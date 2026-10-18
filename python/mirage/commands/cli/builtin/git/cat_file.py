@@ -69,9 +69,9 @@ def named_object(repo: BaseRepo, name: str) -> ShaFile:
 
 
 def peeled(repo: BaseRepo, obj: ShaFile, want: str) -> ShaFile | None:
-    """An object peeled down to a type, git's read_object_with_reference:
-    a tag to what it points at and a commit to its tree; None when the
-    chain never reaches the type.
+    """An object peeled down to a type, as ``git cat-file <type>``
+    peels it: a tag to what it points at and a commit to its tree; None
+    when the chain never reaches the type.
 
     Args:
         repo (BaseRepo): the opened repository.

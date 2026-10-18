@@ -402,9 +402,9 @@ export async function mvGeneric(
       continue
     }
     if (target.walkError !== null && target.rawPath === '') {
-      // GNU stats an empty destination as the directory it is typed in
-      // (gnulib reads the name as `.`): a file cannot overwrite it, and a
-      // directory renamed onto it is busy (coreutils 9.7).
+      // GNU stats an empty destination as the directory it is typed in, as
+      // if it were `.`: a file cannot overwrite it, and a directory renamed
+      // onto it is busy (coreutils 9.7).
       errors.push(
         srcIsDir
           ? moveError(src, target, posixPhrase('EBUSY'))

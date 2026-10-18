@@ -497,8 +497,8 @@ async def mv_generic(
         src_is_dir = src_kind == FileType.DIRECTORY
         if target.walk_error is not None and target.raw_path == "":
             # GNU stats an empty destination as the directory it is typed
-            # in (gnulib reads the name as `.`): a file cannot overwrite
-            # it, and a directory renamed onto it is busy (coreutils 9.7).
+            # in, as if it were `.`: a file cannot overwrite it, and a
+            # directory renamed onto it is busy (coreutils 9.7).
             errors.append(
                 _move_error(src, target, posix_phrase(FsCondition.EBUSY))
                 if src_is_dir

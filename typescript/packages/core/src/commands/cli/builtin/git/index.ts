@@ -66,10 +66,10 @@ const DIRECTORY_OPTION = new Argument('-C', {
 
 const REVISION = new Argument('text', { metavar: '', nargs: '*' })
 
-// --pretty and --format set the same variable in git; both take git's
+// --pretty and --format choose the same format in git; both take git's
 // optional-value form, so a bare --pretty means medium and a detached next
 // word is a revision, never a format. A bare --format stays parseable too,
-// but only so prettyFormat can answer it with git's own fatal (pretty.c reads
+// but only so prettyFormat can answer it with git's own fatal (git takes
 // --format in its =value form alone).
 const PRETTY_OPTION = new Argument('--pretty', {
   nargs: '?',

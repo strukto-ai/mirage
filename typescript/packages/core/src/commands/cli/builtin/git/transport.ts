@@ -42,7 +42,8 @@ const PACK_BAND = 1
 const ERROR_BAND = 3
 const REMOTE_HELPER = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//
 const SCP_LIKE = /^[^/:]+:/
-// The places git's enter_repo tries for a local path, in its order.
+// The places git tries for a local repository path, in the order it prefers
+// them.
 const REPO_SUFFIXES = ['/.git', '', '.git/.git', '.git']
 const SYMREF_HEAD = 'symref=HEAD:'
 const PEELED = '^{}'

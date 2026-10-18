@@ -260,7 +260,7 @@ def test_a_refspec_maps_a_remote_ref(spec, name, expected):
         ("refs/heads/../x", False),
     ],
 )
-def test_safe_ref_name_follows_refname_is_safe(name: str, safe: bool):
+def test_safe_ref_name_follows_git(name: str, safe: bool):
     assert safe_ref_name(name) is safe
 
 
@@ -300,7 +300,5 @@ async def test_write_ref_refuses_a_name_that_leaves_the_ref_tree():
         ("a..b", False),
     ],
 )
-def test_a_new_branch_name_follows_strbuf_check_branch_ref(
-    name: str, valid: bool
-):
+def test_a_new_branch_name_follows_git_branch_rules(name: str, valid: bool):
     assert valid_branch_name(name) is valid

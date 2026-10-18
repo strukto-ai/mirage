@@ -14,7 +14,7 @@
 
 import {
   CHAR_MODE,
-  CHMOD_MODE_BITS,
+  ALL_MODE_BITS,
   DIR_MODE,
   FIFO_MODE,
   FILE_MODE,
@@ -144,7 +144,7 @@ function modeBits(st: PrintfStatFacts | null, kind: PrintfKind): number {
   const base = KIND_MODE[kind]
   const mode = st?.mode ?? null
   if (mode === null) return base
-  return (base & ~CHMOD_MODE_BITS) | (mode & CHMOD_MODE_BITS)
+  return (base & ~ALL_MODE_BITS) | (mode & ALL_MODE_BITS)
 }
 
 function warnUnrecognized(src: string, warnings: string[]): void {
@@ -232,13 +232,11 @@ export function expandPrintf(
     } else if (code === 'g' || code === 'G') {
       out.push(groupName(st?.gid ?? null, identity))
     } else if (code === 'm') {
-      out.push((modeBits(st, kind) & CHMOD_MODE_BITS).toString(8))
+      out.push((modeBits(st, kind) & ALL_MODE_BITS).toString(8))
     } else if (code === 'M') {
       const bits = modeBits(st, kind)
       out.push(
-        lsModeString(
-          new FileStat({ name: '', type: KIND_TYPE[kind], mode: bits & CHMOD_MODE_BITS }),
-        ),
+        lsModeString(new FileStat({ name: '', type: KIND_TYPE[kind], mode: bits & ALL_MODE_BITS })),
       )
     } else if (code === 'T' && i < n) {
       const letter = fmt.charAt(i)

@@ -39,13 +39,13 @@ from mirage.commands.builtin.utils.paths import (
 )
 from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import (
-    argmatch_error,
     extra_operand_error,
     usage_hint,
+    word_refusal_error,
 )
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror
@@ -253,10 +253,10 @@ def update_mode(cmd_name: str, fl: FlagView) -> str | None:
     if value is True:
         return "older"
     word = str(value)
-    match = argmatch(word, UPDATE_MODES)
-    if isinstance(match, ArgmatchMatch):
+    match = match_word(word, UPDATE_MODES)
+    if isinstance(match, WordMatch):
         return match.word
-    raise argmatch_error(
+    raise word_refusal_error(
         cmd_name, "--update", word, UPDATE_MODES, 1, match.kind
     )
 
@@ -339,7 +339,7 @@ def parse_flags(fl: FlagView) -> CpFlags:
     )
     typed = fl.typed_order(*_DEREF_OPTIONS)
     # With no link option a recursive copy copies links as links and any
-    # other copy follows them (cp.c's DEREF_UNDEFINED default).
+    # other copy follows them (GNU cp 9.7 with none of -H, -L, -P, -d).
     dereference = (
         _DEREF_OPTIONS[typed[-1]]
         if typed
@@ -1047,8 +1047,7 @@ async def overwrite_gate(
 
     A copy that writes through a link at the target's name compares
     the source with what the link leads to; one whose backup moves the
-    link aside compares with the link itself (GNU copy.c's stat or lstat
-    of the destination, coreutils 9.7).
+    link aside compares with the link itself (GNU cp 9.7).
 
     Args:
         policy (TransferPolicy): Overwrite policy for this command.

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from mirage.commands.builtin.constants import (
     CMP_SIZE_UNITS,
     INTMAX,
-    XSTRTOUMAX_PATTERN,
+    SUFFIXED_COUNT_PATTERN,
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
 from mirage.commands.builtin.utils.output import format_records
@@ -40,7 +40,7 @@ _NEWLINE = ord(b"\n")
 
 
 def parse_count(raw: str, option: str, shown: str | None = None) -> int:
-    """One GNU ``cmp`` byte count read the way xstrtoumax reads it.
+    """One GNU ``cmp`` byte count, read the way diffutils 3.10 reads it.
 
     Base 0, so ``010`` is 8 and ``0x400`` is 1024; one leading ``+`` and
     leading whitespace are allowed; the remainder is a size suffix from
@@ -62,7 +62,7 @@ def parse_count(raw: str, option: str, shown: str | None = None) -> int:
     """
     named = raw if shown is None else shown
     error = UsageError(f"cmp: invalid {option} value '{named}'{_TRY_HELP}")
-    match = XSTRTOUMAX_PATTERN.match(raw)
+    match = SUFFIXED_COUNT_PATTERN.match(raw)
     if match is None:
         raise error
     digits, suffix = match.group(1), match.group(2)
@@ -136,9 +136,9 @@ def operand_skips(
     """The skips cmp's SKIP1 and SKIP2 operands give, beside -i's.
 
     Each is read as -i reads its counts, and each file keeps the larger
-    of the two skips it was given: diffutils' specify_ignore_initial
-    only ever raises one. Past the fourth operand is an extra one, which
-    diffutils refuses only after both skips have parsed.
+    of the two skips it was given: a smaller one, from -i or from an
+    operand, never lowers the other. Past the fourth operand is an extra
+    one, which GNU cmp refuses only after both skips have parsed.
 
     Args:
         texts (Sequence[str]): the operands after FILE1 and FILE2.

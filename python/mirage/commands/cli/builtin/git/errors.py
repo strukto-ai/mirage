@@ -191,8 +191,8 @@ class NoWorkspaceError(GitError):
 class NotAWorkTreeError(GitError):
     """A verb that reads or writes files, run with no work tree to enter.
 
-    git's ``setup_work_tree`` refuses a bare repository and a work tree
-    that is not a directory in the same words (pinned against git 2.54),
+    git refuses a bare repository and a work tree that is not a
+    directory in the same words (pinned against git 2.54),
     so a mistyped ``--work-tree`` is never taken for an empty tree.
     """
 
@@ -328,8 +328,8 @@ class PartialCommitError(GitError):
 
 
 class PatternCompileError(GitError):
-    """git's ``compile_regexp_failed``: a pattern that does not compile,
-    named with where it came from and what the engine said.
+    """A pattern that does not compile, named as git names it: where it
+    came from and what the engine said.
 
     Args:
         origin (str): git's name for where the pattern came from.
@@ -1353,7 +1353,7 @@ class BrokenHeadError(GitError):
 class SymbolicRefLockError(RefLockError):
     """``symbolic-ref`` writing a ref whose path another ref holds.
 
-    The same lock failure as RefLockError, which ``refs_update_symref``
+    The same lock failure as RefLockError, which ``git symbolic-ref``
     reports as an ``error`` exiting 1 rather than a fatal (pinned
     against git 2.47.3).
 
@@ -1986,8 +1986,8 @@ class UnknownDateFormatError(GitError):
     """A ``--date`` value, or a date atom's argument, git has no style
     for.
 
-    Named as git's ``parse_date_format`` names it: the whole value, a
-    ``-local`` suffix and all (pinned against git 2.50.1).
+    Named as git names it: the whole value, a ``-local`` suffix and
+    all (pinned against git 2.50.1).
 
     Args:
         value (str): the value as typed.

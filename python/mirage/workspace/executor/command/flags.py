@@ -324,8 +324,8 @@ def option_error(
         if kind == "value":
             option, value, choices = parsed.invalid_value_options[0]
             return invalid_argument_error(cmd_name, option, value, choices)
-        # gnulib's other wording for the same refusal, reached only by an
-        # ARGMATCH table: the value is a prefix of two candidates or more.
+        # GNU's other wording for the same refusal, reached only by a
+        # word-choice table: the value is a prefix of two candidates or more.
         if kind == "ambiguous_value":
             option, value, choices = parsed.ambiguous_value_options[0]
             return invalid_argument_error(

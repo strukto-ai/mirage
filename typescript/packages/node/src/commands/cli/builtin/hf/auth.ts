@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// `hf auth whoami` prints as huggingface_hub 0.35.3 does (Apache-2.0;
+// see licenses/third_party/huggingface_hub.txt).
+
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'

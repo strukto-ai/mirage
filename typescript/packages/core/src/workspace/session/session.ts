@@ -446,7 +446,9 @@ export class SessionState {
   // Hidden `getopts` state: the char offset within the word being
   // scanned (0 = positioned at the word's leading dash), plus the OPTIND
   // that offset belongs to. A caller resetting OPTIND makes the seen
-  // value stale, restarting the scan, matching bash's char pointer.
+  // value stale, restarting the scan at the word's first letter, as bash
+  // 5.2 does: after `getopts ab o` reads `a` from `-ab`, `OPTIND=1` makes
+  // the next one read `a` again, not `b`.
   getoptsPos = 0
   getoptsOptind: number | null = null
   // `shopt` options, kept apart from `set -o` ones (bash keeps two

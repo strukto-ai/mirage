@@ -61,7 +61,7 @@ function pair(raw: Uint8Array, at: number, table: Table, unmapped: number): Deco
   return cp !== undefined ? [cp, 2] : [ILLEGAL, unmapped]
 }
 
-/** One GBK character, as glibc 2.41's `gbk.c` reads it. */
+/** One GBK character, by the byte grammar measured from glibc 2.41. */
 function gbkStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]
@@ -73,7 +73,7 @@ function gbkStep(raw: Uint8Array, at: number, table: Table): Decoded {
   return pair(raw, at, table, 2)
 }
 
-/** One EUC-CN (GB2312) character, as glibc's `euc-cn.c` reads it. */
+/** One EUC-CN (GB2312) character, by the byte grammar measured from glibc. */
 function eucCnStep(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]
@@ -84,7 +84,7 @@ function eucCnStep(raw: Uint8Array, at: number, table: Table): Decoded {
 }
 
 /**
- * One EUC-KR character, as glibc's `euc-kr.c` reads it.
+ * One EUC-KR character, by the byte grammar measured from glibc.
  *
  * Bytes up to 0x9F stand for themselves, C1 controls included, and a
  * refused pair is skipped whole whatever its second byte is.
@@ -98,7 +98,7 @@ function eucKrStep(raw: Uint8Array, at: number, table: Table): Decoded {
 }
 
 /**
- * One Shift_JIS character, as glibc's `sjis.c` reads it.
+ * One Shift_JIS character, by the byte grammar measured from glibc.
  *
  * glibc reads 0x5C as YEN SIGN and 0x7E as OVERLINE, JIS X 0201's Roman
  * half, and 0xA1-0xDF as half-width katakana.
@@ -116,7 +116,7 @@ function sjisStep(raw: Uint8Array, at: number, table: Table): Decoded {
 }
 
 /**
- * One EUC-JP character, as glibc's `euc-jp.c` reads it.
+ * One EUC-JP character, by the byte grammar measured from glibc.
  *
  * Code set 2 (0x8E) is half-width katakana and code set 3 (0x8F) JIS X
  * 0212, whose rows outside 0x22-0x6D glibc refuses before it asks for the
@@ -153,7 +153,7 @@ function supplementary(raw: Uint8Array, at: number): number | null {
   return cp <= LAST_CODE_POINT ? cp : null
 }
 
-/** One GB18030 character, as glibc's `gb18030.c` reads it. */
+/** One GB18030 character, by the byte grammar measured from glibc. */
 function gb18030Step(raw: Uint8Array, at: number, table: Table): Decoded {
   const lead = raw[at] ?? 0
   if (lead < 0x80) return [lead, 1]

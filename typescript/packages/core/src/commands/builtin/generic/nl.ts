@@ -92,9 +92,9 @@ interface NlState {
 
 // What GNU writes in place of a number on an unnumbered line.
 //
-// Not the number field plus the separator: GNU builds one `print_no_line_fmt`
-// of `lineno_width` blanks followed by `strlen(separator_str)` MORE blanks, so
-// the separator is padded over rather than printed. The default line is
+// Not the number field plus the separator: GNU writes as many blanks as the
+// number width, then one MORE blank per byte of the separator, so the
+// separator is padded over rather than printed. The default line is
 // therefore seven spaces, not six spaces and a TAB, and the difference is
 // visible on every unnumbered line (`nl -b n`, a blank line under `-b t`, a
 // line a `-b p` pattern did not match).
@@ -169,9 +169,9 @@ function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array 
 // `nl -b n -v 9223372036854775807` never overflows.
 //
 // Reported by mutating the caller's IOResult, because the exit code is decided
-// after the handler already returned its stream. `error(EXIT_FAILURE, 0, ...)`
-// means errnum 0, so there is no colon clause here -- unlike every option
-// refusal in this module.
+// after the handler already returned its stream. GNU's message is the bare
+// `line number overflow`, with no colon clause -- unlike every option refusal
+// in this module.
 async function* nlStream(
   source: ByteSource,
   config: NlConfig,
@@ -313,10 +313,9 @@ const NUMERIC_OPTIONS: readonly (readonly [
 ]
 
 // The three style options and the message each one words its refusal with.
-// GNU tests only the FIRST character of the argument (its build_type_arg
-// switches on `*optarg`), so `-b tt` is the `t` style with a trailing byte
-// GNU never reads again, while `-b A` and an empty `-b` fall to the default
-// arm and are refused.
+// GNU reads only the FIRST character of the argument, so `-b tt` is the `t`
+// style with a trailing byte GNU never reads again, while `-b A` and an empty
+// `-b` name no style and are refused.
 const STYLE_OPTIONS: Readonly<Record<string, string>> = {
   body_numbering: 'invalid body numbering style',
   footer_numbering: 'invalid footer numbering style',
@@ -378,7 +377,7 @@ function patternError(dest: string, raw: string): string | null {
 //     starting line number, and neither prints the --help hint.
 //   * A bad STYLE or FORMAT value (-b -f -h -n) is reported without
 //     exiting and parsing continues, so several can accumulate and the line
-//     ends in usage(EXIT_FAILURE), which is where the hint comes from. This
+//     ends with the --help hint, exit 1, once every option is read. This
 //     is why `nl -b bogus -w abc` prints two lines and NO hint (the width
 //     killed the parse), `nl -b bogus -w 3` prints one WITH the hint, and
 //     `nl -w abc -b bogus` prints only the width (the parse died before -b

@@ -58,7 +58,8 @@ USER_AGENT = "git/mirage"
 PACK_BAND, ERROR_BAND = 1, 3
 REMOTE_HELPER = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*)://")
 SCP_LIKE = re.compile(r"^[^/:]+:")
-# The places git's enter_repo tries for a local path, in its order.
+# The places git tries for a local repository path, in the order it
+# prefers them.
 REPO_SUFFIXES = ("/.git", "", ".git/.git", ".git")
 SYMREF_HEAD = "symref=HEAD:"
 PEELED = "^{}"

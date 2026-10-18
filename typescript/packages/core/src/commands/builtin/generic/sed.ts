@@ -119,7 +119,8 @@ function editFailure(name: string, err: unknown): string {
 }
 
 // Truncate the `w` files as GNU opens them when it compiles the script,
-// in order; the first that cannot be opened is GNU's panic.
+// in order; the first that cannot be opened ends the run with GNU's
+// `couldn't open file` line, exit 4.
 async function openWriteFiles(
   names: readonly string[],
   access: ScriptFiles,

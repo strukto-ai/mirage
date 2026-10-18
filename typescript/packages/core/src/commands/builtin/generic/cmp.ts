@@ -21,7 +21,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
-import { CMP_SIZE_UNITS, INTMAX, XSTRTOUMAX_PATTERN } from '../constants.ts'
+import { CMP_SIZE_UNITS, INTMAX, SUFFIXED_COUNT_PATTERN } from '../constants.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
@@ -40,7 +40,7 @@ function octal(n: number, width = 0): string {
 }
 
 /**
- * One GNU `cmp` byte count read the way xstrtoumax reads it.
+ * One GNU `cmp` byte count, read the way diffutils 3.10 reads it.
  *
  * Base 0, so `010` is 8 and `0x400` is 1024; one leading `+` and
  * leading whitespace are allowed; the remainder is a size suffix from
@@ -60,7 +60,7 @@ function octal(n: number, width = 0): string {
  */
 export function parseCount(raw: string, option: string, shown?: string): number {
   const error = new UsageError(`cmp: invalid ${option} value '${shown ?? raw}'${TRY_HELP}`)
-  const match = XSTRTOUMAX_PATTERN.exec(raw)
+  const match = SUFFIXED_COUNT_PATTERN.exec(raw)
   const suffix = match?.[2] ?? ''
   const unit = suffix === '' ? 1 : CMP_SIZE_UNITS[suffix]
   if (match === null || unit === undefined) throw error
@@ -179,9 +179,9 @@ function offsetWidth(sizes: readonly number[], limit: number | null): number {
  * The skips cmp's SKIP1 and SKIP2 operands give, beside -i's.
  *
  * Each is read as -i reads its counts, and each file keeps the larger of the
- * two skips it was given: diffutils' specify_ignore_initial only ever raises
- * one. Past the fourth operand is an extra one, which diffutils refuses only
- * after both skips have parsed. Mirrors Python's operand_skips.
+ * two skips it was given: a smaller one, from -i or from an operand, never
+ * lowers the other. Past the fourth operand is an extra one, which GNU cmp
+ * refuses only after both skips have parsed. Mirrors Python's operand_skips.
  */
 export function operandSkips(
   texts: readonly string[],

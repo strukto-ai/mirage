@@ -47,8 +47,8 @@ from mirage.utils.quote import (
     shell_quote_always,
 )
 from mirage.utils.stat_view import (
+    ALL_MODE_BITS,
     BLOCK_UNIT,
-    CHMOD_MODE_BITS,
     content_size,
     device_rdev,
     posix_mode,
@@ -144,7 +144,7 @@ def _type_label(s: FileStat) -> str:
 
 
 def _effective_mode(s: FileStat) -> int:
-    return posix_mode(s) & CHMOD_MODE_BITS
+    return posix_mode(s) & ALL_MODE_BITS
 
 
 def _epoch(iso: str | None) -> str:

@@ -435,7 +435,8 @@ async def execute_assignment(
     else:
         await _assign_var(view, key, stored, added=added)
     # Reassigning OPTIND (even to its current value) restarts the
-    # getopts scan, matching bash's internal char pointer.
+    # getopts scan at the first letter of the word it names, as bash 5.2
+    # does (`OPTIND=1` midway through `-ab` makes getopts read `a` again).
     if key == "OPTIND":
         session._getopts_optind = None
     return result(text, exit_code=assignment_status(context.frame, sub_seq))

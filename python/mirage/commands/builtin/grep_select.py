@@ -75,15 +75,14 @@ def parse_file_globs(fl: FlagView) -> tuple[FileGlob, ...]:
 def file_admitted(path: str, filters: WalkFilters) -> bool:
     """GNU's --include/--exclude gate for one candidate file.
 
-    Globs match the base name with fnmatch wildcards, case sensitively
-    (a glob carrying a slash therefore matches nothing, which is what
-    GNU 3.11 answers too). The rules resolve in command-line order,
-    gnulib's exclude list: the last matching rule decides, and a file
-    matching none is admitted only when the first rule is an exclude
-    (both pinned against GNU 3.11, where ``--include='*.txt'
-    --exclude='*.txt'`` skips a .txt file and the reversed order
-    searches it). Applies to command-line files exactly as to walked
-    ones, which is pinned GNU behavior: an explicit operand --include
+    Globs match the base name with fnmatch wildcards, case sensitively (a
+    glob carrying a slash therefore matches nothing, which is what GNU 3.11
+    answers too). The rules resolve in command-line order: the last matching
+    rule decides, and a file matching none is admitted only when the first
+    rule is an exclude (both pinned against GNU 3.11, where
+    ``--include='*.txt' --exclude='*.txt'`` skips a .txt file and the
+    reversed order searches it). Applies to command-line files exactly as to
+    walked ones, which is pinned GNU behavior: an explicit operand --include
     passes over is silently no match, not an error.
 
     Args:

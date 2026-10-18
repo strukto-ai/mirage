@@ -1152,15 +1152,14 @@ def parse_posix_time(
 ) -> datetime | None:
     """Parse the ``MMDDhhmm[[CC]YY][.ss]`` a bare ``date`` operand is.
 
-    gnulib's posixtime with date's syntax bits, measured on coreutils
-    9.7: no year is this year, a two-digit one is 2000-2068 up to 68
-    and 1969-1999 from 69, and ``.ss`` takes exactly two digits. A
-    field out of range (``1301000024``, ``01012500``) is not a date,
-    nor is a wall clock ``tz`` skips; second 60 is the next minute's
-    first, as mktime reads a leap second. One divergence: GNU shows
-    year 0 and year 10000, where mirage holds what ``datetime`` holds,
-    so a year 0 operand, a UTC moment outside years 1-9999 and the
-    leap second after 9999-12-31 23:59:59 are not a date either.
+    As GNU date reads it, measured on coreutils 9.7: no year is this year, a
+    two-digit one is 2000-2068 up to 68 and 1969-1999 from 69, and ``.ss``
+    takes exactly two digits. A field out of range (``1301000024``,
+    ``01012500``) is not a date, nor is a wall clock ``tz`` skips; second 60 is
+    the next minute's first, as mktime reads a leap second. One divergence: GNU
+    shows year 0 and year 10000, where mirage holds what ``datetime`` holds, so
+    a year 0 operand, a UTC moment outside years 1-9999 and the leap second
+    after 9999-12-31 23:59:59 are not a date either.
 
     Args:
         text (str): the operand as typed.

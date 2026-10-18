@@ -26,7 +26,7 @@ def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
     channel is AcceptEnv-gated server-side, so it silently drops
     names), so the working directory and the merged environment ride
     the command itself: ``cd 'cwd' && env 'K=V' ... sh -c 'line'``.
-    Every piece is sh_single_quoted, so the remote login shell reads
+    Every piece is single-quoted for sh, so the remote login shell reads
     each as one word whatever it holds; the machine only needs a
     POSIX-compatible shell.
 

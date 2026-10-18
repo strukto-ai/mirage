@@ -73,7 +73,7 @@ const KIND_PREFIXES: readonly (readonly [string, RefKind])[] = [
   [REMOTE_PREFIX, RefKind.REMOTE],
   [TAG_PREFIX, RefKind.TAG],
 ]
-// match_pattern strips the first of these before a tag or branch pattern is
+// matchShort strips the first of these before a tag or branch pattern is
 // matched, so `v1.*` and `origin/*` name refs by their short names.
 const SHORT_PREFIXES = [TAG_PREFIX, BRANCH_PREFIX, REMOTE_PREFIX, 'refs/']
 const WORKTREES = 'worktrees'
@@ -81,13 +81,13 @@ const GITDIR_FILE = 'gitdir'
 const CHECKOUT_MOVE = 'checkout: moving from '
 const DEC = new TextDecoder()
 
-/** `is_root_ref`: a ref beside HEAD rather than under `refs/`, pseudorefs excluded. */
+/** A ref beside HEAD rather than under `refs/`, pseudorefs excluded. */
 export function isRootRef(name: string): boolean {
   if (!ROOT_REF_SYNTAX.test(name) || PSEUDO_REFS.includes(name)) return false
   return name.endsWith('_HEAD') || IRREGULAR_ROOT_REFS.includes(name)
 }
 
-/** `ref_kind_from_refname`: which part of the namespace a ref is in. */
+/** Which part of the namespace a ref is in. */
 export function refKind(name: string): RefKind {
   for (const [prefix, kind] of KIND_PREFIXES) if (name.startsWith(prefix)) return kind
   if (name === HEAD_FILE) return RefKind.DETACHED
@@ -147,12 +147,12 @@ function folded(text: string, icase: boolean): string {
 }
 
 /**
- * `match_name_as_path`: for-each-ref's pattern rule.
+ * for-each-ref's pattern rule.
  *
  * A pattern selects a ref it spells in full or up to a `/` (always
- * case-sensitively), or one it matches as a `WM_PATHNAME` glob: `*` stops at a
- * `/`, so `refs/*` selects nothing while `refs/*\/*` and `refs/**` select every
- * branch (git 2.47.3 and 2.50.1). No pattern selects every ref.
+ * case-sensitively), or one it matches as a path glob: `*` stops at a `/`, so
+ * `refs/*` selects nothing while `refs/*\/*` and `refs/**` select every branch
+ * (git 2.47.3 and 2.50.1). No pattern selects every ref.
  */
 export function matchAsPath(name: string, patterns: readonly string[], icase = false): boolean {
   if (!patterns.length) return true
@@ -168,8 +168,8 @@ export function matchAsPath(name: string, patterns: readonly string[], icase = f
 }
 
 /**
- * `match_pattern`: tag's and branch's pattern rule, a glob over the name less
- * its `refs/tags/`, `refs/heads/`, `refs/remotes/` or `refs/`, where `*`
+ * Tag's and branch's pattern rule, a glob over the name less its
+ * `refs/tags/`, `refs/heads/`, `refs/remotes/` or `refs/`, where `*`
  * crosses a `/`.
  */
 export function matchShort(name: string, patterns: readonly string[], icase = false): boolean {
@@ -240,7 +240,7 @@ export async function listedRefs(
 }
 
 /**
- * `branch_get_upstream`: the ref a branch's upstream lands in.
+ * The ref a branch's upstream lands in.
  * `branch.<name>.merge` is mapped through the remote's fetch refspecs; a branch
  * following a remote with none that map it has no upstream at all, and one
  * following `.` follows a local ref.
@@ -313,10 +313,10 @@ async function rootNames(repo: Repo): Promise<string[]> {
 }
 
 /**
- * `get_worktrees`: the branch each worktree has checked out, and where that
- * worktree is. The main worktree is the one this repository was found in or
- * the one around its common directory; a linked one is named by the `gitdir`
- * file git keeps for it, less its `/.git`.
+ * The branch each worktree has checked out, and where that worktree is. The
+ * main worktree is the one this repository was found in or the one around its
+ * common directory; a linked one is named by the `gitdir` file git keeps for
+ * it, less its `/.git`.
  */
 async function worktreeHeads(repo: Repo): Promise<Map<string, string>> {
   const heads = new Map<string, string>()
@@ -391,8 +391,8 @@ export async function detachedLine(repo: Repo, head: HeadRef): Promise<string> {
 }
 
 /**
- * `get_head_description`: how a detached HEAD row names itself in a branch
- * listing, the status line in parentheses.
+ * How a detached HEAD row names itself in a branch listing, the status line in
+ * parentheses.
  */
 export async function headDescription(repo: Repo, head: HeadRef): Promise<string> {
   const line = await detachedLine(repo, head)
@@ -435,8 +435,8 @@ function sharedLength(a: string, b: string): number {
 }
 
 /**
- * The shortest prefix of `oid` no other id shares, no shorter than `width`, as
- * git's `find_abbrev_len_for_pack` finds it. In sorted ids the longest prefix
+ * The shortest prefix of `oid` no other id shares, no shorter than `width`, the
+ * length git abbreviates it to. In sorted ids the longest prefix
  * any other id shares with `oid` is shared by a neighbour of the place it sorts
  * to, so only those two are compared. An id the repository lacks (a missing
  * parent) sorts between its neighbours all the same.

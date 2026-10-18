@@ -1145,8 +1145,9 @@ _PS_USAGE = (
     "For more details see ps(1).\n"
 )
 
-# procps-ng 4.0.4's -o keys: header, width, right alignment and the fact
-# ``_ps_cell`` renders; accounting a runner lacks prints procps's none.
+# procps-ng 4.0.4's -o keys: the header, width and right alignment
+# measured from its ``ps -o`` output, and the fact ``_ps_cell`` renders;
+# accounting a runner lacks prints procps's none.
 _PS_COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "pid": ("PID", 7, True, "pid"),
     "tgid": ("TGID", 7, True, "pid"),
@@ -1438,8 +1439,9 @@ def _elapsed(seconds: int) -> str:
 
 
 def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
-    """One start-time column, procps's pr_lstart, pr_start, pr_stime or
-    pr_bsdstart: a day-old start prints its date, a recent one its clock.
+    """One start-time column, lstart, start, stime or bsdstart, in the
+    layouts measured from procps-ng 4.0.4's ``ps -o`` output: a day-old
+    start prints its date, a recent one its clock.
 
     Args:
         fact (str): lstart, start, stime or bsdstart.

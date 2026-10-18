@@ -82,11 +82,11 @@ DIRECTORY_OPTION = Argument(
 
 REVISION = Argument("text", nargs="*", metavar="")
 
-# --pretty and --format set the same variable in git; both take git's
+# --pretty and --format choose the same format in git; both take git's
 # optional-value form, so a bare --pretty means medium and a detached
 # next word is a revision, never a format. A bare --format stays
 # parseable too, but only so pretty_format can answer it with git's own
-# fatal (pretty.c reads --format in its =value form alone).
+# fatal (git takes --format in its =value form alone).
 PRETTY_OPTION = Argument(
     "--pretty",
     nargs="?",

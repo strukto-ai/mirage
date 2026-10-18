@@ -181,10 +181,9 @@ _NUMERIC_OPTIONS: tuple[tuple[str, str, int, int | None, int | None], ...] = (
 )
 
 # The three style options and the message each one words its refusal
-# with. GNU tests only the FIRST character of the argument (its
-# build_type_arg switches on `*optarg`), so `-b tt` is the `t` style
-# with a trailing byte GNU never reads again, while `-b A` and an empty
-# `-b` fall to the default arm and are refused.
+# with. GNU reads only the FIRST character of the argument, so `-b tt`
+# is the `t` style with a trailing byte GNU never reads again, while
+# `-b A` and an empty `-b` name no style and are refused.
 _STYLE_OPTIONS: dict[str, str] = {
     "body_numbering": "invalid body numbering style",
     "footer_numbering": "invalid footer numbering style",
@@ -265,8 +264,8 @@ def _option_errors(fl: FlagView) -> str | None:
       the starting line number, and neither prints the ``--help`` hint.
     * A bad STYLE or FORMAT value (``-b -f -h -n``) is reported without
       exiting and parsing continues, so several can accumulate and the
-      line ends in ``usage(EXIT_FAILURE)``, which is where the hint
-      comes from. This is why ``nl -b bogus -w abc`` prints two lines
+      line ends with the ``--help`` hint, exit 1, once every option is
+      read. This is why ``nl -b bogus -w abc`` prints two lines
       and NO hint (the width killed the parse), ``nl -b bogus -w 3``
       prints one WITH the hint, and ``nl -w abc -b bogus`` prints only
       the width (the parse died before ``-b`` was scanned). All
@@ -436,13 +435,12 @@ def _format_number(number: int, width: int, number_format: str) -> str:
 def _blank_prefix(config: NlConfig) -> str:
     """What GNU writes in place of a number on an unnumbered line.
 
-    Not the number field plus the separator: GNU builds one
-    ``print_no_line_fmt`` of ``lineno_width`` blanks followed by
-    ``strlen(separator_str)`` MORE blanks, so the separator is padded
-    over rather than printed. The default line is therefore seven
-    spaces, not six spaces and a TAB, and the difference is visible on
-    every unnumbered line (``nl -b n``, a blank line under ``-b t``, a
-    line a ``-b p`` pattern did not match).
+    Not the number field plus the separator: GNU writes as many blanks as
+    the number width, then one MORE blank per byte of the separator, so the
+    separator is padded over rather than printed. The default line is
+    therefore seven spaces, not six spaces and a TAB, and the difference is
+    visible on every unnumbered line (``nl -b n``, a blank line under
+    ``-b t``, a line a ``-b p`` pattern did not match).
 
     Two things the count does NOT depend on. ``-n``'s format is
     irrelevant -- ``ln``, ``rn`` and ``rz`` all pad to the same width --
@@ -534,9 +532,9 @@ async def _nl_stream(
 
     Reported by mutating the caller's ``IOResult`` the way
     ``truncate_stream`` does, because the exit code is decided after
-    the handler already returned its stream. ``error(EXIT_FAILURE, 0,
-    ...)`` means errnum 0, so there is no colon clause here -- unlike
-    every option refusal in this module.
+    the handler already returned its stream. GNU's message is the bare
+    ``line number overflow``, with no colon clause -- unlike every option
+    refusal in this module.
 
     Args:
         source (ByteSource): the raw bytes to number.

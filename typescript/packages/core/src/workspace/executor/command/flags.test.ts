@@ -178,11 +178,11 @@ describe('optionError scan order', () => {
   })
 })
 
-// The spec-driven ARGMATCH path, end to end through the executor's
+// The spec-driven word-choice path, end to end through the executor's
 // renderer. Measured on coreutils 9.4: `tee --output-error=warn-` exits 0,
 // `=w` is `ambiguous argument 'w'` and `=zzz` is `invalid argument 'zzz'`,
 // over one shared candidate block. Mirrors test_flags.py.
-describe('optionError — the two ARGMATCH refusals', () => {
+describe('optionError — the two word-choice refusals', () => {
   it('accepts an unambiguous prefix', () => {
     const parsed = parseFlags(['--output-error=warn-', '/f'], specOf('tee'), 'tee', '/')
     expect(optionError('tee', parsed)).toBeNull()
@@ -205,7 +205,7 @@ describe('optionError — the two ARGMATCH refusals', () => {
   // The two wordings are one report, so the FIRST refused value on the LINE
   // wins whichever wording it carries. Ordering them by which list they
   // landed in would make a later invalid value outrank an earlier ambiguous
-  // one, which no other report here does. numfmt declares both ARGMATCH
+  // one, which no other report here does. numfmt declares both word-choice
   // tables, so one line can carry one of each. Mirrors test_flags.py.
   it('follows line order between the two wordings', () => {
     const dec = new TextDecoder()

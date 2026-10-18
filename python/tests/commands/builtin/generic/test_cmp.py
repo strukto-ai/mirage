@@ -120,7 +120,7 @@ def test_parse_skip_takes_one_count_for_both_files():
     ],
 )
 def test_parse_skip_names_the_operand_from_where_it_stopped(raw, named):
-    # GNU prints the operand from the position xstrtoumax was reading,
+    # GNU prints the operand from the position its count started at,
     # so a bad SKIP1 names the whole pair and a bad SKIP2 names only
     # itself. A colon is the one character the first count may stop on.
     with pytest.raises(UsageError) as excinfo:

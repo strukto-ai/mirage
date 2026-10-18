@@ -127,7 +127,7 @@ async def write_ref(
         sha (bytes): hex object id the ref should name.
 
     Raises:
-        BadRefNameUpdateError: a name ``refname_is_safe`` refuses.
+        BadRefNameUpdateError: a name ``safe_ref_name`` refuses.
     """
     if not safe_ref_name(ref):
         raise BadRefNameUpdateError(ref)
@@ -339,8 +339,7 @@ def valid_ref_name(name: str) -> bool:
 
 
 def valid_branch_name(name: str) -> bool:
-    """Whether git takes a name for a new branch
-    (``strbuf_check_branch_ref``).
+    """Whether git takes a name for a new branch.
 
     git's ref rules, and two more that hold for a branch only: no
     leading ``-``, which would read as an option, and not ``HEAD``,
@@ -356,7 +355,7 @@ def valid_branch_name(name: str) -> bool:
 def whole_ref_name(name: str) -> bool:
     """Whether git's ref rules take a whole ref name, one level allowed.
 
-    ``check_refname_format`` with ``REFNAME_ALLOW_ONELEVEL``: a bare
+    As ``git check-ref-format --allow-onelevel`` judges it: a bare
     ``@`` is the one name they refuse whole that they take below
     ``refs/``.
 
@@ -397,8 +396,8 @@ async def resolve_symbolic(
     name: str,
     recurse: bool,
 ) -> SymbolicEnd | None:
-    """Follow a ref the way ``refs_resolve_ref_unsafe`` does without
-    reading.
+    """Follow a symbolic ref the way git resolves one, without reading
+    the object it lands on.
 
     One hop when ``recurse`` is off, otherwise to the end of the chain,
     which may name a ref that does not exist yet (an unborn branch).
@@ -430,8 +429,8 @@ async def resolve_symbolic(
 
 
 def safe_ref_name(name: str) -> bool:
-    """Whether git lets a ref transaction write a name it has no object
-    for (``refname_is_safe``).
+    """Whether git lets a ref update write a name it has no object
+    for.
 
     Below ``refs/``, a path with no empty, ``.`` or ``..`` component;
     anywhere else, capitals and underscores only, which is HEAD and its

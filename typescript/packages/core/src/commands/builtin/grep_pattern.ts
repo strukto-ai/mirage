@@ -35,8 +35,9 @@ const MATCHERS: Readonly<Record<string, RegexSyntax>> = {
 }
 const CONFLICTING_MATCHERS = 'conflicting matchers specified'
 const PERL_SINGLE = 'the -P option only supports a single pattern'
-// GNU grep 3.11's -P wrapping for -w (pcresearch.c).
-const PERL_WORD: readonly [string, string] = ['(?<!\\w)(?:', ')(?!\\w)']
+// What -w puts around a -P pattern: no word character may touch the match on
+// either side (grep 3.11).
+const PERL_WORD_BOUNDS: readonly [string, string] = ['(?<!\\w)(?:', ')(?!\\w)']
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -178,7 +179,7 @@ export function matcherSyntax(fl: FlagView, prog = 'grep'): RegexSyntax {
 
 /**
  * GNU grep's compile-time warnings for a pattern list, as stderr. Only an
- * extended expression has any: dfa.c warns about a repetition operator at the
+ * extended expression has any: GNU warns about a repetition operator at the
  * start of an expression (`grep: warning: * at start of expression`), once per
  * occurrence, which is also how GNU reads `(?<=...)`.
  */
@@ -215,7 +216,7 @@ export function perlRegex(
   unicode = false,
 ): HostRegex {
   if (pattern.includes('\n')) throw new UsageError(`grep: ${PERL_SINGLE}`)
-  const source = whole ? PERL_WORD[0] + pattern + PERL_WORD[1] : pattern
+  const source = whole ? PERL_WORD_BOUNDS[0] + pattern + PERL_WORD_BOUNDS[1] : pattern
   try {
     return translatePcre(source, unicode, ignoreCase)
   } catch (err) {

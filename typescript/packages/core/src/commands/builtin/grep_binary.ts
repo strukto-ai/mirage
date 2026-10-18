@@ -87,7 +87,7 @@ export function nameEnd(f: FlagSet): string {
 /**
  * The width -T pads line numbers and byte offsets to. GNU sizes the field to
  * the digits of the file's size, plus one under -n, and to INTMAX_MAX's
- * digits when the size is unknown (grep.c).
+ * digits when the size is unknown (grep 3.11).
  */
 function offsetWidth(f: FlagSet, size: number | null): number {
   if (f.initialTab !== true) return 0

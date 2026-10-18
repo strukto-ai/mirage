@@ -62,7 +62,7 @@ def _pair(raw: bytes, at: int, table: Table, unmapped: int) -> Decoded:
 
 
 def gbk_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One GBK character, as glibc 2.41's ``gbk.c`` reads it.
+    """One GBK character, by the byte grammar measured from glibc 2.41.
 
     Args:
         raw (bytes): the input.
@@ -85,7 +85,7 @@ def gbk_step(raw: bytes, at: int, table: Table) -> Decoded:
 
 
 def euc_cn_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One EUC-CN (GB2312) character, as glibc's ``euc-cn.c`` reads it.
+    """One EUC-CN (GB2312) character, by the byte grammar measured from glibc.
 
     Args:
         raw (bytes): the input.
@@ -105,7 +105,7 @@ def euc_cn_step(raw: bytes, at: int, table: Table) -> Decoded:
 
 
 def euc_kr_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One EUC-KR character, as glibc's ``euc-kr.c`` reads it.
+    """One EUC-KR character, by the byte grammar measured from glibc.
 
     Bytes up to 0x9F stand for themselves, C1 controls included, and
     a refused pair is skipped whole whatever its second byte is.
@@ -126,7 +126,7 @@ def euc_kr_step(raw: bytes, at: int, table: Table) -> Decoded:
 
 
 def sjis_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One Shift_JIS character, as glibc's ``sjis.c`` reads it.
+    """One Shift_JIS character, by the byte grammar measured from glibc.
 
     glibc reads 0x5C as YEN SIGN and 0x7E as OVERLINE, JIS X 0201's
     Roman half, and 0xA1-0xDF as half-width katakana.
@@ -155,7 +155,7 @@ def sjis_step(raw: bytes, at: int, table: Table) -> Decoded:
 
 
 def euc_jp_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One EUC-JP character, as glibc's ``euc-jp.c`` reads it.
+    """One EUC-JP character, by the byte grammar measured from glibc.
 
     Code set 2 (0x8E) is half-width katakana and code set 3 (0x8F)
     JIS X 0212, whose rows outside 0x22-0x6D glibc refuses before it
@@ -203,7 +203,7 @@ def _supplementary(raw: bytes, at: int) -> int | None:
 
 
 def gb18030_step(raw: bytes, at: int, table: Table) -> Decoded:
-    """One GB18030 character, as glibc's ``gb18030.c`` reads it.
+    """One GB18030 character, by the byte grammar measured from glibc.
 
     Args:
         raw (bytes): the input.

@@ -145,8 +145,8 @@ def parse_suffix_length(value: str) -> int:
             f"split: invalid suffix length: '{quote_text(value)}'", 1
         )
     length = int(value)
-    # xstrtoumax overflow: past 2**64 - 1 GNU refuses the width at parse
-    # time (byte and line counts saturate instead — a count bigger than
+    # Past 2**64 - 1 GNU refuses the width as it reads the option
+    # (byte and line counts saturate instead — a count bigger than
     # the input reads the same either way, but a width this size would be
     # built into a file name).
     if length > UINTMAX:
@@ -161,9 +161,9 @@ def parse_suffix_length(value: str) -> int:
 def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
     """GNU ``--numeric-suffixes=``/``--hex-suffixes=`` start value.
 
-    The refused value is named through gnulib's ``quote()`` like every
-    other word split reports, and it comes FIRST in this clause where
-    the four count clauses put it last (measured on coreutils 9.4:
+    The refused value is quoted the way every other word split reports
+    is, and it comes FIRST in this clause where the four count clauses
+    put it last (measured on coreutils 9.4:
     ``split: 'x\\303\\251': invalid start value for numerical
     suffix``).
 
@@ -176,8 +176,8 @@ def parse_suffix_start(value: str, hex_mode: bool, suffix_len: int) -> int:
         suffix_len (int): the effective suffix width the start must fit.
     """
     # An empty value (`--numeric-suffixes=`) is a start of 0 that still
-    # pins the width, since GNU checks `strspn` over an empty string and
-    # keeps the pointer; only an absent value auto-lengthens.
+    # pins the width, as GNU 9.7 reads it; only an absent value
+    # auto-lengthens.
     if value == "":
         return 0
     pattern = SPLIT_HEX_DIGITS if hex_mode else SPLIT_DIGITS
@@ -339,7 +339,7 @@ def _to_base(value: int, alphabet: str, width: int) -> str:
 def _suffix_namer(
     index: int, alphabet: str, auto: bool, width: int, start: int
 ) -> str:
-    """One output-file suffix, GNU next_file_name style.
+    """One output-file suffix, as GNU split names its outputs.
 
     With no explicit width and no explicit start value the suffix
     auto-lengthens, reserving the last alphabet character as a prefix —

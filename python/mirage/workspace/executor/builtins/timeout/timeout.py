@@ -99,12 +99,13 @@ def timeout_missing(name: str) -> str:
     )
 
 
-def parse_duration(raw: str) -> float | None:
-    """GNU timeout's parse_duration: a C float plus an optional s/m/h/d.
+def duration_seconds(raw: str) -> float | None:
+    """A timeout DURATION in seconds: a C float plus an optional s/m/h/d.
 
-    cl_strtod reads the longest number at the front of the word, leading
-    whitespace, an exponent, a hex float and inf included; at most one
-    suffix letter may follow, and a negative or NaN interval is refused.
+    GNU timeout 9.7 takes the longest C-locale floating-point number at
+    the front of the word, leading whitespace, an exponent, a hex float
+    and inf included; at most one suffix letter may follow, and a
+    negative or NaN interval is refused.
 
     Args:
         raw (str): duration operand as typed.
@@ -243,7 +244,7 @@ async def handle_timeout(
                 ExecutionNode(command="timeout", exit_code=0),
             )
         if name == "k" and isinstance(value, str):
-            after = parse_duration(value)
+            after = duration_seconds(value)
             if after is None:
                 return _usage_error(
                     f"invalid time interval '{quote_text(value)}'"
@@ -270,7 +271,7 @@ async def handle_timeout(
     if len(parse.operands) < 2:
         return _refuse(encode_text(f"{usage_hint('timeout')}\n"))
     raw = parse.operands[0]
-    seconds = parse_duration(raw)
+    seconds = duration_seconds(raw)
     if seconds is None:
         return _usage_error(f"invalid time interval '{quote_text(raw)}'")
 

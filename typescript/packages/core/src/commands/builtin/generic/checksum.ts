@@ -126,7 +126,7 @@ const CHECK_ONLY: readonly (readonly [string, string])[] = [
 ]
 
 // Refuse the combinations GNU refuses after its option loop, in its order
-// (coreutils 9.7 digest.c).
+// (coreutils 9.7).
 function refuseConflicts(fl: FlagView, name: string): void {
   const refuse = (message: string): UsageError =>
     new UsageError(`${name}: ${message}\n${usageHint(name)}`, usageExitCode(name))

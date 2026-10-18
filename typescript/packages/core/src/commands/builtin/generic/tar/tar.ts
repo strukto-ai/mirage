@@ -194,10 +194,10 @@ const MODES = ['create', 'extract', 'list'] as const
 const STRIP_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?([0-9]+)$`)
 
 /**
- * A --strip-components value as tar reads it, or tar's refusal: xstrtoumax
- * at base 10 with no suffix, so leading blanks and one `+` pass, a sign,
- * another letter or a count past UINTMAX does not (tar 1.35). Mirrors
- * Python's strip_count.
+ * A --strip-components value as tar reads it, or tar's refusal: a decimal
+ * count with no suffix, so leading blanks and one `+` pass, a sign, another
+ * letter or a count past UINTMAX does not (tar 1.35). Mirrors Python's
+ * strip_count.
  */
 export function stripCount(raw: string): number {
   const digits = STRIP_COUNT_PATTERN.exec(raw)?.[1]

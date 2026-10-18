@@ -51,7 +51,7 @@ class TeeFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> TeeFlags:
     # --output-error values are validated declaratively: the spec's
     # choices= makes the parser report any other value and the executor
-    # refuse with GNU's ARGMATCH shape before tee runs. -p and a bare
+    # refuse with GNU's invalid-argument lines before tee runs. -p and a bare
     # --output-error are warn-nopipe; the last one typed wins, as GNU's one
     # option does.
     fl = FlagView(flags, spec=SPECS["tee"])

@@ -66,9 +66,9 @@ def parse_size(value: str, current: int) -> int:
         "",
     )
     digits = raw[: -len(suffix)] if suffix else raw
-    # GNU quotes what xdectoimax saw: the remainder past the skipped
-    # whitespace and mode character, sign included (`<abc` says 'abc'),
-    # escaped the way its quote() escapes a word.
+    # GNU quotes the remainder past the skipped whitespace and mode
+    # character, sign included (`<abc` says 'abc'), escaped the way it
+    # escapes every word it quotes.
     shown = quote_text(remainder)
     if _DIGITS.fullmatch(digits) is None:
         raise UsageError(f"truncate: Invalid number: '{shown}'", 1)

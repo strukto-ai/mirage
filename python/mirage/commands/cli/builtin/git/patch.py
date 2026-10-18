@@ -75,10 +75,10 @@ def file_patch(
     function_context: bool = False,
     force_text: bool = False,
 ) -> bytes:
-    """One path's patch, headers and hunks, as git's builtin_diff writes it.
+    """One path's patch, headers and hunks, as git diff prints it.
 
     A change between a file and a symlink is split into a deletion and
-    a creation, the way git's run_diff splits a type change. A ``---``
+    a creation, the two patches git diff prints for a type change. A ``---``
     or ``+++`` label holding a space ends in a tab, so a patch tool can
     tell where the name stops.
 
@@ -159,7 +159,7 @@ def hunks(
     count: int = HUNK_CONTEXT,
     function_context: bool = False,
 ) -> bytes:
-    """The ``@@`` hunks of a two-way patch, as xdiff's xdl_emit_diff emits.
+    """The ``@@`` hunks of a two-way patch, as git diff prints them.
 
     Each header carries the nearest earlier line of the old side that
     starts with a letter, ``_`` or ``$`` (git's default funcname), and

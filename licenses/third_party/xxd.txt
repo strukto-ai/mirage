@@ -1,0 +1,31 @@
+The plain (-p) hexdump reader in python/mirage/commands/builtin/generic/xxd.py
+(_plain_runs) and typescript/packages/core/src/commands/builtin/generic/xxd.ts
+(plainRuns) follows xxd 2024-12-07 (src/xxd/xxd.c of vim 9.1.1230,
+https://github.com/vim/vim). xxd.c carries this notice:
+
+(c) 1990-1998 by Juergen Weigert (jnweiger@gmail.com)
+
+I hereby grant permission to distribute and use xxd
+under X11-MIT or GPL-2.0 (at the user's choice).
+
+Contributions by Bram Moolenaar et al.
+
+mirage takes it under the first of those, the X11 (MIT) license:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

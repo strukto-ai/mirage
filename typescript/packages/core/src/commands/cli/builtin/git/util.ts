@@ -35,8 +35,9 @@ export const STDERR = 'stderr'
 const MARKER = '--'
 const TRUE_WORDS = ['true', 'yes', 'on']
 const FALSE_WORDS = ['false', 'no', 'off', '']
-// git_parse_signed: strtoimax in base 0 after C-locale space, then at most one
-// unit, and the product has to fit an int.
+// A config integer as git reads one: C-locale space, a number read the way
+// C's strtoimax reads base 0, then at most one unit, and the product has to
+// fit an int.
 const INTEGER = /^[ \t\n\v\f\r]*([-+]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)$/
 const UNIT_SHIFTS: Readonly<Record<string, number>> = { '': 0, k: 10, m: 20, g: 30 }
 const INT_BITS = 31
@@ -316,9 +317,9 @@ export function gitBool(values: readonly string[], key: string, fallback: boolea
 }
 
 /**
- * `git_parse_maybe_bool`: `true`/`yes`/`on` or `false`/`no`/`off` in any case,
- * empty for false, or an integer for whether it is nonzero; null for anything
- * else, which each caller answers in its own way.
+ * A config boolean as git reads it: `true`/`yes`/`on` or `false`/`no`/`off`
+ * in any case, empty for false, or an integer for whether it is nonzero; null
+ * for anything else, which each caller answers in its own way.
  *
  * @param value the value as typed or as the config spells it
  */
@@ -362,7 +363,7 @@ export function configSection(
  *
  * `git branch -d` drops the deleted branch's settings this way, so a branch
  * made again under the same name starts with no upstream rather than with two.
- * A header names the block the way git's `section_name_match` reads it,
+ * A header names the block the way git matches it,
  * spelled exactly: `[branch "x"]` with its escapes, or the older `[branch.x]`.
  * `[Branch "x"]` and `[branch.X]` are left, as git leaves them, and a line
  * opening with `[` ends a block (pinned against git 2.50.1).
@@ -431,7 +432,7 @@ function continues(value: string, inside: boolean): [boolean, boolean] {
 }
 
 /**
- * git_parse_int: the integer a config value spells, null for none.
+ * The integer a config value spells as git reads it, null for none.
  *
  * Hex after `0x` and octal after a leading zero, then an optional `k`, `m` or
  * `g`; a product outside an int is no integer.

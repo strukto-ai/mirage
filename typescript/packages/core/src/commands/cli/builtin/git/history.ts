@@ -198,7 +198,7 @@ export function prettyFormat(fl: FlagView): LogFormat {
  * One `--grep`, `--author` or `--committer` pattern, compiled.
  *
  * A refusal names where the pattern came from and the pattern itself, as
- * git's `compile_regexp_failed` words it; the reason after that is glibc's
+ * git words it; the reason after that is glibc's
  * for a basic expression and the host engine's otherwise.
  */
 function pattern(value: string, syntax: string, ignoreCase: boolean, origin: string): RegExp {
@@ -435,9 +435,9 @@ export async function refCommits(repo: Repo): Promise<CommitFacts[]> {
 }
 
 /**
- * `parse_decoration_style`: a boolean word or number, `short`, `full` or
- * `auto`, which decorates only a terminal and so never here; null for anything
- * else.
+ * The decoration style a value names: a boolean word or number, `short`, `full`
+ * or `auto`, which decorates only a terminal and so never here; null for
+ * anything else.
  *
  * @param value the `--decorate=` or `log.decorate` value
  */
@@ -451,8 +451,8 @@ export function decorationStyle(value: string): Decoration | null {
 }
 
 /**
- * How a `log` or `show` line labels its commits, as git's `cmd_log_init_finish`
- * settles it (pinned against git 2.47.3).
+ * How a `log` or `show` line labels its commits, as git settles it (pinned
+ * against git 2.47.3).
  *
  * `log.decorate` sets the style, a value it cannot read meaning none, and the
  * line's `--decorate[=<style>]` and `--no-decorate` override it, the last one

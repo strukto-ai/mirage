@@ -45,7 +45,7 @@ function superuser(target: string): string {
 }
 
 /**
- * Whether a filesystem type passes `-t`, libmount's `mnt_match_fstype`. A
+ * Whether a filesystem type passes `-t`, as util-linux mount reads the list. A
  * comma list, case-insensitive; a leading `no` negates the whole list
  * (`-t nofoo,bar` is neither), and a `no` on a later item refuses that one
  * type.

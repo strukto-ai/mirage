@@ -32,11 +32,11 @@ from mirage.types import PathSpec
 from mirage.utils.dates import parse_date_expr, parse_posix_time
 from mirage.utils.timezone import zone_from_env
 
-# GNU date's output formats (date.c), each chosen by one option: -I
-# takes one per precision, --rfc-3339 one per its narrower set, -R the
-# RFC 5322 line, and a line that chooses none gets the C locale's
-# default (`%e`, so the 5th is " 5"). All of them render through
-# gnu_strftime, the path `+FORMAT` takes.
+# GNU date's output formats, each chosen by one option: -I takes one
+# per precision, --rfc-3339 one per its narrower set, -R the RFC 5322
+# line, and a line that chooses none gets the C locale's default (`%e`,
+# so the 5th is " 5"). All of them render through gnu_strftime, the
+# path `+FORMAT` takes.
 ISO_8601_FORMATS = {
     "date": "%Y-%m-%d",
     "hours": "%Y-%m-%dT%H%:z",

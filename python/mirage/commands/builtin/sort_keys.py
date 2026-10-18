@@ -18,7 +18,7 @@ from mirage.commands.builtin.errors import SortKeyError
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 
-# The letters sort.c's `set_ordering` takes after a KEYDEF position. R is
+# The ordering letters GNU sort takes after a KEYDEF position. R is
 # recognized, so it still keeps a key off the global options and counts
 # against the others it is incompatible with, but it does not shuffle.
 _ORDER_LETTERS = frozenset("bdfghiMnRrV")
@@ -61,7 +61,7 @@ class SortConfig:
 
 
 def _field_count(spec: str, pos: int, what: str) -> tuple[int, int]:
-    """sort.c's ``parse_field_count``: the decimal starting at ``pos``.
+    """A KEYDEF field or offset number: the decimal starting at ``pos``.
 
     strtoumax's reading, so leading blanks and a ``+`` are taken and the
     number ends at the first byte that is not an ASCII digit, which the
@@ -123,7 +123,7 @@ def _mods_from_letters(letters: str) -> KeyMods:
 
 
 def parse_keydef(spec: str, global_mods: KeyMods, global_skip: bool) -> Key:
-    """One ``-k`` KEYDEF, read and refused the way sort.c's option loop does.
+    """One ``-k`` KEYDEF, read and refused the way GNU sort 9.7 does.
 
     ``F[.C][OPTS][,F[.C][OPTS]]``, taken left to right: each number is
     checked as it is read, so ``-k0.x`` names the zero field and not the
@@ -188,13 +188,14 @@ def parse_keydef(spec: str, global_mods: KeyMods, global_skip: bool) -> Key:
 
 
 def _incompatible_letters(mods: KeyMods) -> str:
-    """The letters sort.c's ``check_ordering_compatibility`` refuses.
+    """The letters GNU sort refuses to combine on one key.
 
     A key orders by at most one of ``-n``, ``-g``, ``-h``, ``-M`` and the
     group ``-V``, ``-R``, ``-d``, ``-i``, whose members combine with each
-    other but with none of the rest. The refusal spells the key the way
-    ``key_to_opts`` does, without ``-b`` and ``-r``, and ``-d`` hides
-    ``-i`` because GNU keeps only the stronger of the two filters.
+    other but with none of the rest. The refusal spells the key's
+    letters without ``-b`` and ``-r`` (``options '-gn' are
+    incompatible``), and ``-d`` hides ``-i`` because GNU keeps only the
+    stronger of the two filters.
 
     Args:
         mods (KeyMods): one key's options, inherited ones included.

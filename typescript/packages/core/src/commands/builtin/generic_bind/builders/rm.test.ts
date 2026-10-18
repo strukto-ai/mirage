@@ -105,7 +105,7 @@ describe('rm builder', () => {
   })
 
   it('-f reports an existing file it cannot remove', async () => {
-    // GNU's `ignorable_missing` spares ENOENT and ENOTDIR alone: a file
+    // GNU rm -f spares ENOENT and ENOTDIR alone: a file
     // that exists on a filesystem refusing the unlink fails under -f too.
     expect(await rm(ops(), ['/m/a.txt', '/m/nope'], { f: true })).toEqual([
       1,

@@ -1,3 +1,6 @@
+# Refusal wording and exit codes from Info-ZIP Zip 3.0 (Info-ZIP
+# license; see licenses/third_party/info-zip.txt).
+
 import zlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass

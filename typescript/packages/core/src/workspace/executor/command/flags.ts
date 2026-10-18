@@ -281,8 +281,8 @@ export function optionError(cmdName: string, parsed: ParsedCommand): [Uint8Array
       const badValue = parsed.invalidValueOptions[0]
       if (badValue !== undefined) return invalidArgumentError(cmdName, ...badValue)
     } else if (kind === 'ambiguous_value') {
-      // gnulib's other wording for the same refusal, reached only by an
-      // ARGMATCH table: the value is a prefix of two candidates or more.
+      // GNU's other wording for the same refusal, reached only by a
+      // word-choice table: the value is a prefix of two candidates or more.
       const badValue = parsed.ambiguousValueOptions[0]
       if (badValue !== undefined) {
         const [option, value, choices] = badValue

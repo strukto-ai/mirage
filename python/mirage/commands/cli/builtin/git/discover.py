@@ -88,7 +88,8 @@ async def _common_dir(vfs: Files, gitdir: PathSpec) -> PathSpec:
 
 
 async def _validated(vfs: Files, gitdir: PathSpec) -> PathSpec | None:
-    """git's ``is_git_directory``: the common directory, or None.
+    """Whether git takes this for a git directory: its common
+    directory, or None.
 
     A git directory holds its own HEAD and finds objects and refs in its
     common directory, which is itself unless it is a linked worktree's.
@@ -285,7 +286,7 @@ async def require_work_tree(
     location: RepoLocation,
     named: bool,
 ) -> None:
-    """git's ``setup_work_tree``: refuse when there is no tree to enter.
+    """Refuse, in git's words, when there is no work tree to enter.
 
     Asked by every verb that reads or writes working files, so a bare
     repository or a mistyped ``--work-tree`` is refused rather than read

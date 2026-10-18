@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from mirage.commands.builtin.constants import (
     OD_OVERFLOW_UNITS,
     OD_SIZE_UNITS,
+    SUFFIXED_COUNT_PATTERN,
     UINTMAX,
-    XSTRTOUMAX_PATTERN,
 )
 from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import resolve_source, stdin_stream
@@ -51,7 +51,7 @@ def parse_count(value: str, flag: str) -> int:
         value (str): the raw flag value, e.g. ``0x10``, ``010``, ``1K``.
         flag (str): the flag spelling used in error messages (``-j``/``-N``).
     """
-    match = XSTRTOUMAX_PATTERN.match(value)
+    match = SUFFIXED_COUNT_PATTERN.match(value)
     if match is None:
         raise UsageError(f"od: invalid {flag} argument '{value}'", 1)
     number, suffix = match.group(1), match.group(2)

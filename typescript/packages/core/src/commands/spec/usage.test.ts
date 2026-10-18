@@ -19,9 +19,9 @@ import {
   missingOperandError,
   invalidFloatError,
   invalidIntError,
-  argmatchError,
-  argmatchLine,
-  argmatchValidBlock,
+  wordRefusalError,
+  wordRefusalLine,
+  validWordsBlock,
   invalidArgumentError,
   missingRequiredError,
   missingValueError,
@@ -34,7 +34,7 @@ import {
   readFailExitCodeFromLine,
   usageExitCode,
 } from './usage.ts'
-import { argmatch } from './argmatch.ts'
+import { matchWord } from './word_choice.ts'
 
 const td = new TextDecoder()
 
@@ -106,7 +106,7 @@ describe('extraOperandError', () => {
 })
 
 describe('invalidArgumentError', () => {
-  it('matches the GNU ARGMATCH shape and tee exit 1', () => {
+  it('matches the GNU word-choice refusal shape and tee exit 1', () => {
     const [msg, code] = invalidArgumentError('tee', '--output-error', 'bogus', [
       'warn',
       'warn-nopipe',
@@ -134,7 +134,7 @@ describe('invalidArgumentError', () => {
     expect(code).toBe(1)
   })
 
-  // gnulib's argmatch matches on a prefix and `''` is a prefix of every
+  // GNU matches a word on a prefix and `''` is a prefix of every
   // candidate, so the empty word comes back AMBIGUOUS -- through the
   // ordinary rule, not a special case: it matches all four candidates, which
   // are four different values. Measured the same way at `tail --follow=`,
@@ -142,7 +142,7 @@ describe('invalidArgumentError', () => {
   // `ls --format=`, `ls -l --time-style=` and `cp --update=`.
   it('words an empty value as ambiguous, not invalid', () => {
     const choices = ['warn', 'warn-nopipe', 'exit', 'exit-nopipe']
-    const refusal = argmatch('', choices)
+    const refusal = matchWord('', choices)
     expect(refusal).toEqual({ matched: false, kind: 'ambiguous' })
     const kind = refusal.matched ? 'invalid' : refusal.kind
     const [msg, code] = invalidArgumentError('tee', '--output-error', '', choices, undefined, kind)
@@ -180,33 +180,35 @@ describe('invalidArgumentError', () => {
   })
 })
 
-describe('argmatchLine and argmatchValidBlock', () => {
+describe('wordRefusalLine and validWordsBlock', () => {
   // The wording is the caller's match result, not a re-derivation: there is
   // no empty-string branch, because a slot whose candidates all mean one
   // value ACCEPTS the empty word and only the caller holding the candidates
   // can tell.
   it('words the kind the caller matched', () => {
-    expect(argmatchLine('ls', 'time style', 'x')).toBe("ls: invalid argument 'x' for 'time style'")
-    expect(argmatchLine('ls', 'time style', 'x', 'ambiguous')).toBe(
+    expect(wordRefusalLine('ls', 'time style', 'x')).toBe(
+      "ls: invalid argument 'x' for 'time style'",
+    )
+    expect(wordRefusalLine('ls', 'time style', 'x', 'ambiguous')).toBe(
       "ls: ambiguous argument 'x' for 'time style'",
     )
-    expect(argmatchLine('ls', 'time style', '', 'ambiguous')).toBe(
+    expect(wordRefusalLine('ls', 'time style', '', 'ambiguous')).toBe(
       "ls: ambiguous argument '' for 'time style'",
     )
   })
 
   // GNU `sort --check=x` prints `  - 'quiet', 'silent'` on ONE line:
-  // `argmatch_valid` starts a new row only when the VALUE changes.
+  // GNU starts a new row only when the VALUE changes.
   it('joins aliases of one value on one row', () => {
-    expect(argmatchValidBlock([['quiet', 'silent'], ['diagnose-first']])).toBe(
+    expect(validWordsBlock([['quiet', 'silent'], ['diagnose-first']])).toBe(
       "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'",
     )
   })
 })
 
-describe('argmatchError', () => {
+describe('wordRefusalError', () => {
   it('words the ambiguous kind over the same block', () => {
-    const err = argmatchError(
+    const err = wordRefusalError(
       'sort',
       '--check',
       '',
@@ -223,14 +225,19 @@ describe('argmatchError', () => {
   })
 
   it('carries the block and the code it was given', () => {
-    const err = argmatchError('sort', '--check', 'x', [['quiet', 'silent'], ['diagnose-first']], 1)
+    const err = wordRefusalError(
+      'sort',
+      '--check',
+      'x',
+      [['quiet', 'silent'], ['diagnose-first']],
+      1,
+    )
     expect(err.message).toBe(
       "sort: invalid argument 'x' for '--check'\n" +
         "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'\n" +
         "Try 'sort --help' for more information.",
     )
-    // sort's other usage errors are 2; gnulib's `argmatch_die` always calls
-    // `usage (EXIT_FAILURE)`, so this one is 1.
+    // sort's other usage errors are 2; GNU exits 1 on a refused word.
     expect(err.exitCode).toBe(1)
     expect(usageExitCode('sort')).toBe(2)
   })

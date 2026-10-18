@@ -26,7 +26,7 @@ const POWERS: Readonly<Record<string, number>> = {
 }
 
 /**
- * GNU xstrtol suffix table restricted to the letters a command accepts:
+ * GNU's size suffix table restricted to the letters a command accepts:
  * letter L maps to 1024^n, LB to 1000^n and LiB to 1024^n; the special
  * letter b is 512 with no B/iB forms. The accepted letters differ per
  * coreutil (truncate takes g/t where split does not; od stops at E), so
@@ -49,7 +49,7 @@ export function sizeSuffixes(letters: string): Record<string, number> {
 }
 
 /**
- * The digits of an xstrtoumax operand, read at GNU's base 0: `0x…` is
+ * The digits of a suffixed count operand, read at GNU's base 0: `0x…` is
  * hex, a bare leading zero is octal, anything else decimal.
  *
  * A bigint, because the callers' ceilings (2**63 - 1, 2**64 - 1) are

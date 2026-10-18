@@ -128,8 +128,8 @@ function parseSuffixLength(value: string): number {
   if (!SPLIT_COUNT_PATTERN.test(value)) {
     throw new UsageError(`split: invalid suffix length: '${quoteText(value)}'`, 1)
   }
-  // xstrtoumax overflow: past 2**64 - 1 GNU refuses the width at parse
-  // time (byte and line counts saturate instead — a count bigger than the
+  // Past 2**64 - 1 GNU refuses the width as it reads the option
+  // (byte and line counts saturate instead — a count bigger than the
   // input reads the same either way, but a width this size would be
   // built into a file name).
   if (BigInt(value.trim().replace(/^\+/, '')) > UINTMAX) {
@@ -141,15 +141,14 @@ function parseSuffixLength(value: string): number {
   return Number.parseInt(value, 10)
 }
 
-// The refused value is named through gnulib's quote() like every other word
-// split reports, and it comes FIRST in this clause where the four count
-// clauses put it last (measured on coreutils 9.4:
+// The refused value is quoted the way every other word split reports is, and
+// it comes FIRST in this clause where the four count clauses put it last
+// (measured on coreutils 9.4:
 // `split: 'x\303\251': invalid start value for numerical suffix`).
 // Hex digits are lower case only, as GNU's own suffixes are:
 // `--hex-suffixes=A` is refused (coreutils 9.7). An empty value
-// (`--numeric-suffixes=`) is a start of 0 that still pins the width, since
-// GNU checks `strspn` over an empty string and keeps the pointer; only an
-// absent value auto-lengthens.
+// (`--numeric-suffixes=`) is a start of 0 that still pins the width, as GNU
+// 9.7 reads it; only an absent value auto-lengthens.
 function parseSuffixStart(value: string, hexMode: boolean, suffixLen: number): number {
   if (value === '') return 0
   if (!(hexMode ? SPLIT_HEX_DIGITS : SPLIT_DIGITS).test(value)) {
@@ -297,7 +296,7 @@ function toBase(value: number, alphabet: string, width: number): string {
   return chars.reverse().join('')
 }
 
-// GNU's next_file_name: with no explicit width and no explicit start value
+// GNU split's output names: with no explicit width and no explicit start value
 // the suffix auto-lengthens, reserving the last alphabet character as a
 // prefix — aa..yz, then zaaa..zyzz, then zzaaaa.. (00..89 then 9000..9899
 // then 990000.. for -d); band k holds (B-1)*B**(k+1) names behind k reserved

@@ -52,9 +52,9 @@ function parseSize(value: string, current: number): number {
     .sort((a, b) => b.length - a.length)
     .find((unit) => raw.endsWith(unit))
   const numeric = suffix === undefined ? raw : raw.slice(0, -suffix.length)
-  // GNU quotes what xdectoimax saw: the remainder past the skipped
-  // whitespace and mode character, sign included (`<abc` says 'abc'),
-  // escaped the way its quote() escapes a word.
+  // GNU quotes the remainder past the skipped whitespace and mode
+  // character, sign included (`<abc` says 'abc'), escaped the way it
+  // escapes every word it quotes.
   const shown = quoteText(remainder)
   if (!DIGITS.test(numeric)) throw new UsageError(`truncate: Invalid number: '${shown}'`, 1)
   // off_t is signed, so the bound is 2**63 - 1 upward but 2**63 downward

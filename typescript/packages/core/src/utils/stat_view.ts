@@ -43,9 +43,9 @@ export const DIR_SIZE = 4096
 export const BLKSIZE = 4096
 export const BLOCK_UNIT = 512
 
-// The bits chmod sets (gnulib CHMOD_MODE_BITS): permissions plus
-// setuid, setgid and sticky, everything but the file type.
-export const CHMOD_MODE_BITS = 0o7777
+// The bits chmod sets: permissions plus setuid, setgid and sticky,
+// everything but the file type.
+export const ALL_MODE_BITS = 0o7777
 
 // FNV-1a, 64-bit: the same arithmetic on both hosts and in every runtime,
 // so one path reports one inode whoever asks.
@@ -149,7 +149,7 @@ export function posixMode(st: FileStat): number {
         ? DIR_MODE
         : FILE_MODE
   if (st.mode === null) return base
-  return (base & ~CHMOD_MODE_BITS) | (st.mode & CHMOD_MODE_BITS)
+  return (base & ~ALL_MODE_BITS) | (st.mode & ALL_MODE_BITS)
 }
 
 /**

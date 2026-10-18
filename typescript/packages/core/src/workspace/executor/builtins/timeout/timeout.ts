@@ -85,13 +85,14 @@ export function timeoutMissing(name: string): string {
 }
 
 /**
- * GNU timeout's parse_duration: a C float plus an optional s/m/h/d.
+ * A timeout DURATION in seconds: a C float plus an optional s/m/h/d.
  *
- * cl_strtod reads the longest number at the front of the word, leading
- * whitespace, an exponent, a hex float and inf included; at most one
- * suffix letter may follow, and a negative or NaN interval is refused.
+ * GNU timeout 9.7 takes the longest C-locale floating-point number at the
+ * front of the word, leading whitespace, an exponent, a hex float and inf
+ * included; at most one suffix letter may follow, and a negative or NaN
+ * interval is refused.
  */
-export function parseDuration(raw: string): number | null {
+export function durationSeconds(raw: string): number | null {
   const match = STRTOD.exec(raw)
   if (match === null) return null
   const multiplier = UNIT_SECONDS[raw.slice(match[0].length)]
@@ -253,7 +254,7 @@ export async function handleTimeout(
       ]
     }
     if (name === 'k' && typeof value === 'string') {
-      const after = parseDuration(value)
+      const after = durationSeconds(value)
       if (after === null) return usageError(`invalid time interval '${quoteText(value)}'`)
       killAfter = after < Infinity ? after : 0
     }
@@ -278,7 +279,7 @@ export async function handleTimeout(
   if (raw === undefined || command.length === 0) {
     return refuse(encodeText(`${usageHint('timeout')}\n`))
   }
-  const seconds = parseDuration(raw)
+  const seconds = durationSeconds(raw)
   if (seconds === null) return usageError(`invalid time interval '${quoteText(raw)}'`)
   const name = command[0] ?? ''
   if (registry !== null && !execs(name, session, registry)) {

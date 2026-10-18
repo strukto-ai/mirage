@@ -28,7 +28,7 @@ import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv } from '../../../utils/timezone.ts'
 
 const ENC = new TextEncoder()
 
-// GNU date's output formats (date.c), each chosen by one option: -I takes one
+// GNU date's output formats, each chosen by one option: -I takes one
 // per precision, --rfc-3339 one per its narrower set, -R the RFC 5322 line,
 // and a line that chooses none gets the C locale's default (`%e`, so the 5th
 // is " 5"). All of them render through strftime, the path `+FORMAT` takes.

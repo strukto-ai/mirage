@@ -77,12 +77,11 @@ async def rm(
         try:
             s = await ops.stat(accessor, p, index=ctx.index)
         except FS_ERRORS as exc:
-            # ENOTDIR is a component that is a plain file: the operand
-            # sits under one, or carried a trailing slash that named one
-            # (`rm reg/`). -f ignores it and ENOENT alone, as GNU's
-            # `ignorable_missing` does; any other failure is reported,
-            # -f or not. GNU rm reports the operand and keeps removing
-            # the rest.
+            # ENOTDIR is a component that is a plain file: the operand sits
+            # under one, or carried a trailing slash that named one
+            # (`rm reg/`). -f ignores it and ENOENT alone, as GNU rm 9.7
+            # does; any other failure is reported, -f or not. GNU rm reports
+            # the operand and keeps removing the rest.
             if f and isinstance(exc, (FileNotFoundError, NotADirectoryError)):
                 continue
             errors.append(

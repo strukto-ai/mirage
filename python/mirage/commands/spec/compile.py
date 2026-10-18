@@ -213,7 +213,7 @@ class CompiledSpec:
             options, refused the same way (argparse ``type=float``).
         choices_by_dest (dict[str, tuple[str, ...]]): allowed values per
             canonical spelling, in declaration order (the order GNU's
-            ARGMATCH refusal lists them).
+            word-choice refusal lists them).
         required_dests (tuple[str, ...]): canonical spellings that must
             appear, in declaration order; a default satisfies the
             requirement.

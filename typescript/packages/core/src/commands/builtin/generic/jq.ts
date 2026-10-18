@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// The option loop, main loop and exit statuses follow jq 1.8.2's
+// src/main.c (MIT; see licenses/third_party/jq.txt).
+
 import { Worker } from '../../../concurrency/worker.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, REFUSED } from '../../spec/constants.ts'

@@ -15,8 +15,8 @@ import pytest
 
 from mirage.commands.builtin.generic.diff import (
     DiffFlags,
-    c_escape,
     diff,
+    quote_header_name,
     switch_words,
 )
 from mirage.types import FileStat, FileType, PathSpec
@@ -82,11 +82,11 @@ def test_switch_words_keep_the_option_words_as_typed():
     ]
 
 
-def test_c_escape_quotes_a_header_name_the_way_diffutils_does():
-    assert c_escape("plain/é\x7f") == "plain/é\x7f"
-    assert c_escape("sp ace") == '"sp ace"'
-    assert c_escape('t\tq"b\\') == '"t\\tq\\"b\\\\"'
-    assert c_escape("c\x01") == '"c\\001"'
+def test_quote_header_name_quotes_a_name_the_way_gnu_diff_does():
+    assert quote_header_name("plain/é\x7f") == "plain/é\x7f"
+    assert quote_header_name("sp ace") == '"sp ace"'
+    assert quote_header_name('t\tq"b\\') == '"t\\tq\\"b\\\\"'
+    assert quote_header_name("c\x01") == '"c\\001"'
 
 
 @pytest.mark.asyncio

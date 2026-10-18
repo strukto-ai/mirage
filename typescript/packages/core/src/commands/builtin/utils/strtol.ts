@@ -15,8 +15,8 @@
 import { C_SPACE } from '../constants.ts'
 import { decimalValue, parseBase0 } from './size_suffix.ts'
 
-// gnulib's xstrtoimax/xstrtoumax at base 10 with no suffix: C blanks, one
-// sign, ASCII digits, and nothing after them, not even a blank.
+// A whole decimal word as GNU's count options read one: C blanks, one sign,
+// ASCII digits, and nothing after them, not even a blank.
 const DECIMAL = new RegExp(`^${C_SPACE}([+-]?)([0-9]+)$`)
 // C's strto(u)l at base 0: C blanks, one sign, then hex after 0x, octal after
 // a bare 0, decimal otherwise; the text after the digits is left.
@@ -33,19 +33,23 @@ export const ERANGE_REASON = 'Numerical result out of range'
 export const EOVERFLOW_REASON = 'Value too large for defined data type'
 
 /**
- * `text` as gnulib's `xstrtoumax` reads a decimal operand: a minus, any other
- * byte, or a blank after the digits makes it no number. The value is exact,
- * so a caller's range check also catches one that overflows `uintmax_t`.
- * Mirrors Python's `xstrtoumax`.
+ * `text` as an unsigned decimal operand, as GNU's counts read: a minus, any
+ * other byte, or a blank after the digits makes it no number. The value is
+ * exact, so a caller's range check also catches one that overflows
+ * `uintmax_t`.
+ * Mirrors Python's `unsigned_decimal`.
  */
-export function xstrtoumax(text: string): bigint | null {
+export function unsignedDecimal(text: string): bigint | null {
   const match = DECIMAL.exec(text)
   if (match === null || match[1] === '-') return null
   return decimalValue(match[2] ?? '0')
 }
 
-/** `text` as gnulib's `xstrtoimax` reads a decimal operand. Mirrors Python's `xstrtoimax`. */
-export function xstrtoimax(text: string): bigint | null {
+/**
+ * `text` as a signed decimal operand, as GNU's counts read. Mirrors Python's
+ * `signed_decimal`.
+ */
+export function signedDecimal(text: string): bigint | null {
   const match = DECIMAL.exec(text)
   if (match === null) return null
   const value = decimalValue(match[2] ?? '0')

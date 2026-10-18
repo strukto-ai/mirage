@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# The \h and \v lists are those of PCRE2 10.43 and 10.46 (BSD-3-Clause
+# WITH PCRE2-exception; see licenses/third_party/pcre2.txt).
+
 import re
 import unicodedata
 from functools import cache

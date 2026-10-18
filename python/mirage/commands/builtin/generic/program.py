@@ -148,9 +148,9 @@ async def lower_exclude_from(
 ) -> tuple[dict[str, FlagValue], bool, IOResult | None]:
     """grep's --exclude-from files read into the globs they hold.
 
-    gnulib's add_exclude_file takes one glob per line, trailing blanks
-    dropped and blank lines skipped, and ``-`` is stdin. The globs stay
-    under ``exclude_from``, where the option stood among --include and
+    GNU grep takes one glob per line, trailing blanks dropped and blank
+    lines skipped, and ``-`` is stdin. The globs stay under
+    ``exclude_from``, where the option stood among --include and
     --exclude. A file grep cannot read stops it before it searches
     anything, exit 2. The occurrence tape is kept, so every -d and -D
     is still checked.

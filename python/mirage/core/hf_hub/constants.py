@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# DEFAULT_IGNORE_PATTERNS and EMPTY_COMMIT_WARNING are huggingface_hub
+# 1.16.4's (Apache-2.0; see licenses/third_party/huggingface_hub.txt).
+
 API_BASE = "https://huggingface.co"
 
 # The Hub's default branch. Unlike GitHub, where the default is per

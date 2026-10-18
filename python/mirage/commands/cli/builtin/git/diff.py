@@ -72,11 +72,11 @@ from mirage.types import PathSpec
 # repository. The patch is correct and applies cleanly, and file
 # headers, mode lines, blob abbreviations and hunk function context
 # match git exactly, but a hunk can still sit a line off where git's
-# does (`@@ -3,6 +3,10 @@` against `@@ -4,6 +4,10 @@`): git slides a
-# hunk to the equivalent boundary xdiff prefers (xdl_change_compact),
-# so a blank line can be attributed to the additions on one side and
-# the context on the other. Closing this means reimplementing that
-# pass; until then do not claim byte parity for diff bodies. `log`,
+# does (`@@ -3,6 +3,10 @@` against `@@ -4,6 +4,10 @@`): where a
+# changed block could sit at more than one equivalent place, git picks
+# its own, so a blank line can be attributed to the additions on one
+# side and the context on the other. Closing this means matching that
+# choice; until then do not claim byte parity for diff bodies. `log`,
 # `log --oneline`, `show`'s header and `branch` ARE byte-identical.
 
 

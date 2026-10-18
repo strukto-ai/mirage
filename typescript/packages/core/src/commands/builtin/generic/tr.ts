@@ -39,7 +39,7 @@ const PRINTABLE_ESCAPES: Readonly<Record<string, string>> = {
   '\v': '\\v',
 }
 
-// A piece of an operand as GNU tr's `make_printable_str` spells it. Its
+// A piece of an operand as GNU tr spells it in a diagnostic. Its
 // diagnostics quote this spelling, so a byte outside ASCII shows as an
 // octal escape whose backslash the quoting doubles.
 function printable(view: string): string {
@@ -147,16 +147,16 @@ function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>):
   if (texts.length === 0) throw missingOperandError(CommandName.TR, null)
   const { delete: del, squeeze, complement, truncateSet1 } = parseFlags(bag)
   // -d without -s takes one string, so the extra operand is the second one:
-  // `tr -d a b c` names b (tr.c reports argv[optind + max_operands]).
-  const maxOperands = del && !squeeze ? 1 : 2
-  if (texts.length > maxOperands) {
+  // `tr -d a b c` names b, the first past the strings it takes.
+  const operandLimit = del && !squeeze ? 1 : 2
+  if (texts.length > operandLimit) {
     if (texts.length === 2) {
       throw new Error(
         `tr: extra operand '${quoteText(texts[1] ?? '')}'\n` +
           `Only one string may be given when deleting without squeezing repeats.${TRY_HELP}`,
       )
     }
-    throw extraOperandError(CommandName.TR, texts[maxOperands] ?? '')
+    throw extraOperandError(CommandName.TR, texts[operandLimit] ?? '')
   }
   let set1 = expandRanges(interpretEscapes(byteView(texts[0] ?? '')))
   if (complement) {

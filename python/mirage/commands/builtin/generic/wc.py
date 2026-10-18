@@ -14,10 +14,10 @@ from mirage.commands.builtin.utils.stream import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import argmatch_error
+from mirage.commands.spec.usage import word_refusal_error
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, CountedRun, IOResult
@@ -26,8 +26,8 @@ from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
 
-# GNU's `total_types` in declaration order, which is both the accepted
-# set and what `--total=x` lists back. No aliases, so one per line.
+# The --total words in GNU's order, which is both the accepted set and
+# what `--total=x` lists back. No aliases, so one per line.
 TOTAL_ARGS = ("auto", "always", "only", "never")
 
 
@@ -49,9 +49,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> WCFlags:
     # The old `or "auto"` took it as `auto` and exited 0, which was also
     # the one py/ts split here -- TypeScript refused it.
     word = "auto" if raw_total is None else raw_total
-    match = argmatch(word, TOTAL_ARGS)
-    if not isinstance(match, ArgmatchMatch):
-        raise argmatch_error(
+    match = match_word(word, TOTAL_ARGS)
+    if not isinstance(match, WordMatch):
+        raise word_refusal_error(
             "wc", "--total", word, TOTAL_ARGS, None, match.kind
         )
     total = match.word
@@ -165,10 +165,10 @@ def number_width(sizes: list[int | None], operands: int, counts: int) -> int:
 
 
 def labelled(body: str, label: str | None) -> str:
-    """One report row under GNU's name rule (coreutils 9.7 ``wc.c``).
+    """One report row under GNU's name rule (coreutils 9.7).
 
-    A name holding a newline is shell-quoted, as ``quotef`` does, so no
-    row spans two lines; every other name, spaces included, prints as
+    A name holding a newline is shell-quoted, as GNU 9.7 prints it, so
+    no row spans two lines; every other name, spaces included, prints as
     itself.
 
     Args:

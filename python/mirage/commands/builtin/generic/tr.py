@@ -49,7 +49,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TrFlags:
 
 
 def _printable(view: str) -> str:
-    """A piece of an operand as GNU tr's ``make_printable_str`` spells it.
+    """A piece of an operand as GNU tr spells it in a diagnostic.
 
     Its diagnostics quote this spelling, so a byte outside ASCII shows as
     an octal escape whose backslash the quoting doubles.
@@ -134,16 +134,16 @@ async def tr_generic(
         raise missing_operand_error(CommandName.TR, None)
     parsed = parse_flags(flags or {})
     # -d without -s takes one string, so the extra operand is the second
-    # one: `tr -d a b c` names b (tr.c reports argv[optind + max_operands]).
-    max_operands = 1 if parsed.delete and not parsed.squeeze else 2
-    if len(texts) > max_operands:
+    # one: `tr -d a b c` names b, the first past the strings it takes.
+    operand_limit = 1 if parsed.delete and not parsed.squeeze else 2
+    if len(texts) > operand_limit:
         if len(texts) == 2:
             raise ValueError(
                 f"tr: extra operand '{quote_text(texts[1])}'\n"
                 "Only one string may be given when deleting without "
                 "squeezing repeats." + _TRY_HELP
             )
-        raise extra_operand_error(CommandName.TR, texts[max_operands])
+        raise extra_operand_error(CommandName.TR, texts[operand_limit])
     set1 = _expand_ranges(interpret_escapes(byte_view(texts[0])))
     if parsed.complement:
         all_chars = "".join(chr(i) for i in range(256))

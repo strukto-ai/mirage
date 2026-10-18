@@ -57,7 +57,7 @@ function minLength(text: string): bigint | null {
   return rest === '' ? value : null
 }
 
-// binutils' set_string_min refusals, in the order it tests them. Mirrors
+// GNU strings' refusals of a -n value, in the order it tests them. Mirrors
 // Python's `_min_length_refusal`.
 function minLengthRefusal(text: string, value: bigint | null): string {
   if (value === null) return `strings: invalid integer argument ${text}`

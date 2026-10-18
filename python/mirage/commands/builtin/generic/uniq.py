@@ -11,21 +11,20 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
-from mirage.commands.spec.usage import argmatch_error, extra_operand_error
+from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec, StatFn
 
-# GNU's `delimit_method_string` and `grouping_method_string`, in
-# declaration order, which is what each option lists back. No aliases in
-# either, so one candidate per line.
+# The --all-repeated and --group words, in the order GNU lists each
+# back. No aliases in either, so one candidate per line.
 ALL_REPEATED_ARGS = ("none", "prepend", "separate")
-# GNU's size_opt reads a count with xstrtoimax: leading C whitespace, a
-# sign and decimal digits, nothing after them.
+# How GNU reads a -f, -s or -w count: leading C whitespace, a sign and
+# decimal digits, nothing after them.
 COUNT_WORD = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
 SKIP_FIELDS = "fields to skip"
 SKIP_CHARS = "bytes to skip"
@@ -48,7 +47,7 @@ class UniqFlags:
 
 
 def _parse_count(value: str | None, what: str) -> int | None:
-    """GNU's ``size_opt``: a decimal count, never negative, any size.
+    """A -f, -s or -w count: decimal, never negative, any size.
 
     Args:
         value (str | None): the option's value as typed.
@@ -63,7 +62,7 @@ def _parse_count(value: str | None, what: str) -> int | None:
 
 
 def _method_word(option: str, value: str, allowed: tuple[str, ...]) -> str:
-    """One ``--group``/``--all-repeated`` word, ARGMATCH-resolved.
+    """One ``--group``/``--all-repeated`` word, an unambiguous prefix too.
 
     Args:
         option (str): the option's long spelling, for the refusal.
@@ -71,9 +70,11 @@ def _method_word(option: str, value: str, allowed: tuple[str, ...]) -> str:
         allowed (tuple[str, ...]): GNU's candidates in declaration
             order, one value each (neither option has aliases).
     """
-    match = argmatch(value, allowed)
-    if not isinstance(match, ArgmatchMatch):
-        raise argmatch_error("uniq", option, value, allowed, None, match.kind)
+    match = match_word(value, allowed)
+    if not isinstance(match, WordMatch):
+        raise word_refusal_error(
+            "uniq", option, value, allowed, None, match.kind
+        )
     return match.word
 
 

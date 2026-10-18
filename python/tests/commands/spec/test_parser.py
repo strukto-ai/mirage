@@ -558,7 +558,7 @@ def test_choices_violation_is_reported_not_raised():
 
 
 # `tee --output-error` is one of the three spec-declared choices sets
-# that really are gnulib ARGMATCH tables, so the parser resolves a
+# that GNU really matches as word choices, so the parser resolves a
 # prefix and rewrites the bag to the canonical word. Measured on
 # coreutils 9.7: `tee --output-error=exit-n` exits 0 (exit-nopipe) and
 # `=w` is `ambiguous argument 'w'`.
@@ -582,7 +582,7 @@ def test_an_exact_word_is_left_alone_and_not_read_as_a_prefix():
 # The second table, so the rule is the option's and not one command's:
 # measured on 9.7, `numfmt --to=s` is `si` and `--to=ie` is ambiguous
 # between `iec` and `iec-i`.
-def test_the_other_argmatch_table_resolves_its_own_prefixes():
+def test_the_other_word_choice_table_resolves_its_own_prefixes():
     parsed = parse_command(SPECS["numfmt"], ["--to=s", "1"], "/", "numfmt")
     assert parsed.flags["--to"] == "si"
     assert parsed.ambiguous_value_options == []
@@ -681,7 +681,7 @@ def test_a_choices_set_outside_the_table_reports_the_empty_word_invalid():
 # Nothing the author can write opts a custom spec into the table, which
 # names three builtin Argument OBJECTS and is tested by identity.
 @pytest.mark.parametrize("name", ["--mode", "mode"])
-def test_a_custom_spec_never_inherits_argmatch(name):
+def test_a_custom_spec_never_inherits_word_choice(name):
     spec = CommandSpec(arguments=(Argument(name, choices=("read", "remove")),))
     parsed = parse_command(
         spec, [name, "rem"] if name.startswith("-") else ["rem"], "/", "mycmd"
@@ -692,7 +692,7 @@ def test_a_custom_spec_never_inherits_argmatch(name):
     assert parsed.invalid_value_options == [
         (name, "rem", ("read", "remove")),
     ]
-    # Even naming it after a real ARGMATCH option changes nothing.
+    # Even naming it after a real word-choice option changes nothing.
     named = CommandSpec(arguments=(Argument("--to", choices=("none", "si")),))
     assert parse_command(
         named, ["--to=s"], "/", "mycmd"
@@ -708,7 +708,7 @@ def test_a_custom_spec_never_inherits_argmatch(name):
 # holds. Argument is a frozen dataclass, so this lookalike is `==` to the
 # builtin's and hashes with it -- only `is` tells them apart, which is
 # why the table is not a frozenset of options.
-def test_a_command_that_borrows_a_builtin_name_does_not_borrow_argmatch():
+def test_a_command_that_borrows_a_builtin_name_borrows_no_word_choice():
     lookalike = Argument(
         "--output-error",
         nargs="?",
@@ -740,9 +740,9 @@ def test_a_command_that_borrows_a_builtin_name_does_not_borrow_argmatch():
 # `spec is SPECS[name]` is False for every builtin by the time a line is
 # read. Identity of the Argument survives that copy, which is the whole
 # reason the table names options rather than specs -- keying on the spec
-# would disable ARGMATCH everywhere while every unit test that passes
+# would disable word choices everywhere while every unit test that passes
 # SPECS[name] straight in kept passing.
-def test_argmatch_survives_the_copy_the_registry_parses():
+def test_word_choice_survives_the_copy_the_registry_parses():
     tee = SPECS["tee"]
     registered = registered_spec("tee", tee)
     assert registered is not tee
@@ -753,12 +753,12 @@ def test_argmatch_survives_the_copy_the_registry_parses():
 
 # compile_spec caches on a frozen dataclass, so its key is STRUCTURAL: a
 # spec built to look exactly like tee's shares the builtin's CompiledSpec
-# object. The ARGMATCH decision is therefore read off the spec and never
+# object. The word-choice decision is therefore read off the spec and never
 # stored in there -- stored, it would be whichever of the two compiled
 # first, and the order is whatever the process happened to do. Both
 # directions are checked because the wrong one is order-dependent: the
-# clone inheriting argmatch, and the real tee losing it.
-def test_a_structural_twin_of_a_builtin_spec_shares_no_argmatch():
+# clone inheriting the word choice, and the real tee losing it.
+def test_a_structural_twin_of_a_builtin_spec_shares_no_word_choice():
     tee = SPECS["tee"]
     twin = CommandSpec(
         description=tee.description,
@@ -838,7 +838,7 @@ def test_choices_check_every_value_of_a_multiple_flag():
     assert parsed.invalid_value_options == [("-m", "z", ("x", "y"))]
 
 
-def test_every_occurrence_of_an_argmatch_flag_is_resolved_as_it_is_read():
+def test_every_occurrence_of_a_word_choice_flag_is_resolved_as_read():
     # Each occurrence goes through the table as it is scanned, so the one
     # the bag drops is still refused and the one it keeps is still
     # rewritten to its candidate.

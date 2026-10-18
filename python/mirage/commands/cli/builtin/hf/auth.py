@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# `hf auth whoami` prints as huggingface_hub 0.35.3 does (Apache-2.0;
+# see licenses/third_party/huggingface_hub.txt).
+
 from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import require_token, text_out
 from mirage.commands.config import Context

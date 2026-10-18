@@ -267,9 +267,9 @@ async function slashedLinkRefusal(
 
 /**
  * Resolve each command-line link that leads to a directory: GNU ls's default
- * (ls.c's DEREF_COMMAND_LINE_SYMLINK_TO_DIR, coreutils 9.7). `ls dlink` lists
- * the directory, while `ls flink` and a dangling `ls dang` report the link
- * itself, and so does a loop, whose stat fails where GNU then lstats it.
+ * for command-line operands (measured on coreutils 9.7). `ls dlink` lists the
+ * directory, while `ls flink` and a dangling `ls dang` report the link itself,
+ * and so does a loop, whose target cannot be reached.
  * Where a link leads takes a stat through the dispatcher to know, since the target
  * may live on any mount, so this runs after `followPaths` has resolved every
  * operand's prefix. Mirrors Python's follow_directory_links.

@@ -211,7 +211,7 @@ export class FlagView {
 
   /**
    * An integer option read and refused the way its program does. Each program
-   * scans its own numbers (gnulib's `xstrtoumax`, C's `strtol`, `atoi`) and
+   * scans its own numbers (a whole decimal word, C's `strtol`, `atoi`) and
    * words its own refusal, so both come from the caller: `scan` is the
    * program's reader, null for a text it does not take, and a scanned value
    * outside `low`..`high` is refused the same way, through `refusal`, with

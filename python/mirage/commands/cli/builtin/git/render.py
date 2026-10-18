@@ -138,7 +138,7 @@ def quote_path(path: str, porcelain: bool, fully: bool = True) -> str:
 
     ``core.quotePath=false`` turns ``fully`` off, and a byte outside
     ASCII then passes through as itself while everything else is quoted
-    as before (git's cq_must_quote, pinned against git 2.50).
+    as before (pinned against git 2.50).
 
     Args:
         path (str): repository-relative path, surrogate-escaped.
@@ -223,7 +223,7 @@ def _commits(count: int) -> str:
 def tracking_lines(upstream: Upstream) -> list[str]:
     """What the long status says about a branch and its upstream.
 
-    Pinned against git 2.47.3 and 2.50.1 (``format_tracking_info``).
+    Pinned against git 2.47.3 and 2.50.1.
 
     Args:
         upstream (Upstream): the branch's upstream.
@@ -489,7 +489,7 @@ def long_format(
 def _relative_path(path: str, base: list[str]) -> str:
     """A repository-relative path as seen from a directory inside the tree.
 
-    Computed on the names alone, as git's ``relative_path`` does: the
+    Computed on the names alone, as git computes it: the
     virtual paths never meet the host's working directory. A directory
     row keeps its slash, so the one git runs inside prints ``./``.
 

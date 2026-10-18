@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import { cInt, strtol, strtoul, xstrtoimax, xstrtoumax } from './strtol.ts'
+import { cInt, strtol, strtoul, signedDecimal, unsignedDecimal } from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
 describe('strtol', () => {
@@ -51,9 +51,9 @@ describe('strtol', () => {
     ['', null, null],
     ['+ 5', null, null],
     ['99999999999999999999', 99999999999999999999n, 99999999999999999999n],
-  ])('xstrto %j', (raw, unsigned, signed) => {
-    expect(xstrtoumax(raw)).toBe(unsigned)
-    expect(xstrtoimax(raw)).toBe(signed)
+  ])('whole decimal word %j', (raw, unsigned, signed) => {
+    expect(unsignedDecimal(raw)).toBe(unsigned)
+    expect(signedDecimal(raw)).toBe(signed)
   })
 
   it('cInt keeps the low 32 bits signed', () => {
@@ -66,8 +66,8 @@ describe('strtol', () => {
 describe('a number past any digit limit', () => {
   it('scans exactly or saturates as the C reader does', () => {
     const digits = '9'.repeat(5000)
-    expect(xstrtoumax(digits)).toBe(10n ** 5000n - 1n)
-    expect(xstrtoimax(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
+    expect(unsignedDecimal(digits)).toBe(10n ** 5000n - 1n)
+    expect(signedDecimal(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
     expect(strtol(digits)).toEqual([2n ** 63n - 1n, ''])
     expect(strtoul(digits)).toEqual([2n ** 64n - 1n, ''])
   })

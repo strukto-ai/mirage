@@ -447,7 +447,7 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
 /**
  * The two ends of `A..B` or `A...B`, or null for one revision.
  *
- * Read the way git's handle_dotdot reads it: the first `..` splits the operand,
+ * Read the way git reads a range: the first `..` splits the operand,
  * a dot right after it makes the range symmetric, and an empty end is HEAD, so
  * `..side` is `HEAD..side`.
  */

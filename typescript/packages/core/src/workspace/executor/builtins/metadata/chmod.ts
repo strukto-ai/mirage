@@ -34,7 +34,7 @@ import {
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
-// chmod's report for one file (GNU chmod 9.7's describe_change). Mirrors
+// chmod's report for one file, worded as GNU chmod 9.7 prints it. Mirrors
 // Python's mode_line.
 export function modeLine(name: string, stat: FileStat, mode: number, failed: boolean): string {
   const old = stat.mode ?? 0

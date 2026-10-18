@@ -95,7 +95,7 @@ def offset_width(f: GrepFlags, size: int | None) -> int:
     """The width -T pads line numbers and byte offsets to.
 
     GNU sizes the field to the digits of the file's size, plus one under
-    -n, and to INTMAX_MAX's digits when the size is unknown (grep.c).
+    -n, and to INTMAX_MAX's digits when the size is unknown (grep 3.11).
 
     Args:
         f (GrepFlags): parsed flags.

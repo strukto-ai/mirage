@@ -43,8 +43,8 @@ import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
-import { argmatchLine, argmatchValidBlock, usageHint } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalLine, validWordsBlock, usageHint } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { GREP_STDIN_LABEL } from '../utils/constants.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 
@@ -52,7 +52,7 @@ const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
 // (grep 3.11; the same two lines follow `option requires an argument`).
 const GREP_NO_PATTERN = `Usage: ${SYNOPSES.grep ?? ''}\n${usageHint('grep')}`
-// What --directories takes, an argmatch table: a prefix names one.
+// What --directories takes; an unambiguous prefix names one too.
 const DIRECTORIES = ['read', 'recurse', 'skip']
 const DEVICES = ['read', 'skip']
 // The types -D skip passes over; stdin is read whatever it is.
@@ -63,7 +63,7 @@ const DEVICE_TYPES: ReadonlySet<FileType> = new Set([
   FileType.SOCKET,
 ])
 const UNIX_BYTE_OFFSETS = 'grep: warning: --unix-byte-offsets (-u) is obsolete\n'
-// What xstrtoimax takes as -m's count: blanks, a sign, then digits.
+// What GNU takes as -m's count: blanks, a sign, then digits.
 const MAX_COUNT = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
@@ -86,8 +86,9 @@ function binaryMode(fl: FlagView): string {
 /**
  * What grep does with a directory: read, recurse or skip. -r and -R are
  * --directories=recurse, so the last of the three on the line wins (grep
- * 3.11: `grep -r -d skip` skips, `-d skip -r` recurses). A word argmatch names
- * none of the three by comes back as typed; `checkActions` refuses it.
+ * 3.11: `grep -r -d skip` skips, `-d skip -r` recurses). A word that names
+ * none of the three, whole or as a prefix, comes back as typed;
+ * `checkActions` refuses it.
  */
 export function directoriesAction(fl: FlagView): string {
   let action = 'read'
@@ -97,7 +98,7 @@ export function directoriesAction(fl: FlagView): string {
       continue
     }
     const word = fl.asStr(name) ?? ''
-    const match = argmatch(word, DIRECTORIES)
+    const match = matchWord(word, DIRECTORIES)
     action = match.matched ? match.word : word
   }
   return action
@@ -105,9 +106,9 @@ export function directoriesAction(fl: FlagView): string {
 
 /**
  * Refuse a -d or -D word as GNU does, each one typed and not only the last:
- * its option loop stops at the first bad one. A -d word argmatch names no
- * action by is gnulib's refusal and grep's usage, exit 1; -D takes only the
- * exact words, exit 2.
+ * its option loop stops at the first bad one. A -d word that names no action,
+ * whole or as a prefix, gets GNU's invalid or ambiguous argument message, the
+ * valid words and grep's usage, exit 1; -D takes only the exact words, exit 2.
  */
 function checkActions(fl: FlagView): void {
   for (const [name, value] of fl.occurrences('directories', 'devices')) {
@@ -116,11 +117,11 @@ function checkActions(fl: FlagView): void {
       if (!DEVICES.includes(word)) throw new UsageError('grep: unknown devices method')
       continue
     }
-    const match = argmatch(word, DIRECTORIES)
+    const match = matchWord(word, DIRECTORIES)
     if (!match.matched)
       throw new UsageError(
-        `${argmatchLine('grep', '--directories', word, match.kind)}\n` +
-          `${argmatchValidBlock(DIRECTORIES)}\n${GREP_NO_PATTERN}`,
+        `${wordRefusalLine('grep', '--directories', word, match.kind)}\n` +
+          `${validWordsBlock(DIRECTORIES)}\n${GREP_NO_PATTERN}`,
         1,
       )
   }
@@ -177,8 +178,8 @@ function contextLength(fl: FlagView, name: string): number | undefined {
 }
 
 /**
- * -m as GNU reads it (xstrtoimax): leading blanks and a sign are allowed, a
- * negative count is no limit, and anything else is refused.
+ * -m as GNU 3.11 reads it: leading blanks and a sign are allowed, a negative
+ * count is no limit, and anything else is refused.
  */
 export function maxCount(fl: FlagView): number | null {
   const raw = fl.asStr('max_count')

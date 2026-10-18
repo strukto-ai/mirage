@@ -51,9 +51,9 @@ def superuser(target: str) -> str:
 
 
 def match_type(name: str, pattern: str) -> bool:
-    """Whether a filesystem type passes ``-t``, libmount's
-    ``mnt_match_fstype``: a case-insensitive comma list, a leading ``no``
-    negating the whole list and a later one a single type.
+    """Whether a filesystem type passes ``-t``, as util-linux mount
+    reads the list: case-insensitive and comma-separated, a leading
+    ``no`` negating the whole list and a later one a single type.
 
     Args:
         name (str): the mount's type.

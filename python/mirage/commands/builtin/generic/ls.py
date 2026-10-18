@@ -22,13 +22,17 @@ from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchKind, ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import (
-    argmatch_error,
-    argmatch_line,
     usage_hint,
+    word_refusal_error,
+    word_refusal_line,
+)
+from mirage.commands.spec.word_choice import (
+    WordMatch,
+    WordRefusalKind,
+    match_word,
 )
 from mirage.errors.classify import failure_text, is_entry_error
 from mirage.errors.constants import MISS_ERRORS
@@ -136,7 +140,7 @@ def _grouped_argument_error(
     option: str,
     value: str,
     groups: tuple[tuple[str, ...], ...],
-    kind: ArgmatchKind,
+    kind: WordRefusalKind,
 ) -> UsageError:
     """GNU's ARGMATCH refusal for an option whose values have aliases,
     listed one group per line (``--time``, ``--hyperlink``); exit 1, as
@@ -148,11 +152,11 @@ def _grouped_argument_error(
             escapes it.
         groups (tuple[tuple[str, ...], ...]): the valid values, aliases
             grouped.
-        kind (ArgmatchKind): the wording the match answered with --
+        kind (WordRefusalKind): the wording the match answered with --
             ``ls --hyperlink=a`` spans three values and is ambiguous,
             ``--hyperlink=zzz`` spans none and is invalid.
     """
-    return argmatch_error("ls", option, value, groups, 1, kind)
+    return word_refusal_error("ls", option, value, groups, 1, kind)
 
 
 _WORD_OPTIONS: dict[str, tuple[str, tuple[tuple[str, ...], ...]]] = {
@@ -188,8 +192,8 @@ def _check_option_words(fl: FlagView) -> None:
                 raise UsageError(_block_size_error(word, parsed), 2)
             continue
         option, groups = _WORD_OPTIONS[dest]
-        match = argmatch(word, groups)
-        if not isinstance(match, ArgmatchMatch):
+        match = match_word(word, groups)
+        if not isinstance(match, WordMatch):
             raise _grouped_argument_error(option, word, groups, match.kind)
 
 
@@ -208,9 +212,9 @@ def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
         return _SORT_FLAGS[last], True
     word = fl.as_str("sort") or ""
     words = tuple(_SORT_WORDS)
-    match = argmatch(word, words)
-    if not isinstance(match, ArgmatchMatch):
-        raise argmatch_error("ls", "--sort", word, words, 1, match.kind)
+    match = match_word(word, words)
+    if not isinstance(match, WordMatch):
+        raise word_refusal_error("ls", "--sort", word, words, 1, match.kind)
     return _SORT_WORDS[match.word], True
 
 
@@ -230,8 +234,8 @@ def _time_flag(fl: FlagView) -> LsTimeKind:
     if last == "u":
         return LsTimeKind.ATIME
     word = fl.as_str("time") or ""
-    match = argmatch(word, _TIME_GROUPS)
-    if not isinstance(match, ArgmatchMatch):
+    match = match_word(word, _TIME_GROUPS)
+    if not isinstance(match, WordMatch):
         raise _grouped_argument_error("--time", word, _TIME_GROUPS, match.kind)
     return _TIME_KINDS[match.word]
 
@@ -259,8 +263,8 @@ def _time_style_flag(fl: FlagView) -> str:
         return "locale"
     if style.startswith("+"):
         return style
-    match = argmatch(style, formatting.LS_TIME_STYLES)
-    if isinstance(match, ArgmatchMatch):
+    match = match_word(style, formatting.LS_TIME_STYLES)
+    if isinstance(match, WordMatch):
         return match.word
     # ls hand-writes this block rather than letting argmatch print
     # `time_style_args`, so it is the one ARGMATCH refusal in the repo
@@ -269,7 +273,7 @@ def _time_style_flag(fl: FlagView) -> str:
     # The first line is still argmatch's, so `--time-style=lo` spans
     # long-iso and locale and reads `ambiguous argument 'lo'`.
     raise UsageError(
-        f"{argmatch_line('ls', 'time style', style, match.kind)}\n"
+        f"{word_refusal_line('ls', 'time style', style, match.kind)}\n"
         "Valid arguments are:\n"
         "  - [posix-]full-iso\n"
         "  - [posix-]long-iso\n"
@@ -295,8 +299,8 @@ def _hyperlink_flag(fl: FlagView) -> bool:
     if raw is True:
         return True
     word = str(raw)
-    match = argmatch(word, _WHEN_GROUPS)
-    if not isinstance(match, ArgmatchMatch):
+    match = match_word(word, _WHEN_GROUPS)
+    if not isinstance(match, WordMatch):
         raise _grouped_argument_error(
             "--hyperlink", word, _WHEN_GROUPS, match.kind
         )
@@ -323,8 +327,8 @@ def _indicator_word(dest: str, raw: FlagValue) -> LsIndicator:
     word = str(raw)
     option = "--classify" if dest == "classify" else "--indicator-style"
     groups = _WHEN_GROUPS if dest == "classify" else _INDICATOR_GROUPS
-    match = argmatch(word, groups)
-    if not isinstance(match, ArgmatchMatch):
+    match = match_word(word, groups)
+    if not isinstance(match, WordMatch):
         raise _grouped_argument_error(option, word, groups, match.kind)
     if dest == "indicator_style":
         return LsIndicator(match.word)

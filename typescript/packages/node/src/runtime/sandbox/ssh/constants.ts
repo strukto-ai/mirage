@@ -21,7 +21,7 @@ import { singleQuote } from '@struktoai/mirage-core/utils/quote'
  * is AcceptEnv-gated server-side, so it silently drops names), so the
  * working directory and the merged environment ride the command
  * itself: `cd 'cwd' && env 'K=V' ... sh -c 'line'`. Every piece is
- * sh_single_quoted, so the remote login shell reads each as one word
+ * single-quoted for sh, so the remote login shell reads each as one word
  * whatever it holds; the machine only needs a POSIX-compatible shell.
  */
 export function wrapLine(line: string, env: Record<string, string>, cwd: string): string {

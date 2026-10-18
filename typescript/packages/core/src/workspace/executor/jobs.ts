@@ -967,8 +967,9 @@ const PS_USAGE =
   ' for additional help text.\n\n' +
   'For more details see ps(1).\n'
 
-// procps-ng 4.0.4's -o keys: header, width, right alignment and the fact
-// `psCell` renders; accounting a runner lacks prints procps's none.
+// procps-ng 4.0.4's -o keys: the header, width and right alignment measured
+// from its `ps -o` output, and the fact `psCell` renders; accounting a runner
+// lacks prints procps's none.
 const PS_COLUMNS: Readonly<Record<string, readonly [string, number, boolean, string]>> = {
   pid: ['PID', 7, true, 'pid'],
   tgid: ['TGID', 7, true, 'pid'],
@@ -1210,8 +1211,9 @@ function elapsed(seconds: number): string {
 }
 
 /**
- * One start-time column, procps's pr_lstart, pr_start, pr_stime or
- * pr_bsdstart: a day-old start prints its date, a recent one its clock.
+ * One start-time column, lstart, start, stime or bsdstart, in the layouts
+ * measured from procps-ng 4.0.4's `ps -o` output: a day-old start prints its
+ * date, a recent one its clock.
  */
 function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
   const start = new Date(info.startedAt * 1000)

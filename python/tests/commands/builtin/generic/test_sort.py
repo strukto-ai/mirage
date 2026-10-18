@@ -18,8 +18,8 @@ async def _unused_read_bytes(_path: PathSpec) -> bytes:
     raise AssertionError("read_bytes should not be called")
 
 
-# GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
-# so a byte outside 0x20-0x7e comes back escaped. Rows measured against
+# GNU's word-choice refusal names the refused word quoted, so a byte
+# outside 0x20-0x7e comes back escaped. Rows measured against
 # GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
 # (`sort --check=<w>`). Mirrored in sort.test.ts.
 @pytest.mark.parametrize(
@@ -38,7 +38,7 @@ def test_check_refusal_quotes_the_word(value, escaped):
     )
 
 
-# gnulib's argmatch resolves an unambiguous prefix of one candidate, so
+# GNU resolves an unambiguous prefix of one candidate, so
 # `sort --check=q`, `=s` and `=d` all exit 0 (measured, coreutils 9.4).
 # `quiet` and `silent` are one value, so its canonical word decides
 # whether the check is quiet.

@@ -448,7 +448,7 @@ def follows_links(cmd: str, fl: FlagView) -> tuple[bool, Result | None]:
 
 
 def owner_spec(user: str | None, group: str | None) -> str | None:
-    """``USER:GROUP``, or the one of them given (GNU's user_group_str).
+    """``USER:GROUP``, or the one of them given, as GNU's -v names it.
 
     Args:
         user (str | None): the owner, None when absent.
@@ -466,7 +466,7 @@ def owner_line(
     user: str | None,
     group: str | None,
 ) -> str:
-    """chown and chgrp's report for one file (GNU 9.7's describe_change).
+    """chown and chgrp's report for one file, as GNU 9.7 prints it.
 
     Args:
         name (str): the file as GNU names it.

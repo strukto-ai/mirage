@@ -9,7 +9,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stat,
     stdin_stream,
 )
-from mirage.commands.builtin.utils.strtol import xstrtoimax
+from mirage.commands.builtin.utils.strtol import signed_decimal
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
@@ -108,9 +108,9 @@ class Base64Flags:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> Base64Flags:
     fl = FlagView(flags, spec=SPECS["base64"])
-    # GNU 9.7 reads -w with xstrtoimax and takes a width past intmax_t
-    # as no wrapping at all.
-    wrap = fl.as_number("wrap", xstrtoimax, _wrap_refusal, low=0)
+    # GNU 9.7 reads -w as a signed decimal and takes a width past
+    # intmax_t as no wrapping at all.
+    wrap = fl.as_number("wrap", signed_decimal, _wrap_refusal, low=0)
     return Base64Flags(
         decode=fl.as_bool("D") or fl.as_bool("decode"),
         wrap=None if wrap is None else (0 if wrap > INTMAX else wrap),

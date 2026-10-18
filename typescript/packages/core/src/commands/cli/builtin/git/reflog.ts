@@ -92,7 +92,7 @@ const LOGGED_PREFIXES = ['refs/heads/', 'refs/remotes/', 'refs/notes/']
  * Whether an update to a ref is logged: always where its log already exists,
  * and otherwise as `core.logAllRefUpdates` says, which defaults to HEAD and the
  * branch, remote and notes refs outside a bare repository, and to nothing in
- * one (`should_autocreate_reflog`).
+ * one.
  *
  * @param vfs the session's files
  * @param location the discovered repository
@@ -155,8 +155,8 @@ async function logOf(vfs: Files, location: RepoLocation, ref: string): Promise<U
 /**
  * The log a reflog walk reads, and the name its rows print.
  *
- * As git's `read_complete_reflog` then `dwim_log`: the name as typed, then
- * under `refs/` and `refs/heads/`, keep the spelling; only a log found by the
+ * As git looks a reflog up: the name as typed, then under `refs/` and
+ * `refs/heads/`, keep the spelling; only a log found by the
  * full rev-parse rules (a tag, a remote) is printed by its full name (git
  * 2.47.3 and 2.50.1).
  */

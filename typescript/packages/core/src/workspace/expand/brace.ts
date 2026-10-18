@@ -80,9 +80,9 @@ function padValue(v: number, width: number): string {
 // endpoint, the minus sign counting toward the width ({-05..5..5} yields
 // -05 000 005). Step direction follows the endpoints; the step's own
 // sign is ignored and 0 acts as 1.
-function genSequence(amble: string): string[] | null {
-  if (amble.includes(INERT_OPEN) || amble.includes('\\')) return null
-  const num = NUM_SEQ.exec(amble)
+function genSequence(body: string): string[] | null {
+  if (body.includes(INERT_OPEN) || body.includes('\\')) return null
+  const num = NUM_SEQ.exec(body)
   if (num !== null) {
     const [, loText = '', hiText = '', stepText] = num
     const values = seqValues(Number(loText), Number(hiText), parseStep(stepText))
@@ -92,7 +92,7 @@ function genSequence(amble: string): string[] | null {
     }
     return values.map((v) => String(v))
   }
-  const chr = CHAR_SEQ.exec(amble)
+  const chr = CHAR_SEQ.exec(body)
   if (chr !== null) {
     const [, loText = '', hiText = '', stepText] = chr
     const values = seqValues(loText.charCodeAt(0), hiText.charCodeAt(0), parseStep(stepText))
@@ -125,32 +125,32 @@ function matchClose(text: string, openIdx: number): number {
   return -1
 }
 
-function splitAlternatives(amble: string): string[] | null {
+function splitAlternatives(body: string): string[] | null {
   const alts: string[] = []
   let depth = 0
   let start = 0
   let i = 0
-  const n = amble.length
+  const n = body.length
   while (i < n) {
-    const ch = amble[i]
+    const ch = body[i]
     if (ch === '\\') {
       i += 2
       continue
     }
     if (ch === INERT_OPEN) {
-      i = amble.indexOf(INERT_CLOSE, i) + 1
+      i = body.indexOf(INERT_CLOSE, i) + 1
       continue
     }
     if (ch === '{') depth += 1
     else if (ch === '}') depth -= 1
     else if (ch === ',' && depth === 0) {
-      alts.push(amble.slice(start, i))
+      alts.push(body.slice(start, i))
       start = i + 1
     }
     i += 1
   }
   if (alts.length === 0) return null
-  alts.push(amble.slice(start))
+  alts.push(body.slice(start))
   return alts
 }
 
@@ -176,10 +176,10 @@ function expand(template: string): string[] {
       i += 1
       continue
     }
-    const amble = template.slice(i + 1, close)
-    let alternatives = genSequence(amble)
+    const body = template.slice(i + 1, close)
+    let alternatives = genSequence(body)
     if (alternatives === null) {
-      const alts = splitAlternatives(amble)
+      const alts = splitAlternatives(body)
       if (alts === null) {
         // `{abc}` and friends stay literal; the next `{` (even one
         // inside this body) may still expand, like GNU.

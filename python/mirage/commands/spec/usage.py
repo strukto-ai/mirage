@@ -16,7 +16,6 @@ from collections.abc import Sequence
 
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
-from mirage.commands.spec.argmatch import ArgmatchChoices, ArgmatchKind
 from mirage.commands.spec.constants import (
     IN_ORDER_OPERANDS,
     NOT_GETOPT_LONG,
@@ -31,6 +30,7 @@ from mirage.commands.spec.constants import (
     USAGE_HINT_PREFIX,
 )
 from mirage.commands.spec.types import CommandName
+from mirage.commands.spec.word_choice import WordChoices, WordRefusalKind
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import DotWalkLoop, FileTooLargeError
 from mirage.shell.bytes import decode_text, encode_text
@@ -417,14 +417,14 @@ def old_option_error(cmd_name: str, letter: str) -> tuple[bytes, int]:
     return encode_text(line + hint), OLD_OPTION_EXIT
 
 
-def argmatch_line(
-    cmd_name: str, option: str, value: str, kind: ArgmatchKind = "invalid"
+def word_refusal_line(
+    cmd_name: str, option: str, value: str, kind: WordRefusalKind = "invalid"
 ) -> str:
-    r"""The first line of a gnulib ARGMATCH refusal, without newline.
+    r"""The first line of GNU's word-choice refusal, without newline.
 
     Two wordings, and the CALLER's match result picks between them: the
-    wording is a property of how ``argmatch`` refused the value, not of
-    the value itself, so it arrives from :func:`argmatch` rather than
+    wording is a property of how :func:`match_word` refused the value,
+    not of the value itself, so it arrives from there rather than
     being re-derived here. There is deliberately no ``value == ""``
     branch: the empty word is ambiguous because it is a prefix of every
     candidate and those candidates span two or more values, which is the
@@ -434,11 +434,11 @@ def argmatch_line(
     ``ls -l --time-style=``, ``cp --update=`` and ``tee --output-error=``
     were all measured answering ``ambiguous argument ''`` for. Re-adding
     the special case would get those right and a one-candidate slot
-    wrong. ``du --max-depth=`` is NOT argmatch and says
+    wrong. ``du --max-depth=`` is NOT a word choice and says
     ``invalid maximum depth ''``, which is why that one is worded in du.
 
-    The word is rendered through ``quote_text``, gnulib's own
-    ``quote()``: ``tee --output-error=xé`` is
+    The word is rendered through ``quote_text``, quoted as GNU quotes
+    it: ``tee --output-error=xé`` is
     ``invalid argument 'x\303\251'``. Callers must therefore pass the
     value as typed and never pre-escape it.
 
@@ -448,19 +448,19 @@ def argmatch_line(
             ('--output-error') or a prose name ('backup type',
             'time style'), quoted either way.
         value (str): the rejected value, as typed.
-        kind (ArgmatchKind): the wording, from the refusal
-            :func:`argmatch` answered with. Defaults to the invalid one,
+        kind (WordRefusalKind): the wording, from the refusal
+            :func:`match_word` answered with. Defaults to the invalid one,
             which is every caller that has no candidate table to match
             against.
     """
     return f"{cmd_name}: {kind} argument '{quote_text(value)}' for '{option}'"
 
 
-def argmatch_valid_block(choices: ArgmatchChoices) -> str:
-    """gnulib's ``Valid arguments are:`` block, without a trailing newline.
+def valid_words_block(choices: WordChoices) -> str:
+    """GNU's ``Valid arguments are:`` block, without a trailing newline.
 
     Args:
-        choices (ArgmatchChoices): the candidates in declaration order,
+        choices (WordChoices): the candidates in declaration order,
             aliases of one value grouped into a tuple.
     """
     rows = []
@@ -474,11 +474,11 @@ def invalid_argument_error(
     cmd_name: str,
     option: str,
     value: str,
-    choices: ArgmatchChoices,
+    choices: WordChoices,
     exit_code: int | None = None,
-    kind: ArgmatchKind = "invalid",
+    kind: WordRefusalKind = "invalid",
 ) -> tuple[bytes, int]:
-    """GNU ARGMATCH refusal for a value outside a declared choices set.
+    """GNU's refusal of a value outside a declared choices set.
 
     Shape pinned against real GNU (``tee --output-error=bogus``): the
     offending value, the option's canonical long spelling, then every
@@ -490,40 +490,39 @@ def invalid_argument_error(
         option (str): canonical dashed spelling ('--output-error').
         value (str): the rejected value, as typed; the renderer
             escapes it.
-        choices (ArgmatchChoices): allowed values in declaration order.
+        choices (WordChoices): allowed values in declaration order.
         exit_code (int | None): the code to answer with. None takes the
             command's own usage code, which is 1 for every command in
             the repo that reaches this renderer through the executor.
-            ls and sort pass 1 explicitly: gnulib's ``argmatch_die``
-            always calls ``usage (EXIT_FAILURE)``, so their argmatch
-            refusals are 1 even though their other usage errors are 2.
-        kind (ArgmatchKind): which wording the first line carries, from
-            the caller's :func:`argmatch` refusal. Everything after that
+            ls and sort pass 1 explicitly: GNU exits 1 on a refused word
+            even though their other usage errors are 2.
+        kind (WordRefusalKind): which wording the first line carries, from
+            the caller's :func:`match_word` refusal. Everything after that
             line -- the block and the hint -- is byte-identical between
             the two, measured across ``--quoting-style``, ``--time``,
             ``--color``, ``--format``, ``--total``, ``--sort`` and
             ``time style``, which is why one renderer words both.
     """
     line = (
-        f"{argmatch_line(cmd_name, option, value, kind)}\n"
-        f"{argmatch_valid_block(choices)}\n"
+        f"{word_refusal_line(cmd_name, option, value, kind)}\n"
+        f"{valid_words_block(choices)}\n"
     )
     hint = usage_hint(cmd_name) + "\n"
     code = usage_exit_code(cmd_name) if exit_code is None else exit_code
     return encode_text(line + hint), code
 
 
-def argmatch_error(
+def word_refusal_error(
     cmd_name: str,
     option: str,
     value: str,
-    choices: ArgmatchChoices,
+    choices: WordChoices,
     exit_code: int | None = None,
-    kind: ArgmatchKind = "invalid",
+    kind: WordRefusalKind = "invalid",
 ) -> UsageError:
     """:func:`invalid_argument_error` as the exception a command raises.
 
-    The commands that validate an ARGMATCH value themselves (``sort``,
+    The commands that validate a word-choice value themselves (``sort``,
     ``wc``, ``uniq``, ``ls``, ``cp``, ``tail``) hold the value long
     after the parser is done with it, so they render through the same
     function the executor does rather than wording a second copy.
@@ -532,9 +531,9 @@ def argmatch_error(
         cmd_name (str): command name for the message and exit code.
         option (str): the slot GNU names.
         value (str): the rejected value, as typed.
-        choices (ArgmatchChoices): allowed values in declaration order.
+        choices (WordChoices): allowed values in declaration order.
         exit_code (int | None): as in :func:`invalid_argument_error`.
-        kind (ArgmatchKind): as in :func:`invalid_argument_error`.
+        kind (WordRefusalKind): as in :func:`invalid_argument_error`.
     """
     message, code = invalid_argument_error(
         cmd_name, option, value, choices, exit_code, kind

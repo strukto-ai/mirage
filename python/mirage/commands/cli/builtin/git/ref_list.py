@@ -87,7 +87,7 @@ KIND_PREFIXES = (
     (REMOTE_PREFIX, RefKind.REMOTE),
     (TAG_PREFIX, RefKind.TAG),
 )
-# match_pattern strips the first of these before a tag or branch pattern
+# match_short strips the first of these before a tag or branch pattern
 # is matched, so `v1.*` and `origin/*` name refs by their short names.
 SHORT_PREFIXES = (TAG_PREFIX, BRANCH_PREFIX, REMOTE_PREFIX, "refs/")
 WORKTREES = "worktrees"
@@ -95,8 +95,8 @@ GITDIR_FILE = "gitdir"
 
 
 def is_root_ref(name: str) -> bool:
-    """``is_root_ref``: a ref living beside HEAD rather than under
-    ``refs/``, pseudorefs (``FETCH_HEAD``) excluded.
+    """A ref living beside HEAD rather than under ``refs/``,
+    pseudorefs (``FETCH_HEAD``) excluded.
 
     Args:
         name (str): a name at the top of the git directory.
@@ -107,7 +107,7 @@ def is_root_ref(name: str) -> bool:
 
 
 def ref_kind(name: str) -> RefKind:
-    """``ref_kind_from_refname``: which part of the namespace a ref is in.
+    """Which part of the namespace a ref is in.
 
     Args:
         name (str): the full ref name.
@@ -196,11 +196,11 @@ def _folded(text: str, icase: bool) -> str:
 def match_as_path(
     name: str, patterns: Sequence[str], icase: bool = False
 ) -> bool:
-    """``match_name_as_path``: for-each-ref's pattern rule.
+    """for-each-ref's pattern rule.
 
     A pattern selects a ref it spells in full or up to a ``/`` (always
-    case-sensitively), or one it matches as a ``WM_PATHNAME`` glob:
-    ``*`` stops at a ``/``, so ``refs/*`` selects nothing while
+    case-sensitively), or one it matches as a path glob: ``*`` stops at
+    a ``/``, so ``refs/*`` selects nothing while
     ``refs/*/*`` and ``refs/**`` select every branch (git 2.47.3 and
     2.50.1). No pattern selects every ref.
 
@@ -227,9 +227,9 @@ def match_as_path(
 def match_short(
     name: str, patterns: Sequence[str], icase: bool = False
 ) -> bool:
-    """``match_pattern``: tag's and branch's pattern rule, a glob over
-    the name less its ``refs/tags/``, ``refs/heads/``, ``refs/remotes/``
-    or ``refs/``, where ``*`` crosses a ``/``.
+    """Tag's and branch's pattern rule, a glob over the name less its
+    ``refs/tags/``, ``refs/heads/``, ``refs/remotes/`` or ``refs/``,
+    where ``*`` crosses a ``/``.
 
     Args:
         name (str): the full ref name.
@@ -357,7 +357,7 @@ def config_values(
 def tracking_ref(
     cfg: ConfigFile, branch: str, known: frozenset[str]
 ) -> RefUpstream | None:
-    """``branch_get_upstream``: the ref a branch's upstream lands in.
+    """The ref a branch's upstream lands in.
 
     ``branch.<name>.merge`` is mapped through the remote's fetch
     refspecs; a branch following a remote with none that map it has no
@@ -452,8 +452,8 @@ async def root_names(repo: Repo) -> list[str]:
 
 
 async def worktree_heads(repo: Repo) -> dict[str, str]:
-    """``get_worktrees``: the branch each worktree has checked out, and
-    where that worktree is.
+    """The branch each worktree has checked out, and where that
+    worktree is.
 
     The main worktree is the one this repository was found in or the
     one around its common directory; a linked one is named by the
@@ -553,8 +553,8 @@ async def detached_line(repo: Repo, head: HeadRef) -> str:
 
 
 async def head_description(repo: Repo, head: HeadRef) -> str:
-    """``get_head_description``: how a detached HEAD row names itself
-    in a branch listing, the status line in parentheses.
+    """How a detached HEAD row names itself in a branch listing, the
+    status line in parentheses.
 
     Args:
         repo (Repo): the opened repository.
@@ -591,7 +591,7 @@ def _mailmapped(fields: Sequence[RefField]) -> bool:
 
 def unique_width(oid: str, width: int, ids: Sequence[str]) -> int:
     """The shortest prefix of ``oid`` no other id shares, no shorter than
-    ``width``, as git's ``find_abbrev_len_for_pack`` finds it.
+    ``width``, the length git abbreviates it to.
 
     In sorted ids the longest prefix any other id shares with ``oid`` is
     shared by a neighbour of the place it sorts to, so only those two

@@ -670,7 +670,7 @@ export const RG_FLAG_NAMES: readonly string[] = [
 // `zgrep --bogus f.gz` reaches grep and is refused with exit 2.
 export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 
-// The spec-declared `choices` sets that ARE gnulib ARGMATCH tables, so an
+// The spec-declared `choices` sets that GNU matches as word choices, so an
 // unambiguous prefix of a candidate resolves to it and the bag is rewritten
 // to the canonical word. Every other declared set compares the whole word,
 // which is argparse's own rule for `choices` and so the right default for
@@ -679,9 +679,9 @@ export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 // CLI's node refuses `--state=o`, as clap and git do.
 //
 // It is an opt-in table because prefix matching is the rare case, not the
-// common one: the GNU commands that really do own an argmatch table --
+// common one: the GNU commands that really do take such a word --
 // `--backup`, `ls --sort`, `ls --time`, `sort --check`, `cp --update`,
-// `tail --follow`, `wc --total`, `uniq`, `cut` -- call `argmatch` from the
+// `tail --follow`, `wc --total`, `uniq`, `cut` -- call `matchWord` from the
 // command with their own candidate list, and never reach the parser's
 // `Argument.choices` at all. The entries below are the whole of what does.
 // Measured on coreutils 9.7: `tee --output-error=exit-n` resolves to
@@ -694,7 +694,7 @@ export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 // than keying on the two strings: the parser resolves each entry once and
 // then asks whether the option declaring a set IS one of them. A name is not
 // identity, and a mount may register its own `tee` (commands/registry.ts)
-// whose `--output-error` would otherwise inherit gnulib's rule from a
+// whose `--output-error` would otherwise inherit GNU's prefix rule from a
 // spelling collision alone. Identity is also the only signal that survives
 // registration, which hands the parser an enriched COPY of the spec
 // (config.ts appends --help/--version), so `spec === BUILTIN_SPECS[name]` is
@@ -702,7 +702,7 @@ export const STANDARD_BEFORE_SCAN: ReadonlySet<string> = new Set(['zgrep'])
 // Argument is still the same object. A command name never contains a space, so
 // the joined key is unambiguous; python spells the same table as a set of
 // pairs.
-export const ARGMATCH_CHOICE_OPTIONS: ReadonlySet<string> = new Set([
+export const WORD_CHOICE_OPTIONS: ReadonlySet<string> = new Set([
   'tee --output-error',
   'numfmt --to',
   'numfmt --from',

@@ -87,7 +87,7 @@ class DuOutput:
 
 
 def parse_depth(text: str) -> int | None:
-    """Read a ``--max-depth`` value the way GNU's ``xstrtoimax`` does.
+    """Read a ``--max-depth`` value the way GNU du 9.7 does.
 
     That is C ``strtoimax`` with base 0: a ``0x`` prefix is hexadecimal, a
     bare leading ``0`` is octal (so ``010`` is 8 and ``09`` is invalid),

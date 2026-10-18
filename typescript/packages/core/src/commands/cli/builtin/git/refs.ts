@@ -96,7 +96,7 @@ async function walkLooseRefs(
  * repository's own configuration. Every verb checks its name before it gets
  * here, so this is the last guard, not the refusal a user sees.
  *
- * @throws BadRefNameUpdateError a name `refname_is_safe` refuses
+ * @throws BadRefNameUpdateError a name `safeRefName` refuses
  */
 export async function writeRef(
   vfs: Files,
@@ -287,10 +287,10 @@ export function validRefName(name: string): boolean {
 }
 
 /**
- * Whether git takes a name for a new branch (`strbuf_check_branch_ref`): git's
- * ref rules, and two more that hold for a branch only: no leading `-`, which
- * would read as an option, and not `HEAD`, which `refs/heads/HEAD` would make
- * ambiguous with HEAD itself. Pinned against git 2.47.3.
+ * Whether git takes a name for a new branch: git's ref rules, and two more
+ * that hold for a branch only: no leading `-`, which would read as an option,
+ * and not `HEAD`, which `refs/heads/HEAD` would make ambiguous with HEAD
+ * itself. Pinned against git 2.47.3.
  *
  * @param name the name below `refs/heads/`
  */
@@ -299,9 +299,9 @@ export function validBranchName(name: string): boolean {
 }
 
 /**
- * Whether git's ref rules take a whole ref name, one level allowed
- * (`check_refname_format` with `REFNAME_ALLOW_ONELEVEL`): a bare `@` is the one
- * name they refuse whole that they take below `refs/`.
+ * Whether git's ref rules take a whole ref name, one level allowed, as
+ * `git check-ref-format --allow-onelevel` judges it: a bare `@` is the one name
+ * they refuse whole that they take below `refs/`.
  *
  * @param name the full ref name
  */
@@ -334,7 +334,8 @@ export async function rawRef(
 }
 
 /**
- * Follow a ref the way `refs_resolve_ref_unsafe` does without reading.
+ * Follow a symbolic ref the way git resolves one, without reading the object
+ * it lands on.
  *
  * One hop when `recurse` is off, otherwise to the end of the chain, which may
  * name a ref that does not exist yet (an unborn branch). Null where git finds
@@ -369,10 +370,9 @@ export async function resolveSymbolic(
 }
 
 /**
- * Whether git lets a ref transaction write a name it has no object for
- * (`refname_is_safe`): below `refs/`, a path with no empty, `.` or `..`
- * component; anywhere else, capitals and underscores only, which is HEAD and
- * its kin. Pinned against git 2.47.3.
+ * Whether git lets a ref update write a name it has no object for: below
+ * `refs/`, a path with no empty, `.` or `..` component; anywhere else, capitals
+ * and underscores only, which is HEAD and its kin. Pinned against git 2.47.3.
  *
  * @param name the full ref name about to be written
  */

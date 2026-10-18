@@ -33,7 +33,7 @@ from .errors import (
 )
 from .lexer import parse_input
 from .parser import eval_statement
-from .render import OutputColumn, output_line_size
+from .render import OutputColumn, output_line_length
 from .types import BcState, BcStatement
 
 
@@ -207,7 +207,7 @@ async def bc(
     state = BcState(
         scale=MATH_LIBRARY_SCALE if use_math else 0, math_mode=use_math
     )
-    folder = OutputColumn(output_line_size(ctx.env))
+    folder = OutputColumn(output_line_length(ctx.env))
     errors: list[str] = []
     lines = parse_input(ctx.stdin if ctx.stdin is not None else b"")
     io = IOResult()

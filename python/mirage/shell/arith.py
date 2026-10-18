@@ -216,7 +216,7 @@ class _Reader:
     A token is read only when the grammar needs it, and every value is
     computed the moment its operands are, so an assignment before an
     error has already been made (``x=7, 1+`` leaves x at 7) and an error
-    names the text from the token the reader stood on (``tp``). Inside
+    names the text from the token the reader stood on (``tok_start``). Inside
     the branch ``&&``, ``||`` or ``?:`` skips (``skip``) nothing is read
     from a variable or written to one and a zero divisor is no error, but
     the grammar is still checked, an integer constant still judged and a
@@ -237,7 +237,7 @@ class _Reader:
         self.depth = depth
         self.subscript = subscript
         self.pos = 0
-        self.tp = 0
+        self.tok_start = 0
         self.kind: ArithTokenKind = "end"
         self.tok = ""
         self.value = 0
@@ -251,7 +251,7 @@ class _Reader:
             at (int | None): where the error token starts, when it is not
                 the reader's own token.
         """
-        start = self.tp if at is None else at
+        start = self.tok_start if at is None else at
         return ArithError(message, self.text, self.text[start:])
 
     def advance(self) -> None:
@@ -272,7 +272,7 @@ class _Reader:
         if pos >= n:
             self.pos, self.kind, self.tok = pos, "end", ""
             return
-        self.tp = pos
+        self.tok_start = pos
         name = ARITH_NAME.match(text, pos)
         if name is not None:
             end = name.end()
@@ -340,12 +340,12 @@ class _Reader:
 
     def assign(self) -> int:
         if self.kind == "name":
-            saved = (self.pos, self.tp, self.kind, self.tok)
-            target, at = self.tok, self.tp
+            saved = (self.pos, self.tok_start, self.kind, self.tok)
+            target, at = self.tok, self.tok_start
             self.advance()
             if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
                 return self.assignment(target, at)
-            self.pos, self.tp, self.kind, self.tok = saved
+            self.pos, self.tok_start, self.kind, self.tok = saved
         value = self.ternary()
         if self.kind == "op" and self.tok in ARITH_ASSIGN_OPS:
             raise self.fail("attempted assignment to non-variable")
@@ -367,7 +367,7 @@ class _Reader:
         """
         op = self.tok
         self.advance()
-        divisor = self.tp
+        divisor = self.tok_start
         record = self.record
         if op == "=":
             value = self.assign()
@@ -415,7 +415,7 @@ class _Reader:
             if precedence < floor:
                 break
             self.advance()
-            divisor = self.tp
+            divisor = self.tok_start
             if op in ("&&", "||"):
                 skipped = (left == 0) == (op == "&&")
                 self.skip += skipped
@@ -474,7 +474,7 @@ class _Reader:
         if self.kind == "pre":
             step = 1 if self.tok == "++" else -1
             self.advance()
-            target, at = self.tok, self.tp
+            target, at = self.tok, self.tok_start
             self.advance()
             value = self.step(target, step, True, at)
             if self.kind == "post":
@@ -536,7 +536,7 @@ class _Reader:
             self.advance()
             return value
         if self.kind == "name":
-            target, at = self.tok, self.tp
+            target, at = self.tok, self.tok_start
             self.advance()
             if self.kind == "post":
                 value = self.step(

@@ -1,3 +1,6 @@
+# The plain (-p) reader follows xxd 2024-12-07 from vim, under its
+# X11-MIT option (see licenses/third_party/xxd.txt).
+
 import binascii
 import re
 from collections import deque

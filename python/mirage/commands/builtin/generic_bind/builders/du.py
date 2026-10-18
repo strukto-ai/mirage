@@ -163,9 +163,9 @@ class Dereference:
     """What ``du -L`` follows links by, for one invocation.
 
     GNU counts each file once, under the first name its walks meet, across
-    every operand of the line (du.c's di_set, coreutils 9.7): what one
-    operand reaches is not counted again under another, and an operand
-    already counted prints nothing. A link leading back into its operand's
+    every operand of the line (coreutils 9.7): what one operand reaches
+    is not counted again under another, and an operand already counted
+    prints nothing. A link leading back into its operand's
     own tree waits for the walk to end, and counts only if the walk never
     reached the file under the file's own name: mirage's sorted walk
     prefers that name (where GNU's readdir order may reach the link

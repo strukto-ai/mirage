@@ -173,7 +173,7 @@ def test_a_word_the_parser_normalized_is_synthesized_not_paired():
     assert parsed.paths[0].virtual == "/data/a/f.txt"
 
 
-# The spec-driven ARGMATCH path, end to end through the executor's
+# The spec-driven word-choice path, end to end through the executor's
 # renderer. Measured on coreutils 9.4: `tee --output-error=warn-` exits
 # 0, `=w` is `ambiguous argument 'w'` and `=zzz` is
 # `invalid argument 'zzz'`, over one shared candidate block.
@@ -204,8 +204,8 @@ def test_option_error_words_an_ambiguous_value_as_gnu_does():
 # LINE wins whichever wording it carries. Ordering them by which list
 # they landed in would make a later invalid value outrank an earlier
 # ambiguous one, which no other report here does. numfmt declares both
-# ARGMATCH tables, so one line can carry one of each.
-def test_argmatch_refusals_follow_line_order():
+# word-choice tables, so one line can carry one of each.
+def test_word_choice_refusals_follow_line_order():
     parsed = parse_flags(
         ["--from=ie", "--to=bogus", "1"], SPECS["numfmt"], "numfmt", "/"
     )
@@ -224,7 +224,7 @@ def test_argmatch_refusals_follow_line_order():
     )
 
 
-def test_the_two_argmatch_refusals_differ_only_in_the_first_line():
+def test_the_two_word_choice_refusals_differ_only_in_the_first_line():
     ambiguous = option_error(
         "tee",
         parse_flags(["--output-error=w", "/f"], SPECS["tee"], "tee", "/"),

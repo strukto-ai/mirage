@@ -23,7 +23,7 @@ import { gnuStrftime } from './strftime.ts'
 import { UINTMAX } from '../constants.ts'
 import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
-import { CHMOD_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
+import { ALL_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
 import {
   EPOCH_LS_TIME,
   FIND_FUTURE_SECONDS,
@@ -46,7 +46,7 @@ export const UNKNOWN_STAT_FIELD = '?'
 export const STAT_FAILED_KEY = 'stat_failed'
 
 // GNU's --block-size units: the letter and its power; K prints as K for
-// KiB and kB for KB. xstrtoumax's table, which takes every letter in upper
+// KiB and kB for KB. GNU's size table, which takes every letter in upper
 // case and only k, m, g and t in lower case; R and Q are not in it
 // (coreutils 9.7 refuses `--block-size=1R`).
 const BLOCK_UNITS = 'KMGTPEZY'
@@ -57,9 +57,8 @@ const C_SPACE = ' \t\n\v\f\r'
  * cannot read a number or a unit out of (`x`, `0`, `iB`, an empty value),
  * a number followed by something that is not a unit (`1x`, `1.5K`, `Kx`,
  * a trailing blank), and a value past UINTMAX_MAX (`Y` alone is 2**80).
- * The suffix test outranks the overflow test, as gnulib's
- * LONGINT_INVALID_SUFFIX_CHAR_WITH_OVERFLOW is worded as the suffix
- * failure. Mirrors Python's `BlockSizeRefusal`. */
+ * The suffix test outranks the overflow test: a value that fails both is
+ * worded as the suffix failure. Mirrors Python's `BlockSizeRefusal`. */
 export type BlockSizeRefusal = 'invalid' | 'invalid suffix' | 'too large'
 
 function blockUnitPower(letter: string): number | null {
@@ -178,7 +177,7 @@ export function scaledSize(n: number, block: BlockSize | null, human: boolean): 
 }
 
 /**
- * GNU's `human_readable` rounding, shared by `-h` and `-H`.
+ * The rounding GNU prints sizes with, shared by `-h` and `-H`.
  *
  * Three rules, none of which fall out of a plain divide-and-format.
  * Below one unit GNU prints the count alone -- `24`, never `24B`. Above
@@ -243,7 +242,7 @@ function permTriplet(bits: number, special?: string): string {
 
 export function lsModeString(s: FileStat): string {
   const typeChar = TYPE_CHARS[s.type] ?? '-'
-  const mode = s.mode ?? posixMode(s) & CHMOD_MODE_BITS
+  const mode = s.mode ?? posixMode(s) & ALL_MODE_BITS
   return (
     typeChar +
     permTriplet(mode >> 6, mode & 0o4000 ? 's' : undefined) +
@@ -436,7 +435,7 @@ export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {
 }
 
 /**
- * One `find -ls` row in findutils' own layout. GNU's `list_file` is not
+ * One `find -ls` row in findutils' own layout. GNU's `find -ls` row is not
  * `ls -l`: it leads with the inode and the allocated 1K blocks, then
  * fixes every column's width (inode 9, blocks 6, links 3, owner and
  * group 8 left-aligned, size 8) instead of fitting them to the listing,

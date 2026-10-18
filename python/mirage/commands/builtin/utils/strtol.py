@@ -20,7 +20,7 @@ from mirage.commands.builtin.utils.size_suffix import (
     parse_base0,
 )
 
-# gnulib's xstrtoimax/xstrtoumax at base 10 with no suffix: C blanks, one
+# A whole decimal word as GNU's count options read one: C blanks, one
 # sign, ASCII digits, and nothing after them, not even a blank.
 DECIMAL = re.compile(rf"{C_SPACE}([+-]?)([0-9]+)")
 # C's strto(u)l at base 0: C blanks, one sign, then hex after 0x, octal
@@ -38,8 +38,8 @@ ERANGE_REASON = "Numerical result out of range"
 EOVERFLOW_REASON = "Value too large for defined data type"
 
 
-def xstrtoumax(text: str) -> int | None:
-    """``text`` as gnulib's ``xstrtoumax`` reads a decimal operand.
+def unsigned_decimal(text: str) -> int | None:
+    """``text`` as an unsigned decimal operand, as GNU's counts read.
 
     A minus, any other byte, or a blank after the digits makes it no
     number. The value is exact, so a caller's range check also catches
@@ -54,8 +54,8 @@ def xstrtoumax(text: str) -> int | None:
     return decimal_value(match.group(2))
 
 
-def xstrtoimax(text: str) -> int | None:
-    """``text`` as gnulib's ``xstrtoimax`` reads a decimal operand.
+def signed_decimal(text: str) -> int | None:
+    """``text`` as a signed decimal operand, as GNU's counts read.
 
     Args:
         text (str): the operand as typed.
@@ -120,8 +120,8 @@ __all__ = [
     "UINT_MAX",
     "ULONG_MAX",
     "c_int",
+    "signed_decimal",
     "strtol",
     "strtoul",
-    "xstrtoimax",
-    "xstrtoumax",
+    "unsigned_decimal",
 ]

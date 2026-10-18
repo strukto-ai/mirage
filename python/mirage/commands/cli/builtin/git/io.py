@@ -392,9 +392,8 @@ async def blocking_ancestor(
     and the two directions take it differently. Writing the entry
     *replaces* it with the directory the entry needs, leaving whatever
     a link pointed at exactly as it was; removing the entry does
-    nothing at all, because the path never led there. That is git's
-    ``create_directories`` and ``check_leading_path``, and both halves
-    were probed against git 2.50.1.
+    nothing at all, because the path never led there. Both halves are
+    what git does, probed against git 2.50.1.
 
     The lstat is asked before the stat, and the order is the whole
     point: ``stat`` dereferences, so a link to a directory stats as a

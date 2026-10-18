@@ -79,14 +79,14 @@ const UNSIGNED = new RegExp(`^${C_SPACE}\\+?[0-9]+$`)
 // Error rather than returned like every user-facing refusal.
 export const NO_WRITE_OP = 'shuf: backend provides no write op'
 
-// GNU's own `xalloc_die` wording, exit 1. It is what real shuf answers with
+// GNU's own out-of-memory wording, exit 1. It is what real shuf answers with
 // when a range is too large to materialize, so it is borrowed rather than
 // invented. Measured, ground truth SH5.
 export const MEMORY_EXHAUSTED = 'shuf: memory exhausted'
 
 // `-i`'s bounds are `uintmax_t`, so a bound one past UINTMAX_MAX is refused
-// with gnulib's LONGINT_OVERFLOW clause appended. The clause is EOVERFLOW's
-// `strerror`, not ERANGE's: `nl -w` produces both and they read differently
+// with an overflow clause appended. The clause is EOVERFLOW's `strerror`, not
+// ERANGE's: `nl -w` produces both and they read differently
 // (`: Numerical result out of range` is the value outside an option's OWN
 // range), while `shuf -i` has no range below the C type's and so only ever
 // emits this one. Measured, ground truth SH1.
@@ -114,11 +114,11 @@ export const SIZE_MAX = UINTMAX
 export const MAX_OUTPUT_LINES = 1000000n
 
 // Which of GNU's two `-i` refusals an argument earned. Not a pair of sentinels
-// but two real answers with different bytes: `invalid` is gnulib's
-// LONGINT_INVALID and prints the bare `invalid input range: '<arg>'`, while
-// `overflow` is LONGINT_OVERFLOW and appends OVERFLOW_CLAUSE. The span limit
-// (SH3) is `invalid`, not `overflow`, even though it is a magnitude that trips
-// it. `RangeRefusal` in shuf.py is the twin.
+// but two real answers with different bytes: `invalid` prints the bare
+// `invalid input range: '<arg>'`, while `overflow`, a bound past UINTMAX_MAX,
+// appends OVERFLOW_CLAUSE. The span limit (SH3) is `invalid`, not `overflow`,
+// even though it is a magnitude that trips it. `RangeRefusal` in shuf.py is
+// the twin.
 export type RangeRefusal = 'invalid' | 'overflow'
 
 // Render the one `-i` diagnostic, with the clause iff it is earned. The whole
@@ -130,12 +130,12 @@ export function rangeError(raw: string, refusal: RangeRefusal): string {
 
 // GNU's `-i LO-HI`, read the way GNU reads it.
 //
-// Split at the FIRST dash and scan each side on its own, which is what
-// `strchr(optarg, '-')` plus two `strtoumax` calls amount to. Doing it as one
-// regex over the whole argument gets three shapes wrong: `-i +1-3` and
-// `-i 1-+3` carry a `+` on either bound independently, `-i '1- 3'` puts the
-// blank on the HIGH bound's prefix and is accepted, and `-i '1 -3'` is refused
-// because that same blank is trailing garbage on the LOW one.
+// Split at the FIRST dash and read each side as a number on its own, as GNU
+// does. Doing it as one regex over the whole argument gets three shapes wrong:
+// `-i +1-3` and `-i 1-+3` carry a `+` on either bound independently,
+// `-i '1- 3'` puts the blank on the HIGH bound's prefix and is accepted, and
+// `-i '1 -3'` is refused because that same blank is trailing garbage on the LOW
+// one.
 //
 // A `-` is never a sign here, so an empty low bound (`-i -1-3`, where the
 // first dash is at index 0) and a negative high bound (`-i 1--3`) are both
@@ -289,9 +289,9 @@ export interface ShufFlags {
 // GNU refuses the line, the shape every sibling generic's parseFlags uses.
 //
 // A `-n` past UINTMAX_MAX is CLAMPED, never refused, which is the opposite of
-// what `-i` does with the same overflow: `xstrtoumax` answering
-// LONGINT_OVERFLOW is fatal for `-i` and is quietly read as SIZE_MAX for `-n`,
-// so `shuf -n 99999999999999999999999999` exits 0. Measured, ground truth SH6.
+// what `-i` does with the same overflow: a number past `uintmax_t` is fatal
+// for `-i` and is quietly read as SIZE_MAX for `-n`, so
+// `shuf -n 99999999999999999999999999` exits 0. Measured, ground truth SH6.
 // Read shuf's flags once, refusing what GNU refuses in GNU's order.
 //
 // GNU validates each option as getopt hands it over, so the refusal that
@@ -538,7 +538,7 @@ export async function shufGeneric(
     // (`-2-1`) and a decreasing range (`3-1`) are refused here rather than
     // read as a range; shuf has no decreasing-range diagnostic of its own.
     // The one shape that reads differently is a bound past UINTMAX_MAX, which
-    // earns gnulib's overflow clause (SH1).
+    // earns the overflow clause (SH1).
     const bounds = parseInputRange(inputRange)
     if (typeof bounds === 'string') {
       return [

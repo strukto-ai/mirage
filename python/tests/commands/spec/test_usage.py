@@ -1,11 +1,7 @@
 import pytest
 
-from mirage.commands.spec.argmatch import ArgmatchRefusal, argmatch
 from mirage.commands.spec.usage import (
     ambiguous_option_error,
-    argmatch_error,
-    argmatch_line,
-    argmatch_valid_block,
     extra_operand_error,
     invalid_argument_error,
     invalid_float_error,
@@ -21,7 +17,11 @@ from mirage.commands.spec.usage import (
     unexpected_value_error,
     unknown_option_error,
     usage_exit_code,
+    valid_words_block,
+    word_refusal_error,
+    word_refusal_line,
 )
+from mirage.commands.spec.word_choice import WordRefusal, match_word
 from mirage.errors.fs import efbig, stale_write
 
 
@@ -141,7 +141,7 @@ def test_extra_operand_mktemp_says_too_many_templates():
     assert err.exit_code == 1
 
 
-def test_invalid_argument_matches_gnu_argmatch_shape():
+def test_invalid_argument_matches_gnu_word_choice_shape():
     stderr, code = invalid_argument_error(
         "tee",
         "--output-error",
@@ -434,20 +434,20 @@ def test_invalid_argument_escapes_the_word_through_quote():
     assert code == 1
 
 
-def test_an_empty_argmatch_value_is_ambiguous_not_invalid():
+def test_an_empty_word_choice_value_is_ambiguous_not_invalid():
     """GNU: `tee --output-error=` is `ambiguous argument ''`, exit 1.
 
     And it is ambiguous through the ordinary rule, not a special case:
     the empty word is a prefix of all four candidates, which are four
-    different values, so `argmatch` refuses it as ambiguous and the
+    different values, so `match_word` refuses it as ambiguous and the
     renderer is only told which wording to use. Measured the same way at
     `tail --follow=`, `sort --check=`, `wc --total=`,
     `uniq --all-repeated=`, `uniq --group=`, `ls --format=`,
     `ls -l --time-style=` and `cp --update=`.
     """
     choices = ("warn", "warn-nopipe", "exit", "exit-nopipe")
-    refusal = argmatch("", choices)
-    assert refusal == ArgmatchRefusal("ambiguous")
+    refusal = match_word("", choices)
+    assert refusal == WordRefusal("ambiguous")
     stderr, code = invalid_argument_error(
         "tee", "--output-error", "", choices, kind=refusal.kind
     )
@@ -457,21 +457,21 @@ def test_an_empty_argmatch_value_is_ambiguous_not_invalid():
     assert code == 1
 
 
-def test_argmatch_line_words_the_kind_the_caller_matched():
+def test_word_refusal_line_words_the_kind_the_caller_matched():
     """The wording is the caller's match result, not a re-derivation.
 
-    `argmatch_line` has no empty-string branch: the empty word above is
+    `word_refusal_line` has no empty-string branch: the empty word above is
     ambiguous because of what it matched, and a slot with one candidate
     value accepts it instead, so only the caller holding the candidates
     can tell.
     """
-    assert argmatch_line("ls", "time style", "x") == (
+    assert word_refusal_line("ls", "time style", "x") == (
         "ls: invalid argument 'x' for 'time style'"
     )
-    assert argmatch_line("ls", "time style", "x", "ambiguous") == (
+    assert word_refusal_line("ls", "time style", "x", "ambiguous") == (
         "ls: ambiguous argument 'x' for 'time style'"
     )
-    assert argmatch_line("ls", "time style", "", "ambiguous") == (
+    assert word_refusal_line("ls", "time style", "", "ambiguous") == (
         "ls: ambiguous argument '' for 'time style'"
     )
 
@@ -496,8 +496,8 @@ def test_ambiguous_and_invalid_differ_only_in_the_first_line():
     assert amb_code == inv_code == 1
 
 
-def test_argmatch_error_words_the_ambiguous_kind_too():
-    err = argmatch_error(
+def test_word_refusal_error_words_the_ambiguous_kind_too():
+    err = word_refusal_error(
         "sort",
         "--check",
         "",
@@ -515,19 +515,19 @@ def test_argmatch_error_words_the_ambiguous_kind_too():
     assert err.exit_code == 1
 
 
-def test_argmatch_valid_block_joins_aliases_of_one_value():
+def test_valid_words_block_joins_aliases_of_one_value():
     """GNU `sort --check=x` prints `  - 'quiet', 'silent'` on ONE line.
 
-    `argmatch_valid` starts a new `  - ` row only when the VALUE
-    changes, so two spellings of one value share a row.
+    GNU starts a new `  - ` row only when the VALUE changes, so two
+    spellings of one value share a row.
     """
-    assert argmatch_valid_block(
-        (("quiet", "silent"), ("diagnose-first",))
-    ) == ("Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'")
+    assert valid_words_block((("quiet", "silent"), ("diagnose-first",))) == (
+        "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'"
+    )
 
 
-def test_argmatch_error_carries_the_block_and_the_given_code():
-    err = argmatch_error(
+def test_word_refusal_error_carries_the_block_and_the_given_code():
+    err = word_refusal_error(
         "sort", "--check", "x", (("quiet", "silent"), ("diagnose-first",)), 1
     )
     assert str(err) == (
@@ -537,8 +537,7 @@ def test_argmatch_error_carries_the_block_and_the_given_code():
         "  - 'diagnose-first'\n"
         "Try 'sort --help' for more information."
     )
-    # sort's other usage errors are 2; gnulib's `argmatch_die` always
-    # calls `usage (EXIT_FAILURE)`, so this one is 1.
+    # sort's other usage errors are 2; GNU exits 1 on a refused word.
     assert err.exit_code == 1
     assert usage_exit_code("sort") == 2
 

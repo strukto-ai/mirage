@@ -38,8 +38,8 @@ import {
   type SortConfig,
   type SortGlobals,
 } from '../sort_keys.ts'
-import { argmatchError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -54,19 +54,18 @@ export interface SortFlags extends SortGlobals {
   zeroTerminated: boolean
 }
 
-// `check_args` as gnulib's `argmatch_valid` prints it: `quiet` and
-// `silent` map to the same value, so they share one `  - ` line.
-const CHECK_ARGS: readonly (readonly string[])[] = [['quiet', 'silent'], ['diagnose-first']]
+// The --check words as GNU lists them back: `quiet` and `silent` map to the
+// same value, so they share one `  - ` line.
+const CHECK_WORDS: readonly (readonly string[])[] = [['quiet', 'silent'], ['diagnose-first']]
 
 export const MULTIPLE_OUTPUTS = 'sort: multiple output files specified'
 
 export const CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
 
-// sort.c's `sort_die` prefixes. GNU tests every input with euidaccess(R_OK)
-// before it reads any (`cannot read`), opens the output and the one input
-// -c reads with open(2) (`open failed`), stats every input it is about to
-// sort to size its buffer (`stat failed`), and only then reads (`read
-// failed`).
+// The steps GNU sort names when a file fails it. GNU checks that every input
+// is readable before it reads any (`cannot read`), opens the output and the
+// one input -c reads (`open failed`), stats every input it is about to sort
+// (`stat failed`), and only then reads (`read failed`).
 export const CANNOT_READ = 'cannot read'
 export const OPEN_FAILED = 'open failed'
 export const STAT_FAILED = 'stat failed'
@@ -108,8 +107,8 @@ export function inputStage(strerror: string, sorting: boolean): InputStage {
   return InputStage.ACCESS
 }
 
-// GNU's `sort_die` line: the step, the name, then the errno.
-export function sortDie(verb: string, label: string, strerror: string): Uint8Array {
+// GNU sort's line for a failed step: the step, the name, the errno.
+export function stepFailure(verb: string, label: string, strerror: string): Uint8Array {
   return ENC.encode(`sort: ${verb}: ${shellQuote(label)}: ${strerror}\n`)
 }
 
@@ -130,14 +129,14 @@ function earliest(
 
 // The check mode one check option asks for, as GNU's letter: `-c`, a bare
 // `--check` and `--check=diagnose-first` are `c`; `-C` and `--check=quiet`
-// (or `silent`) are `C`. A `--check` word argmatch refuses throws its
-// UsageError, exit 1.
+// (or `silent`) are `C`. A refused `--check` word throws its UsageError,
+// exit 1.
 function checkMode(raw: ParsedFlagValue, dest: string): string {
   if (dest !== 'check') return dest
   if (raw === true) return 'c'
   const word = String(raw)
-  const match = argmatch(word, CHECK_ARGS)
-  if (!match.matched) throw argmatchError('sort', '--check', word, CHECK_ARGS, 1, match.kind)
+  const match = matchWord(word, CHECK_WORDS)
+  if (!match.matched) throw wordRefusalError('sort', '--check', word, CHECK_WORDS, 1, match.kind)
   // The canonical word of the ['quiet', 'silent'] value is `quiet`, so
   // `--check=s` and `--check=silent` both land here.
   return match.word === 'quiet' ? 'C' : 'c'
@@ -206,9 +205,8 @@ export function parseFlags(bag: Record<string, FlagValue>): SortFlags {
 }
 
 function refusalOf(error: unknown): IOResult {
-  // Already GNU-worded and carrying its own code: gnulib's argmatch dies
-  // with EXIT_FAILURE, so `--check=x` is 1 where sort's other usage errors
-  // are 2.
+  // Already GNU-worded and carrying its own code: GNU exits 1 on a refused
+  // word, so `--check=x` is 1 where sort's other usage errors are 2.
   if (error instanceof UsageError) {
     return new IOResult({ exitCode: error.exitCode, stderr: ENC.encode(`${error.message}\n`) })
   }
@@ -270,7 +268,7 @@ async function checkStream(
     const stage = inputStage(strerror, false)
     return new IOResult({
       exitCode: 2,
-      stderr: sortDie(stageVerb(stage, true), labelOf(path), strerror),
+      stderr: stepFailure(stageVerb(stage, true), labelOf(path), strerror),
     })
   }
   return new IOResult()
@@ -443,7 +441,7 @@ async function externalRecords(
         refused = earliest(
           refused,
           stage,
-          sortDie(stageVerb(stage, false), labelOf(path), strerror),
+          stepFailure(stageVerb(stage, false), labelOf(path), strerror),
         )
         if (stage === InputStage.ACCESS) break
       } finally {
@@ -548,7 +546,7 @@ export async function sortGeneric(
         new Uint8Array(),
         new IOResult({
           exitCode: 2,
-          stderr: sortDie(OPEN_FAILED, parsed.output.rawPath, strerror),
+          stderr: stepFailure(OPEN_FAILED, parsed.output.rawPath, strerror),
         }),
       ]
     } finally {

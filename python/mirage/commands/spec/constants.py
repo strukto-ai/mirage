@@ -647,7 +647,7 @@ RG_FLAG_NAMES = (
 # with exit 2.
 STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 
-# The spec-declared `choices` sets that ARE gnulib ARGMATCH tables, so
+# The spec-declared `choices` sets that GNU matches as word choices, so
 # an unambiguous prefix of a candidate resolves to it and the bag is
 # rewritten to the canonical word. Every other declared set compares the
 # whole word, which is argparse's own rule for `choices` and so the
@@ -657,10 +657,10 @@ STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 # git do.
 #
 # It is an opt-in table because prefix matching is the rare case, not
-# the common one: the GNU commands that really do own an argmatch table
-# -- `--backup`, `ls --sort`, `ls --time`, `sort --check`, `cp
-# --update`, `tail --follow`, `wc --total`, `uniq`, `cut` -- call
-# `argmatch` from the command with their own candidate list, and never
+# the common one: the GNU commands that really do take such a word --
+# `--backup`, `ls --sort`, `ls --time`, `sort --check`, `cp --update`,
+# `tail --follow`, `wc --total`, `uniq`, `cut` -- call `match_word`
+# from the command with their own candidate list, and never
 # reach the parser's `Argument.choices` at all. The entries below are the
 # whole of what does. Measured on coreutils 9.7: `tee
 # --output-error=exit-n` resolves to `exit-nopipe` while `=w` and `=e`
@@ -674,12 +674,12 @@ STANDARD_BEFORE_SCAN = frozenset({"zgrep"})
 # once and then asks whether the option declaring a set IS one of them.
 # A name is not identity, and a mount may register its own `tee`
 # (commands/config.py) whose `--output-error` would otherwise inherit
-# gnulib's rule from a spelling collision alone. Identity is also the
+# GNU's prefix rule from a spelling collision alone. Identity is also the
 # only signal that survives registration, which hands the parser an
 # enriched COPY of the spec (config.py appends --help/--version), so
 # `spec is SPECS[name]` is False for every builtin by the time a line is
 # parsed while every declared Argument is still the same object.
-ARGMATCH_CHOICE_OPTIONS = frozenset(
+WORD_CHOICE_OPTIONS = frozenset(
     {
         ("tee", "--output-error"),
         ("numfmt", "--to"),

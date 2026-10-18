@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Ports parts of CPython 3.12's email package (PSF-2.0; see
+// licenses/third_party/cpython.txt).
+
 import { encodeBase64 } from './base64.ts'
 
 // A byte-exact port of the corners of python's email package that the

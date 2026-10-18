@@ -60,8 +60,7 @@ def test_backup_control_invalid_argument():
 def test_an_empty_backup_control_is_the_default_not_a_refusal():
     """GNU ACCEPTS `cp --backup=`, exit 0, and backs up as `existing`.
 
-    gnulib's `xget_version` only calls argmatch when
-    `version && *version`, so an empty control is the bare `--backup`.
+    An empty control is the bare `--backup`.
     Measured on coreutils 9.4: `cp --backup= src bk` exits 0 and writes
     `bk~`. mirage used to answer `invalid argument ''` and exit 1.
     """

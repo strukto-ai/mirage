@@ -21,8 +21,8 @@ import { closeQuietly } from '../../../io/stream.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec, type ReadRangeFn } from '../../../types.ts'
-import { argmatchError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
   normalizeCounts,
@@ -48,7 +48,7 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
 const DEFAULT_SLEEP_INTERVAL = 1
-// GNU's `follow_mode_string`, in declaration order.
+// The --follow words, in the order GNU lists them back.
 const FOLLOW_ARGS = ['descriptor', 'name'] as const
 
 /** -f/--follow[=HOW], -F, --retry and -s as tail reads them. */
@@ -59,7 +59,7 @@ export interface FollowFlags {
   readonly interval: number
 }
 
-// -f, --follow[=HOW] and -F. A bad HOW is GNU's ARGMATCH refusal; -F is
+// -f, --follow[=HOW] and -F. A bad HOW is GNU's word-choice refusal; -F is
 // --follow=name --retry. The mode is whichever of -f/--follow and -F came
 // last, GNU's own order (`-F --follow=descriptor` follows the descriptor),
 // while -F's --retry half stays on either way.
@@ -67,10 +67,10 @@ export function followFlags(fl: FlagView): FollowFlags | string {
   const raw: unknown = fl.raw('follow')
   let how: string | null = null
   if (typeof raw === 'string') {
-    const match = argmatch(raw, FOLLOW_ARGS)
+    const match = matchWord(raw, FOLLOW_ARGS)
     if (!match.matched) {
       return (
-        argmatchError('tail', '--follow', raw, FOLLOW_ARGS, undefined, match.kind).message + '\n'
+        wordRefusalError('tail', '--follow', raw, FOLLOW_ARGS, undefined, match.kind).message + '\n'
       )
     }
     how = match.word
@@ -87,9 +87,9 @@ export function followFlags(fl: FlagView): FollowFlags | string {
   let interval = DEFAULT_SLEEP_INTERVAL
   if (rawSeconds !== undefined) {
     const seconds = parseSeconds(rawSeconds)
-    // GNU's own two-part test, `xstrtod(...) && 0 <= s`: the grammar
-    // first, then the range. `0 <= nan` is false, so NaN is refused, while
-    // `inf` passes both and is ACCEPTED (measured, coreutils 9.4).
+    // GNU's two-part test: the whole word must read as a number, then the
+    // number must be at least 0. NaN is not, so it is refused, while `inf`
+    // passes both and is ACCEPTED (measured, coreutils 9.4).
     if (seconds === null || !(0 <= seconds)) {
       return `tail: invalid number of seconds: '${quoteText(rawSeconds)}'\n`
     }

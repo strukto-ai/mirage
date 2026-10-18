@@ -16,10 +16,10 @@ import pytest
 
 from mirage.commands.builtin.utils.strtol import (
     c_int,
+    signed_decimal,
     strtol,
     strtoul,
-    xstrtoimax,
-    xstrtoumax,
+    unsigned_decimal,
 )
 
 
@@ -70,9 +70,9 @@ def test_strtoul_negates_unsigned_and_saturates(raw, value):
         ("99999999999999999999", 99999999999999999999, 99999999999999999999),
     ],
 )
-def test_xstrto_reads_a_whole_decimal_word(raw, unsigned, signed):
-    assert xstrtoumax(raw) == unsigned
-    assert xstrtoimax(raw) == signed
+def test_decimal_scanners_read_a_whole_decimal_word(raw, unsigned, signed):
+    assert unsigned_decimal(raw) == unsigned
+    assert signed_decimal(raw) == signed
 
 
 def test_c_int_keeps_the_low_32_bits_signed():
@@ -83,7 +83,7 @@ def test_c_int_keeps_the_low_32_bits_signed():
 
 def test_scanners_read_a_number_past_the_int_digit_limit():
     digits = "9" * 5000
-    assert xstrtoumax(digits) == 10**5000 - 1
-    assert xstrtoimax("-" + digits) == -(10**5000 - 1)
+    assert unsigned_decimal(digits) == 10**5000 - 1
+    assert signed_decimal("-" + digits) == -(10**5000 - 1)
     assert strtol(digits) == (2**63 - 1, "")
     assert strtoul(digits) == (2**64 - 1, "")

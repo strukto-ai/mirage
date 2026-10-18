@@ -21,7 +21,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { cutStream, parseRanges, type CutOptions } from '../cut_ranges.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { operandsIo, reportedStream, splitReadable } from '../utils/operands.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -48,13 +48,13 @@ function parseFlags(bag: Record<string, FlagValue>): CutOptions | string {
   if (fl.asBool('w') || fl.asStr('F') !== undefined || rawWhitespace === true) {
     whitespace = 'default'
   } else if (typeof rawWhitespace === 'string') {
-    // One candidate, so ARGMATCH can only match or not match here: a
+    // One candidate, so the word can only match or not match here: a
     // prefix of `trimmed` resolves to it, and the refusal keeps cut's own
     // one-line wording (no candidate block). GNU cut has no such option, so
     // there is nothing to measure this against: the empty word reaching the
     // sole candidate as ACCEPTED is what the general rule says, not a probed
     // answer. It stays the general rule rather than a special case.
-    if (!argmatch(rawWhitespace, WHITESPACE_ARGS).matched) {
+    if (!matchWord(rawWhitespace, WHITESPACE_ARGS).matched) {
       return (
         `cut: invalid argument '${quoteText(rawWhitespace)}' for ` + "'--whitespace-delimited'\n"
       )

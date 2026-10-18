@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { argmatch, valueClasses } from './argmatch.ts'
+import { matchWord, valueClasses } from './word_choice.ts'
 
 // GNU coreutils 9.4 tables, as the commands that use them declare them.
 const QUOTING_STYLES = [
@@ -64,7 +64,7 @@ describe('valueClasses', () => {
   })
 })
 
-describe('argmatch', () => {
+describe('matchWord', () => {
   // `ls --quoting-style=shell` exits 0 although three longer candidates
   // start with it, and `ls --color=no` is `never` although `none` does too.
   it.each([
@@ -73,12 +73,12 @@ describe('argmatch', () => {
     ['c', 'c'],
     ['shell-escape-always', 'shell-escape-always'],
   ])("takes the exact word %s over being a longer word's prefix", (value, matched) => {
-    expect(argmatch(value, QUOTING_STYLES)).toEqual(word(matched))
+    expect(matchWord(value, QUOTING_STYLES)).toEqual(word(matched))
   })
 
   it('answers an exact alias with its canonical word', () => {
-    expect(argmatch('access', LS_TIME)).toEqual(word('atime'))
-    expect(argmatch('no', COLOR)).toEqual(word('never'))
+    expect(matchWord('access', LS_TIME)).toEqual(word('atime'))
+    expect(matchWord('no', COLOR)).toEqual(word('never'))
   })
 
   // `ls --sort=non`, `--sort=n`, `--quoting-style=lit`, `=shell-a`, `=loc`.
@@ -90,7 +90,7 @@ describe('argmatch', () => {
     ['e', 'extension'],
     ['w', 'width'],
   ])('answers the unambiguous prefix %s with its canonical word', (value, matched) => {
-    expect(argmatch(value, LS_SORT)).toEqual(word(matched))
+    expect(matchWord(value, LS_SORT)).toEqual(word(matched))
   })
 
   it.each([
@@ -98,7 +98,7 @@ describe('argmatch', () => {
     ['shell-al', 'shell-always'],
     ['shell-escape-a', 'shell-escape-always'],
   ])('treats a hyphen as an ordinary character in %s', (value, matched) => {
-    expect(argmatch(value, QUOTING_STYLES)).toEqual(word(matched))
+    expect(matchWord(value, QUOTING_STYLES)).toEqual(word(matched))
   })
 
   // Ambiguity is decided on VALUES, not on how many words matched:
@@ -113,12 +113,12 @@ describe('argmatch', () => {
     ['cr', 'birth'],
     ['ct', 'ctime'],
   ])('accepts %s, several words of one value', (value, matched) => {
-    expect(argmatch(value, LS_TIME)).toEqual(word(matched))
+    expect(matchWord(value, LS_TIME)).toEqual(word(matched))
   })
 
   it('accepts three words of one value', () => {
-    expect(argmatch('n', COLOR)).toEqual(word('never'))
-    expect(argmatch('a', DU_TIME)).toEqual(word('atime'))
+    expect(matchWord('n', COLOR)).toEqual(word('never'))
+    expect(matchWord('a', DU_TIME)).toEqual(word('atime'))
   })
 
   // `ls -l --time=c` hits ctime and creation, two values, exit 1.
@@ -131,7 +131,7 @@ describe('argmatch', () => {
     [QUOTING_STYLES, 's'],
     [QUOTING_STYLES, 'shell-e'],
   ])('calls %#: a word spanning two values ambiguous', (choices, value) => {
-    expect(argmatch(value, choices)).toEqual(ambiguous)
+    expect(matchWord(value, choices)).toEqual(ambiguous)
   })
 
   it.each([
@@ -140,13 +140,13 @@ describe('argmatch', () => {
     [DU_TIME, 'm'],
     [QUOTING_STYLES, 'shellalways'],
   ])('calls %#: a word no candidate starts with invalid', (choices, value) => {
-    expect(argmatch(value, choices)).toEqual(invalid)
+    expect(matchWord(value, choices)).toEqual(invalid)
   })
 
   // `ls --sort=NON`, `=NONE` and `=None` are all `invalid argument`, not
   // ambiguous and not accepted: strncmp is case-sensitive.
   it.each(['NON', 'NONE', 'None', 'N'])('matches case-sensitively (%s)', (value) => {
-    expect(argmatch(value, LS_SORT)).toEqual(invalid)
+    expect(matchWord(value, LS_SORT)).toEqual(invalid)
   })
 
   // `ls --sort=` is `ambiguous argument ''` with no empty-word branch: `''`
@@ -154,14 +154,14 @@ describe('argmatch', () => {
   // only because they span more than one value. A table whose words all mean
   // one value therefore ACCEPTS it.
   it('calls the empty word ambiguous by the ordinary rule', () => {
-    expect(argmatch('', LS_SORT)).toEqual(ambiguous)
-    expect(argmatch('', LS_TIME)).toEqual(ambiguous)
-    expect(argmatch('', ['only'])).toEqual(word('only'))
-    expect(argmatch('', [['quiet', 'silent']])).toEqual(word('quiet'))
+    expect(matchWord('', LS_SORT)).toEqual(ambiguous)
+    expect(matchWord('', LS_TIME)).toEqual(ambiguous)
+    expect(matchWord('', ['only'])).toEqual(word('only'))
+    expect(matchWord('', [['quiet', 'silent']])).toEqual(word('quiet'))
   })
 
   it('calls no candidate at all invalid, even for the empty word', () => {
-    expect(argmatch('', [])).toEqual(invalid)
-    expect(argmatch('x', [])).toEqual(invalid)
+    expect(matchWord('', [])).toEqual(invalid)
+    expect(matchWord('x', [])).toEqual(invalid)
   })
 })

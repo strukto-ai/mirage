@@ -59,7 +59,7 @@ def test_find_ls_and_ls_show_the_year_for_an_old_or_future_time():
         (" +1", formatting.BlockSize(1, "")),
         ("+1K", formatting.BlockSize(1024, "")),
         (" 1K", formatting.BlockSize(1024, "")),
-        # xstrtoumax's three refusals, measured on coreutils 9.7.
+        # The three size refusals, measured on coreutils 9.7.
         ("bogus", formatting.BlockSizeRefusal.INVALID),
         # strtol's blanks and `+` are skipped only in front of a digit.
         ("+K", formatting.BlockSizeRefusal.INVALID),

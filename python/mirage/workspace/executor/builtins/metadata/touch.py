@@ -15,8 +15,8 @@
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.usage import invalid_argument_error, usage_hint
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -70,8 +70,8 @@ async def handle_touch(
         return refused
     time = fl.as_str("time")
     if time is not None:
-        match = argmatch(time, TIME_GROUPS)
-        if not isinstance(match, ArgmatchMatch):
+        match = match_word(time, TIME_GROUPS)
+        if not isinstance(match, WordMatch):
             message, code = invalid_argument_error(
                 "touch", "--time", time, TIME_GROUPS, kind=match.kind
             )

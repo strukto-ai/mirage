@@ -929,9 +929,8 @@ _STRIP_COUNT_PATTERN = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
 def strip_count(raw: str) -> int:
     """A --strip-components value as tar reads it, or tar's refusal.
 
-    xstrtoumax at base 10 with no suffix: leading blanks and one ``+``
-    pass, a sign, another letter or a count past UINTMAX does not (tar
-    1.35).
+    A decimal count with no suffix: leading blanks and one ``+`` pass,
+    a sign, another letter or a count past UINTMAX does not (tar 1.35).
 
     Args:
         raw (str): the value as typed.

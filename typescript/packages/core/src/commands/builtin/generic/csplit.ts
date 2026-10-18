@@ -24,15 +24,15 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
-import { EOVERFLOW_REASON, INT_MAX, xstrtoimax } from '../utils/strtol.ts'
+import { EOVERFLOW_REASON, INT_MAX, signedDecimal } from '../utils/strtol.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 
 /**
- * csplit's refusal of a -n value, which GNU 9.7 reads with
- * xdectoimax(optarg, 0, INT_MAX): out of that range is too large. Mirrors
- * Python's `digits_refusal`.
+ * csplit's refusal of a -n value, which GNU 9.7 takes as a decimal from 0 to
+ * INT_MAX: out of that range is too large. Mirrors Python's
+ * `digits_refusal`.
  */
 export function digitsRefusal(text: string, value: bigint | null): string {
   const reason = value === null ? '' : `: ${EOVERFLOW_REASON}`
@@ -163,7 +163,7 @@ interface CsplitFlags {
 // `parse_flags`.
 function parseFlags(bag: Record<string, FlagValue>): CsplitFlags {
   const fl = new FlagView(bag, specOf('csplit'))
-  const digits = fl.asNumber('digits', xstrtoimax, digitsRefusal, { low: 0n, high: INT_MAX })
+  const digits = fl.asNumber('digits', signedDecimal, digitsRefusal, { low: 0n, high: INT_MAX })
   const suffixFormat = fl.asStr('suffix_format')
   return {
     prefix: fl.asPath('prefix')?.rawPath ?? 'xx',

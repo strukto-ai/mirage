@@ -20,7 +20,7 @@ def test_single_char_delimiter_is_accepted():
     assert parsed.delimiter == ","
 
 
-# `--whitespace-delimited` has one candidate, so ARGMATCH accepts any
+# `--whitespace-delimited` has one candidate, so a word choice accepts any
 # prefix of it. The refusal keeps cut's own one-line wording; GNU cut has
 # no such option, so the rows below are the general rule's answer rather
 # than a measured one, and the empty word (which the general rule

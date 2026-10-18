@@ -15,7 +15,7 @@ _POWERS = {
 
 
 def size_suffixes(letters: str) -> dict[str, int]:
-    """GNU xstrtol suffix table restricted to a command's accepted letters.
+    """GNU's size suffix table restricted to a command's accepted letters.
 
     Letter ``L`` maps to ``1024**n``, ``LB`` to ``1000**n`` and ``LiB`` to
     ``1024**n``; the special letter ``b`` is 512 with no B/iB forms. The
@@ -39,7 +39,7 @@ def size_suffixes(letters: str) -> dict[str, int]:
 
 
 def parse_base0(digits: str) -> int:
-    """The digits of an xstrtoumax operand, read at GNU's base 0.
+    """The digits of a suffixed count operand, read at GNU's base 0.
 
     ``0x…`` is hex, a bare leading zero is octal, anything else decimal.
     Python's own ``int(s, 0)`` cannot stand in: it rejects ``010``,

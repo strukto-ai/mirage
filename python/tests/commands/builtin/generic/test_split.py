@@ -50,7 +50,7 @@ def test_bytes_accepts_gnu_suffixes():
 
 
 def test_counts_accept_one_leading_plus_and_whitespace():
-    # xstrtoumax allows a single '+' (pinned against coreutils 9.7); -a is
+    # GNU allows a single '+' on a count (pinned against coreutils 9.7); -a is
     # the one count GNU lets be zero, signed or not.
     assert parse_bytes_value("+10") == 10
     assert parse_suffix_length("+0") == 0
@@ -198,8 +198,8 @@ def test_suffix_length_overflows_past_uintmax():
 
 
 def test_suffix_start_rejects_signs_and_whitespace():
-    # Unlike the counts, GNU validates start values itself rather than
-    # through xstrtoumax: `--numeric-suffixes=+5` is an error.
+    # Unlike the counts, a start value takes no sign or blank:
+    # `--numeric-suffixes=+5` is an error.
     with pytest.raises(UsageError) as exc:
         parse_suffix_start("+5", False, 2)
     assert str(exc.value) == (

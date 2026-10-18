@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# Follows jq 1.8.2's src/jv_parse.c, with the UTF-8 decoding of its
+# src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h (MIT; see
+# licenses/third_party/jq.txt).
+
 import json
 import logging
 import re

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ArgmatchChoices } from '../../../commands/spec/argmatch.ts'
+import type { WordChoices } from '../../../commands/spec/word_choice.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { ExecutionNode } from '../../types.ts'
 import type { FlagValue } from '../../../commands/spec/types.ts'
@@ -48,8 +48,8 @@ export interface ParsedCommand {
   // `ambiguous argument` for one that prefixes candidates spanning two or
   // more values. optionErrorKinds orders them against each other and
   // against every other refusal on the line.
-  invalidValueOptions: [string, string, ArgmatchChoices][]
-  ambiguousValueOptions: [string, string, ArgmatchChoices][]
+  invalidValueOptions: [string, string, WordChoices][]
+  ambiguousValueOptions: [string, string, WordChoices][]
   invalidIntOptions: [string, string][]
   invalidFloatOptions: [string, string][]
   missingRequiredOptions: string[]

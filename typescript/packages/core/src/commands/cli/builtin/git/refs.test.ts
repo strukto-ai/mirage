@@ -57,7 +57,7 @@ it.each([
   ['refs/heads//x', false],
   ['refs/heads/./x', false],
   ['refs/heads/../x', false],
-])('safeRefName follows refname_is_safe: %s', (name, safe) => {
+])('safeRefName follows git: %s', (name, safe) => {
   expect(safeRefName(name)).toBe(safe)
 })
 
@@ -91,6 +91,6 @@ it.each([
   ['HEAD', false],
   ['-x', false],
   ['a..b', false],
-])('validBranchName follows strbuf_check_branch_ref: %s', (name, valid) => {
+])('validBranchName follows git branch rules: %s', (name, valid) => {
   expect(validBranchName(name)).toBe(valid)
 })

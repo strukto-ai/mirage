@@ -267,9 +267,9 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "numfmt": CommandSpec(
         arguments=(
-            # GNU's argmatch tables, in GNU's order: `--to=auto` is not
-            # an output mode, and an unknown word answers with the
-            # shared ARGMATCH refusal (coreutils 9.7).
+            # GNU's word choices, in GNU's order: `--to=auto` is not an
+            # output mode, and an unknown word answers with the shared
+            # word-choice refusal (coreutils 9.7).
             Argument("--to", choices=("none", "si", "iec", "iec-i")),
             Argument(
                 "--from",

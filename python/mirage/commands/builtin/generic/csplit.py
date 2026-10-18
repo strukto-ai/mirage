@@ -6,7 +6,7 @@ from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.strtol import (
     EOVERFLOW_REASON,
     INT_MAX,
-    xstrtoimax,
+    signed_decimal,
 )
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
@@ -23,8 +23,8 @@ from mirage.utils.key_prefix import mount_key
 
 
 def digits_refusal(text: str, value: int | None) -> str:
-    """csplit's refusal of a -n value, which GNU 9.7 reads with
-    xdectoimax(optarg, 0, INT_MAX): out of that range is too large.
+    """csplit's refusal of a -n value, which GNU 9.7 takes as a decimal
+    from 0 to INT_MAX: out of that range is too large.
 
     Args:
         text (str): the value as typed.
@@ -53,7 +53,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CsplitFlags:
     """
     fl = FlagView(flags, spec=SPECS["csplit"])
     digits = fl.as_number(
-        "digits", xstrtoimax, digits_refusal, low=0, high=INT_MAX
+        "digits", signed_decimal, digits_refusal, low=0, high=INT_MAX
     )
     prefix = fl.raw("prefix")
     return CsplitFlags(

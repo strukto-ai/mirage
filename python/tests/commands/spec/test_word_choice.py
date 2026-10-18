@@ -1,9 +1,9 @@
 import pytest
 
-from mirage.commands.spec.argmatch import (
-    ArgmatchMatch,
-    ArgmatchRefusal,
-    argmatch,
+from mirage.commands.spec.word_choice import (
+    WordMatch,
+    WordRefusal,
+    match_word,
     value_classes,
 )
 
@@ -60,12 +60,12 @@ def test_value_classes_takes_a_flat_tuple_as_one_value_per_word():
     ],
 )
 def test_an_exact_word_wins_over_being_a_longer_word_s_prefix(value, word):
-    assert argmatch(value, QUOTING_STYLES) == ArgmatchMatch(word)
+    assert match_word(value, QUOTING_STYLES) == WordMatch(word)
 
 
 def test_an_exact_alias_answers_its_canonical_word():
-    assert argmatch("access", LS_TIME) == ArgmatchMatch("atime")
-    assert argmatch("no", COLOR) == ArgmatchMatch("never")
+    assert match_word("access", LS_TIME) == WordMatch("atime")
+    assert match_word("no", COLOR) == WordMatch("never")
 
 
 # `ls --sort=non`, `--sort=n`, `--quoting-style=lit`, `=shell-a`, `=loc`.
@@ -81,7 +81,7 @@ def test_an_exact_alias_answers_its_canonical_word():
     ],
 )
 def test_an_unambiguous_prefix_answers_the_canonical_word(value, word):
-    assert argmatch(value, LS_SORT) == ArgmatchMatch(word)
+    assert match_word(value, LS_SORT) == WordMatch(word)
 
 
 @pytest.mark.parametrize(
@@ -93,7 +93,7 @@ def test_an_unambiguous_prefix_answers_the_canonical_word(value, word):
     ],
 )
 def test_a_hyphen_is_an_ordinary_character_in_a_prefix(value, word):
-    assert argmatch(value, QUOTING_STYLES) == ArgmatchMatch(word)
+    assert match_word(value, QUOTING_STYLES) == WordMatch(word)
 
 
 # Ambiguity is decided on VALUES, not on how many words matched:
@@ -112,12 +112,12 @@ def test_a_hyphen_is_an_ordinary_character_in_a_prefix(value, word):
     ],
 )
 def test_several_words_of_one_value_are_accepted(value, word):
-    assert argmatch(value, LS_TIME) == ArgmatchMatch(word)
+    assert match_word(value, LS_TIME) == WordMatch(word)
 
 
 def test_three_words_of_one_value_are_accepted():
-    assert argmatch("n", COLOR) == ArgmatchMatch("never")
-    assert argmatch("a", DU_TIME) == ArgmatchMatch("atime")
+    assert match_word("n", COLOR) == WordMatch("never")
+    assert match_word("a", DU_TIME) == WordMatch("atime")
 
 
 # `ls -l --time=c` hits ctime and creation, two values, exit 1.
@@ -134,7 +134,7 @@ def test_three_words_of_one_value_are_accepted():
     ],
 )
 def test_words_spanning_two_values_are_ambiguous(choices, value):
-    assert argmatch(value, choices) == ArgmatchRefusal("ambiguous")
+    assert match_word(value, choices) == WordRefusal("ambiguous")
 
 
 @pytest.mark.parametrize(
@@ -147,14 +147,14 @@ def test_words_spanning_two_values_are_ambiguous(choices, value):
     ],
 )
 def test_a_word_no_candidate_starts_with_is_invalid(choices, value):
-    assert argmatch(value, choices) == ArgmatchRefusal("invalid")
+    assert match_word(value, choices) == WordRefusal("invalid")
 
 
 # `ls --sort=NON`, `=NONE` and `=None` are all `invalid argument`, not
 # ambiguous and not accepted: strncmp is case-sensitive.
 @pytest.mark.parametrize("value", ["NON", "NONE", "None", "N"])
 def test_prefix_matching_is_case_sensitive(value):
-    assert argmatch(value, LS_SORT) == ArgmatchRefusal("invalid")
+    assert match_word(value, LS_SORT) == WordRefusal("invalid")
 
 
 def test_the_empty_word_is_ambiguous_by_the_ordinary_rule():
@@ -165,12 +165,12 @@ def test_the_empty_word_is_ambiguous_by_the_ordinary_rule():
     words all mean one value therefore ACCEPTS it, which is what a
     special case for `""` would get wrong.
     """
-    assert argmatch("", LS_SORT) == ArgmatchRefusal("ambiguous")
-    assert argmatch("", LS_TIME) == ArgmatchRefusal("ambiguous")
-    assert argmatch("", ("only",)) == ArgmatchMatch("only")
-    assert argmatch("", (("quiet", "silent"),)) == ArgmatchMatch("quiet")
+    assert match_word("", LS_SORT) == WordRefusal("ambiguous")
+    assert match_word("", LS_TIME) == WordRefusal("ambiguous")
+    assert match_word("", ("only",)) == WordMatch("only")
+    assert match_word("", (("quiet", "silent"),)) == WordMatch("quiet")
 
 
 def test_no_candidate_at_all_is_invalid_even_for_the_empty_word():
-    assert argmatch("", ()) == ArgmatchRefusal("invalid")
-    assert argmatch("x", ()) == ArgmatchRefusal("invalid")
+    assert match_word("", ()) == WordRefusal("invalid")
+    assert match_word("x", ()) == WordRefusal("invalid")

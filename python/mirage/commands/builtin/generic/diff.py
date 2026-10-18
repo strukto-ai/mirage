@@ -84,9 +84,9 @@ Absent = tuple[bool, bool]
 
 PRESENT: Absent = (False, False)
 
-# diffutils' c_escape_char: the characters a header name spells as a C
-# escape. Any other control character is three octal digits.
-C_ESCAPES = {
+# The characters GNU diff spells as a C escape in a header name. Any
+# other control character is three octal digits.
+HEADER_ESCAPES = {
     "\a": "a",
     "\b": "b",
     "\t": "t",
@@ -113,25 +113,25 @@ def _name(path: PathSpec) -> str:
     return path.raw_path or path.virtual
 
 
-def c_escape(name: str) -> str:
+def quote_header_name(name: str) -> str:
     """A file name as GNU diff writes it in a header line.
 
-    diffutils' ``c_escape`` double-quotes a name holding a space, a
-    double quote, a backslash or a control character, and writes each of
-    those but the space as a C escape (``"sp ace"``, ``"t\\tab"``); any
-    other name, bytes above ASCII included, is written as it is. The
-    ``---`` and ``+++`` lines and the ``diff -r`` line use it; the
-    ``Only in`` and ``Files ... differ`` lines do not.
+    GNU diff double-quotes a name holding a space, a double quote, a
+    backslash or a control character, and writes each of those but the
+    space as a C escape (``"sp ace"``, ``"t\\tab"``); any other name,
+    bytes above ASCII included, is written as it is. The ``---`` and
+    ``+++`` lines and the ``diff -r`` line use it; the ``Only in`` and
+    ``Files ... differ`` lines do not.
 
     Args:
         name (str): the name as typed or walked.
     """
-    if not any(ch == " " or ch in C_ESCAPES or ch < " " for ch in name):
+    if not any(ch == " " or ch in HEADER_ESCAPES or ch < " " for ch in name):
         return name
     out: list[str] = []
     for ch in name:
-        if ch in C_ESCAPES:
-            out.append("\\" + C_ESCAPES[ch])
+        if ch in HEADER_ESCAPES:
+            out.append("\\" + HEADER_ESCAPES[ch])
         elif ch < " ":
             out.append(f"\\{ord(ch):03o}")
         else:
@@ -286,8 +286,8 @@ async def _diff_pair(
             difflib.unified_diff(
                 a_lines,
                 b_lines,
-                fromfile=c_escape(name1),
-                tofile=c_escape(name2),
+                fromfile=quote_header_name(name1),
+                tofile=quote_header_name(name2),
                 fromfiledate=await _header_time(walk, path1, absent[0]),
                 tofiledate=await _header_time(walk, path2, absent[1]),
                 n=flags.context,
@@ -428,8 +428,8 @@ async def _diff_dirs(
                 parts.append(body)
             else:
                 header = (
-                    f"diff{walk.switches} {c_escape(_name(child_a))} "
-                    f"{c_escape(_name(child_b))}\n"
+                    f"diff{walk.switches} {quote_header_name(_name(child_a))} "
+                    f"{quote_header_name(_name(child_b))}\n"
                 )
                 parts.append(header.encode() + body)
         elif a_dir:

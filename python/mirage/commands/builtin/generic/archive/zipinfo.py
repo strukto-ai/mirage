@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# Follows the zipinfo and unzip -v listings of Info-ZIP UnZip 6.00
+# (Info-ZIP license; see licenses/third_party/info-zip.txt).
+
 from dataclasses import dataclass
 from typing import Literal
 

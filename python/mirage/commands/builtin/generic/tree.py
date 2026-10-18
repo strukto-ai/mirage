@@ -426,7 +426,7 @@ class TreeFlags:
 
 
 def _level(text: str) -> int:
-    """``-L`` as tree 2.2.1 reads it: ``(int)strtoul(sLevel, NULL, 0)``.
+    """``-L`` as tree 2.2.1 reads it: C ``strtoul`` at base 0, as an int.
 
     Args:
         text (str): the value as typed.

@@ -3197,9 +3197,9 @@ describe('a moved path that the node table knows about', () => {
 
 describe('a component on the way that is not a directory', () => {
   it('replaces a regular file standing where a directory belongs', async () => {
-    // The symlink case's other half, and the commoner one. git's
-    // create_directories unlinks any leading non-directory and makes the
-    // directory, so the restore succeeds and the file is gone. Left
+    // The symlink case's other half, and the commoner one. git unlinks any
+    // leading non-directory and makes the directory, so the restore succeeds
+    // and the file is gone. Left
     // unhandled, the write failed with a raw ENOTDIR.
     const h = await harness()
     await h.ws.shell('rm -r /repo/docs && echo untracked > /repo/docs')

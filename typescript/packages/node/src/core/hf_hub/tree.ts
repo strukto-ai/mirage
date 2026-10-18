@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Path filtering follows huggingface_hub 1.16.4 (Apache-2.0; see
+// licenses/third_party/huggingface_hub.txt).
+
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { fnmatchcase } from '@struktoai/mirage-core/utils/fnmatch'
 import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'

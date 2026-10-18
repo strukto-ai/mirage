@@ -154,8 +154,8 @@ export class NoWorkspaceError extends GitError {
 /**
  * A verb that reads or writes files, run with no work tree to enter.
  *
- * git's `setup_work_tree` refuses a bare repository and a work tree that is not
- * a directory in the same words (pinned against git 2.54), so a mistyped
+ * git refuses a bare repository and a work tree that is not a directory in the
+ * same words (pinned against git 2.54), so a mistyped
  * `--work-tree` is never taken for an empty tree.
  */
 export class NotAWorkTreeError extends GitError {
@@ -513,8 +513,8 @@ export class PartialCommitError extends GitError {
 }
 
 /**
- * git's `compile_regexp_failed`: a pattern that does not compile, named with
- * where it came from and what the engine said.
+ * A pattern that does not compile, named as git names it: where it came from
+ * and what the engine said.
  */
 export class PatternCompileError extends GitError {
   constructor(origin: string, pattern: string, reason: string) {
@@ -1293,7 +1293,7 @@ export class BrokenHeadError extends GitError {
 
 /**
  * `symbolic-ref` writing a ref whose path another ref holds: the same lock
- * failure as RefLockError, which `refs_update_symref` reports as an `error`
+ * failure as RefLockError, which `git symbolic-ref` reports as an `error`
  * exiting 1 rather than a fatal (pinned against git 2.47.3).
  */
 export class SymbolicRefLockError extends RefLockError {
@@ -1487,8 +1487,8 @@ export class MissingRepositoryError extends GitError {
 /**
  * A `--date` value, or a date atom's argument, git has no style for.
  *
- * Named as git's `parse_date_format` names it: the whole value, a `-local`
- * suffix and all (pinned against git 2.50.1).
+ * Named as git names it: the whole value, a `-local` suffix and all (pinned
+ * against git 2.50.1).
  */
 export class UnknownDateFormatError extends GitError {
   constructor(value: string) {

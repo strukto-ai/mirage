@@ -17,10 +17,10 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import argmatch_error
+from mirage.commands.spec.usage import word_refusal_error
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
@@ -33,19 +33,19 @@ from mirage.rs.stream import OpenStream
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
 
-# `check_args` as gnulib's `argmatch_valid` prints it: `quiet` and
-# `silent` map to the same value, so they share one `  - ` line.
-CHECK_ARGS = (("quiet", "silent"), ("diagnose-first",))
+# The --check words as GNU lists them back: `quiet` and `silent` map to
+# the same value, so they share one `  - ` line.
+CHECK_WORDS = (("quiet", "silent"), ("diagnose-first",))
 
 MULTIPLE_OUTPUTS = "sort: multiple output files specified"
 
 CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
 
-# sort.c's `sort_die` prefixes. GNU tests every input with
-# euidaccess(R_OK) before it reads any (`cannot read`), opens the output
-# and the one input -c reads with open(2) (`open failed`), stats every
-# input it is about to sort to size its buffer (`stat failed`), and only
-# then reads (`read failed`).
+# The steps GNU sort names when a file fails it. GNU checks that every
+# input is readable before it reads any (`cannot read`), opens the
+# output and the one input -c reads (`open failed`), stats every input
+# it is about to sort (`stat failed`), and only then reads (`read
+# failed`).
 CANNOT_READ = "cannot read"
 OPEN_FAILED = "open failed"
 STAT_FAILED = "stat failed"
@@ -89,8 +89,8 @@ def input_stage(strerror: str, sorting: bool) -> InputStage:
     return InputStage.ACCESS
 
 
-def sort_die(verb: str, label: str, strerror: str) -> bytes:
-    """GNU's ``sort_die`` line: the step, the name, then the errno.
+def step_failure(verb: str, label: str, strerror: str) -> bytes:
+    """GNU sort's line for a failed step: the step, the name, the errno.
 
     Args:
         verb (str): which step failed (``CANNOT_READ``, ``OPEN_FAILED``,
@@ -151,18 +151,18 @@ def _check_mode(raw: FlagValue, dest: str) -> str:
         dest (str): ``c``, ``C`` or ``check``.
 
     Raises:
-        UsageError: ``--check`` names no mode, which gnulib's argmatch
-            refuses with exit 1.
+        UsageError: ``--check`` names no mode, which GNU refuses with
+            exit 1.
     """
     if dest != "check":
         return dest
     if raw is True:
         return "c"
     word = str(raw)
-    match = argmatch(word, CHECK_ARGS)
-    if not isinstance(match, ArgmatchMatch):
-        raise argmatch_error(
-            "sort", "--check", word, CHECK_ARGS, 1, match.kind
+    match = match_word(word, CHECK_WORDS)
+    if not isinstance(match, WordMatch):
+        raise word_refusal_error(
+            "sort", "--check", word, CHECK_WORDS, 1, match.kind
         )
     # The canonical word of the ('quiet', 'silent') value is `quiet`, so
     # `--check=s` and `--check=silent` both land here.
@@ -180,8 +180,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
 
     Raises:
-        UsageError: a refused option, exit 1 for a ``--check`` word
-            argmatch refuses and 2 for the rest.
+        UsageError: a refused option, exit 1 for a refused ``--check``
+            word and 2 for the rest.
         SortKeyError: a ``-k`` that is not a KEYDEF.
     """
     fl = FlagView(flags, spec=SPECS["sort"])
@@ -256,9 +256,9 @@ def _config(parsed: SortFlags) -> SortConfig:
 
 def _refusal_of(exc: ValueError) -> IOResult:
     if isinstance(exc, UsageError):
-        # Already GNU-worded and carrying its own code: gnulib's argmatch
-        # dies with EXIT_FAILURE, so `--check=x` is 1 where sort's other
-        # usage errors are 2.
+        # Already GNU-worded and carrying its own code: GNU exits 1 on a
+        # refused word, so `--check=x` is 1 where sort's other usage
+        # errors are 2.
         return IOResult(stderr=f"{exc}\n".encode(), exit_code=exc.exit_code)
     return IOResult(stderr=f"sort: {exc}\n".encode(), exit_code=2)
 
@@ -448,7 +448,7 @@ async def _external_records(
                 refused = _earliest(
                     refused,
                     stage,
-                    sort_die(
+                    step_failure(
                         _stage_verb(stage, False), _label(path), strerror
                     ),
                 )
@@ -517,7 +517,9 @@ async def _check_stream(
         strerror = fs_strerror(exc) or str(exc)
         stage = input_stage(strerror, False)
         return IOResult(
-            stderr=sort_die(_stage_verb(stage, True), _label(path), strerror),
+            stderr=step_failure(
+                _stage_verb(stage, True), _label(path), strerror
+            ),
             exit_code=2,
         )
     return IOResult()
@@ -611,7 +613,9 @@ async def sort_generic(
         except FS_ERRORS as exc:
             strerror = fs_strerror(exc) or str(exc)
             return b"", IOResult(
-                stderr=sort_die(OPEN_FAILED, parsed.output.raw_path, strerror),
+                stderr=step_failure(
+                    OPEN_FAILED, parsed.output.raw_path, strerror
+                ),
                 exit_code=2,
             )
         finally:

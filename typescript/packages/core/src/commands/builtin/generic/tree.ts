@@ -47,7 +47,7 @@ interface TreeFlags {
   readonly oneFileSystem: boolean
 }
 
-// `-L` as tree 2.2.1 reads it: `(int)strtoul(sLevel, NULL, 0)`. Mirrors
+// `-L` as tree 2.2.1 reads it: C `strtoul` at base 0, as an int. Mirrors
 // Python's `_level`.
 function level(text: string): bigint {
   return cInt(strtoul(text)[0])

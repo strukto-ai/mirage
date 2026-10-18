@@ -158,7 +158,7 @@ export async function compare(
 }
 
 /**
- * How a rename names its paths in a diffstat, git's pprint_rename: when either
+ * How a rename names its paths in a diffstat, as git prints it: when either
  * side needs quoting the two quoted paths stand whole, otherwise the shared
  * leading and trailing directories fold into `pre/{old => new}/post`.
  */
@@ -268,7 +268,7 @@ async function rowStat(repo: Repo, row: Change, display: string): Promise<FileSt
   return { ...fresh, path: display, insertions: 0, deletions: 0, oldSize: fresh.newSize }
 }
 
-/** The `--summary` lines for one change, git's diff_summary. */
+/** The `--summary` lines for one change, as git prints them. */
 function summaryLines(row: Change, display: string, shown: string): string[] {
   const old = row.old,
     fresh = row.new

@@ -49,7 +49,7 @@ def quote_word(view: str, utf8: bool = False) -> str:
 
     It sits directly under `commands/` because both halves of the tree
     need it: every builtin that refuses a flag value, and the shared
-    ARGMATCH renderer in `commands/spec/usage.py`. A leaf beside
+    word-choice renderer in `commands/spec/usage.py`. A leaf beside
     `commands/errors.py` is reachable from `spec` and from `builtin`
     alike, where the old home under `commands/builtin/utils/` would
     have made `spec` import `builtin` -- the one direction nothing in

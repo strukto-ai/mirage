@@ -48,7 +48,7 @@ export const NAMED_ESCAPES = new Map([
 // The commands whose operand mirage reports shell-quoted, each one probed
 // against its own GNU original on debian:stable-slim. GNU picks the policy
 // per diagnostic, not per command family: cat/wc/cut and most of the read
-// family quote only when the name needs it (gnulib's shell_escape style),
+// family quote only when the name needs it (the shell-escape quoting style),
 // while head/tail/tac/fmt/split/csplit/truncate/strings quote always and
 // word the line differently ("cannot open X for reading"). Those say it in
 // GNU's words (FAILURE_WORDING in errors.ts). For the rest
@@ -166,7 +166,7 @@ export function needsShellQuote(name: string): boolean {
 }
 
 // Wrap a name so a shell would read it back as itself: GNU's
-// shell_escape_always rendering. The "name" form when the name holds a
+// shell-escape-always quoting style. The "name" form when the name holds a
 // single quote and nothing else that would need escaping there, otherwise
 // the 'name' form, where an embedded quote becomes '\'' and a run of
 // control characters becomes one $'...' group. Deliberate divergence: a
@@ -214,7 +214,7 @@ export function shellQuoteAlways(name: string): string {
 }
 
 // Wrap a name only when a shell would read it back as something else:
-// GNU's shell_escape rendering, byte-identical with the python
+// GNU's shell-escape quoting style, byte-identical with the python
 // shell_quote. `nope.txt` stays bare and `*.txt` becomes `'*.txt'`, which
 // is what makes a name carrying a metacharacter readable in a diagnostic
 // without dressing up every ordinary one.

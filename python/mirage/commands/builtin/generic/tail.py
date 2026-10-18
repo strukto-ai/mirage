@@ -31,10 +31,10 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import argmatch_error
+from mirage.commands.spec.usage import word_refusal_error
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io.async_line_iterator import AsyncLineIterator
@@ -54,7 +54,7 @@ from mirage.types import (
 from mirage.utils.quote import shell_quote
 
 DEFAULT_SLEEP_INTERVAL = 1.0
-# GNU's `follow_mode_string`, in declaration order.
+# The --follow words, in the order GNU lists them back.
 FOLLOW_ARGS = ("descriptor", "name")
 
 
@@ -105,9 +105,9 @@ def _follow_flags(fl: FlagView) -> tuple[bool, bool, bool]:
     raw = fl.raw("follow")
     how: str | None = None
     if isinstance(raw, str):
-        match = argmatch(raw, FOLLOW_ARGS)
-        if not isinstance(match, ArgmatchMatch):
-            raise argmatch_error(
+        match = match_word(raw, FOLLOW_ARGS)
+        if not isinstance(match, WordMatch):
+            raise word_refusal_error(
                 "tail", "--follow", raw, FOLLOW_ARGS, None, match.kind
             )
         how = match.word
@@ -136,9 +136,9 @@ def _interval_flag(fl: FlagView) -> float:
     if raw is None:
         return DEFAULT_SLEEP_INTERVAL
     seconds = parse_seconds(raw)
-    # GNU's own two-part test, `xstrtod(...) && 0 <= s`: the grammar
-    # first, then the range. `0 <= nan` is false, so NaN is refused,
-    # while `inf` passes both and is ACCEPTED (measured, coreutils 9.4).
+    # GNU's two-part test: the whole word must read as a number, then the
+    # number must be at least 0. NaN is not, so it is refused, while `inf`
+    # passes both and is ACCEPTED (measured, coreutils 9.4).
     if seconds is None or not 0 <= seconds:
         raise ValueError(
             f"tail: invalid number of seconds: '{quote_text(raw)}'\n"

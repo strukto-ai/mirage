@@ -61,7 +61,8 @@ GIT_DIR = ".git"
 TEMPLATE_KINDS = ("format", "tformat")
 TERMINATED_KINDS = ("oneline", "tformat")
 
-# The rules a short ref name is tried against, rev-parse's dwim_ref order.
+# The rules a short ref name is tried against, in the order
+# gitrevisions(7) lists them.
 DWIM_RULES = (
     "{}",
     "refs/{}",

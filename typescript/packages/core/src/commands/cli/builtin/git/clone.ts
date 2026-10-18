@@ -34,7 +34,7 @@ import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 
 const ENC = new TextEncoder()
 
-/** The directory git names a clone after, as `guess_dir_name` does. */
+/** The directory git names a clone after when none is given. */
 export function defaultDirectory(url: string): string {
   let path = url.replace(/\/+$/, '')
   if (path.endsWith('/.git')) path = path.slice(0, -'/.git'.length).replace(/\/+$/, '')
@@ -141,8 +141,8 @@ export async function clone(
     throw err
   }
   const local = isLocal(url)
-  // git records a local path the way absolute_pathdup spells it: the directory
-  // it ran in and the path as typed, not normalized.
+  // git records a local path as the directory it ran in joined to the path as
+  // typed, not normalized.
   const stored = !local || url.startsWith('/') ? url : `${start.virtual.replace(/\/+$/, '')}/${url}`
   let notes = quiet ? '' : `Cloning into '${name}'...\n`
   try {

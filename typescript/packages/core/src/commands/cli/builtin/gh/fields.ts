@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// The --json selections and exports follow gh 2.85.0, printed as Go
+// 1.25.5's encoding/json prints them (MIT and BSD-3-Clause; see
+// licenses/third_party/gh.txt and go.txt).
+
 import { exported, list, pointer, struct, type Shape } from './shape.ts'
 
 /** A GraphQL connection as gh reads one: its nodes, and whether more follow. */

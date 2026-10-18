@@ -97,7 +97,7 @@ async def logged(
     Always where its log already exists, and otherwise as
     ``core.logAllRefUpdates`` says, which defaults to HEAD and the
     branch, remote and notes refs outside a bare repository, and to
-    nothing in one (``should_autocreate_reflog``).
+    nothing in one.
 
     Args:
         vfs (Files): the session's files.
@@ -174,8 +174,8 @@ async def _named_log(
 ) -> tuple[str, bytes | None]:
     """The log a reflog walk reads, and the name its rows print.
 
-    As git's ``read_complete_reflog`` then ``dwim_log``: the name as
-    typed, then under ``refs/`` and ``refs/heads/``, keep the spelling;
+    As git looks a reflog up: the name as typed, then under ``refs/``
+    and ``refs/heads/``, keep the spelling;
     only a log found by the full rev-parse rules (a tag, a remote) is
     printed by its full name (git 2.47.3 and 2.50.1).
 

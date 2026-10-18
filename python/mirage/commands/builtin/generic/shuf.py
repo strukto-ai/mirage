@@ -34,13 +34,13 @@ from mirage.types import PathSpec, PolymorphicReadFn
 # this one through; naming it here is what keeps the two in step.
 NO_WRITE_OP = "shuf: backend provides no write op"
 
-# GNU's own `xalloc_die` wording, exit 1. It is what real shuf answers
+# GNU's own out-of-memory wording, exit 1. It is what real shuf answers
 # with when a range is too large to materialize, so it is borrowed
 # rather than invented. Measured, ground truth SH5.
 MEMORY_EXHAUSTED = "shuf: memory exhausted"
 
 # `-i`'s bounds are `uintmax_t`, so a bound one past UINTMAX_MAX is
-# refused with gnulib's LONGINT_OVERFLOW clause appended. The clause is
+# refused with an overflow clause appended. The clause is
 # EOVERFLOW's `strerror`, not ERANGE's: `nl -w` produces both and they
 # read differently (`: Numerical result out of range` is the value
 # outside an option's OWN range), while `shuf -i` has no range below the
@@ -113,11 +113,10 @@ _UNSIGNED = re.compile(rf"{C_SPACE}\+?[0-9]+")
 class RangeRefusal(Enum):
     """Which of GNU's two `-i` refusals an argument earned.
 
-    Not a sentinel pair but two real answers with different bytes:
-    INVALID is gnulib's LONGINT_INVALID and prints the bare
-    `invalid input range: '<arg>'`, while OVERFLOW is LONGINT_OVERFLOW
-    and appends `OVERFLOW_CLAUSE`. The span limit (SH3) is INVALID, not
-    OVERFLOW, even though it is a magnitude that trips it.
+    Not a sentinel pair but two real answers with different bytes: INVALID
+    prints the bare `invalid input range: '<arg>'`, while OVERFLOW, a bound
+    past UINTMAX_MAX, appends `OVERFLOW_CLAUSE`. The span limit (SH3) is
+    INVALID, not OVERFLOW, even though it is a magnitude that trips it.
     """
 
     INVALID = "invalid"
@@ -129,7 +128,7 @@ def range_error(raw: str, refusal: RangeRefusal) -> str:
 
     Args:
         raw (str): the raw ``-i`` value, quoted whole as GNU quotes it.
-        refusal (RangeRefusal): which gnulib status the scan produced.
+        refusal (RangeRefusal): which of the two refusals it earned.
 
     Returns:
         str: the single stderr line, without its newline.
@@ -151,13 +150,12 @@ class ShufFlags:
 def parse_input_range(raw: str) -> tuple[int, int] | RangeRefusal:
     """GNU's ``-i LO-HI``, read the way GNU reads it.
 
-    Split at the FIRST dash and scan each side on its own, which is what
-    ``strchr(optarg, '-')`` plus two ``strtoumax`` calls amount to. Doing
-    it as one regex over the whole argument gets three shapes wrong:
-    ``-i +1-3`` and ``-i 1-+3`` carry a ``+`` on either bound
-    independently, ``-i '1- 3'`` puts the blank on the HIGH bound's
-    prefix and is accepted, and ``-i '1 -3'`` is refused because that
-    same blank is trailing garbage on the LOW one.
+    Split at the FIRST dash and read each side as a number on its own, as
+    GNU does. Doing it as one regex over the whole argument gets three
+    shapes wrong: ``-i +1-3`` and ``-i 1-+3`` carry a ``+`` on either bound
+    independently, ``-i '1- 3'`` puts the blank on the HIGH bound's prefix
+    and is accepted, and ``-i '1 -3'`` is refused because that same blank is
+    trailing garbage on the LOW one.
 
     A ``-`` is never a sign here, so an empty low bound (``-i -1-3``,
     where the first dash is at index 0) and a negative high bound
@@ -291,9 +289,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags:
     the ``int`` below cannot see a prefix.
 
     A ``-n`` past UINTMAX_MAX is CLAMPED, never refused, which is the
-    opposite of what ``-i`` does with the same overflow: ``xstrtoumax``
-    answering LONGINT_OVERFLOW is fatal for ``-i`` and is quietly read
-    as SIZE_MAX for ``-n``, so ``shuf -n 99999999999999999999999999``
+    opposite of what ``-i`` does with the same overflow: a number past
+    ``uintmax_t`` is fatal for ``-i`` and is quietly read as SIZE_MAX
+    for ``-n``, so ``shuf -n 99999999999999999999999999``
     exits 0. The clamp is written down rather than left to the host's
     own integers: python would carry the bignum and TypeScript's
     ``Number.parseInt`` answers ``Infinity`` for a 400-digit count,

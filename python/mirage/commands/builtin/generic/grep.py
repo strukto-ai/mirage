@@ -47,14 +47,14 @@ from mirage.commands.builtin.utils.wrap import (
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.usage import (
-    argmatch_line,
-    argmatch_valid_block,
     usage_hint,
+    valid_words_block,
+    word_refusal_line,
 )
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -72,7 +72,7 @@ from mirage.view.namespace_view import followed_stat
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
 GREP_NO_PATTERN = f"Usage: {SYNOPSES['grep']}\n" + usage_hint("grep")
-# What --directories takes, an argmatch table: a prefix names one.
+# What --directories takes; an unambiguous prefix names one too.
 DIRECTORIES = ("read", "recurse", "skip")
 DEVICES = ("read", "skip")
 # The types -D skip passes over; stdin is read whatever it is.
@@ -85,7 +85,7 @@ DEVICE_TYPES = frozenset(
     }
 )
 UNIX_BYTE_OFFSETS = b"grep: warning: --unix-byte-offsets (-u) is obsolete\n"
-# What xstrtoimax takes as -m's count: blanks, a sign, then digits.
+# What GNU takes as -m's count: blanks, a sign, then digits.
 MAX_COUNT = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
 
 
@@ -109,8 +109,8 @@ def directories_action(fl: FlagView) -> str:
 
     -r and -R are --directories=recurse, so the last of the three on the
     line wins (grep 3.11: `grep -r -d skip` skips, `-d skip -r`
-    recurses). A word argmatch names none of the three by comes back as
-    typed; ``check_actions`` refuses it.
+    recurses). A word that names none of the three, whole or as a prefix,
+    comes back as typed; ``check_actions`` refuses it.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -124,8 +124,8 @@ def directories_action(fl: FlagView) -> str:
                 action = "recurse"
             continue
         word = fl.as_str(name) or ""
-        match = argmatch(word, DIRECTORIES)
-        action = match.word if isinstance(match, ArgmatchMatch) else word
+        match = match_word(word, DIRECTORIES)
+        action = match.word if isinstance(match, WordMatch) else word
     return action
 
 
@@ -133,7 +133,8 @@ def check_actions(fl: FlagView) -> None:
     """Refuse a -d or -D word as GNU does, each one typed and not only
     the last: its option loop stops at the first bad one.
 
-    A -d word argmatch names no action by is gnulib's refusal and grep's
+    A -d word that names no action, whole or as a prefix, gets GNU's
+    invalid or ambiguous argument message, the valid words and grep's
     usage, exit 1; -D takes only the exact words, exit 2.
 
     Args:
@@ -145,11 +146,11 @@ def check_actions(fl: FlagView) -> None:
             if word not in DEVICES:
                 raise UsageError("grep: unknown devices method")
             continue
-        match = argmatch(word, DIRECTORIES)
-        if not isinstance(match, ArgmatchMatch):
+        match = match_word(word, DIRECTORIES)
+        if not isinstance(match, WordMatch):
+            line = word_refusal_line("grep", "--directories", word, match.kind)
             raise UsageError(
-                f"{argmatch_line('grep', '--directories', word, match.kind)}"
-                f"\n{argmatch_valid_block(DIRECTORIES)}\n{GREP_NO_PATTERN}",
+                f"{line}\n{valid_words_block(DIRECTORIES)}\n{GREP_NO_PATTERN}",
                 1,
             )
 
@@ -206,7 +207,7 @@ def context_length(fl: FlagView, name: str) -> int | None:
 
 
 def max_count(fl: FlagView) -> int | None:
-    """-m as GNU reads it (xstrtoimax): leading blanks and a sign are
+    """-m as GNU 3.11 reads it: leading blanks and a sign are
     allowed, a negative count is no limit, and anything else is refused.
 
     Args:

@@ -36,8 +36,9 @@ NEVER_MATCH = r"(?!)"
 MATCHERS = {"E": RegexSyntax.EXTENDED, "P": RegexSyntax.PERL}
 CONFLICTING_MATCHERS = "conflicting matchers specified"
 PERL_SINGLE = "the -P option only supports a single pattern"
-# GNU grep 3.11's -P wrapping for -w (pcresearch.c).
-PERL_WORD = ("(?<!\\w)(?:", ")(?!\\w)")
+# What -w puts around a -P pattern: no word character may touch the match
+# on either side (grep 3.11).
+PERL_WORD_BOUNDS = ("(?<!\\w)(?:", ")(?!\\w)")
 
 
 def pattern_arg(texts: Sequence[str], flags: FlagView) -> str | None:
@@ -201,7 +202,7 @@ def pattern_warnings(
 ) -> bytes:
     """GNU grep's compile-time warnings for a pattern list, as stderr.
 
-    Only an extended expression has any: dfa.c warns about a repetition
+    Only an extended expression has any: GNU warns about a repetition
     operator at the start of an expression (`grep: warning: * at start
     of expression`), once per occurrence, which is also how GNU reads
     `(?<=...)`.
@@ -257,7 +258,11 @@ def perl_regex(
     """
     if "\n" in pattern:
         raise UsageError(f"grep: {PERL_SINGLE}")
-    source = PERL_WORD[0] + pattern + PERL_WORD[1] if whole else pattern
+    source = (
+        PERL_WORD_BOUNDS[0] + pattern + PERL_WORD_BOUNDS[1]
+        if whole
+        else pattern
+    )
     try:
         translated = translate_pcre(source, unicode, ignore_case)
     except PcreError as exc:

@@ -265,8 +265,8 @@ def _pattern(
     ``-P`` goes to the ``regex`` engine, whose syntax is PCRE's where
     Python's ``re`` is not (``\\p{L}``, ``[[:alpha:]]``, ``\\K``), with
     ASCII escapes as PCRE2 reads them without UCP. A refusal names where
-    the pattern came from and the pattern itself, as git's
-    ``compile_regexp_failed`` words it; the reason after that is glibc's
+    the pattern came from and the pattern itself, as git words it;
+    the reason after that is glibc's
     for a basic expression and the host engine's otherwise.
 
     Args:
@@ -430,7 +430,7 @@ def ref_commits(repo: BaseRepo) -> list[Commit]:
 
 
 def decoration_style(value: bytes) -> Decoration | None:
-    """``parse_decoration_style``: the style a value names, None for none.
+    """The decoration style a value names, None for none.
 
     A boolean word or number, ``short``, ``full`` or ``auto``, which
     decorates only a terminal and so never here.
@@ -458,14 +458,13 @@ async def decoration_for(
 ) -> Decoration:
     """How a ``log`` or ``show`` line labels its commits.
 
-    As git's ``cmd_log_init_finish`` settles it (pinned against git
-    2.47.3): ``log.decorate`` sets the style, a value it cannot read
-    meaning none, and the line's ``--decorate[=<style>]`` and
-    ``--no-decorate`` override it, the last one typed winning;
-    ``--pretty=raw`` ignores the config. A template that prints ``%d``
-    or ``%D`` is decorated even when nothing asked, by short names
-    unless a style says full, and one that prints neither loads no
-    labels at all.
+    As git settles it (pinned against git 2.47.3): ``log.decorate`` sets
+    the style, a value it cannot read meaning none, and the line's
+    ``--decorate[=<style>]`` and ``--no-decorate`` override it, the last
+    one typed winning; ``--pretty=raw`` ignores the config. A template
+    that prints ``%d`` or ``%D`` is decorated even when nothing asked,
+    by short names unless a style says full, and one that prints neither
+    loads no labels at all.
 
     Args:
         vfs (Files): the session's files.

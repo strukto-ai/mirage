@@ -13,34 +13,35 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * One ARGMATCH candidate set. Each entry is one VALUE, spelled either as
+ * The candidate words of an option that takes one of them, or an
+ * unambiguous prefix of one. Each entry is one VALUE, spelled either as
  * the single word that names it or as an array of alias words that all
- * mean it. The grouping is not cosmetic: it is the whole of gnulib's
+ * mean it. The grouping is not cosmetic: it is the whole of GNU's
  * ambiguity rule (two matching words inside one entry are one value and
  * match; two matching entries are two values and are ambiguous), and it
- * is what `argmatchValidBlock` renders one `  - ` line per, which is how
+ * is what `validWordsBlock` renders one `  - ` line per, which is how
  * GNU answers `sort --check=x` with `  - 'quiet', 'silent'` on one line
  * and `  - 'diagnose-first'` on the next.
  *
- * `ArgmatchChoices` in argmatch.py is the twin.
+ * `WordChoices` in word_choice.py is the twin.
  */
-export type ArgmatchChoices = readonly (string | readonly string[])[]
+export type WordChoices = readonly (string | readonly string[])[]
 
 /**
  * The two wordings a refused value picks between, spelled as the word the
  * message carries (`ls: invalid argument 'zzz' for '--time'`).
  */
-export type ArgmatchKind = 'ambiguous' | 'invalid'
+export type WordRefusalKind = 'ambiguous' | 'invalid'
 
 /**
- * What `argmatch` answers: the canonical word of the one value that
+ * What `matchWord` answers: the canonical word of the one value that
  * matched, or the wording GNU refuses the value with. Discriminated on
  * `matched` so a caller cannot read a refusal as a word, mirroring
- * Python's `ArgmatchMatch | ArgmatchRefusal`.
+ * Python's `WordMatch | WordRefusal`.
  */
-export type ArgmatchResult =
+export type WordChoiceResult =
   | { readonly matched: true; readonly word: string }
-  | { readonly matched: false; readonly kind: ArgmatchKind }
+  | { readonly matched: false; readonly kind: WordRefusalKind }
 
 /**
  * `choices` as one array of alias words per value.
@@ -49,17 +50,16 @@ export type ArgmatchResult =
  * spec's plain `choices` reach the matcher with no change to its
  * declaration.
  */
-export function valueClasses(choices: ArgmatchChoices): readonly (readonly string[])[] {
+export function valueClasses(choices: WordChoices): readonly (readonly string[])[] {
   return choices
     .map((choice) => (typeof choice === 'string' ? [choice] : choice))
     .filter((group) => group.length > 0)
 }
 
 /**
- * gnulib's `argmatch` for one option value.
+ * One option value matched against its candidates, as GNU does.
  *
- * The three answers of `argmatch (arg, arglist, vallist, valsize)`, in
- * one pass, measured against coreutils 9.4:
+ * GNU's three answers, in one pass, measured against coreutils 9.4:
  *
  * 1. An EXACT word wins outright, even when it is a proper prefix of a
  *    longer candidate: `ls --quoting-style=shell` is `shell`, not an
@@ -77,13 +77,11 @@ export function valueClasses(choices: ArgmatchChoices): readonly (readonly strin
  * a bug. `''` is a prefix of every candidate, so it falls through rule 2
  * into rule 3 and is ambiguous exactly when the candidates span two or
  * more values -- which is why `ls --sort=` and `wc --total=` answer
- * `ambiguous argument ''` while a one-value set accepts it. gnulib does
- * no such check either: its test is `strncmp (arglist[i], arg, 0) == 0`,
- * true for every candidate.
+ * `ambiguous argument ''` while a one-value set accepts it.
  *
- * `argmatch` in argmatch.py is the twin.
+ * `match_word` in word_choice.py is the twin.
  */
-export function argmatch(value: string, choices: ArgmatchChoices): ArgmatchResult {
+export function matchWord(value: string, choices: WordChoices): WordChoiceResult {
   const classes = valueClasses(choices)
   for (const group of classes) {
     if (group.includes(value)) return { matched: true, word: group[0] ?? '' }

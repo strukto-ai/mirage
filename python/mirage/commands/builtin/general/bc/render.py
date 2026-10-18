@@ -58,8 +58,11 @@ def c_atoi(text: str) -> int:
     return value
 
 
-def output_line_size(env: Mapping[str, str] | None) -> int:
-    """GNU's `line_size`: how wide one output line may be.
+def output_line_length(env: Mapping[str, str] | None) -> int:
+    """How wide one output line may be, from `BC_LINE_LENGTH`.
+
+    Unset, or set below 3 but not to 0, it is GNU's default of 70; 0
+    folds nothing.
 
     Args:
         env (Mapping[str, str] | None): the session environment, or None
@@ -98,19 +101,19 @@ def column_width(char: str) -> int:
 
 @dataclass(slots=True)
 class OutputColumn:
-    """GNU's `out_col`: how full the current output line is.
+    """How full the current output line is, in bytes.
 
     One counter for the whole run, not one per value: `print` ends in no
     newline, so a string it wrote moves the column a later value folds
     at. Only written output folds; a diagnostic never does.
 
     Args:
-        line_size (int): the width from `output_line_size`; 0 folds
+        line_length (int): the width from `output_line_length`; 0 folds
             nothing, however long the output is.
         col (int): bytes already written on the current line.
     """
 
-    line_size: int
+    line_length: int
     col: int = 0
 
     def write(self, text: str) -> str:
@@ -132,7 +135,7 @@ class OutputColumn:
                 out.append(char)
                 continue
             width = column_width(char)
-            # A folded line carries `line_size - 2` bytes and then a
+            # A folded line carries `line_length - 2` bytes and then a
             # backslash, so the default 70 puts 68 of them on a line and
             # makes it 69 wide. A character that would cross that
             # boundary moves whole to the next line; GNU, writing one
@@ -142,9 +145,9 @@ class OutputColumn:
             # ASCII one. The `col != 0` guard keeps a character wider
             # than the whole line from folding forever.
             if (
-                self.line_size != 0
+                self.line_length != 0
                 and self.col != 0
-                and self.col + width > self.line_size - 2
+                and self.col + width > self.line_length - 2
             ):
                 out.append("\\\n")
                 self.col = 0

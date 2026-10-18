@@ -55,7 +55,7 @@ describe('cut', () => {
     expect(await runCut(ENC.encode(`a${whitespace}b\n`), { fields: '2', w: true })).toBe('b\n')
   })
 
-  // One candidate, so ARGMATCH accepts any prefix of it. GNU cut has no
+  // One candidate, so a word choice accepts any prefix of it. GNU cut has no
   // such option, so these are the general rule's answer rather than a
   // measured one, and the empty word is deliberately not pinned either way.
   // Mirrors test_cut.py.

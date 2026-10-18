@@ -124,9 +124,9 @@ type Absent = readonly [boolean, boolean]
 
 const PRESENT: Absent = [false, false]
 
-// diffutils' c_escape_char: the characters a header name spells as a C
-// escape. Any other control character is three octal digits.
-const C_ESCAPES: Readonly<Record<string, string>> = {
+// The characters GNU diff spells as a C escape in a header name. Any other
+// control character is three octal digits.
+const HEADER_ESCAPES: Readonly<Record<string, string>> = {
   '\x07': 'a',
   '\b': 'b',
   '\t': 't',
@@ -139,20 +139,21 @@ const C_ESCAPES: Readonly<Record<string, string>> = {
 }
 
 /**
- * A file name as GNU diff writes it in a header line. diffutils' `c_escape`
- * double-quotes a name holding a space, a double quote, a backslash or a
- * control character, and writes each of those but the space as a C escape
+ * A file name as GNU diff writes it in a header line. GNU diff double-quotes
+ * a name holding a space, a double quote, a backslash or a control
+ * character, and writes each of those but the space as a C escape
  * (`"sp ace"`, `"t\\tab"`); any other name, bytes above ASCII included, is
  * written as it is. The `---` and `+++` lines and the `diff -r` line use it;
  * the `Only in` and `Files ... differ` lines do not. Mirrors Python's
- * `c_escape`.
+ * `quote_header_name`.
  */
-export function cEscape(name: string): string {
-  const special = (ch: string): boolean => ch === ' ' || Object.hasOwn(C_ESCAPES, ch) || ch < ' '
+export function quoteHeaderName(name: string): string {
+  const special = (ch: string): boolean =>
+    ch === ' ' || Object.hasOwn(HEADER_ESCAPES, ch) || ch < ' '
   if (!Array.from(name).some(special)) return name
   let out = ''
   for (const ch of name) {
-    const escape = Object.hasOwn(C_ESCAPES, ch) ? C_ESCAPES[ch] : undefined
+    const escape = Object.hasOwn(HEADER_ESCAPES, ch) ? HEADER_ESCAPES[ch] : undefined
     if (escape !== undefined) out += '\\' + escape
     else if (ch < ' ') out += '\\' + ch.charCodeAt(0).toString(8).padStart(3, '0')
     else out += ch
@@ -296,8 +297,8 @@ async function diffPair(
     const args = [
       aLines,
       bLines,
-      cEscape(path1.rawPath),
-      cEscape(path2.rawPath),
+      quoteHeaderName(path1.rawPath),
+      quoteHeaderName(path2.rawPath),
       flags.context,
       await headerTime(walk, path1, absent[0]),
       await headerTime(walk, path2, absent[1]),
@@ -419,7 +420,7 @@ async function diffDirs(
         parts.push(
           concat([
             ENC.encode(
-              `diff${walk.switches} ${cEscape(childA.rawPath)} ${cEscape(childB.rawPath)}\n`,
+              `diff${walk.switches} ${quoteHeaderName(childA.rawPath)} ${quoteHeaderName(childB.rawPath)}\n`,
             ),
             body,
           ]),

@@ -19,7 +19,7 @@ import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
-import { xstrtoimax } from '../utils/strtol.ts'
+import { signedDecimal } from '../utils/strtol.ts'
 import { INTMAX } from '../constants.ts'
 import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -45,9 +45,9 @@ function wrapRefusal(text: string): string {
 
 function parseFlags(bag: Record<string, FlagValue>): Base64Flags {
   const fl = new FlagView(bag, specOf('base64'))
-  // GNU 9.7 reads -w with xstrtoimax and takes a width past intmax_t as no
+  // GNU 9.7 reads -w as a signed decimal and takes a width past intmax_t as no
   // wrapping at all.
-  const wrap = fl.asNumber('wrap', xstrtoimax, wrapRefusal, { low: 0n })
+  const wrap = fl.asNumber('wrap', signedDecimal, wrapRefusal, { low: 0n })
   return {
     decode: fl.asBool('D') || fl.asBool('decode'),
     wrap: wrap === undefined ? null : wrap > INTMAX ? 0 : Number(wrap),

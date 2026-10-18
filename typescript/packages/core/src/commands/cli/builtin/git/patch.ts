@@ -46,10 +46,10 @@ export function shortOid(entry: TreeEntry | null, width: number): string {
 }
 
 /**
- * One path's patch, headers and hunks, as git's builtin_diff writes it. A
- * change between a file and a symlink is split into a deletion and a creation,
- * the way git's run_diff splits a type change. A `---` or `+++` label holding a
- * space ends in a tab, so a patch tool can tell where the name stops.
+ * One path's patch, headers and hunks, as git diff prints it. A change between
+ * a file and a symlink is split into a deletion and a creation, the two patches
+ * git diff prints for a type change. A `---` or `+++` label holding a space
+ * ends in a tab, so a patch tool can tell where the name stops.
  */
 export async function filePatch(
   repo: Repo,
@@ -111,7 +111,7 @@ function text(rows: readonly string[]): string {
 }
 
 /**
- * The `@@` hunks of a two-way patch, as xdiff's xdl_emit_diff emits them. Each
+ * The `@@` hunks of a two-way patch, as git diff prints them. Each
  * header carries the nearest earlier line of the old side that starts with a
  * letter, `_` or `$` (git's default funcname), and keeps the previous hunk's
  * when none lies between the two.

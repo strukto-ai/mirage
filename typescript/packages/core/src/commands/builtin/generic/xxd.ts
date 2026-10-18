@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// The plain (-p) reader follows xxd 2024-12-07 from vim, under its
+// X11-MIT option (see licenses/third_party/xxd.txt).
+
 import { closeQuietly, primeStream } from '../../../io/stream.ts'
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'

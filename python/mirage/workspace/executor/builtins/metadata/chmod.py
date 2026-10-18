@@ -38,7 +38,7 @@ from mirage.workspace.session import SessionState
 
 
 def mode_line(name: str, stat: FileStat, new: int, failed: bool) -> str:
-    """chmod's report for one file (GNU chmod 9.7's describe_change).
+    """chmod's report for one file, worded as GNU chmod 9.7 prints it.
 
     Args:
         name (str): the file as GNU names it.

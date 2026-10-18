@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Warns as huggingface_hub 1.16.4's `hf upload` does (Apache-2.0; see
+// licenses/third_party/huggingface_hub.txt).
+
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { FlagView } from '@struktoai/mirage-core/commands/spec/index'

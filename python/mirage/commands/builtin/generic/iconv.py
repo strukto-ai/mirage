@@ -377,7 +377,7 @@ async def iconv(
 ) -> tuple[ByteSource | None, IOResult]:
     """Convert each input from one charset to another, in order.
 
-    Follows glibc's iconv: ``-c`` drops what cannot be converted and exits
+    Matches glibc's iconv: ``-c`` drops what cannot be converted and exits
     1; without it the output stops before the first such sequence, which
     is reported by its byte offset in that input, and no later input is
     read. An input that cannot be opened is reported and skipped; one

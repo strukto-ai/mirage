@@ -1,3 +1,6 @@
+# The option loop, main loop and exit statuses follow jq 1.8.2's
+# src/main.c (MIT; see licenses/third_party/jq.txt).
+
 import dataclasses
 import re
 from collections.abc import (

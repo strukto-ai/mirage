@@ -321,8 +321,7 @@ export async function restorePaths(
       // the entry needs a directory where it stands, so git replaces it with
       // one rather than writing through it. A link's target tree is left
       // exactly as it was, and an untracked file standing there is replaced
-      // in silence, which is what git's create_directories does to any
-      // leading non-directory.
+      // in silence, which is what git does to any leading non-directory.
       const above = await blockingAncestor(vfs, repo.location.worktree, name)
       if (above !== null) await removeFile(vfs, above)
       // A directory can still stand here after the loop above: it removed

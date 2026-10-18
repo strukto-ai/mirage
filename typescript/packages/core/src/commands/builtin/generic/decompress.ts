@@ -28,7 +28,7 @@ function asciiLower(text: string): string {
 /**
  * The compression suffix gzip reads off `name`, as spelled there.
  *
- * gzip 1.13's get_suffix: the -S suffix and the ones gzip always knows,
+ * As gzip 1.13 reads it: the -S suffix and the ones gzip always knows,
  * compared without regard to ASCII case, and only where the name is longer
  * than the suffix with no slash right before it, so neither `.gz` nor
  * `d/.gz` has one. A -S suffix that ends one of the built-in ones is tried
@@ -133,7 +133,7 @@ interface GzipOpenOptions {
 }
 
 /**
- * Open one operand the way gzip 1.13's open_input_file does.
+ * Open one operand the way gzip 1.13 opens it.
  *
  * A name typed with a trailing slash has to be a directory. Without -c, -t
  * or -f gzip opens with O_NOFOLLOW, so a link standing at the name, dangling

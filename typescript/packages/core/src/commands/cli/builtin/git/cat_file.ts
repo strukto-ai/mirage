@@ -62,7 +62,7 @@ async function raw(repo: Repo, oid: string): Promise<Uint8Array> {
 }
 
 /**
- * An object peeled down to a type, git's read_object_with_reference: a tag to
+ * An object peeled down to a type, as `git cat-file <type>` peels it: a tag to
  * what it points at and a commit to its tree; null when the chain never
  * reaches the type.
  */

@@ -121,8 +121,8 @@ const ENC = new TextEncoder()
  * parsed by splitting on whitespace. Verified both ways against git 2.47.
  *
  * `core.quotePath=false` turns `fully` off, and a byte outside ASCII then passes
- * through as itself while everything else is quoted as before (git's
- * cq_must_quote, pinned against git 2.50). A byte that is not UTF-8 arrives as a
+ * through as itself while everything else is quoted as before (pinned against
+ * git 2.50). A byte that is not UTF-8 arrives as a
  * surrogate escape and is quoted, or passed through, as that byte.
  *
  * @param path repository-relative path
@@ -185,7 +185,7 @@ function commits(count: number): string {
 /**
  * What the long status says about a branch and its upstream.
  *
- * Pinned against git 2.47.3 and 2.50.1 (`format_tracking_info`).
+ * Pinned against git 2.47.3 and 2.50.1.
  */
 export function trackingLines(upstream: Upstream): string[] {
   const name = upstream.label

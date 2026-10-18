@@ -72,7 +72,7 @@ async function commonDir(vfs: Files, gitdir: PathSpec): Promise<PathSpec> {
 }
 
 /**
- * git's `is_git_directory`: the common directory, or null.
+ * Whether git takes this for a git directory: its common directory, or null.
  *
  * A git directory holds its own HEAD and finds objects and refs in its common
  * directory, which is itself unless it is a linked worktree's.
@@ -227,7 +227,7 @@ export async function isBare(vfs: Files, location: RepoLocation): Promise<boolea
 }
 
 /**
- * git's `setup_work_tree`: refuse when there is no tree to enter.
+ * Refuse, in git's words, when there is no work tree to enter.
  *
  * Asked by every verb that reads or writes working files, so a bare repository
  * or a mistyped `--work-tree` is refused rather than read as a tree with every

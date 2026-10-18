@@ -171,7 +171,8 @@ async def _open_write_files(
 ) -> str | None:
     """Truncate the ``w`` files as GNU opens them when it compiles.
 
-    In order; the first that cannot be opened is GNU's panic.
+    In order; the first that cannot be opened ends the run with GNU's
+    ``couldn't open file`` line, exit 4.
 
     Args:
         names (Sequence[str]): the files, in the order they were opened.

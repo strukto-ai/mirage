@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# Compile error texts from PCRE2 10.43 and 10.46 (BSD-3-Clause WITH
+# PCRE2-exception; see licenses/third_party/pcre2.txt).
+
 import re
 from dataclasses import dataclass, field, replace
 from functools import cache, lru_cache

@@ -54,8 +54,8 @@ ARGUMENT_OPTIONS = [
 ]
 
 
-# Both of uniq's ARGMATCH refusals name the refused word through gnulib's
-# quote(), so a byte outside 0x20-0x7e comes back escaped. Rows measured
+# Both of uniq's word-choice refusals name the refused word quoted, so a
+# byte outside 0x20-0x7e comes back escaped. Rows measured
 # against GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
 # (`uniq --all-repeated=<w>`, `uniq --group=<w>`). Mirrored in
 # uniq.test.ts.

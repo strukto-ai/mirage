@@ -354,7 +354,8 @@ export async function executeAssignment(
     await assignVar(view, key, stored, null, added)
   }
   // Reassigning OPTIND (even to its current value) restarts the getopts
-  // scan, matching bash's internal char pointer.
+  // scan at the first letter of the word it names, as bash 5.2 does
+  // (`OPTIND=1` midway through `-ab` makes getopts read `a` again).
   if (key === 'OPTIND') session.getoptsOptind = null
   return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
 }

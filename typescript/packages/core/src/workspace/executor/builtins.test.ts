@@ -67,7 +67,7 @@ import {
   handleWhoami,
   handleXargs as streamXargs,
 } from './builtins/index.ts'
-import { parseDuration, parseSignal, signalName } from './builtins/timeout/timeout.ts'
+import { durationSeconds, parseSignal, signalName } from './builtins/timeout/timeout.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 
 function wireMount(mount: MountEntry): void {
@@ -2707,34 +2707,34 @@ describe('handleTimeout', () => {
   const session = new SessionState({ sessionId: 'test' })
 
   it('parses duration units', () => {
-    expect(parseDuration('1')).toBe(1)
-    expect(parseDuration('0.5')).toBe(0.5)
-    expect(parseDuration('2s')).toBe(2)
-    expect(parseDuration('2m')).toBe(120)
-    expect(parseDuration('1h')).toBe(3600)
-    expect(parseDuration('1d')).toBe(86400)
-    expect(parseDuration('.5')).toBe(0.5)
+    expect(durationSeconds('1')).toBe(1)
+    expect(durationSeconds('0.5')).toBe(0.5)
+    expect(durationSeconds('2s')).toBe(2)
+    expect(durationSeconds('2m')).toBe(120)
+    expect(durationSeconds('1h')).toBe(3600)
+    expect(durationSeconds('1d')).toBe(86400)
+    expect(durationSeconds('.5')).toBe(0.5)
   })
 
   it('reads C floats as durations', () => {
-    expect(parseDuration('1e-1')).toBe(0.1)
-    expect(parseDuration('.1s')).toBe(0.1)
-    expect(parseDuration(' 0.1')).toBe(0.1)
-    expect(parseDuration('0x1p-3')).toBe(0.125)
-    expect(parseDuration('inf')).toBe(Infinity)
-    expect(parseDuration('infinitys')).toBe(Infinity)
-    expect(parseDuration('-0')).toBe(0)
+    expect(durationSeconds('1e-1')).toBe(0.1)
+    expect(durationSeconds('.1s')).toBe(0.1)
+    expect(durationSeconds(' 0.1')).toBe(0.1)
+    expect(durationSeconds('0x1p-3')).toBe(0.125)
+    expect(durationSeconds('inf')).toBe(Infinity)
+    expect(durationSeconds('infinitys')).toBe(Infinity)
+    expect(durationSeconds('-0')).toBe(0)
   })
 
   it('rejects garbage durations', () => {
-    expect(parseDuration('xx')).toBeNull()
-    expect(parseDuration('-1')).toBeNull()
-    expect(parseDuration('1x')).toBeNull()
-    expect(parseDuration('')).toBeNull()
-    expect(parseDuration('1ss')).toBeNull()
-    expect(parseDuration('1,5')).toBeNull()
-    expect(parseDuration('1e')).toBeNull()
-    expect(parseDuration('nan')).toBeNull()
+    expect(durationSeconds('xx')).toBeNull()
+    expect(durationSeconds('-1')).toBeNull()
+    expect(durationSeconds('1x')).toBeNull()
+    expect(durationSeconds('')).toBeNull()
+    expect(durationSeconds('1ss')).toBeNull()
+    expect(durationSeconds('1,5')).toBeNull()
+    expect(durationSeconds('1e')).toBeNull()
+    expect(durationSeconds('nan')).toBeNull()
   })
 
   it.each<[string, number | null]>([

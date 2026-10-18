@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// A port of dulwich 1.2.15's block similarity score, under its
+// Apache-2.0 option (see licenses/third_party/dulwich.txt).
+
 // A block ends at a newline or at this many bytes, whichever comes first, so a
 // long line without newlines still splits into comparable pieces.
 const BLOCK_SIZE = 64

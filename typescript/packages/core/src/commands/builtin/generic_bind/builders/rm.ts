@@ -65,8 +65,8 @@ const rm: GenericCommandFn = async (ops, accessor, paths, _texts, ctx) => {
       if (!isFsError(err)) throw err
       // ENOTDIR is a component that is a plain file: the operand sits
       // under one, or carried a trailing slash that named one (`rm reg/`).
-      // -f ignores it and ENOENT alone, as GNU's `ignorable_missing` does;
-      // any other failure is reported, -f or not. GNU rm reports the
+      // -f ignores it and ENOENT alone, as GNU rm 9.7 does; any other
+      // failure is reported, -f or not. GNU rm reports the
       // operand and keeps removing the rest.
       if (force && (isEnoent(err) || isEnotdir(err))) continue
       errors.push(`rm: cannot remove '${p.rawPath}': ${fsStrerror(err) ?? String(err)}`)

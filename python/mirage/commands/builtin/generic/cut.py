@@ -16,9 +16,9 @@ from mirage.commands.builtin.utils.stream import (
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.argmatch import ArgmatchMatch, argmatch
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -67,7 +67,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
     if fl.as_bool("w") or fl.as_str("F") is not None or raw_whitespace is True:
         whitespace = "default"
     elif isinstance(raw_whitespace, str):
-        # One candidate, so ARGMATCH can only match or not match here:
+        # One candidate, so the word can only match or not match here:
         # a prefix of `trimmed` resolves to it, and the refusal keeps
         # cut's own one-line wording (no candidate block). GNU cut has no
         # such option, so there is nothing to measure this against: the
@@ -75,7 +75,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CutFlags:
         # general rule says, not a probed answer. It stays the general
         # rule rather than a special case.
         if not isinstance(
-            argmatch(raw_whitespace, WHITESPACE_ARGS), ArgmatchMatch
+            match_word(raw_whitespace, WHITESPACE_ARGS), WordMatch
         ):
             raise ValueError(
                 f"cut: invalid argument "

@@ -76,6 +76,15 @@ FETCH_HEAD = "FETCH_HEAD"
 ALL_TAGS = "refs/tags/*:refs/tags/*"
 TERM_COLUMNS = 80
 REFCOL_MIN = 10
+# What a summary row spends beside its two ref names when the ref column
+# is sized, counted off the row summary_lines writes: ` * ` (3), the
+# summary column at the default abbrev of 7 (2 * 7 + 3) and the space
+# after it make the 21 columns before the remote, and ` -> ` the 4 before
+# the local. The sizing keeps that default whatever the repository's
+# abbrev is: measured on git 2.47.3, a 23-character branch widens the
+# column at core.abbrev=12 as well, and a 24-character one at neither.
+ROW_LEAD = len(" * ") + 2 * 7 + 3 + len(" ")
+ROW_ARROW = len(" -> ")
 UNREACHABLE = (
     "fatal: Could not read from remote repository.\n\n"
     "Please make sure you have the correct access rights\n"
@@ -120,8 +129,8 @@ class Row:
         remote (str): the remote ref, prettified.
         local (str): the local ref, prettified, or FETCH_HEAD.
         error (str): the parenthesized note, empty for none.
-        counted (bool): whether the row widens the ref column, as
-            git's refcol_width counts a changed local ref only.
+        counted (bool): whether the row may widen the ref column,
+            which git widens for a changed local ref only.
     """
 
     code: str
@@ -161,9 +170,9 @@ def summary_lines(url: str, rows: list[Row], abbrev: int) -> str:
     width = 2 * abbrev + 3
     refcol = REFCOL_MIN
     for row in rows:
-        if (
-            row.counted
-            and 21 + len(row.remote) + 4 + len(row.local) < TERM_COLUMNS
+        if row.counted and (
+            ROW_LEAD + len(row.remote) + ROW_ARROW + len(row.local)
+            < TERM_COLUMNS
         ):
             refcol = max(refcol, len(row.remote))
     lines = [f"From {display_url(url)}\n"]
@@ -234,7 +243,7 @@ async def _receive(
 
 
 def ignore_funny(wanted: list[Wanted]) -> tuple[list[Wanted], str]:
-    """Drop the refs whose local name git refuses, as get_fetch_map does.
+    """Drop the refs whose local name git refuses to write.
 
     The remote names its refs, so one it advertises as
     ``refs/tags/../../x`` would land outside ``.git``. git skips such a

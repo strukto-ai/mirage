@@ -155,7 +155,7 @@ function power(base: bigint, exponent: bigint): bigint {
  * does. A token is read only when the grammar needs it, and every value
  * is computed the moment its operands are, so an assignment before an
  * error has already been made (`x=7, 1+` leaves x at 7) and an error names
- * the text from the token the reader stood on (`tp`). Inside the branch
+ * the text from the token the reader stood on (`tokStart`). Inside the branch
  * `&&`, `||` or `?:` skips (`skip`) nothing is read from a variable or
  * written to one and a zero divisor is no error, but the grammar is still
  * checked, an integer constant still judged and a negative exponent still
@@ -163,7 +163,7 @@ function power(base: bigint, exponent: bigint): bigint {
  */
 class Reader {
   private pos = 0
-  private tp = 0
+  private tokStart = 0
   private kind: ArithTokenKind = 'end'
   private tok = ''
   private value = 0n
@@ -177,7 +177,7 @@ class Reader {
   ) {}
 
   /** The error bash reports at the token the reader stands on, or at `at`. */
-  private fail(reason: string, at: number = this.tp): ArithError {
+  private fail(reason: string, at: number = this.tokStart): ArithError {
     return new ArithError(reason, this.text, this.text.slice(at))
   }
 
@@ -197,7 +197,7 @@ class Reader {
       this.set(pos, 'end', '')
       return
     }
-    this.tp = pos
+    this.tokStart = pos
     ARITH_NAME.lastIndex = pos
     if (ARITH_NAME.test(text)) {
       let end = ARITH_NAME.lastIndex
@@ -282,11 +282,11 @@ class Reader {
 
   private assign(): bigint {
     if (this.is('name')) {
-      const [pos, tp, target] = [this.pos, this.tp, this.tok]
+      const [pos, at, target] = [this.pos, this.tokStart, this.tok]
       this.advance()
-      if (this.is('op') && ARITH_ASSIGN_OPS.has(this.tok)) return this.assignment(target, tp)
+      if (this.is('op') && ARITH_ASSIGN_OPS.has(this.tok)) return this.assignment(target, at)
       this.set(pos, 'name', target)
-      this.tp = tp
+      this.tokStart = at
     }
     const value = this.ternary()
     if (this.is('op') && ARITH_ASSIGN_OPS.has(this.tok)) {
@@ -307,7 +307,7 @@ class Reader {
   private assignment(target: string, at: number): bigint {
     const op = this.tok
     this.advance()
-    const divisor = this.tp
+    const divisor = this.tokStart
     let key: string | null
     let value: bigint
     if (op === '=') {
@@ -351,7 +351,7 @@ class Reader {
       const precedence = ARITH_PRECEDENCE.get(op) ?? 0
       if (precedence < floor) break
       this.advance()
-      const divisor = this.tp
+      const divisor = this.tokStart
       if (op === '&&' || op === '||') {
         const skipped = (left === 0n) === (op === '&&')
         if (skipped) this.skip++
@@ -400,7 +400,7 @@ class Reader {
     if (this.is('pre')) {
       const step = this.tok === '++' ? 1n : -1n
       this.advance()
-      const [target, at] = [this.tok, this.tp]
+      const [target, at] = [this.tok, this.tokStart]
       this.advance()
       const value = this.step(target, step, true, at)
       if (this.is('post')) throw this.fail(`${this.tok}: assignment requires lvalue`)
@@ -452,7 +452,7 @@ class Reader {
       return value
     }
     if (this.is('name')) {
-      const [target, at] = [this.tok, this.tp]
+      const [target, at] = [this.tok, this.tokStart]
       this.advance()
       if (this.is('post')) {
         const value = this.step(target, this.tok === '++' ? 1n : -1n, false, at)

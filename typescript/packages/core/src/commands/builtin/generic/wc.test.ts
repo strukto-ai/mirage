@@ -18,8 +18,8 @@ import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { formatWcLines, numberWidth, parseFlags, wcGeneric } from './wc.ts'
 
-// GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
-// so a byte outside 0x20-0x7e comes back escaped rather than interpolated
+// GNU's word-choice refusal names the refused word quoted, so a byte
+// outside 0x20-0x7e comes back escaped rather than interpolated
 // raw. Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a
 // raw `bytes` argv (`wc --total=<w>`). Mirrors test_wc.py.
 describe('wc quotes the word --total refuses', () => {

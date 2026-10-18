@@ -125,8 +125,8 @@ describe('split flag values', () => {
     expect(Object.keys(sink).sort()).toEqual(['x98', 'x99'])
   })
 
-  // xstrtoumax skips leading whitespace and allows a single '+', so these are
-  // valid counts (pinned against coreutils 9.7).
+  // GNU skips leading whitespace and allows a single '+' on a count, so these
+  // are valid counts (pinned against coreutils 9.7).
   it.each([
     [{ bytes: '+3' }, 'signed bytes'],
     [{ suffix_length: '+3', lines: '1' }, 'signed suffix length'],

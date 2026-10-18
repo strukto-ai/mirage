@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# Marshals as gh 2.85.0's types do under Go 1.25.5's encoding/json
+# (MIT and BSD-3-Clause; see licenses/third_party/gh.txt and go.txt).
+
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 

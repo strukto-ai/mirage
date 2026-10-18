@@ -103,7 +103,7 @@ describe('parseSkip', () => {
     [':1', ':1'],
     [':', ':'],
   ])('names the operand from where it stopped: %s', (raw, named) => {
-    // GNU prints the operand from the position xstrtoumax was reading,
+    // GNU prints the operand from the position its count started at,
     // so a bad SKIP1 names the whole pair and a bad SKIP2 names only
     // itself. A colon is the one character the first count may stop on.
     let caught: unknown

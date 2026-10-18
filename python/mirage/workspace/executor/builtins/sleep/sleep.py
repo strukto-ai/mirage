@@ -37,9 +37,9 @@ from mirage.workspace.executor.builtins.sleep.constants import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.types import ExecutionNode
 
-# The only two options coreutils sleep declares, through gnulib's
-# `parse_gnu_standard_options_only`. They share no prefix, so an
-# abbreviation of either resolves and neither can ever be ambiguous.
+# The only two options coreutils sleep accepts; its --help page lists
+# no others. They share no prefix, so an abbreviation of either
+# resolves and neither can ever be ambiguous.
 _STANDARD_OPTIONS = ("--help", "--version")
 
 
@@ -92,18 +92,16 @@ def _standard_response(
 def _sleep_operands(args: list[str]) -> tuple[list[str], str | None]:
     """sleep's operands, and the first dash word that is not one.
 
-    coreutils sleep declares only gnulib's two standard options and
-    reads the line through a real getopt_long loop
-    (``parse_gnu_standard_options_only``), so it stops at a dash-leading
-    word wherever that word sits: measured on 9.4, `sleep --zzz 0` and
-    `sleep 0 --zzz` both report the option and neither reports the
-    interval. The caller decides what that word means, since a
-    `--help`/`--version` spelling is an answer rather than a refusal.
-    `--` ends the scan, which is what makes `sleep -- '--zzz=é'` an
-    interval diagnostic instead of an option one, and a `-<digits>`
-    word stays an operand -- mirage's NUMERIC_SHORT rule, which every
-    command shares, and the reason `sleep -1` names the interval where
-    GNU names the option letter.
+    coreutils sleep accepts only `--help` and `--version` and refuses
+    any other dash-leading word wherever that word sits: measured on
+    9.4, `sleep --zzz 0` and `sleep 0 --zzz` both report the option and
+    neither reports the interval. The caller decides what that word
+    means, since a `--help`/`--version` spelling is an answer rather
+    than a refusal. `--` ends the scan, which is what makes
+    `sleep -- '--zzz=é'` an interval diagnostic instead of an option
+    one, and a `-<digits>` word stays an operand -- mirage's
+    NUMERIC_SHORT rule, which every command shares, and the reason
+    `sleep -1` names the interval where GNU names the option letter.
 
     Args:
         args (list[str]): words after the command name, as typed.
@@ -135,11 +133,10 @@ def _interval_seconds(raw: str) -> float | None:
     """One operand's seconds, or None when it is not an interval.
 
     GNU's grammar is `NUMBER[SUFFIX]`, which the help page advertises:
-    gnulib reads the number with strtod, then allows at most ONE
-    trailing character and looks it up in `apply_suffix`. Measured on
-    coreutils 9.7: `sleep 0.005m` takes 0.3s, `sleep 1e-3s` is
-    accepted, and `sleep 0S`, `sleep 0ss`, `sleep 0sx` and `sleep s`
-    are each `invalid time interval`.
+    a floating-point number followed by at most ONE suffix letter, one
+    of s, m, h or d. Measured on coreutils 9.7: `sleep 0.005m` takes
+    0.3s, `sleep 1e-3s` is accepted, and `sleep 0S`, `sleep 0ss`,
+    `sleep 0sx` and `sleep s` are each `invalid time interval`.
 
     Args:
         raw (str): one operand, as typed.
@@ -194,9 +191,9 @@ async def handle_sleep(
             ExecutionNode(command="sleep", exit_code=code),
         )
     if not operands:
-        # Missing operand is the same `usage (EXIT_FAILURE)` refusal the
-        # invalid-interval one is, so it carries the same Try-help line
-        # (measured on 9.4: `sleep` is two lines, not one).
+        # Missing operand is refused like an invalid interval: exit 1
+        # under the same closing Try-help line (measured on 9.4: `sleep`
+        # is two lines, not one).
         err = encode_text(f"sleep: missing operand\n{usage_hint('sleep')}\n")
         return (
             None,
@@ -227,13 +224,12 @@ async def handle_sleep(
             continue
         total += seconds
     if bad:
-        # coreutils calls `error()` per offending operand and only then
-        # `usage (EXIT_FAILURE)`, so EVERY bad operand is named, in line
-        # order and repeated if it repeats, under one closing Try-help
-        # line (measured on 9.7: `sleep 1x 2y` is three lines, `sleep 1x
-        # 1x` names 1x twice). Each operand goes through gnulib's
-        # `quote()` like every other coreutils operand diagnostic
-        # (measured on 9.4: `sleep -- <e-acute>` names `'\303\251'`).
+        # GNU names EVERY bad operand, one line each, in line order and
+        # repeated if it repeats, under one closing Try-help line
+        # (measured on 9.7: `sleep 1x 2y` is three lines, `sleep 1x 1x`
+        # names 1x twice). Each operand is quoted the way every other
+        # coreutils operand diagnostic is (measured on 9.4:
+        # `sleep -- <e-acute>` names `'\303\251'`).
         err = encode_text(
             "".join(
                 f"sleep: invalid time interval '{quote_text(raw)}'\n"

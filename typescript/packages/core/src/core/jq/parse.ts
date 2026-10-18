@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Follows jq 1.8.2's src/jv_parse.c, with the UTF-8 decoding of its
+// src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h (MIT; see
+// licenses/third_party/jq.txt).
+
 import { JqParseError, NO_VALUE, NumberText, type NoValue } from './types.ts'
 
 // The deepest jq nests arrays, objects and the keys between them. jq's

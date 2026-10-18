@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_UMASK } from '../../../../context/session_context.ts'
-import { argmatch } from '../../../../commands/spec/argmatch.ts'
+import { matchWord } from '../../../../commands/spec/word_choice.ts'
 import { invalidArgumentError, usageHint } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -64,7 +64,7 @@ export async function handleTouch(
   if (refused !== null) return refused
   let time = fl.asStr('time')
   if (time !== undefined) {
-    const match = argmatch(time, TIME_GROUPS)
+    const match = matchWord(time, TIME_GROUPS)
     if (!match.matched) {
       const [message, code] = invalidArgumentError(
         'touch',

@@ -21,8 +21,8 @@ import { fsErrorLine } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { formatRecords } from '../utils/output.ts'
-import { argmatchError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -47,8 +47,8 @@ interface WcCounts {
   maxLineLength: number
 }
 
-// GNU's `total_types` in declaration order, which is both the accepted set
-// and what `--total=x` lists back. No aliases, so one per line.
+// The --total words in GNU's order, which is both the accepted set and what
+// `--total=x` lists back. No aliases, so one per line.
 const TOTAL_ARGS = ['auto', 'always', 'only', 'never'] as const
 
 export interface WcFlags {
@@ -69,10 +69,10 @@ export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
   // tests `typeof === 'string'`), so the empty word still reaches the
   // renderer rather than defaulting.
   const rawTotal = fl.asStr('total') ?? 'auto'
-  const match = argmatch(rawTotal, TOTAL_ARGS)
+  const match = matchWord(rawTotal, TOTAL_ARGS)
   if (!match.matched) {
     return (
-      argmatchError('wc', '--total', rawTotal, TOTAL_ARGS, undefined, match.kind).message + '\n'
+      wordRefusalError('wc', '--total', rawTotal, TOTAL_ARGS, undefined, match.kind).message + '\n'
     )
   }
   return {
@@ -151,9 +151,10 @@ export function numberWidth(
   return sizes.includes(null) ? Math.max(width, 7) : width
 }
 
-// One report row under GNU's name rule (coreutils 9.7 wc.c): a name holding a
-// newline is shell-quoted, as quotef does, so no row spans two lines; every
-// other name, spaces included, prints as itself. Mirrors Python's labelled.
+// One report row under GNU's name rule (coreutils 9.7): a name holding a
+// newline is shell-quoted, as GNU 9.7 prints it, so no row spans two lines;
+// every other name, spaces included, prints as itself. Mirrors Python's
+// labelled.
 function labelled(body: string, label: string | null): string {
   if (label === null) return body
   return `${body} ${label.includes('\n') ? shellQuote(label) : label}`

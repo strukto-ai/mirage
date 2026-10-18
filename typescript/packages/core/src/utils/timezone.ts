@@ -53,9 +53,9 @@ export interface Zone {
   /**
    * The instant whose wall clock reads `p`. A wall clock two instants share
    * (the hour repeated when DST ends) resolves to the one under `prefer`,
-   * the offset in seconds east that a displaced moment started from, which
-   * is how gnulib hands mktime the base's tm_isdst, and to the later one
-   * without it, as glibc's mktime resolves an absolute reading. One no
+   * the offset in seconds east that a displaced moment started from, so a
+   * moved time keeps the side of the change its base was on, and to the
+   * later one without it, as GNU date resolves an absolute reading. One no
    * instant shows (the hour skipped when DST starts) is read under the
    * offset in force before the change and so lands forward by the gap,
    * which a caller that must refuse it detects by comparing `parts` of the

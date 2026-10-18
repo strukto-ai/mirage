@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Follows jq 1.8.2's src/util.c (MIT; see licenses/third_party/jq.txt).
+
 import {
   CLOSE_BRACE,
   CLOSE_BRACKET,
@@ -37,7 +39,7 @@ import { READ_FAILURES } from '../../errors/constants.ts'
 import { fsStrerror, isFsError } from '../../errors/fs.ts'
 
 /**
- * The most bytes one read of jq's input reader takes (jq 1.8's util.c):
+ * The most bytes one read of jq's input reader takes (jq 1.8.2's util.c):
  * fgets into a 4096-byte buffer, less the four bytes it keeps for UTF-8 and
  * the NUL. A read stops after a newline, and one that ends inside a
  * character reads on to the end of it.

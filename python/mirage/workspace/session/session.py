@@ -425,7 +425,9 @@ class SessionState:
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,
-    # which restarts the scan, matching bash's internal char pointer.
+    # which restarts the scan at the word's first letter, as bash 5.2
+    # does: after `getopts ab o` reads `a` from `-ab`, `OPTIND=1` makes
+    # the next one read `a` again, not `b`.
     _trap_status: int | None = field(default=None, repr=False)
     _getopts_pos: int = field(default=1, repr=False)
     _getopts_optind: int | None = field(default=None, repr=False)

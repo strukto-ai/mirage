@@ -16,12 +16,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from mirage.commands.spec import constants
-from mirage.commands.spec.argmatch import (
-    ArgmatchChoices,
-    ArgmatchMatch,
-    argmatch,
-    value_classes,
-)
 from mirage.commands.spec.builtin_specs import SPECS
 from mirage.commands.spec.builtins import is_builtin_grammar
 from mirage.commands.spec.compile import (
@@ -35,12 +29,12 @@ from mirage.commands.spec.compile import (
 )
 from mirage.commands.spec.constants import (
     ARG_PLACEHOLDER,
-    ARGMATCH_CHOICE_OPTIONS,
     FLOAT_VALUE,
     INT_VALUE,
     NO_LONG_OPTIONS,
     NUMERIC_SHORT,
     SOLE_ARGUMENT_LONG_OPTIONS,
+    WORD_CHOICE_OPTIONS,
     flag_kwarg_name,
 )
 from mirage.commands.spec.flag_view import FlagBag
@@ -52,35 +46,41 @@ from mirage.commands.spec.types import (
     ValueType,
     WordKind,
 )
+from mirage.commands.spec.word_choice import (
+    WordChoices,
+    WordMatch,
+    match_word,
+    value_classes,
+)
 from mirage.utils.path import resolve_path
 
 
-def _argmatch_options() -> tuple[Argument, ...]:
-    """The builtin ``Argument`` objects whose choices are ARGMATCH tables.
+def _word_choice_arguments() -> tuple[Argument, ...]:
+    """The builtin ``Argument`` objects whose choices are word choices.
 
-    ARGMATCH_CHOICE_OPTIONS names them as (command, spelling) pairs
+    WORD_CHOICE_OPTIONS names them as (command, spelling) pairs
     because that is how the measurement reads; this resolves each pair
-    to the one object the builtin spec declares, so ``_argmatch_dests``
+    to the one object the builtin spec declares, so ``_word_choice_dests``
     can test ``is`` rather than compare strings. A pair that names no
     option is a rotted entry and fails loudly here, at import.
     """
     found: list[Argument] = []
-    for name, spelling in sorted(ARGMATCH_CHOICE_OPTIONS):
+    for name, spelling in sorted(WORD_CHOICE_OPTIONS):
         options = [o for o in SPECS[name].arguments if spelling in o.names]
         if not options:
             raise ValueError(
-                f"ARGMATCH_CHOICE_OPTIONS names {name} "
+                f"WORD_CHOICE_OPTIONS names {name} "
                 f"{spelling}, which that spec does not declare"
             )
         found.extend(options)
     return tuple(found)
 
 
-_ARGMATCH_OPTIONS = _argmatch_options()
+_WORD_CHOICE_ARGUMENTS = _word_choice_arguments()
 
 
-def _argmatch_dests(spec: CommandSpec) -> frozenset[str]:
-    """Which of this spec's choice sets are gnulib ARGMATCH tables.
+def _word_choice_dests(spec: CommandSpec) -> frozenset[str]:
+    """Which of this spec's choice sets GNU matches as word choices.
 
     Decided by ``Argument`` identity, not by the command's name: a mount
     may register its own `tee` (commands/config.py), and a name is not
@@ -101,7 +101,7 @@ def _argmatch_dests(spec: CommandSpec) -> frozenset[str]:
     return frozenset(
         next((name for name in o.names if name.startswith("--")), o.names[0])
         for o in spec.arguments
-        if o.choices and any(o is table for table in _ARGMATCH_OPTIONS)
+        if o.choices and any(o is table for table in _WORD_CHOICE_ARGUMENTS)
     )
 
 
@@ -151,17 +151,17 @@ class ParsedArgs:
     option_error_kinds: list[str] = field(default_factory=list)
     needs_value_options: list[str] = field(default_factory=list)
     # Values outside a declared choices set, in scan order. The two
-    # lists are the two wordings gnulib picks between and the kinds tape
+    # lists are the two wordings GNU picks between and the kinds tape
     # above is what orders them against each other: a value that is a
     # prefix of two candidates reads `ambiguous argument 'ie'`, one that
     # is a prefix of none reads `invalid argument 'a'`, and both print
-    # the same candidate block. Only the ARGMATCH_CHOICE_OPTIONS tables
+    # the same candidate block. Only the WORD_CHOICE_OPTIONS tables
     # can fill the ambiguous one, because only a prefix can be
     # ambiguous and every other choices set compares the whole word.
-    invalid_value_options: list[tuple[str, str, ArgmatchChoices]] = field(
+    invalid_value_options: list[tuple[str, str, WordChoices]] = field(
         default_factory=list
     )
-    ambiguous_value_options: list[tuple[str, str, ArgmatchChoices]] = field(
+    ambiguous_value_options: list[tuple[str, str, WordChoices]] = field(
         default_factory=list
     )
     invalid_int_options: list[tuple[str, str]] = field(default_factory=list)
@@ -204,10 +204,8 @@ class _Refusals:
     kinds: list[str]
     ints: list[tuple[str, str]] = field(default_factory=list)
     floats: list[tuple[str, str]] = field(default_factory=list)
-    values: list[tuple[str, str, ArgmatchChoices]] = field(
-        default_factory=list
-    )
-    ambiguous_values: list[tuple[str, str, ArgmatchChoices]] = field(
+    values: list[tuple[str, str, WordChoices]] = field(default_factory=list)
+    ambiguous_values: list[tuple[str, str, WordChoices]] = field(
         default_factory=list
     )
 
@@ -215,7 +213,7 @@ class _Refusals:
 def _check_value(
     refusals: _Refusals,
     cs: CompiledSpec,
-    argmatch_dests: frozenset[str],
+    word_choice_dests: frozenset[str],
     dest: str,
     value: str,
 ) -> str:
@@ -227,26 +225,26 @@ def _check_value(
     choices reports the conversion failure, not the choice list.
 
     A declared ``choices`` set compares the WHOLE word, argparse's rule,
-    unless the option declaring it is one of the gnulib ARGMATCH
-    tables the parser owns, in which case an unambiguous prefix resolves
+    unless the option declaring it is one of the word-choice tables the
+    parser owns, in which case an unambiguous prefix resolves
     to its candidate. The resolved word is what the caller stores, so a
     command reads `none` where the line typed `non` and never learns the
     difference. Which sets those are was settled by ``compile_spec``, by
     ``Argument`` identity rather than by the command's name, so a
     registered command that borrows the name `tee` still compares the
-    whole word. ``_argmatch_dests`` settled which they are.
+    whole word. ``_word_choice_dests`` settled which they are.
 
     Args:
         refusals (_Refusals): the lists to report into.
         cs (CompiledSpec): compiled spec tables.
-        argmatch_dests (frozenset[str]): this spec's ARGMATCH sets, from
-            _argmatch_dests.
+        word_choice_dests (frozenset[str]): this spec's word-choice sets,
+            from _word_choice_dests.
         dest (str): the value's dest.
         value (str): the raw value.
 
     Returns:
         str: the value to store -- the canonical candidate when an
-            ARGMATCH prefix resolved, otherwise the value as typed.
+            word-choice prefix resolved, otherwise the value as typed.
     """
     if dest in cs.int_dests and not INT_VALUE.match(value):
         refusals.ints.append((dest, value))
@@ -259,9 +257,9 @@ def _check_value(
     allowed = cs.choices_by_dest.get(dest)
     if allowed is None:
         return value
-    if dest in argmatch_dests:
-        match = argmatch(value, allowed)
-        if isinstance(match, ArgmatchMatch):
+    if dest in word_choice_dests:
+        match = match_word(value, allowed)
+        if isinstance(match, WordMatch):
             return match.word
         if match.kind == "ambiguous":
             refusals.ambiguous_values.append((dest, value, allowed))
@@ -282,7 +280,7 @@ def _set_value_flag(
     flags: dict[str, ParsedFlagValue],
     refusals: _Refusals,
     cs: CompiledSpec,
-    argmatch_dests: frozenset[str],
+    word_choice_dests: frozenset[str],
     spelling: str,
     value: str | list[str],
 ) -> None:
@@ -303,13 +301,13 @@ def _set_value_flag(
         flags (dict): parsed flag bag, updated in place.
         refusals (_Refusals): where a dropped value's refusal lands.
         cs (CompiledSpec): compiled spec tables.
-        argmatch_dests (frozenset[str]): this spec's ARGMATCH sets.
+        word_choice_dests (frozenset[str]): this spec's word-choice sets.
         spelling (str): dashed spelling as typed.
         value (str | list[str]): one scalar or a fixed-width group.
     """
     name = cs.dest_of(spelling)
     stored = [
-        _check_value(refusals, cs, argmatch_dests, name, part)
+        _check_value(refusals, cs, word_choice_dests, name, part)
         for part in ([value] if isinstance(value, str) else value)
     ]
     if isinstance(flags, FlagBag):
@@ -565,7 +563,7 @@ def parse_command(
             say it: the shared grammar stays what POSIX and argparse can
             both express. It says nothing about ``choices``, which
             compares the whole word for every spec unless the option
-            declaring the set is one of the builtin ARGMATCH
+            declaring the set is one of the builtin word-choice
             declarations -- an identity the spec itself settles, so
             it is not a fact about the caller at all.
         abbreviations (Sequence[str] | None): the same kind of fact
@@ -584,7 +582,7 @@ def parse_command(
             earned.
     """
     cs = compile_spec(spec)
-    argmatch_dests = _argmatch_dests(spec)
+    word_choice_dests = _word_choice_dests(spec)
 
     # tar's old option style is expanded before anything else reads the
     # line, so classification, routing and dispatch all scan the same
@@ -734,7 +732,9 @@ def parse_command(
         values = ([attached] if attached is not None else []) + scan_argv[
             i + 1 : i + detached + 1
         ]
-        _set_value_flag(flags, refusals, cs, argmatch_dests, spelling, values)
+        _set_value_flag(
+            flags, refusals, cs, word_choice_dests, spelling, values
+        )
         kinds = cs.value_types_by_dest.get(
             cs.dest_of(spelling), (cs.kind_of[spelling],) * arity
         )
@@ -843,7 +843,7 @@ def parse_command(
                         flags,
                         refusals,
                         cs,
-                        argmatch_dests,
+                        word_choice_dests,
                         etok,
                         scan_argv[i + 1],
                     )
@@ -862,7 +862,12 @@ def parse_command(
                 and i + 1 < len(scan_argv)
             ):
                 _set_value_flag(
-                    flags, refusals, cs, argmatch_dests, etok, scan_argv[i + 1]
+                    flags,
+                    refusals,
+                    cs,
+                    word_choice_dests,
+                    etok,
+                    scan_argv[i + 1],
                 )
                 word_kinds[scan_origins[i + 1]] = cs.kind_of[etok]
                 if cs.dest_of(etok) == cs.base_dest:
@@ -889,7 +894,7 @@ def parse_command(
                         flags,
                         refusals,
                         cs,
-                        argmatch_dests,
+                        word_choice_dests,
                         spelling,
                         tok[eq + 1 :],
                     )
@@ -944,7 +949,12 @@ def parse_command(
             for vf in cs.attach_spellings:
                 if tok.startswith(vf) and len(tok) > len(vf):
                     _set_value_flag(
-                        flags, refusals, cs, argmatch_dests, vf, tok[len(vf) :]
+                        flags,
+                        refusals,
+                        cs,
+                        word_choice_dests,
+                        vf,
+                        tok[len(vf) :],
                     )
                     base = _rebase(flags, cs, vf, tok[len(vf) :], base)
                     i += 1
@@ -971,7 +981,7 @@ def parse_command(
                         flags,
                         refusals,
                         cs,
-                        argmatch_dests,
+                        word_choice_dests,
                         vf,
                         scan_argv[i + 1],
                     )
@@ -985,7 +995,12 @@ def parse_command(
                 if tok.startswith(vf) and len(tok) > len(vf):
                     attached_value = _attached(tok[len(vf) :], equals_values)
                     _set_value_flag(
-                        flags, refusals, cs, argmatch_dests, vf, attached_value
+                        flags,
+                        refusals,
+                        cs,
+                        word_choice_dests,
+                        vf,
+                        attached_value,
                     )
                     base = _rebase(flags, cs, vf, attached_value, base)
                     i += 1
@@ -1008,7 +1023,7 @@ def parse_command(
                         flags,
                         refusals,
                         cs,
-                        argmatch_dests,
+                        word_choice_dests,
                         tok,
                         scan_argv[i + 1],
                     )
@@ -1088,7 +1103,7 @@ def parse_command(
                     for name in cluster_bools:
                         _set_bool_flag(flags, cs, name)
                     _set_value_flag(
-                        flags, refusals, cs, argmatch_dests, vflag, attached
+                        flags, refusals, cs, word_choice_dests, vflag, attached
                     )
                     base = _rebase(flags, cs, vflag, attached, base)
                     i += 1
@@ -1100,7 +1115,7 @@ def parse_command(
                         flags,
                         refusals,
                         cs,
-                        argmatch_dests,
+                        word_choice_dests,
                         vflag,
                         scan_argv[i + 1],
                     )
@@ -1202,7 +1217,7 @@ def parse_command(
                 flags[dest_name] = default
 
     # Every typed value was checked as it was read; what a default or
-    # the environment filled in afterwards is checked here. An ARGMATCH
+    # the environment filled in afterwards is checked here. A word-choice
     # dest canonicalizes here too, so a default spelled as a prefix
     # reaches the command as the candidate it names.
     checked = dict.fromkeys(
@@ -1213,7 +1228,7 @@ def parse_command(
             continue
         values = _bag_values(flags, dest_name)
         stored = [
-            _check_value(refusals, cs, argmatch_dests, dest_name, part)
+            _check_value(refusals, cs, word_choice_dests, dest_name, part)
             for part in values
         ]
         if stored and stored != values:

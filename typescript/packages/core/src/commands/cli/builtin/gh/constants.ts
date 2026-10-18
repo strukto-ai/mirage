@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Values from gh 2.85.0, go-gh v2.13.0, gojq v0.12.17 and Go 1.25.5
+// (MIT, MIT, MIT and BSD-3-Clause; see gh.txt, go-gh.txt, gojq.txt
+// and go.txt in licenses/third_party/).
+
 import type { RepoEditField } from './types.ts'
 
 export const SEARCH_FLAGS: Record<string, string[]> = {

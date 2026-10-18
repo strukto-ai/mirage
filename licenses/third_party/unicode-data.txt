@@ -1,6 +1,10 @@
 rust/mirage-rs/src/generated/unicode_width.rs is generated from the Unicode
 16.0.0 Character Database (https://www.unicode.org/Public/16.0.0/ucd/) by
-scripts/gen_unicode_width.py, under this license:
+scripts/gen_unicode_width.py, and python/mirage/utils/generated/width_data.py
+and typescript/packages/core/src/utils/generated/width_data.ts from the
+Unicode 15.0.0 Character Database (https://www.unicode.org/Public/15.0.0/ucd/),
+as Python 3.12's unicodedata module carries it, by scripts/gen_width_table.py.
+Both are under this license:
 
 UNICODE LICENSE V3
 

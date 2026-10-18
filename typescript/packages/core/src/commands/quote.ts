@@ -45,7 +45,7 @@ const QUOTE_ESCAPES = new Map<string, string>([
 // than a copy in each command.
 //
 // It sits directly under `commands/` because both halves of the tree need
-// it: every builtin that refuses a flag value, and the shared ARGMATCH
+// it: every builtin that refuses a flag value, and the shared word-choice
 // renderer in `commands/spec/usage.ts`. A leaf beside `commands/errors.ts`
 // is reachable from `spec` and from `builtin` alike, where the old home
 // under `commands/builtin/utils/` would have made `spec` import `builtin`

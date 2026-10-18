@@ -15,8 +15,8 @@
 from collections.abc import Awaitable, Sequence
 from typing import NamedTuple, Protocol
 
-from mirage.commands.spec.argmatch import ArgmatchChoices
 from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.word_choice import WordChoices
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy.types import HandOff
@@ -62,8 +62,8 @@ class ParsedCommand(NamedTuple):
     # candidate, `ambiguous argument` for one that prefixes candidates
     # spanning two or more values. option_error_kinds orders them
     # against each other and against every other refusal on the line.
-    invalid_value_options: list[tuple[str, str, ArgmatchChoices]]
-    ambiguous_value_options: list[tuple[str, str, ArgmatchChoices]]
+    invalid_value_options: list[tuple[str, str, WordChoices]]
+    ambiguous_value_options: list[tuple[str, str, WordChoices]]
     invalid_int_options: list[tuple[str, str]]
     invalid_float_options: list[tuple[str, str]]
     missing_required_options: list[str]

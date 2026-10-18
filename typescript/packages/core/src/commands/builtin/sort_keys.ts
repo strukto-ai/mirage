@@ -17,7 +17,7 @@ import { UsageError } from '../errors.ts'
 import { quoteText } from '../quote.ts'
 import { SortKeyError } from './errors.ts'
 
-// The letters sort.c's `set_ordering` takes after a KEYDEF position. R is
+// The ordering letters GNU sort takes after a KEYDEF position. R is
 // recognized, so it still keeps a key off the global options and counts
 // against the others it is incompatible with, but it does not shuffle.
 const ORDER_LETTERS = 'bdfghiMnRrV'
@@ -59,7 +59,7 @@ function isAsciiDigit(char: string): boolean {
   return char >= '0' && char <= '9'
 }
 
-// sort.c's `parse_field_count`: the decimal starting at `pos`, with the
+// A KEYDEF field or offset number: the decimal starting at `pos`, with the
 // index just past it. strtoumax's reading, so leading blanks and a `+` are
 // taken and the number ends at the first byte that is not an ASCII digit,
 // which the caller reads on from. A `-`, or no digit at all, is refused
@@ -101,7 +101,7 @@ function modsFromLetters(letters: string): KeyMods {
   }
 }
 
-// One `-k` KEYDEF, read and refused the way sort.c's option loop does:
+// One `-k` KEYDEF, read and refused the way GNU sort 9.7 does:
 // F[.C][OPTS][,F[.C][OPTS]], taken left to right. Each number is checked
 // as it is read, so `-k0.x` names the zero field and not the bad offset,
 // and ordering letters run until the first byte that is not one, where
@@ -155,12 +155,12 @@ export function parseKeydef(spec: string, globalMods: KeyMods, globalSkip: boole
   }
 }
 
-// The letters sort.c's `check_ordering_compatibility` refuses, or '' for a
-// compatible key. A key orders by at most one of -n, -g, -h, -M and the
-// group -V, -R, -d, -i, whose members combine with each other but with
-// none of the rest. The refusal spells the key the way `key_to_opts` does,
-// without -b and -r, and -d hides -i because GNU keeps only the stronger
-// of the two filters. Mirrors _incompatible_letters in sort_keys.py.
+// The letters GNU sort refuses to combine on one key, or '' for a compatible
+// key. A key orders by at most one of -n, -g, -h, -M and the group -V, -R,
+// -d, -i, whose members combine with each other but with none of the rest.
+// The refusal spells the key's letters without -b and -r (`options '-gn' are
+// incompatible`), and -d hides -i because GNU keeps only the stronger of the
+// two filters. Mirrors _incompatible_letters in sort_keys.py.
 function incompatibleLetters(mods: KeyMods): string {
   const dictionary = mods.dictionary === true
   const ignoreNonprinting = mods.ignoreNonprinting === true

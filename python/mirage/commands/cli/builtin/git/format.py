@@ -113,7 +113,7 @@ class CommitDisplay(Protocol):
 
 
 def parse_pretty(value: str) -> LogFormat:
-    """Read a --pretty/--format value the way git's pretty.c does.
+    """Read a --pretty/--format value the way git reads it.
 
     Args:
         value (str): the flag's value as spelled.
@@ -372,7 +372,7 @@ def render_template(
 ) -> str:
     """Expand a format:/tformat: template for one commit.
 
-    The scan mirrors git's pretty.c behavior pinned in docker: an
+    The scan matches git's behaviour pinned in docker: an
     unknown or incomplete placeholder stays verbatim (``%q`` prints
     ``%q``), ``%%`` is a literal percent, and ``%xHH`` names a raw
     output byte (``%x80`` is the single byte 0x80, carried by the

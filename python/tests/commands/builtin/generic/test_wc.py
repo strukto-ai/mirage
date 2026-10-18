@@ -145,8 +145,8 @@ async def test_format_multi_all_missing_zero_total():
     )
 
 
-# GNU's ARGMATCH refusal names the refused word through gnulib's quote(),
-# so a byte outside 0x20-0x7e comes back escaped. Rows measured against
+# GNU's word-choice refusal names the refused word quoted, so a byte
+# outside 0x20-0x7e comes back escaped. Rows measured against
 # GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
 # (`wc --total=<w>`). Mirrored in wc.test.ts.
 @pytest.mark.parametrize(

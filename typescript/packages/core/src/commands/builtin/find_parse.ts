@@ -263,7 +263,7 @@ function strictInt(value: string): number {
 // ceil(size/unit) > N, -N keeps ceil(size/unit) < N, N alone keeps
 // ceil(size/unit) === N. Expressed as inclusive byte bounds: +N ->
 // [N*unit + 1, inf), -N -> [0, (N-1)*unit], N -> [(N-1)*unit + 1, N*unit].
-// N past UINTMAX is invalid in any unit, as GNU's get_num refuses it.
+// N past UINTMAX is invalid in any unit, as GNU find refuses it.
 export function parseSize(spec: string): [number | null, number | null] {
   const units: Record<string, number> = { b: 512, c: 1, w: 2, k: 1024, M: 1024 ** 2, G: 1024 ** 3 }
   if (spec === '') throw new FindParseError('find: invalid null argument to -size')

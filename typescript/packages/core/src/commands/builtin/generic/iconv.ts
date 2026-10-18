@@ -312,7 +312,7 @@ function parseFlags(bag: Record<string, FlagValue>): IconvFlags {
 }
 
 /**
- * Convert each input from one charset to another, in order. Follows glibc's
+ * Convert each input from one charset to another, in order. Matches glibc's
  * iconv: -c drops what cannot be converted and exits 1; without it the output
  * stops before the first such sequence and no later input is read. An input
  * that cannot be opened is reported and skipped; one that opens and then

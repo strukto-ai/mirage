@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { UsageError } from '../errors.ts'
-import type { ArgmatchChoices, ArgmatchKind } from './argmatch.ts'
+import type { WordChoices, WordRefusalKind } from './word_choice.ts'
 import { quoteText } from '../quote.ts'
 import { CODE_ARMS } from '../../errors/constants.ts'
 import { posixPhrase } from '../../errors/posix.ts'
@@ -348,12 +348,12 @@ export function oldOptionError(cmdName: string, letter: string): [Uint8Array, nu
 }
 
 /**
- * The first line of a gnulib ARGMATCH refusal, without its newline.
+ * The first line of GNU's word-choice refusal, without its newline.
  *
  * Two wordings, and the CALLER's match result picks between them: the
- * wording is a property of how `argmatch` refused the value, not of the
- * value itself, so it arrives from `argmatch` rather than being
- * re-derived here. There is deliberately no `value === ''` branch: the
+ * wording is a property of how `matchWord` refused the value, not of the
+ * value itself, so it arrives from there rather than being re-derived
+ * here. There is deliberately no `value === ''` branch: the
  * empty word is ambiguous because it is a prefix of every candidate and
  * those candidates span two or more values, which is the same rule every
  * other word goes through and is what `tail --follow=`, `sort --check=`,
@@ -361,26 +361,26 @@ export function oldOptionError(cmdName: string, letter: string): [Uint8Array, nu
  * `ls -l --time-style=`, `cp --update=` and `tee --output-error=` were
  * all measured answering `ambiguous argument ''` for. Re-adding the
  * special case would get those right and a one-candidate slot wrong.
- * `du --max-depth=` is NOT argmatch and says `invalid maximum depth ''`,
+ * `du --max-depth=` is NOT a word choice and says `invalid maximum depth ''`,
  * which is why that one is worded in du.
  *
- * The word is rendered through `quoteText`, gnulib's own `quote()`:
+ * The word is rendered through `quoteText`, quoted as GNU quotes it:
  * `tee --output-error=xé` is `invalid argument 'x\303\251'`. Callers must
  * therefore pass the value as typed and never pre-escape it.
  *
- * `argmatch_line` in usage.py is the twin.
+ * `word_refusal_line` in usage.py is the twin.
  */
-export function argmatchLine(
+export function wordRefusalLine(
   cmdName: string,
   option: string,
   value: string,
-  kind: ArgmatchKind = 'invalid',
+  kind: WordRefusalKind = 'invalid',
 ): string {
   return `${cmdName}: ${kind} argument '${quoteText(value)}' for '${option}'`
 }
 
-/** gnulib's `Valid arguments are:` block, without a trailing newline. */
-export function argmatchValidBlock(choices: ArgmatchChoices): string {
+/** GNU's `Valid arguments are:` block, without a trailing newline. */
+export function validWordsBlock(choices: WordChoices): string {
   const rows = choices.map((choice) => {
     const group = typeof choice === 'string' ? [choice] : choice
     return '  - ' + group.map((c) => `'${c}'`).join(', ')
@@ -389,7 +389,7 @@ export function argmatchValidBlock(choices: ArgmatchChoices): string {
 }
 
 /**
- * GNU ARGMATCH refusal for a value outside a declared choices set.
+ * GNU's refusal of a value outside a declared choices set.
  *
  * Shape pinned against real GNU (`tee --output-error=bogus`): the
  * offending value, the option's canonical long spelling, then every valid
@@ -398,19 +398,18 @@ export function argmatchValidBlock(choices: ArgmatchChoices): string {
  *
  * `exitCode` undefined takes the command's own usage code, which is 1 for
  * every command that reaches this renderer through the executor. ls and
- * sort pass 1 explicitly: gnulib's `argmatch_die` always calls
- * `usage (EXIT_FAILURE)`, so their argmatch refusals are 1 even though
- * their other usage errors are 2.
+ * sort pass 1 explicitly: GNU exits 1 on a refused word even though their
+ * other usage errors are 2.
  */
 export function invalidArgumentError(
   cmdName: string,
   option: string,
   value: string,
-  choices: ArgmatchChoices,
+  choices: WordChoices,
   exitCode?: number,
-  kind: ArgmatchKind = 'invalid',
+  kind: WordRefusalKind = 'invalid',
 ): [Uint8Array, number] {
-  const line = `${argmatchLine(cmdName, option, value, kind)}\n${argmatchValidBlock(choices)}\n`
+  const line = `${wordRefusalLine(cmdName, option, value, kind)}\n${validWordsBlock(choices)}\n`
   const hint = usageHint(cmdName) + '\n'
   const code = exitCode ?? usageExitCode(cmdName)
   return [encodeText(line + hint), code]
@@ -419,20 +418,20 @@ export function invalidArgumentError(
 /**
  * `invalidArgumentError` as the error a command throws.
  *
- * The commands that validate an ARGMATCH value themselves (`sort`, `wc`,
+ * The commands that validate a word-choice value themselves (`sort`, `wc`,
  * `uniq`, `ls`, `cp`, `tail`) hold the value long after the parser is done
  * with it, so they render through the same function the executor does
  * rather than wording a second copy.
  *
- * `argmatch_error` in usage.py is the twin.
+ * `word_refusal_error` in usage.py is the twin.
  */
-export function argmatchError(
+export function wordRefusalError(
   cmdName: string,
   option: string,
   value: string,
-  choices: ArgmatchChoices,
+  choices: WordChoices,
   exitCode?: number,
-  kind: ArgmatchKind = 'invalid',
+  kind: WordRefusalKind = 'invalid',
 ): UsageError {
   const [message, code] = invalidArgumentError(cmdName, option, value, choices, exitCode, kind)
   return new UsageError(decodeText(message).replace(/\n+$/, ''), code)

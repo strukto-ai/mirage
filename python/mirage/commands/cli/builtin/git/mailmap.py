@@ -55,7 +55,7 @@ def parse_mailmap(text: str) -> tuple[MailmapEntry, ...]:
 
 
 def mapped_identity(identity: str, entries: tuple[MailmapEntry, ...]) -> str:
-    """Map one ``Name <email>`` identity the way git's ``map_user`` does.
+    """Map one ``Name <email>`` identity the way git's mailmap does.
 
     An entry naming both the recorded name and email wins outright, the
     last such line replacing any earlier one. Without one, the entries

@@ -40,9 +40,8 @@ describe('backupControl', () => {
     expect(backupControl('cp', 'nil', null)).toBe('existing')
     expect(backupControl('cp', 'never', null)).toBe('simple')
     expect(backupControl('cp', 'off', null)).toBe('none')
-    // An EMPTY control is the default, not a refusal: gnulib's
-    // `xget_version` only calls argmatch when `version && *version`, so
-    // `cp --backup=` is `cp --backup`. Measured on coreutils 9.4: exit 0,
+    // An EMPTY control is the default, not a refusal: `cp --backup=` is
+    // `cp --backup`. Measured on coreutils 9.4: exit 0,
     // and it writes the `existing` backup. Mirrors test_backup.py.
     expect(backupControl('cp', '', null)).toBe('existing')
     // -S SUFFIX alone enables backups (GNU 9.7).

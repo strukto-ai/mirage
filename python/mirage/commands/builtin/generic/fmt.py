@@ -11,7 +11,7 @@ from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.builtin.utils.strtol import (
     EOVERFLOW_REASON,
     ERANGE_REASON,
-    xstrtoumax,
+    unsigned_decimal,
 )
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
@@ -59,14 +59,14 @@ def _goal_refusal(text: str, value: int | None) -> str:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
     fl = FlagView(flags, spec=SPECS["fmt"])
-    # GNU 9.7 reads -w with xdectoumax(optarg, 0, MAXCHARS / 2) and then
-    # -g with xdectoumax(optarg, 0, max_width).
+    # GNU 9.7 takes -w as a decimal from 0 to MAX_CHARS / 2, then -g as
+    # one from 0 to that width.
     width = fl.as_number(
-        "width", xstrtoumax, _width_refusal, low=0, high=MAX_CHARS // 2
+        "width", unsigned_decimal, _width_refusal, low=0, high=MAX_CHARS // 2
     )
     goal = fl.as_number(
         "goal",
-        xstrtoumax,
+        unsigned_decimal,
         _goal_refusal,
         low=0,
         high=WIDTH if width is None else width,

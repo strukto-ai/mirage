@@ -463,9 +463,9 @@ async def test_a_bare_tag_id_still_names_a_source_tree(
 @pytest.mark.asyncio
 async def test_a_file_standing_where_a_directory_belongs_is_replaced(git_rw):
     # The symlink case's other half, and the commoner one: an untracked
-    # regular file on the way to the entry. git's create_directories
-    # unlinks any leading non-directory and makes the directory, so the
-    # restore succeeds and the file is gone. Left unhandled, the write
+    # regular file on the way to the entry. git unlinks any leading
+    # non-directory and makes the directory, so the restore succeeds and
+    # the file is gone. Left unhandled, the write
     # failed with a raw ENOTDIR the caller could do nothing with.
     await git_rw.shell("mkdir /repo/slot && echo c > /repo/slot/child")
     assert (await run(git_rw, "add slot/child"))[0] == 0

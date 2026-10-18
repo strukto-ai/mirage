@@ -64,6 +64,15 @@ const FETCH_HEAD = 'FETCH_HEAD'
 const ALL_TAGS = 'refs/tags/*:refs/tags/*'
 const TERM_COLUMNS = 80
 const REFCOL_MIN = 10
+// What a summary row spends beside its two ref names when the ref column
+// is sized, counted off the row summaryLines writes: ` * ` (3), the
+// summary column at the default abbrev of 7 (2 * 7 + 3) and the space
+// after it make the 21 columns before the remote, and ` -> ` the 4 before
+// the local. The sizing keeps that default whatever the repository's
+// abbrev is: measured on git 2.47.3, a 23-character branch widens the
+// column at core.abbrev=12 as well, and a 24-character one at neither.
+const ROW_LEAD = ' * '.length + 2 * 7 + 3 + ' '.length
+const ROW_ARROW = ' -> '.length
 const UNREACHABLE =
   'fatal: Could not read from remote repository.\n\n' +
   'Please make sure you have the correct access rights\n' +
@@ -96,7 +105,7 @@ export interface Row {
   readonly remote: string
   readonly local: string
   readonly error: string
-  /** Whether the row widens the ref column, as git's refcol_width counts it. */
+  /** Whether the row may widen the ref column: git widens it for a changed local ref only. */
   readonly counted: boolean
 }
 
@@ -141,7 +150,10 @@ export function summaryLines(url: string, rows: readonly Row[], abbrev: number):
   const width = 2 * abbrev + 3
   let refcol = REFCOL_MIN
   for (const line of rows)
-    if (line.counted && 21 + line.remote.length + 4 + line.local.length < TERM_COLUMNS)
+    if (
+      line.counted &&
+      ROW_LEAD + line.remote.length + ROW_ARROW + line.local.length < TERM_COLUMNS
+    )
       refcol = Math.max(refcol, line.remote.length)
   const lines = [`From ${displayUrl(url)}\n`]
   for (const line of rows) {
@@ -189,7 +201,7 @@ async function receive(repo: Repo, transport: Transport, wants: readonly string[
 }
 
 /**
- * Drop the refs whose local name git refuses, as get_fetch_map does.
+ * Drop the refs whose local name git refuses to write.
  *
  * The remote names its refs, so one it advertises as `refs/tags/../../x` would
  * land outside `.git`. git skips such a ref with an error and takes the rest

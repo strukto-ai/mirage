@@ -76,7 +76,7 @@ def _read_mode(fl: FlagView) -> str | None:
 
 def _refuse_conflicts(fl: FlagView, name: str) -> None:
     """Refuse the combinations GNU refuses after its option loop, in its
-    order (coreutils 9.7 digest.c).
+    order (coreutils 9.7).
 
     Args:
         fl (FlagView): The command's flags.

@@ -30,7 +30,7 @@ def _min_length(text: str) -> int | None:
 
 
 def _min_length_refusal(text: str, value: int | None) -> str:
-    """binutils' set_string_min refusals, in the order it tests them.
+    """GNU strings' refusals of a -n value, in the order it tests them.
 
     Args:
         text (str): the value as typed.

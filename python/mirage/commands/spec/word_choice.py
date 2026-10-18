@@ -15,23 +15,24 @@
 from dataclasses import dataclass
 from typing import Literal
 
-# One ARGMATCH candidate set. Each entry is one VALUE, spelled either as
+# The candidate words of an option that takes one of them, or an
+# unambiguous prefix of one. Each entry is one VALUE, spelled either as
 # the single word that names it or as a tuple of alias words that all
-# mean it. The grouping is not cosmetic: it is the whole of gnulib's
+# mean it. The grouping is not cosmetic: it is the whole of GNU's
 # ambiguity rule (two matching words inside one entry are one value and
 # match; two matching entries are two values and are ambiguous), and it
-# is what `argmatch_valid_block` renders one `  - ` line per, which is
+# is what `valid_words_block` renders one `  - ` line per, which is
 # how GNU answers `sort --check=x` with `  - 'quiet', 'silent'` on one
 # line and `  - 'diagnose-first'` on the next.
-ArgmatchChoices = tuple[str | tuple[str, ...], ...]
+WordChoices = tuple[str | tuple[str, ...], ...]
 
 # The two wordings a refused value picks between, spelled as the word the
 # message carries (`ls: invalid argument 'zzz' for '--time'`).
-ArgmatchKind = Literal["ambiguous", "invalid"]
+WordRefusalKind = Literal["ambiguous", "invalid"]
 
 
 @dataclass(frozen=True, slots=True)
-class ArgmatchMatch:
+class WordMatch:
     """A value that resolved to exactly one candidate value.
 
     Args:
@@ -45,22 +46,22 @@ class ArgmatchMatch:
 
 
 @dataclass(frozen=True, slots=True)
-class ArgmatchRefusal:
-    """A value gnulib refuses, and which of its two wordings says so.
+class WordRefusal:
+    """A value GNU refuses, and which of its two wordings says so.
 
     Args:
-        kind (ArgmatchKind): "ambiguous" when the value is a prefix of
+        kind (WordRefusalKind): "ambiguous" when the value is a prefix of
             words spanning two or more values, "invalid" when it is a
             prefix of none.
     """
 
-    kind: ArgmatchKind
+    kind: WordRefusalKind
 
 
-ArgmatchResult = ArgmatchMatch | ArgmatchRefusal
+WordChoiceResult = WordMatch | WordRefusal
 
 
-def value_classes(choices: ArgmatchChoices) -> tuple[tuple[str, ...], ...]:
+def value_classes(choices: WordChoices) -> tuple[tuple[str, ...], ...]:
     """``choices`` as one tuple of alias words per value.
 
     A flat candidate tuple is a set of one-word values, which is what
@@ -68,7 +69,7 @@ def value_classes(choices: ArgmatchChoices) -> tuple[tuple[str, ...], ...]:
     its declaration.
 
     Args:
-        choices (ArgmatchChoices): the candidates in declaration order.
+        choices (WordChoices): the candidates in declaration order.
     """
     grouped = (
         (choice,) if isinstance(choice, str) else tuple(choice)
@@ -77,11 +78,10 @@ def value_classes(choices: ArgmatchChoices) -> tuple[tuple[str, ...], ...]:
     return tuple(group for group in grouped if group)
 
 
-def argmatch(value: str, choices: ArgmatchChoices) -> ArgmatchResult:
-    """gnulib's ``argmatch`` for one option value.
+def match_word(value: str, choices: WordChoices) -> WordChoiceResult:
+    """One option value matched against its candidates, as GNU does.
 
-    The three answers of `argmatch (arg, arglist, vallist, valsize)`,
-    in one pass, measured against coreutils 9.4:
+    GNU's three answers, in one pass, measured against coreutils 9.4:
 
     1. An EXACT word wins outright, even when it is a proper prefix of
        a longer candidate: `ls --quoting-style=shell` is `shell`, not an
@@ -100,29 +100,27 @@ def argmatch(value: str, choices: ArgmatchChoices) -> ArgmatchResult:
     rule 2 into rule 3 and is ambiguous exactly when the candidates span
     two or more values -- which is why `ls --sort=` and `wc --total=`
     answer `ambiguous argument ''` while a one-value set accepts it.
-    gnulib does no such check either: its test is
-    `strncmp (arglist[i], arg, 0) == 0`, true for every candidate.
 
     Args:
         value (str): the value as typed, never pre-escaped.
-        choices (ArgmatchChoices): the candidates in declaration order,
+        choices (WordChoices): the candidates in declaration order,
             alias words of one value grouped into a tuple.
 
     Returns:
-        ArgmatchResult: ``ArgmatchMatch`` carrying the canonical word,
-            or ``ArgmatchRefusal`` carrying the wording GNU picks.
+        WordChoiceResult: ``WordMatch`` carrying the canonical word,
+            or ``WordRefusal`` carrying the wording GNU picks.
     """
     classes = value_classes(choices)
     for group in classes:
         if value in group:
-            return ArgmatchMatch(group[0])
+            return WordMatch(group[0])
     matched = [
         group
         for group in classes
         if any(word.startswith(value) for word in group)
     ]
     if not matched:
-        return ArgmatchRefusal("invalid")
+        return WordRefusal("invalid")
     if len({group[0] for group in matched}) > 1:
-        return ArgmatchRefusal("ambiguous")
-    return ArgmatchMatch(matched[0][0])
+        return WordRefusal("ambiguous")
+    return WordMatch(matched[0][0])

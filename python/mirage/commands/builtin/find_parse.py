@@ -72,8 +72,8 @@ def parse_size(spec: str) -> tuple[int | None, int | None]:
     ceil(size/unit) > N, -N keeps ceil(size/unit) < N, N alone keeps
     ceil(size/unit) == N. Expressed as inclusive byte bounds: +N ->
     [N*unit + 1, inf), -N -> [0, (N-1)*unit], N -> [(N-1)*unit + 1,
-    N*unit]. N past UINTMAX is invalid in any unit, as GNU's get_num
-    refuses it.
+    N*unit]. N past UINTMAX is invalid in any unit, as GNU find refuses
+    it.
 
     Args:
         spec (str): the argument as typed.

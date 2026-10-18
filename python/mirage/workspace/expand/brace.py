@@ -79,7 +79,7 @@ def _seq_values(lo: int, hi: int, step: int) -> list[int]:
     return list(range(lo, hi - 1, -step))
 
 
-def _gen_sequence(amble: str) -> list[str] | None:
+def _gen_sequence(body: str) -> list[str] | None:
     """Generate `{x..y[..step]}` sequence words, or None if not a range.
 
     A range body must be pure literal text: an inert atom or escape
@@ -90,11 +90,11 @@ def _gen_sequence(amble: str) -> list[str] | None:
     endpoints; the step's own sign is ignored and 0 acts as 1.
 
     Args:
-        amble (str): text between the braces.
+        body (str): text between the braces.
     """
-    if INERT_OPEN in amble or "\\" in amble:
+    if INERT_OPEN in body or "\\" in body:
         return None
-    m = NUM_SEQ.match(amble)
+    m = NUM_SEQ.match(body)
     if m:
         lo_text, hi_text, step_text = m.group(1), m.group(2), m.group(3)
         values = _seq_values(
@@ -104,7 +104,7 @@ def _gen_sequence(amble: str) -> list[str] | None:
             width = max(len(lo_text), len(hi_text))
             return [f"{v:0{width}d}" for v in values]
         return [str(v) for v in values]
-    m = CHAR_SEQ.match(amble)
+    m = CHAR_SEQ.match(body)
     if m:
         values = _seq_values(
             ord(m.group(1)), ord(m.group(2)), _parse_step(m.group(3))
@@ -135,31 +135,31 @@ def _match_close(text: str, open_idx: int) -> int:
     return -1
 
 
-def _split_alternatives(amble: str) -> list[str] | None:
+def _split_alternatives(body: str) -> list[str] | None:
     alts: list[str] = []
     depth = 0
     start = 0
     i = 0
-    n = len(amble)
+    n = len(body)
     while i < n:
-        ch = amble[i]
+        ch = body[i]
         if ch == "\\":
             i += 2
             continue
         if ch == INERT_OPEN:
-            i = amble.index(INERT_CLOSE, i) + 1
+            i = body.index(INERT_CLOSE, i) + 1
             continue
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
         elif ch == "," and depth == 0:
-            alts.append(amble[start:i])
+            alts.append(body[start:i])
             start = i + 1
         i += 1
     if not alts:
         return None
-    alts.append(amble[start:])
+    alts.append(body[start:])
     return alts
 
 
@@ -181,10 +181,10 @@ def _expand(template: str) -> list[str]:
         if close < 0:
             i += 1
             continue
-        amble = template[i + 1 : close]
-        alternatives = _gen_sequence(amble)
+        body = template[i + 1 : close]
+        alternatives = _gen_sequence(body)
         if alternatives is None:
-            alts = _split_alternatives(amble)
+            alts = _split_alternatives(body)
             if alts is None:
                 # `{abc}` and friends stay literal; the next `{` (even
                 # one inside this body) may still expand, like GNU.

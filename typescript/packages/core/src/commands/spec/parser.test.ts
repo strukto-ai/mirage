@@ -830,14 +830,14 @@ describe('choices violations are reported, never thrown', () => {
   // Nothing the author can write opts a custom spec into the table, which
   // names three builtin Argument OBJECTS and is tested by identity. Mirrors
   // test_parser.py.
-  it.each(['--mode', 'mode'])('never lets a custom argument %s inherit argmatch', (name) => {
+  it.each(['--mode', 'mode'])('never lets a custom argument %s inherit a word choice', (name) => {
     const spec = new CommandSpec({
       arguments: [new Argument(name, { choices: ['read', 'remove'] })],
     })
     const parsed = parseCommand(spec, name.startsWith('-') ? [name, 'rem'] : ['rem'], '/', 'mycmd')
     expect(name.startsWith('-') ? parsed.flags[name] : parsed.texts()[0]).toBe('rem')
     expect(parsed.invalidValueOptions).toEqual([[name, 'rem', ['read', 'remove']]])
-    // Even naming it after a real ARGMATCH option changes nothing.
+    // Even naming it after a real word-choice option changes nothing.
     const named = new CommandSpec({
       arguments: [new Argument('--to', { choices: ['none', 'si'] })],
     })
@@ -851,7 +851,7 @@ describe('choices violations are reported, never thrown', () => {
   // `--output-error` field for field still compares the whole word: the
   // option it declares is its own object, not the one the builtin spec holds.
   // Mirrors test_parser.py.
-  it('does not let a command that borrows a builtin name borrow argmatch', () => {
+  it('does not let a command that borrows a builtin name borrow a word choice', () => {
     const lookalike = new Argument('--output-error', {
       nargs: '?',
       attachedOnly: true,
@@ -877,9 +877,9 @@ describe('choices violations are reported, never thrown', () => {
   // `spec === BUILTIN_SPECS[name]` is false for every builtin by the time a
   // line is read. Identity of the Argument survives that copy, which is the
   // whole reason the table names options rather than specs -- keying on the
-  // spec would disable ARGMATCH everywhere while every unit test that passes
-  // specOf(name) straight in kept passing. Mirrors test_parser.py.
-  it('keeps argmatch through the copy the registry parses', () => {
+  // spec would disable word choices everywhere while every unit test that
+  // passes specOf(name) straight in kept passing. Mirrors test_parser.py.
+  it('keeps the word choice through the copy the registry parses', () => {
     const tee = specOf('tee')
     const registered = helpSpec(tee)
     expect(registered).not.toBe(tee)
@@ -890,10 +890,10 @@ describe('choices violations are reported, never thrown', () => {
 
   // python's compileSpec twin caches on a frozen dataclass, so ITS key is
   // structural and a spec built to look exactly like tee's shares the
-  // builtin's compiled tables. The ARGMATCH decision is therefore read off
+  // builtin's compiled tables. The word-choice decision is therefore read off
   // the spec in both languages and never stored on the compiled tables,
   // which is the only way the two answer alike here. Mirrors test_parser.py.
-  it('gives a structural twin of a builtin spec no argmatch', () => {
+  it('gives a structural twin of a builtin spec no word choice', () => {
     const tee = specOf('tee')
     // Declared the long way round, exactly as builtin_specs/text_proc.ts
     // declares it, so the twin is equal field for field and shares not one
@@ -957,7 +957,7 @@ describe('choices violations are reported, never thrown', () => {
   })
 
   // `tee --output-error` is one of the spec-declared choices sets that
-  // really are gnulib ARGMATCH tables, so the parser resolves a prefix and
+  // GNU really matches as word choices, so the parser resolves a prefix and
   // rewrites the bag to the canonical word. Measured on coreutils 9.7:
   // `tee --output-error=exit-n` exits 0 (exit-nopipe) and `=w` is
   // `ambiguous argument 'w'`.
@@ -977,7 +977,7 @@ describe('choices violations are reported, never thrown', () => {
   // The second table, so the rule is the option's and not one command's:
   // measured on 9.7, `numfmt --to=s` is `si` and `--to=ie` is ambiguous
   // between `iec` and `iec-i`.
-  it('resolves the other argmatch table own prefixes', () => {
+  it('resolves the other word-choice table own prefixes', () => {
     const parsed = parseCommand(specOf('numfmt'), ['--to=s', '1'], '/', 'numfmt')
     expect(parsed.flags['--to']).toBe('si')
     expect(parsed.ambiguousValueOptions).toEqual([])
@@ -1014,7 +1014,7 @@ describe('choices violations are reported, never thrown', () => {
     ])
   })
 
-  it('resolves every occurrence of an argmatch flag as it is read', () => {
+  it('resolves every occurrence of a word-choice flag as it is read', () => {
     // Each occurrence goes through the table as it is scanned, so the one the
     // bag drops is still refused and the one it keeps is still rewritten to
     // its candidate.

@@ -61,8 +61,8 @@ export const TYPE_CHARS: Partial<Record<FileType, string>> = {
 }
 
 // GNU ls's window of "recent" times: half a Gregorian year of 365.2425
-// days, in seconds (ls.c). findutils draws its own line (listfile.c):
-// old past 180 days, future past an hour.
+// days, in seconds. GNU find -ls draws its own line: old past 180 days,
+// future past an hour.
 export const LS_RECENT_SECONDS = Math.floor(31556952 / 2)
 export const FIND_OLD_SECONDS = 180 * 24 * 60 * 60
 export const FIND_FUTURE_SECONDS = 60 * 60

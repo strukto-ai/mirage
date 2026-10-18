@@ -1,3 +1,6 @@
+# Refusal wording and exit codes from Info-ZIP UnZip 6.00 (Info-ZIP
+# license; see licenses/third_party/info-zip.txt).
+
 import dataclasses
 import fnmatch
 import logging

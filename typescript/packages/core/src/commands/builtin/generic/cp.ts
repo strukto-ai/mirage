@@ -36,8 +36,8 @@ import {
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { beforeFullScan } from '../utils/tree.ts'
-import { argmatchError, extraOperandError, usageHint } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError, extraOperandError, usageHint } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
 import { backupControl, backupTarget } from '../utils/backup.ts'
@@ -213,9 +213,9 @@ export function updateMode(cmdName: string, fl: FlagView): string | null {
   if (value === undefined || value === false) return null
   if (value === true) return 'older'
   const shown = typeof value === 'string' ? value : ''
-  const match = argmatch(shown, UPDATE_MODES)
+  const match = matchWord(shown, UPDATE_MODES)
   if (match.matched) return match.word
-  throw argmatchError(cmdName, '--update', shown, UPDATE_MODES, 1, match.kind)
+  throw wordRefusalError(cmdName, '--update', shown, UPDATE_MODES, 1, match.kind)
 }
 
 // The --suffix value, an empty one reading as absent: GNU 9.7
@@ -270,7 +270,7 @@ export function parseFlags(fl: FlagView): CpFlags {
   const recursive = fl.asBool('r') || fl.asBool('recursive') || fl.asBool('archive')
   const last = fl.typedOrder(...Object.keys(DEREF_OPTIONS)).at(-1)
   // With no link option a recursive copy copies links as links and any other
-  // copy follows them (cp.c's DEREF_UNDEFINED default).
+  // copy follows them (GNU cp 9.7 with none of -H, -L, -P, -d).
   const dereference: CopyDeref =
     last !== undefined ? (DEREF_OPTIONS[last] ?? 'always') : recursive ? 'never' : 'always'
   return cpFlags({
@@ -783,10 +783,9 @@ async function clearForDirectory(
 // or target with no usable mtime always replaces (freshness cannot be
 // proven). A copy that writes through a link at the target's name compares
 // the source with what the link leads to; one whose backup moves the link
-// aside compares with the link itself (GNU copy.c's stat or lstat of the
-// destination, coreutils 9.7). `copies` is given for a copy that writes
-// through such a link, and left out for one that renames onto it or copies a
-// link as a link.
+// aside compares with the link itself (GNU cp 9.7). `copies` is given for a
+// copy that writes through such a link, and left out for one that renames
+// onto it or copies a link as a link.
 export async function overwriteGate(
   policy: TransferPolicy,
   stat: StatFn,

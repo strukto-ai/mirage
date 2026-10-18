@@ -284,13 +284,13 @@ export function followsLinks(cmd: string, fl: FlagView): [boolean, Result | null
   return [false, null]
 }
 
-// `USER:GROUP`, or the one of them given (GNU's user_group_str).
+// `USER:GROUP`, or the one of them given, as GNU's -v names it.
 export function ownerSpec(user: string | null, group: string | null): string | null {
   if (user === null) return group
   return group === null ? user : `${user}:${group}`
 }
 
-// chown and chgrp's report for one file (GNU 9.7's describe_change).
+// chown and chgrp's report for one file, as GNU 9.7 prints it.
 // `status` is 'changed', 'retained' or 'failed'; `old` is null when the
 // file could not be read.
 export function ownerLine(

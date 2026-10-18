@@ -101,7 +101,8 @@ def _last_format(args: list[str | PathSpec]) -> str | None:
 def _human_si(n: int) -> str:
     """Human-readable size in powers of 1000 (df -H).
 
-    Same rounding as ``-h``; GNU runs both through one ``human_readable``.
+    Same rounding as ``-h``: GNU df rounds the two alike, and only the
+    base differs.
 
     Args:
         n (int): byte count.

@@ -12,7 +12,7 @@ from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.builtin.utils.strtol import (
     ERANGE_REASON,
     ULONG_MAX,
-    xstrtoumax,
+    unsigned_decimal,
 )
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
@@ -24,8 +24,8 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 # GNU fold's line width when -w names none.
 WIDTH = 80
-# GNU 9.7 reads -w with xdectoumax(optarg, 1, SIZE_MAX - TAB_WIDTH - 1),
-# so 0 and anything past this are out of range.
+# GNU 9.7 takes -w as a decimal from 1 to 2**64 - 10, so 0 and anything
+# past this are out of range.
 WIDTH_MAX = ULONG_MAX - 9
 
 
@@ -50,7 +50,7 @@ class FoldFlags:
 def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags:
     fl = FlagView(flags, spec=SPECS["fold"])
     width = fl.as_number(
-        "width", xstrtoumax, _width_refusal, low=1, high=WIDTH_MAX
+        "width", unsigned_decimal, _width_refusal, low=1, high=WIDTH_MAX
     )
     return FoldFlags(
         width=WIDTH if width is None else width,

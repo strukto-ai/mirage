@@ -243,7 +243,7 @@ def compare(
 
 
 def rename_name(old: str, new: str, fully: bool = True) -> str:
-    """How a rename names its paths in a diffstat, git's pprint_rename.
+    """How a rename names its paths in a diffstat, as git prints it.
 
     When either side needs quoting the two quoted paths stand whole;
     otherwise the shared leading and trailing directories fold into
@@ -416,7 +416,7 @@ def _row_stat(repo: BaseRepo, row: Change, display: str) -> FileStat:
 
 
 def _summary_lines(row: Change, display: str, shown: str) -> list[str]:
-    """The ``--summary`` lines for one change, git's diff_summary.
+    """The ``--summary`` lines for one change, as git prints them.
 
     Args:
         row (Change): the paired delta.
@@ -624,7 +624,7 @@ def combined_patch(
     """Render ``-c``/``--cc`` for the paths that differ from every parent.
 
     A path with no hunk left and no mode change prints nothing at all,
-    and the headers follow git's show_combined_header. Binary combined
+    and the headers are the ones git prints for it. Binary combined
     patches stay binary under ``--text``, as in Git 2.50.1.
 
     Args:

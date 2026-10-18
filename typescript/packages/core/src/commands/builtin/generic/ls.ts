@@ -41,8 +41,8 @@ import {
 } from '../utils/formatting.ts'
 import { UsageError } from '../../errors.ts'
 import { isEntryError } from '../../../errors/classify.ts'
-import { argmatchError, argmatchLine, usageHint } from '../../spec/usage.ts'
-import { type ArgmatchKind, argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError, wordRefusalLine, usageHint } from '../../spec/usage.ts'
+import { type WordRefusalKind, matchWord } from '../../spec/word_choice.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
 import {
   fsStrerror,
@@ -893,9 +893,9 @@ function groupedArgumentError(
   option: string,
   value: string,
   groups: readonly (readonly string[])[],
-  kind: ArgmatchKind,
+  kind: WordRefusalKind,
 ): UsageError {
-  return argmatchError('ls', option, value, groups, 1, kind)
+  return wordRefusalError('ls', option, value, groups, 1, kind)
 }
 
 const WORD_OPTIONS: Readonly<Record<string, [string, readonly (readonly string[])[]]>> = {
@@ -929,7 +929,7 @@ function checkOptionWords(fl: FlagView): void {
     const entry = WORD_OPTIONS[dest]
     if (entry === undefined) continue
     const [option, groups] = entry
-    const match = argmatch(word, groups)
+    const match = matchWord(word, groups)
     if (!match.matched) throw groupedArgumentError(option, word, groups, match.kind)
   }
 }
@@ -943,9 +943,9 @@ function sortFlag(fl: FlagView): [LsSortBy, boolean] {
   if (last !== 'sort') return [SORT_FLAGS[last] ?? 'name', true]
   const word = fl.asStr('sort') ?? ''
   const words = Object.keys(SORT_WORDS)
-  const match = argmatch(word, words)
+  const match = matchWord(word, words)
   if (!match.matched) {
-    throw argmatchError('ls', '--sort', word, words, 1, match.kind)
+    throw wordRefusalError('ls', '--sort', word, words, 1, match.kind)
   }
   return [SORT_WORDS[match.word] ?? 'name', true]
 }
@@ -958,7 +958,7 @@ function timeFlag(fl: FlagView): LsTimeKind {
   if (last === 'c') return 'ctime'
   if (last === 'u') return 'atime'
   const word = fl.asStr('time') ?? ''
-  const match = argmatch(word, TIME_GROUPS)
+  const match = matchWord(word, TIME_GROUPS)
   if (!match.matched) throw groupedArgumentError('--time', word, TIME_GROUPS, match.kind)
   return TIME_KINDS[match.word] ?? 'mtime'
 }
@@ -977,7 +977,7 @@ function timeStyleFlag(fl: FlagView): string {
   if (style === undefined) return 'locale'
   if (style.startsWith('posix-')) return 'locale'
   if (style.startsWith('+')) return style
-  const match = argmatch(style, LS_TIME_STYLES)
+  const match = matchWord(style, LS_TIME_STYLES)
   if (match.matched) return match.word
   // ls hand-writes this block rather than letting argmatch print
   // `time_style_args`, so it is the one ARGMATCH refusal in the repo whose
@@ -986,7 +986,7 @@ function timeStyleFlag(fl: FlagView): string {
   // is still argmatch's, so `--time-style=lo` spans long-iso and locale and
   // reads `ambiguous argument 'lo'`.
   throw new UsageError(
-    `${argmatchLine('ls', 'time style', style, match.kind)}\n` +
+    `${wordRefusalLine('ls', 'time style', style, match.kind)}\n` +
       'Valid arguments are:\n' +
       '  - [posix-]full-iso\n' +
       '  - [posix-]long-iso\n' +
@@ -1006,7 +1006,7 @@ function hyperlinkFlag(fl: FlagView): boolean {
   if (raw === undefined || raw === null || raw === false) return false
   if (raw === true) return true
   const word = typeof raw === 'string' ? raw : ''
-  const match = argmatch(word, WHEN_GROUPS)
+  const match = matchWord(word, WHEN_GROUPS)
   if (!match.matched) {
     throw groupedArgumentError('--hyperlink', word, WHEN_GROUPS, match.kind)
   }
@@ -1024,7 +1024,7 @@ function indicatorWord(dest: string, raw: unknown): LsIndicator {
   const word = typeof raw === 'string' ? raw : ''
   const option = dest === 'classify' ? '--classify' : '--indicator-style'
   const groups = dest === 'classify' ? WHEN_GROUPS : INDICATOR_GROUPS
-  const match = argmatch(word, groups)
+  const match = matchWord(word, groups)
   if (!match.matched) throw groupedArgumentError(option, word, groups, match.kind)
   if (dest === 'indicator_style') return match.word as LsIndicator
   return match.word === 'always' ? 'classify' : 'none'

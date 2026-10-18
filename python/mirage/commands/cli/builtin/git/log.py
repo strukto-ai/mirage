@@ -128,8 +128,7 @@ def _graphed(
     decor: Decorations | None,
     diff: DiffFlags | None,
 ) -> bytes:
-    """The bytes a ``--graph`` log prints: git's show_log, commit by
-    commit.
+    """The bytes a ``--graph`` log prints, commit by commit.
 
     Every walked commit moves the graph on, printed or not, so a commit
     the pickaxe passed by leaves a ``...`` row. A printed commit gets the

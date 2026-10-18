@@ -15,7 +15,7 @@
 // Mirrors python/tests/commands/builtin/generic/test_diff.py.
 
 import { describe, expect, it } from 'vitest'
-import { cEscape, diffGeneric, switchWords } from './diff.ts'
+import { diffGeneric, quoteHeaderName, switchWords } from './diff.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -77,11 +77,11 @@ describe('diffGeneric with stdin', () => {
 })
 
 describe('diff headers', () => {
-  it('C-quotes a header name the way diffutils does', () => {
-    expect(cEscape('plain/é\x7f')).toBe('plain/é\x7f')
-    expect(cEscape('sp ace')).toBe('"sp ace"')
-    expect(cEscape('t\tq"b\\')).toBe('"t\\tq\\"b\\\\"')
-    expect(cEscape('c\x01')).toBe('"c\\001"')
+  it('C-quotes a header name the way GNU diff does', () => {
+    expect(quoteHeaderName('plain/é\x7f')).toBe('plain/é\x7f')
+    expect(quoteHeaderName('sp ace')).toBe('"sp ace"')
+    expect(quoteHeaderName('t\tq"b\\')).toBe('"t\\tq\\"b\\\\"')
+    expect(quoteHeaderName('c\x01')).toBe('"c\\001"')
   })
 
   it('reads the time the namespace keeps', async () => {

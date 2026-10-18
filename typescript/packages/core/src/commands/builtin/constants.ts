@@ -55,9 +55,9 @@ export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
   'application/pdf': 'application/pdf',
 })
 
-// od, split and cmp all read their counts with xstrtoumax, which skips leading
-// whitespace and allows one '+' before the digits, so `-b +10` and `-b " 10"`
-// are valid while `+ 10`, `++10`, `-10` and a trailing space are not.
+// od, split and cmp all skip leading whitespace in a count and allow one '+'
+// before the digits, so `-b +10` and `-b " 10"` are valid while `+ 10`,
+// `++10`, `-10` and a trailing space are not.
 // A bigint: as a double, 2 ** 64 - 1 rounds up to 2 ** 64, which would let
 // exactly-2**64 values through the too-large checks that python rejects.
 export const UINTMAX = 2n ** 64n - 1n
@@ -86,7 +86,7 @@ export const C_SPACE = '[ \\t\\n\\v\\f\\r]*'
 // 0 is octal, else decimal; the unconsumed remainder is the suffix. The sign
 // stays outside group 1 so the radix is picked from the digits alone
 // (`-N +0x10` is hex, `-N +010` is octal).
-export const XSTRTOUMAX_PATTERN = new RegExp(
+export const SUFFIXED_COUNT_PATTERN = new RegExp(
   `^${C_SPACE}\\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$`,
 )
 

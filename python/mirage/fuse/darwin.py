@@ -25,17 +25,18 @@ from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
 
-# macFUSE's libfuse extends fuse_operations with Darwin-only callbacks
-# (fuse.h, inside #ifdef __APPLE__). mfusepy does not declare them: its
-# struct ends with 13 reserved pointer slots exactly where the Apple tail
-# lives, so libfuse sees NULL for every extended op. The kext path never
-# needs them, which is why this went unnoticed. The FSKit backend does:
-# the shim finalizes createItem/createDirectory with a SETATTR carrying
-# mode|uid|gid|crtime|flags, which macFUSE's high level routes to
-# setattr_x, and routes rename through renamex. With those slots NULL,
-# libfuse answers ENOSYS *after* our CREATE/MKDIR already succeeded, so
-# the file lands and the syscall still fails, and rename never reaches
-# userspace at all. Verified with a libfuse wire trace:
+# macFUSE's libfuse takes Darwin-only callbacks after the portable
+# fuse_operations ones, the ABI layout the macFUSE headers define for Apple
+# builds. mfusepy does not declare them: its struct ends with 13 reserved
+# pointer slots exactly where the Apple tail lives, so libfuse sees NULL for
+# every extended op. The kext path never needs them, which is why this went
+# unnoticed. The FSKit backend does: the shim finalizes
+# createItem/createDirectory with a SETATTR carrying mode|uid|gid|crtime|flags,
+# which macFUSE's high-level API delivers to the setattr_x callback, and
+# delivers rename to renamex. With those slots NULL, libfuse answers ENOSYS
+# *after* our CREATE/MKDIR already succeeded, so the file lands and the syscall
+# still fails, and rename never reaches userspace at all. Verified with a
+# libfuse wire trace:
 #   unique: 43, CREATE  -> success
 #   unique: 44, SETATTR -> error: -78 (Function not implemented)
 # Related macFUSE FSKit-shim reports (different bugs, same layer):
@@ -69,7 +70,7 @@ class Timespec(ctypes.Structure):
 
 
 class SetattrX(ctypes.Structure):
-    """Mirror of struct setattr_x (macFUSE fuse_common.h).
+    """The setattr_x payload, in the ABI layout the macFUSE headers define.
 
     Field types follow the Darwin C ABI: mode_t is uint16, uid_t/gid_t are
     uint32, off_t is int64; ctypes inserts the same padding the C compiler
@@ -188,10 +189,10 @@ def _marshal_renamex(self: Any, old: bytes, new: bytes, flags: int) -> int:
 def install_macfuse_extensions(mfusepy: Any) -> None:
     """Teach mfusepy the Darwin-only callbacks the FSKit backend needs.
 
-    Replaces mfusepy's reserved tail slots with macFUSE's real Apple
-    fields (fuse.h declaration order after fallocate) and attaches
-    marshalling methods for setattr_x, fsetattr_x and renamex. Only those
-    three carry callbacks; the rest stay opaque pointers and therefore
+    Replaces mfusepy's reserved tail slots with macFUSE's real Apple fields
+    (the ABI order the macFUSE headers give them, after fallocate) and
+    attaches marshalling methods for setattr_x, fsetattr_x and renamex. Only
+    those three carry callbacks; the rest stay opaque pointers and therefore
     NULL, and macFUSE prefers setattr_x over the per-attribute
     setcrtime/setchgtime/chflags entry points when it is non-NULL, so one
     decomposing callback covers them all. Idempotent, and a no-op off macOS.
@@ -219,6 +220,8 @@ def install_macfuse_extensions(mfusepy: Any) -> None:
     base = [
         f for f in mfusepy.fuse_operations._fields_ if f[0] not in _REPLACED
     ]
+    # The Apple tail, in the ABI order and types the macFUSE headers
+    # define.
     apple_tail = [
         ("reserved00", ctypes.c_void_p),
         ("monitor", ctypes.c_void_p),

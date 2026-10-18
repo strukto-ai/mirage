@@ -86,7 +86,7 @@ GNU_READ_EXIT = {
 # says the step in GNU's words only where that still names the operand
 # (``FAILURE_WORDING``: head, tail and uniq
 # say `error reading 'dir'`, tac and tsort `dir: read error`, sed `read
-# error on dir`; sort's steps come from `sort_die`, whose `read failed:
+# error on dir`; sort names its failed step, and its `read failed:
 # dir: Is a directory` still holds the house style) and keeps `<cmd>:
 # <path>: Is a directory` for the rest, so the message test asserts that
 # the operand and the errno are named and only the exit code above is

@@ -30,9 +30,9 @@ import { SLEEP_INTERVAL, SLEEP_SUFFIXES } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
-// The only two options coreutils sleep declares, through gnulib's
-// `parse_gnu_standard_options_only`. They share no prefix, so an abbreviation
-// of either resolves and neither can ever be ambiguous.
+// The only two options coreutils sleep accepts; its --help page lists no
+// others. They share no prefix, so an abbreviation of either resolves and
+// neither can ever be ambiguous.
 const STANDARD_OPTIONS = ['--help', '--version'] as const
 
 /**
@@ -72,16 +72,15 @@ function standardResponse(option: string): Result {
 /**
  * sleep's operands, and the first dash word that is not one.
  *
- * coreutils sleep declares only gnulib's two standard options and reads the
- * line through a real getopt_long loop (`parse_gnu_standard_options_only`), so
- * it stops at a dash-leading word wherever that word sits: measured on 9.4,
- * `sleep --zzz 0` and `sleep 0 --zzz` both report the option and neither
- * reports the interval. The caller decides what that word means, since a
- * `--help`/`--version` spelling is an answer rather than a refusal. `--` ends
- * the scan, which is what makes `sleep -- '--zzz=é'` an interval diagnostic
- * instead of an option one, and a `-<digits>` word stays an operand --
- * mirage's NUMERIC_SHORT rule, which every command shares, and the reason
- * `sleep -1` names the interval where GNU names the option letter.
+ * coreutils sleep accepts only `--help` and `--version` and refuses any other
+ * dash-leading word wherever that word sits: measured on 9.4, `sleep --zzz 0`
+ * and `sleep 0 --zzz` both report the option and neither reports the interval.
+ * The caller decides what that word means, since a `--help`/`--version`
+ * spelling is an answer rather than a refusal. `--` ends the scan, which is
+ * what makes `sleep -- '--zzz=é'` an interval diagnostic instead of an option
+ * one, and a `-<digits>` word stays an operand -- mirage's NUMERIC_SHORT rule,
+ * which every command shares, and the reason `sleep -1` names the interval
+ * where GNU names the option letter.
  *
  * The returned word is the whole token for a long spelling and the offending
  * letter for a short one, the split `unknownOptionError` already words.
@@ -106,13 +105,13 @@ function sleepOperands(args: string[]): [string[], string | null] {
 /**
  * One operand's seconds, or null when it is not an interval.
  *
- * GNU's grammar is `NUMBER[SUFFIX]`, which the help page advertises: gnulib
- * reads the number with strtod, then allows at most ONE trailing character and
- * looks it up in `apply_suffix`. Measured on coreutils 9.7: `sleep 0.005m`
- * takes 0.3s, `sleep 1e-3s` is accepted, and `sleep 0S`, `sleep 0ss`,
- * `sleep 0sx` and `sleep s` are each `invalid time interval`. Null also covers
- * GNU's own "inf", a documented divergence carried by SLEEP_INTERVAL.
- * `_interval_seconds` in sleep.py is the twin.
+ * GNU's grammar is `NUMBER[SUFFIX]`, which the help page advertises: a
+ * floating-point number followed by at most ONE suffix letter, one of s, m, h
+ * or d. Measured on coreutils 9.7: `sleep 0.005m` takes 0.3s, `sleep 1e-3s` is
+ * accepted, and `sleep 0S`, `sleep 0ss`, `sleep 0sx` and `sleep s` are each
+ * `invalid time interval`. Null also covers GNU's own "inf", a documented
+ * divergence carried by SLEEP_INTERVAL. `_interval_seconds` in sleep.py is the
+ * twin.
  */
 function intervalSeconds(raw: string): number | null {
   const multiplier = SLEEP_SUFFIXES[raw.slice(-1)] ?? 0
@@ -156,9 +155,9 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
     ]
   }
   if (operands.length === 0) {
-    // Missing operand is the same `usage (EXIT_FAILURE)` refusal the
-    // invalid-interval one is, so it carries the same Try-help line (measured
-    // on 9.4: `sleep` is two lines, not one).
+    // Missing operand is refused like an invalid interval: exit 1 under the
+    // same closing Try-help line (measured on 9.4: `sleep` is two lines, not
+    // one).
     const err = encodeText(`sleep: missing operand\n${usageHint('sleep')}\n`)
     return [
       null,
@@ -193,12 +192,11 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
     total += seconds
   }
   if (bad.length > 0) {
-    // coreutils calls `error()` per offending operand and only then
-    // `usage (EXIT_FAILURE)`, so EVERY bad operand is named, in line order and
-    // repeated if it repeats, under one closing Try-help line (measured on
-    // 9.7: `sleep 1x 2y` is three lines, `sleep 1x 1x` names 1x twice). Each
-    // operand goes through gnulib's `quote()` like every other coreutils
-    // operand diagnostic (measured on 9.4: `sleep -- é` names `'\303\251'`).
+    // GNU names EVERY bad operand, one line each, in line order and repeated
+    // if it repeats, under one closing Try-help line (measured on 9.7:
+    // `sleep 1x 2y` is three lines, `sleep 1x 1x` names 1x twice). Each
+    // operand is quoted the way every other coreutils operand diagnostic is
+    // (measured on 9.4: `sleep -- é` names `'\303\251'`).
     const lines = bad.map((raw) => `sleep: invalid time interval '${quoteText(raw)}'\n`)
     const err = encodeText(`${lines.join('')}${usageHint('sleep')}\n`)
     return [

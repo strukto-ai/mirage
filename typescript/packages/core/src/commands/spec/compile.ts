@@ -161,7 +161,7 @@ export interface CompiledSpec {
    * into a number (click count, `-vvv`). */
   readonly countDests: ReadonlySet<string>
   /** Allowed values per canonical spelling, in declaration order (the
-   * order GNU's ARGMATCH refusal lists them). */
+   * order GNU's word-choice refusal lists them). */
   readonly choicesByDest: ReadonlyMap<string, readonly string[]>
   /** Canonical spellings that must appear, in declaration order; a
    * default satisfies the requirement. */

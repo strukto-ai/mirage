@@ -534,10 +534,10 @@ class Parser:
     def parse_builtin_args(self, name: str) -> tuple[Expr, ...]:
         """Parse a builtin's argument list and check its count, as mawk does.
 
-        Only ``length`` may go without parentheses. ``length``, ``match``,
-        ``split``, ``sub`` and ``gsub`` are grammar rules in mawk 1.3.4, so a
-        surplus or missing argument is a syntax error at the token that
-        breaks the rule (``match(s, re, arr)``, gawk's array form, stops at
+        Only ``length`` may go without parentheses. In mawk 1.3.4 a
+        surplus or missing argument to ``length``, ``match``, ``split``,
+        ``sub`` or ``gsub`` is a syntax error at the token where the call
+        goes wrong (``match(s, re, arr)``, gawk's array form, is refused at
         its second comma). Every other builtin takes a free list that is
         then counted against its bounds.
 

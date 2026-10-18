@@ -384,8 +384,8 @@ async def restore_paths(
             # stands, so git replaces it with one rather than
             # writing through it. A link's target tree is left
             # exactly as it was, and an untracked file standing
-            # there is replaced in silence, which is what git's
-            # create_directories does to any leading non-directory.
+            # there is replaced in silence, which is what git does
+            # to any leading non-directory.
             above = await blocking_ancestor(vfs, location.worktree, name)
             if above is not None:
                 await remove_file(vfs, above)

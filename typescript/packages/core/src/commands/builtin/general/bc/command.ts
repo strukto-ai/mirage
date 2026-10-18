@@ -24,7 +24,7 @@ import type { BcNumber, BcState, BcStatement } from './types.ts'
 import { ZERO } from './numbers.ts'
 import * as constants from './constants.ts'
 import { BcParseError, BcRuntimeError, BcHalt, parseErrorLine, runtimeErrorLine } from './errors.ts'
-import { OutputColumn, outputLineSize } from './render.ts'
+import { OutputColumn, outputLineLength } from './render.ts'
 import { parseInput } from './lexer.ts'
 import { evalStatement } from './parser.ts'
 
@@ -130,7 +130,7 @@ export function bc(
     variables: new Map<string, BcNumber>(),
     warnings: [],
   }
-  const folder = new OutputColumn(outputLineSize(ctx.env))
+  const folder = new OutputColumn(outputLineLength(ctx.env))
   const errors: string[] = []
   const lines = parseInput(ctx.stdin ?? new Uint8Array(), ctx.signal)
   const io = new IOResult()

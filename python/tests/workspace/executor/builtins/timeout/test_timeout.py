@@ -5,8 +5,8 @@ import pytest
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.workspace.executor.builtins.timeout.timeout import (
+    duration_seconds,
     handle_timeout,
-    parse_duration,
     parse_signal,
     signal_name,
 )
@@ -37,35 +37,35 @@ def make_session() -> SessionState:
     return SessionState(session_id="s1")
 
 
-def test_parse_duration_units():
-    assert parse_duration("1") == 1.0
-    assert parse_duration("0.5") == 0.5
-    assert parse_duration("2s") == 2.0
-    assert parse_duration("2m") == 120.0
-    assert parse_duration("1h") == 3600.0
-    assert parse_duration("1d") == 86400.0
-    assert parse_duration(".5") == 0.5
+def test_duration_seconds_units():
+    assert duration_seconds("1") == 1.0
+    assert duration_seconds("0.5") == 0.5
+    assert duration_seconds("2s") == 2.0
+    assert duration_seconds("2m") == 120.0
+    assert duration_seconds("1h") == 3600.0
+    assert duration_seconds("1d") == 86400.0
+    assert duration_seconds(".5") == 0.5
 
 
-def test_parse_duration_reads_c_floats():
-    assert parse_duration("1e-1") == 0.1
-    assert parse_duration(".1s") == 0.1
-    assert parse_duration(" 0.1") == 0.1
-    assert parse_duration("0x1p-3") == 0.125
-    assert parse_duration("inf") == float("inf")
-    assert parse_duration("infinitys") == float("inf")
-    assert parse_duration("-0") == 0
+def test_duration_seconds_reads_c_floats():
+    assert duration_seconds("1e-1") == 0.1
+    assert duration_seconds(".1s") == 0.1
+    assert duration_seconds(" 0.1") == 0.1
+    assert duration_seconds("0x1p-3") == 0.125
+    assert duration_seconds("inf") == float("inf")
+    assert duration_seconds("infinitys") == float("inf")
+    assert duration_seconds("-0") == 0
 
 
-def test_parse_duration_rejects_garbage():
-    assert parse_duration("xx") is None
-    assert parse_duration("-1") is None
-    assert parse_duration("1x") is None
-    assert parse_duration("") is None
-    assert parse_duration("1ss") is None
-    assert parse_duration("1,5") is None
-    assert parse_duration("1e") is None
-    assert parse_duration("nan") is None
+def test_duration_seconds_rejects_garbage():
+    assert duration_seconds("xx") is None
+    assert duration_seconds("-1") is None
+    assert duration_seconds("1x") is None
+    assert duration_seconds("") is None
+    assert duration_seconds("1ss") is None
+    assert duration_seconds("1,5") is None
+    assert duration_seconds("1e") is None
+    assert duration_seconds("nan") is None
 
 
 @pytest.mark.parametrize(

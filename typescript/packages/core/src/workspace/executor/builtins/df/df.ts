@@ -103,8 +103,8 @@ async function operandError(dispatch: DispatchFn, spec: PathSpec): Promise<Error
   return null
 }
 
-// Human-readable size in powers of 1000 (df -H). Same rounding as -h;
-// GNU runs both through one `human_readable`.
+// Human-readable size in powers of 1000 (df -H). Same rounding as -h: GNU df
+// rounds the two alike, and only the base differs.
 function humanSi(n: number): string {
   return humanScaled(n, 1000, SI_UNITS)
 }

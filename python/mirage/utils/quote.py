@@ -46,7 +46,7 @@ NAMED_ESCAPES = {
 # The commands whose operand mirage reports shell-quoted, each one probed
 # against its own GNU original on debian:stable-slim. GNU picks the policy
 # per diagnostic, not per command family: cat/wc/cut and most of the read
-# family quote only when the name needs it (gnulib's ``shell_escape``
+# family quote only when the name needs it (the ``shell-escape`` quoting
 # style), while head/tail/tac/fmt/split/csplit/truncate/strings quote
 # always and word the line differently ("cannot open X for reading").
 # Those say it in GNU's words (``FAILURE_WORDING`` in
@@ -190,7 +190,7 @@ def needs_shell_quote(name: str) -> bool:
 def shell_quote_always(name: str) -> str:
     """Wrap a name so a shell would read it back as itself.
 
-    GNU's ``shell_escape_always`` rendering: the ``"name"`` form when the
+    GNU's ``shell-escape-always`` quoting style: the ``"name"`` form when the
     name holds a single quote and nothing else that would need escaping
     there, otherwise the ``'name'`` form, where an embedded quote becomes
     ``'\\''`` and a run of control characters becomes one ``$'...'``
@@ -233,7 +233,7 @@ def shell_quote_always(name: str) -> str:
 def shell_quote(name: str) -> str:
     """Wrap a name only when a shell would read it back as something else.
 
-    GNU's ``shell_escape`` rendering, byte-identical with the TypeScript
+    GNU's ``shell-escape`` quoting style, byte-identical with the TypeScript
     ``shellQuote``: ``nope.txt`` stays bare and ``*.txt`` becomes
     ``'*.txt'``, which is what makes a name carrying a metacharacter
     readable in a diagnostic without dressing up every ordinary one.

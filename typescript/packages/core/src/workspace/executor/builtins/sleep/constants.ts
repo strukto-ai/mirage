@@ -21,11 +21,10 @@
 // "inf", "nan", and "1_0".
 export const SLEEP_INTERVAL = /^\+?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
 
-// The SUFFIX half, and what each one multiplies the number by. gnulib's
-// `apply_suffix` switches on one character, so exactly one may follow the
-// number and the switch is lowercase only. Measured on coreutils 9.7:
-// `sleep 0.005m` takes 0.3s, while `sleep 0S`, `sleep 0ss` and `sleep s` are
-// all `invalid time interval`.
+// The SUFFIX half, and what each one multiplies the number by. GNU takes at
+// most one suffix letter after the number, lowercase only. Measured on
+// coreutils 9.7: `sleep 0.005m` takes 0.3s, while `sleep 0S`, `sleep 0ss` and
+// `sleep s` are all `invalid time interval`.
 export const SLEEP_SUFFIXES: Readonly<Record<string, number>> = Object.freeze({
   s: 1,
   m: 60,

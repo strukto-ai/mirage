@@ -10,7 +10,7 @@ import type { Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { OD_OVERFLOW_UNITS, OD_SIZE_UNITS, UINTMAX, XSTRTOUMAX_PATTERN } from '../constants.ts'
+import { OD_OVERFLOW_UNITS, OD_SIZE_UNITS, UINTMAX, SUFFIXED_COUNT_PATTERN } from '../constants.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
 import { resolveSource, stdinStream } from '../utils/stream.ts'
 
@@ -29,7 +29,7 @@ export function parseRadix(value: string): string {
 }
 
 export function parseCount(value: string, flag: string): number {
-  const match = XSTRTOUMAX_PATTERN.exec(value)
+  const match = SUFFIXED_COUNT_PATTERN.exec(value)
   if (match === null) throw new UsageError(`od: invalid ${flag} argument '${value}'`, 1)
   const number = match[1] ?? ''
   const suffix = match[2] ?? ''

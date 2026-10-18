@@ -60,9 +60,9 @@ MAGIC_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
     (b"[{", ContentType.JSON),
 )
 
-# od, split and cmp all read their counts with xstrtoumax, which skips leading
-# whitespace and allows one '+' before the digits, so `-b +10` and `-b " 10"`
-# are valid while `+ 10`, `++10`, `-10` and a trailing space are not.
+# od, split and cmp all skip leading whitespace in a count and allow one
+# '+' before the digits, so `-b +10` and `-b " 10"` are valid while
+# `+ 10`, `++10`, `-10` and a trailing space are not.
 # `[0-9]` not `\d`: GNU is ASCII-only, while python's `\d` would accept other
 # Unicode decimal digits.
 UINTMAX = 2**64 - 1
@@ -92,7 +92,7 @@ C_SPACE = r"[ \t\n\v\f\r]*"
 # 0 is octal, else decimal; the unconsumed remainder is the suffix. The sign
 # stays outside group 1 so the radix is picked from the digits alone
 # (`-N +0x10` is hex, `-N +010` is octal).
-XSTRTOUMAX_PATTERN = re.compile(
+SUFFIXED_COUNT_PATTERN = re.compile(
     rf"^{C_SPACE}\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$"
 )
 

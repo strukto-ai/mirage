@@ -22,7 +22,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
 import { TAB_WIDTH } from '../../../utils/width.ts'
-import { EOVERFLOW_REASON, ERANGE_REASON, xstrtoumax } from '../utils/strtol.ts'
+import { EOVERFLOW_REASON, ERANGE_REASON, unsignedDecimal } from '../utils/strtol.ts'
 import { quoteText } from '../../quote.ts'
 
 const ENC = new TextEncoder()
@@ -451,13 +451,13 @@ function goalRefusal(text: string, value: bigint | null): string {
 
 function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
   const fl = new FlagView(bag, specOf('fmt'))
-  // GNU 9.7 reads -w with xdectoumax(optarg, 0, MAXCHARS / 2) and then -g with
-  // xdectoumax(optarg, 0, max_width).
-  const width = fl.asNumber('width', xstrtoumax, widthRefusal, {
+  // GNU 9.7 takes -w as a decimal from 0 to MAX_CHARS / 2, then -g as one from
+  // 0 to that width.
+  const width = fl.asNumber('width', unsignedDecimal, widthRefusal, {
     low: 0n,
     high: BigInt(MAX_CHARS / 2),
   })
-  const goal = fl.asNumber('goal', xstrtoumax, goalRefusal, {
+  const goal = fl.asNumber('goal', unsignedDecimal, goalRefusal, {
     low: 0n,
     high: width ?? BigInt(WIDTH),
   })

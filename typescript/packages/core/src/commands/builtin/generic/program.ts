@@ -96,13 +96,13 @@ export function programFiles(name: string, bag: Record<string, FlagValue>): Path
 }
 
 /**
- * grep's --exclude-from files read into the globs they hold. gnulib's
- * add_exclude_file takes one glob per line, trailing blanks dropped and blank
- * lines skipped, and `-` is stdin (`source`, shared with -f). The globs stay
- * under `exclude_from`, where the option stood among --include and --exclude.
- * A file grep cannot read stops it before it searches anything, exit 2.
- * Returns the flags, whether stdin was read, and the refusal. Mirrors
- * Python's lower_exclude_from.
+ * grep's --exclude-from files read into the globs they hold. GNU grep takes
+ * one glob per line, trailing blanks dropped and blank lines skipped, and `-`
+ * is stdin (`source`, shared with -f). The globs stay under `exclude_from`,
+ * where the option stood among --include and --exclude. A file grep cannot
+ * read stops it before it searches anything, exit 2. Returns the flags,
+ * whether stdin was read, and the refusal. Mirrors Python's
+ * lower_exclude_from.
  */
 /**
  * Which of grep's -f and --exclude-from reads stdin: the first of them on the

@@ -44,8 +44,9 @@ STDERR = "stderr"
 MARKER = "--"
 TRUE_WORDS = (b"true", b"yes", b"on")
 FALSE_WORDS = (b"false", b"no", b"off", b"")
-# git_parse_signed: strtoimax in base 0 after C-locale space, then at most
-# one unit, and the product has to fit an int.
+# A config integer as git reads one: C-locale space, a number read the
+# way C's strtoimax reads base 0, then at most one unit, and the product
+# has to fit an int.
 INTEGER = re.compile(
     rb"[ \t\n\v\f\r]*([-+]?)"
     rb"(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)"
@@ -346,7 +347,7 @@ def git_bool(values: Sequence[bytes], key: str, default: bool) -> bool:
 
 
 def maybe_bool(value: bytes) -> bool | None:
-    """``git_parse_maybe_bool``: a boolean word, empty, or an integer.
+    """A config boolean as git reads it: a boolean word, empty, or an integer.
 
     ``true``/``yes``/``on`` or ``false``/``no``/``off`` in any case,
     empty for false, or an integer for whether it is nonzero; None for
@@ -415,8 +416,8 @@ def without_section(data: bytes, section: str, name: str) -> bytes:
 
     ``git branch -d`` drops the deleted branch's settings this way, so a
     branch made again under the same name starts with no upstream
-    rather than with two. A header names the block the way git's
-    ``section_name_match`` reads it, spelled exactly: ``[branch "x"]``
+    rather than with two. A header names the block the way git
+    matches it, spelled exactly: ``[branch "x"]``
     with its escapes, or the older ``[branch.x]``. ``[Branch "x"]`` and
     ``[branch.X]`` are left, as git leaves them, and a line opening with
     ``[`` ends a block (pinned against git 2.50.1).
@@ -489,7 +490,7 @@ def _continues(value: bytes, inside: bool) -> tuple[bool, bool]:
 
 
 def _integer(value: bytes) -> int | None:
-    """git_parse_int: the integer a config value spells, None for none.
+    """The integer a config value spells as git reads it, None for none.
 
     Hex after ``0x`` and octal after a leading zero, then an optional
     ``k``, ``m`` or ``g``; a product outside an int is no integer.

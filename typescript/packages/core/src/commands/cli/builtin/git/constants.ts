@@ -63,7 +63,8 @@ export const GIT_DIR = '.git'
 export const TEMPLATE_KINDS: readonly string[] = ['format', 'tformat']
 export const TERMINATED_KINDS: readonly string[] = ['oneline', 'tformat']
 
-// The rules a short ref name is tried against, rev-parse's dwim_ref order.
+// The rules a short ref name is tried against, in the order gitrevisions(7)
+// lists them.
 export const DWIM_RULES = [
   '{}',
   'refs/{}',

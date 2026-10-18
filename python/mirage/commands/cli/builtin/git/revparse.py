@@ -202,7 +202,7 @@ def resolve_commit(repo: BaseRepo, revision: str) -> Commit:
 def _range_ends(revision: str) -> tuple[str, str, bool] | None:
     """The two ends of ``A..B`` or ``A...B``, or None for one revision.
 
-    Read the way git's handle_dotdot reads it: the first ``..`` splits
+    Read the way git reads a range: the first ``..`` splits
     the operand, a dot right after it makes the range symmetric, and an
     empty end is HEAD, so ``..side`` is ``HEAD..side``.
 

@@ -38,7 +38,7 @@ import {
 } from '../../../utils/quote.ts'
 import {
   BLOCK_UNIT,
-  CHMOD_MODE_BITS,
+  ALL_MODE_BITS,
   contentSize,
   deviceRdev,
   posixMode,
@@ -66,7 +66,7 @@ function typeLabel(s: FileStat): string {
 }
 
 function effectiveMode(s: FileStat): number {
-  return posixMode(s) & CHMOD_MODE_BITS
+  return posixMode(s) & ALL_MODE_BITS
 }
 
 function epoch(iso: string | null): string {

@@ -37,7 +37,7 @@ export function cAtoi(text: string): number {
   return Number(low)
 }
 
-export function outputLineSize(env: Record<string, string> | undefined): number {
+export function outputLineLength(env: Record<string, string> | undefined): number {
   const raw = env?.[constants.LINE_LENGTH_VAR]
   if (raw === undefined) return constants.DEFAULT_LINE_LENGTH
   const size = cAtoi(raw)
@@ -54,7 +54,7 @@ export function columnWidth(char: string): number {
 
 export class OutputColumn {
   col = 0
-  constructor(private readonly lineSize: number) {}
+  constructor(private readonly lineLength: number) {}
 
   write(text: string): string {
     const out: string[] = []
@@ -65,7 +65,7 @@ export class OutputColumn {
         continue
       }
       const width = columnWidth(char)
-      if (this.lineSize !== 0 && this.col !== 0 && this.col + width > this.lineSize - 2) {
+      if (this.lineLength !== 0 && this.col !== 0 && this.col + width > this.lineLength - 2) {
         out.push('\\\n')
         this.col = 0
       }

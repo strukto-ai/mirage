@@ -15,12 +15,12 @@
 import { PathSpec, type ReaddirFn } from '../../../types.ts'
 import { rekey, respelled } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { argmatchError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 
-// GNU's version-control names as ARGMATCH candidates, aliases of one value on one
-// line, which is how gnulib's `argmatch_valid` prints `backup_args`.
-const BACKUP_ARGS: readonly (readonly string[])[] = [
+// GNU's version-control words, the aliases of one value on one line as GNU
+// lists them back.
+const VERSION_CONTROL_WORDS: readonly (readonly string[])[] = [
   ['none', 'off'],
   ['simple', 'never'],
   ['existing', 'nil'],
@@ -43,20 +43,18 @@ export function backupControl(
 ): string | null {
   const enabled = value !== undefined && value !== false
   if (!enabled && suffix === null) return null
-  // An EMPTY control is the default, not a refusal: gnulib's
-  // `xget_version` only calls argmatch when `version && *version`, so
-  // `cp --backup=` is `cp --backup` (measured on coreutils 9.4: exit 0,
-  // and it writes the `existing` backup). This is the one argmatch-shaped
-  // slot in the repo where the empty word is neither invalid nor
-  // ambiguous.
+  // An EMPTY control is the default, not a refusal: `cp --backup=` is
+  // `cp --backup` (measured on coreutils 9.4: exit 0, and it writes the
+  // `existing` backup). This is the one word-choice slot in the repo where
+  // the empty word is neither invalid nor ambiguous.
   if (typeof value === 'string' && value !== '') {
-    // The canonical word of each class IS its control, so an ARGMATCH
-    // match answers the control directly: `--backup=e` is `existing`,
+    // The canonical word of each class IS its control, so a match answers
+    // the control directly: `--backup=e` is `existing`,
     // while `--backup=n` spans none/never/nil/numbered and is ambiguous
     // (both measured on coreutils 9.4).
-    const match = argmatch(value, BACKUP_ARGS)
+    const match = matchWord(value, VERSION_CONTROL_WORDS)
     if (!match.matched) {
-      throw argmatchError(cmdName, 'backup type', value, BACKUP_ARGS, 1, match.kind)
+      throw wordRefusalError(cmdName, 'backup type', value, VERSION_CONTROL_WORDS, 1, match.kind)
     }
     return match.word
   }

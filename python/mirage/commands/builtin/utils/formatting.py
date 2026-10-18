@@ -37,7 +37,7 @@ from mirage.types import (
 )
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
-    CHMOD_MODE_BITS,
+    ALL_MODE_BITS,
     content_size,
     posix_mode,
     size_unknown,
@@ -46,7 +46,7 @@ from mirage.utils.stat_view import (
 logger = logging.getLogger(__name__)
 
 # GNU's --block-size units: the letter, its 1024-based factor and the two
-# suffixes it prints (K for KiB, kB for KB). xstrtoumax's table, which
+# suffixes it prints (K for KiB, kB for KB). GNU's size table, which
 # takes every letter in upper case and only k, m, g and t in lower case;
 # R and Q are not in it (coreutils 9.7 refuses `--block-size=1R`).
 BLOCK_UNITS = "KMGTPEZY"
@@ -107,13 +107,13 @@ DEFAULT_COLUMNS = LsColumns()
 class BlockSizeRefusal(Enum):
     """Which of GNU's three ``--block-size`` refusals a value earned.
 
-    xstrtoumax's three failures, which ls words differently: a word it
+    Three ways a size can fail, which ls words differently: a word it
     cannot read a number or a unit out of (``x``, ``0``, ``iB``, an
     empty value), a number followed by something that is not a unit
     (``1x``, ``1.5K``, ``Kx``, a trailing blank), and a value past
     UINTMAX_MAX (``Y`` alone is 2**80). The suffix test outranks the
-    overflow test, as gnulib's ``LONGINT_INVALID_SUFFIX_CHAR_WITH_OVERFLOW``
-    is worded as the suffix failure.
+    overflow test: a value that fails both is worded as the suffix
+    failure.
     """
 
     INVALID = "invalid"
@@ -225,7 +225,7 @@ STAT_FAILED_KEY = "stat_failed"
 
 
 def human_scaled(n: int, base: int, units: tuple[str, ...]) -> str:
-    """GNU's ``human_readable`` rounding, shared by ``-h`` and ``-H``.
+    """The rounding GNU prints sizes with, shared by ``-h`` and ``-H``.
 
     Three rules, none of which fall out of a plain divide-and-format.
     Below one unit GNU prints the count alone -- ``24``, never ``24B``.
@@ -273,7 +273,7 @@ def _perm_triplet(bits: int, special: str | None = None) -> str:
 
 def ls_mode_string(s: FileStat) -> str:
     type_char = constants.TYPE_CHARS.get(s.type, "-")
-    mode = s.mode if s.mode is not None else posix_mode(s) & CHMOD_MODE_BITS
+    mode = s.mode if s.mode is not None else posix_mode(s) & ALL_MODE_BITS
     perms = (
         _perm_triplet(mode >> 6, "s" if mode & 0o4000 else None)
         + _perm_triplet(mode >> 3, "s" if mode & 0o2000 else None)
@@ -606,7 +606,7 @@ def _find_ls_name(s: FileStat) -> str:
 def format_find_ls(s: FileStat, identity: Identity | None) -> str:
     """Render one ``find -ls`` row in findutils' own layout.
 
-    GNU's ``list_file`` is not ``ls -l``: it leads with the inode and
+    GNU's ``find -ls`` row is not ``ls -l``: it leads with the inode and
     the allocated 1K blocks, then fixes every column's width (inode 9,
     blocks 6, links 3, owner and group 8 left-aligned, size 8) instead
     of fitting them to the listing, so a consumer can count fields.

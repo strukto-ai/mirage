@@ -82,7 +82,7 @@ from mirage.types import FileType, PathSpec
 
 
 def default_directory(url: str) -> str:
-    """The directory git names a clone after, as ``guess_dir_name`` does.
+    """The directory git names a clone after when none is given.
 
     Args:
         url (str): the repository as typed.
@@ -205,8 +205,8 @@ async def clone(
     except GitError as exc:
         return fatal(exc)
     local = is_local(url)
-    # git records a local path the way absolute_pathdup spells it: the
-    # directory it ran in and the path as typed, not normalized.
+    # git records a local path as the directory it ran in joined to the
+    # path as typed, not normalized.
     stored = (
         url
         if not local or url.startswith("/")

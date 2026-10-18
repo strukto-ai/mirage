@@ -18,8 +18,8 @@ import { splitReadable } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { argmatchError, extraOperandError } from '../../spec/usage.ts'
-import { argmatch } from '../../spec/argmatch.ts'
+import { wordRefusalError, extraOperandError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
 import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -40,14 +40,14 @@ interface UniqFlags {
   zeroTerminated: boolean
 }
 
-// GNU's size_opt reads a count with xstrtoimax: leading C whitespace, a sign
-// and decimal digits, nothing after them.
+// How GNU reads a -f, -s or -w count: leading C whitespace, a sign and
+// decimal digits, nothing after them.
 const COUNT_WORD = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
 const SKIP_FIELDS = 'fields to skip'
 const SKIP_CHARS = 'bytes to skip'
 const CHECK_CHARS = 'bytes to compare'
 
-// GNU's size_opt: a decimal count, never negative, any size (a huge one is
+// A -f, -s or -w count: decimal, never negative, any size (a huge one is
 // clamped, as GNU clamps it to SIZE_MAX).
 function parseCount(value: ParsedFlagValue | undefined, what: string): number | null {
   if (value === undefined || value === false) return null
@@ -57,9 +57,8 @@ function parseCount(value: ParsedFlagValue | undefined, what: string): number | 
   return Math.min(count, Number.MAX_SAFE_INTEGER)
 }
 
-// GNU's `delimit_method_string` and `grouping_method_string`, in
-// declaration order, which is what each option lists back. No aliases in
-// either, so one candidate per line.
+// The --all-repeated and --group words, in the order GNU lists each back. No
+// aliases in either, so one candidate per line.
 const ALL_REPEATED_ARGS = ['none', 'prepend', 'separate'] as const
 const GROUP_ARGS = ['prepend', 'append', 'separate', 'both'] as const
 
@@ -74,10 +73,10 @@ function optionalMethod(
   const word = String(normalized)
   // A non-string bag value (a number, a list) is not a candidate word at
   // all, so it never reaches the matcher and reads as invalid.
-  const match = typeof normalized === 'string' ? argmatch(word, allowed) : null
+  const match = typeof normalized === 'string' ? matchWord(word, allowed) : null
   if (match?.matched !== true) {
     const kind = match === null ? 'invalid' : match.kind
-    throw argmatchError('uniq', `--${option}`, word, allowed, undefined, kind)
+    throw wordRefusalError('uniq', `--${option}`, word, allowed, undefined, kind)
   }
   return match.word
 }

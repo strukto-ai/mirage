@@ -1,0 +1,47 @@
+python/mirage/utils/generated/encoding_data.py and
+typescript/packages/core/src/utils/generated/encoding_data.ts are generated
+by scripts/gen_encoding_tables.py from the WHATWG Encoding Standard as last
+updated on 21 May 2026, the commit snapshot at
+https://encoding.spec.whatwg.org/commit-snapshots/a985b62a9b45c17da3e17a9f0a0b4e30c34c4a8a/:
+its encoding labels (encodings.json) and the indexes of its single-byte
+encodings (index-*.txt), laid out as lookup tables. The standard carries this
+notice (https://github.com/whatwg/encoding/blob/main/LICENSE), and the tables
+are portions of it incorporated into source code:
+
+Copyright © WHATWG (Apple, Google, Mozilla, Microsoft).
+
+This work is licensed under a Creative Commons Attribution 4.0 International
+License. To the extent portions of it are incorporated into source code,
+such portions in the source code are licensed under the BSD 3-Clause License instead.
+
+BSD 3-Clause License
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+- - - -
+
+The Creative Commons Attribution 4.0 International Public License is at
+https://creativecommons.org/licenses/by/4.0/legalcode.
