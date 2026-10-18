@@ -477,7 +477,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /** Consume an append incrementally, through the append dispatcher. */
-  appendStream(path: PathSpec, _data: ByteSource, _signal?: AbortSignal): Promise<void> {
+  appendStream(path: PathSpec, _data: ByteSource, _signal?: AbortSignal): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'appendStream', path))
   }
 
@@ -597,7 +597,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * that atomically rejects with ENOTSUP before writing.
    */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
-  truncate(path: PathSpec, _length: number, _noCreate = false, _handed?: Handed): Promise<void> {
+  truncate(path: PathSpec, _length: number, _noCreate = false, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'truncate', path))
   }
 

@@ -83,19 +83,21 @@ class GridFSVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
+    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
+        return await _write(self.accessor, path, data)
 
     async def write_stream(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
-    ) -> None:
-        await _write_stream(self.accessor, path, data)
+    ) -> FileStat | None:
+        return await _write_stream(self.accessor, path, data)
 
-    async def append(self, path: PathSpec, data: bytes) -> None:
-        await self.append_stream(path, data)
+    async def append(self, path: PathSpec, data: bytes) -> FileStat | None:
+        return await self.append_stream(path, data)
 
-    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
-        await append_by_streamed_rewrite(
+    async def append_stream(
+        self, path: PathSpec, data: ByteSource
+    ) -> FileStat | None:
+        return await append_by_streamed_rewrite(
             lambda p, remember: _read_stream(
                 self.accessor, p, on_version=remember
             ),
@@ -105,8 +107,8 @@ class GridFSVFS(BaseVFS):
             data,
         )
 
-    async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+    async def create(self, path: PathSpec) -> FileStat | None:
+        return await _create(self.accessor, path)
 
     async def unlink(self, path: PathSpec) -> None:
         await _unlink(self.accessor, path)
@@ -128,8 +130,8 @@ class GridFSVFS(BaseVFS):
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
-    ) -> None:
-        await _truncate(self.accessor, path, length, no_create)
+    ) -> FileStat | None:
+        return await _truncate(self.accessor, path, length, no_create)
 
     def storage_location(self) -> str:
         # The hosts, the database, the bucket and the key prefix pin the

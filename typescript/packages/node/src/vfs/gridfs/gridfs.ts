@@ -110,19 +110,23 @@ export class GridFSVFS extends BaseVFS {
     return gridfsExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
     return gridfsWrite(this.accessor, path, data)
   }
 
-  override writeStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+  ): Promise<FileStat | null> {
     return gridfsWriteStream(this.accessor, path, data, signal)
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<FileStat | null | undefined> {
     return this.appendStream(path, data)
   }
 
-  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+  override appendStream(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => gridfsStream(this.accessor, p, remember),
       (p, d) => this.writeStream(p, d),
@@ -132,7 +136,7 @@ export class GridFSVFS extends BaseVFS {
     )
   }
 
-  override create(path: PathSpec): Promise<void> {
+  override create(path: PathSpec): Promise<FileStat | null> {
     return gridfsCreate(this.accessor, path)
   }
 
@@ -160,7 +164,7 @@ export class GridFSVFS extends BaseVFS {
     return gridfsCopy(this.accessor, src, dst)
   }
 
-  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<FileStat | null> {
     return gridfsTruncate(this.accessor, path, length, noCreate)
   }
 

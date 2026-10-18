@@ -100,19 +100,23 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3Exists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
     return s3Write(this.accessor, path, data)
   }
 
-  override writeStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+  ): Promise<FileStat | null> {
     return s3WriteStream(this.accessor, path, data, signal)
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+  override append(path: PathSpec, data: Uint8Array): Promise<FileStat | null | undefined> {
     return this.appendStream(path, data)
   }
 
-  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+  override appendStream(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => s3Stream(this.accessor, p, remember),
       (p, d) => this.writeStream(p, d),
@@ -122,7 +126,7 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     )
   }
 
-  override create(path: PathSpec): Promise<void> {
+  override create(path: PathSpec): Promise<FileStat | null> {
     return s3Create(this.accessor, path)
   }
 
@@ -150,7 +154,7 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3Copy(this.accessor, src, dst)
   }
 
-  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<FileStat | null> {
     return s3Truncate(this.accessor, path, length, noCreate)
   }
 }

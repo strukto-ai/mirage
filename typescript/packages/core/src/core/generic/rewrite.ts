@@ -22,7 +22,7 @@ import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 
 export type ReadFn = (path: PathSpec) => Promise<Uint8Array>
-export type WriteFn = (path: PathSpec, data: Uint8Array) => Promise<void>
+export type WriteFn<Written = unknown> = (path: PathSpec, data: Uint8Array) => Promise<Written>
 export type StatFn = (path: PathSpec) => Promise<FileStat>
 
 /**
@@ -37,21 +37,20 @@ export type StatFn = (path: PathSpec) => Promise<FileStat>
  * Drive) turns a path into an id through it. Mirrors Python's
  * `append_by_rewrite`.
  */
-export async function appendByRewrite(
+export async function appendByRewrite<Written>(
   read: ReadFn,
-  write: WriteFn,
+  write: WriteFn<Written>,
   stat: StatFn,
   path: PathSpec,
   data: Uint8Array,
-): Promise<void> {
+): Promise<Written | undefined> {
   if (data.length === 0) {
     let found: FileStat
     try {
       found = await stat(path)
     } catch (error) {
       if (!isMissingPath(error)) throw error
-      await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
-      return
+      return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
     }
     if (found.type === FileType.DIRECTORY) throw eisdir(path)
     return
@@ -62,23 +61,22 @@ export async function appendByRewrite(
     ;[existing, own] = await readVersioned(path, () => read(path))
   } catch (error) {
     if (!isMissingPath(error)) throw error
-    await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
-    return
+    return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, data))
   }
   const joined = new Uint8Array(existing.length + data.length)
   joined.set(existing)
   joined.set(data, existing.length)
-  await runWithOwnVersion(path, own, () => write(path, joined))
+  return await runWithOwnVersion(path, own, () => write(path, joined))
 }
 
 /** Stage a read-modify-write with bounded RAM and the read's version. */
-export async function appendByStreamedRewrite(
+export async function appendByStreamedRewrite<Written>(
   read: (path: PathSpec, onVersion: (version: string | null) => void) => AsyncIterable<Uint8Array>,
-  write: (path: PathSpec, data: ByteSource) => Promise<void>,
+  write: (path: PathSpec, data: ByteSource) => Promise<Written>,
   stat: StatFn,
   path: PathSpec,
   data: ByteSource,
-): Promise<void> {
+): Promise<Written | undefined> {
   const source = chunks(data)[Symbol.asyncIterator]()
   const spool = new ByteSpool()
   try {
@@ -89,8 +87,7 @@ export async function appendByStreamedRewrite(
         found = await stat(path)
       } catch (error) {
         if (!isMissingPath(error)) throw error
-        await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
-        return
+        return await runWithOwnVersion(path, OwnRead.ABSENT, () => write(path, new Uint8Array()))
       }
       if (found.type === FileType.DIRECTORY) throw eisdir(path)
       return
@@ -112,7 +109,7 @@ export async function appendByStreamedRewrite(
       if (part.done) break
       await spool.append(part.value)
     }
-    await runWithOwnVersion(path, own, () => write(path, spool.stream()))
+    return await runWithOwnVersion(path, own, () => write(path, spool.stream()))
   } finally {
     await source.return?.()
     await spool.close()

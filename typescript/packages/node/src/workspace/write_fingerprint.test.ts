@@ -20,6 +20,7 @@ import {
   ReadPolicy,
 } from '@struktoai/mirage-core/types'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { S3Config } from '../vfs/s3/config.ts'
 import { installS3Mock, type S3Mock } from '../vfs/s3/mock.ts'
@@ -130,6 +131,50 @@ describe('object-store write fingerprint (mocked S3)', () => {
       expect(DEC.decode(await ws.vfs.read('/s3/x.txt'))).toBe('hello\n')
       expect(await ws.cache.isFresh('/s3/x.txt', etagOf('hello\n'))).toBe(true)
       expect(mock.calls.get('GetObject') ?? 0).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    'write',
+    'stream',
+    'redirect',
+    'create',
+    'truncate',
+    'append',
+    'append-stream',
+    'append-redirect',
+  ] as const)('%s keeps confirmed metadata without a HEAD', async (operation) => {
+    const ws = makeWorkspace(BOUNDED)
+    const bodies = {
+      write: 'hello',
+      stream: 'hello',
+      redirect: 'hello',
+      create: '',
+      truncate: '\0\0\0',
+      append: 'oldhello',
+      'append-stream': 'oldhello',
+      'append-redirect': 'oldhello',
+    }
+    const calls = {
+      write: () => ws.vfs.write('/s3/x.txt', 'hello'),
+      stream: () => ws.vfs.write('/s3/x.txt', yieldBytes(ENC.encode('hello'))),
+      redirect: () => ws.shell('printf hello > /s3/x.txt'),
+      create: () => ws.vfs.create('/s3/x.txt'),
+      truncate: () => ws.vfs.truncate('/s3/x.txt', 3),
+      append: () => ws.vfs.append('/s3/x.txt', ENC.encode('hello')),
+      'append-stream': () => ws.vfs.append('/s3/x.txt', yieldBytes(ENC.encode('hello'))),
+      'append-redirect': () => ws.shell('printf hello >> /s3/x.txt'),
+    }
+    try {
+      if (operation.startsWith('append')) await ws.vfs.write('/s3/x.txt', 'old')
+      await calls[operation]()
+      mock.calls.clear()
+      const row = await ws.vfs.stat('/s3/x.txt')
+      expect(row.size).toBe(ENC.encode(bodies[operation]).byteLength)
+      expect(row.fingerprint).toBe(etagOf(bodies[operation]))
+      expect(mock.calls.get('HeadObject') ?? 0).toBe(0)
     } finally {
       await ws.close()
     }

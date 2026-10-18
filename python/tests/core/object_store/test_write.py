@@ -17,19 +17,27 @@ from dataclasses import replace
 
 import pytest
 
+from mirage.core.object_store.driver import ObjectMeta
 from mirage.core.object_store.write import (
     make_create,
     make_mkdir,
     make_truncate,
     make_write,
+    make_write_stream,
 )
 from mirage.errors.fs import enoent
+from mirage.io.cooperative import chunks
 from mirage.observe.context import RecordingScope
+from mirage.types import FileStat, FileType
 from tests.core.object_store.conftest import (
     FakeStore,
     make_driver,
     spec,
 )
+
+
+async def _reject_lookup(conn, key):
+    raise AssertionError("write metadata must not issue a lookup")
 
 
 def test_write_puts_the_object(accessor):
@@ -58,6 +66,67 @@ def test_truncate_extends_a_missing_key(accessor):
     store = FakeStore()
     asyncio.run(make_truncate(make_driver(store))(accessor, spec("/f.bin"), 3))
     assert store.objects["f.bin"] == b"\0\0\0"
+
+
+@pytest.mark.parametrize(
+    "operation", ["write", "create", "truncate", "stream"]
+)
+def test_mutation_returns_confirmed_metadata_without_a_lookup(
+    accessor, operation
+):
+    store = FakeStore()
+    meta = ObjectMeta(
+        size=7,
+        fingerprint="confirmed-token",
+        revision="confirmed-revision",
+        extra={"etag": "confirmed-token"},
+    )
+
+    async def put(conn, key, data):
+        conn.objects[key] = data
+        return meta
+
+    async def put_stream(conn, key, data, cond):
+        conn.objects[key] = b"".join([piece async for piece in chunks(data)])
+        return meta
+
+    driver = replace(
+        make_driver(store), put=put, put_stream=put_stream, head=_reject_lookup
+    )
+    path = spec("/a/result.txt")
+    calls = {
+        "write": lambda: make_write(driver)(accessor, path, b"hello"),
+        "create": lambda: make_create(driver)(accessor, path),
+        "truncate": lambda: make_truncate(driver)(accessor, path, 2),
+        "stream": lambda: make_write_stream(driver)(accessor, path, b"hello"),
+    }
+    scope = RecordingScope()
+    try:
+        row = asyncio.run(calls[operation]())
+    finally:
+        scope.close()
+    assert row == FileStat(
+        name="result.txt",
+        size=7,
+        type=FileType.FILE,
+        content="text",
+        fingerprint="confirmed-token",
+        revision="confirmed-revision",
+        extra={"etag": "confirmed-token"},
+    )
+    assert [r.revision for r in scope.records] == [None]
+
+
+@pytest.mark.parametrize("operation", ["write", "create", "truncate"])
+def test_mutation_without_metadata_returns_none(accessor, operation):
+    driver = replace(make_driver(FakeStore()), put=_put_silently)
+    path = spec("/a/result.txt")
+    calls = {
+        "write": lambda: make_write(driver)(accessor, path, b"hello"),
+        "create": lambda: make_create(driver)(accessor, path),
+        "truncate": lambda: make_truncate(driver)(accessor, path, 2),
+    }
+    assert asyncio.run(calls[operation]()) is None
 
 
 def test_mkdir_writes_a_marker(accessor):

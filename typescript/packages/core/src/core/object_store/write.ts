@@ -18,16 +18,17 @@ import type { Accessor } from '../../accessor/base.ts'
 import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, enotsup, isMissingPath } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
-import { ancestors, norm, parent } from '../../utils/path.ts'
+import { contentTypeForPath } from '../../utils/filetype.ts'
+import { ancestors, gnuBasename, norm, parent } from '../../utils/path.ts'
 import { isDir } from '../../utils/stat_view.ts'
 import {
+  type CreateFn,
   type MkdirFn,
   type ObjectMeta,
   type ObjectStoreDriver,
-  type PathFn,
   type StatFn,
   type TruncateFn,
   type WriteFn,
@@ -37,6 +38,21 @@ import {
 } from './driver.ts'
 import { ConditionLostError } from './errors.ts'
 import { makeStat } from './stat.ts'
+
+/** Describe only the facts confirmed by a successful object write. */
+export function writtenStat(path: PathSpec, meta: ObjectMeta | null): FileStat | null {
+  if (meta === null) return null
+  return new FileStat({
+    name: gnuBasename(path.mountPath),
+    size: meta.size,
+    modified: meta.modified ?? null,
+    type: FileType.FILE,
+    content: contentTypeForPath(path.mountPath),
+    fingerprint: meta.fingerprint ?? null,
+    revision: meta.revision ?? null,
+    extra: { ...(meta.extra ?? {}) },
+  })
+}
 
 // Put one object, translating a missing container to ENOENT. The driver
 // primitives speak keys, so a store error for a missing repository or
@@ -82,13 +98,12 @@ export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     record('write', path.virtual, driver.vfs, data.byteLength, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    // A put materializes every missing level of the key at once, so the
-    // listings above the immediate parent gained entries too.
+    return writtenStat(path, meta)
   }
 }
 
 /** Build the empty-object create over one driver. */
-export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): PathFn<A> {
+export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): CreateFn<A> {
   return async function create(accessor, path) {
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const cond = await writeCondition(path, 'put')
@@ -103,7 +118,7 @@ export function makeCreate<A extends Accessor, C>(driver: ObjectStoreDriver<A, C
     record('create', path.virtual, driver.vfs, 0, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    // An empty put materializes missing parents exactly like write.
+    return writtenStat(path, meta)
   }
 }
 
@@ -151,7 +166,7 @@ export function makeTruncate<A extends Accessor, C>(
     record('truncate', path.virtual, driver.vfs, 0, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
-    // Truncating a missing key creates it, parents included.
+    return writtenStat(path, meta)
   }
 }
 
@@ -275,5 +290,6 @@ export function makeWriteStream<A extends Accessor, C>(
     record('write', path.virtual, driver.vfs, meta.size ?? 0, timer, {
       fingerprint: meta.fingerprint ?? null,
     })
+    return writtenStat(path, meta)
   }
 }

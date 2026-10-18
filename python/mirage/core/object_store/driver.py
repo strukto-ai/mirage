@@ -64,6 +64,12 @@ class PathFn(Protocol[A_contra]):
     ) -> Awaitable[None]: ...
 
 
+class CreateFn(Protocol[A_contra]):
+    def __call__(
+        self, accessor: A_contra, path_spec: PathSpec
+    ) -> Awaitable[FileStat | None]: ...
+
+
 class PairFn(Protocol[A_contra]):
     def __call__(
         self, accessor: A_contra, src_spec: PathSpec, dst_spec: PathSpec
@@ -73,13 +79,13 @@ class PairFn(Protocol[A_contra]):
 class WriteFn(Protocol[A_contra]):
     def __call__(
         self, accessor: A_contra, path_spec: PathSpec, data: bytes
-    ) -> Awaitable[None]: ...
+    ) -> Awaitable[FileStat | None]: ...
 
 
 class WriteStreamFn(Protocol[A_contra]):
     def __call__(
         self, accessor: A_contra, path_spec: PathSpec, data: ByteSource
-    ) -> Awaitable[None]: ...
+    ) -> Awaitable[FileStat | None]: ...
 
 
 class MkdirFn(Protocol[A_contra]):
@@ -95,7 +101,7 @@ class TruncateFn(Protocol[A_contra]):
         path_spec: PathSpec,
         length: int,
         no_create: bool = False,
-    ) -> Awaitable[None]: ...
+    ) -> Awaitable[FileStat | None]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,10 +283,9 @@ class ObjectStoreDriver(Generic[A, C]):
             partial: ``size`` is the bytes written and ``fingerprint``
             is the store's token, spelled exactly as ``head`` spells
             it so the two can be compared; ``modified`` is absent,
-            because no store's write response carries one. A store
-            that answers without a token gives a meta whose
-            ``fingerprint`` is None; callers read only that field, so
-            they cannot tell it from None and do not need to.
+            because no store's write response carries one. A response
+            without a token can still confirm size. The write factory
+            returns these facts as a FileStat for index retention.
             A store error meaning the container is absent
             (``is_not_found``) propagates, and the write factory
             restates it as ENOENT on the path.

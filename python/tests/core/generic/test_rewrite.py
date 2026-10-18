@@ -47,6 +47,24 @@ async def test_append_reads_current_bytes_and_creates_missing():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("existing", [b"old", None])
+@pytest.mark.parametrize("data", [b"new", b""])
+async def test_append_returns_confirmed_write_metadata(existing, data):
+    row = _file()
+    read = AsyncMock(
+        return_value=existing,
+        side_effect=FileNotFoundError() if existing is None else None,
+    )
+    stat = AsyncMock(
+        return_value=row,
+        side_effect=FileNotFoundError() if existing is None else None,
+    )
+    write = AsyncMock(return_value=row)
+    result = await append_by_rewrite(read, write, stat, PATH, data)
+    assert result == (None if not data and existing is not None else row)
+
+
+@pytest.mark.asyncio
 async def test_append_does_not_overwrite_after_a_failed_read():
     read = AsyncMock(side_effect=PermissionError(PATH.virtual))
     write = AsyncMock()

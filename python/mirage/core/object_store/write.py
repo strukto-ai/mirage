@@ -17,10 +17,10 @@ from mirage.cache.types import OwnRead, WriteCondition
 from mirage.core.object_store.driver import (
     A,
     C,
+    CreateFn,
     MkdirFn,
     ObjectMeta,
     ObjectStoreDriver,
-    PathFn,
     StatFn,
     TruncateFn,
     WriteFn,
@@ -33,10 +33,32 @@ from mirage.errors.fs import eexist, enoent, enotdir, enotsup
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, revision_for, start_op
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
+from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import ancestors, norm, parent
 from mirage.utils.stat_view import is_dir
+
+
+def written_stat(path: PathSpec, meta: ObjectMeta | None) -> FileStat | None:
+    """Describe only the facts confirmed by a successful object write.
+
+    Args:
+        path (PathSpec): the written file.
+        meta (ObjectMeta | None): the store's write response.
+    """
+    if meta is None:
+        return None
+    return FileStat(
+        name=path.mount_path.rstrip("/").rsplit("/", 1)[-1],
+        size=meta.size,
+        modified=meta.modified,
+        type=FileType.FILE,
+        content=content_type_for_path(path.mount_path),
+        fingerprint=meta.fingerprint,
+        revision=meta.revision,
+        extra=dict(meta.extra),
+    )
 
 
 async def _put(
@@ -97,7 +119,9 @@ def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def write(accessor: A, path_spec: PathSpec, data: bytes) -> None:
+    async def write(
+        accessor: A, path_spec: PathSpec, data: bytes
+    ) -> FileStat | None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
         cond = await write_condition(path_spec, "put")
@@ -112,6 +136,7 @@ def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
+        return written_stat(path_spec, meta)
 
     return write
 
@@ -125,7 +150,7 @@ def make_write_stream(driver: ObjectStoreDriver[A, C]) -> WriteStreamFn[A]:
 
     async def write_stream(
         accessor: A, path_spec: PathSpec, data: ByteSource
-    ) -> None:
+    ) -> FileStat | None:
         key = kp.apply(driver.key_prefix_of(accessor), path_spec.mount_path)
         cond = await write_condition(path_spec, "put")
         timer = start_op()
@@ -151,18 +176,19 @@ def make_write_stream(driver: ObjectStoreDriver[A, C]) -> WriteStreamFn[A]:
             timer,
             fingerprint=meta.fingerprint,
         )
+        return written_stat(path_spec, meta)
 
     return write_stream
 
 
-def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
+def make_create(driver: ObjectStoreDriver[A, C]) -> CreateFn[A]:
     """Build the empty-object create over one driver.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def create(accessor: A, path_spec: PathSpec) -> None:
+    async def create(accessor: A, path_spec: PathSpec) -> FileStat | None:
         path = path_spec.mount_path
         key = kp.apply(driver.key_prefix_of(accessor), path)
         cond = await write_condition(path_spec, "put")
@@ -177,6 +203,7 @@ def make_create(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
+        return written_stat(path_spec, meta)
 
     return create
 
@@ -190,7 +217,7 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
 
     async def truncate(
         accessor: A, path_spec: PathSpec, length: int, no_create: bool = False
-    ) -> None:
+    ) -> FileStat | None:
         if no_create:
             raise enotsup(driver.vfs, "truncate --no-create", path_spec)
         path = path_spec.mount_path
@@ -229,6 +256,7 @@ def make_truncate(driver: ObjectStoreDriver[A, C]) -> TruncateFn[A]:
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
+        return written_stat(path_spec, meta)
 
     return truncate
 

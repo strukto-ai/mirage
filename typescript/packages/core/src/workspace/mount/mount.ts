@@ -873,16 +873,13 @@ export class MountEntry {
   ): Promise<unknown> {
     try {
       if (!(data instanceof Uint8Array) && vfs.supports(append ? 'appendStream' : 'writeStream')) {
-        if (append) await vfs.appendStream(path, data, callerSignal())
-        else
-          return await vfs.writeStream(path, data, callerSignal(), kw.atomic === true, handedOf(kw))
-        return null
+        if (append) return await vfs.appendStream(path, data, callerSignal())
+        return await vfs.writeStream(path, data, callerSignal(), kw.atomic === true, handedOf(kw))
       }
       const raw = await materialize(data)
       if (!append) return await vfs.write(path, raw, callerSignal(), handedOf(kw))
       if (vfs.supports('append')) return await vfs.append(path, raw, handedOf(kw), callerSignal())
-      await this.appendByRewrite(path, raw, kw.index)
-      return null
+      return await this.appendByRewrite(path, raw, kw.index)
     } finally {
       await closeQuietly(data)
     }
@@ -892,7 +889,7 @@ export class MountEntry {
     path: PathSpec,
     data: Uint8Array,
     index: IndexCacheStore = this.index,
-  ): Promise<void> {
+  ): Promise<unknown> {
     return appendByRewrite(
       (p) => this.readAt(index, p),
       (p, d) => this.writeAt(index, p, d),
@@ -939,8 +936,12 @@ export class MountEntry {
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
-  private async writeAt(index: IndexCacheStore, path: PathSpec, data: Uint8Array): Promise<void> {
-    await this.vfs.write(
+  private async writeAt(
+    index: IndexCacheStore,
+    path: PathSpec,
+    data: Uint8Array,
+  ): Promise<unknown> {
+    return this.vfs.write(
       path,
       data,
       callerSignal(),

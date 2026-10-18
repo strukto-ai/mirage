@@ -225,9 +225,9 @@ export function commandIo(vfs: BaseVFS): CommandIO {
       : {}),
     ...(has('truncate')
       ? {
-          truncate: withoutAccessor((p: PathSpec, length: number, noCreate?: boolean) =>
-            vfs.truncate(p, length, noCreate),
-          ),
+          truncate: withoutAccessor(async (p: PathSpec, length: number, noCreate?: boolean) => {
+            await vfs.truncate(p, length, noCreate)
+          }),
         }
       : {}),
     ...(has('setattr')

@@ -30,7 +30,10 @@ const PAYLOAD = new TextEncoder().encode('payload-bytes')
 
 /** A store with no partial write: it keeps the base's truncate. */
 class NoTruncateRAM extends RAMVFS {
-  override truncate = Reflect.get(BaseVFS.prototype, 'truncate')
+  constructor() {
+    super()
+    Object.defineProperty(this, 'truncate', { value: Reflect.get(BaseVFS.prototype, 'truncate') })
+  }
 }
 
 /** A caching mount whose backend names no size, as an API mount does. */

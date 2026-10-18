@@ -13,10 +13,28 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { PathSpec } from '../../types.ts'
-import { truncateByRewrite } from './rewrite.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { enoent } from '../../errors/fs.ts'
+import { appendByRewrite, truncateByRewrite } from './rewrite.ts'
 
 const PATH = PathSpec.fromStrPath('/m/f')
+
+describe('appendByRewrite', () => {
+  it.each([
+    [true, 'new'],
+    [false, 'new'],
+    [false, ''],
+    [true, ''],
+  ] as const)('returns confirmed write metadata, existing %s, data %j', async (existing, data) => {
+    const row = new FileStat({ name: 'f', type: FileType.FILE })
+    const read = () =>
+      existing ? Promise.resolve(new TextEncoder().encode('old')) : Promise.reject(enoent(PATH))
+    const stat = () => (existing ? Promise.resolve(row) : Promise.reject(enoent(PATH)))
+    const write = () => Promise.resolve(row)
+    const result = await appendByRewrite(read, write, stat, PATH, new TextEncoder().encode(data))
+    expect(result).toEqual(existing && data === '' ? undefined : row)
+  })
+})
 
 describe('truncateByRewrite', () => {
   it('refuses a negative length before any io', async () => {

@@ -109,11 +109,11 @@ export class HfBucketsVFS extends BaseVFS {
     return hfExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
     return hfWrite(this.accessor, path, data)
   }
 
-  override create(path: PathSpec): Promise<void> {
+  override create(path: PathSpec): Promise<FileStat | null> {
     return hfCreate(this.accessor, path)
   }
 

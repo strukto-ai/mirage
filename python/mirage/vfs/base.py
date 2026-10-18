@@ -331,7 +331,9 @@ class BaseVFS:
         """
         raise enotsup(self.name, "write_stream", path)
 
-    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+    async def append_stream(
+        self, path: PathSpec, data: ByteSource
+    ) -> FileStat | None:
         """Consume an append incrementally, through the append dispatcher.
 
         Args:
@@ -620,7 +622,7 @@ class BaseVFS:
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
-    ) -> None:
+    ) -> FileStat | None:
         """Resize a file, padding with zeros or cutting the end.
 
         Args:

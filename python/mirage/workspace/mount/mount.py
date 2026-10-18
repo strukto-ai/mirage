@@ -1432,13 +1432,11 @@ class MountEntry:
             if not isinstance(data, bytes) and self.vfs.supports(
                 "append_stream"
             ):
-                await self.vfs.append_stream(path, data)
-                return None
+                return await self.vfs.append_stream(path, data)
             if not self.vfs.supports("append"):
-                await self._append_by_rewrite(
+                return await self._append_by_rewrite(
                     path, await materialize(data), index
                 )
-                return None
             append: Callable[..., Awaitable[Any]] = self.vfs.append
             return await append(
                 path,
@@ -1453,8 +1451,8 @@ class MountEntry:
         path: PathSpec,
         data: bytes,
         index: IndexCacheStore = NULL_INDEX,
-    ) -> None:
-        await append_by_rewrite(
+    ) -> FileStat | None:
+        return await append_by_rewrite(
             functools.partial(self._read, index),
             functools.partial(self._write, index),
             functools.partial(self._stat, index),

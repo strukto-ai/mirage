@@ -77,11 +77,11 @@ class HfBucketsVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
+    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
+        return await _write(self.accessor, path, data)
 
-    async def create(self, path: PathSpec) -> None:
-        await _create(self.accessor, path)
+    async def create(self, path: PathSpec) -> FileStat | None:
+        return await _create(self.accessor, path)
 
     async def unlink(self, path: PathSpec) -> None:
         await _unlink(self.accessor, path)

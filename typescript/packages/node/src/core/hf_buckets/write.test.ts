@@ -41,7 +41,7 @@ function missingRepo(): ReturnType<typeof fakeHfOperator> {
   return fake
 }
 
-async function caught(fn: () => Promise<void>): Promise<unknown> {
+async function caught(fn: () => Promise<unknown>): Promise<unknown> {
   try {
     await fn()
   } catch (err) {

@@ -34,7 +34,7 @@ StatFn = Callable[[PathSpec], Awaitable[FileStat]]
 
 async def append_by_rewrite(
     read: ReadFn, write: WriteFn, stat: StatFn, path: PathSpec, data: bytes
-) -> None:
+) -> FileStat | None:
     """Append by reading the file and writing it back whole.
 
     Not atomic against a concurrent writer. A zero-byte append is an open
@@ -56,30 +56,28 @@ async def append_by_rewrite(
             found = await stat(path)
         except FileNotFoundError:
             with own_write_version(path, OwnRead.ABSENT):
-                await write(path, data)
-            return
+                return await write(path, data)
         if found.type == FileType.DIRECTORY:
             raise eisdir(path.virtual)
-        return
+        return None
     try:
         existing, own = await read_versioned(path, lambda: read(path))
     except FileNotFoundError:
         with own_write_version(path, OwnRead.ABSENT):
-            await write(path, data)
-        return
+            return await write(path, data)
     with own_write_version(path, own):
-        await write(path, existing + data)
+        return await write(path, existing + data)
 
 
 async def append_by_streamed_rewrite(
     read: Callable[
         [PathSpec, Callable[[str | None], None]], AsyncIterator[bytes]
     ],
-    write: Callable[[PathSpec, ByteSource], Awaitable[None]],
+    write: Callable[[PathSpec, ByteSource], Awaitable[FileStat | None]],
     stat: StatFn,
     path: PathSpec,
     data: ByteSource,
-) -> None:
+) -> FileStat | None:
     """Stage a read-modify-write with bounded RAM and the read's version.
 
     Args:
@@ -96,11 +94,10 @@ async def append_by_streamed_rewrite(
                 found = await stat(path)
             except FileNotFoundError:
                 with own_write_version(path, OwnRead.ABSENT):
-                    await write(path, b"")
-                return
+                    return await write(path, b"")
             if found.type == FileType.DIRECTORY:
                 raise eisdir(path)
-            return
+            return None
         async with ByteSpool() as spool:
             own: str | OwnRead | None = None
 
@@ -118,7 +115,7 @@ async def append_by_streamed_rewrite(
             async for part in source:
                 await spool.append(part)
             with own_write_version(path, own):
-                await write(path, spool.stream())
+                return await write(path, spool.stream())
 
 
 async def pwrite_by_rewrite(

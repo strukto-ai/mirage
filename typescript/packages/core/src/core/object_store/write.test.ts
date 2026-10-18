@@ -16,10 +16,12 @@ import { describe, expect, it } from 'vitest'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { enoent, errorVirtualPath } from '../../errors/fs.ts'
+import { materialize } from '../../io/types.ts'
+import { FileType } from '../../types.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from './fakes.ts'
 import { FakeAccessor, FakeStore, makeDriver, spec } from './fakes.ts'
-import { makeCreate, makeMkdir, makeTruncate, makeWrite } from './write.ts'
+import { makeCreate, makeMkdir, makeTruncate, makeWrite, makeWriteStream } from './write.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
@@ -35,7 +37,7 @@ function missingContainer(): ObjectStoreDriver<FakeAccessor, Store> {
   }
 }
 
-async function caught(fn: () => Promise<void>): Promise<unknown> {
+async function caught(fn: () => Promise<unknown>): Promise<unknown> {
   try {
     await fn()
   } catch (err) {
@@ -45,6 +47,67 @@ async function caught(fn: () => Promise<void>): Promise<unknown> {
 }
 
 describe('object_store write', () => {
+  it.each(['write', 'create', 'truncate', 'stream'] as const)(
+    '%s returns confirmed metadata without a lookup',
+    async (operation) => {
+      const store = new FakeStore()
+      const meta = {
+        size: 7,
+        fingerprint: 'confirmed-token',
+        revision: 'confirmed-revision',
+        extra: { etag: 'confirmed-token' },
+      }
+      const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+        ...makeDriver(store),
+        put: (conn, key, data) => {
+          conn.objects.set(key, data)
+          return Promise.resolve(meta)
+        },
+        putStream: async (conn, key, data) => {
+          conn.objects.set(key, await materialize(data))
+          return meta
+        },
+        head: () => Promise.reject(new Error('write metadata must not issue a lookup')),
+      }
+      const path = spec('/a/result.txt')
+      const calls = {
+        write: () => makeWrite(driver)(accessor, path, ENC.encode('hello')),
+        create: () => makeCreate(driver)(accessor, path),
+        truncate: () => makeTruncate(driver)(accessor, path, 2),
+        stream: () => makeWriteStream(driver)(accessor, path, ENC.encode('hello')),
+      }
+      const [row, records] = await runWithRecording(calls[operation])
+      expect(row).toMatchObject({
+        name: 'result.txt',
+        size: 7,
+        type: FileType.FILE,
+        content: 'text',
+        fingerprint: 'confirmed-token',
+        revision: 'confirmed-revision',
+        extra: { etag: 'confirmed-token' },
+      })
+      expect(row?.modified).toBeNull()
+      expect(records.map((r) => r.revision)).toEqual([null])
+    },
+  )
+
+  it.each(['write', 'create', 'truncate'] as const)(
+    '%s without metadata returns null',
+    async (operation) => {
+      const driver: ObjectStoreDriver<FakeAccessor, Store> = {
+        ...makeDriver(new FakeStore()),
+        put: () => Promise.resolve(null),
+      }
+      const path = spec('/a/result.txt')
+      const calls = {
+        write: () => makeWrite(driver)(accessor, path, ENC.encode('hello')),
+        create: () => makeCreate(driver)(accessor, path),
+        truncate: () => makeTruncate(driver)(accessor, path, 2),
+      }
+      expect(await calls[operation]()).toBeNull()
+    },
+  )
+
   it('write puts the object', async () => {
     const store = new FakeStore()
     await makeWrite(makeDriver(store))(accessor, spec('/a/b/c.txt'), ENC.encode('hi'))
@@ -188,7 +251,7 @@ describe('object_store write', () => {
 
 // ── the backend token the put answered reaches the op record ───────────
 
-async function recorded(fn: () => Promise<void>): Promise<OpRecord[]> {
+async function recorded(fn: () => Promise<unknown>): Promise<OpRecord[]> {
   const [, records] = await runWithRecording(async () => {
     await fn()
   })

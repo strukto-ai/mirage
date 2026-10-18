@@ -34,6 +34,8 @@ export type ExistsFn<A extends Accessor> = (accessor: A, path: PathSpec) => Prom
 
 export type PathFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<void>
 
+export type CreateFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<FileStat | null>
+
 export type PairFn<A extends Accessor> = (
   accessor: A,
   src: PathSpec,
@@ -44,14 +46,14 @@ export type WriteFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
   data: Uint8Array,
-) => Promise<void>
+) => Promise<FileStat | null>
 
 export type WriteStreamFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
   data: ByteSource,
   signal?: AbortSignal,
-) => Promise<void>
+) => Promise<FileStat | null>
 
 export type MkdirFn<A extends Accessor> = (
   accessor: A,
@@ -64,7 +66,7 @@ export type TruncateFn<A extends Accessor> = (
   path: PathSpec,
   length: number,
   noCreate?: boolean,
-) => Promise<void>
+) => Promise<FileStat | null>
 
 /**
  * One entry a driver saw while listing the immediate children of a
@@ -176,9 +178,9 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * (opendal). The meta is partial: `size` is the bytes written and
    * `fingerprint` is the store's token, spelled exactly as `head` spells
    * it so the two can be compared; `modified` is absent, because no
-   * store's write response carries one. A store that answers without a
-   * token gives a meta whose `fingerprint` is null; callers read only
-   * that field, so they cannot tell it from null and do not need to.
+   * store's write response carries one. A response without a token can
+   * still confirm size. The write factory returns these facts as a
+   * FileStat for index retention.
    * A store error meaning the container is absent
    * (`isNotFound`) propagates, and the write factory restates it as
    * ENOENT on the path.

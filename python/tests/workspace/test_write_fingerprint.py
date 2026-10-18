@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from mirage.io.stream import yield_bytes
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
@@ -174,6 +175,58 @@ def test_a_write_outside_a_line_keeps_its_bytes_with_the_backend_token():
     assert served == b"hello\n"
     assert tokened
     assert client.calls["get_object"] == 0
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "write",
+        "stream",
+        "redirect",
+        "create",
+        "truncate",
+        "append",
+        "append-stream",
+        "append-redirect",
+    ],
+)
+def test_mutation_keeps_confirmed_metadata_without_a_head(operation):
+    store: dict[str, bytes] = {}
+    with _workspace(store, ReadSpec(policy=ReadPolicy.BOUNDED)) as (
+        ws,
+        client,
+    ):
+
+        async def run():
+            try:
+                if operation.startswith("append"):
+                    await ws.vfs.write("/s3/x.txt", b"old")
+                calls = {
+                    "write": lambda: ws.vfs.write("/s3/x.txt", b"hello"),
+                    "stream": lambda: ws.vfs.write(
+                        "/s3/x.txt", yield_bytes(b"hello")
+                    ),
+                    "redirect": lambda: ws.shell("printf hello > /s3/x.txt"),
+                    "create": lambda: ws.vfs.create("/s3/x.txt"),
+                    "truncate": lambda: ws.vfs.truncate("/s3/x.txt", 3),
+                    "append": lambda: ws.vfs.append("/s3/x.txt", b"hello"),
+                    "append-stream": lambda: ws.vfs.append(
+                        "/s3/x.txt", yield_bytes(b"hello")
+                    ),
+                    "append-redirect": lambda: ws.shell(
+                        "printf hello >> /s3/x.txt"
+                    ),
+                }
+                await calls[operation]()
+                client.calls.clear()
+                row = await ws.vfs.stat("/s3/x.txt")
+                assert row.size == len(store["x.txt"])
+                assert row.fingerprint == _etag(store["x.txt"])
+                assert client.calls["head_object"] == 0
+            finally:
+                await ws.close()
+
+        asyncio.run(run())
 
 
 def test_a_write_after_a_guarded_cp_keeps_its_own_bytes():
