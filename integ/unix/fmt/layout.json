@@ -1,0 +1,140 @@
+{
+  "cases": [
+    {
+      "id": "fmt_breaks_where_the_remainder_is_cheapest",
+      "seq": 16100128,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'dgmvxmkm knkgnmgs bmdmfkrnsj pqfknn hbcf dwqhc nbxp sfnfwpn\\n' | fmt -w 33 -g 13",
+      "expect": { "exit": 0, "stdout": "dgmvxmkm knkgnmgs\nbmdmfkrnsj\npqfknn hbcf dwqhc nbxp sfnfwpn\n", "stderr": "" },
+      "flags": ["w", "g"]
+    },
+    {
+      "id": "fmt_keeps_a_last_short_word_off_its_own_line",
+      "seq": 16100129,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'aaaa bbbb cc\\n' | fmt -w 10",
+      "expect": { "exit": 0, "stdout": "aaaa\nbbbb cc\n", "stderr": "" },
+      "flags": ["w"]
+    },
+    {
+      "id": "fmt_prefers_breaks_after_punctuation",
+      "seq": 16100130,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'fij (f, fe, (jecgg.\\n' | fmt -w 10",
+      "expect": { "exit": 0, "stdout": "fij\n(f, fe,\n(jecgg.\n", "stderr": "" },
+      "flags": ["w"]
+    },
+    {
+      "id": "fmt_prefers_breaks_before_an_opener",
+      "seq": 16100131,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'jh, ejhj (j.  b df,\\n' | fmt -w 9",
+      "expect": { "exit": 0, "stdout": "jh,\nejhj (j.\nb df,\n", "stderr": "" },
+      "flags": ["w"]
+    },
+    {
+      "id": "fmt_avoids_leaving_a_sentence_first_word_behind",
+      "seq": 16100132,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'h fj.  acchc dcfiaa.  jj hie (iifcc (ebbja jhcc\\n' | fmt -w 13",
+      "expect": { "exit": 0, "stdout": "h fj.  acchc\ndcfiaa.\njj hie\n(iifcc\n(ebbja jhcc\n", "stderr": "" },
+      "flags": ["w"]
+    },
+    {
+      "id": "fmt_avoids_breaking_after_a_single_spaced_period",
+      "seq": 16100133,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'a b c d. e f g h i j k l\\n' | fmt -w 10",
+      "expect": { "exit": 0, "stdout": "a b c\nd. e f g\nh i j k l\n", "stderr": "" },
+      "flags": ["w"]
+    },
+    {
+      "id": "fmt_goal_alone_allows_ten_more_columns",
+      "seq": 16100134,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii\\n' | fmt -g 20",
+      "expect": { "exit": 0, "stdout": "aaaa bbbb cccc dddd\neeee ffff gggg hhhh iiii\n", "stderr": "" },
+      "flags": ["g"]
+    },
+    {
+      "id": "fmt_writes_tabs_only_where_shorter",
+      "seq": 16100135,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'abcdefg  h\\tx\\nabcdef  h\\tx\\n\\nabc     d\\nx\\ty\\n' | fmt",
+      "expect": { "exit": 0, "stdout": "abcdefg  h\tx abcdef  h\t  x\n\nabc\td x\t  y\n", "stderr": "" },
+      "flags": []
+    },
+    {
+      "id": "fmt_counts_a_tab_in_the_next_indent_first",
+      "seq": 16100136,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'abc     d\\n\\ta\\nabc     d\\n' | fmt",
+      "expect": { "exit": 0, "stdout": "abc\td\n\ta\nabc\td\n", "stderr": "" },
+      "flags": []
+    },
+    {
+      "id": "fmt_prefix_spaces_are_floors",
+      "seq": 16100137,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf '# aaa bbb ccc\\n # aaa bbb ccc\\n #aaa bbb ccc\\n' | fmt -p ' # ' -w 10",
+      "expect": { "exit": 0, "stdout": "# aaa bbb ccc\n # aaa\n # bbb\n # ccc\n #aaa bbb ccc\n", "stderr": "" },
+      "flags": ["p", "w"]
+    },
+    {
+      "id": "fmt_prefix_copy_rewrites_blanks",
+      "seq": 16100138,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf '\\tq\\n#        x\\n' | fmt -p ' # '",
+      "expect": { "exit": 0, "stdout": "\tq\n#\t x\n", "stderr": "" },
+      "flags": ["p"]
+    },
+    {
+      "id": "fmt_prefix_lines_share_their_lead",
+      "seq": 16100139,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf ' #  a\\n #  b\\n  # c\\n#\\n# \\n' | fmt -p '# '",
+      "expect": { "exit": 0, "stdout": " #  a b\n  # c\n#\n#\n", "stderr": "" },
+      "flags": ["p"]
+    },
+    {
+      "id": "fmt_copied_last_line_keeps_lacking_a_newline",
+      "seq": 16100140,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf '#a\\n  x  ' | fmt -p '#'",
+      "expect": { "exit": 0, "stdout": "#a\n  x  ", "stderr": "" },
+      "flags": ["p"]
+    },
+    {
+      "id": "fmt_tagged_one_line_paragraphs_hang",
+      "seq": 16100141,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'aaa bbb ccc\\n\\n  a\\n    b\\n\\n    xx yy zz ww\\n' | fmt -t -w 12",
+      "expect": { "exit": 0, "stdout": "aaa bbb ccc\n\n  a b\n\n    xx yy\nzz ww\n", "stderr": "" },
+      "flags": ["t", "w"]
+    },
+    {
+      "id": "fmt_tagged_hang_left_of_the_prefix",
+      "seq": 16100142,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf '#xx aaaa bbbb\\n' | fmt -t -w 10 -p '#'",
+      "expect": { "exit": 0, "stdout": "#xx\n#aaaa bbbb\n", "stderr": "" },
+      "flags": ["t", "w", "p"]
+    },
+    {
+      "id": "fmt_crown_wins_over_tagged",
+      "seq": 16100143,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'a b\\nc d\\ne f\\n' | fmt -c -t",
+      "expect": { "exit": 0, "stdout": "a b c d e f\n", "stderr": "" },
+      "flags": ["c", "t"]
+    },
+    {
+      "id": "fmt_carriage_return_starts_a_word",
+      "seq": 16100144,
+      "targets": ["ram", "opfs", "disk"],
+      "command": "printf 'aaaa\\rbbbb cccc\\n' | fmt -w 8",
+      "expect": { "exit": 0, "stdout": "aaaa\n\rbbbb\ncccc\n", "stderr": "" },
+      "flags": ["w"]
+    }
+  ]
+}

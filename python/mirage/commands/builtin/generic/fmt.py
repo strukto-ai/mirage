@@ -1,6 +1,8 @@
-from collections.abc import AsyncIterator, Generator, Mapping
+from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from string import punctuation
+from typing import Literal
 
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
@@ -59,17 +61,17 @@ def _goal_refusal(text: str, value: int | None) -> str:
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
     fl = FlagView(flags, spec=SPECS["fmt"])
-    # GNU 9.7 takes -w as a decimal from 0 to MAX_CHARS / 2, then -g as
-    # one from 0 to that width.
+    # GNU 9.7 takes -w as a decimal from 0 to 2500, then -g as one from 0
+    # to that width.
     width = fl.as_number(
-        "width", unsigned_decimal, _width_refusal, low=0, high=MAX_CHARS // 2
+        "width", unsigned_decimal, _width_refusal, low=0, high=_WIDEST
     )
     goal = fl.as_number(
         "goal",
         unsigned_decimal,
         _goal_refusal,
         low=0,
-        high=WIDTH if width is None else width,
+        high=_DEFAULT_WIDTH if width is None else width,
     )
     return FmtFlags(
         width=width,
@@ -82,397 +84,710 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
     )
 
 
-WIDTH = 75
-LEEWAY = 7
-DEF_INDENT = 3
-MAX_WORDS = 1000
-MAX_CHARS = 5000
-EOF = -1
-LINE_COST = 70**2
-SENTENCE_BONUS = 50**2
-NOBREAK_COST = 600**2
-PAREN_BONUS = 40**2
-PUNCT_BONUS = 40**2
-LINE_CREDIT = 3**2
-MAX_COST = 2**63 - 1
-OPENERS = b"(['`\""
-CLOSERS = b")]'\""
-PERIODS = b".?!"
-PUNCTUATION = frozenset(b"!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
-SPACES = frozenset(b" \t\n\v\f\r")
+_DEFAULT_WIDTH = 75
+# GNU 9.7 refuses a -w past 2500.
+_WIDEST = 2500
+
+# GNU 9.7 lays a long paragraph out a piece at a time, a piece holding at
+# most 998 words and 5000 bytes of word text. It sets the piece, prints its
+# first lines, and carries the words of the rest into the next piece,
+# whose first line is then also weighed against the line printed
+# before it. A piece that fits on one line is printed whole; `_resume`
+# says how many lines of a longer one are carried.
+_PIECE_WORDS = 998
+_PIECE_BYTES = 5000
+
+# What a layout costs, in hundredths of a squared column. The last line laid
+# out is free and every other line pays the rest. These values reproduce GNU
+# 9.7's choices over the probe corpus, ties going to the shorter line.
+# _EACH_LINE is paid per line, _OFF_GOAL per squared column a line misses the
+# goal by, and _UNEVEN per squared column a line differs from the one after it.
+# A line ending on a word that ends a sentence earns _SENTENCE_END, one ending
+# on . ? or ! that ends no sentence pays _FALSE_STOP, one ending on any other
+# punctuation earns _MARK_END, and one starting on ( [ ` ' or " earns
+# _OPENER_START. _FIRST_ALONE and _LAST_ALONE, over the word's length plus two,
+# are paid for ending a line on a sentence's first word or starting one on a
+# sentence's last, the paragraph's last word included. _LATER is, per line, how
+# much a full piece would rather stop later than earlier.
+_EACH_LINE = 4900
+_OFF_GOAL = 100
+_UNEVEN = 50
+_SENTENCE_END = -2500
+_FALSE_STOP = 360000
+_MARK_END = -1600
+_OPENER_START = -1600
+_FIRST_ALONE = 40000
+_LAST_ALONE = 22500
+_LATER = 9
+
+_SPACES = frozenset(b" \t\n\v\f\r")
+_CLOSERS = b")]'\""
+_OPENERS = frozenset(b"([`'\"")
+_STOPS = frozenset(b".?!")
+_MARKS = frozenset(punctuation.encode())
 
 
-def _short_cost(n: int) -> int:
-    return (n * 10) ** 2
+def _limits(width: int | None, goal: int | None) -> tuple[int, int]:
+    """The width lines stay under and the goal they aim at.
+
+    GNU 9.7 aims at 93.5% of the width, rounded down, and with only a
+    goal it allows ten columns past it.
+
+    Args:
+        width (int | None): -w, None when not given.
+        goal (int | None): -g, None when not given.
+    """
+    if width is None:
+        if goal is not None:
+            return goal + 10, goal
+        width = _DEFAULT_WIDTH
+    return width, width * 187 // 200 if goal is None else goal
 
 
-def _ragged_cost(n: int) -> int:
-    return _short_cost(n) // 2
+def _pad(col: int, target: int, tabs: bool) -> bytes:
+    """Blanks from column ``col`` up to ``target``.
+
+    Once the input has shown a tab, GNU 9.7 writes tabs wherever they take
+    fewer bytes than spaces: column 7 to 9 stays two spaces, 7 to 16
+    becomes two tabs.
+
+    Args:
+        col (int): the current column.
+        target (int): the column to reach, nothing when not past ``col``.
+        tabs (bool): whether tabs may be written.
+    """
+    if tabs:
+        stops = target // TAB_WIDTH - col // TAB_WIDTH
+        rest = target % TAB_WIDTH
+        if stops > 0 and stops + rest < target - col:
+            return b"\t" * stops + b" " * rest
+    return b" " * (target - col)
 
 
 @dataclass(slots=True)
-class _Word:
-    start: int
-    length: int = 0
-    space: int = 0
-    paren: bool = False
-    punct: bool = False
-    period: bool = False
-    final: bool = False
+class _Term:
+    """One word of a paragraph and how lines may break around it."""
+
+    chars: bytes
+    # Columns to the next word when both share a line.
+    gap: int
+    ends_sentence: bool
+    # Ends in . ? or ! without ending a sentence.
+    false_stop: bool
+    marked: bool
+    opener: bool
+    # Follows the end of a sentence.
+    after_stop: bool
 
 
-class _Formatter:
-    """GNU fmt over one file's bytes, ported from coreutils 9.7 fmt.c.
+def _join_cost(terms: list[_Term], k: int, final: bool) -> int:
+    """What ending a line between ``terms[k]`` and the next word costs.
 
-    The C keeps its state in globals; here it is this object's, one per
-    file, as fmt() resets ``tabs`` and ``other_indent`` for each.
+    Args:
+        terms (list[_Term]): the words being laid out.
+        k (int): the word the line ends on, never the last.
+        final (bool): whether the last of ``terms`` ends the paragraph.
+    """
+    left = terms[k]
+    right = terms[k + 1]
+    cost = 0
+    if left.ends_sentence:
+        cost += _SENTENCE_END
+    elif left.false_stop:
+        cost += _FALSE_STOP
+    elif left.marked:
+        cost += _MARK_END
+    elif left.after_stop and k:
+        # GNU 9.7 does not count a piece's first word as a sentence's.
+        cost += _FIRST_ALONE // (len(left.chars) + 2)
+    if right.opener:
+        cost += _OPENER_START
+    elif right.ends_sentence or (final and k + 2 == len(terms)):
+        cost += _LAST_ALONE // (len(right.chars) + 2)
+    return cost
+
+
+def _plan(
+    terms: list[_Term],
+    first_col: int,
+    rest_col: int,
+    width: int,
+    goal: int,
+    before: int | None,
+    final: bool,
+) -> tuple[list[int], list[int]]:
+    """Choose where the lines of ``terms`` end.
+
+    Working back from the last word, each word gets the cheapest way to
+    lay out everything from it on, and a line is weighed against the
+    first line of the remainder chosen after it. GNU 9.7 decides the same
+    way, so a layout found this way can differ from the cheapest overall.
+
+    Args:
+        terms (list[_Term]): the words, at least one.
+        first_col (int): where the first line's text starts.
+        rest_col (int): where every other line's text starts.
+        width (int): lines of two or more words stay narrower than this.
+        goal (int): the length lines aim at.
+        before (int | None): the length of the line printed just before
+            these words, None at a paragraph's start.
+        final (bool): whether the last of ``terms`` ends the paragraph.
+
+    Returns:
+        tuple[list[int], list[int]]: the index one past each line's last
+        word, and what each line cost as laid out.
+    """
+    count = len(terms)
+    best = [0] * (count + 1)
+    stop = [count] * (count + 1)
+    reach = [0] * (count + 1)
+    joins = [_join_cost(terms, k, final) for k in range(count - 1)]
+    for start in range(count - 1, -1, -1):
+        length = first_col if start == 0 else rest_col
+        for end in range(start + 1, count + 1):
+            if end > start + 1:
+                length += terms[end - 2].gap
+            length += len(terms[end - 1].chars)
+            if end > start + 1 and length >= width:
+                break
+            cost = best[end]
+            if end < count:
+                cost += _EACH_LINE + _OFF_GOAL * (goal - length) ** 2
+                cost += joins[end - 1]
+                if stop[end] < count:
+                    cost += _UNEVEN * (length - reach[end]) ** 2
+            if start == 0 and before is not None:
+                cost += _UNEVEN * (length - before) ** 2
+            if end == start + 1 or cost < best[start]:
+                best[start] = cost
+                stop[start] = end
+                reach[start] = length
+    ends = []
+    costs = []
+    at = 0
+    while at < count:
+        costs.append(best[at] - best[stop[at]])
+        at = stop[at]
+        ends.append(at)
+    return ends, costs
+
+
+def _resume(terms: list[_Term], ends: list[int], costs: list[int]) -> int:
+    """Where a full piece stops printing: the word its kept lines start at.
+
+    GNU 9.7 keeps the lines from the one that weighs least as a first
+    line: its own cost without the break it ends on, but with the break
+    before it, the piece's last line counting as a perfect line, plus a
+    little for every line still after it. Ties go to the earlier line.
+
+    Args:
+        terms (list[_Term]): the piece's words.
+        ends (list[int]): its lines, as `_plan` chose them, two or more.
+        costs (list[int]): what each of those lines cost.
+
+    Returns:
+        int: the index of the first word carried into the next piece.
+    """
+    last = len(ends) - 1
+    keep = ends[-2]
+    lowest = None
+    for line in range(1, last + 1):
+        start = ends[line - 1]
+        if line == last:
+            weight = _EACH_LINE
+        else:
+            weight = costs[line] - _join_cost(terms, ends[line] - 1, False)
+        weight += _join_cost(terms, start - 1, False) + _LATER * (last - line)
+        if lowest is None or weight < lowest:
+            lowest = weight
+            keep = start
+    return keep
+
+
+@dataclass(slots=True)
+class _Paragraph:
+    """Lines joined so far, and what is left of them to print."""
+
+    # Columns of blanks before the prefix, which every line must share.
+    lead: int
+    first_col: int
+    rest_col: int
+    lines: int = 1
+    terms: list[_Term] = field(default_factory=list)
+    size: int = 0
+    # Length of the last line printed, for the next piece's first line.
+    last: int | None = None
+    # Whether the word before the next one ended a sentence.
+    after_stop: bool = False
+
+
+class _Layout:
+    """Reflows one input stream, a paragraph at a time.
+
+    A paragraph is printed once a line arrives that does not continue it.
+    GNU 9.7 has read that line's leading blanks, prefix and indent by
+    then, so a tab among them already counts when the paragraph prints.
     """
 
     def __init__(
         self,
-        max_width: int,
-        goal_width: int,
+        width: int,
+        goal: int,
         prefix: str | None,
-        split: bool,
+        split_only: bool,
         tagged: bool,
         crown: bool,
         uniform: bool,
     ) -> None:
-        self.max_width = max_width
-        self.goal_width = goal_width
-        lead = (prefix or "").encode()
-        stripped = lead.lstrip(b" ")
-        self.prefix_lead_space = len(lead) - len(stripped)
-        self.prefix_full_length = len(stripped)
-        self.prefix = stripped.rstrip(b" ")
-        self.split = split
-        self.tagged = tagged
-        self.crown = crown
-        self.uniform = uniform
-        self.out = bytearray()
-        self.input: bytes | None = b""
-        self.pos = 0
-        self.out_column = 0
-        self.in_column = 0
-        self.next_prefix_indent = 0
-        self.prefix_indent = 0
-        self.first_indent = 0
-        self.other_indent = 0
-        self.last_line_length = 0
-        self.tabs = False
-        self.next_char = EOF
-        self.para = bytearray()
-        self.words: list[_Word] = []
-        self.best_cost: list[int] = []
-        self.next_break: list[int] = []
-        self.line_length: list[int] = []
+        self._width = width
+        self._goal = goal
+        typed = (prefix or "").encode(errors="surrogateescape")
+        # GNU 9.7 reads -p ' # ' as '#' at least one column in and followed
+        # by at least one blank column; those spaces are not matched as
+        # typed, so '\t#\tx' qualifies. A tab in a prefix is matched as
+        # typed and counted as one column.
+        core = typed.lstrip(b" ")
+        self._floor = len(typed) - len(core)
+        self._mark = core.rstrip(b" ")
+        self._trail = len(core) - len(self._mark)
+        self._prefixed = bool(typed)
+        self._split = split_only
+        self._tagged = tagged
+        self._crown = crown
+        self._uniform = uniform
+        self._tabs = False
+        # Where the last paragraph's later lines started; -t starts a
+        # one-line paragraph's from there.
+        self._hung = 0
+        self._para: _Paragraph | None = None
+        # The input line being read: "start" until its text or its end,
+        # then "copy" for a line printed as it stands or "text" for one
+        # whose words join a paragraph; the column read to, whether the
+        # blanks just read held a tab, the columns of blanks before the
+        # prefix and the bytes of the prefix matched, -1 before it.
+        self._mode: Literal["start", "copy", "text"] = "start"
+        self._col = 0
+        self._tab = False
+        self._lead = 0
+        self._matched = -1
+        # The word being read, the column it starts in and the column
+        # after it, -1 while it goes on.
+        self._word = bytearray()
+        self._start = 0
+        self._after = -1
 
-    def run(self) -> Generator[None, int, None]:
-        self.next_char = yield from self.get_prefix()
-        while (yield from self.get_paragraph()):
-            self.fmt_paragraph()
-            self.put_paragraph(len(self.words))
+    def feed(self, data: bytes | None) -> bytes:
+        """Take more input, or None at its end, and return what it settles.
 
-    def feed(self, data: bytes | None) -> None:
-        """Hand over the next chunk to read.
+        Words are read as they come, so a full piece prints before its
+        line ends, as GNU 9.7 prints one.
 
         Args:
-            data (bytes | None): the chunk, or None at end of input.
+            data (bytes | None): the next bytes of the stream.
         """
-        self.input = data
-        self.pos = 0
-
-    def getc(self) -> Generator[None, int, int]:
-        while self.input is not None and self.pos >= len(self.input):
-            yield
-        if self.input is None:
-            return EOF
-        self.pos += 1
-        return self.input[self.pos - 1]
-
-    def get_paragraph(self) -> Generator[None, int, bool]:
-        self.last_line_length = 0
-        c = self.next_char
-        while (
-            c in (10, EOF)
-            or self.next_prefix_indent < self.prefix_lead_space
-            or self.in_column
-            < self.next_prefix_indent + self.prefix_full_length
-        ):
-            c = yield from self.copy_rest(c)
-            if c == EOF:
-                self.next_char = EOF
-                return False
-            self.out.append(10)
-            c = yield from self.get_prefix()
-        self.prefix_indent = self.next_prefix_indent
-        self.first_indent = self.in_column
-        self.para = bytearray()
-        self.words = []
-        c = yield from self.get_line(c)
-        self.set_other_indent(self.same_para(c))
-        if self.split:
-            pass
-        elif self.crown or self.tagged:
-            if self.same_para(c) and (
-                self.crown or self.in_column != self.first_indent
-            ):
-                c = yield from self.get_line(c)
-                while (
-                    self.same_para(c) and self.in_column == self.other_indent
-                ):
-                    c = yield from self.get_line(c)
-        else:
-            while self.same_para(c) and self.in_column == self.other_indent:
-                c = yield from self.get_line(c)
-        self.words[-1].period = self.words[-1].final = True
-        self.next_char = c
-        return True
-
-    def copy_rest(self, c: int) -> Generator[None, int, int]:
-        self.out_column = 0
-        if self.in_column > self.next_prefix_indent or c not in (10, EOF):
-            self.put_space(self.next_prefix_indent)
-            for byte in self.prefix:
-                if self.out_column == self.in_column:
-                    break
-                self.out.append(byte)
-                self.out_column += 1
-            if c not in (10, EOF):
-                self.put_space(self.in_column - self.out_column)
-            if c == EOF and self.in_column >= (
-                self.next_prefix_indent + len(self.prefix)
-            ):
-                self.out.append(10)
-        while c not in (10, EOF):
-            self.out.append(c)
-            c = yield from self.getc()
-        return c
-
-    def same_para(self, c: int) -> bool:
-        return (
-            self.next_prefix_indent == self.prefix_indent
-            and self.in_column
-            >= self.next_prefix_indent + self.prefix_full_length
-            and c not in (10, EOF)
-        )
-
-    def get_line(self, c: int) -> Generator[None, int, int]:
-        while True:
-            word = _Word(start=len(self.para))
-            while True:
-                if len(self.para) == MAX_CHARS:
-                    self.set_other_indent(True)
-                    self.flush_paragraph(word)
-                self.para.append(c)
-                c = yield from self.getc()
-                if c == EOF or c in SPACES:
-                    break
-            word.length = len(self.para) - word.start
-            self.in_column += word.length
-            self.check_punctuation(word)
-            start = self.in_column
-            c = yield from self.get_space(c)
-            word.space = self.in_column - start
-            word.final = c == EOF or (
-                word.period and (c == 10 or word.space > 1)
-            )
-            if c in (10, EOF) or self.uniform:
-                word.space = 2 if word.final else 1
-            if len(self.words) == MAX_WORDS - 2:
-                self.set_other_indent(True)
-                self.flush_paragraph(word)
-            self.words.append(word)
-            if c in (10, EOF):
-                break
-        return (yield from self.get_prefix())
-
-    def get_prefix(self) -> Generator[None, int, int]:
-        self.in_column = 0
-        c = yield from self.get_space((yield from self.getc()))
-        if not self.prefix:
-            self.next_prefix_indent = min(
-                self.prefix_lead_space, self.in_column
-            )
-            return c
-        self.next_prefix_indent = self.in_column
-        for byte in self.prefix:
-            if c != byte:
-                return c
-            self.in_column += 1
-            c = yield from self.getc()
-        return (yield from self.get_space(c))
-
-    def get_space(self, c: int) -> Generator[None, int, int]:
-        while True:
-            if c == 32:
-                self.in_column += 1
-            elif c == 9:
-                self.tabs = True
-                self.in_column = (self.in_column // TAB_WIDTH + 1) * TAB_WIDTH
+        out = bytearray()
+        if data is None:
+            if self._mode == "start" and self._col:
+                self._decide(True, False, out)
+            self._end(False, out)
+            self._close(out)
+            return bytes(out)
+        pos = 0
+        while pos < len(data):
+            if self._mode == "start":
+                pos = self._head(data, pos, out)
+            elif self._mode == "text":
+                pos = self._text(data, pos, out)
             else:
-                return c
-            c = yield from self.getc()
+                newline = data.find(b"\n", pos)
+                if newline < 0:
+                    out += data[pos:]
+                    break
+                out += data[pos:newline]
+                self._end(True, out)
+                pos = newline + 1
+        return bytes(out)
 
-    def check_punctuation(self, word: _Word) -> None:
-        text = self.para[word.start : word.start + word.length]
-        word.paren = text[0] in OPENERS
-        word.punct = text[-1] in PUNCTUATION
-        finish = len(text) - 1
-        while finish > 0 and text[finish] in CLOSERS:
-            finish -= 1
-        word.period = text[finish] in PERIODS
+    def _head(self, data: bytes, pos: int, out: bytearray) -> int:
+        """Read a line's leading blanks, prefix and indent from ``pos``.
 
-    def set_other_indent(self, same_paragraph: bool) -> None:
-        if self.split:
-            self.other_indent = self.first_indent
-        elif self.crown:
-            self.other_indent = (
-                self.in_column if same_paragraph else self.first_indent
-            )
-        elif self.tagged:
-            if same_paragraph and self.in_column != self.first_indent:
-                self.other_indent = self.in_column
-            elif self.other_indent == self.first_indent:
-                self.other_indent = DEF_INDENT if self.first_indent == 0 else 0
-        else:
-            self.other_indent = self.first_indent
+        Args:
+            data (bytes): the input.
+            pos (int): where to go on from.
+            out (bytearray): where the output goes.
 
-    def flush_paragraph(self, current: _Word) -> None:
-        if not self.words:
-            self.out += self.para
-            self.para = bytearray()
-            current.start = 0
+        Returns:
+            int: where reading stopped, at the line's text or past its end.
+        """
+        mark = self._mark
+        while pos < len(data):
+            byte = data[pos]
+            if byte == 10:
+                self._decide(True, True, out)
+                self._end(True, out)
+                return pos + 1
+            if 0 <= self._matched < len(mark):
+                if byte != mark[self._matched]:
+                    self._decide(False, False, out)
+                    return pos
+                self._matched += 1
+                self._col += 1
+            elif byte == 32:
+                self._col += 1
+            elif byte == 9:
+                self._col += TAB_WIDTH - self._col % TAB_WIDTH
+                self._tab = True
+            elif self._matched < 0 and mark:
+                self._lead = self._col
+                self._matched = 0
+                continue
+            else:
+                self._decide(False, False, out)
+                return pos
+            pos += 1
+        return pos
+
+    def _decide(self, bare: bool, ended: bool, out: bytearray) -> None:
+        """Settle what the line whose head was just read is.
+
+        Args:
+            bare (bool): whether the line ended within its head.
+            ended (bool): whether it ended in a newline.
+            out (bytearray): where the output goes.
+        """
+        col = self._col
+        tab = self._tab
+        mark = self._mark
+        if not self._prefixed:
+            if bare:
+                self._interrupt(tab, out)
+                out += b"\n"
+                return
+            lead = 0
+        elif not mark:
+            # A prefix of only spaces: GNU 9.7 wants that many columns of
+            # leading blanks, and more than that on a line of nothing else.
+            # It prints them as the prefix and the rest as indent.
+            floor = self._floor
+            if col < floor or (bare and col == floor):
+                self._interrupt(tab, out)
+                if not bare:
+                    out += _pad(0, col, self._tabs)
+                    self._mode = "copy"
+                elif ended:
+                    out += b"\n"
+                return
+            if bare:
+                self._interrupt(tab, out)
+                out += _pad(0, floor, self._tabs) + b"\n"
+                return
+            lead = floor
+        elif self._matched < len(mark):
+            # Copied with its leading blanks rewritten; a line of only
+            # blanks prints empty, and a last line without a newline
+            # stays without.
+            matched = max(self._matched, 0)
+            lead = self._lead if matched else col
+            self._interrupt(tab, out)
+            if matched or not bare:
+                out += _pad(0, lead, self._tabs) + mark[:matched]
+                self._mode = "copy"
+            elif ended:
+                out += b"\n"
             return
-        self.fmt_paragraph()
-        end = len(self.words)
-        split_point = end
-        best_break = MAX_COST
-        w = self.next_break[0]
-        while w != end:
-            gain = self.best_cost[w] - self.best_cost[self.next_break[w]]
-            if gain < best_break:
-                split_point = w
-                best_break = gain
-            if best_break <= MAX_COST - LINE_CREDIT:
-                best_break += LINE_CREDIT
-            w = self.next_break[w]
-        self.put_paragraph(split_point)
-        shift = (
-            self.words[split_point].start
-            if split_point < end
-            else current.start
+        else:
+            lead = self._lead
+            after = lead + len(mark)
+            if lead < self._floor or col - after < self._trail:
+                # Copied too, but GNU 9.7 also rewrites the blanks it read
+                # past the prefix, and ends a bare prefix with a newline.
+                self._interrupt(tab, out)
+                out += _pad(0, lead, self._tabs) + mark
+                if bare:
+                    out += b"\n"
+                    return
+                out += _pad(after, col, self._tabs)
+                self._mode = "copy"
+                return
+            if bare:
+                self._interrupt(tab, out)
+                out += _pad(0, lead, self._tabs) + mark + b"\n"
+                return
+        self._tabs |= tab
+        para = self._para
+        if para is not None and self._joins(para, lead, col):
+            para.lines += 1
+        else:
+            self._close(out)
+            self._para = _Paragraph(lead, col, self._hang(col))
+        self._mode = "text"
+        self._tab = False
+
+    def _end(self, ended: bool, out: bytearray) -> None:
+        """Finish the input line being read.
+
+        Args:
+            ended (bool): whether it ended in a newline.
+            out (bytearray): where the output goes.
+        """
+        if self._mode == "copy" and ended:
+            out += b"\n"
+        elif self._mode == "text":
+            self._finish(True, out)
+        self._mode = "start"
+        self._col = 0
+        self._tab = False
+        self._matched = -1
+
+    def _interrupt(self, tab: bool, out: bytearray) -> None:
+        """End the paragraph before a line printed as it stands.
+
+        Args:
+            tab (bool): whether the blanks read from that line held a tab.
+            out (bytearray): where the output goes.
+        """
+        self._tabs |= tab
+        self._close(out)
+
+    def _hang(self, indent: int) -> int:
+        """Where a paragraph's later lines start until its second line says.
+
+        Under -t alone, GNU 9.7 starts them where the last paragraph's
+        later lines started, unless that is the first line's own indent:
+        then in column 3 when that is column 0, and in column 0 otherwise.
+
+        Args:
+            indent (int): the column the first line's text starts in.
+        """
+        if not self._tagged or self._crown or self._split:
+            return indent
+        if self._hung == indent:
+            return 3 if indent == 0 else 0
+        return self._hung
+
+    def _joins(self, para: _Paragraph, lead: int, indent: int) -> bool:
+        """Whether a line with these blanks continues ``para``.
+
+        Args:
+            para (_Paragraph): the paragraph so far.
+            lead (int): columns of blanks before the line's prefix.
+            indent (int): the column the line's text starts in.
+        """
+        if self._split or lead != para.lead:
+            return False
+        if para.lines > 1:
+            return indent == para.rest_col
+        # The second line sets where all lines after the first start.
+        if self._crown or (self._tagged and indent != para.first_col):
+            para.rest_col = indent
+            return True
+        return not self._tagged and indent == para.first_col
+
+    def _text(self, data: bytes, pos: int, out: bytearray) -> int:
+        """Read words from ``pos`` up to the line's end.
+
+        A word runs to the next space, tab, newline, vertical tab, form
+        feed or carriage return; only spaces and tabs part it from the
+        next, so 'a\rb' holds the words 'a' and '\rb'.
+
+        Args:
+            data (bytes): the input.
+            pos (int): where to go on from.
+            out (bytearray): where a full piece is printed.
+
+        Returns:
+            int: where reading stopped, past the line's end or the input's.
+        """
+        while pos < len(data):
+            byte = data[pos]
+            if byte == 10:
+                self._end(True, out)
+                return pos + 1
+            if self._word and self._after < 0:
+                stop = pos
+                while stop < len(data) and data[stop] not in _SPACES:
+                    stop += 1
+                self._grow(data[pos:stop], out)
+                if stop < len(data):
+                    self._after = self._col
+                pos = stop
+                continue
+            if byte == 32:
+                self._col += 1
+            elif byte == 9:
+                self._col += TAB_WIDTH - self._col % TAB_WIDTH
+                self._tab = True
+            else:
+                if self._word:
+                    self._finish(False, out)
+                self._start = self._col
+                self._grow(data[pos : pos + 1], out)
+            pos += 1
+        return pos
+
+    def _grow(self, chars: bytes, out: bytearray) -> None:
+        """Add ``chars`` to the word being read.
+
+        GNU 9.7 prints a piece as soon as the word overflows it, before
+        reading the rest of the word or the blanks after it.
+
+        Args:
+            chars (bytes): the word's next bytes.
+            out (bytearray): where a full piece is printed.
+        """
+        self._word += chars
+        self._col += len(chars)
+        para = self._para
+        assert para is not None
+        while para.size + len(self._word) > _PIECE_BYTES:
+            if para.terms:
+                self._flush(para, self._start, out)
+                continue
+            # A word filling a whole piece: GNU 9.7 prints as much of it as
+            # a piece holds, with no indent and no newline, and goes on
+            # with the rest of it as a word of its own, in the column the
+            # word started in.
+            out += self._word[:_PIECE_BYTES]
+            del self._word[:_PIECE_BYTES]
+            self._col -= _PIECE_BYTES
+
+    def _finish(self, last: bool, out: bytearray) -> None:
+        """Add the word just read, and the blanks after it, to the paragraph.
+
+        Args:
+            last (bool): whether the word ends its line.
+            out (bytearray): where a full piece is printed.
+        """
+        para = self._para
+        assert para is not None
+        chars = bytes(self._word)
+        if self._after < 0:
+            self._after = self._col
+        gap = self._col - self._after
+        core = chars.rstrip(_CLOSERS)
+        stop = bool(core) and core[-1] in _STOPS
+        ends = stop and (last or gap >= 2)
+        if last or self._uniform:
+            gap = 2 if ends else 1
+        if len(para.terms) >= _PIECE_WORDS:
+            # GNU 9.7 has read this word's trailing blanks by then.
+            self._tabs |= self._tab
+            self._flush(para, self._col, out)
+        para.terms.append(
+            _Term(
+                chars=chars,
+                gap=gap,
+                ends_sentence=ends,
+                false_stop=stop and not ends,
+                marked=chars[-1] in _MARKS,
+                opener=chars[0] in _OPENERS,
+                after_stop=para.after_stop,
+            )
         )
-        self.para = self.para[shift:]
-        self.words = self.words[split_point:]
-        for word in (*self.words, current):
-            word.start -= shift
+        para.after_stop = ends
+        para.size += len(chars)
+        self._tabs |= self._tab
+        self._tab = False
+        self._word = bytearray()
+        self._after = -1
 
-    def fmt_paragraph(self) -> None:
-        words = self.words
-        end = len(words)
-        self.best_cost = [0] * (end + 1)
-        self.next_break = [end] * end
-        self.line_length = [0] * end
-        for start in range(end - 1, -1, -1):
-            best = MAX_COST
-            length = self.first_indent if start == 0 else self.other_indent
-            w = start
-            length += words[w].length
-            while True:
-                w += 1
-                cost = self.line_cost(w, length) + self.best_cost[w]
-                if start == 0 and self.last_line_length > 0:
-                    cost += _ragged_cost(length - self.last_line_length)
-                if cost < best:
-                    best = cost
-                    self.next_break[start] = w
-                    self.line_length[start] = length
-                if w == end:
-                    break
-                length += words[w - 1].space + words[w].length
-                if length >= self.max_width:
-                    break
-            self.best_cost[start] = best + self.base_cost(start)
+    def _flush(self, para: _Paragraph, col: int, out: bytearray) -> None:
+        """Print a full piece of ``para``.
 
-    def base_cost(self, this: int) -> int:
-        words = self.words
-        cost = LINE_COST
-        if this > 0:
-            before = words[this - 1]
-            if before.period:
-                cost += -SENTENCE_BONUS if before.final else NOBREAK_COST
-            elif before.punct:
-                cost -= PUNCT_BONUS
-            elif this > 1 and words[this - 2].final:
-                cost += (200**2) // (before.length + 2)
-        if words[this].paren:
-            cost -= PAREN_BONUS
-        elif words[this].final:
-            cost += (150**2) // (words[this].length + 2)
-        return cost
+        Under -c or -t, GNU 9.7 then starts the paragraph's later lines,
+        whatever its second line said, in the input column it has read to.
 
-    def line_cost(self, following: int, length: int) -> int:
-        end = len(self.words)
-        if following == end:
-            return 0
-        cost = _short_cost(self.goal_width - length)
-        if self.next_break[following] != end:
-            cost += _ragged_cost(length - self.line_length[following])
-        return cost
+        Args:
+            para (_Paragraph): the paragraph.
+            col (int): the input column read to.
+            out (bytearray): where the output goes.
+        """
+        if (self._crown or self._tagged) and not self._split:
+            para.rest_col = col
+        self._settle(para, out, final=False)
 
-    def put_paragraph(self, finish: int) -> None:
-        self.put_line(0, self.first_indent)
-        w = self.next_break[0]
-        while w != finish:
-            self.put_line(w, self.other_indent)
-            w = self.next_break[w]
+    def _close(self, out: bytearray) -> None:
+        para = self._para
+        if para is None:
+            return
+        if para.lines == 1 and not self._split:
+            # A paragraph of one line, its later indent settled now: -c
+            # takes the first line's, -t keeps the one it has unless that
+            # is the first line's own.
+            if self._crown:
+                para.rest_col = para.first_col
+            elif self._tagged and para.rest_col == para.first_col:
+                para.rest_col = 3 if para.first_col == 0 else 0
+        self._settle(para, out, final=True)
+        self._hung = para.rest_col
+        self._para = None
 
-    def put_line(self, w: int, indent: int) -> None:
-        self.out_column = 0
-        self.put_space(self.prefix_indent)
-        self.out += self.prefix
-        self.out_column += len(self.prefix)
-        self.put_space(indent - self.out_column)
-        endline = self.next_break[w] - 1
-        while w != endline:
-            self.put_word(self.words[w])
-            self.put_space(self.words[w].space)
-            w += 1
-        self.put_word(self.words[w])
-        self.last_line_length = self.out_column
-        self.out.append(10)
+    def _settle(self, para: _Paragraph, out: bytearray, final: bool) -> None:
+        """Print what ``para`` holds, but for the lines a full piece carries.
 
-    def put_word(self, word: _Word) -> None:
-        self.out += self.para[word.start : word.start + word.length]
-        self.out_column += word.length
+        Args:
+            para (_Paragraph): the paragraph.
+            out (bytearray): where the output goes.
+            final (bool): whether the paragraph has ended.
+        """
+        terms = para.terms
+        if not terms:
+            return
+        # GNU 9.7 starts every piece's first line in the first line's column.
+        ends, costs = _plan(
+            terms,
+            para.first_col,
+            para.rest_col,
+            self._width,
+            self._goal,
+            para.last,
+            final,
+        )
+        keep = 0 if final or len(ends) == 1 else _resume(terms, ends, costs)
+        start = 0
+        for end in ends:
+            if keep and end > keep:
+                break
+            col = para.rest_col if start else para.first_col
+            para.last = self._print(para, start, end, col, out)
+            start = end
+        del terms[: keep or len(terms)]
+        para.size = sum(len(term.chars) for term in terms)
 
-    def put_space(self, space: int) -> None:
-        target = self.out_column + space
-        if self.tabs:
-            tab_target = target // TAB_WIDTH * TAB_WIDTH
-            if self.out_column + 1 < tab_target:
-                while self.out_column < tab_target:
-                    self.out.append(9)
-                    self.out_column = (
-                        self.out_column // TAB_WIDTH + 1
-                    ) * TAB_WIDTH
-        while self.out_column < target:
-            self.out.append(32)
-            self.out_column += 1
+    def _print(
+        self, para: _Paragraph, start: int, end: int, col: int, out: bytearray
+    ) -> int:
+        """Print one line of ``para`` and return its length as laid out.
 
+        A -t indent left of the prefix's end counts as given, though the
+        text then starts right after the prefix.
 
-def _widths(width: int | None, goal: int | None) -> tuple[int, int]:
-    """``max_width`` and ``goal_width`` as fmt.c's main sets them.
-
-    Args:
-        width (int | None): ``-w``.
-        goal (int | None): ``-g``.
-    """
-    max_width = WIDTH if width is None else width
-    if goal is None:
-        return max_width, max_width * (2 * (100 - LEEWAY) + 1) // 200
-    return (goal + 10 if width is None else max_width), goal
+        Args:
+            para (_Paragraph): the paragraph.
+            start (int): its first word on the line.
+            end (int): one past its last.
+            col (int): the column the text starts in.
+            out (bytearray): where the output goes.
+        """
+        here = 0
+        if self._prefixed:
+            out += _pad(0, para.lead, self._tabs) + self._mark
+            here = para.lead + len(self._mark)
+        out += _pad(here, col, self._tabs)
+        here = max(here, col)
+        length = col
+        for k in range(start, end):
+            term = para.terms[k]
+            if k > start:
+                gap = para.terms[k - 1].gap
+                out += _pad(here, here + gap, self._tabs)
+                here += gap
+                length += gap
+            out += term.chars
+            here += len(term.chars)
+            length += len(term.chars)
+        out += b"\n"
+        return length
 
 
 async def fmt(
@@ -488,13 +803,13 @@ async def fmt(
     crown: bool = False,
     uniform: bool = False,
 ) -> tuple[ByteSource | None, IOResult]:
-    max_width, goal_width = _widths(width, goal)
+    max_width, goal_width = _limits(width, goal)
 
     def each(source: ByteSource) -> AsyncIterator[bytes]:
-        formatter = _Formatter(
+        layout = _Layout(
             max_width, goal_width, prefix, split_only, tagged, crown, uniform
         )
-        return _fmt_stream(source, formatter)
+        return _fmt_stream(source, layout)
 
     io = IOResult()
     read = stdin_stream(read_stream, stdin)
@@ -502,24 +817,16 @@ async def fmt(
 
 
 async def _fmt_stream(
-    source: ByteSource, formatter: _Formatter
+    source: ByteSource, layout: _Layout
 ) -> AsyncIterator[bytes]:
-    machine = formatter.run()
-    next(machine)
-    try:
-        async with aclosing(chunks(source)) as bounded:
-            async for part in bounded:
-                formatter.feed(part)
-                next(machine)
-                if formatter.out:
-                    yield bytes(formatter.out)
-                    formatter.out.clear()
-        formatter.feed(None)
-        next(machine, None)
-        if formatter.out:
-            yield bytes(formatter.out)
-    finally:
-        machine.close()
+    async with aclosing(chunks(source)) as bounded:
+        async for part in bounded:
+            settled = layout.feed(part)
+            if settled:
+                yield settled
+    settled = layout.feed(None)
+    if settled:
+        yield settled
 
 
 async def fmt_generic(
