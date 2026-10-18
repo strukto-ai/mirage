@@ -203,3 +203,25 @@ fn nan_signs_hex_carry_and_negative_zero() {
         );
     }
 }
+
+#[test]
+fn short_arguments_retain_proportional_storage() {
+    let raw = [b'x'; 31];
+    let inputs: Vec<_> = (0..1024)
+        .map(|size| {
+            let mut input = Input::default();
+            input.push(&raw[..size % raw.len() + 1]);
+            input
+        })
+        .collect();
+    let bytes: usize = inputs.iter().map(|input| input.len).sum();
+    let retained: usize = inputs
+        .iter()
+        .flat_map(|input| input.pages.values())
+        .map(Vec::capacity)
+        .sum();
+    assert!(
+        retained <= 2 * bytes + 8 * inputs.len(),
+        "retained {retained} bytes for {bytes} bytes of short arguments"
+    );
+}

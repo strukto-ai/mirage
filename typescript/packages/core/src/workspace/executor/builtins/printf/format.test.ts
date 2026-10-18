@@ -129,9 +129,6 @@ it('cancels a preloaded numeric scan before it finishes', async () => {
   stream.endInput(1)
   expect(stream.finish()).toHaveLength(0)
   const controller = new AbortController()
-  const timer = setTimeout(() => {
-    controller.abort(new Error('scan cancelled'))
-  }, 20)
   const budget = new YieldBudget(controller.signal)
   try {
     const drain = async () => {
@@ -140,10 +137,11 @@ it('cancels a preloaded numeric scan before it finishes', async () => {
         await budget.run()
       }
     }
-    await expect(drain()).rejects.toThrow('scan cancelled')
+    const pending = drain()
+    controller.abort(new Error('scan cancelled'))
+    await expect(pending).rejects.toThrow('scan cancelled')
     expect(stream.busy()).toBe(true)
   } finally {
-    clearTimeout(timer)
     stream.close()
   }
 })

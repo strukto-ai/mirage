@@ -23,10 +23,10 @@ struct Input {
 impl Input {
     fn push(&mut self, mut bytes: &[u8]) {
         while !bytes.is_empty() {
-            if self.len % STEP == 0 {
-                self.pages.insert(self.len / STEP, Vec::with_capacity(STEP));
-            }
             let n = bytes.len().min(STEP - self.len % STEP);
+            if self.len % STEP == 0 {
+                self.pages.insert(self.len / STEP, Vec::with_capacity(n));
+            }
             self.pages
                 .get_mut(&(self.len / STEP))
                 .expect("input page")

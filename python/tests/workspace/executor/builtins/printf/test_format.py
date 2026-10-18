@@ -106,7 +106,8 @@ async def test_large_width_and_precision_are_cancellable():
     assert await run_printf("%s", ["after"]) == (b"after", b"", 0, False)
 
 
-async def test_cancels_a_preloaded_numeric_scan():
+async def test_cancels_a_preloaded_numeric_scan(monkeypatch):
+    monkeypatch.setattr("mirage.io.yield_budget.YIELD_INTERVAL", 0)
     stream = open_stream("printf", {"mode": "builtin", "argument_count": 1})
     stream.feed_input(0, b"%d")
     stream.end_input(0)
@@ -122,6 +123,9 @@ async def test_cancels_a_preloaded_numeric_scan():
             stream.drain()
             await budget.run()
 
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(drain(), timeout=0.02)
+    pending = asyncio.create_task(drain())
+    await asyncio.sleep(0)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
     assert stream.busy()

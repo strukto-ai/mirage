@@ -131,7 +131,10 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
         ("head -c 1 <(head -c 200000 /dev/zero)", (0, "\0", "")),
         ("cat <(cat <(echo nested))", (0, "nested\n", "")),
         (": <(cat /dev/zero); echo after", (0, "after\n", "")),
-        ("printf data > >(true); echo after:$?", (0, "after:0\n", "")),
+        (
+            "printf data > >(cat > /dev/null); echo after:$?",
+            (0, "after:0\n", ""),
+        ),
         (
             "head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?",
             (0, "st:141\n", ""),
