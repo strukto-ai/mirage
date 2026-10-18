@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import weakref
 from dataclasses import replace
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -467,7 +468,10 @@ def test_a_padded_epoch_in_the_last_southern_summer_a_datetime_holds(zone):
 def test_a_padded_epoch_reads_a_named_host_zone_as_tzdata(monkeypatch):
     # Without TZ in the session, a host running under America/New_York is
     # read as that tzdata zone: the same dates as a session that names it,
-    # its summers searched a day at a time and kept.
+    # its summers searched a day at a time and kept. The zone is the shared
+    # ZoneInfo, whose summers other tests may have kept already, so the
+    # count starts from an empty table.
+    monkeypatch.setattr(dates, "STRETCHES", weakref.WeakKeyDictionary())
     monkeypatch.setenv("TZ", "America/New_York")
     host = parse_date_mode("format:%12s", date_clock({}))
     named = parse_date_mode(
