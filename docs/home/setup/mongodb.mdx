@@ -17,16 +17,15 @@ MONGODB_URI=mongodb://localhost:27017
 
 #### MongoDB Atlas (Cloud)
 
-For Atlas, create a database user, allow the application host through Network
-Access, and percent-encode credentials in the URI. See the Atlas [connection
-guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/).
-
-1. Go to https://cloud.mongodb.com
-1. Select your cluster -> **Connect** -> **Drivers**
-1. Copy the connection string:
+1. Create a database user and allow the application host through **Network Access**.
+1. Select your cluster, then **Connect** → **Drivers**.
+1. Copy the connection URI, replace its username and password, and
+   percent-encode special characters in the credentials:
    ```
    mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/
    ```
+
+See the Atlas [connection guide](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/).
 
 #### Self-hosted with Authentication
 
