@@ -115,6 +115,7 @@ export interface ListResult {
 /** The directory row, the twin of the pydantic `IndexDirectory`. */
 export const IndexDirectorySchema = z.object({
   entries: z.array(z.string()),
+  folders: z.array(z.number().int()),
   expires_at: z.number(),
   generation: z.string(),
   partial: z.boolean().default(false),

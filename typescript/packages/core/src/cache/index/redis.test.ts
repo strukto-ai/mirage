@@ -14,7 +14,8 @@
 
 import { FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LookupStatus } from './config.ts'
+import { IndexDirectorySchema, LookupStatus } from './config.ts'
+import { CacheManager } from '../manager.ts'
 import { REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 
@@ -156,7 +157,8 @@ ${script}`,
       })
     await store.put('/put-only', child)
     await store.invalidateEntry('/put-only')
-    expect(await members()).toEqual([''])
+    expect(await members()).toEqual(['', '/'])
+    await store.invalidatePrefix('/')
     await store.setDir('/d', [['child', child]])
     await store.setDir('/d', [])
     expect(await members()).toEqual(['', '/d'])
@@ -420,6 +422,11 @@ ${script}`,
         commands[index] = (commands[index] ?? 0) + 1
         return write(key, value, options)
       }
+      const evaluate = pipeline.eval.bind(pipeline)
+      pipeline.eval = (script, options) => {
+        commands[index] = (commands[index] ?? 0) + 1
+        return evaluate(script, options)
+      }
       const exec = pipeline.exec.bind(pipeline)
       pipeline.exec = async () => {
         executions += 1
@@ -438,7 +445,7 @@ ${script}`,
       expect(mGet.mock.calls.map(([keys]) => keys.length)).toEqual([100])
       expect(transactions).toHaveBeenCalledTimes(2)
       expect(executions).toBe(2)
-      expect(commands).toEqual([100, 101])
+      expect(commands).toEqual([101, 102])
     } finally {
       get.mockRestore()
       set.mockRestore()
@@ -611,6 +618,171 @@ ${script}`,
       expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
       await store.setDir('/other', [])
       expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('narrow invalidation fences a captured directory generation', async () => {
+    await store.setDir('/snapshot', [])
+    const client = await redis()
+    const run = client.eval.bind(client)
+    const peer = new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix })
+    const spy = vi.spyOn(client, 'eval').mockImplementationOnce(async (script, options) => {
+      await peer.invalidateEntry('/snapshot/old')
+      return run(script, options)
+    })
+    try {
+      await store.setDir('/snapshot', [['old', entry('old', 'old')]])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('narrow invalidation preserves the exact deadline', async () => {
+    const deadline = new Date(Date.now() + 3600000)
+    await store.setDir('/snapshot', [['a', entry('a', 'a')]], deadline)
+    await store.invalidateEntry('/snapshot/a')
+    const client = await redis()
+    const raw = await client.get(`${prefix}mirage:idx:directory:/snapshot`)
+    expect(raw).not.toBeNull()
+    if (raw === null) throw new Error('missing parent listing')
+    expect(IndexDirectorySchema.parse(JSON.parse(raw)).expires_at).toBe(deadline.getTime() / 1000)
+  })
+
+  it('learning a child directory preserves parent freshness fields', async () => {
+    const deadline = new Date(Date.now() + 3600000)
+    await store.setDir('/dir', [['sub', entry('sub', 'sub')]], deadline, {
+      window: true,
+      version: 'v1',
+    })
+    const client = await redis()
+    const before = await client.get(`${prefix}mirage:idx:directory:/dir`)
+    if (before === null) throw new Error('missing parent listing')
+    await store.setDir('/dir/sub', [])
+    const after = await client.get(`${prefix}mirage:idx:directory:/dir`)
+    if (after === null) throw new Error('missing parent listing')
+    const original = IndexDirectorySchema.parse(JSON.parse(before))
+    const updated = IndexDirectorySchema.parse(JSON.parse(after))
+    expect(updated).toEqual({ ...original, folders: [1] })
+    expect(updated.expires_at).toBe(deadline.getTime() / 1000)
+  })
+
+  it('seed commit captures a concurrently published child directory', async () => {
+    const client = await redis()
+    const peer = new RedisIndexCacheStore({ client, keyPrefix: prefix })
+    const row = entry('sub', 'sub')
+    store.seed(
+      new Map([['/dir/sub', row]]),
+      new Map([['/dir', ['/dir/sub']]]),
+      new Date(Date.now() + 3600000),
+    )
+    const multi = client.multi.bind(client)
+    let inserted = false
+    const spy = vi.spyOn(client, 'multi').mockImplementation(() => {
+      const pipeline = multi()
+      const evaluate = pipeline.eval.bind(pipeline)
+      let publishesSeed = false
+      pipeline.eval = (script, options) => {
+        if (
+          options.keys[0] === `${prefix}mirage:idx:directory:/dir` &&
+          options.arguments[3] === '/dir'
+        )
+          publishesSeed = true
+        return evaluate(script, options)
+      }
+      const exec = pipeline.exec.bind(pipeline)
+      pipeline.exec = async () => {
+        if (publishesSeed && !inserted) {
+          inserted = true
+          await peer.setDir('/dir/sub', [])
+          await peer.put('/dir/sub/stray', entry('stray', 'stray'))
+        }
+        return exec()
+      }
+      return pipeline
+    })
+    try {
+      expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
+    } finally {
+      spy.mockRestore()
+      await peer.close()
+    }
+    expect(inserted).toBe(true)
+    await store.invalidateDir('/dir/sub')
+    expect(await store.setDir('/dir', [['sub', row]])).toEqual([{ path: '/dir/sub', folder: true }])
+    expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+  })
+
+  it.each([false, true])(
+    'split seed membership retains directory flags (flushed=%s)',
+    async (flushed) => {
+      const deadline = new Date(Date.now() + 3600000)
+      store.seed(
+        new Map([['/dir/sub', new FileStat({ name: 'sub', type: FileType.DIRECTORY })]]),
+        new Map(),
+        deadline,
+      )
+      if (flushed) await store.get('/dir/sub')
+      store.seed(new Map(), new Map([['/dir', ['/dir/sub']]]), deadline)
+      await store.listDir('/dir')
+      const raw = await (await redis()).get(`${prefix}mirage:idx:directory:/dir`)
+      if (raw === null) throw new Error('missing seeded directory')
+      expect(IndexDirectorySchema.parse(JSON.parse(raw)).folders).toEqual([1])
+    },
+  )
+
+  it('authoritative add fences a captured directory generation', async () => {
+    const old = new FileStat({ name: 'a', type: FileType.FILE, size: 3, fingerprint: 'old' })
+    const next = new FileStat({ name: 'a', type: FileType.FILE, size: 11, fingerprint: 'new' })
+    await store.setDir('/snapshot', [['a', old]])
+    const client = await redis()
+    const run = client.eval.bind(client)
+    const peer = new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix })
+    const spy = vi.spyOn(client, 'eval').mockImplementationOnce(async (script, options) => {
+      await new CacheManager(null, peer, '/snapshot/', true).keepCreated('/a', next)
+      expect((await peer.get('/snapshot/a')).entry).toEqual(next)
+      return run(script, options)
+    })
+    try {
+      await store.setDir('/snapshot', [['a', old]])
+      expect((await store.listDir('/snapshot')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('authoritative add preserves the exact live deadline', async () => {
+    const deadline = new Date(Date.now() + 3600000)
+    await store.setDir('/dir', [['a', entry('a', 'a')]], deadline, { version: 'v1', window: true })
+    await store.addEntry('/dir/a', new FileStat({ name: 'a', type: FileType.FILE, size: 11 }))
+    const raw = await (await redis()).get(`${prefix}mirage:idx:directory:/dir`)
+    if (raw === null) throw new Error('missing parent listing')
+    const listing = IndexDirectorySchema.parse(JSON.parse(raw))
+    expect(listing.expires_at).toBe(deadline.getTime() / 1000)
+    expect(listing.version).toBe('v1')
+    expect(listing.window).toBe(true)
+    expect(listing.partial).toBe(false)
+  })
+
+  it('authoritative add does not adopt a raced global generation', async () => {
+    await store.setDir('/dir', [])
+    const client = await redis()
+    const peer = new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix })
+    const multi = client.multi.bind(client)
+    const spy = vi.spyOn(client, 'multi').mockImplementationOnce(() => {
+      const pipe = multi()
+      const exec = pipe.exec.bind(pipe)
+      pipe.exec = async () => {
+        await peer.invalidate()
+        return exec()
+      }
+      return pipe
+    })
+    try {
+      await store.addEntry('/dir/a', new FileStat({ name: 'a', type: FileType.FILE }))
+      expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
     } finally {
       spy.mockRestore()
     }
@@ -942,7 +1114,9 @@ describe('Redis client protocol', () => {
     await store.close()
     expect(pipeline.exec).toHaveBeenCalledTimes(2)
     const writes = vi.mocked(pipeline.set).mock.calls
-    expect(writes.slice(0, 2)).toEqual(writes.slice(2))
+    expect(writes.slice(0, 1)).toEqual(writes.slice(1))
+    const scripts = vi.mocked(pipeline.eval).mock.calls
+    expect(scripts.slice(0, 2)).toEqual(scripts.slice(2))
     expect(value.quit).not.toHaveBeenCalled()
   })
 
@@ -981,7 +1155,12 @@ describe('Redis client protocol', () => {
 
   it('keeps listings stale when their generation key is evicted', async () => {
     const { value } = client()
-    const raw = JSON.stringify({ entries: [], expires_at: 4102444800, generation: 'old:dir' })
+    const raw = JSON.stringify({
+      entries: [],
+      folders: [],
+      expires_at: 4102444800,
+      generation: 'old:dir',
+    })
     vi.mocked(value.mGet).mockResolvedValue([raw, null, 'dir'])
     const store = new RedisIndexCacheStore({ client: value })
     expect((await store.listDir('/old')).status).toBe(LookupStatus.EXPIRED)
@@ -997,7 +1176,12 @@ describe('Redis client protocol', () => {
   it('reads a row without a version key as unversioned', async () => {
     const { value } = client()
     vi.mocked(value.mGet).mockResolvedValue([
-      JSON.stringify({ entries: ['/d/a'], expires_at: 4102444800, generation: 'g:d' }),
+      JSON.stringify({
+        entries: ['/d/a'],
+        folders: [0],
+        expires_at: 4102444800,
+        generation: 'g:d',
+      }),
       'g',
       'd',
     ])
@@ -1010,7 +1194,7 @@ describe('Redis client protocol', () => {
   it('reads a listing and its invalidation generation in one request', async () => {
     const { value } = client()
     vi.mocked(value.mGet).mockResolvedValue([
-      JSON.stringify({ entries: [], expires_at: 4102444800, generation: 'g:d' }),
+      JSON.stringify({ entries: [], folders: [], expires_at: 4102444800, generation: 'g:d' }),
       'g',
       'd',
     ])

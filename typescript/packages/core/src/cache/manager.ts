@@ -741,8 +741,8 @@ export class CacheManager {
     const key = this.cacheKey(path)
     let parent = key.slice(0, Math.max(key.lastIndexOf('/'), 0))
     while (parent !== '' && parent !== this.prefix) {
+      await this.index.invalidateEntry(parent)
       parent = parent.slice(0, Math.max(parent.lastIndexOf('/'), 0))
-      await this.evictDir(parent === '' ? '/' : parent)
     }
   }
 
@@ -787,7 +787,6 @@ export class CacheManager {
   }
 
   private async invalidateParent(key: string): Promise<void> {
-    const lastSlash = key.lastIndexOf('/')
-    await this.evictDir(lastSlash > 0 ? key.slice(0, lastSlash) : '/')
+    if (this.index !== null) await this.index.invalidateEntry(key)
   }
 }

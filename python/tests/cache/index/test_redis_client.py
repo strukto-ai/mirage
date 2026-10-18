@@ -21,7 +21,8 @@ from mirage.cache.index.constants import (
     REGISTRY_PAGE,
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
-from mirage.types import FileStat, FileType
+from mirage.cache.manager import CacheManager
+from mirage.types import FileStat, FileType, PathSpec
 
 
 @pytest_asyncio.fixture(params=["fake", "redis"])
@@ -55,7 +56,7 @@ def client():
     )
     value.mget = AsyncMock(
         return_value=[
-            b'{"entries":["/folder/a.txt"],"expires_at":4102444800,"generation":"g:d"}',
+            b'{"entries":["/folder/a.txt"],"folders":[0],"expires_at":4102444800,"generation":"g:d"}',
             b"g",
             b"d",
         ]
@@ -155,7 +156,8 @@ async def test_failed_seed_flush_remains_retryable(client):
         await store.close()
     await store.close()
     assert pipe.execute.await_count == 2
-    assert pipe.set.call_args_list[:2] == pipe.set.call_args_list[2:]
+    assert pipe.set.call_args_list[:1] == pipe.set.call_args_list[1:]
+    assert pipe.eval.call_args_list[:2] == pipe.eval.call_args_list[2:]
 
 
 @pytest.mark.asyncio
@@ -677,7 +679,8 @@ async def test_path_registry_prunes_removed_rows_but_preserves_tombstones(
     await store.clear()
     await store.put("/put-only", child)
     await store.invalidate_entry("/put-only")
-    assert await client.zrange(registry, 0, -1) == [""]
+    assert await client.zrange(registry, 0, -1) == ["", "/"]
+    await store.invalidate_prefix("/")
     await store.set_dir("/d", [("child", child)])
     await store.set_dir("/d", [])
     assert await client.zrange(registry, 0, -1) == ["", "/d"]
@@ -1075,3 +1078,197 @@ def test_a_store_built_without_a_prefix_shares_the_config_default():
     # keys, or two workers on one Redis keep two indexes.
     store = RedisIndexCacheStore(client=FakeRedis(decode_responses=True))
     assert store._entry_key("/dir/a") == "mirage:index:mirage:idx:entry:/dir/a"
+
+
+@pytest.mark.asyncio
+async def test_narrow_invalidation_fences_captured_directory_generation(
+    rolling_client, monkeypatch
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    peer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    row = FileStat(name="a", type=FileType.FILE)
+    await store.set_dir("/repo", [("a", row)])
+    original = store._eval_complete
+
+    async def publish_after_mutation(script, keys, args):
+        await peer.invalidate_entry("/repo/a")
+        return await original(script, keys, args)
+
+    monkeypatch.setattr(store, "_eval_complete", publish_after_mutation)
+    await store.set_dir("/repo", [("a", row)])
+    assert (await store.list_dir("/repo")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_narrow_invalidation_preserves_exact_deadline(rolling_client):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=3600)
+    await store.set_dir(
+        "/repo", [("a", FileStat(name="a", type=FileType.FILE))], deadline
+    )
+    await store.invalidate_entry("/repo/a")
+    raw = await client.get(prefix + "mirage:idx:directory:/repo")
+    assert json.loads(raw)["expires_at"] == deadline.timestamp()
+
+
+@pytest.mark.asyncio
+async def test_learning_a_child_directory_preserves_parent_freshness_fields(
+    rolling_client,
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    await store.set_dir(
+        "/dir", [_row("sub")], deadline, window=True, version="v1"
+    )
+    before = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+    await store.set_dir("/dir/sub", [])
+    after = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+    assert after == {**before, "folders": [1]}
+    assert after["expires_at"] == deadline.timestamp()
+
+
+@pytest.mark.asyncio
+async def test_seed_commit_captures_concurrently_published_child_directory(
+    rolling_client, monkeypatch
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    peer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    row = FileStat(name="sub", type=FileType.FILE)
+    store.seed(
+        {"/dir/sub": row},
+        {"/dir": ["/dir/sub"]},
+        datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    pipeline = client.pipeline
+    inserted = False
+
+    def paused_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        async def execute_after_child_publication(*args, **kwargs):
+            nonlocal inserted
+            if not inserted and any(
+                str(command[0][0]).lower() == "eval"
+                and command[0][1] == redis_index._SEED_LISTING
+                for command in pipe.command_stack
+            ):
+                inserted = True
+                await peer.set_dir("/dir/sub", [])
+                await peer.put(
+                    "/dir/sub/stray",
+                    FileStat(name="stray", type=FileType.FILE),
+                )
+            return await execute(*args, **kwargs)
+
+        pipe.execute = execute_after_child_publication
+        return pipe
+
+    with monkeypatch.context() as patch:
+        patch.setattr(client, "pipeline", paused_pipeline)
+        assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
+    assert inserted
+    await store.invalidate_dir("/dir/sub")
+    gone = await store.set_dir("/dir", [("sub", row)])
+    assert [(child.path, child.folder) for child in gone] == [
+        ("/dir/sub", True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flushed", [False, True])
+async def test_split_seed_membership_retains_directory_flags(
+    rolling_client, flushed
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    store.seed(
+        {"/dir/sub": FileStat(name="sub", type=FileType.DIRECTORY)},
+        {},
+        deadline,
+    )
+    if flushed:
+        await store.get("/dir/sub")
+    store.seed({}, {"/dir": ["/dir/sub"]}, deadline)
+    await store.list_dir("/dir")
+    raw = await client.get(prefix + "mirage:idx:directory:/dir")
+    assert json.loads(raw)["folders"] == [1]
+
+
+@pytest.mark.asyncio
+async def test_authoritative_add_fences_captured_directory_generation(
+    rolling_client, monkeypatch
+):
+    client, prefix = rolling_client
+    writer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    peer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    old = FileStat(name="a", type=FileType.FILE, size=3, fingerprint="old")
+    new = FileStat(name="a", type=FileType.FILE, size=11, fingerprint="new")
+    await writer.set_dir("/dir", [("a", old)])
+    original = writer._eval_complete
+
+    async def publish_after_write(script, keys, args):
+        await CacheManager(None, peer, "/dir/", True).keep_created(
+            PathSpec.from_str_path("/a"), new
+        )
+        assert (await peer.get("/dir/a")).entry == new
+        return await original(script, keys, args)
+
+    monkeypatch.setattr(writer, "_eval_complete", publish_after_write)
+    await writer.set_dir("/dir", [("a", old)])
+    assert (await writer.list_dir("/dir")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_authoritative_add_preserves_exact_live_deadline(rolling_client):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    await store.set_dir(
+        "/dir",
+        [("a", FileStat(name="a", type=FileType.FILE))],
+        deadline,
+        version="v1",
+        window=True,
+    )
+    await store.add_entry(
+        "/dir/a", FileStat(name="a", type=FileType.FILE, size=11)
+    )
+    raw = await client.get(prefix + "mirage:idx:directory:/dir")
+    listing = json.loads(raw)
+    assert listing["expires_at"] == deadline.timestamp()
+    assert listing["version"] == "v1"
+    assert listing["window"] is True
+    assert not listing["partial"]
+
+
+@pytest.mark.asyncio
+async def test_authoritative_add_does_not_adopt_a_raced_global_generation(
+    rolling_client, monkeypatch
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    peer = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    await store.set_dir("/dir", [])
+    original = client.pipeline
+
+    def pipeline_after_capture():
+        pipe = original()
+        execute = pipe.execute
+
+        async def execute_after_invalidation():
+            await peer.invalidate()
+            return await execute()
+
+        pipe.execute = execute_after_invalidation
+        return pipe
+
+    monkeypatch.setattr(client, "pipeline", pipeline_after_capture)
+    await store.add_entry("/dir/a", FileStat(name="a", type=FileType.FILE))
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED

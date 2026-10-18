@@ -670,3 +670,301 @@ async def test_conditional_replacement_observes_pending_seed(store):
         "/dir/a", old.model_dump_json(), entry("confirmed")
     )
     assert (await store.get("/dir/a")).entry == seeded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", [False, True])
+async def test_narrow_mutation_keeps_siblings_and_demotes_parent(
+    store, window
+):
+    await store.set_dir(
+        "/dir",
+        [("a", entry()), ("b", entry("b"))],
+        version="v1",
+        window=window,
+    )
+    await store.invalidate_entry("/dir/a")
+    assert (await store.get("/dir/a")).status == LookupStatus.NOT_FOUND
+    assert (await store.get("/dir/b")).entry == entry("b")
+    listing = await store.list_dir("/dir")
+    assert listing.entries is None
+    assert listing.partial_entries == ["/dir/b"]
+    assert listing.version is None
+    assert not listing.window
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["deadline", "generation"])
+async def test_narrow_mutation_does_not_revive_stale_parent(store, state):
+    deadline = datetime.now(timezone.utc) + timedelta(
+        seconds=-1 if state == "deadline" else 3600
+    )
+    await store.set_dir(
+        "/dir", [("a", entry()), ("sub", folder("sub"))], deadline
+    )
+    await store.put("/dir/sub/stray", entry("stray"))
+    if state == "generation":
+        await store.invalidate()
+    await store.invalidate_entry("/dir/a")
+    assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+    await store.add_entry("/dir/new", entry("new"))
+    assert (await store.list_dir("/dir")).partial_entries == ["/dir/new"]
+    gone = await store.set_dir("/dir", [("new", entry("new"))])
+    assert sorted(gone, key=lambda child: child.path) == [
+        Evicted("/dir/a", folder=False),
+        Evicted("/dir/sub", folder=True),
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after", ["none", "broad", "prefix", "add"])
+async def test_narrow_tombstones_survive_partial_overwrite(store, after):
+    await store.set_dir("/dir", [("a", entry()), ("sub", folder("sub"))])
+    await store.put("/dir/sub/stray", entry("stray"))
+    await store.put("/dir/sub/nested/keep", entry("keep"))
+    await store.invalidate_entry("/dir/a")
+    await store.set_partial_dir("/dir", [("sub", entry("sub"))])
+    if after == "broad":
+        await store.invalidate_dir("/dir")
+    elif after == "prefix":
+        await store.invalidate_prefix("/dir", excluded=("/dir/sub/nested",))
+    elif after == "add":
+        await store.add_entry("/dir/sub", entry("sub"))
+    gone = await store.set_dir(
+        "/dir", [("sub", entry("sub"))], excluded=("/dir/sub/nested",)
+    )
+    assert sorted(gone, key=lambda child: child.path) == [
+        Evicted("/dir/a", folder=False),
+        Evicted("/dir/sub", folder=True),
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+    assert (await store.get("/dir/sub/nested/keep")).entry == entry("keep")
+
+
+@pytest.mark.asyncio
+async def test_authoritative_add_preserves_replaced_folder_evidence(store):
+    await store.set_dir("/dir", [("sub", folder("sub"))])
+    await store.put("/dir/sub/stray", entry("stray"))
+    await store.add_entry("/dir/sub", entry("sub"))
+    await store.invalidate_dir("/dir")
+    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == [
+        Evicted("/dir/sub", folder=True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_concurrent_narrow_mutations_merge_history(store):
+    await store.set_dir(
+        "/dir", [("a", entry()), ("b", entry("b")), ("sub", folder("sub"))]
+    )
+    await store.put("/dir/sub/stray", entry("stray"))
+    await asyncio.gather(
+        store.invalidate_entry("/dir/a"), store.invalidate_entry("/dir/b")
+    )
+    assert (await store.list_dir("/dir")).partial_entries == ["/dir/sub"]
+    gone = await store.set_dir("/dir", [])
+    assert sorted(gone, key=lambda child: child.path) == [
+        Evicted("/dir/a", folder=False),
+        Evicted("/dir/b", folder=False),
+        Evicted("/dir/sub", folder=True),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flushed", [False, True])
+async def test_split_seeds_classify_rows_from_merged_state(store, flushed):
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    store.seed({"/dir/sub": folder("sub")}, {}, deadline)
+    if flushed:
+        assert (await store.get("/dir/sub")).entry == folder("sub")
+    store.seed({}, {"/dir": ["/dir/sub"]}, deadline)
+    assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
+    assert (await store.get("/dir/sub")).entry == folder("sub")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flushed", [False, True])
+@pytest.mark.parametrize("parent_first", [False, True])
+async def test_split_seeds_preserve_child_listing_directory_evidence(
+    store, flushed, parent_first
+):
+    deadline = datetime.now(timezone.utc) + timedelta(hours=1)
+    first = {"/dir": ["/dir/sub"]} if parent_first else {"/dir/sub": []}
+    second = {"/dir/sub": []} if parent_first else {"/dir": ["/dir/sub"]}
+    store.seed({}, first, deadline)
+    if flushed:
+        await store.list_dir(next(iter(first)))
+    store.seed({}, second, deadline)
+    assert (await store.list_dir("/dir")).entries == ["/dir/sub"]
+    await store.put("/dir/sub/stray", entry("stray"))
+    await store.invalidate_entry("/dir/a")
+    await store.invalidate_dir("/dir/sub")
+    await store.set_partial_dir("/dir", [("sub", entry("sub"))])
+    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == [
+        Evicted("/dir/sub", folder=True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "publication", ["seed", "complete", "partial", "window"]
+)
+@pytest.mark.parametrize("prior", ["listed", "tombstone", "absent"])
+async def test_child_listing_publication_preserves_existing_parent_evidence(
+    store, publication, prior
+):
+    if prior != "absent":
+        await store.set_dir("/dir", [("sub", entry("sub"))])
+    if prior == "tombstone":
+        await store.invalidate_entry("/dir/sub")
+    if publication == "seed":
+        store.seed(
+            {},
+            {"/dir/sub": []},
+            datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        await store.list_dir("/dir/sub")
+    elif publication == "partial":
+        await store.set_partial_dir("/dir/sub", [])
+    else:
+        await store.set_dir("/dir/sub", [], window=publication == "window")
+    await store.put("/dir/sub/stray", entry("stray"))
+    await store.invalidate_entry("/dir/a")
+    await store.invalidate_dir("/dir/sub")
+    await store.set_partial_dir("/dir", [("sub", entry("sub"))])
+    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == (
+        [] if prior == "absent" else [Evicted("/dir/sub", folder=True)]
+    )
+    assert (await store.get("/dir/sub/stray")).status == (
+        None if prior == "absent" else LookupStatus.NOT_FOUND
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("window", [False, True])
+@pytest.mark.parametrize("offset", [-1, 3600])
+async def test_child_directory_proof_preserves_parent_listing_state(
+    store, window, offset
+):
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=offset)
+    await store.set_dir(
+        "/dir", [("sub", entry("sub"))], deadline, window=window, version="v1"
+    )
+    before = await store.list_dir("/dir")
+    await store.set_dir("/dir/sub", [])
+    assert await store.list_dir("/dir") == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("publication", ["seed", "partial"])
+async def test_parent_publication_retains_previously_listed_child_directory(
+    store, publication
+):
+    await store.set_dir("/dir/sub", [])
+    await store.put("/dir/sub/stray", entry("stray"))
+    if publication == "seed":
+        store.seed(
+            {"/dir/sub": entry("sub")},
+            {"/dir": ["/dir/sub"]},
+            datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        await store.list_dir("/dir")
+    else:
+        await store.set_partial_dir("/dir", [("sub", entry("sub"))])
+    await store.invalidate_dir("/dir/sub")
+    assert await store.set_dir("/dir", [("sub", entry("sub"))]) == [
+        Evicted("/dir/sub", folder=True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("listed", [False, True])
+async def test_narrow_invalidation_preserves_own_listing_directory_evidence(
+    store, listed
+):
+    if listed:
+        await store.set_dir("/dir", [("sub", entry("sub"))])
+    await store.set_dir("/dir/sub", [])
+    await store.put("/dir/sub/stray", entry("stray"))
+    await store.invalidate_entry("/dir/sub")
+    await store.invalidate_dir("/dir/sub")
+    assert await store.set_dir("/dir", []) == [
+        Evicted("/dir/sub", folder=True)
+    ]
+    assert (await store.get("/dir/sub/stray")).status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_incoming_authoritative_row_creates_no_prior_membership(store):
+    await store.add_entry("/dir/sub", folder("sub"))
+    await store.invalidate_prefix("/dir")
+    await store.put("/dir/sub", folder("sub"))
+    assert await store.set_dir("/dir", [("a", entry())]) == []
+    assert (await store.get("/dir/sub")).entry == folder("sub")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("publication", ["seed", "complete", "child-listing"])
+async def test_current_membership_creates_no_history_after_prefix_forget(
+    store, publication
+):
+    if publication == "seed":
+        store.seed(
+            {"/dir/sub": folder("sub")},
+            {"/dir": ["/dir/sub"]},
+            datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        await store.list_dir("/dir")
+    else:
+        await store.set_dir("/dir", [("sub", folder("sub"))])
+        if publication == "child-listing":
+            await store.set_dir("/dir/sub", [])
+    await store.invalidate_prefix("/dir")
+    await store.put("/dir/sub", folder("sub"))
+    await store.put("/dir/sub/stray", entry("stray"))
+    assert await store.set_dir("/dir", [("a", entry())]) == []
+    assert (await store.get("/dir/sub")).entry == folder("sub")
+    assert (await store.get("/dir/sub/stray")).entry == entry("stray")
+
+
+@pytest.mark.asyncio
+async def test_partial_incoming_file_creates_no_history_after_prefix_forget(
+    store,
+):
+    await store.set_partial_dir("/dir", [("new", entry("new"))])
+    await store.invalidate_prefix("/dir")
+    await store.put("/dir/new", entry("new"))
+    assert await store.set_dir("/dir", []) == []
+    assert (await store.get("/dir/new")).entry == entry("new")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", ["put", "add_entry"])
+@pytest.mark.parametrize("expired", [False, True])
+async def test_row_replacement_retains_only_its_required_history(
+    store, replacement, expired
+):
+    deadline = datetime.now(timezone.utc) + timedelta(
+        seconds=-1 if expired else 3600
+    )
+    await store.set_dir(
+        "/dir",
+        [("changed", folder("changed")), ("kept", folder("kept"))],
+        deadline,
+    )
+    await getattr(store, replacement)("/dir/changed", entry("changed"))
+    await store.invalidate_prefix("/dir")
+    await store.put("/dir/kept", folder("kept"))
+    await store.put("/dir/kept/stray", entry("stray"))
+    gone = await store.set_dir("/dir", [("changed", entry("changed"))])
+    expected = [Evicted("/dir/changed", folder=True)]
+    if expired and replacement == "add_entry":
+        expected.append(Evicted("/dir/kept", folder=True))
+    assert sorted(gone, key=lambda child: child.path) == expected
+    assert (await store.get("/dir/kept/stray")).status == (
+        LookupStatus.NOT_FOUND if len(expected) == 2 else None
+    )

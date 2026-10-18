@@ -109,6 +109,312 @@ for (const backend of ['ram', 'redis']) {
         expect((await store.get('/dir/a')).entry).toEqual(seeded)
       })
 
+      it.each([false, true])(
+        'narrow mutation keeps siblings and demotes parent (window=%s)',
+        async (window) => {
+          await store.setDir(
+            '/dir',
+            [
+              ['a', entry()],
+              ['b', entry('b')],
+            ],
+            undefined,
+            { version: 'v1', window },
+          )
+          await store.invalidateEntry('/dir/a')
+          expect((await store.get('/dir/a')).status).toBe(LookupStatus.NOT_FOUND)
+          expect((await store.get('/dir/b')).entry).toEqual(entry('b'))
+          const listing = await store.listDir('/dir')
+          expect(listing.entries ?? null).toBeNull()
+          expect(listing.partialEntries).toEqual(['/dir/b'])
+          expect(listing.version ?? null).toBeNull()
+          expect(listing.window ?? false).toBe(false)
+        },
+      )
+
+      it.each(['deadline', 'generation'])(
+        'narrow mutation does not revive stale parent (%s)',
+        async (state) => {
+          const deadline = new Date(Date.now() + (state === 'deadline' ? -1000 : 3600000))
+          await store.setDir(
+            '/dir',
+            [
+              ['a', entry()],
+              ['sub', folder('sub')],
+            ],
+            deadline,
+          )
+          await store.put('/dir/sub/stray', entry('stray'))
+          if (state === 'generation') await store.invalidate()
+          await store.invalidateEntry('/dir/a')
+          expect((await store.listDir('/dir')).status).toBe(LookupStatus.EXPIRED)
+          await store.addEntry('/dir/new', entry('new'))
+          expect((await store.listDir('/dir')).partialEntries).toEqual(['/dir/new'])
+          expect(
+            (await store.setDir('/dir', [['new', entry('new')]])).sort((a, b) =>
+              a.path.localeCompare(b.path),
+            ),
+          ).toEqual([
+            { path: '/dir/a', folder: false },
+            { path: '/dir/sub', folder: true },
+          ])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+        },
+      )
+
+      it.each(['none', 'broad', 'prefix', 'add'])(
+        'narrow tombstones survive partial overwrite (%s)',
+        async (after) => {
+          await store.setDir('/dir', [
+            ['a', entry()],
+            ['sub', folder('sub')],
+          ])
+          await store.put('/dir/sub/stray', entry('stray'))
+          await store.put('/dir/sub/nested/keep', entry('keep'))
+          await store.invalidateEntry('/dir/a')
+          await store.setPartialDir('/dir', [['sub', entry('sub')]])
+          if (after === 'broad') await store.invalidateDir('/dir')
+          else if (after === 'prefix') await store.invalidatePrefix('/dir', ['/dir/sub/nested'])
+          else if (after === 'add') await store.addEntry('/dir/sub', entry('sub'))
+          expect(
+            (
+              await store.setDir('/dir', [['sub', entry('sub')]], undefined, {
+                excluded: ['/dir/sub/nested'],
+              })
+            ).sort((a, b) => a.path.localeCompare(b.path)),
+          ).toEqual([
+            { path: '/dir/a', folder: false },
+            { path: '/dir/sub', folder: true },
+          ])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+          expect((await store.get('/dir/sub/nested/keep')).entry).toEqual(entry('keep'))
+        },
+      )
+
+      it('authoritative add preserves replaced folder evidence', async () => {
+        await store.setDir('/dir', [['sub', folder('sub')]])
+        await store.put('/dir/sub/stray', entry('stray'))
+        await store.addEntry('/dir/sub', entry('sub'))
+        await store.invalidateDir('/dir')
+        expect(await store.setDir('/dir', [['sub', entry('sub')]])).toEqual([
+          { path: '/dir/sub', folder: true },
+        ])
+        expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+      })
+
+      it('concurrent narrow mutations merge history', async () => {
+        await store.setDir('/dir', [
+          ['a', entry()],
+          ['b', entry('b')],
+          ['sub', folder('sub')],
+        ])
+        await store.put('/dir/sub/stray', entry('stray'))
+        await Promise.all([store.invalidateEntry('/dir/a'), store.invalidateEntry('/dir/b')])
+        expect((await store.listDir('/dir')).partialEntries).toEqual(['/dir/sub'])
+        expect(
+          (await store.setDir('/dir', [])).sort((a, b) => a.path.localeCompare(b.path)),
+        ).toEqual([
+          { path: '/dir/a', folder: false },
+          { path: '/dir/b', folder: false },
+          { path: '/dir/sub', folder: true },
+        ])
+      })
+
+      it.each([false, true])(
+        'split seeds classify rows from merged state (flushed=%s)',
+        async (flushed) => {
+          const deadline = new Date(Date.now() + 3600000)
+          store.seed(new Map([['/dir/sub', folder('sub')]]), new Map(), deadline)
+          if (flushed) expect((await store.get('/dir/sub')).entry).toEqual(folder('sub'))
+          store.seed(new Map(), new Map([['/dir', ['/dir/sub']]]), deadline)
+          expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
+          expect((await store.get('/dir/sub')).entry).toEqual(folder('sub'))
+        },
+      )
+
+      it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+      ])(
+        'split seeds preserve child listing directory evidence (flushed=%s, parentFirst=%s)',
+        async (flushed, parentFirst) => {
+          const deadline = new Date(Date.now() + 3600000)
+          const first = parentFirst
+            ? new Map([['/dir', ['/dir/sub']]])
+            : new Map([['/dir/sub', []]])
+          const second = parentFirst
+            ? new Map([['/dir/sub', []]])
+            : new Map([['/dir', ['/dir/sub']]])
+          store.seed(new Map(), first, deadline)
+          if (flushed) await store.listDir(parentFirst ? '/dir' : '/dir/sub')
+          store.seed(new Map(), second, deadline)
+          expect((await store.listDir('/dir')).entries).toEqual(['/dir/sub'])
+          await store.put('/dir/sub/stray', entry('stray'))
+          await store.invalidateEntry('/dir/a')
+          await store.invalidateDir('/dir/sub')
+          await store.setPartialDir('/dir', [['sub', entry('sub')]])
+          expect(await store.setDir('/dir', [['sub', entry('sub')]])).toEqual([
+            { path: '/dir/sub', folder: true },
+          ])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+        },
+      )
+
+      it.each(
+        ['seed', 'complete', 'partial', 'window'].flatMap((publication) =>
+          ['listed', 'tombstone', 'absent'].map((prior) => [publication, prior]),
+        ),
+      )(
+        'child listing publication preserves existing parent evidence (publication=%s, prior=%s)',
+        async (publication, prior) => {
+          if (prior !== 'absent') await store.setDir('/dir', [['sub', entry('sub')]])
+          if (prior === 'tombstone') await store.invalidateEntry('/dir/sub')
+          if (publication === 'seed') {
+            store.seed(new Map(), new Map([['/dir/sub', []]]), new Date(Date.now() + 3600000))
+            await store.listDir('/dir/sub')
+          } else if (publication === 'partial') {
+            await store.setPartialDir('/dir/sub', [])
+          } else {
+            await store.setDir('/dir/sub', [], undefined, { window: publication === 'window' })
+          }
+          await store.put('/dir/sub/stray', entry('stray'))
+          await store.invalidateEntry('/dir/a')
+          await store.invalidateDir('/dir/sub')
+          await store.setPartialDir('/dir', [['sub', entry('sub')]])
+          expect(await store.setDir('/dir', [['sub', entry('sub')]])).toEqual(
+            prior === 'absent' ? [] : [{ path: '/dir/sub', folder: true }],
+          )
+          expect((await store.get('/dir/sub/stray')).status).toBe(
+            prior === 'absent' ? undefined : LookupStatus.NOT_FOUND,
+          )
+        },
+      )
+
+      it.each([
+        { window: false, offset: -1 },
+        { window: false, offset: 3600 },
+        { window: true, offset: -1 },
+        { window: true, offset: 3600 },
+      ])(
+        'child directory proof preserves parent listing state (window=$window, offset=$offset)',
+        async ({ window, offset }) => {
+          const deadline = new Date(Date.now() + offset * 1000)
+          await store.setDir('/dir', [['sub', entry('sub')]], deadline, { window, version: 'v1' })
+          const before = await store.listDir('/dir')
+          await store.setDir('/dir/sub', [])
+          expect(await store.listDir('/dir')).toEqual(before)
+        },
+      )
+
+      it.each(['seed', 'partial'])(
+        'parent %s retains previously listed child directory',
+        async (publication) => {
+          await store.setDir('/dir/sub', [])
+          await store.put('/dir/sub/stray', entry('stray'))
+          if (publication === 'seed') {
+            store.seed(
+              new Map([['/dir/sub', entry('sub')]]),
+              new Map([['/dir', ['/dir/sub']]]),
+              new Date(Date.now() + 3600000),
+            )
+            await store.listDir('/dir')
+          } else {
+            await store.setPartialDir('/dir', [['sub', entry('sub')]])
+          }
+          await store.invalidateDir('/dir/sub')
+          expect(await store.setDir('/dir', [['sub', entry('sub')]])).toEqual([
+            { path: '/dir/sub', folder: true },
+          ])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+        },
+      )
+
+      it.each([false, true])(
+        'narrow invalidation preserves own listing directory evidence (listed=%s)',
+        async (listed) => {
+          if (listed) await store.setDir('/dir', [['sub', entry('sub')]])
+          await store.setDir('/dir/sub', [])
+          await store.put('/dir/sub/stray', entry('stray'))
+          await store.invalidateEntry('/dir/sub')
+          await store.invalidateDir('/dir/sub')
+          expect(await store.setDir('/dir', [])).toEqual([{ path: '/dir/sub', folder: true }])
+          expect((await store.get('/dir/sub/stray')).status).toBe(LookupStatus.NOT_FOUND)
+        },
+      )
+
+      it('incoming authoritative row creates no prior membership', async () => {
+        await store.addEntry('/dir/sub', folder('sub'))
+        await store.invalidatePrefix('/dir')
+        await store.put('/dir/sub', folder('sub'))
+        expect(await store.setDir('/dir', [['a', entry()]])).toEqual([])
+        expect((await store.get('/dir/sub')).entry).toEqual(folder('sub'))
+      })
+
+      it.each(['seed', 'complete', 'child-listing'])(
+        'current %s membership creates no history after prefix forget',
+        async (publication) => {
+          if (publication === 'seed') {
+            store.seed(
+              new Map([['/dir/sub', folder('sub')]]),
+              new Map([['/dir', ['/dir/sub']]]),
+              new Date(Date.now() + 3600000),
+            )
+            await store.listDir('/dir')
+          } else {
+            await store.setDir('/dir', [['sub', folder('sub')]])
+            if (publication === 'child-listing') await store.setDir('/dir/sub', [])
+          }
+          await store.invalidatePrefix('/dir')
+          await store.put('/dir/sub', folder('sub'))
+          await store.put('/dir/sub/stray', entry('stray'))
+          expect(await store.setDir('/dir', [['a', entry()]])).toEqual([])
+          expect((await store.get('/dir/sub')).entry).toEqual(folder('sub'))
+          expect((await store.get('/dir/sub/stray')).entry).toEqual(entry('stray'))
+        },
+      )
+
+      it('partial incoming file creates no history after prefix forget', async () => {
+        await store.setPartialDir('/dir', [['new', entry('new')]])
+        await store.invalidatePrefix('/dir')
+        await store.put('/dir/new', entry('new'))
+        expect(await store.setDir('/dir', [])).toEqual([])
+        expect((await store.get('/dir/new')).entry).toEqual(entry('new'))
+      })
+
+      it.each([
+        { replacement: 'put', expired: false },
+        { replacement: 'put', expired: true },
+        { replacement: 'add', expired: false },
+        { replacement: 'add', expired: true },
+      ])(
+        '$replacement row replacement retains only required history (expired=$expired)',
+        async ({ replacement, expired }) => {
+          const deadline = new Date(Date.now() + (expired ? -1000 : 3600000))
+          await store.setDir(
+            '/dir',
+            [
+              ['changed', folder('changed')],
+              ['kept', folder('kept')],
+            ],
+            deadline,
+          )
+          if (replacement === 'put') await store.put('/dir/changed', entry('changed'))
+          else await store.addEntry('/dir/changed', entry('changed'))
+          await store.invalidatePrefix('/dir')
+          await store.put('/dir/kept', folder('kept'))
+          await store.put('/dir/kept/stray', entry('stray'))
+          const gone = await store.setDir('/dir', [['changed', entry('changed')]])
+          const expected = [{ path: '/dir/changed', folder: true }]
+          if (expired && replacement === 'add') expected.push({ path: '/dir/kept', folder: true })
+          expect(gone.sort((a, b) => a.path.localeCompare(b.path))).toEqual(expected)
+          expect((await store.get('/dir/kept/stray')).status).toBe(
+            expected.length === 2 ? LookupStatus.NOT_FOUND : undefined,
+          )
+        },
+      )
+
       const sub = (type: FileType): FileStat => new FileStat({ name: 'sub', type })
       const PRIORS = ['listed', 'invalidated', 'unlisted']
       it.each(PRIORS)('clears a directory replaced by a file (prior=%s)', async (prior) => {

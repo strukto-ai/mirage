@@ -54,10 +54,13 @@ describe('IndexDirectory JSON', () => {
   it('reads the listing Python writes', () => {
     expect(
       IndexDirectorySchema.parse(
-        JSON.parse('{"entries":["/a/b"],"expires_at":4102444800.5,"generation":"g:d"}'),
+        JSON.parse(
+          '{"entries":["/a/b"],"folders":[0],"expires_at":4102444800.5,"generation":"g:d"}',
+        ),
       ),
     ).toEqual({
       entries: ['/a/b'],
+      folders: [0],
       expires_at: 4102444800.5,
       generation: 'g:d',
       partial: false,

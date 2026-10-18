@@ -418,6 +418,7 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
     assert {key: row.type for key, row in (await index.entries()).items()} == {
         "/data/d": FileType.DIRECTORY,
         "/data/e": FileType.DIRECTORY,
+        "/data/d/g": FileType.FILE,
         "/data/e/h": FileType.FILE,
     }
     assert (await index.list_dir("/data/d")).entries is None
@@ -1170,3 +1171,32 @@ async def _repeated_mount_case(prefix: str) -> None:
 @pytest.mark.parametrize("prefix", ["/data", "/nested/data"])
 def test_ancestor_eviction_with_repeated_mount_name(prefix: str):
     _run(_repeated_mount_case(prefix))
+
+
+@pytest.mark.asyncio
+async def test_write_preserves_sibling_rows_without_listing_trust():
+    cache, index = _stores()
+    a = FileStat(name="a", type=FileType.FILE)
+    b = FileStat(name="b", type=FileType.FILE)
+    await index.set_dir("/data/dir", [("a", a), ("b", b)], version="v1")
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.invalidate_after_write(PathSpec.from_str_path("/dir/a"))
+    assert (await index.get("/data/dir/a")).entry is None
+    assert (await index.get("/data/dir/b")).entry == b
+    assert (await index.list_dir("/data/dir")).partial_entries == [
+        "/data/dir/b"
+    ]
+    assert not manager.listing_trusted("/data/dir")
+
+
+@pytest.mark.asyncio
+async def test_ancestor_mutation_preserves_unrelated_branches():
+    cache, index = _stores()
+    branch = FileStat(name="dir", type=FileType.DIRECTORY)
+    sibling = FileStat(name="keep", type=FileType.DIRECTORY)
+    await index.set_dir("/data", [("dir", branch), ("keep", sibling)])
+    manager = CacheManager(cache, index, "/data/", True)
+    await manager.invalidate_ancestors(PathSpec.from_str_path("/dir/new/a"))
+    assert (await index.get("/data/dir")).entry is None
+    assert (await index.get("/data/keep")).entry == sibling
+    assert (await index.list_dir("/data")).partial_entries == ["/data/keep"]

@@ -187,7 +187,11 @@ class IndexCacheStore:
             await self.put(f"{vfs_path.rstrip('/')}/{name}", entry)
 
     async def invalidate_entry(self, vfs_path: str) -> None:
-        """Drop one metadata row while preserving listing history.
+        """Drop a changed row and demote its parent listing to partial.
+
+        Retain siblings, the original deadline and deletion history. Clear
+        the parent's version and window without recording a new observation.
+        Missing or stale membership must never become fresh.
 
         Args:
             vfs_path (str): mount-absolute entry key.

@@ -37,6 +37,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._ttl = ttl
         self._entries: dict[str, FileStat] = {}
         self._children: dict[str, list[str]] = {}
+        self._folder_flags: dict[str, dict[str, bool]] = {}
         self._expiry: dict[str, datetime] = {}
         self._partial: set[str] = set()
         self._windows: set[str] = set()
@@ -58,8 +59,14 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._expiry.update({path: expires_at for path in children})
         self._partial.difference_update(children)
         self._windows.difference_update(children)
-        for path in children:
+        for path, keys in children.items():
+            self._folder_flags[path] = {
+                child: child in self._children or self._is_folder(child)
+                for child in keys
+            }
             self._stamp(path, version)
+        for path in children:
+            self._remember_directory(path)
 
     def _stamp(self, vfs_path: str, version: str | None) -> None:
         if version is None:
@@ -81,7 +88,13 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         return LookupResult(entry=entry)
 
     async def put(self, vfs_path: str, entry: FileStat) -> None:
-        async with self._lock_for(vfs_path):
+        folder = vfs_path.rsplit("/", 1)[0] or "/"
+        async with self._lock_for(folder):
+            if (
+                self._is_folder(vfs_path)
+                and entry.type is not FileType.DIRECTORY
+            ):
+                self._bury(folder, (vfs_path,))
             self._entries[vfs_path] = entry
 
     async def add_entry(
@@ -93,12 +106,21 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         async with self._lock_for(folder):
             now = datetime.now(timezone.utc)
-            self._entries[vfs_path] = entry
-            children = self._children.get(folder)
+            children = self._children.get(folder, [])
             exp = self._expiry.get(folder)
-            if children is None or exp is None or now >= exp:
+            was_folder = self._is_folder(vfs_path) or self._folder_flags.get(
+                folder, {}
+            ).get(vfs_path, False)
+            stale = folder not in self._children or exp is None or now >= exp
+            if stale:
+                self._bury(folder, tuple(children))
+            if was_folder and entry.type is not FileType.DIRECTORY:
+                self._bury(folder, (vfs_path,))
+            self._entries[vfs_path] = entry
+            if stale:
                 lifetime = now + timedelta(seconds=self._ttl)
                 self._children[folder] = [vfs_path]
+                self._folder_flags[folder] = {}
                 self._expiry[folder] = (
                     lifetime
                     if expired_at is None
@@ -109,6 +131,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._versions.pop(folder, None)
             elif vfs_path not in children:
                 bisect.insort(children, vfs_path)
+            self._folder_flags.setdefault(folder, {})[vfs_path] = (
+                entry.type is FileType.DIRECTORY
+            )
 
     async def replace_if_unchanged(
         self, vfs_path: str, predecessor: str, entry: FileStat
@@ -187,9 +212,18 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 prefix + name: entry for name, entry in entries
             }
             child_keys = list(rows)
-            # What the last full knowledge named: the current listing, plus a
-            # tombstone an invalidation left (a partial since then cannot
-            # have proven its other children gone).
+            if partial:
+                self._bury(
+                    vfs_path,
+                    (
+                        *self._children.get(vfs_path, []),
+                        *(
+                            key
+                            for key in rows
+                            if key in self._children or self._is_folder(key)
+                        ),
+                    ),
+                )
             buried = (
                 {}
                 if partial
@@ -199,11 +233,17 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 }
             )
             candidates = dict.fromkeys(self._children.get(vfs_path, []))
+            current_folders = self._folder_flags.get(vfs_path, {})
             candidates.update(dict.fromkeys(buried))
             candidates.update(dict.fromkeys(rows))
             gone = (
                 [
-                    self._evict(key, buried.get(key, False), excluded)
+                    self._evict(
+                        key,
+                        buried.get(key, False)
+                        or current_folders.get(key, False),
+                        excluded,
+                    )
                     for key in candidates
                     if (
                         key not in rows
@@ -211,6 +251,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                             rows[key].type is not FileType.DIRECTORY
                             and (
                                 buried.get(key, False)
+                                or current_folders.get(key, False)
                                 or key in self._children
                                 or self._is_folder(key)
                             )
@@ -223,6 +264,11 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             )
             self._entries.update(rows)
             self._children[vfs_path] = child_keys
+            self._folder_flags[vfs_path] = {
+                key: row.type is FileType.DIRECTORY
+                for key, row in rows.items()
+            }
+            self._remember_directory(vfs_path)
             self._expiry[vfs_path] = exp
             self._stamp(vfs_path, None if partial else version)
             if partial:
@@ -259,39 +305,80 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._drop_prefix(key, excluded=excluded)
         return Evicted(key, folder=folder)
 
-    async def invalidate_entry(self, vfs_path: str) -> None:
-        self._entries.pop(vfs_path, None)
-
-    async def invalidate_dir(self, vfs_path: str) -> None:
-        # The child list is kept as a tombstone, so the next complete
-        # listing can still tell which children went away.
-        children = self._children.get(vfs_path)
-        if children is not None:
-            buried = (
-                {
-                    child.path: child.folder
-                    for child in self._tombstones.get(vfs_path, [])
-                }
-                if vfs_path in self._partial
-                else {}
+    def _bury(self, vfs_path: str, paths: tuple[str, ...]) -> None:
+        buried = {
+            child.path: child.folder
+            for child in self._tombstones.get(vfs_path, [])
+        }
+        for child in paths:
+            buried[child] = (
+                buried.get(child, False)
+                or self._folder_flags.get(vfs_path, {}).get(child, False)
+                or child in self._children
+                or self._is_folder(child)
             )
-            for child in children:
-                buried[child] = (
-                    buried.get(child, False)
-                    or child in self._children
-                    or self._is_folder(child)
-                )
+        if buried:
             self._tombstones[vfs_path] = [
                 Evicted(child, folder=folder)
                 for child, folder in buried.items()
             ]
-        for child in children or []:
-            self._entries.pop(child, None)
-        self._expiry.pop(vfs_path, None)
-        self._children.pop(vfs_path, None)
-        self._partial.discard(vfs_path)
-        self._windows.discard(vfs_path)
-        self._versions.pop(vfs_path, None)
+
+    def _remember_directory(self, vfs_path: str) -> None:
+        vfs_path = vfs_path.rstrip("/")
+        if not vfs_path:
+            return
+        parent = vfs_path.rsplit("/", 1)[0] or "/"
+        flags = self._folder_flags.get(parent, {})
+        if vfs_path in flags:
+            flags[vfs_path] = True
+        saved = self._tombstones.get(parent, [])
+        if not any(child.path == vfs_path for child in saved):
+            return
+        remembered = [
+            Evicted(child.path, folder=True)
+            if child.path == vfs_path
+            else child
+            for child in saved
+        ]
+        self._tombstones[parent] = remembered
+
+    async def invalidate_entry(self, vfs_path: str) -> None:
+        folder = vfs_path.rsplit("/", 1)[0] or "/"
+        async with self._lock_for(folder):
+            self._bury(
+                folder,
+                (
+                    *self._children.get(folder, []),
+                    *(
+                        (vfs_path,)
+                        if vfs_path in self._children
+                        or self._is_folder(vfs_path)
+                        else ()
+                    ),
+                ),
+            )
+            self._entries.pop(vfs_path, None)
+            children = self._children.get(folder)
+            if children is not None:
+                self._children[folder] = [
+                    child for child in children if child != vfs_path
+                ]
+                self._partial.add(folder)
+                self._windows.discard(folder)
+                self._versions.pop(folder, None)
+                self._folder_flags.get(folder, {}).pop(vfs_path, None)
+
+    async def invalidate_dir(self, vfs_path: str) -> None:
+        async with self._lock_for(vfs_path):
+            self._bury(vfs_path, tuple(self._children.get(vfs_path, [])))
+            for child in self._children.get(vfs_path, []):
+                self._entries.pop(child, None)
+            self._expiry.pop(vfs_path, None)
+            self._children.pop(vfs_path, None)
+            self._folder_flags.pop(vfs_path, None)
+            self._partial.discard(vfs_path)
+            self._windows.discard(vfs_path)
+            self._versions.pop(vfs_path, None)
 
     async def invalidate_prefix(
         self, vfs_path: str, *, excluded: tuple[str, ...] = ()
@@ -336,6 +423,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             and not any(under_path(k, p) for p in excluded)
         ]:
             self._children.pop(dir_key, None)
+            self._folder_flags.pop(dir_key, None)
         for exp_key in [
             k
             for k in self._expiry
@@ -355,6 +443,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     async def clear(self) -> None:
         self._entries.clear()
         self._children.clear()
+        self._folder_flags.clear()
         self._expiry.clear()
         self._partial.clear()
         self._windows.clear()

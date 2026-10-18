@@ -70,6 +70,7 @@ class ListResult(BaseModel):
 
 class IndexDirectory(BaseModel):
     entries: list[str]
+    folders: list[int]
     expires_at: float
     generation: str
     partial: bool = False

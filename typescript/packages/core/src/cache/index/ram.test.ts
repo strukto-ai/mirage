@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType } from '../../types.ts'
 import { LookupStatus } from './config.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
@@ -22,6 +22,21 @@ function mkEntry(id: string, name: string): FileStat {
 }
 
 describe('RAMIndexCacheStore', () => {
+  it('narrow invalidation preserves the exact deadline', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    try {
+      const store = new RAMIndexCacheStore()
+      await store.setDir('/repo', [['a', mkEntry('a', 'a')]], new Date(2000))
+      await store.invalidateEntry('/repo/a')
+      clock.mockReturnValue(1999)
+      expect((await store.listDir('/repo')).partialEntries).toEqual([])
+      clock.mockReturnValue(2000)
+      expect((await store.listDir('/repo')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('returns NOT_FOUND for unknown path', async () => {
     const store = new RAMIndexCacheStore()
     const result = await store.get('/foo')

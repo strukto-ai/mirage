@@ -16,7 +16,7 @@ import { KeyLock } from '../lock.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { FileStat } from '../../types.ts'
+import { FileStat, FileType } from '../../types.ts'
 import {
   FileStatWireSchema,
   IndexDirectorySchema,
@@ -44,37 +44,6 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
 return 1
 `
-
-const ADD_ENTRY = `
-local raw = redis.call('GET', KEYS[1])
-local current = redis.call('GET', KEYS[2])
-local directory = redis.call('GET', KEYS[3])
-redis.call('SET', ARGV[1], ARGV[2])
-if raw and current and directory then
-  local listing = cjson.decode(raw)
-  if listing.generation == current .. ':' .. directory
-      and tonumber(ARGV[5]) < listing.expires_at then
-    local position = #listing.entries + 1
-    for i, path in ipairs(listing.entries) do
-      if path == ARGV[3] then return 0 end
-      if path > ARGV[3] then
-        position = i
-        break
-      end
-    end
-    table.insert(listing.entries, position, ARGV[3])
-    redis.call('SET', KEYS[1], cjson.encode(listing))
-    return 1
-  end
-end
-redis.call('SET', KEYS[1], ARGV[4])
-return 1
-`
-
-/** An index row read back from its JSON. Mirrors Python's `_row`. */
-function row(raw: string): FileStat {
-  return new FileStat(FileStatWireSchema.parse(JSON.parse(raw)))
-}
 
 const PATH_RANGE = `
 local function path_range(root)
@@ -108,6 +77,138 @@ end
 local function is_dir(row)
   return row.type == 'directory'
 end
+`
+
+const LISTING_HISTORY =
+  PATH_REGISTRY +
+  `
+local function bury(key, listing)
+  local raw = redis.call('GET', key)
+  local saved = raw and cjson.decode(raw) or {entries = {}, folders = {}}
+  local positions = {}
+  for i, path in ipairs(saved.entries) do positions[path] = i end
+  for i, path in ipairs(listing.entries) do
+    local position = positions[path]
+    if not position then
+      saved.entries[#saved.entries + 1] = path
+      position = #saved.entries
+      positions[path] = position
+    end
+    saved.folders[position] =
+      (saved.folders[position] == 1 or listing.folders[i] == 1) and 1 or 0
+  end
+  if #saved.entries > 0 then redis.call('SET', key, cjson.encode(saved)) end
+end
+local function encode_listing(listing, predecessor)
+  local encoded = string.gsub(string.gsub(cjson.encode(listing),
+    '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
+  local deadline = string.match(predecessor, '"expires_at"%s*:%s*([%d%.eE%+%-]+)')
+  return (string.gsub(encoded, '"expires_at":[%d%.eE%+%-]+',
+    '"expires_at":' .. deadline))
+end
+local function remember_directory(children_prefix, tombstone_prefix, path)
+  path = string.gsub(path, '/+$', '')
+  if path == '' then return end
+  local parent = string.match(path, '^(.*)/[^/]+$')
+  if parent == '' then parent = '/' end
+  for i, prefix in ipairs({children_prefix, tombstone_prefix}) do
+    local key = prefix .. parent
+    local raw = redis.call('GET', key)
+    if raw then
+      local listing = cjson.decode(raw)
+      for position, child in ipairs(listing.entries) do
+        if child == path and listing.folders[position] ~= 1 then
+          listing.folders[position] = 1
+          redis.call('SET', key, i == 1 and encode_listing(listing, raw)
+            or cjson.encode(listing))
+          break
+        end
+      end
+    end
+  end
+end
+`
+
+const SEED_LISTING =
+  LISTING_HISTORY +
+  `
+local listing = cjson.decode(ARGV[1])
+for offset = 1, #listing.entries, 128 do
+  local keys = {}
+  local last = math.min(offset + 127, #listing.entries)
+  for i = offset, last do
+    keys[#keys + 1] = ARGV[5] .. listing.entries[i]
+    keys[#keys + 1] = ARGV[2] .. listing.entries[i]
+  end
+  local saved = redis.call('MGET', unpack(keys))
+  for i = offset, last do
+    local position = (i - offset) * 2 + 1
+    local row = saved[position]
+    listing.folders[i] = (listing.folders[i] == 1 or saved[position + 1] ~= false
+      or (row ~= false and is_dir(cjson.decode(row)))) and 1 or 0
+  end
+end
+redis.call('SET', KEYS[1], encode_listing(listing, ARGV[1]))
+remember_directory(ARGV[2], ARGV[3], ARGV[4])
+return 1
+`
+
+const PUT_ENTRY =
+  LISTING_HISTORY +
+  `
+local old = redis.call('GET', KEYS[1])
+if old and cjson.decode(old).type == 'directory'
+    and cjson.decode(ARGV[2]).type ~= 'directory' then
+  bury(KEYS[2], {entries = {ARGV[1]}, folders = {1}})
+  redis.call('ZADD', KEYS[3], 0, ARGV[3])
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`
+
+const ADD_ENTRY =
+  LISTING_HISTORY +
+  `
+local raw = redis.call('GET', KEYS[1])
+local current = redis.call('GET', KEYS[2])
+local directory = redis.call('GET', KEYS[3])
+local old = redis.call('GET', ARGV[1])
+redis.call('SET', KEYS[3], ARGV[6])
+local folder = cjson.decode(ARGV[2]).type == 'directory' and 1 or 0
+if old and cjson.decode(old).type == 'directory' and folder == 0 then
+  bury(KEYS[4], {entries = {ARGV[3]}, folders = {1}})
+end
+redis.call('SET', ARGV[1], ARGV[2])
+if raw then
+  local listing = cjson.decode(raw)
+  if current and directory and listing.generation == current .. ':' .. directory
+      and tonumber(ARGV[5]) < listing.expires_at then
+    listing.generation = current .. ':' .. ARGV[6]
+    local position = #listing.entries + 1
+    for i, path in ipairs(listing.entries) do
+      if path == ARGV[3] then
+        if listing.folders[i] == 1 and folder == 0 then
+          bury(KEYS[4], {entries = {ARGV[3]}, folders = {1}})
+        end
+        listing.folders[i] = folder
+        redis.call('SET', KEYS[1], encode_listing(listing, raw))
+        return 0
+      end
+      if path > ARGV[3] then position = i break end
+    end
+    table.insert(listing.entries, position, ARGV[3])
+    table.insert(listing.folders, position, folder)
+    redis.call('SET', KEYS[1], encode_listing(listing, raw))
+    return 1
+  end
+  bury(KEYS[4], listing)
+end
+local fresh = cjson.decode(ARGV[4])
+if current and directory and fresh.generation == current .. ':' .. directory then
+  fresh.generation = current .. ':' .. ARGV[6]
+end
+redis.call('SET', KEYS[1], encode_listing(fresh, ARGV[4]))
+return 1
 `
 
 const TRACK_PATHS =
@@ -196,16 +297,71 @@ return {0, #paths == page and paths[#paths] or ''}
 `
 
 const DELETE_ENTRY =
-  PATH_REGISTRY +
+  LISTING_HISTORY +
   `
 local prefixes = {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}
-track(KEYS[1], prefixes, {})
-redis.call('DEL', ARGV[1] .. ARGV[5])
+track(KEYS[1], prefixes, {string.sub(KEYS[2], #ARGV[2] + 1)})
+local raw = redis.call('GET', KEYS[2])
+local current = redis.call('GET', KEYS[4])
+local directory = redis.call('GET', KEYS[5])
+local old = redis.call('GET', KEYS[6])
+if (old and is_dir(cjson.decode(old)))
+  or redis.call('EXISTS', ARGV[2] .. ARGV[5]) == 1 then
+  bury(KEYS[3], {entries = {ARGV[5]}, folders = {1}})
+end
+if raw then
+  local listing = cjson.decode(raw)
+  bury(KEYS[3], listing)
+  for i, path in ipairs(listing.entries) do
+    if path == ARGV[5] then
+      table.remove(listing.entries, i)
+      table.remove(listing.folders, i)
+      break
+    end
+  end
+  if current and directory and listing.generation == current .. ':' .. directory then
+    listing.generation = current .. ':' .. ARGV[6]
+  end
+  listing.partial = true
+  listing.version = cjson.null
+  listing.window = false
+  redis.call('SET', KEYS[2], encode_listing(listing, raw))
+end
+redis.call('SET', KEYS[5], ARGV[6])
+redis.call('DEL', KEYS[6])
 prune(KEYS[1], prefixes, ARGV[5])
 `
 
+const WRITE_LISTING =
+  LISTING_HISTORY +
+  `
+local next = cjson.decode(ARGV[1])
+local path = string.sub(KEYS[1], #ARGV[3] + 1)
+track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, {path})
+if next.partial then
+  local old = redis.call('GET', KEYS[1])
+  if old then bury(KEYS[2], cjson.decode(old)) end
+else
+  redis.call('DEL', KEYS[2])
+end
+for i = 7, #ARGV, 2 do
+  if next.partial then
+    local old = redis.call('GET', ARGV[2] .. ARGV[i])
+    if (old and is_dir(cjson.decode(old)))
+      or redis.call('EXISTS', ARGV[3] .. ARGV[i]) == 1 then
+      bury(KEYS[2], {entries = {ARGV[i]}, folders = {1}})
+    end
+  end
+  redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
+  redis.call('ZADD', KEYS[3], 0, ARGV[i])
+end
+redis.call('SET', KEYS[1], ARGV[1])
+remember_directory(ARGV[3], ARGV[4], path)
+return 1
+`
+
 const SWAP_LISTING =
-  PATH_REGISTRY +
+  LISTING_HISTORY +
   `
 if not redis.call('ZSCORE', KEYS[3], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
@@ -253,8 +409,9 @@ if saved then
   end
 end
 if old then
-  for _, path in ipairs(cjson.decode(old).entries) do
-    drop(path, buried[path] == true)
+  local listing = cjson.decode(old)
+  for i, path in ipairs(listing.entries) do
+    drop(path, buried[path] == true or listing.folders[i] == 1)
   end
 end
 if saved then
@@ -280,6 +437,7 @@ for i = 7, #ARGV, 2 do
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
 redis.call('SET', KEYS[1], ARGV[1])
+remember_directory(ARGV[3], ARGV[4], string.sub(KEYS[1], #ARGV[3] + 1))
 return {gone, folders}
 `
 
@@ -292,20 +450,19 @@ local raw = redis.call('GET', KEYS[1])
 if raw then
   local listing = cjson.decode(raw)
   local entries, folders, positions = {}, {}, {}
-  if listing.partial then
-    local saved = redis.call('GET', KEYS[2])
-    if saved then
+  local saved = redis.call('GET', KEYS[2])
+  if saved then
       local tomb = cjson.decode(saved)
       for i, path in ipairs(tomb.entries) do
         entries[#entries + 1] = path
         folders[#folders + 1] = tomb.folders[i]
         positions[path] = #entries
       end
-    end
   end
-  for _, path in ipairs(listing.entries) do
+  for i, path in ipairs(listing.entries) do
     local row = redis.call('GET', ARGV[1] .. path)
-    local folder = redis.call('EXISTS', ARGV[2] .. path) == 1
+    local folder = listing.folders[i] == 1
+      or redis.call('EXISTS', ARGV[2] .. path) == 1
       or (row ~= false and is_dir(cjson.decode(row)))
     local position = positions[path]
     if not position then
@@ -325,6 +482,10 @@ redis.call('DEL', KEYS[3])
 prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
   string.sub(KEYS[1], #ARGV[2] + 1))
 `
+
+function row(raw: string): FileStat {
+  return new FileStat(FileStatWireSchema.parse(JSON.parse(raw)))
+}
 
 interface PendingSeed {
   entries: Map<string, FileStat>
@@ -571,6 +732,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             for (const [path, token] of missing) directories.set(path, token)
           }
         }
+        const rows = new Map(pending.flatMap((seed) => [...seed.entries]))
+        const listed = new Set(paths)
         const pipe = c.multi()
         this.trackPaths(
           pipe,
@@ -583,13 +746,25 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           for (const [path, keys] of seed.children) {
             const listing: IndexDirectory = {
               entries: keys,
+              folders: keys.map((key) =>
+                listed.has(key) || rows.get(key)?.type === FileType.DIRECTORY ? 1 : 0,
+              ),
               expires_at: seed.expiresAt,
               generation: `${generation}:${directories.get(path) ?? ''}`,
               partial: false,
               version: seed.version,
               window: false,
             }
-            pipe.set(this.childrenKey(path), JSON.stringify(listing))
+            pipe.eval(SEED_LISTING, {
+              keys: [this.childrenKey(path)],
+              arguments: [
+                JSON.stringify(listing),
+                this.childrenPrefix,
+                this.tombstonePrefix,
+                path,
+                this.entryPrefix,
+              ],
+            })
           }
         }
         await pipe.exec()
@@ -624,7 +799,11 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const c = await this.client()
     const pipe = c.multi()
     this.trackPaths(pipe, [vfsPath])
-    pipe.set(this.entryKey(vfsPath), JSON.stringify(entry))
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    pipe.eval(PUT_ENTRY, {
+      keys: [this.entryKey(vfsPath), this.tombstonePrefix + folder, this.pathsKey],
+      arguments: [vfsPath, JSON.stringify(entry), folder],
+    })
     await pipe.exec()
   }
 
@@ -638,6 +817,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const directory = await this.generation(c, `${this.generationKey}:${folder}`)
     const fresh: IndexDirectory = {
       entries: [vfsPath],
+      folders: [entry.type === FileType.DIRECTORY ? 1 : 0],
       generation: `${generation}:${directory}`,
       expires_at: (expiredAt == null ? lifetime : Math.min(lifetime, expiredAt.getTime())) / 1000,
       partial: true,
@@ -647,13 +827,19 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const pipe = c.multi()
     this.trackPaths(pipe, [folder, vfsPath])
     pipe.eval(ADD_ENTRY, {
-      keys: [this.childrenKey(folder), this.generationKey, `${this.generationKey}:${folder}`],
+      keys: [
+        this.childrenKey(folder),
+        this.generationKey,
+        `${this.generationKey}:${folder}`,
+        this.tombstonePrefix + folder,
+      ],
       arguments: [
         this.entryKey(vfsPath),
         JSON.stringify(entry),
         vfsPath,
         JSON.stringify(fresh),
         String(now.getTime() / 1000),
+        uuid7(),
       ],
     })
     await pipe.exec()
@@ -742,6 +928,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     }
     const listing: IndexDirectory = {
       entries: rows.map(([path]) => path),
+      folders: entries.map(([, entry]) => (entry.type === FileType.DIRECTORY ? 1 : 0)),
       generation: `${generation}:${directory}`,
       expires_at: (expiredAt?.getTime() ?? now.getTime() + this.ttl * 1000) / 1000,
       partial,
@@ -749,14 +936,18 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       window: !partial && !evict,
     }
     if (!evict) {
-      const pipe = c.multi()
-      this.trackPaths(pipe, [vfsPath, ...rows.map(([path]) => path)])
-      for (const [path, row] of rows) pipe.set(this.entryKey(path), row)
-      pipe.set(this.childrenKey(vfsPath), JSON.stringify(listing))
-      // A window is the new full knowledge; it proves nothing gone and leaves
-      // nothing for a later listing to diff against.
-      if (!partial) pipe.del(this.tombstonePrefix + vfsPath)
-      await pipe.exec()
+      await c.eval(WRITE_LISTING, {
+        keys: [this.childrenKey(vfsPath), this.tombstonePrefix + vfsPath, this.pathsKey],
+        arguments: [
+          JSON.stringify(listing),
+          this.entryPrefix,
+          this.childrenPrefix,
+          this.tombstonePrefix,
+          `${this.generationKey}:`,
+          '[]',
+          ...rows.flat(),
+        ],
+      })
       return []
     }
     // One script, so no other writer lands between reading the previous
@@ -783,14 +974,23 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   async invalidateEntry(vfsPath: string): Promise<void> {
     await this.flushSeed()
     const c = await this.client()
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     await c.eval(DELETE_ENTRY, {
-      keys: [this.pathsKey],
+      keys: [
+        this.pathsKey,
+        this.childrenKey(folder),
+        this.tombstonePrefix + folder,
+        this.generationKey,
+        `${this.generationKey}:${folder}`,
+        this.entryKey(vfsPath),
+      ],
       arguments: [
         this.entryPrefix,
         this.childrenPrefix,
         this.tombstonePrefix,
         `${this.generationKey}:`,
         vfsPath,
+        uuid7(),
       ],
     })
   }

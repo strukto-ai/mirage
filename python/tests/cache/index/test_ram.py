@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -187,3 +187,14 @@ async def test_an_expired_row_still_hints():
     src._expiry["/m/a"] = datetime(2000, 1, 1, tzinfo=timezone.utc)
     scratch = ListingCheckStore(hints=src)
     assert await scratch.hint("/m/a/c.txt") is not None
+
+
+@pytest.mark.asyncio
+async def test_narrow_invalidation_preserves_exact_deadline():
+    store = RAMIndexCacheStore()
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=3600)
+    await store.set_dir(
+        "/repo", [("a", FileStat(name="a", type=FileType.FILE))], deadline
+    )
+    await store.invalidate_entry("/repo/a")
+    assert store._expiry["/repo"] == deadline

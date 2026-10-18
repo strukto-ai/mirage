@@ -30,6 +30,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   readonly ttl: number
   private readonly entryMap = new Map<string, FileStat>()
   private readonly children = new Map<string, string[]>()
+  private readonly folderFlags = new Map<string, Map<string, boolean>>()
   private readonly expiry = new Map<string, number>()
   private readonly partial = new Set<string>()
   private readonly windowed = new Set<string>()
@@ -56,6 +57,20 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       this.windowed.delete(path)
       this.stamp(path, version)
     }
+    for (const [path, keys] of children) {
+      this.folderFlags.set(
+        path,
+        new Map(
+          keys.map((child) => [
+            child,
+            this.children.has(child) || this.entryMap.get(child)?.type === FileType.DIRECTORY,
+          ]),
+        ),
+      )
+    }
+    for (const path of children.keys()) {
+      this.rememberDirectory(path)
+    }
   }
 
   private stamp(vfsPath: string, version: string | null): void {
@@ -74,7 +89,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   put(vfsPath: string, entry: FileStat): Promise<void> {
-    return this.lock.withLock(vfsPath, () => {
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    return this.lock.withLock(folder, () => {
+      if (
+        this.entryMap.get(vfsPath)?.type === FileType.DIRECTORY &&
+        entry.type !== FileType.DIRECTORY
+      )
+        this.bury(folder, [vfsPath])
       this.entryMap.set(vfsPath, entry)
       return Promise.resolve()
     })
@@ -84,12 +105,19 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     return this.lock.withLock(folder, () => {
       const now = Date.now()
-      this.entryMap.set(vfsPath, entry)
-      const children = this.children.get(folder)
+      const children = this.children.get(folder) ?? []
       const exp = this.expiry.get(folder)
-      if (children === undefined || exp === undefined || now >= exp) {
+      const wasFolder =
+        this.entryMap.get(vfsPath)?.type === FileType.DIRECTORY ||
+        this.folderFlags.get(folder)?.get(vfsPath) === true
+      const stale = !this.children.has(folder) || exp === undefined || now >= exp
+      if (stale) this.bury(folder, children)
+      if (wasFolder && entry.type !== FileType.DIRECTORY) this.bury(folder, [vfsPath])
+      this.entryMap.set(vfsPath, entry)
+      if (stale) {
         const lifetime = now + this.ttl * 1000
         this.children.set(folder, [vfsPath])
+        this.folderFlags.set(folder, new Map())
         this.expiry.set(
           folder,
           expiredAt == null ? lifetime : Math.min(lifetime, expiredAt.getTime()),
@@ -101,6 +129,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         const at = children.findIndex((child) => compareCodePoints(child, vfsPath) > 0)
         children.splice(at === -1 ? children.length : at, 0, vfsPath)
       }
+      this.folderFlags.get(folder)?.set(vfsPath, entry.type === FileType.DIRECTORY)
       return Promise.resolve()
     })
   }
@@ -170,9 +199,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const rows = new Map<string, FileStat>()
       for (const [name, entry] of entries) rows.set(prefix + name, entry)
       const childKeys = [...rows.keys()]
-      // What the last full knowledge named: the current listing, plus a
-      // tombstone an invalidation left (a partial since then cannot have
-      // proven its other children gone).
+      if (partial)
+        this.bury(vfsPath, [
+          ...(this.children.get(vfsPath) ?? []),
+          ...[...rows.keys()].filter(
+            (key) => this.children.has(key) || this.entryMap.get(key)?.type === FileType.DIRECTORY,
+          ),
+        ])
       const buried = new Map<string, boolean>()
       if (!partial) {
         for (const child of this.tombstones.get(vfsPath) ?? []) buried.set(child.path, child.folder)
@@ -183,6 +216,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         ...buried.keys(),
         ...rows.keys(),
       ])
+      const currentFolders = this.folderFlags.get(vfsPath)
       const gone = evict
         ? [...candidates]
             .filter(
@@ -190,14 +224,26 @@ export class RAMIndexCacheStore extends IndexCacheStore {
                 (!rows.has(key) ||
                   (rows.get(key)?.type === FileType.FILE &&
                     (buried.get(key) === true ||
+                      currentFolders?.get(key) === true ||
                       this.children.has(key) ||
                       this.entryMap.get(key)?.type === FileType.DIRECTORY))) &&
                 !excluded.some((prefix) => underPath(key, prefix)),
             )
-            .map((key) => this.evict(key, buried.get(key) ?? false, excluded))
+            .map((key) =>
+              this.evict(
+                key,
+                buried.get(key) === true || currentFolders?.get(key) === true,
+                excluded,
+              ),
+            )
         : []
       for (const [path, row] of rows) this.entryMap.set(path, row)
       this.children.set(vfsPath, childKeys)
+      this.folderFlags.set(
+        vfsPath,
+        new Map([...rows].map(([key, row]) => [key, row.type === FileType.DIRECTORY])),
+      )
+      this.rememberDirectory(vfsPath)
       this.expiry.set(vfsPath, exp)
       this.stamp(vfsPath, partial ? null : version)
       if (partial) this.partial.add(vfsPath)
@@ -217,43 +263,77 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     return { path: key, folder }
   }
 
-  invalidateEntry(vfsPath: string): Promise<void> {
-    this.entryMap.delete(vfsPath)
-    return Promise.resolve()
-  }
-
-  invalidateDir(vfsPath: string): Promise<void> {
-    // The child list is kept as a tombstone, so the next complete listing can
-    // still tell which children went away.
-    const children = this.children.get(vfsPath)
-    if (children !== undefined) {
-      const buried = new Map(
-        this.partial.has(vfsPath)
-          ? (this.tombstones.get(vfsPath) ?? []).map((child) => [child.path, child.folder])
-          : [],
+  private bury(vfsPath: string, paths: readonly string[]): void {
+    const buried = new Map(
+      (this.tombstones.get(vfsPath) ?? []).map((child) => [child.path, child.folder]),
+    )
+    for (const child of paths) {
+      buried.set(
+        child,
+        buried.get(child) === true ||
+          this.folderFlags.get(vfsPath)?.get(child) === true ||
+          this.children.has(child) ||
+          this.entryMap.get(child)?.type === FileType.DIRECTORY,
       )
-      for (const child of children) {
-        buried.set(
-          child,
-          buried.get(child) === true ||
-            this.children.has(child) ||
-            this.entryMap.get(child)?.type === FileType.DIRECTORY,
-        )
-      }
+    }
+    if (buried.size > 0)
       this.tombstones.set(
         vfsPath,
         [...buried].map(([path, folder]) => ({ path, folder })),
       )
-    }
-    for (const child of children ?? []) {
-      this.entryMap.delete(child)
-    }
-    this.expiry.delete(vfsPath)
-    this.children.delete(vfsPath)
-    this.partial.delete(vfsPath)
-    this.windowed.delete(vfsPath)
-    this.versions.delete(vfsPath)
-    return Promise.resolve()
+  }
+
+  private rememberDirectory(vfsPath: string): void {
+    vfsPath = vfsPath.replace(/\/+$/, '')
+    if (vfsPath === '') return
+    const parent = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    const flags = this.folderFlags.get(parent)
+    if (flags?.has(vfsPath)) flags.set(vfsPath, true)
+    const saved = this.tombstones.get(parent) ?? []
+    if (!saved.some((child) => child.path === vfsPath)) return
+    const remembered = saved.map((child) =>
+      child.path === vfsPath ? { path: child.path, folder: true } : child,
+    )
+    this.tombstones.set(parent, remembered)
+  }
+
+  invalidateEntry(vfsPath: string): Promise<void> {
+    const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
+    return this.lock.withLock(folder, () => {
+      this.bury(folder, [
+        ...(this.children.get(folder) ?? []),
+        ...(this.children.has(vfsPath) || this.entryMap.get(vfsPath)?.type === FileType.DIRECTORY
+          ? [vfsPath]
+          : []),
+      ])
+      this.entryMap.delete(vfsPath)
+      const children = this.children.get(folder)
+      if (children !== undefined) {
+        this.children.set(
+          folder,
+          children.filter((child) => child !== vfsPath),
+        )
+        this.partial.add(folder)
+        this.windowed.delete(folder)
+        this.versions.delete(folder)
+        this.folderFlags.get(folder)?.delete(vfsPath)
+      }
+      return Promise.resolve()
+    })
+  }
+
+  invalidateDir(vfsPath: string): Promise<void> {
+    return this.lock.withLock(vfsPath, () => {
+      this.bury(vfsPath, this.children.get(vfsPath) ?? [])
+      for (const child of this.children.get(vfsPath) ?? []) this.entryMap.delete(child)
+      this.expiry.delete(vfsPath)
+      this.children.delete(vfsPath)
+      this.folderFlags.delete(vfsPath)
+      this.partial.delete(vfsPath)
+      this.windowed.delete(vfsPath)
+      this.versions.delete(vfsPath)
+      return Promise.resolve()
+    })
   }
 
   // Forgetting what is cached is not evidence that anything went away, so an
@@ -286,8 +366,10 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.entryMap.delete(key)
     }
     for (const key of [...this.children.keys()]) {
-      if (underPath(key, vfsPath) && !excluded.some((prefix) => underPath(key, prefix)))
+      if (underPath(key, vfsPath) && !excluded.some((prefix) => underPath(key, prefix))) {
         this.children.delete(key)
+        this.folderFlags.delete(key)
+      }
     }
     for (const key of [...this.expiry.keys()]) {
       if (underPath(key, vfsPath) && !excluded.some((prefix) => underPath(key, prefix))) {
@@ -308,6 +390,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   clear(): Promise<void> {
     this.entryMap.clear()
     this.children.clear()
+    this.folderFlags.clear()
     this.expiry.clear()
     this.partial.clear()
     this.windowed.clear()

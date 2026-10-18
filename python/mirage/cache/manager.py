@@ -899,8 +899,8 @@ class CacheManager:
         """
         parent = self._cache_key(path).rsplit("/", 1)[0]
         while parent and parent != self._prefix:
+            await self._index.invalidate_entry(parent)
             parent = parent.rsplit("/", 1)[0]
-            await self._evict_dir(parent or "/")
 
     async def drop_prefix(self) -> None:
         """Drop every cached body under this mount, path unspecified.
@@ -937,4 +937,4 @@ class CacheManager:
         await self._index.invalidate_prefix(key)
 
     async def _invalidate_parent(self, key: str) -> None:
-        await self._evict_dir(key.rsplit("/", 1)[0] or "/")
+        await self._index.invalidate_entry(key)

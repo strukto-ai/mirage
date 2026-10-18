@@ -69,6 +69,40 @@ describe('CacheManager', () => {
     expect(listing.entries ?? null).toBeNull()
   })
 
+  it('write preserves sibling rows without listing trust', async () => {
+    const index = new RAMIndexCacheStore()
+    await index.setDir(
+      '/data/dir',
+      [
+        ['a', file('a')],
+        ['b', file('b')],
+      ],
+      undefined,
+      { version: 'v1' },
+    )
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    await manager.invalidateAfterWrite('/dir/a')
+    expect((await index.get('/data/dir/a')).entry ?? null).toBeNull()
+    expect((await index.get('/data/dir/b')).entry).toEqual(file('b'))
+    expect((await index.listDir('/data/dir')).partialEntries).toEqual(['/data/dir/b'])
+    expect(manager.listingTrusted('/data/dir')).toBe(false)
+  })
+
+  it('ancestor mutation preserves unrelated branches', async () => {
+    const index = new RAMIndexCacheStore()
+    const branch = new FileStat({ name: 'dir', type: FileType.DIRECTORY })
+    const sibling = new FileStat({ name: 'keep', type: FileType.DIRECTORY })
+    await index.setDir('/data', [
+      ['dir', branch],
+      ['keep', sibling],
+    ])
+    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
+    await manager.invalidateAncestors('/dir/new/a')
+    expect((await index.get('/data/dir')).entry ?? null).toBeNull()
+    expect((await index.get('/data/keep')).entry).toEqual(sibling)
+    expect((await index.listDir('/data')).partialEntries).toEqual(['/data/keep'])
+  })
+
   it('keeps a created row no longer than the read limit', async () => {
     // A store whose own lifetime is a day must not keep the listing a create
     // starts past the mount's read limit.
@@ -272,6 +306,7 @@ describe('CacheManager', () => {
     ).toEqual({
       '/data/d': FileType.DIRECTORY,
       '/data/e': FileType.DIRECTORY,
+      '/data/d/g': FileType.FILE,
       '/data/e/h': FileType.FILE,
     })
     expect((await index.listDir('/data/d')).entries).toBeUndefined()
