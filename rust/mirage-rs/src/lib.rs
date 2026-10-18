@@ -4,6 +4,7 @@ mod compress;
 mod digest;
 mod generated;
 mod grep;
+mod jq;
 mod printf;
 mod regex;
 mod sort;
@@ -270,6 +271,9 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "compress" => compress::open(config),
         "digest" => digest::open(config),
         "grep" => grep::open(config),
+        "jq_scan" => jq::open_scan(config),
+        "jq_format" => jq::open_format(config),
+        "jq_decode" => jq::open_decode(config),
         "printf" => printf::open(config),
         "sort" => sort::open(config),
         "wc" => wc::open(config),

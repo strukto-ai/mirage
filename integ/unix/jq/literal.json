@@ -706,6 +706,63 @@
         "c",
         "argjson"
       ]
+    },
+    {
+      "id": "jq_malformed_utf8_is_replaced_within_each_unescaped_string",
+      "seq": 9901918,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[\"\\342\", \"\\342a\", \"\\342\\\\n\"]' | jq -c .",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"�\",\"�\",\"�\"]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_sorted_nested_output_keeps_large_literal_numbers",
+      "seq": 9901919,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '{\"b\":[123456789012345678901234567890,1.000,1e1000],\"10\":{\"z\":-0,\"a\":2.50},\"2\":\"é\"}' | jq -cS .",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"10\":{\"a\":2.50,\"z\":-0},\"2\":\"é\",\"b\":[123456789012345678901234567890,1.000,1E+1000]}\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "jq_invalid_bytes_after_numeric_nul_do_not_consume_structure",
+      "seq": 9901920,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf '[1\\000\\342]' | jq -c .",
+      "expect": {
+        "exit": 0,
+        "stdout": "[1]\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

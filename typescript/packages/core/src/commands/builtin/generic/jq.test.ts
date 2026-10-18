@@ -364,17 +364,17 @@ describe('inputName', () => {
 })
 
 describe('positionalValue', () => {
-  it('reads an operand under --args as a string', () => {
-    expect(positionalValue('args', '1')).toBe('"1"')
+  it('reads an operand under --args as a string', async () => {
+    expect(await positionalValue('args', '1')).toBe('"1"')
   })
 
-  it('keeps each operand under --jsonargs as the text jq reads', () => {
-    expect(positionalValue('jsonargs', '1.0')).toBe('1.0')
-    expect(positionalValue('jsonargs', '{"b":1,"1":2}')).toBe('{"b":1,"1":2}')
+  it('keeps each operand under --jsonargs as the text jq reads', async () => {
+    expect(await positionalValue('jsonargs', '1.0')).toBe('1.0')
+    expect(await positionalValue('jsonargs', '{"b":1,"1":2}')).toBe('{"b":1,"1":2}')
   })
 
-  it("refuses invalid JSON under --jsonargs in jq's words", () => {
-    expect(() => positionalValue('jsonargs', 'nope')).toThrow(
+  it("refuses invalid JSON under --jsonargs in jq's words", async () => {
+    await expect(positionalValue('jsonargs', 'nope')).rejects.toThrow(
       `jq: invalid JSON text passed to --jsonargs\n${HINT}`,
     )
   })

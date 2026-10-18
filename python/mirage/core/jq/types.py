@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Generic, TypeAlias, TypeVar
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -48,27 +48,6 @@ class JqParseError:
     """
 
     message: str
-
-
-@dataclass(frozen=True, slots=True)
-class NumberText:
-    """A number as a --stream event carries it: its literal, which jq
-    keeps and prints as it was written (`1.000`, `1E+2`) where a float
-    cannot.
-
-    Args:
-        text (str): the literal, up to its first NUL.
-    """
-
-    text: str
-
-
-# A value as jq's parser builds it: JSON, with a --stream event's number
-# leaf kept as its literal.
-ParsedValue: TypeAlias = (
-    "None | bool | int | float | str | NumberText"
-    " | list[ParsedValue] | dict[str, ParsedValue]"
-)
 
 
 @dataclass(frozen=True, slots=True)

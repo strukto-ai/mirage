@@ -13,22 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { JqParser } from './parse.ts'
-import { InputReader, READ_CHUNK, piecesThrough, readTexts, valueText } from './stream.ts'
+import { jqRunTexts } from './eval.ts'
+import { InputReader, readTexts, valueText } from './stream.ts'
 import { JqParseError, NO_VALUE, jqOptions, type InputSource, type JqOptions } from './types.ts'
 import { eacces, eisdir, enoent } from '../../errors/fs.ts'
 
 const ENC = new TextEncoder()
 
 /** The value jq's parser reads a text as, which is what libjq runs on. */
-function parsed(text: unknown): unknown {
-  expect(typeof text).toBe('string')
-  const parser = new JqParser()
-  parser.feed(ENC.encode(text as string), false)
-  const value = parser.next()
-  expect(value).not.toBeInstanceOf(JqParseError)
-  expect(parser.next()).toBe(NO_VALUE)
-  return value
+async function parsed(text: unknown): Promise<unknown> {
+  if (typeof text !== 'string') throw new Error('expected input text')
+  if (!/\\u[dD][89a-fA-F]/.test(text)) {
+    try {
+      return JSON.parse(text)
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error
+    }
+  }
+  const run = await jqRunTexts(text, '.')
+  const [dump] = run.outputs
+  if (dump === undefined) throw new Error('expected one reference output')
+  return JSON.parse(dump)
 }
 
 function bytes(text: string): Uint8Array {
@@ -61,7 +66,7 @@ async function read(
       if (!opts.seq) return rows
       continue
     }
-    rows.push([asTexts ? text : parsed(text), reader.position()])
+    rows.push([asTexts ? text : await parsed(text), reader.position()])
   }
 }
 
@@ -165,7 +170,7 @@ describe('InputReader', () => {
         resolve('still waiting')
       }, 5000)
     })
-    expect(parsed(await Promise.race([reader.nextInput(), late]))).toEqual(value)
+    expect(await parsed(await Promise.race([reader.nextInput(), late]))).toEqual(value)
     clearTimeout(timer)
   })
 
@@ -178,7 +183,7 @@ describe('InputReader', () => {
         [{ a: 1 }, 'f0.json:2'],
         [{ b: 2 }, 'f0.json:4'],
       ])
-      expect(Number.isNaN((rows[2]?.[0] as number[])[0])).toBe(true)
+      expect((rows[2]?.[0] as unknown[])[0]).toBe(null)
       expect(rows[2]?.[1]).toBe('f0.json:7')
     },
   )
@@ -186,7 +191,7 @@ describe('InputReader', () => {
   it("reads jq's own numbers and the JSON around them", async () => {
     const got = await values([bytes('[1]\nnan\n{"a":.5}\n')])
     expect(got[0]).toEqual([1])
-    expect(Number.isNaN(got[1])).toBe(true)
+    expect(got[1]).toBe(null)
     expect(got[2]).toEqual({ a: 0.5 })
   })
 
@@ -385,7 +390,7 @@ async function reported(
   for (;;) {
     const text = await reader.nextInput()
     if (text === NO_VALUE) return [found, reports, reader.position(), reader.failures()]
-    found.push(parsed(text))
+    found.push(await parsed(text))
   }
 }
 
@@ -456,23 +461,6 @@ describe('InputReader over an input it cannot open or read', () => {
   })
 })
 
-describe('piecesThrough', () => {
-  it('ends a piece at a newline or after 4091 bytes', () => {
-    const data = bytes('ab\ncd\n')
-    expect(piecesThrough(data, 0)).toEqual([3, 1])
-    expect(piecesThrough(data, 4)).toEqual([6, 2])
-    const long = bytes('x'.repeat(READ_CHUNK + 5) + '\n')
-    expect(piecesThrough(long, 10)).toEqual([READ_CHUNK, 0])
-    expect(piecesThrough(long, READ_CHUNK + 1)).toEqual([long.length, 1])
-  })
-
-  it('reads a piece ending inside a character on to its end', () => {
-    const head = bytes('x'.repeat(READ_CHUNK - 1))
-    const data = new Uint8Array([...head, ...ENC.encode('é'), ...bytes('yz\n')])
-    expect(piecesThrough(data, 0)).toEqual([READ_CHUNK + 1, 0])
-  })
-})
-
 describe('readTexts', () => {
   it('reads a slurpfile as jq does', async () => {
     expect(
@@ -486,14 +474,14 @@ describe('readTexts', () => {
 })
 
 describe('valueText', () => {
-  it('takes one value as jv_parse does', () => {
-    expect(valueText(bytes('{"b":1,"1":2.50}'))).toBe('{"b":1,"1":2.50}')
-    expect(valueText(bytes('nan'))).toBe('nan')
-    expect(valueText(bytes(' 12 \n'))).toBe('12')
-    expect(valueText(bytes('\xef\xbb\xbf1.0'))).toBe('1.0')
-    expect(valueText(bytes('1 2'))).toBe(NO_VALUE)
-    expect(valueText(bytes(''))).toBe(NO_VALUE)
-    expect(valueText(bytes('nope'))).toBe(NO_VALUE)
-    expect(valueText(bytes('[1,'))).toBe(NO_VALUE)
+  it('takes one value as jv_parse does', async () => {
+    expect(await valueText(bytes('{"b":1,"1":2.50}'))).toBe('{"b":1,"1":2.50}')
+    expect(await valueText(bytes('nan'))).toBe('nan')
+    expect(await valueText(bytes(' 12 \n'))).toBe('12')
+    expect(await valueText(bytes('\xef\xbb\xbf1.0'))).toBe('1.0')
+    expect(await valueText(bytes('1 2'))).toBe(NO_VALUE)
+    expect(await valueText(bytes(''))).toBe(NO_VALUE)
+    expect(await valueText(bytes('nope'))).toBe(NO_VALUE)
+    expect(await valueText(bytes('[1,'))).toBe(NO_VALUE)
   })
 })

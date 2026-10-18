@@ -13,15 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import math
+import json
 
+import jq as libjq
 import pytest
 
-from mirage.core.jq.parse import JqParser
 from mirage.core.jq.stream import (
-    READ_CHUNK,
     InputReader,
-    pieces_through,
     read_texts,
     value_text,
 )
@@ -43,12 +41,12 @@ def _sources(*inputs: bytes, size: int = 1 << 20) -> list[InputSource]:
 def _parsed(text: object) -> object:
     # The value jq's parser reads the text as, which is what libjq runs on.
     assert isinstance(text, str)
-    parser = JqParser()
-    parser.feed(text.encode(), False)
-    value = parser.next()
-    assert not isinstance(value, JqParseError), text
-    assert parser.next() is NO_VALUE, text
-    return value
+    if "\\ud" not in text.lower():
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return libjq.compile(".").input_text(text).first()
+    return libjq.compile(".").input_text(text).first()
 
 
 async def _read(
@@ -187,7 +185,7 @@ async def test_a_document_not_pretty_printed_goes_to_jqs_parser(size):
     data = b'{\n"a": 1}\n{\n  "b": 2 }\n[\n  nan\n]\n'
     rows = await _read(_sources(data, size=size))
     assert rows[:2] == [({"a": 1}, "f0.json:2"), ({"b": 2}, "f0.json:4")]
-    assert math.isnan(rows[2][0][0]) and rows[2][1] == "f0.json:7"
+    assert rows[2][0][0] is None and rows[2][1] == "f0.json:7"
 
 
 @pytest.mark.asyncio
@@ -252,7 +250,7 @@ async def test_raw_lines_seq_stream_and_slurp_hand_over_text():
 @pytest.mark.asyncio
 async def test_jqs_own_numbers_and_the_json_around_them():
     values = await _values(b'[1]\nnan\n{"a":.5}\n')
-    assert values[0] == [1] and math.isnan(values[1])
+    assert values[0] == [1] and values[1] is None
     assert values[2] == {"a": 0.5}
 
 
@@ -496,20 +494,6 @@ async def test_without_a_reporter_a_failed_input_raises():
         await _read([missing])
 
 
-def test_pieces_end_at_a_newline_or_after_4091_bytes():
-    data = b"ab\ncd\n"
-    assert pieces_through(data, 0) == (3, 1)
-    assert pieces_through(data, 4) == (6, 2)
-    long = b"x" * (READ_CHUNK + 5) + b"\n"
-    assert pieces_through(long, 10) == (READ_CHUNK, 0)
-    assert pieces_through(long, READ_CHUNK + 1) == (len(long), 1)
-
-
-def test_a_piece_ending_inside_a_character_reads_to_its_end():
-    data = b"x" * (READ_CHUNK - 1) + "é".encode() + b"yz\n"
-    assert pieces_through(data, 0) == (READ_CHUNK + 1, 0)
-
-
 @pytest.mark.asyncio
 async def test_read_texts_reads_a_slurpfile_as_jq_does():
     source = InputSource("m.json", _chunks(b'{"a":1.0}\n{"a":2}\n', 4))
@@ -523,12 +507,13 @@ async def test_read_texts_reads_a_slurpfile_as_jq_does():
     )
 
 
-def test_value_text_takes_one_value_as_jv_parse_does():
-    assert value_text(b'{"b":1,"1":2.50}') == '{"b":1,"1":2.50}'
-    assert value_text(b"nan") == "nan"
-    assert value_text(b" 12 \n") == "12"
-    assert value_text(b"\xef\xbb\xbf1.0") == "1.0"
-    assert value_text(b"1 2") is NO_VALUE
-    assert value_text(b"") is NO_VALUE
-    assert value_text(b"nope") is NO_VALUE
-    assert value_text(b"[1,") is NO_VALUE
+@pytest.mark.asyncio
+async def test_value_text_takes_one_value_as_jv_parse_does():
+    assert (await value_text(b'{"b":1,"1":2.50}')) == '{"b":1,"1":2.50}'
+    assert (await value_text(b"nan")) == "nan"
+    assert (await value_text(b" 12 \n")) == "12"
+    assert (await value_text(b"\xef\xbb\xbf1.0")) == "1.0"
+    assert (await value_text(b"1 2")) is NO_VALUE
+    assert (await value_text(b"")) is NO_VALUE
+    assert (await value_text(b"nope")) is NO_VALUE
+    assert (await value_text(b"[1,")) is NO_VALUE

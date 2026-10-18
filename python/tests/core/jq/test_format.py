@@ -27,7 +27,6 @@ from mirage.core.jq import (
     load_failure,
     printable,
 )
-from mirage.core.jq.format import _indented, _sorted
 
 PRETTY = JqOptions()
 COMPACT = JqOptions(compact=True)
@@ -112,98 +111,112 @@ STRING_LAYOUTS = [
 ]
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("opts, expected", LAYOUTS)
-def test_an_output_is_laid_out_the_way_jq_prints_it(opts, expected):
-    assert format_one(DOC, opts) == expected
+async def test_an_output_is_laid_out_the_way_jq_prints_it(opts, expected):
+    assert (await format_one(DOC, opts)) == expected
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("opts, expected", STRING_LAYOUTS)
-def test_a_string_output_is_printed_the_way_jq_prints_it(opts, expected):
-    assert format_one(STRING, opts) == expected
+async def test_a_string_output_is_printed_the_way_jq_prints_it(opts, expected):
+    assert (await format_one(STRING, opts)) == expected
 
 
-def test_the_hand_layout_is_jqs_too():
-    # orjson lays out what it can; the hand-written layout, the one for a
-    # value nested past orjson's reach, prints the same.
-    assert f"{_indented(DOC, '  ')}\n".encode() == LAYOUTS[0][1]
-    assert f"{_indented(_sorted(DOC), '  ')}\n".encode() == LAYOUTS[2][1]
-    assert f"{_sorted(DOC)}\n".encode() == LAYOUTS[3][1]
-
-
-def test_a_value_nested_past_orjson_is_laid_out_by_hand():
+@pytest.mark.asyncio
+async def test_a_deep_value_is_laid_out_without_recursion():
     deep = "[" * 300 + "1.000" + "]" * 300
-    pretty = dump_text(deep, PRETTY)
+    pretty = await dump_text(deep, PRETTY)
     assert pretty.startswith("[\n  [\n    [")
     assert "\n" + " " * 600 + "1.000\n" in pretty
     assert (
-        dump_text(
+        await dump_text(
             '{"b":' * 300 + '{"a":1}' + "}" * 300,
             JqOptions(compact=True, sort_keys=True),
-        ).count('"b"')
-        == 300
-    )
+        )
+    ).count('"b"') == 300
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("compact", [True, False])
-def test_sort_keys_orders_by_code_point_and_reads_escaped_keys(compact):
+async def test_sort_keys_orders_by_code_point_and_reads_escaped_keys(compact):
     # jq compares keys as UTF-8 bytes, which is code point order.
     text = '{"é":1,"z":2,"a\\"":3,"😀":4,"ｚ":5,"\\u0001":6}'
     ordered = '{"\\u0001":6,"a\\"":3,"z":2,"é":1,"ｚ":5,"😀":4}'
-    assert _sorted(text) == ordered
     opts = JqOptions(compact=compact, sort_keys=True)
-    assert dump_text(text, opts) == dump_text(
-        ordered, JqOptions(compact=compact)
+    assert (await dump_text(text, opts)) == (
+        await dump_text(ordered, JqOptions(compact=compact))
     )
 
 
-def test_format_jq_raw_leaves_non_strings_as_json():
-    assert format_one('"a"', RAW) + format_one("1.000", RAW) == b"a\n1.000\n"
+@pytest.mark.asyncio
+async def test_format_jq_raw_leaves_non_strings_as_json():
+    assert (await format_one('"a"', RAW)) + (
+        await format_one("1.000", RAW)
+    ) == b"a\n1.000\n"
 
 
-def test_join_output_writes_no_separator():
+@pytest.mark.asyncio
+async def test_join_output_writes_no_separator():
     opts = JqOptions(raw_output=True, join_output=True, compact=True)
-    assert format_one('"a"', opts) + format_one('"b"', opts) == b"ab"
+    assert (await format_one('"a"', opts)) + (
+        await format_one('"b"', opts)
+    ) == b"ab"
 
 
-def test_raw_output0_terminates_with_nul_and_beats_join():
+@pytest.mark.asyncio
+async def test_raw_output0_terminates_with_nul_and_beats_join():
     opts = JqOptions(
         raw_output=True, join_output=True, nul_output=True, compact=True
     )
-    assert format_one('"a"', opts) + format_one('"b"', opts) == b"a\x00b\x00"
+    assert (await format_one('"a"', opts)) + (
+        await format_one('"b"', opts)
+    ) == b"a\x00b\x00"
 
 
-def test_seq_puts_rs_before_each_value_but_not_a_raw_string():
+@pytest.mark.asyncio
+async def test_seq_puts_rs_before_each_value_but_not_a_raw_string():
     opts = JqOptions(seq=True, raw_output=True, compact=True)
     assert (
-        b"".join(format_one(text, opts) for text in ["1.000", '"x"', "[]"])
+        b"".join(
+            [(await format_one(text, opts)) for text in ["1.000", '"x"', "[]"]]
+        )
         == b"\x1e1.000\nx\n\x1e[]\n"
     )
 
 
-def test_raw_output0_refuses_a_string_holding_a_nul():
+@pytest.mark.asyncio
+async def test_raw_output0_refuses_a_string_holding_a_nul():
     # Pinned: printf '"a\u0000b" "c"' | jq --raw-output0 . fails the first
     # run with this error and prints the second.
     opts = JqOptions(raw_output=True, nul_output=True, compact=True)
     run = JqRun(['"x"', '"a\\u0000b"', '"c"'])
-    assert printable(run, opts) == JqRun(
+    assert (await printable(run, opts)) == JqRun(
         ['"x"'],
         JqError(
             "Cannot dump a string containing NUL with --raw-output0 option",
             True,
         ),
     )
-    assert printable(JqRun(['"a\\\\u0000"']), opts) == JqRun(['"a\\\\u0000"'])
-    assert printable(run, JqOptions(raw_output=True, compact=True)) == run
-    assert printable(run, JqOptions(nul_output=True, ascii_output=True)) == run
+    assert (await printable(JqRun(['"a\\\\u0000"']), opts)) == JqRun(
+        ['"a\\\\u0000"']
+    )
+    assert (
+        await printable(run, JqOptions(raw_output=True, compact=True))
+    ) == run
+    assert (
+        await printable(run, JqOptions(nul_output=True, ascii_output=True))
+    ) == run
 
 
-def test_outputs_keep_the_spelling_jq_gives_them():
+@pytest.mark.asyncio
+async def test_outputs_keep_the_spelling_jq_gives_them():
     run = jq_run_texts(
         '{"b":1.000,"1":2}', "., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted"
     )
-    assert b"".join(format_one(text, COMPACT) for text in run.outputs) == (
-        b'{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n'
-    )
+    assert b"".join(
+        [(await format_one(text, COMPACT)) for text in run.outputs]
+    ) == (b'{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n')
 
 
 def test_error_report_words_an_error_the_way_jq_does():

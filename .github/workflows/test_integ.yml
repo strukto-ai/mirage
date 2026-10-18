@@ -70,7 +70,8 @@ jobs:
             # the extracted Pyodide config also remains in runtime's TS glob.
             # Shared utils/abort primitives stay in both whole-host filters
             # and runtime; workspace/abort owns only line orchestration.
-            # The bc package split stays covered by the whole-host filters.
+            # The bc package split and shared Rust jq codecs stay covered
+            # by the whole-host filters, including Node/browser providers.
             core:
               - 'integ/**'
               - 'data/**'

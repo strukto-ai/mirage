@@ -14,18 +14,7 @@
 
 // Follows jq 1.8.2's src/util.c (MIT; see licenses/third_party/jq.txt).
 
-import {
-  CLOSE_BRACE,
-  CLOSE_BRACKET,
-  JqParser,
-  MAX_PARSING_DEPTH,
-  OPEN_BRACE,
-  OPEN_BRACKET,
-  QUOTE,
-  decodeUtf8,
-  stringText,
-  utf8Missing,
-} from './parse.ts'
+import { JqParser, decodeUtf8, stringText, utf8Missing } from './parse.ts'
 import {
   JqParseError,
   NO_VALUE,
@@ -47,112 +36,6 @@ import { fsStrerror, isFsError } from '../../errors/fs.ts'
 export const READ_CHUNK = 4091
 
 const NEWLINE = 0x0a
-const SPACE = 0x20
-const TAB = 0x09
-const BACKSLASH = 0x5c
-const WHITESPACE = new Set([SPACE, TAB, 0x0d, NEWLINE])
-const CLOSERS = new Set([QUOTE, CLOSE_BRACKET, CLOSE_BRACE])
-const STRICT = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-
-// JSON.parse takes a lone surrogate escape, which jq refuses or replaces.
-const SURROGATE_ESCAPE = /\\u[dD][89a-fA-F]/
-
-/**
- * Whether a text nests deep enough that jq's parser could refuse it: its
- * stack holds each open array or object and the key each object waits on,
- * so half its limit in brackets alone is enough to leave it to jq.
- */
-function nestsDeep(data: Uint8Array): boolean {
-  const limit = MAX_PARSING_DEPTH / 2
-  let openers = 0
-  for (const byte of data) if (byte === OPEN_BRACKET || byte === OPEN_BRACE) openers += 1
-  if (openers < limit) return false
-  let depth = 0
-  let inString = false
-  for (let i = 0; i < data.length; i++) {
-    const byte = data[i]
-    if (inString) {
-      if (byte === BACKSLASH) i += 1
-      else if (byte === QUOTE) inString = false
-    } else if (byte === QUOTE) {
-      inString = true
-    } else if (byte === OPEN_BRACKET || byte === OPEN_BRACE) {
-      depth += 1
-      if (depth >= limit) return true
-    } else if (byte === CLOSE_BRACKET || byte === CLOSE_BRACE) {
-      depth -= 1
-    }
-  }
-  return false
-}
-
-/**
- * The text of one JSON value when JSON.parse reads it as one, which jq's
- * parser then reads as one value too, or null. JSON.parse also takes lone
- * surrogate escapes and nesting past jq's limit, which are left to jq's
- * parser along with everything JSON.parse refuses (jq's extra number forms,
- * invalid UTF-8). Only the extent is JSON.parse's to say; jq reads the text
- * itself.
- */
-function parses(data: Uint8Array): string | null {
-  let text: string
-  try {
-    text = STRICT.decode(data)
-  } catch {
-    return null
-  }
-  if (SURROGATE_ESCAPE.test(text) || nestsDeep(data)) return null
-  try {
-    JSON.parse(text)
-  } catch {
-    return null
-  }
-  return text
-}
-
-/**
- * Where jq's parser holds the one value `data` spells whole: at its closing
- * quote or bracket, or at the whitespace byte after a number or a literal.
- * -1 for a number or a literal nothing follows, which jq completes only at
- * the end of its input.
- */
-function completion(data: Uint8Array): number {
-  let stop = data.length
-  while (stop > 0 && WHITESPACE.has(data[stop - 1] ?? 0)) stop -= 1
-  if (CLOSERS.has(data[stop - 1] ?? 0)) return stop - 1
-  return stop < data.length ? stop : -1
-}
-
-/**
- * The reads jq's reader takes from the start of `data`, one piece at a time,
- * until it holds byte `index`: where the last of them ends, and how many of
- * them end in a newline, which is what its line count counts. `data` holds
- * an input's unread bytes, from a piece boundary on, through at least the
- * piece holding `index`.
- */
-export function piecesThrough(data: Uint8Array, index: number): [number, number] {
-  // A piece never runs past a newline, so each newline before the line
-  // holding `index` ended a piece of its own.
-  let at = index > 0 ? data.lastIndexOf(NEWLINE, index - 1) + 1 : 0
-  let lines = 0
-  for (let i = 0; i < at; i++) if (data[i] === NEWLINE) lines += 1
-  for (;;) {
-    const window = data.subarray(at, at + READ_CHUNK)
-    const newline = window.indexOf(NEWLINE)
-    let end: number
-    if (newline >= 0) {
-      end = at + newline + 1
-      lines += 1
-    } else if (data.length - at > READ_CHUNK) {
-      end = Math.min(at + READ_CHUNK + utf8Missing(window), data.length)
-    } else {
-      end = data.length
-    }
-    if (end > index) return [end, lines]
-    at = end
-  }
-}
-
 /** An input's bytes not yet read, a growable window over one buffer. */
 class Pending {
   private buf = new Uint8Array(0)
@@ -211,13 +94,8 @@ class Pending {
  * lines, which also run on from one input into the next when one lacks its
  * final newline.
  *
- * Each value comes out as JSON text for libjq to read (JqParser.text): the
- * bytes it was read from, so every number keeps its literal and every object
- * its key order, which jq prints as they came in. A value JSON.parse can
- * read, one line of JSON Lines or a pretty-printed document, is taken in one
- * step and handed to the parser as read (see fast); everything else, bad
- * input included, goes through jq's parser. `opts` decides the reading
- * through -R, -s, --seq and --stream.
+ * Each value comes out as original JSON text or literal-preserving
+ * streaming event text from the shared scanner.
  *
  * An input is opened when the reader reaches it, and one that cannot be
  * opened or read is reported and counted the way jq's reader does it, and
@@ -231,7 +109,7 @@ export class InputReader {
   private failedInputs = 0
   private opened = 0
   private readonly parser: JqParser | null
-  private readonly fastOk: boolean
+  private jsonEof = false
   private slurped: string[] | string | NoValue = NO_VALUE
   private name: string | null = null
   private line = 0
@@ -246,11 +124,11 @@ export class InputReader {
     sources: readonly InputSource[],
     opts: JqOptions,
     report: ((line: string) => void) | null = null,
+    private readonly signal?: AbortSignal,
   ) {
     this.sources = sources
     this.report = report
-    this.parser = opts.rawInput ? null : new JqParser(opts.seq, opts.stream)
-    this.fastOk = !(opts.rawInput || opts.seq || opts.stream)
+    this.parser = opts.rawInput ? null : new JqParser(opts.seq, opts.stream, signal)
     if (opts.slurp) this.slurped = opts.rawInput ? '' : []
   }
 
@@ -280,7 +158,11 @@ export class InputReader {
   async close(): Promise<void> {
     const chunks = this.chunks
     this.chunks = null
-    await chunks?.return?.()
+    try {
+      await chunks?.return?.()
+    } finally {
+      await this.parser?.close()
+    }
   }
 
   /**
@@ -292,29 +174,18 @@ export class InputReader {
   async nextInput(): Promise<string | JqParseError | NoValue> {
     const parser = this.parser
     if (parser === null) return this.nextLine()
-    let isLast = false
     for (;;) {
-      if (parser.remaining() === 0) {
-        if (this.fastOk && parser.clean()) {
-          const fast = await this.fast(parser)
-          if (fast !== NO_VALUE) {
-            if (!Array.isArray(this.slurped)) return fast
-            this.slurped.push(fast)
-            continue
-          }
-        }
-        const [piece, last] = await this.readMore()
-        isLast = last
-        parser.feed(piece, !isLast)
-      }
-      const value = parser.next()
+      const value = await parser.next()
       if (value instanceof JqParseError) return value
-      if (Array.isArray(this.slurped)) {
-        if (value !== NO_VALUE) this.slurped.push(parser.text())
-      } else if (value !== NO_VALUE) {
-        return parser.text()
+      if (value !== NO_VALUE) {
+        if (!Array.isArray(this.slurped)) return value
+        this.slurped.push(value)
+        continue
       }
-      if (isLast) break
+      if (this.jsonEof) break
+      const [piece, last] = await this.readMore()
+      this.jsonEof = last
+      parser.feed(piece, !last)
     }
     return this.takeSlurped()
   }
@@ -325,12 +196,14 @@ export class InputReader {
       const [piece, isLast] = await this.readMore()
       if (piece.length > 0) {
         if (typeof this.slurped === 'string') {
-          this.slurped += decodeUtf8(piece)
+          this.slurped += await decodeUtf8(piece, this.signal)
         } else if (piece[piece.length - 1] === NEWLINE) {
           const head = line === NO_VALUE ? '' : line
-          return stringText(head + decodeUtf8(piece.subarray(0, piece.length - 1)))
+          return stringText(
+            head + (await decodeUtf8(piece.subarray(0, piece.length - 1), this.signal)),
+          )
         } else {
-          line = (line === NO_VALUE ? '' : line) + decodeUtf8(piece)
+          line = (line === NO_VALUE ? '' : line) + (await decodeUtf8(piece, this.signal))
         }
       }
       if (isLast) break
@@ -441,110 +314,6 @@ export class InputReader {
       await this.pull()
     }
   }
-
-  /**
-   * Take the next value's text in one step when JSON.parse reads it as one
-   * value: the rest of the line, or else the pretty-printed document the
-   * line opens (see document). The parser (clean, see JqParser.clean) is
-   * handed the bytes as read and the rest of the last piece, so the line
-   * count, the position and whatever follows are what jq's parser would have
-   * reached.
-   */
-  private async fast(parser: JqParser): Promise<string | NoValue> {
-    this.openNext()
-    if (this.chunks === null) return NO_VALUE
-    let newline = this.pending.indexOf(NEWLINE)
-    while (newline < 0 && !this.drained) {
-      const searched = this.pending.length
-      await this.pull()
-      newline = this.pending.indexOf(NEWLINE, searched)
-    }
-    const pending = this.pending
-    if (pending.length === 0) return NO_VALUE
-    const skip = parser.bomSkip(pending.view(0, Math.min(3, pending.length)))
-    if (skip === null) return NO_VALUE
-    if (newline < 0 && this.tailUnsettled()) return NO_VALUE
-    const end = newline >= 0 ? newline + 1 : pending.length
-    const line = pending.view(skip, end)
-    const text = parses(line)
-    if (text !== null) {
-      const stop = completion(line)
-      if (stop < 0) return NO_VALUE
-      return this.took(parser, text, skip, skip + stop)
-    }
-    let last = line.length
-    while (last > 0 && WHITESPACE.has(line[last - 1] ?? 0)) last -= 1
-    if (last !== 1 || (line[0] !== OPEN_BRACKET && line[0] !== OPEN_BRACE)) return NO_VALUE
-    return this.document(parser, skip, end)
-  }
-
-  /**
-   * Take a pretty-printed document in one step: one whose opener stands
-   * alone on the first line and whose closer starts a later line, every line
-   * between them indented. `skip` counts the BOM bytes before the opener,
-   * and `start` is where the opener's line ends.
-   *
-   * It reads on only to the first line that is not indented. The closer
-   * there completes the document, and anything else hands it to jq's parser.
-   * So it reads no further than jq's reader does before the document
-   * completes, and never past one document of a stream.
-   */
-  private async document(parser: JqParser, skip: number, start: number): Promise<string | NoValue> {
-    const pending = this.pending
-    const closer = pending.byteAt(skip) === OPEN_BRACE ? CLOSE_BRACE : CLOSE_BRACKET
-    let at = start - 1
-    let stop = -1
-    while (stop < 0) {
-      const newline = pending.indexOf(NEWLINE, at)
-      const next = newline < 0 ? undefined : pending.byteAt(newline + 1)
-      if (next === undefined) {
-        if (this.drained) return NO_VALUE
-        at = newline < 0 ? pending.length : newline
-        await this.pull()
-      } else if (next === SPACE || next === TAB) {
-        at = newline + 1
-      } else {
-        stop = newline + 1
-      }
-    }
-    if (pending.byteAt(stop) !== closer) return NO_VALUE
-    let newline = pending.indexOf(NEWLINE, stop)
-    while (newline < 0 && !this.drained) {
-      const searched = pending.length
-      await this.pull()
-      newline = pending.indexOf(NEWLINE, searched)
-    }
-    if (newline < 0 && this.tailUnsettled()) return NO_VALUE
-    const text = parses(pending.view(skip, stop + 1))
-    if (text === null) return NO_VALUE
-    return this.took(parser, text, skip, stop)
-  }
-
-  // Whether an input's bytes after its last newline cannot be taken as they
-  // are: another input can run on from them, and a failed read loses them.
-  private tailUnsettled(): boolean {
-    return this.failed || this.opened < this.sources.length
-  }
-
-  // The value's text: what `stop` completes, whitespace around it left out.
-  private took(parser: JqParser, text: string, skip: number, stop: number): string {
-    const [end, lines] = piecesThrough(this.pending.view(), stop)
-    parser.skip(this.pending.view(0, stop + 1), skip, stop + 1)
-    this.pending.take(stop + 1)
-    const rest = this.pending.take(end - stop - 1)
-    this.line += lines
-    parser.feed(rest, true)
-    return trimmed(text)
-  }
-}
-
-/** A text with the JSON whitespace around it left out. */
-function trimmed(text: string): string {
-  let start = 0
-  let end = text.length
-  while (start < end && WHITESPACE.has(text.charCodeAt(start))) start += 1
-  while (end > start && WHITESPACE.has(text.charCodeAt(end - 1))) end -= 1
-  return start === 0 && end === text.length ? text : text.slice(start, end)
 }
 
 /**
@@ -554,11 +323,15 @@ function trimmed(text: string): string {
 export async function readTexts(source: InputSource): Promise<[string[], JqParseError | null]> {
   const reader = new InputReader([source], jqOptions())
   const texts: string[] = []
-  for (;;) {
-    const text = await reader.nextInput()
-    if (text instanceof JqParseError) return [texts, text]
-    if (text === NO_VALUE) return [texts, null]
-    texts.push(text)
+  try {
+    for (;;) {
+      const text = await reader.nextInput()
+      if (text instanceof JqParseError) return [texts, text]
+      if (text === NO_VALUE) return [texts, null]
+      texts.push(text)
+    }
+  } finally {
+    await reader.close()
   }
 }
 
@@ -567,13 +340,14 @@ export async function readTexts(source: InputSource): Promise<[string[], JqParse
  * --argjson or a --jsonargs value, or NO_VALUE when it holds none, several,
  * or bad JSON.
  */
-export function valueText(text: Uint8Array): string | NoValue {
-  const fast = parses(text)
-  if (fast !== null) return trimmed(fast)
+export async function valueText(text: Uint8Array): Promise<string | NoValue> {
   const parser = new JqParser()
-  parser.feed(text, false)
-  const value = parser.next()
-  if (value === NO_VALUE || value instanceof JqParseError) return NO_VALUE
-  const parsed = parser.text()
-  return parser.next() === NO_VALUE ? parsed : NO_VALUE
+  try {
+    parser.feed(text, false)
+    const value = await parser.next()
+    if (value === NO_VALUE || value instanceof JqParseError) return NO_VALUE
+    return (await parser.next()) === NO_VALUE ? value.trim() : NO_VALUE
+  } finally {
+    await parser.close()
+  }
 }

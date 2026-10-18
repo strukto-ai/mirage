@@ -59,6 +59,7 @@ from mirage.core.jq.types import (
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.yield_budget import YieldBudget
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 
@@ -156,7 +157,7 @@ def _pair_flag(fl: FlagView, name: str) -> list[tuple[str, Any]]:
     return _pair_args(raw) if isinstance(raw, list) else []
 
 
-def positional_value(mode: str, word: str) -> str:
+async def positional_value(mode: str, word: str) -> str:
     """The JSON text one operand gives `$ARGS.positional`: the string it
     spells after --args, and after --jsonargs the one JSON value it spells.
 
@@ -170,7 +171,7 @@ def positional_value(mode: str, word: str) -> str:
     """
     if mode == "args":
         return string_text(word)
-    text = value_text(word.encode())
+    text = await value_text(word.encode())
     if text is NO_VALUE:
         raise UsageError(
             f"jq: invalid JSON text passed to --jsonargs\n{USAGE_HINT}", 2
@@ -218,7 +219,7 @@ async def _binding(
     if isinstance(value, str):
         if dest == "arg":
             return string_text(value)
-        text = value_text(value.encode())
+        text = await value_text(value.encode())
         if text is NO_VALUE:
             raise UsageError(
                 f"jq: invalid JSON text passed to --argjson\n{USAGE_HINT}", 2
@@ -226,7 +227,7 @@ async def _binding(
         return text
     data = await _load_file(read_file, dest, name, value)
     if dest == "rawfile":
-        return string_text(decode_utf8(data))
+        return string_text(await decode_utf8(data))
     shown = flag_file_name(value)
     texts, failure = await read_texts(InputSource(shown, yield_bytes(data)))
     if failure is not None:
@@ -390,7 +391,7 @@ async def read_options(
             elif mode is not None:
                 word = next(words, None)
                 if word is not None:
-                    positional.append(positional_value(mode, word))
+                    positional.append(await positional_value(mode, word))
         elif dest in MODES:
             mode = dest
         elif dest == "compact_output":
@@ -412,7 +413,9 @@ async def read_options(
             if name not in named:
                 named[name] = await _binding(dest, name, bound, read_file)
     if mode is not None:
-        positional.extend(positional_value(mode, word) for word in words)
+        positional.extend(
+            [await positional_value(mode, word) for word in words]
+        )
     return dataclasses.replace(
         parse_flags(fl),
         compact=compact,
@@ -550,6 +553,7 @@ class MainLoop:
         self._args = args
         self._io = io
         self._statuses: list[int] = []
+        self._budget = YieldBudget()
 
     async def outputs(self) -> AsyncIterator[bytes]:
         """The invocation's stdout, run by run."""
@@ -559,7 +563,8 @@ class MainLoop:
                     "null", self._reader.position()
                 )
                 for value in run.outputs:
-                    yield format_one(value, self._opts)
+                    await self._budget.run()
+                    yield await format_one(value, self._opts)
                 self._settle(run, position)
                 return
             while not self._reader.failures():
@@ -573,7 +578,8 @@ class MainLoop:
                     return
                 run, position = await self._run(item, self._reader.position())
                 for value in run.outputs:
-                    yield format_one(value, self._opts)
+                    await self._budget.run()
+                    yield await format_one(value, self._opts)
                 if self._settle(run, position):
                     return
         finally:
@@ -618,7 +624,7 @@ class MainLoop:
                 None,
                 self._args,
             )
-            return printable(run, self._opts), position
+            return await printable(run, self._opts), position
         docs: list[str] = []
         failure: JqParseError | None = None
         while True:
@@ -641,7 +647,7 @@ class MainLoop:
             self._args,
             None if failure is None else failure.message,
         )
-        return printable(run, self._opts), position
+        return await printable(run, self._opts), position
 
     def _settle(self, run: JqRun[str], position: str) -> bool:
         # Fold one run into the invocation: its answer toward the exit

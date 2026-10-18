@@ -36,15 +36,6 @@ export class JqParseError {
 }
 
 /**
- * A number as a --stream event carries it: its literal, up to its first
- * NUL, which jq keeps and prints as it was written (`1.000`, `1E+2`) where
- * a JS number cannot.
- */
-export class NumberText {
-  constructor(readonly text: string) {}
-}
-
-/**
  * One input of the stream jq reads: a file operand or stdin. `name` is the
  * input as jq reports it, the operand as the command line spelled it or
  * `<stdin>`.

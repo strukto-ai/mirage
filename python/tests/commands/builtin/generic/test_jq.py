@@ -358,18 +358,23 @@ def test_an_input_is_named_as_typed_and_dash_as_stdin():
     )
 
 
-def test_args_reads_an_operand_as_a_string():
-    assert positional_value("args", "1") == '"1"'
+@pytest.mark.asyncio
+async def test_args_reads_an_operand_as_a_string():
+    assert (await positional_value("args", "1")) == '"1"'
 
 
-def test_jsonargs_keeps_each_operand_as_the_text_jq_reads():
-    assert positional_value("jsonargs", "1.0") == "1.0"
-    assert positional_value("jsonargs", '{"b":1,"1":2}') == '{"b":1,"1":2}'
+@pytest.mark.asyncio
+async def test_jsonargs_keeps_each_operand_as_the_text_jq_reads():
+    assert (await positional_value("jsonargs", "1.0")) == "1.0"
+    assert (
+        await positional_value("jsonargs", '{"b":1,"1":2}')
+    ) == '{"b":1,"1":2}'
 
 
-def test_jsonargs_rejects_invalid_json_in_jqs_words():
+@pytest.mark.asyncio
+async def test_jsonargs_rejects_invalid_json_in_jqs_words():
     with pytest.raises(UsageError) as caught:
-        positional_value("jsonargs", "nope")
+        (await positional_value("jsonargs", "nope"))
     assert str(caught.value) == (
         f"jq: invalid JSON text passed to --jsonargs\n{HINT}"
     )

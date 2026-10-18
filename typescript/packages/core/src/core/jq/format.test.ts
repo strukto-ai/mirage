@@ -97,79 +97,82 @@ const STRING_LAYOUTS: [string, JqOptions, string][] = [
 ]
 
 describe('formatOne', () => {
-  it.each(LAYOUTS)('lays an output out the way jq prints it under %s', (_, opts, expected) => {
-    expect(DEC.decode(formatOne(DOC, opts))).toBe(expected)
+  it.each(LAYOUTS)(
+    'lays an output out the way jq prints it under %s',
+    async (_, opts, expected) => {
+      expect(DEC.decode(await formatOne(DOC, opts))).toBe(expected)
+    },
+  )
+
+  it.each(STRING_LAYOUTS)(
+    'prints a string the way jq prints it under %s',
+    async (_, opts, expected) => {
+      expect(DEC.decode(await formatOne(STRING, opts))).toBe(expected)
+    },
+  )
+
+  it('leaves non-strings as JSON when raw=true', async () => {
+    expect(await rendered(['"a"', '1.000'], RAW)).toBe('a\n1.000\n')
   })
 
-  it.each(STRING_LAYOUTS)('prints a string the way jq prints it under %s', (_, opts, expected) => {
-    expect(DEC.decode(formatOne(STRING, opts))).toBe(expected)
-  })
-
-  it('leaves non-strings as JSON when raw=true', () => {
-    expect(['"a"', '1.000'].map((text) => DEC.decode(formatOne(text, RAW))).join('')).toBe(
-      'a\n1.000\n',
-    )
-  })
-
-  it('lays out a value nested as deep as jq reads', () => {
+  it('lays out a value nested as deep as jq reads', async () => {
     const deep = '['.repeat(300) + '1.000' + ']'.repeat(300)
-    const pretty = dumpText(deep, PRETTY)
+    const pretty = await dumpText(deep, PRETTY)
     expect(pretty.startsWith('[\n  [\n    [')).toBe(true)
     expect(pretty.includes(`\n${' '.repeat(600)}1.000\n`)).toBe(true)
     const nested = '{"b":'.repeat(300) + '{"a":1}' + '}'.repeat(300)
     expect(
-      dumpText(nested, jqOptions({ compact: true, sortKeys: true })).split('"b"'),
+      (await dumpText(nested, jqOptions({ compact: true, sortKeys: true }))).split('"b"'),
     ).toHaveLength(301)
   })
 
-  it.each([true, false])('sorts keys by code point, escaped ones read (compact: %s)', (compact) => {
-    // jq compares keys as UTF-8 bytes, which is code point order.
-    const text = '{"é":1,"z":2,"a\\"":3,"😀":4,"ｚ":5,"\\u0001":6}'
-    const ordered = '{"\\u0001":6,"a\\"":3,"z":2,"é":1,"ｚ":5,"😀":4}'
-    expect(dumpText(text, jqOptions({ compact, sortKeys: true }))).toBe(
-      dumpText(ordered, jqOptions({ compact })),
-    )
-  })
+  it.each([true, false])(
+    'sorts keys by code point, escaped ones read (compact: %s)',
+    async (compact) => {
+      // jq compares keys as UTF-8 bytes, which is code point order.
+      const text = '{"é":1,"z":2,"a\\"":3,"😀":4,"ｚ":5,"\\u0001":6}'
+      const ordered = '{"\\u0001":6,"a\\"":3,"z":2,"é":1,"ｚ":5,"😀":4}'
+      expect(await dumpText(text, jqOptions({ compact, sortKeys: true }))).toBe(
+        await dumpText(ordered, jqOptions({ compact })),
+      )
+    },
+  )
 
   it('keeps the spelling jq gives each output', async () => {
     const run = await jqRunTexts(
       '{"b":1.000,"1":2}',
       '., .b, (.b + 0), (1e17 * 1), -0, keys_unsorted',
     )
-    expect(run.outputs.map((text) => DEC.decode(formatOne(text, COMPACT))).join('')).toBe(
+    expect(await rendered(run.outputs, COMPACT)).toBe(
       '{"b":1.000,"1":2}\n1.000\n1\n1e+17\n0\n["b","1"]\n',
     )
   })
 })
 
 describe('jq output flags', () => {
-  it('writes no separator under -j', () => {
+  it('writes no separator under -j', async () => {
     const opts = jqOptions({ rawOutput: true, joinOutput: true, compact: true })
-    expect(['"a"', '"b"'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe('ab')
+    expect(await rendered(['"a"', '"b"'], opts)).toBe('ab')
   })
 
-  it('terminates with NUL under --raw-output0, which beats -j', () => {
+  it('terminates with NUL under --raw-output0, which beats -j', async () => {
     const opts = jqOptions({ rawOutput: true, joinOutput: true, nulOutput: true, compact: true })
-    expect(['"a"', '"b"'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe(
-      'a\x00b\x00',
-    )
+    expect(await rendered(['"a"', '"b"'], opts)).toBe('a\x00b\x00')
   })
 
-  it('puts RS before each value under --seq, but not before a raw string', () => {
+  it('puts RS before each value under --seq, but not before a raw string', async () => {
     const opts = jqOptions({ seq: true, rawOutput: true, compact: true })
-    expect(['1.000', '"x"', '[]'].map((text) => DEC.decode(formatOne(text, opts))).join('')).toBe(
-      '\x1e1.000\nx\n\x1e[]\n',
-    )
+    expect(await rendered(['1.000', '"x"', '[]'], opts)).toBe('\x1e1.000\nx\n\x1e[]\n')
   })
 })
 
 describe('printable', () => {
-  it('refuses a string holding a NUL under --raw-output0', () => {
+  it('refuses a string holding a NUL under --raw-output0', async () => {
     // Pinned: printf '"a\u0000b" "c"' | jq --raw-output0 . fails the first
     // run with this error and prints the second.
     const opts = jqOptions({ rawOutput: true, nulOutput: true, compact: true })
     const run = { outputs: ['"x"', '"a\\u0000b"', '"c"'], stop: null }
-    expect(printable(run, opts)).toEqual({
+    expect(await printable(run, opts)).toEqual({
       outputs: ['"x"'],
       stop: {
         kind: 'error',
@@ -178,9 +181,9 @@ describe('printable', () => {
       },
     })
     const escaped = { outputs: ['"a\\\\u0000"'], stop: null }
-    expect(printable(escaped, opts)).toBe(escaped)
-    expect(printable(run, jqOptions({ rawOutput: true, compact: true }))).toBe(run)
-    expect(printable(run, jqOptions({ nulOutput: true, asciiOutput: true }))).toBe(run)
+    expect(await printable(escaped, opts)).toBe(escaped)
+    expect(await printable(run, jqOptions({ rawOutput: true, compact: true }))).toBe(run)
+    expect(await printable(run, jqOptions({ nulOutput: true, asciiOutput: true }))).toBe(run)
   })
 })
 
@@ -220,3 +223,9 @@ describe('loadFailure', () => {
     expect(loadFailure('f', error)).toBe(expected)
   })
 })
+
+async function rendered(texts: readonly string[], opts: JqOptions): Promise<string> {
+  const parts: string[] = []
+  for (const text of texts) parts.push(DEC.decode(await formatOne(text, opts)))
+  return parts.join('')
+}

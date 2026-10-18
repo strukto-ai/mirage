@@ -243,7 +243,7 @@ additional jobs:
 | `integ/runners/`, `integ/targets.json`                                                                       | database, observability           |
 | the FUSE and mount core modules and the FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                              |
-| `rust/`, the mirage-rs crate both hosts run their command streams through                                    | core, ts, data, database, runtime |
+| `rust/`, the shared command streams, jq scanner and output formatter both hosts run                          | core, ts, data, database, runtime |
 | `data/`                                                                                                      | core only                         |
 | `test_integ.yml`                                                                                             | every filter                      |
 

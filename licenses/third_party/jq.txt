@@ -1,7 +1,6 @@
-The JSON parser in python/mirage/core/jq/parse.py and
-typescript/packages/core/src/core/jq/parse.ts follows src/jv_parse.c of jq
-1.8.2 (https://github.com/jqlang/jq), with the UTF-8 decoding of its
-src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h; the input reader in
+The JSON parser and UTF-8 decoder in rust/mirage-rs/src/jq/ follow
+src/jv_parse.c, src/jv.c, src/jv_unicode.c and src/jv_utf8_tables.h of jq
+1.8.2 (https://github.com/jqlang/jq); the input reader in
 python/mirage/core/jq/stream.py and
 typescript/packages/core/src/core/jq/stream.ts follows its src/util.c; and
 the option loop, the main loop and the exit statuses of

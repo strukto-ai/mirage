@@ -10,6 +10,7 @@ RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
 # cargo about cannot see because it is not a dependency.
 ADAPTED = [
+    ROOT / "licenses/third_party/jq.txt",
     ROOT / "licenses/third_party/uutils-coreutils.txt",
     ROOT / "licenses/third_party/unicode-data.txt",
 ]

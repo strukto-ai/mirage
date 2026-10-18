@@ -16,6 +16,7 @@
 // src/main.c (MIT; see licenses/third_party/jq.txt).
 
 import { Worker } from '../../../concurrency/worker.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, REFUSED } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -152,9 +153,9 @@ function pairArgs(values: readonly string[]): [string, string][] {
  * parser reads it. `mode` is the last of the two typed before it. A --jsonargs
  * operand that is not one JSON value is refused in jq's words.
  */
-export function positionalValue(mode: Mode, word: string): string {
+export async function positionalValue(mode: Mode, word: string): Promise<string> {
   if (mode === 'args') return stringText(word)
-  const text = valueText(ENC.encode(word))
+  const text = await valueText(ENC.encode(word))
   if (text === NO_VALUE) {
     throw new UsageError(`jq: invalid JSON text passed to --jsonargs\n${USAGE_HINT}`, 2)
   }
@@ -201,14 +202,14 @@ async function binding(
 ): Promise<string> {
   if (typeof value === 'string') {
     if (dest === 'arg') return stringText(value)
-    const text = valueText(ENC.encode(value))
+    const text = await valueText(ENC.encode(value))
     if (text === NO_VALUE) {
       throw new UsageError(`jq: invalid JSON text passed to --argjson\n${USAGE_HINT}`, 2)
     }
     return text
   }
   const data = await loadFile(read, dest, name, value)
-  if (dest === 'rawfile') return stringText(decodeUtf8(data))
+  if (dest === 'rawfile') return stringText(await decodeUtf8(data))
   const shown = flagFileName(value)
   const [texts, failure] = await readTexts({ name: shown, chunks: yieldBytes(data) })
   if (failure !== null) {
@@ -341,7 +342,7 @@ export async function readOptions(
         program = false
       } else if (mode !== null) {
         const word = words.next()
-        if (word.done !== true) positional.push(positionalValue(mode, word.value))
+        if (word.done !== true) positional.push(await positionalValue(mode, word.value))
       }
     } else if (dest === 'args' || dest === 'jsonargs') {
       mode = dest
@@ -367,7 +368,7 @@ export async function readOptions(
       if (!named.has(name)) named.set(name, await binding(kind, name, bound, read))
     }
   }
-  if (mode !== null) for (const word of words) positional.push(positionalValue(mode, word))
+  if (mode !== null) for (const word of words) positional.push(await positionalValue(mode, word))
   return jqOptions({
     ...parseFlags(fl),
     compact,
@@ -460,6 +461,7 @@ export class MainLoop {
   private readonly statuses: number[] = []
   private readonly reports: string[] = []
   private readonly reader: InputReader
+  private readonly budget: YieldBudget
 
   constructor(
     sources: readonly InputSource[],
@@ -470,7 +472,8 @@ export class MainLoop {
     private readonly io: IOResult,
     private readonly signal?: AbortSignal,
   ) {
-    this.reader = new InputReader(sources, opts, (line) => this.reports.push(line))
+    this.budget = new YieldBudget(signal)
+    this.reader = new InputReader(sources, opts, (line) => this.reports.push(line), signal)
   }
 
   /** The invocation's stdout, run by run. */
@@ -478,7 +481,11 @@ export class MainLoop {
     try {
       if (this.opts.nullInput) {
         const [run, position] = await this.run('null', this.reader.position())
-        for (const value of run.outputs) yield formatOne(value, this.opts)
+        for (const value of run.outputs) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          yield await formatOne(value, this.opts, this.signal)
+        }
         this.settle(run, position)
         return
       }
@@ -491,7 +498,11 @@ export class MainLoop {
           return
         }
         const [run, position] = await this.run(item, this.reader.position())
-        for (const value of run.outputs) yield formatOne(value, this.opts)
+        for (const value of run.outputs) {
+          const pending = this.budget.run()
+          if (pending !== undefined) await pending
+          yield await formatOne(value, this.opts, this.signal)
+        }
         if (this.settle(run, position)) return
       }
     } finally {
@@ -528,7 +539,7 @@ export class MainLoop {
     const reads = this.reads
     if (!reads.input && !reads.inputs) {
       const run = await this.evaluate([doc, this.expr, this.opts.namedArgs, null, this.args])
-      return [printable(run, this.opts), position]
+      return [await printable(run, this.opts, this.signal), position]
     }
     const docs: string[] = []
     let failure: JqParseError | null = null
@@ -552,7 +563,7 @@ export class MainLoop {
       this.args,
       failure === null ? null : failure.message,
     ])
-    return [printable(run, this.opts), at]
+    return [await printable(run, this.opts, this.signal), at]
   }
 
   // Fold one run into the invocation: its answer toward the exit status,

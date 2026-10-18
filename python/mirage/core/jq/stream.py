@@ -14,16 +14,9 @@
 
 # Follows jq 1.8.2's src/util.c (MIT; see licenses/third_party/jq.txt).
 
-import re
 from collections.abc import AsyncIterator, Callable, Sequence
 
-import orjson
-
 from mirage.core.jq.parse import (
-    CLOSE_BRACE,
-    CLOSE_BRACKET,
-    OPEN_BRACE,
-    QUOTE,
     JqParser,
     decode_utf8,
     string_text,
@@ -47,74 +40,6 @@ from mirage.errors.fs import fs_strerror
 READ_CHUNK = 4091
 
 WHITESPACE = b" \t\r\n"
-CLOSERS = frozenset((QUOTE, CLOSE_BRACKET, CLOSE_BRACE))
-
-# The line a pretty-printed document opens on, and the start of a line that
-# is not indented: in such a document, the line it closes on.
-OPENER_LINES = frozenset((b"[", b"{"))
-UNINDENTED_LINE = re.compile(rb"\n[^ \t]")
-
-
-def _parses(data: bytes) -> bool:
-    """Whether orjson reads the text as one JSON value, which jq's parser
-    then reads as one value too: what orjson refuses (jq's extra number
-    forms, lone surrogates, invalid UTF-8, nesting past 1024) is jq's
-    parser's to decide. Only the extent is orjson's to say; jq reads the
-    text itself.
-
-    Args:
-        data (bytes): the text.
-    """
-    try:
-        orjson.loads(data)
-    except orjson.JSONDecodeError:
-        return False
-    return True
-
-
-def _completion(data: bytes) -> int:
-    """Where jq's parser holds the one value `data` spells whole: at its
-    closing quote or bracket, or at the whitespace byte after a number or
-    a literal. -1 for a number or a literal nothing follows, which jq
-    completes only at the end of its input.
-
-    Args:
-        data (bytes): one value with the whitespace around it.
-    """
-    stop = len(data.rstrip(WHITESPACE))
-    if data[stop - 1] in CLOSERS:
-        return stop - 1
-    return stop if stop < len(data) else -1
-
-
-def pieces_through(data: bytes | bytearray, index: int) -> tuple[int, int]:
-    """The reads jq's reader takes from the start of `data`, one piece at
-    a time, until it holds byte `index`: where the last of them ends, and
-    how many of them end in a newline, which is what its line count
-    counts.
-
-    Args:
-        data (bytes | bytearray): an input's unread bytes, from a piece
-            boundary on, through at least the piece holding `index`.
-        index (int): the byte.
-    """
-    # A piece never runs past a newline, so each newline before the line
-    # holding `index` ended a piece of its own.
-    at = data.rfind(b"\n", 0, index) + 1
-    lines = data.count(b"\n", 0, at)
-    while True:
-        newline = data.find(b"\n", at, at + READ_CHUNK)
-        if newline >= 0:
-            end = newline + 1
-            lines += 1
-        elif len(data) - at > READ_CHUNK:
-            end = at + READ_CHUNK
-            end = min(end + utf8_missing(data[at:end]), len(data))
-        else:
-            end = len(data)
-        if end > index:
-            return end, lines
-        at = end
 
 
 class InputReader:
@@ -128,12 +53,8 @@ class InputReader:
     the pieces make up the lines, which also run on from one input into
     the next when one lacks its final newline.
 
-    Each value comes out as JSON text for libjq to read (JqParser.text):
-    the bytes it was read from, so every number keeps its literal and
-    every object its key order, which jq prints as they came in. A value
-    orjson can read, one line of JSON Lines or a pretty-printed document,
-    is taken in one step and handed to the parser as read (see _fast);
-    everything else, bad input included, goes through jq's parser.
+    Each value comes out as original JSON text or literal-preserving
+    streaming event text from the shared scanner.
 
     An input is opened when the reader reaches it, and one that cannot be
     opened or read is reported and counted the way jq's reader does it,
@@ -163,7 +84,7 @@ class InputReader:
             if opts.raw_input
             else JqParser(seq=opts.seq, streaming=opts.stream)
         )
-        self._fast_ok = not (opts.raw_input or opts.seq or opts.stream)
+        self._json_eof = False
         self._slurped: "list[str] | str | NoValue" = NO_VALUE
         if opts.slurp:
             self._slurped = "" if opts.raw_input else []
@@ -197,8 +118,12 @@ class InputReader:
         backend stream stays open until a collection finds it."""
         chunks, self._chunks = self._chunks, None
         close = getattr(chunks, "aclose", None)
-        if close is not None:
-            await close()
+        try:
+            if close is not None:
+                await close()
+        finally:
+            if self._parser is not None:
+                await self._parser.close()
 
     async def next_input(self) -> "str | JqParseError | NoValue":
         """The JSON text of the next value of the stream, the parse error
@@ -208,28 +133,19 @@ class InputReader:
         if self._parser is None:
             return await self._next_line()
         parser = self._parser
-        is_last = False
         while True:
-            if parser.remaining() == 0:
-                if self._fast_ok and parser.clean():
-                    fast = await self._fast(parser)
-                    if fast is not NO_VALUE:
-                        if not isinstance(self._slurped, list):
-                            return fast
-                        self._slurped.append(fast)
-                        continue
-                piece, is_last = await self._read_more()
-                parser.feed(piece, not is_last)
-            value = parser.next()
+            value = await parser.next()
             if isinstance(value, JqParseError):
                 return value
-            if isinstance(self._slurped, list):
-                if value is not NO_VALUE:
-                    self._slurped.append(parser.text())
-            elif value is not NO_VALUE:
-                return parser.text()
-            if is_last:
+            if value is not NO_VALUE:
+                if not isinstance(self._slurped, list):
+                    return value
+                self._slurped.append(value)
+                continue
+            if self._json_eof:
                 break
+            piece, self._json_eof = await self._read_more()
+            parser.feed(piece, not self._json_eof)
         return self._take_slurped()
 
     async def _next_line(self) -> "str | NoValue":
@@ -238,14 +154,14 @@ class InputReader:
             piece, is_last = await self._read_more()
             if piece:
                 if isinstance(self._slurped, str):
-                    self._slurped += decode_utf8(piece)
+                    self._slurped += await decode_utf8(piece)
                 elif piece.endswith(b"\n"):
                     head = "" if line is NO_VALUE else line
-                    return string_text(head + decode_utf8(piece[:-1]))
+                    return string_text(head + (await decode_utf8(piece[:-1])))
                 else:
-                    line = ("" if line is NO_VALUE else line) + decode_utf8(
-                        piece
-                    )
+                    line = (
+                        "" if line is NO_VALUE else line
+                    ) + await decode_utf8(piece)
             if is_last:
                 break
         if isinstance(self._slurped, str):
@@ -351,103 +267,6 @@ class InputReader:
                 return piece
             await self._pull()
 
-    async def _fast(self, parser: JqParser) -> "str | NoValue":
-        """Take the next value's text in one step when orjson reads it as
-        one value: the rest of the line, or else the pretty-printed
-        document the line opens (see _document). The parser is handed the
-        bytes as read and the rest of the last piece, so the line count,
-        the position and whatever follows are what jq's parser would have
-        reached.
-
-        Args:
-            parser (JqParser): the stream's parser, clean (JqParser.clean).
-        """
-        await self._open_next()
-        if self._chunks is None:
-            return NO_VALUE
-        newline = self._pending.find(b"\n")
-        while newline < 0 and not self._drained:
-            searched = len(self._pending)
-            await self._pull()
-            newline = self._pending.find(b"\n", searched)
-        pending = self._pending
-        if not pending:
-            return NO_VALUE
-        skip = parser.bom_skip(bytes(pending[:3]))
-        if skip is None:
-            return NO_VALUE
-        if newline < 0 and self._tail_unsettled():
-            return NO_VALUE
-        end = newline + 1 if newline >= 0 else len(pending)
-        line = bytes(pending[skip:end])
-        if _parses(line):
-            stop = _completion(line)
-            if stop < 0:
-                return NO_VALUE
-            return self._took(parser, skip, skip + stop)
-        if line.rstrip(WHITESPACE) not in OPENER_LINES:
-            return NO_VALUE
-        return await self._document(parser, skip, end)
-
-    async def _document(
-        self, parser: JqParser, skip: int, start: int
-    ) -> "str | NoValue":
-        """Take a pretty-printed document in one step: one whose opener
-        stands alone on the first line and whose closer starts a later
-        line, every line between them indented.
-
-        It reads on only to the first line that is not indented. The
-        closer there completes the document, and anything else hands it
-        to jq's parser. So it reads no further than jq's reader does
-        before the document completes, and never past one document of a
-        stream.
-
-        Args:
-            parser (JqParser): the stream's parser, clean.
-            skip (int): the BOM bytes before the opener.
-            start (int): where the opener's line ends.
-        """
-        pending = self._pending
-        closer = CLOSE_BRACE if pending[skip] == OPEN_BRACE else CLOSE_BRACKET
-        at = start - 1
-        found = UNINDENTED_LINE.search(pending, at)
-        while found is None and not self._drained:
-            at = max(at, len(pending) - 1)
-            await self._pull()
-            found = UNINDENTED_LINE.search(pending, at)
-        if found is None or pending[found.end() - 1] != closer:
-            return NO_VALUE
-        stop = found.end() - 1
-        newline = pending.find(b"\n", stop)
-        while newline < 0 and not self._drained:
-            searched = len(pending)
-            await self._pull()
-            newline = pending.find(b"\n", searched)
-        if newline < 0 and self._tail_unsettled():
-            return NO_VALUE
-        if not _parses(bytes(pending[skip : stop + 1])):
-            return NO_VALUE
-        return self._took(parser, skip, stop)
-
-    def _tail_unsettled(self) -> bool:
-        # Whether an input's bytes after its last newline cannot be taken
-        # as they are: another input can run on from them, and a failed
-        # read loses them.
-        return self._failed or self._opened < len(self._sources)
-
-    def _took(self, parser: JqParser, skip: int, stop: int) -> str:
-        # The value's text: what `stop` completes, whitespace around it
-        # left out (orjson read it as valid UTF-8).
-        pending = self._pending
-        end, lines = pieces_through(pending, stop)
-        text = bytes(pending[skip : stop + 1]).strip(WHITESPACE).decode()
-        parser.skip(pending, skip, stop + 1)
-        rest = bytes(pending[stop + 1 : end])
-        del pending[:end]
-        self._line += lines
-        parser.feed(rest, True)
-        return text
-
 
 async def read_texts(
     source: InputSource,
@@ -460,16 +279,19 @@ async def read_texts(
     """
     reader = InputReader([source], JqOptions())
     texts: list[str] = []
-    while True:
-        text = await reader.next_input()
-        if isinstance(text, JqParseError):
-            return texts, text
-        if text is NO_VALUE:
-            return texts, None
-        texts.append(text)
+    try:
+        while True:
+            text = await reader.next_input()
+            if isinstance(text, JqParseError):
+                return texts, text
+            if text is NO_VALUE:
+                return texts, None
+            texts.append(text)
+    finally:
+        await reader.close()
 
 
-def value_text(text: bytes) -> "str | NoValue":
+async def value_text(text: bytes) -> "str | NoValue":
     """The JSON text of the one value a text holds, as jq's jv_parse reads
     an --argjson or a --jsonargs value, or NO_VALUE when it holds none,
     several, or bad JSON.
@@ -477,14 +299,14 @@ def value_text(text: bytes) -> "str | NoValue":
     Args:
         text (bytes): the text.
     """
-    if _parses(text):
-        return text.strip(WHITESPACE).decode()
     parser = JqParser()
-    parser.feed(text, False)
-    parsed = parser.next()
-    if parsed is NO_VALUE or isinstance(parsed, JqParseError):
-        return NO_VALUE
-    value = parser.text()
-    if parser.next() is not NO_VALUE:
-        return NO_VALUE
-    return value
+    try:
+        parser.feed(text, False)
+        value = await parser.next()
+        if value is NO_VALUE or isinstance(value, JqParseError):
+            return NO_VALUE
+        if await parser.next() is not NO_VALUE:
+            return NO_VALUE
+        return value.strip(WHITESPACE.decode())
+    finally:
+        await parser.close()
