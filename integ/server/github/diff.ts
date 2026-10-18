@@ -189,14 +189,18 @@ interface Search {
 // diagonal. The snake found there splits the box. The paper walks a round's
 // diagonals from the lowest; git's output shows them walked from the highest,
 // which picks a different edit among the shortest. The answer is the snake's
-// two ends, as absolute line numbers: x, y, u, v.
+// two ends, as absolute line numbers: x, y, u, v, or null once MOST_ROUNDS
+// rounds pass without the paths meeting, so a file reordered end to end costs
+// a bounded time.
+const MOST_ROUNDS = 4096
+
 function middleSnake(
   s: Search,
   aLo: number,
   aHi: number,
   bLo: number,
   bHi: number,
-): [number, number, number, number] {
+): [number, number, number, number] | null {
   const { a, b, forward: fw, reverse: rv, offset } = s
   const n = aHi - aLo
   const m = bHi - bLo
@@ -214,7 +218,7 @@ function middleSnake(
   let fHi = 0
   let rLo = delta
   let rHi = delta
-  for (;;) {
+  for (let round = 0; round < MOST_ROUNDS; round += 1) {
     let lo = n + 1
     let hi = -m - 1
     for (let k = fHi < n ? fHi + 1 : fHi - 1; k >= (fLo > -m ? fLo - 1 : fLo + 1); k -= 2) {
@@ -252,11 +256,14 @@ function middleSnake(
     rLo = lo
     rHi = hi
   }
+  return null
 }
 
 // The shortest edit of a box: its matching ends taken off first, then a side
 // left empty is all inserted or all removed, and any other box is split at
-// its middle snake and each half searched in turn.
+// its middle snake and each half searched in turn. A box whose search gives
+// up is all removed and all inserted; neither half of a split needs more
+// edits than the box did, so only the first box can give up.
 function searchBox(s: Search, aFrom: number, aTo: number, bFrom: number, bTo: number): void {
   let aLo = aFrom
   let aHi = aTo
@@ -273,9 +280,15 @@ function searchBox(s: Search, aFrom: number, aTo: number, bFrom: number, bTo: nu
   if (aLo === aHi) s.goneB.fill(1, bLo, bHi)
   else if (bLo === bHi) s.goneA.fill(1, aLo, aHi)
   else {
-    const [x, y, u, v] = middleSnake(s, aLo, aHi, bLo, bHi)
-    searchBox(s, aLo, x, bLo, y)
-    searchBox(s, u, aHi, v, bHi)
+    const snake = middleSnake(s, aLo, aHi, bLo, bHi)
+    if (snake === null) {
+      s.goneA.fill(1, aLo, aHi)
+      s.goneB.fill(1, bLo, bHi)
+    } else {
+      const [x, y, u, v] = snake
+      searchBox(s, aLo, x, bLo, y)
+      searchBox(s, u, aHi, v, bHi)
+    }
   }
 }
 
@@ -358,14 +371,15 @@ function weigh(a: Score, b: Score): number {
 
 // Where a run of `size` changed lines that can end anywhere from `top` to
 // `bottom` ends, by its two edges: git reads its places from the highest to
-// the lowest, only the lowest size + 2 of them and never more than 100, and
-// moves to each one that weighs no worse than the best before it.
-const MOST_PLACES = 100
+// the lowest, only the lowest size + 2 of them and none more than 100 lines
+// above the lowest, and moves to each one that weighs no worse than the best
+// before it.
+const PLACE_REACH = 100
 
 function bestEnd(lines: string[], top: number, bottom: number, size: number): number {
   let best = bottom
   let bestScore: Score | null = null
-  const first = Math.max(top, bottom - size - 1, bottom - MOST_PLACES + 1)
+  const first = Math.max(top, bottom - size - 1, bottom - PLACE_REACH)
   for (let end = first; end <= bottom; end += 1) {
     const score = { level: 0, penalty: 0 }
     edgeAt(lines, end - size, score)
@@ -452,8 +466,10 @@ function settle(side: Side, other: Side): void {
 // Which lines of `a` and `b` changed, in order: the two files' matching ends
 // are kept, the lines set aside are changed, the rest go to the search, and
 // every run of changes then settles where git puts it. Past about 500 changed
-// lines in one file git stops short of the shortest edit and this search does
-// not, so the two can differ there; no fixture comes near.
+// lines with few matching lines between them git can stop short of the
+// shortest edit and this search does not, and past 8192 edits of the searched
+// lines this search gives up and git does not, so the two can differ there;
+// no fixture comes near.
 function lineOps(a: string[], b: string[]): Op[] {
   const [old, neu] = sidesOf(a, b)
   const shorter = Math.min(a.length, b.length)

@@ -868,6 +868,26 @@ async function diffsMatchGit(): Promise<void> {
     if (!unifiedDiff(diffTrees(before, after)).equals(theirs)) blocks.push(run)
   }
   eq('ten tree pairs of block edits diff as git diffs them', blocks, [])
+  // A run of 101 added lines that could end at any of more than 101 places:
+  // git weighs places up to 100 lines above the lowest, and here the one
+  // exactly 100 above wins.
+  const unit = Array.from({ length: 101 }, (_, i) => (i === 1 ? 'x' : '    x'))
+  const short = new Map([['far.py', asFile([...unit, ...unit, ...unit, 'end'])]])
+  const long = new Map([['far.py', asFile([...unit, ...unit, ...unit, ...unit, 'end'])]])
+  eq(
+    'a run that can end at more than 101 places ends where git ends it',
+    unifiedDiff(diffTrees(short, long)).equals(await gitDiff(short, long)),
+    true,
+  )
+  // A file reordered end to end needs more edits than the search makes
+  // before it gives up, so every line reads as changed.
+  const forward = Array.from({ length: 10000 }, (_, i) => `line ${String(i)}`)
+  const reversed = new Map([['r.txt', asFile([...forward].reverse())]])
+  const changed = unifiedDiff(diffTrees(new Map([['r.txt', asFile(forward)]]), reversed))
+    .toString()
+    .split('\n')
+    .filter((line) => /^[-+]line /.test(line)).length
+  eq('a file reversed end to end reads as every line changed', changed, 20000)
 }
 
 // What used to answer fixed or missing, each now read off the rows the fake
