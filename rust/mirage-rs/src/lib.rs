@@ -4,6 +4,7 @@ mod compress;
 mod digest;
 mod generated;
 mod grep;
+mod printf;
 mod regex;
 mod sort;
 mod utf8;
@@ -269,6 +270,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "compress" => compress::open(config),
         "digest" => digest::open(config),
         "grep" => grep::open(config),
+        "printf" => printf::open(config),
         "sort" => sort::open(config),
         "wc" => wc::open(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),

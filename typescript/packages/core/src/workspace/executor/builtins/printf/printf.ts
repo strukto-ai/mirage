@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { quoteText } from '../../../../commands/quote.ts'
 import { usageHint } from '../../../../commands/spec/usage.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { concat } from '../../../../utils/bytes.ts'
@@ -20,7 +19,7 @@ import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -87,8 +86,8 @@ export const HELP =
  * escapes (including `\u`/`\U`) interpreted once in the same scan. When
  * arguments remain after one pass the format is reused until they are
  * exhausted; a missing argument renders as the empty string / `0`.
- * Integers wrap at 64 bits; `%a` formats at IEEE double precision. The
- * conversion engine itself lives in `format.ts`.
+ * Integers saturate at 64-bit limits; negative unsigned values wrap. `%a`
+ * formats at IEEE double precision. The shared Rust stream owns conversions.
  *
  * With `-v NAME` the formatted text is stored in the shell variable
  * `NAME` (or the array element `NAME[idx]`) instead of written to
@@ -107,6 +106,7 @@ export async function handlePrintf(
   args: string[],
   session: SessionState,
   view?: SessionView,
+  signal?: AbortSignal,
 ): Promise<Result> {
   const program = isProgramInvocation(session)
   let target: string | null = null
@@ -165,17 +165,18 @@ export async function handlePrintf(
     if (program) return fail('printf', `printf: missing operand\n${usageHint('printf')}\n`)
     return fail('printf', USAGE, 2)
   }
-  const [output, messages, failed, excess] = runPrintf(
+  const [output, stderr, exitCode] = await runPrintf(
     args[0] ?? '',
     args.slice(1),
     program,
     program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT'),
+    utf8Locale(envSnapshot(session)),
+    signal,
   )
-  let errors = messages.map((message) => (program ? '' : 'bash: ') + message).join('')
-  const exitCode = failed ? 1 : 0
+  const errors = decodeText(stderr)
   if (target !== null && parsed !== null) {
     const base = parsed[1] ?? ''
-    const text = decodeText(encodeText(output)).split('\0', 1)[0] ?? ''
+    const text = decodeText(output).split('\0', 1)[0] ?? ''
     let status: 'ok' | 'denied' | 'readonly' | 'subscript'
     try {
       status = await assignElement(session, view ?? null, base, parsed[2] ?? null, text)
@@ -195,13 +196,7 @@ export async function handlePrintf(
     if (status !== 'ok') return fail('printf', errors + `bash: ${target}: bad array subscript\n`)
     return result('printf', { exitCode, stderr: errors })
   }
-  if (excess !== null && program) {
-    // coreutils printf names the first argument a format that takes none
-    // left over, where bash's builtin drops them silently; a warning, so the
-    // status stays the format's own.
-    errors += `printf: warning: ignoring excess arguments, starting with '${quoteText(excess)}'\n`
-  }
-  return result('printf', { out: encodeText(output), exitCode, stderr: errors })
+  return result('printf', { out: output, exitCode, stderr: errors })
 }
 
 /** The `printf` arm. */
@@ -210,5 +205,6 @@ export async function printfBuiltin(call: BuiltinCall): Promise<Result> {
     [...call.argv.args],
     call.context.session,
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    call.signal,
   )
 }

@@ -1,0 +1,229 @@
+{
+  "cases": [
+    {
+      "id": "printf_shared_builtin_nan_signs",
+      "seq": 992600,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '%+.1f|% .1f|%+.1e|%+.1g|%+.1a\\n' nan nan nan nan nan",
+      "expect": {
+        "exit": 0,
+        "stdout": "+nan| nan|+nan|+nan|+nan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_nan_signs",
+      "seq": 992601,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env printf '%+.1f|% .1f|%+.1e|%+.1g|%+.1a\\n' nan nan nan nan nan",
+      "expect": {
+        "exit": 0,
+        "stdout": "+nan| nan|+nan|+nan|+nan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_builtin_negative_specials",
+      "seq": 992602,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '%+.1f|%+.1f|%+.1f\\n' -nan -0 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "-nan|-0.0|+0.0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_negative_specials",
+      "seq": 992603,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env printf '%+.1f|%+.1f|%+.1f\\n' -nan -0 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "-nan|-0.0|+0.0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_builtin_byte_fields",
+      "seq": 992604,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '[%c][%.1s][%4s]\\n' é é é | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 5b c3 5d 5b c3 5d 5b 20 20 c3 a9 5d 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_byte_fields",
+      "seq": 992605,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env printf '[%c][%.1s][%4s]\\n' é é é | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 5b c3 5d 5b c3 5d 5b 20 20 c3 a9 5d 0a\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_builtin_hex_carry",
+      "seq": 992606,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '%.0a|%.1a|%+.1a\\n' 0x1.ffp0 0x1.ffp0 -nan",
+      "expect": {
+        "exit": 0,
+        "stdout": "0x2p+0|0x2.0p+0|-nan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_hex_carry",
+      "seq": 992607,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env printf '%.0a|%.1a|%+.1a\\n' 0x1.ffp0 0x1.ffp0 -nan",
+      "expect": {
+        "exit": 0,
+        "stdout": "0x2p+0|0x2.0p+0|-nan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_builtin_c_characters",
+      "seq": 992608,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "LC_ALL=C printf '%d|%d\\n' \"'é\" $'\\x27\\xff'",
+      "expect": {
+        "exit": 0,
+        "stdout": "195|255\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_builtin_utf8_characters",
+      "seq": 992609,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "LC_ALL=C.UTF-8 printf '%d|%d\\n' \"'é\" $'\\x27\\xff'",
+      "expect": {
+        "exit": 0,
+        "stdout": "233|255\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_c_characters",
+      "seq": 992610,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env LC_ALL=C POSIXLY_CORRECT= printf '%d|%d\\n' \"'é\" $'\\x27\\xff'",
+      "expect": {
+        "exit": 0,
+        "stdout": "195|255\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_utf8_characters",
+      "seq": 992611,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env LC_ALL=C.UTF-8 POSIXLY_CORRECT= printf '%d|%d\\n' \"'é\" $'\\x27\\xff'",
+      "expect": {
+        "exit": 0,
+        "stdout": "233|255\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_diagnostic_escape",
+      "seq": 992612,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env LC_ALL=C printf '%d' $'\\e'",
+      "expect": {
+        "exit": 1,
+        "stdout": "0",
+        "stderr": "printf: '\\033': expected a numeric value\n"
+      }
+    },
+    {
+      "id": "printf_shared_builtin_special_padding",
+      "seq": 992613,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '[%+010f]|[% 010f]|[%-010f]\\n' inf nan -inf",
+      "expect": {
+        "exit": 0,
+        "stdout": "[      +inf]|[       nan]|[-inf      ]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "printf_shared_program_special_padding",
+      "seq": 992614,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "env printf '[%+010f]|[% 010f]|[%-010f]\\n' inf nan -inf",
+      "expect": {
+        "exit": 0,
+        "stdout": "[      +inf]|[       nan]|[-inf      ]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

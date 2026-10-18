@@ -1,15 +1,13 @@
+import asyncio
+
 import pytest
 
-from mirage.shell.bytes import encode_text
+from mirage.io.yield_budget import YieldBudget
+from mirage.rs.stream import open_stream
 from mirage.workspace.executor.builtins.printf.format import run_printf
 
-# GNU pins taken in debian:stable-slim. `handle_printf` collapses the
-# message list into one stderr blob and a status, so the list itself —
-# order and count — is only observable here.
+pytestmark = pytest.mark.asyncio
 
-# bash 5.2.37 through `od -An -tx1`: the format reads \NNN, one to three
-# octal digits, and a %b argument also reads \0NNN, a leading 0 and up
-# to three more.
 _OCTAL_PINS = [
     ("\\0003", "00 33", "03"),
     ("\\0", "00", "00"),
@@ -24,10 +22,6 @@ _OCTAL_PINS = [
     ("\\0400", "20 30", "00"),
 ]
 
-# bash 5.2.37 under LC_ALL=C.UTF-8 through `od -An -tx1`: the format and
-# a %b argument UTF-8-encode \u and \U values, so a surrogate half
-# and a value past Unicode come out UTF-8-shaped, and 0x80000000 and
-# past come out as nothing.
 _UNICODE_PINS = [
     ("\\uD800", "ed a0 80"),
     ("\\uDC80", "ed b2 80"),
@@ -44,173 +38,90 @@ _UNICODE_PINS = [
 ]
 
 
-def _od(text: str) -> str:
-    return encode_text(text).hex(" ")
-
-
-def test_errors_come_back_as_a_list_in_argument_order():
-    out, messages, failed, _ = run_printf("%d %d\n", ["abc", "def"])
-    assert out == "0 0\n"
-    assert messages == [
-        "printf: abc: invalid number\n",
-        "printf: def: invalid number\n",
-    ]
-    assert failed
-
-
-def test_a_cycle_consuming_nothing_ends_the_reuse():
-    # `a%%b` has no conversion, so the first cycle consumes no argument
-    # and the excess args are dropped rather than looping forever; the
-    # first one dropped comes back for coreutils' warning.
-    assert run_printf("a%%b\n", ["x", "y", "z"]) == ("a%b\n", [], False, "x")
-
-
-def test_empty_format_drops_every_argument():
-    assert run_printf("", ["a", "b", "c"]) == ("", [], False, "a")
-
-
-def test_a_reused_format_drops_nothing():
-    assert run_printf("%s-%s\n", ["a", "b", "c"]) == (
-        "a-b\nc-\n",
-        [],
+@pytest.mark.parametrize("escape,format_hex,argument_hex", _OCTAL_PINS)
+async def test_octal_byte_grammars(escape, format_hex, argument_hex):
+    assert await run_printf(escape, []) == (
+        bytes.fromhex(format_hex),
+        b"",
+        0,
         False,
-        None,
     )
-
-
-def test_c_in_the_format_drops_nothing_to_warn_about():
-    assert run_printf("x\\c", ["a"]) == ("x", [], False, None)
-
-
-def test_stop_from_b_suppresses_the_rest_of_the_format():
-    assert run_printf("[%b][%s]\n", ["ab\\ccd", "tail"]) == (
-        "[ab",
-        [],
+    assert await run_printf("%b", [escape]) == (
+        bytes.fromhex(argument_hex),
+        b"",
+        0,
         False,
-        None,
     )
-
-
-def test_stop_from_b_on_a_later_cycle_ends_every_cycle():
-    assert run_printf("<%b>", ["one", "tw\\co", "three"]) == (
-        "<one><tw",
-        [],
-        False,
-        None,
-    )
-
-
-@pytest.mark.parametrize("escape,in_format,in_b_arg", _OCTAL_PINS)
-def test_octal_reads_three_digits_in_the_format_and_zero_plus_three_in_b(
-    escape, in_format, in_b_arg
-):
-    fmt_out, fmt_messages, fmt_failed, _ = run_printf(escape, [])
-    b_out, b_messages, b_failed, _ = run_printf("%b", [escape])
-    assert (_od(fmt_out), fmt_messages, fmt_failed) == (in_format, [], False)
-    assert (_od(b_out), b_messages, b_failed) == (in_b_arg, [], False)
 
 
 @pytest.mark.parametrize("escape,expected", _UNICODE_PINS)
-def test_unicode_escapes_are_utf8_encoded(escape, expected):
-    fmt_out, fmt_messages, fmt_failed, _ = run_printf(escape, [])
-    b_out, b_messages, b_failed, _ = run_printf("%b", [escape])
-    assert (_od(fmt_out), fmt_messages, fmt_failed) == (expected, [], False)
-    assert (_od(b_out), b_messages, b_failed) == (expected, [], False)
+async def test_unicode_escapes_preserve_raw_bytes(escape, expected):
+    for fmt, args in [(escape, []), ("%b", [escape])]:
+        assert await run_printf(fmt, args) == (
+            bytes.fromhex(expected),
+            b"",
+            0,
+            False,
+        )
 
 
-_HEX_WARNING = "printf: missing hex digit for \\x\n"
-
-_ABC_INVALID = "printf: abc: invalid number\n"
-
-_DEF_INVALID = "printf: def: invalid number\n"
-
-# bash 5.2.37: an escape with no hex digit after it is written as it
-# stands and warns on stderr, in the format and in a %b argument alike,
-# and the status stays 0.
-_MISSING_DIGIT_PINS = [
-    ("\\x|", [_HEX_WARNING]),
-    ("\\xg", [_HEX_WARNING]),
-    ("\\x", [_HEX_WARNING]),
-    (
-        "\\u|\\U|",
-        [
-            "printf: missing unicode digit for \\u\n",
-            "printf: missing unicode digit for \\U\n",
-        ],
-    ),
-]
+@pytest.mark.parametrize("program", [False, True])
+async def test_signed_special_values_and_hex_carry(program):
+    assert await run_printf(
+        "%+.1f|%+.1a|%.0a|%.1a|%.0f",
+        ["nan", "-nan", "0x1.ffp0", "0x1.ffp0", "-0"],
+        program,
+    ) == (b"+nan|-nan|0x2p+0|0x2.0p+0|-0", b"", 0, False)
 
 
-@pytest.mark.parametrize("escapes,warnings", _MISSING_DIGIT_PINS)
-def test_an_escape_without_digits_warns_and_does_not_fail(escapes, warnings):
-    assert run_printf(escapes, []) == (escapes, warnings, False, None)
-    assert run_printf("%b", [escapes]) == (escapes, warnings, False, None)
-
-
-def test_warnings_and_invalid_numbers_come_back_in_scan_order():
-    warning_first = run_printf("\\x%d\n", ["abc"])
-    error_first = run_printf("%d\\x\n", ["abc"])
-    b_after_error = run_printf("%d%b\n", ["abc", "\\x"])
-    assert warning_first == (
-        "\\x0\n",
-        [_HEX_WARNING, _ABC_INVALID],
+async def test_argument_stop_retains_diagnostics_and_resets_status():
+    assert await run_printf("%d%b%d", ["bad", "x\\cy", "unread"]) == (
+        b"0x",
+        b"bash: printf: bad: invalid number\n",
+        0,
         True,
-        None,
     )
-    assert error_first == ("0\\x\n", [_ABC_INVALID, _HEX_WARNING], True, None)
-    assert b_after_error == (
-        "0\\x\n",
-        [_ABC_INVALID, _HEX_WARNING],
+
+
+async def test_format_stop_retains_failure():
+    assert await run_printf("%d\\c%d", ["bad", "unread"]) == (
+        b"0",
+        b"bash: printf: bad: invalid number\n",
+        1,
         True,
-        None,
     )
 
 
-def test_a_reused_format_warns_once_per_pass():
-    two_passes = run_printf("\\x%s\n", ["a", "b"])
-    one_pass = run_printf("\\x\n", ["a", "b"])
-    assert two_passes == (
-        "\\xa\n\\xb\n",
-        [_HEX_WARNING, _HEX_WARNING],
-        False,
-        None,
-    )
-    assert one_pass == ("\\x\n", [_HEX_WARNING], False, "a")
+async def test_long_arguments_cross_host_chunks_without_losing_bytes():
+    raw = "a" * 4095 + "𐂀" + "\udcff" + "b" * 17000
+    out, err, status, stopped = await run_printf("%s", [raw])
+    assert out == raw.encode("utf-8", "surrogateescape")
+    assert (err, status, stopped) == (b"", 0, False)
 
 
-def test_b_warns_up_to_its_stop_and_before_its_precision():
-    assert run_printf("%b\n", ["a\\cb\\x"]) == ("a", [], False, None)
-    assert run_printf("%.1b\n", ["\\xy"]) == (
-        "\\\n",
-        [_HEX_WARNING],
-        False,
-        None,
-    )
+async def test_large_width_and_precision_are_cancellable():
+    for fmt in ["%2147483647s", "%.2147483647f", "%.2147483647d"]:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(run_printf(fmt, ["1"]), timeout=0.03)
+    assert await run_printf("%s", ["after"]) == (b"after", b"", 0, False)
 
 
-# bash 5.2.37: %b's \c returns from printf with the status it has so
-# far, before the end of the builtin folds an invalid number into it.
-def test_a_stop_from_b_reports_no_failure_after_an_invalid_number():
-    assert run_printf("%d%b", ["abc", "\\c"]) == (
-        "0",
-        [_ABC_INVALID],
-        False,
-        None,
-    )
-    mid_argument = run_printf("%d%b\n", ["abc", "x\\cy"])
-    later_pass = run_printf("%d%b", ["abc", "x", "def", "\\c"])
-    assert mid_argument == ("0x", [_ABC_INVALID], False, None)
-    assert later_pass == ("0x0", [_ABC_INVALID, _DEF_INVALID], False, None)
+async def test_cancels_a_preloaded_numeric_scan():
+    stream = open_stream("printf", {"mode": "builtin", "argument_count": 1})
+    stream.feed_input(0, b"%d")
+    stream.end_input(0)
+    raw = b"0" * (1024 * 1024) + b"7"
+    for at in range(0, len(raw), 16384):
+        stream.feed_input(1, raw[at : at + 16384])
+    stream.end_input(1)
+    assert stream.finish() == b""
 
+    async def drain():
+        budget = YieldBudget()
+        while stream.busy():
+            stream.drain()
+            await budget.run()
 
-def test_an_invalid_number_after_the_stop_is_never_read():
-    assert run_printf("%b%d", ["\\c", "abc"]) == ("", [], False, None)
-
-
-def test_an_invalid_number_without_a_stop_still_fails():
-    assert run_printf("%d%b", ["abc", "x"]) == (
-        "0x",
-        [_ABC_INVALID],
-        True,
-        None,
-    )
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(drain(), timeout=0.02)
+    assert stream.busy()

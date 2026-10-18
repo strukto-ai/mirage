@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { applyPad } from '../../workspace/executor/builtins/printf/format.ts'
+import { applyPad } from './value.ts'
 import { readEscape } from './lexer.ts'
 import { AwkRuntimeError } from './errors.ts'
 import { compileEre, searchFrom, splitPattern } from './regex.ts'

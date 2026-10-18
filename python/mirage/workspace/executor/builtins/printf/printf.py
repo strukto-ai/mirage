@@ -14,14 +14,13 @@
 
 import re
 
-from mirage.commands.quote import quote_text
 from mirage.commands.spec.usage import usage_hint
 from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
@@ -104,9 +103,9 @@ async def handle_printf(
     backslash escapes (including ``\\u``/``\\U``) interpreted once in the
     same scan. When arguments remain after one pass the format is reused
     until they are exhausted; a missing argument renders as the empty
-    string / ``0``. Integers wrap at 64 bits; ``%a`` formats at IEEE
-    double precision. The conversion engine itself lives in
-    ``printf_format``.
+    string / ``0``. Integers saturate at 64-bit limits; negative unsigned
+    values wrap. ``%a`` formats at IEEE double precision. The shared Rust
+    stream owns the conversions.
 
     With ``-v NAME`` the formatted text is stored in the shell variable
     ``NAME`` (or the array element ``NAME[idx]``) instead of written to
@@ -196,19 +195,17 @@ async def handle_printf(
                 "printf", f"printf: missing operand\n{usage_hint('printf')}\n"
             )
         return fail("printf", _USAGE, 2)
-    output, messages, failed, excess = run_printf(
+    output, stderr, exit_code, _stopped = await run_printf(
         args[0],
         args[1:],
         program,
         program and "POSIXLY_CORRECT" in env_snapshot(session),
+        utf8_locale(env_snapshot(session)),
     )
-    errors = "".join(
-        ("" if program else "bash: ") + message for message in messages
-    )
-    exit_code = 1 if failed else 0
+    errors = decode_text(stderr)
     if target is not None and parsed is not None:
         base, subscript = parsed.group(1), parsed.group(2)
-        text = decode_text(encode_text(output)).partition("\0")[0]
+        text = decode_text(output).partition("\0")[0]
         try:
             status = await assign_element(session, view, base, subscript, text)
         except PolicyDenied as exc:
@@ -232,15 +229,7 @@ async def handle_printf(
                 "printf", errors + f"bash: {target}: bad array subscript\n"
             )
         return result("printf", exit_code=exit_code, stderr=errors)
-    if excess is not None and program:
-        # coreutils printf names the first argument a format that takes
-        # none left over, where bash's builtin drops them silently; a
-        # warning, so the status stays the format's own.
-        errors += (
-            "printf: warning: ignoring excess arguments, "
-            f"starting with '{quote_text(excess)}'\n"
-        )
-    return result("printf", encode_text(output), exit_code, errors)
+    return result("printf", output, exit_code, errors)
 
 
 async def printf_builtin(call: BuiltinCall) -> Result:

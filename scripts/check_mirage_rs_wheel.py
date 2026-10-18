@@ -150,6 +150,29 @@ def main() -> None:
         merged = settle(merge, merged + merge.end_input(index))
     checks["merge"] = (settle(merge, merged + merge.finish()), b"a\nb\nc\nd\n")
 
+    for mode in ("builtin", "program"):
+        printf = stream("printf", {"mode": mode, "argument_count": 5})
+        for index, value in enumerate(
+            (b"%+.1f|%+.1a|%s|%d%b", b"nan", b"-nan", b"\xff", b"bad", b"\\c")
+        ):
+            for byte in value:
+                printf.feed_input(index, bytes([byte]))
+            printf.end_input(index)
+        checks[f"printf {mode} output"] = (
+            settle(printf, printf.finish()),
+            b"+nan|-nan|\xff|0",
+        )
+        checks[f"printf {mode} diagnostic"] = (
+            printf.take_stderr(),
+            b"printf: 'bad': expected a numeric value\n"
+            if mode == "program"
+            else b"bash: printf: bad: invalid number\n",
+        )
+        checks[f"printf {mode} stop"] = (
+            (printf.status(), printf.done()),
+            (0, True),
+        )
+
     failed = [name for name, (got, want) in checks.items() if got != want]
     for name, (got, want) in checks.items():
         status = "FAIL" if name in failed else "ok"

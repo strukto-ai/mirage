@@ -40,6 +40,10 @@ import quotingSyntax from '../bash/syntax/quoting.json'
 import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
 import processStreams from '../bash/procsub/stream.json'
+import printfBasic from '../bash/printf/basic.json'
+import printfAssignments from '../bash/printf/vflag.json'
+import printfShared from '../bash/printf/shared.json'
+import printfOptions from '../unix/printf/unknown_option.json'
 
 export interface Outcome {
   name: string
@@ -89,6 +93,10 @@ function battery(): [string, Check][] {
   const files = [
     traps,
     processStreams,
+    printfBasic,
+    printfAssignments,
+    printfShared,
+    printfOptions,
     substitutionScope,
     assignmentRedirect,
     unset,

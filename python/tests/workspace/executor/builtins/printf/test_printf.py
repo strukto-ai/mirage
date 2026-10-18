@@ -6,6 +6,7 @@ from mirage.commands.spec.help import render_help
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io.stream import materialize
 from mirage.shell.variable import VarAttr
+from mirage.types import Limit
 from mirage.workspace.executor.builtins.printf import handle_printf
 from mirage.workspace.executor.builtins.printf.printf import _HELP
 from mirage.workspace.session import SessionState
@@ -474,3 +475,18 @@ async def test_printf_v_readonly_still_fails_after_a_stop_from_b():
         b"bash: printf: abc: invalid number\nbash: R: readonly variable\n"
     )
     assert session.env["R"] == "orig"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["", "env "])
+async def test_output_limit_applies_after_formatting(prefix):
+    ws = Workspace(
+        {"/data": RAMVFS()}, command_limits={"printf": Limit(max_bytes=4)}
+    )
+    try:
+        io = await ws.shell(prefix + "printf '%s' abcdefgh")
+        assert io.stdout == b"abcd"
+        assert io.exit_code == 0
+        assert b"output truncated" in io.stderr
+    finally:
+        await ws.close()

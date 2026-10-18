@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
-import { MountMode } from '../../../../types.ts'
+import { Limit, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../fixtures/workspace_fixture.ts'
 import { SessionState } from '../../../session/session.ts'
@@ -107,3 +107,24 @@ describe('printf under a command runner', () => {
     },
   )
 })
+
+it.each(['', 'env '])(
+  'applies the command output limit after formatting for %s',
+  async (prefix) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        shellParser: await getTestParser(),
+        commandLimits: { printf: new Limit({ maxBytes: 4 }) },
+      },
+    )
+    try {
+      const io = await ws.shell(prefix + "printf '%s' abcdefgh")
+      expect(io.stdoutText).toBe('abcd')
+      expect(io.exitCode).toBe(0)
+      expect(io.stderrText).toContain('output truncated')
+    } finally {
+      await ws.close()
+    }
+  },
+)
