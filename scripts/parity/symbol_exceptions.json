@@ -130,18 +130,12 @@
   },
   "workspace/executor/redirect": {
    "typescript_only": {
-    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "runRedirects": "Extracted body wrapped by redirect ownership cleanup; Python uses a single try/finally body."
    }
   },
   "commands/builtin/generic/cmp": {
    "typescript_only": {
     "newlines": "Counts newlines in a Uint8Array, which has no count; Python's bytes.count does it."
-   }
-  },
-  "commands/builtin/generic/iconv_multibyte": {
-   "typescript_only": {
-    "logger": "An opt-in diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes."
    }
   },
   "policy/policies": {
@@ -191,7 +185,6 @@
   },
   "server/mcp/server": {
    "typescript_only": {
-    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "createMirageMcpServer": "Python's lowlevel Server takes list and call handlers, so MirageMcpServer is a class that holds the tool table and answers both. TypeScript's McpServer registers each tool itself, so a factory registers the table and returns the server."
    }
   },
@@ -205,7 +198,6 @@
   },
   "server/rpc/server": {
    "typescript_only": {
-    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
    }
   },
@@ -524,7 +516,6 @@
     "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
    "typescript_only": {
-    "logger": "A host-stderr diagnostic sink mirrors Python's module logger, whose logging.getLogger assignment the symbol gate excludes.",
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "RouteError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",

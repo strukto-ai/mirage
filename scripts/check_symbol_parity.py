@@ -40,6 +40,9 @@ class Exceptions(TypedDict, total=False):
 # JavaScript's TextEncoder/TextDecoder singletons; a Python str encodes
 # itself, so these have no counterpart to mirror.
 TS_CODECS = {"ENC", "DEC", "ENCODER", "DECODER", "encoder", "decoder"}
+# A module's diagnostic sink. Each one is built differently, so it is
+# matched by name, where python matches its logging.getLogger call.
+TS_LOGGER = "logger"
 TYPE_VARS = ("TypeVar", "ParamSpec", "TypeVarTuple")
 
 TS_DECL = re.compile(
@@ -95,7 +98,8 @@ def python_names(path: Path) -> dict[str, str]:
     Functions, classes and assignments, unpacked ones included, as
     typescript counts every top-level const. A TypeVar is skipped because
     typescript declares generics inline, a module logger because
-    typescript has none, and a dunder because it is python's own.
+    typescript_names skips its own, and a dunder because it is python's
+    own.
 
     Args:
         path (Path): the module.
@@ -136,7 +140,8 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
     """Top-level names the typescript twins of one module declare.
 
     Exported or not, since python marks the same split with a leading
-    underscore that folding drops.
+    underscore that folding drops. A module ``logger`` is skipped, as
+    python_names skips a module logger.
 
     Args:
         paths (list[Path]): the core, node and browser files for one module.
@@ -155,7 +160,7 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
                 name = part.split(":")[-1].split("=")[0].strip(" .\n")
                 if name:
                     found.add(name)
-        for name in sorted(found - TS_CODECS):
+        for name in sorted(found - TS_CODECS - {TS_LOGGER}):
             names[fold(name)] = name
     return names
 
