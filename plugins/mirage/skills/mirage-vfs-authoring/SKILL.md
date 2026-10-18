@@ -125,7 +125,7 @@ reusable package, use the supported class reference or registration path:
 
 - Python: `CONFIG_CLS` with `register_vfs`, a `mirage.vfs` package entry point,
   or a `./backend.py:ResourceVFS` reference.
-- TypeScript: `registerVfsFactory` or a Node-loadable
+- TypeScript: `registerVfs` or a Node-loadable
   `./backend.mjs:ResourceVFS` reference. Do not assume a browser can load a
   local Node module.
 
