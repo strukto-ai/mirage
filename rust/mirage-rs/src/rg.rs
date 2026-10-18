@@ -2505,7 +2505,7 @@ impl Rg {
                 data
             } else {
                 if input.record.capacity() == 0 {
-                    input.record = Vec::with_capacity(end);
+                    input.record = Vec::with_capacity(next);
                 }
                 let start = input.record.len();
                 let copied = (end - start).min(budget);
