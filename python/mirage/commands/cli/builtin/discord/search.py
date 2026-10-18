@@ -29,7 +29,7 @@ async def search(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     results = await search_guild(
         accessor,
         fl.as_str("guild") or "",

@@ -27,7 +27,7 @@ export async function edit(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await editMessage(
     accessor,
     fl.asStr('channel') ?? '',

@@ -29,7 +29,7 @@ async def poll(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     answers = fl.as_list("answer")
     result = await send_poll(
         accessor,

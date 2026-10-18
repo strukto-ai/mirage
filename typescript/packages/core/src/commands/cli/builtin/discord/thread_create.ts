@@ -27,7 +27,7 @@ export async function threadCreate(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await createThread(
     accessor,
     fl.asStr('channel') ?? '',

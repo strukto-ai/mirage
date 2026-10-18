@@ -27,7 +27,7 @@ export async function poll(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const result = await sendPoll(
     accessor,
     fl.asStr('channel') ?? '',

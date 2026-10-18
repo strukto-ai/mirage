@@ -29,7 +29,7 @@ async def read(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     messages = await fetch_recent_messages(
         accessor,
         fl.as_str("channel") or "",

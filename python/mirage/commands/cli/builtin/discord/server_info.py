@@ -29,7 +29,7 @@ async def server_info(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     guild = fl.as_str("guild") or ""
     result = await discord_get(accessor, f"/guilds/{guild}")
     out = json.dumps(

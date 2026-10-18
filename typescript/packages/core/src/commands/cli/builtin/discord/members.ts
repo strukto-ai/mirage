@@ -27,7 +27,7 @@ export async function members(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const guild = fl.asStr('guild') ?? ''
   const query = fl.asStr('query')
   const result =

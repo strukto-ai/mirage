@@ -29,7 +29,7 @@ async def edit(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     result = await edit_message(
         accessor,
         fl.as_str("channel") or "",

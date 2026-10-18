@@ -26,7 +26,7 @@ export async function serverInfo(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const guild = fl.asStr('guild') ?? ''
   const result = await accessor.transport.call('GET', `/guilds/${guild}`)
   const out: ByteSource = ENC.encode(JSON.stringify(result))

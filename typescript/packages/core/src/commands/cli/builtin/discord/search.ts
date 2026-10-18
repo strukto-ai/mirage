@@ -27,7 +27,7 @@ export async function search(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   const results = await searchGuild(
     accessor,
     fl.asStr('guild') ?? '',

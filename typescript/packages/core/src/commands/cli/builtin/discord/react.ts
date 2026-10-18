@@ -27,7 +27,7 @@ export async function react(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   await addReaction(
     accessor,
     fl.asStr('channel') ?? '',

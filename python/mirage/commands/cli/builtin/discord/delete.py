@@ -29,7 +29,7 @@ async def delete(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
+    fl = FlagView(ctx.flags, ctx.spec)
     await delete_message(
         accessor, fl.as_str("channel") or "", fl.as_str("message") or ""
     )

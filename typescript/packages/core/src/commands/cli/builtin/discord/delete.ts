@@ -27,7 +27,7 @@ export async function deleteVerb(
   _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
+  const fl = new FlagView(ctx.flags, ctx.spec)
   await deleteMessage(accessor, fl.asStr('channel') ?? '', fl.asStr('message') ?? '')
   const out: ByteSource = ENC.encode(JSON.stringify({ ok: true }))
   return [out, new IOResult()]
