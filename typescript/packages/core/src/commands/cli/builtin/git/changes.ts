@@ -535,11 +535,8 @@ export async function assembled(repo: Repo, shown: readonly StatusRow[]): Promis
     }
   }
   const rows = merge(await pairRenames(repo, staged, oids, kinds), unstaged, conflicts, untracked)
-  rows.push(
-    ...ignored
-      .sort(compareCodePoints)
-      .map((path) => ({ path, indexStatus: IGNORED, treeStatus: IGNORED, original: null })),
-  )
+  for (const path of ignored.sort(compareCodePoints))
+    rows.push({ path, indexStatus: IGNORED, treeStatus: IGNORED, original: null })
   return rows
 }
 

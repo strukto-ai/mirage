@@ -302,6 +302,7 @@ async def _rendered(
     if rows is None:
         return out
     if stdout is not None:
+        await close_quietly(stdout)
         raise ValueError(f"{name}: hands over both rows and stdout")
     io.rows = None
     items = list(rows.items)

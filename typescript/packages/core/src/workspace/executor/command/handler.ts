@@ -199,15 +199,14 @@ export async function runHandler(
 ): Promise<CommandFnResult> {
   const timeout = limit?.timeoutSeconds ?? null
   let out: CommandFnResult
+  // The rendered answer is what a caller that left abandons: a renderer that
+  // finishes late hands back output nobody reads.
+  const answer = rendered(body, opts.vfs ?? null, name)
   try {
-    out = await runWithTimeout(
-      joinOrAbort(rendered(body, opts.vfs ?? null, name), opts.signal),
-      timeout,
-      name,
-    )
+    out = await runWithTimeout(joinOrAbort(answer, opts.signal), timeout, name)
   } catch (err) {
     if (err instanceof CommandTimeoutError) opts.abort?.abort()
-    abandon(body, err, name)
+    abandon(answer, err, name)
     const drop = opts.drop
     if (drop !== undefined) {
       await drop()
@@ -270,7 +269,10 @@ async function rendered(
   const [stdout, io] = out
   const rows = io.rows
   if (rows === null) return out
-  if (stdout !== null) throw new Error(`${name}: hands over both rows and stdout`)
+  if (stdout !== null) {
+    await closeQuietly(stdout)
+    throw new Error(`${name}: hands over both rows and stdout`)
+  }
   io.rows = null
   let items = [...rows.items]
   if (vfs !== null) {

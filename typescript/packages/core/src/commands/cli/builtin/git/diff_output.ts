@@ -435,7 +435,7 @@ export async function commitDeltas(
   for (const commit of commits) {
     if (spans.has(commit.oid)) continue
     const sides = await commitSides(repo, commit, flags, recursive, root)
-    rows.push(...deltas(repo.location, sides, count))
+    for (const row of deltas(repo.location, sides, count)) rows.push(row)
     spans.set(commit.oid, [count, count + sides.length])
     count += sides.length
   }

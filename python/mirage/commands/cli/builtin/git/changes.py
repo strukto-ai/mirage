@@ -34,6 +34,7 @@ from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
+from mirage.commands.cli.builtin.git.rows import entry_path
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
@@ -301,7 +302,12 @@ def staged_state(
     repo: BaseRepo,
     entries: dict[bytes, IndexEntry],
     conflicts: set[bytes],
-) -> tuple[dict[str, str], dict[str, bytes], dict[str, int], bool]:
+) -> tuple[
+    dict[str, str],
+    dict[str, bytes],
+    dict[str, int],
+    dict[bytes, tuple[int, bytes]] | None,
+]:
     """HEAD against the index, read off the event loop.
 
     On the worker thread because reading HEAD's tree fetches objects
@@ -314,12 +320,12 @@ def staged_state(
         conflicts (set[bytes]): paths left unmerged.
 
     Returns:
-        tuple: what ``staged_letters`` returns, then whether HEAD
-            resolves to nothing yet.
+        tuple: what ``staged_letters`` returns, then HEAD's tree, None
+            when HEAD resolves to nothing yet.
     """
     head = head_entries(repo)
     staged, shas, kinds = staged_letters(head, entries, conflicts)
-    return staged, shas, kinds, head is None
+    return staged, shas, kinds, head
 
 
 def conflict_codes(
@@ -641,7 +647,7 @@ async def collect(
         show_ignored (bool): whether to report ignored files too.
     """
     state = await read_index(vfs, location.gitdir)
-    staged, shas, kinds, no_commits = await asyncio.to_thread(
+    staged, shas, kinds, head = await asyncio.to_thread(
         staged_state, repo, state.entries, set(state.conflicts)
     )
     # The walk collapses a directory holding nothing tracked into
@@ -654,7 +660,18 @@ async def collect(
     unstaged = await work_changes(vfs, location.worktree, state.entries, found)
     conflicts = conflict_codes(state.conflicts)
 
+    # The verdicts name a path as text with its undecodable bytes
+    # replaced; a row names the path itself, which is what a hide is
+    # written against.
+    originals = {
+        raw.decode("utf-8", errors="replace"): raw
+        for raw in (*state.entries, *state.conflicts, *(head or {}))
+    }
+
     def path(name: str) -> PathSpec:
+        raw = originals.get(name)
+        if raw is not None:
+            return entry_path(location, raw)
         return location.worktree.join(name.rstrip("/"))
 
     rows = [
@@ -678,4 +695,4 @@ async def collect(
     rows.extend(
         StatusRow(path(name), name, IGNORED, IGNORED) for name in found.ignored
     )
-    return rows, state, no_commits
+    return rows, state, head is None

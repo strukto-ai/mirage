@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.index import IndexEntry
+from dulwich.objects import Blob
+from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.status import parse_flags
@@ -296,3 +299,35 @@ async def test_a_directory_whose_only_tracked_file_is_hidden_reads_as_untracked(
         line = "git -C /repo status --porcelain"
         assert (await ws.shell(line, session_id="v")).stdout == b"?? dir/\n"
         assert (await ws.shell(line)).stdout == b"?? dir/new.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_a_hide_matches_an_index_name_that_is_not_utf8(repo_path: Path):
+    # The row names the path as its bytes spell it, so a hide written
+    # with the surrogate escape still matches it.
+    blob = Blob.from_string(b"x\n")
+    with Repo(str(repo_path)) as repo:
+        repo.object_store.add_object(blob)
+        index = repo.open_index()
+        index[b"\xff.txt"] = IndexEntry(
+            ctime=0,
+            mtime=0,
+            dev=0,
+            ino=0,
+            mode=0o100644,
+            uid=0,
+            gid=0,
+            size=2,
+            sha=blob.id,
+        )
+        index.write()
+    with Workspace(
+        {"/repo/": DiskVFS(root=str(repo_path))},
+        mode=MountMode.WRITE,
+        profiles={"veiled": {"paths": {"hide": ["/repo/\udcff.txt"]}}},
+    ) as ws:
+        ws.register_cli("git", GIT)
+        ws.create_session("v", profile="veiled")
+        line = "git -C /repo status --porcelain"
+        assert (await ws.shell(line, session_id="v")).stdout == b""
+        assert (await ws.shell(line)).stdout == (b'AD "\\357\\277\\275.txt"\n')
