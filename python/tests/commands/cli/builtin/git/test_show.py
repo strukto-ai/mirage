@@ -44,6 +44,7 @@ from tests.commands.cli.builtin.git.conftest import (
         ("\n", "", True, " \t\n\t \n", False, " \t"),
         ("\r\n", "", True, " \t\r\n\t \r\n", False, " \t"),
         ("\n", "", True, "", True, " \t"),
+        ("\n", "\n \t", True, "", False, ""),
     ],
     ids=[
         "body-unterminated",
@@ -61,6 +62,7 @@ from tests.commands.cli.builtin.git.conftest import (
         "leading-whitespace-lf",
         "leading-whitespace-crlf",
         "multiline-spaces",
+        "trailing-blank-line-without-newline",
     ],
 )
 @pytest.mark.parametrize("count", [1, 2])

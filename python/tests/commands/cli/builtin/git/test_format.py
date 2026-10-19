@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from time import perf_counter
+
 import pytest
 from dulwich.objects import Commit
 
@@ -115,6 +117,29 @@ def test_blank_message_lines_render_as_four_spaces(message):
         "    ",
         "    body",
     ]
+
+
+@pytest.mark.parametrize("ending", ["", "\n", "\n \t", "\n \n\t"])
+def test_display_trims_blank_edge_lines_without_changing_raw_message(ending):
+    message = f" \t\ntitle\n\nbody{ending}"
+    commit = _commit(message.encode())
+    assert message_block(commit) == ["    title", "    ", "    body"]
+    assert git_format.render_template("%B", commit, 7, None) == message
+
+
+@pytest.mark.parametrize("prefix", [False, True])
+def test_display_handles_long_whitespace_runs_in_linear_time(prefix):
+    padding = " " * 128_000
+    title = padding + "title" if prefix else "title"
+    body = "body" if prefix else "body" + padding
+    commit = _commit(f"{title}\n\n{body}".encode())
+    started = perf_counter()
+    block = message_block(commit)
+    rendered_subject = subject(commit)
+    elapsed = perf_counter() - started
+    assert block == [f"    {title}", "    ", "    body"]
+    assert rendered_subject == title
+    assert elapsed < 2.0
 
 
 def test_medium_has_gits_header_block():

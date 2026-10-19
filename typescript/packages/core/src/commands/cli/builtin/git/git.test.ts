@@ -29,7 +29,7 @@ import { GIT } from './index.ts'
 import * as gitFsModule from './fs.ts'
 import { ensureDir } from './io.ts'
 import { commitFacts, openRepo } from './repo.ts'
-import { renderTemplate, subject } from './format.ts'
+import { presetBlock, renderTemplate, subject } from './format.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -113,6 +113,15 @@ MESSAGE_CASES.push(
     prefix: '',
     continuation: true,
     blank: ' \t',
+  },
+  {
+    id: 'trailing-blank-line-without-newline',
+    ending: '\n \t',
+    hasBody: true,
+    newline: '\n',
+    prefix: '',
+    continuation: false,
+    blank: '',
   },
 )
 const messageCommits = new Map<string, string[]>()
@@ -314,6 +323,35 @@ it('reads a loose commit once when loading its facts', async () => {
   expect(facts.parents).toEqual([commits[0]])
   expect(reads).toBe(1)
 })
+
+it.each([false, true])(
+  'displays long whitespace runs in linear time: prefix=%s',
+  async (prefix) => {
+    const commits = messageCommits.get('body-unterminated')
+    assert(commits)
+    const oid = commits[1]
+    assert(oid)
+    const root = PathSpec.fromStrPath('/repo')
+    const gitdir = root.join('.git')
+    const repo = await openRepo(ws.vfs, {
+      gitdir,
+      commondir: gitdir,
+      worktree: root,
+      mountRoot: root,
+    })
+    const padding = ' '.repeat(128_000)
+    const title = prefix ? padding + 'title' : 'title'
+    const body = prefix ? 'body' : 'body' + padding
+    const commit = { ...(await commitFacts(repo, oid)), message: `${title}\n\n${body}` }
+    const started = performance.now()
+    const block = presetBlock(commit, 'medium', 7)
+    const renderedSubject = subject(commit)
+    const elapsed = performance.now() - started
+    expect(block.slice(4)).toEqual([`    ${title}`, '    ', '    body'])
+    expect(renderedSubject).toBe(title)
+    expect(elapsed).toBeLessThan(2000)
+  },
+)
 
 it('keeps parents, timestamps, offsets and identities when reading raw metadata', async () => {
   const root = PathSpec.fromStrPath('/repo')

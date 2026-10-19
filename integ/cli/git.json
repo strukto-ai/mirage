@@ -5454,6 +5454,20 @@
         "stdout": "subject=two\nbody=\nsubject=one\nbody=\nsubject=two\nbody=\nsubject=one\nbody=\nraw=two\n \t\n\r\nraw=one\n\n \t\nraw=two\n \t\n\r\nraw=one\n\n \t\nbody=|subject=two\nbody=|subject=one\nbody=|subject=two\nbody=|subject=one\ntwo\nExample (2):\n      one\n      two\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_message_trims_display_only",
+      "seq": 9970053,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && oid=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" ' \t\ntitle\n\nbody \t\n \t' | git -C /repo hash-object -t commit -w --stdin) && git -C /repo show -s --pretty=medium \"$oid\" | tail -3; git -C /repo log -1 --pretty=medium \"$oid\" | tail -3; git -C /repo show -s --format='raw=%B' \"$oid\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "    title\n    \n    body\n    title\n    \n    body\nraw= \t\ntitle\n\nbody \t\n \t\n",
+        "stderr": ""
+      }
     }
   ]
 }

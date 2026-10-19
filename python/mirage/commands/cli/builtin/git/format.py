@@ -214,6 +214,15 @@ def oneline(commit: Commit, length: int = SHORT_SHA) -> str:
     return f"{short(commit.id, length)} {subject(commit)}"
 
 
+def _trim_line(line: str) -> str:
+    """Remove Git's trailing line whitespace in one backward pass.
+
+    Args:
+        line (str): one decoded message line, without its newline.
+    """
+    return line.rstrip(" \t\r")
+
+
 def message_block(commit: Commit) -> list[str]:
     """A commit message indented the way log and show print it.
 
@@ -226,9 +235,13 @@ def message_block(commit: Commit) -> list[str]:
         commit (Commit): the commit to render.
     """
     text = commit.message.decode("utf-8", errors="replace")
-    text = re.sub(r"^(?:[ \t\r]*\n)+", "", text)
-    text = re.sub(r"(?:[ \t\r]*\n)+$", "", text)
-    return [INDENT + line.rstrip(" \t\r") for line in text.split("\n")]
+    lines = [_trim_line(line) for line in text.split("\n")]
+    start, end = 0, len(lines)
+    while start < end and not lines[start]:
+        start += 1
+    while end > start and not lines[end - 1]:
+        end -= 1
+    return [INDENT + line for line in lines[start:end]]
 
 
 def _merge_line(commit: Commit, length: int) -> list[str]:
@@ -360,11 +373,8 @@ def _subject_lines(message: str) -> list[str]:
     """
     text = re.sub(r"^(?:[ \t\r]*\n)+", "", message)
     head = re.split(r"\n[ \t\r]*\n", text, maxsplit=1)[0]
-    return [
-        part.rstrip(" \t\r")
-        for part in head.split("\n")
-        if part.rstrip(" \t\r")
-    ]
+    lines = [_trim_line(part) for part in head.split("\n")]
+    return [line for line in lines if line]
 
 
 def _subject_folded(message: str) -> str:

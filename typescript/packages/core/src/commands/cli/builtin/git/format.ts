@@ -195,6 +195,17 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
   return `${short(commit.oid, length)} ${subject(commit)}`
 }
 
+/** Remove Git's trailing line whitespace in one backward pass. */
+function trimLine(line: string): string {
+  let end = line.length
+  while (end > 0) {
+    const char = line[end - 1]
+    if (char !== ' ' && char !== '\t' && char !== '\r') break
+    end--
+  }
+  return line.slice(0, end)
+}
+
 /**
  * A commit message indented the way log and show print it.
  *
@@ -203,11 +214,12 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
  * against git 2.47.3; it is trailing whitespace on purpose.
  */
 function messageBlock(commit: CommitFacts): string[] {
-  return commit.message
-    .replace(/^(?:[ \t\r]*\n)+/, '')
-    .replace(/(?:[ \t\r]*\n)+$/, '')
-    .split('\n')
-    .map((line) => `${INDENT}${line.replace(/[ \t\r]+$/, '')}`)
+  const lines = commit.message.split('\n').map(trimLine)
+  let start = 0
+  let end = lines.length
+  while (start < end && lines[start] === '') start++
+  while (end > start && lines[end - 1] === '') end--
+  return lines.slice(start, end).map((line) => `${INDENT}${line}`)
 }
 
 /**
@@ -284,7 +296,7 @@ function subjectLines(message: string): string[] {
   const head = message.replace(/^(?:[ \t\r]*\n)+/, '').split(/\n[ \t\r]*\n/, 1)[0] ?? ''
   return head
     .split('\n')
-    .map((part) => part.replace(/[ \t\r]+$/, ''))
+    .map(trimLine)
     .filter((part) => part !== '')
 }
 
