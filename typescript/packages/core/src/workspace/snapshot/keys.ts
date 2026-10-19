@@ -28,6 +28,9 @@ export const StateKey = Object.freeze({
   NODES: 'nodes',
   CLIS: 'clis',
   WRITE: 'write',
+  PROFILES: 'profiles',
+  PROFILE: 'profile',
+  COMMAND_LIMITS: 'command_limits',
 } as const)
 
 export const MountKey = Object.freeze({

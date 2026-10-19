@@ -582,6 +582,28 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     session.processes = policies.processes
 
 
+def narrowing_of(session: SessionState) -> CompiledProfile:
+    """The narrowing a session holds, as the compiled profile ``narrow``
+    stamps back unchanged: how a recorded session's restrictions land
+    on another, the inline document and every later profile change kept.
+
+    Args:
+        session (SessionState): the session to read.
+    """
+    return CompiledProfile(
+        visibility=session.visibility,
+        policies=ProfilePolicies(
+            mount_modes=session.mount_modes,
+            commands=session.commands,
+            scripts=session.scripts,
+            command_limits=session.command_limits,
+            processes=session.processes,
+        ),
+        hide_reasons=session.hide_reasons,
+        profile=session.profile,
+    )
+
+
 def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
     """Narrow a fresh session and seed its scratch state from the profile.
 

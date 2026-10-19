@@ -43,6 +43,8 @@ from mirage.policy.profile import (
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    profile_from_dict,
+    profile_to_dict,
 )
 from mirage.policy.types import CommandRule, HideReason
 from mirage.process.config import ProcessPermissions
@@ -82,6 +84,87 @@ def test_profile_from_dict_regroups_paths_and_vars():
     }
     assert p.paths == PathsBlock(hide=("/repo/.env", "*.pem"))
     assert p.vars == VarsBlock(hide=("AWS_*",))
+
+
+# The document a snapshot carries, as both hosts write it: profile.test.ts
+# holds the same literal, so either host reads what the other wrote.
+DOCUMENT = {
+    "cwd": "/repo",
+    "env": {"PAGER": "cat"},
+    "vars": {"hide": ["TOKEN", "AWS_*"]},
+    "policy": {
+        "pre_command": [
+            {
+                "script": {
+                    "source": "print()",
+                    "language": "python",
+                    "module": False,
+                },
+                "runtime": {
+                    "name": "monty",
+                    "config": {"auto_load_from_imports": True},
+                },
+            }
+        ]
+    },
+    "command_limits": {
+        "cat": {
+            "max_bytes": 10,
+            "max_lines": None,
+            "timeout_seconds": None,
+            "on_exceed": "truncate",
+        }
+    },
+    "processes": {"list": "workspace", "kill": "workspace", "max": None},
+    "mounts": {
+        "/repo": {
+            "mode": "read",
+            "paths": {
+                "hide": ["/repo/.env"],
+                "show": {"/repo/.env.example": None},
+                "reasons": [],
+            },
+            "commands": {
+                "ask": [
+                    {"reason": "sign-off", "commands": {"git push": ["/repo"]}}
+                ],
+                "deny": [
+                    {"reason": "denied by policy", "commands": ["git rebase"]}
+                ],
+            },
+        },
+        "/scratch": {"mode": "exec"},
+    },
+    "paths": {
+        "hide": ["/repo/secrets", "*.pem"],
+        "show": {"/repo/secrets/public": "read"},
+        "reasons": [{"patterns": ["*.pem"], "reason": "keys"}],
+    },
+    "commands": {
+        "ask": [{"reason": "shared", "commands": {"rm": ["/scratch/*"]}}],
+        "deny": [
+            {"reason": "sealed", "paths": ["/repo/sealed"]},
+            {"reason": "denied by policy", "commands": ["curl"]},
+        ],
+        "allow": ["ls", "cat", "git push", "rm"],
+    },
+}
+
+
+def test_profile_to_dict_writes_the_document_it_parses_from():
+    assert profile_to_dict(profile_from_dict(DOCUMENT)) == DOCUMENT
+    # A rule naming commands beside paths, which the document cannot
+    # spell, is written one command per rule and admits the same lines.
+    rule = CommandRule(reason="r", commands=("rm", "mv"), paths=("/a",))
+    profile = SessionProfile(commands=CommandsBlock(deny=(rule,)))
+    assert profile_from_dict(profile_to_dict(profile)).commands == (
+        CommandsBlock(
+            deny=(
+                CommandRule(reason="r", commands=("rm",), paths=("/a",)),
+                CommandRule(reason="r", commands=("mv",), paths=("/a",)),
+            )
+        )
+    )
 
 
 def test_profile_unsaid_fields_are_none_so_a_reader_can_tell():

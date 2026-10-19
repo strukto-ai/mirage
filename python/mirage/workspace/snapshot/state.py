@@ -31,6 +31,7 @@ from mirage.core.disk.utils import open_regular
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
 from mirage.policy.policies import Policies
+from mirage.policy.profile import SessionProfile, profile_to_dict
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     KILLED_OUTCOME,
@@ -70,7 +71,7 @@ from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.resolve import narrow
+from mirage.workspace.session.resolve import narrow, narrowing_of
 from mirage.workspace.session.session import (
     SessionState,
     vars_from_fields,
@@ -111,6 +112,8 @@ class WorkspaceLike(Protocol):
     _implicit_root: bool
     _write_default: WritePolicy
     _documents: Documents
+    _profiles: dict[str, SessionProfile]
+    _default_profile_name: str | None
 
     @property
     def registry(self) -> MountRegistry: ...
@@ -349,6 +352,17 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.NODES: {
             path: meta.to_fields() for path, meta in ws.namespace.nodes.items()
         },
+        # The profile table and the limits are what every session here
+        # runs under: a load built without them ran each one unconfined.
+        StateKey.PROFILES: {
+            name: profile_to_dict(profile)
+            for name, profile in ws._profiles.items()
+        },
+        StateKey.PROFILE: ws._default_profile_name,
+        StateKey.COMMAND_LIMITS: {
+            name: limit.model_dump()
+            for name, limit in ws.registry.command_limits.items()
+        },
     }
 
 
@@ -549,7 +563,11 @@ def build_mount_args(
 
 
 async def apply_state_dict(
-    ws: WorkspaceLike, state: dict[str, Any], *, replace_cache: bool = False
+    ws: WorkspaceLike,
+    state: dict[str, Any],
+    *,
+    replace_cache: bool = False,
+    built_for_state: bool = False,
 ) -> None:
     """Restore post-construction state into an already-built Workspace.
 
@@ -577,9 +595,16 @@ async def apply_state_dict(
             callers used to clear before calling, and a refused
             checkout then still sent every cached read back to an
             origin that may have moved.
+        built_for_state (bool): the workspace was just built from this
+            state, under its profile table, and has run nothing: each
+            session then lands the narrowing its table recorded, as a
+            stored record hydrates. A checkout onto a running workspace
+            keeps its own sessions' narrowing.
     """
     check_format_version(state)
-    sessions, seed_vars = await _gate_restored_state(ws, state)
+    sessions, seed_vars = await _gate_restored_state(
+        ws, state, built_for_state
+    )
     # A snapshot holds no document bindings, so a load into a live
     # workspace drops its own: one left in place would shadow a file the
     # snapshot restores at the same path.
@@ -673,7 +698,7 @@ async def _restore_nodes(ws: WorkspaceLike, state: dict[str, Any]) -> None:
 
 
 async def _gate_restored_state(
-    ws: WorkspaceLike, state: dict[str, Any]
+    ws: WorkspaceLike, state: dict[str, Any], built_for_state: bool = False
 ) -> RestoredEnv:
     """Vet every env input the snapshot carries before any of it lands.
 
@@ -685,17 +710,20 @@ async def _gate_restored_state(
     template is gated under the id the restore makes the default
     session, which is the session a live write of it would land in.
 
-    Each table is judged under the policy the target gives its
-    session, never the one the snapshot's own profile compiled, which
-    was the source deployment's and does not land: the live session's
-    for an id the target already has, and the default profile's for
-    one the restore will create, which is what ``script_of`` answers
-    for an id the manager does not know and the profile
-    ``_restore_sessions`` then puts the created session under.
+    On a checkout each table is judged under the policy the target
+    gives its session, never the one the snapshot's own profile
+    compiled, which was the source deployment's and does not land: the
+    live session's for an id the target already has, and the default
+    profile's for one the restore will create, which is what
+    ``script_of`` answers for an id the manager does not know and the
+    profile ``_restore_sessions`` then puts the created session under.
+    A workspace built for the state seats every table's own narrowing
+    first, so each is judged under the policy it then runs under.
 
     Args:
         ws (WorkspaceLike): the target workspace.
         state (dict[str, Any]): the snapshot state.
+        built_for_state (bool): see ``apply_state_dict``.
 
     Returns:
         The parsed session tables, and the env template or None when
@@ -705,6 +733,13 @@ async def _gate_restored_state(
         SessionState.from_dict(s_data)
         for s_data in state.get(StateKey.SESSIONS, [])
     ]
+    if built_for_state:
+        for fields in sessions:
+            try:
+                session = ws._session_mgr.create(fields.session_id)
+            except ValueError:
+                session = ws._session_mgr.get(fields.session_id)
+            narrow(session, narrowing_of(fields))
     for fields in sessions:
         await gate_restored_vars(ws.policies, fields.session_id, fields.vars)
     seed = state.get(StateKey.ENV)
@@ -740,9 +775,10 @@ async def _restore_sessions(
             try:
                 session = ws._session_mgr.create(sid)
             except ValueError:
-                # The session already exists live (checkout on a
-                # running workspace): the restored state wins, matching
-                # the replace_from_snapshot contract below.
+                # The session already exists, live on a running
+                # workspace or seated by the gate on one built for the
+                # state: the restored state wins, matching the
+                # replace_from_snapshot contract below.
                 session = ws._session_mgr.get(sid)
             else:
                 # A session the restore creates is one created without

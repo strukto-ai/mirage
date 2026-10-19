@@ -38,7 +38,7 @@ import { secretStr } from '../vfs/secrets.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
-import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../types.ts'
+import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { VERSION } from '../version.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import {
@@ -314,6 +314,46 @@ describe('Workspace.copy', () => {
     } finally {
       await cp.close()
       await ws.close()
+    }
+  })
+
+  // A load built its workspace with no profile table: every restored
+  // session lost its hides and rules, and one created afterwards ran
+  // unconfined. Each session now lands as its table recorded it, an
+  // inline document included, and the table and the limits are the loaded
+  // workspace's own. Mirrors the Python test of the same name.
+  it('load keeps inline documents, limits and the default profile', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          default: { commands: { deny: [{ reason: 'denied by policy', commands: ['rm'] }] } },
+          ro: { paths: { hide: ['/data/secrets'] } },
+        },
+        commandLimits: { cat: new Limit({ maxBytes: 2 }) },
+      },
+    )
+    let tar: Uint8Array
+    try {
+      expect((await ws.shell('mkdir /data/secrets; echo hello > /data/a')).exitCode).toBe(0)
+      ws.createSession('agent', { profile: 'ro', permissions: { paths: { hide: ['/data/a'] } } })
+      tar = await ws.snapshot()
+    } finally {
+      await ws.close()
+    }
+    const loaded = await Workspace.load(tar, { shellParser: parser })
+    try {
+      const listed = await loaded.shell('ls /data', { sessionId: 'agent' })
+      expect([listed.exitCode, new TextDecoder().decode(listed.stdout)]).toEqual([0, ''])
+      expect(loaded.getSession('agent').profile).toBe('ro')
+      const capped = await loaded.shell('cat /data/a')
+      expect(new TextDecoder().decode(capped.stdout)).toBe('he')
+      loaded.createSession('later')
+      expect((await loaded.shell('rm /data/a', { sessionId: 'later' })).exitCode).toBe(126)
+    } finally {
+      await loaded.close()
     }
   })
 })

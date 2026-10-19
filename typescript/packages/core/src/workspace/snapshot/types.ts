@@ -150,4 +150,12 @@ export interface WorkspaceStateDict {
    * Optional for snapshots that predate the env plane.
    */
   env?: VarFields
+  /**
+   * The profile table (`profileToDict` documents), its default profile's
+   * name and the workspace's command limits, which a load builds the
+   * workspace under. Optional for snapshots that predate them.
+   */
+  profiles?: Record<string, Record<string, unknown>>
+  profile?: string | null
+  command_limits?: Record<string, unknown>
 }

@@ -465,6 +465,28 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
 }
 
 /**
+ * The narrowing a session holds, as the compiled profile `narrow` stamps
+ * back unchanged: how a recorded session's restrictions land on another,
+ * the inline document and every later profile change kept. Mirrors
+ * Python `narrowing_of`.
+ */
+export function narrowingOf(session: SessionState): CompiledProfile {
+  return {
+    setup: { env: null, cwd: null },
+    visibility: session.visibility,
+    policies: {
+      mountModes: session.mountModes,
+      commands: session.commands,
+      scripts: session.scripts,
+      commandLimits: session.commandLimits,
+      processes: session.processes,
+    },
+    hideReasons: session.hideReasons,
+    profile: session.profile,
+  }
+}
+
+/**
  * Narrow a fresh session and seed its scratch state from the profile.
  * A profile's env is a *process* environment, the same shape
  * `ws.env = {...}` speaks, so every name in it is exported: seeding
