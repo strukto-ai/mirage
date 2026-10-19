@@ -12,6 +12,7 @@ permissions:
       - scripts/gen_unicode_classes.py
       - scripts/gen_rust_notices.py
       - scripts/check_mirage_rs_wheel.py
+      - scripts/check_release_artifacts.py
       - licenses/third_party/**
       - typescript/packages/core/THIRD_PARTY_NOTICES
       - .github/workflows/test_rust.yml

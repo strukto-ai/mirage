@@ -54,6 +54,8 @@ jobs:
           working-directory: rust/python
           command: sdist
           args: --out dist
+      - name: The sdist carries the license
+        run: python3 scripts/check_release_artifacts.py rust/python/dist/*.tar.gz
       # Built as an installer without a wheel would: pip, maturin from PyPI
       # and the runner's own Rust, since the sdist carries no toolchain pin.
       - name: Install the sdist and run every stream
@@ -100,9 +102,11 @@ jobs:
         run: |
           python -m pip install --no-index --find-links dist mirage-rs
           python scripts/check_mirage_rs_wheel.py
+          python scripts/check_release_artifacts.py dist/*.whl
       - name: Install the wheel in Alpine and run every stream
         if: ${{ matrix.alpine }}
         run: >-
           docker run --rm -v "$PWD:/w" -w /w python:3.11-alpine
           sh -c "pip install --no-index --find-links dist mirage-rs
-          && python scripts/check_mirage_rs_wheel.py"
+          && python scripts/check_mirage_rs_wheel.py
+          && python scripts/check_release_artifacts.py dist/*.whl"

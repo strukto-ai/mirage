@@ -343,7 +343,6 @@
                   "python/agents/agno",
                   "python/agents/openai-agents",
                   "python/agents/langchain",
-                  "python/agents/openhands",
                   "python/agents/pydantic-ai",
                   "python/agents/haystack"
                 ]
@@ -695,6 +694,10 @@
     ]
   },
   "redirects": [
+    {
+      "source": "/python/agents/openhands",
+      "destination": "/python/agents/index"
+    },
     {
       "source": "/home/events-matrix",
       "destination": "/home/notifications/support"

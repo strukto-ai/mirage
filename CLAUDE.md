@@ -69,6 +69,11 @@ permissively licensed.
   `scripts/check_dependency_licenses.py` the Python and npm trees. Those
   still carry the packages `licenses/dependency_exceptions.toml` lists,
   each with its reason; a new one fails the check.
+- Every published package ships a copy of the root `LICENSE`, and its
+  `THIRD_PARTY_NOTICES` where it bundles third-party code.
+  `scripts/check_release_artifacts.py` checks the package directories on
+  every pull request and the built wheels, sdists and npm tarballs before
+  a release.
 - Match GNU's behaviour, never its code: do not translate, copy or
   paraphrase GNU, gnulib or glibc source, or any copyleft code. Work from
   POSIX, the GNU manuals and the pinned image's output. Ship no table

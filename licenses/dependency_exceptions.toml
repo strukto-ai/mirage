@@ -12,18 +12,6 @@
 # --- metadata names no license; checked by hand ---
 
 [[python]]
-name = "agent-client-protocol"
-license = "LicenseRef-Unknown"
-version = "0.10.1"
-reason = "Apache-2.0: the LICENSE in the 0.10.1 wheel. Reached through the openhands extra."
-
-[[python]]
-name = "caio"
-license = "LicenseRef-Unknown"
-version = "0.9.25"
-reason = "Apache-2.0: the COPYING in the 0.9.25 wheel. Reached through the openhands extra."
-
-[[python]]
 name = "daytona-analytics-api-client*"
 license = "LicenseRef-Unknown"
 version = "0.207.0"
@@ -34,18 +22,6 @@ name = "fastembed"
 license = "LicenseRef-Proprietary"
 version = "0.8.0"
 reason = "Apache-2.0: the LICENSE and NOTICE in the 0.8.0 wheel; only its trove classifier says proprietary. Reached through the qdrant and sandbox extras."
-
-[[python]]
-name = "lupa"
-license = "LicenseRef-Unknown"
-version = "2.8"
-reason = "MIT: the LICENSE.txt in the 2.8 wheel, which its metadata calls 'MIT style'. Reached through the openhands extra."
-
-[[python]]
-name = "openhands-*"
-license = "LicenseRef-Unknown"
-version = "1.49.1"
-reason = "MIT: the LICENSE of OpenHands/software-agent-sdk, which builds both packages; their wheels carry none. The openhands extra."
 
 [[python]]
 name = "protobuf-py-ext"
@@ -59,13 +35,7 @@ license = "LicenseRef-Unknown"
 version = "0.1.8"
 reason = "MIT: the LICENSE in the 0.1.8 wheel. Reached through the qdrant extra."
 
-[[python]]
-name = "tiktoken"
-license = "LicenseRef-Unknown"
-version = "0.12.0"
-reason = "MIT: the LICENSE in the 0.12.0 wheel; its metadata holds the text, not a name. Reached through the openhands extra."
-
-# --- not permissive; kept until each is replaced or dropped ---
+# --- weak copyleft, accepted as unmodified, separately installed packages ---
 
 [[python]]
 name = "asyncssh"
@@ -83,23 +53,6 @@ license = "MPL-2.0"
 reason = "File-level copyleft, used unmodified as a separate package. Reached through httpx and httpcore, core dependencies."
 
 [[python]]
-name = "docutils"
-license = "GPL-2.0-or-later AND LicenseRef-BSD AND LicenseRef-Public-Domain"
-version = "0.22.4"
-reason = "The GPL part is only tools/editors/emacs/rst.el, which the 0.22.4 wheel does not carry; the rest is public domain and BSD. Reached through the openhands extra."
-
-[[python]]
-name = "func-timeout"
-license = "LGPL-2.0-only"
-reason = "Weak copyleft, imported unmodified as a separate package. Reached through openhands-tools, the openhands extra."
-
-[[python]]
-name = "lmnr-claude-code-proxy"
-license = "LicenseRef-Proprietary"
-version = "0.1.24"
-reason = "LMNR AI's terms of service. Reached through openhands-sdk's lmnr dependency, the openhands extra."
-
-[[python]]
 name = "orjson"
 license = "MPL-2.0 AND (Apache-2.0 OR MIT)"
 reason = "File-level copyleft in part, used unmodified as a separate package. A core dependency."
@@ -107,7 +60,7 @@ reason = "File-level copyleft in part, used unmodified as a separate package. A 
 [[python]]
 name = "tqdm"
 license = "MPL-2.0 AND MIT"
-reason = "File-level copyleft in part, used unmodified as a separate package. Reached through the lancedb, mem0, openai, openhands, qdrant and sandbox extras."
+reason = "File-level copyleft in part, used unmodified as a separate package. Reached through the lancedb, mem0, openai, qdrant and sandbox extras."
 
 [[npm]]
 name = "@anthropic-ai/claude-agent-sdk*"

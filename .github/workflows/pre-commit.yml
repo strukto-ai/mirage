@@ -90,6 +90,11 @@ jobs:
           (cd typescript && pnpm licenses list --json --prod) > "$RUNNER_TEMP/npm-licenses.json"
           python3 scripts/check_dependency_licenses.py --python --npm "$RUNNER_TEMP/npm-licenses.json"
 
+      - name: Published packages carry the license
+        run: |
+          python3 scripts/check_release_artifacts.py --selftest
+          python3 scripts/check_release_artifacts.py
+
       - name: Build TypeScript packages
         working-directory: typescript
         run: pnpm -r build

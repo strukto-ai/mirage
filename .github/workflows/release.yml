@@ -48,6 +48,8 @@ jobs:
       - name: Build mirage-ai
         working-directory: python
         run: uv build --no-sources --out-dir dist
+      - name: Each distribution carries the license
+        run: python3 scripts/check_release_artifacts.py python/dist/*
       - uses: actions/download-artifact@v8
         with:
           name: mirage-rs-wheel-x86_64-unknown-linux-gnu
@@ -104,6 +106,8 @@ jobs:
           for name in $PACKAGES; do
             pnpm --filter "@struktoai/mirage-$name" pack --pack-destination "$RUNNER_TEMP/npm"
           done
+      - name: Each tarball carries the license
+        run: python3 scripts/check_release_artifacts.py "$RUNNER_TEMP"/npm/*.tgz
       - uses: actions/upload-artifact@v7
         with:
           name: npm-tarballs

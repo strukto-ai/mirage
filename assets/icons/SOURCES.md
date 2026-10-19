@@ -14,7 +14,6 @@ mount or drive that service; it does not imply endorsement or affiliation.
 | File            | Source                                                                                                           | Project                |
 | --------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | `seaweedfs.svg` | [`note/icon.svg`](https://github.com/seaweedfs/seaweedfs/blob/master/note/icon.svg)                              | SeaweedFS (Apache-2.0) |
-| `openhands.svg` | [`public/favicon.svg`](https://github.com/All-Hands-AI/OpenHands/blob/main/public/favicon.svg)                   | OpenHands (MIT)        |
 | `lancedb.png`   | [lancedb.com](https://lancedb.com) site favicon                                                                  | LanceDB                |
 | `qingstor.png`  | [qingcloud.com](https://www.qingcloud.com/products/qingstor) site favicon                                        | QingCloud QingStor     |
 | `agno.png`      | [github.com/agno-agi](https://github.com/agno-agi) organization avatar                                           | Agno                   |
