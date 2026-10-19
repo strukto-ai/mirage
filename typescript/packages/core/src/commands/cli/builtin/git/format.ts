@@ -180,9 +180,9 @@ export function short(sha: string, length: number = SHORT_SHA): string {
   return sha.slice(0, length)
 }
 
-/** The first line of a commit message. */
+/** The first paragraph of a commit message, folded onto one line. */
 export function subject(commit: CommitFacts): string {
-  return (commit.message.split('\n', 1)[0] ?? '').replace(/\s+$/, '')
+  return subjectFolded(commit.message)
 }
 
 /**
@@ -195,6 +195,17 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
   return `${short(commit.oid, length)} ${subject(commit)}`
 }
 
+/** Remove Git's trailing line whitespace in one backward pass. */
+function trimLine(line: string): string {
+  let end = line.length
+  while (end > 0) {
+    const char = line[end - 1]
+    if (char !== ' ' && char !== '\t' && char !== '\r') break
+    end--
+  }
+  return line.slice(0, end)
+}
+
 /**
  * A commit message indented the way log and show print it.
  *
@@ -203,10 +214,12 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
  * against git 2.47.3; it is trailing whitespace on purpose.
  */
 function messageBlock(commit: CommitFacts): string[] {
-  return commit.message
-    .replace(/\n+$/, '')
-    .split('\n')
-    .map((line) => `${INDENT}${line}`)
+  const lines = commit.message.split('\n').map(trimLine)
+  let start = 0
+  let end = lines.length
+  while (start < end && lines[start] === '') start++
+  while (end > start && lines[end - 1] === '') end--
+  return lines.slice(start, end).map((line) => `${INDENT}${line}`)
 }
 
 /**
@@ -256,7 +269,11 @@ export function presetBlock(
     return lines
   }
   if (kind === 'short') {
-    lines.push(`Author: ${author}`, '', `${INDENT}${subject(commit)}`)
+    lines.push(
+      `Author: ${author}`,
+      '',
+      ...subjectLines(commit.message).map((line) => `${INDENT}${line}`),
+    )
     return lines
   }
   if (kind === 'full') {
@@ -274,20 +291,25 @@ export function presetBlock(
   return lines
 }
 
-/** git's %s: the first paragraph folded onto one line. */
-function subjectFolded(message: string): string {
-  const head = message.split('\n\n', 1)[0] ?? ''
+/** The subject paragraph's lines, with Git's trailing whitespace removed. */
+function subjectLines(message: string): string[] {
+  const head = message.replace(/^(?:[ \t\r]*\n)+/, '').split(/\n[ \t\r]*\n/, 1)[0] ?? ''
   return head
     .split('\n')
+    .map(trimLine)
     .filter((part) => part !== '')
-    .join(' ')
-    .trim()
 }
 
-/** git's %b: everything after the subject paragraph. */
+/** git's %s: the first paragraph folded onto one line. */
+function subjectFolded(message: string): string {
+  return subjectLines(message).join(' ')
+}
+
+/** git's %b: the text after the subject and blank separator lines. */
 function body(message: string): string {
-  const separator = message.indexOf('\n\n')
-  return separator === -1 ? '' : message.slice(separator + 2)
+  const text = message.replace(/^(?:[ \t\r]*\n)+/, '')
+  const separator = /\n(?:[ \t\r]*\n)+(?:[ \t\r]+$)?/.exec(text)
+  return separator === null ? '' : text.slice(separator.index + separator[0].length)
 }
 
 /**

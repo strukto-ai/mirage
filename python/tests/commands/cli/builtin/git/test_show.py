@@ -18,10 +18,98 @@ from dulwich import porcelain
 from mirage.commands.cli.builtin.git import GIT
 from tests.commands.cli.builtin.git.conftest import (
     AUTHOR,
+    commit_file,
     commit_merge,
     make_branch,
     mounted,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "newline,ending,has_body,prefix,continuation,blank",
+    [
+        ("\n", "", True, "", False, ""),
+        ("\n", "", False, "", False, ""),
+        ("\n", "\n", True, "", False, ""),
+        ("\n", "\n", False, "", False, ""),
+        ("\r\n", "", True, "", False, ""),
+        ("\r\n", "\r\n", True, "", False, ""),
+        ("\n", "", True, "\n\n", False, ""),
+        ("\r\n", "", True, "\r\n\r\n", False, ""),
+        ("\r\n", "\r\n", True, "", True, ""),
+        ("\n", "", True, "", False, " "),
+        ("\n", "", True, "", False, "\t"),
+        ("\n", "", True, "", False, " \t\r"),
+        ("\n", "", True, " \t\n\t \n", False, " \t"),
+        ("\r\n", "", True, " \t\r\n\t \r\n", False, " \t"),
+        ("\n", "", True, "", True, " \t"),
+        ("\n", "\n \t", True, "", False, ""),
+    ],
+    ids=[
+        "body-unterminated",
+        "empty-body-unterminated",
+        "body-terminated",
+        "empty-body-terminated",
+        "crlf-unterminated",
+        "crlf-terminated",
+        "leading-lf",
+        "leading-crlf",
+        "multiline-crlf",
+        "blank-0",
+        "blank-1",
+        "blank-2",
+        "leading-whitespace-lf",
+        "leading-whitespace-crlf",
+        "multiline-spaces",
+        "trailing-blank-line-without-newline",
+    ],
+)
+@pytest.mark.parametrize("count", [1, 2])
+@pytest.mark.parametrize(
+    "template", ["subject=%s%nbody=%b", "raw=%B", "body=%b|subject=%s"]
+)
+async def test_message_endings_match_git_2_51_2(
+    git_ws,
+    repo_path,
+    newline,
+    ending,
+    has_body,
+    prefix,
+    continuation,
+    blank,
+    count,
+    template,
+):
+    """Preserve message endings measured with git 2.51.2 commit-tree."""
+    expected = []
+    for subject in ("one", "two"):
+        body = f"body {subject}{ending}" if has_body else ""
+        title = subject + (" continued" if continuation else "")
+        stored_title = subject + (
+            f"{newline}continued" if continuation else ""
+        )
+        message = (
+            prefix
+            + stored_title
+            + (f"{newline}{blank}{newline}{body}" if has_body else ending)
+        )
+        commit_file(repo_path, "message.txt", subject, message)
+        expected.append(
+            {
+                "subject=%s%nbody=%b": f"subject={title}\nbody={body}\n",
+                "raw=%B": f"raw={message}\n",
+                "body=%b|subject=%s": f"body={body}|subject={title}\n",
+            }[template]
+        )
+    stdout = "".join(reversed(expected[-count:])).encode()
+    revisions = "HEAD" if count == 1 else "HEAD HEAD~1"
+    for command in (f"show -s {revisions}", f"log -{count} HEAD"):
+        result = await git_ws.shell(
+            f"git -C /repo {command} --format='{template}'"
+        )
+        assert (result.exit_code, result.stderr) == (0, None)
+        assert result.stdout == stdout
 
 
 @pytest.mark.asyncio

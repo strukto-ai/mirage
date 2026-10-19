@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -194,13 +195,13 @@ def short(sha: bytes, length: int = SHORT_SHA) -> str:
 
 
 def subject(commit: Commit) -> str:
-    """The first line of a commit message.
+    """The first paragraph of a commit message, folded onto one line.
 
     Args:
         commit (Commit): the commit to read.
     """
     text = commit.message.decode("utf-8", errors="replace")
-    return text.split("\n", 1)[0].rstrip()
+    return _subject_folded(text)
 
 
 def oneline(commit: Commit, length: int = SHORT_SHA) -> str:
@@ -211,6 +212,15 @@ def oneline(commit: Commit, length: int = SHORT_SHA) -> str:
         length (int): how many hex digits of the id to print.
     """
     return f"{short(commit.id, length)} {subject(commit)}"
+
+
+def _trim_line(line: str) -> str:
+    """Remove Git's trailing line whitespace in one backward pass.
+
+    Args:
+        line (str): one decoded message line, without its newline.
+    """
+    return line.rstrip(" \t\r")
 
 
 def message_block(commit: Commit) -> list[str]:
@@ -224,8 +234,14 @@ def message_block(commit: Commit) -> list[str]:
     Args:
         commit (Commit): the commit to render.
     """
-    text = commit.message.decode("utf-8", errors="replace").rstrip("\n")
-    return [f"{INDENT}{line}" for line in text.split("\n")]
+    text = commit.message.decode("utf-8", errors="replace")
+    lines = [_trim_line(line) for line in text.split("\n")]
+    start, end = 0, len(lines)
+    while start < end and not lines[start]:
+        start += 1
+    while end > start and not lines[end - 1]:
+        end -= 1
+    return [INDENT + line for line in lines[start:end]]
 
 
 def _merge_line(commit: Commit, length: int) -> list[str]:
@@ -292,7 +308,14 @@ def preset_block(
         )
         return lines
     if kind == "short":
-        lines.extend([f"Author: {author}", "", f"{INDENT}{subject(commit)}"])
+        message = commit.message.decode("utf-8", errors="replace")
+        lines.extend(
+            [
+                f"Author: {author}",
+                "",
+                *[INDENT + line for line in _subject_lines(message)],
+            ]
+        )
         return lines
     if kind == "full":
         lines.extend(
@@ -342,24 +365,36 @@ def ident_email(ident: bytes) -> str:
     return text[start + 1 : end] if 0 <= start < end else ""
 
 
+def _subject_lines(message: str) -> list[str]:
+    """The subject paragraph's lines, with Git's trailing whitespace removed.
+
+    Args:
+        message (str): the decoded commit message.
+    """
+    text = re.sub(r"^(?:[ \t\r]*\n)+", "", message)
+    head = re.split(r"\n[ \t\r]*\n", text, maxsplit=1)[0]
+    lines = [_trim_line(part) for part in head.split("\n")]
+    return [line for line in lines if line]
+
+
 def _subject_folded(message: str) -> str:
     """git's %s: the first paragraph folded onto one line.
 
     Args:
         message (str): the decoded commit message.
     """
-    head = message.split("\n\n", 1)[0]
-    return " ".join(part for part in head.split("\n") if part).strip()
+    return " ".join(_subject_lines(message))
 
 
 def _body(message: str) -> str:
-    """git's %b: everything after the subject paragraph.
+    """git's %b: the text after the subject and blank separator lines.
 
     Args:
         message (str): the decoded commit message.
     """
-    _, separator, rest = message.partition("\n\n")
-    return rest if separator else ""
+    text = re.sub(r"^(?:[ \t\r]*\n)+", "", message)
+    separator = re.search(r"\n(?:[ \t\r]*\n)+(?:[ \t\r]+$)?", text)
+    return "" if separator is None else text[separator.end() :]
 
 
 def render_template(

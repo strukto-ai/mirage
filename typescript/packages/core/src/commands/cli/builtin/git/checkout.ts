@@ -46,7 +46,7 @@ import {
   UnresolvableSourceError,
 } from './errors.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
-import { short } from './format.ts'
+import { short, subject } from './format.ts'
 import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './index_file.ts'
 import {
   blockingAncestor,
@@ -73,7 +73,7 @@ import {
   writeRef,
 } from './refs.ts'
 import { matched, repoRelative, under as inside } from './pathspec.ts'
-import { repoArgs, type Repo } from './repo.ts'
+import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
@@ -366,9 +366,8 @@ export async function switchTo(
  */
 async function previousPosition(repo: Repo, head: HeadRef): Promise<string> {
   if (head.commit === null) return ''
-  const { commit } = await git.readCommit({ ...repoArgs(repo), oid: head.commit })
-  const subject = commit.message.split('\n')[0] ?? ''
-  return `Previous HEAD position was ${short(head.commit, repo.abbrev)} ${subject}\n`
+  const commit = await commitFacts(repo, head.commit)
+  return `Previous HEAD position was ${short(head.commit, repo.abbrev)} ${subject(commit)}\n`
 }
 
 /**
@@ -520,11 +519,10 @@ export async function moveHead(
     note += `${verb} '${target}'\n`
     if (!creating) out += await trackingReport(repo, target)
   } else {
-    const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-    const subject = commit.message.split('\n')[0] ?? ''
+    const commit = await commitFacts(repo, oid)
     // Asked for by name, a detached HEAD needs no advice on how it happened.
     if (advise) note += `Note: switching to '${target}'.\n\n${DETACHED_ADVICE}\n`
-    note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject}\n`
+    note += `HEAD is now at ${short(oid, repo.abbrev)} ${subject(commit)}\n`
   }
   if (quiet) return [null, new IOResult({ stderr: ENC.encode(warnings + warning) })]
   return [ENC.encode(out), new IOResult({ stderr: ENC.encode(note) })]

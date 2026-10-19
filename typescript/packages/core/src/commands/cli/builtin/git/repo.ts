@@ -24,6 +24,7 @@ import { entryName } from '../../../../utils/remnants.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { gitBool } from './util.ts'
+import { GitError } from './errors.ts'
 import type { RefObject, RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
@@ -229,27 +230,47 @@ export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array
 }
 
 /**
- * One commit as the renderers want it.
- *
- * isomorphic-git reports the timezone the way `Date.getTimezoneOffset()` does,
- * negated minutes east of UTC, so `+0530` arrives as `-330`. git prints the
- * other sign, and this is the one place the two conventions meet.
+ * One commit's metadata and message from a single object read. The message
+ * retains its stored newlines; identity offsets are minutes east of UTC.
  */
 export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts> {
-  const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
-  const decoded = [
-    commit.message,
-    commit.author.name,
-    commit.author.email,
-    commit.committer.name,
-    commit.committer.email,
-  ]
+  let object = await rawObject(repo, oid)
+  while (object.type === 'tag') {
+    const target = /^object ([0-9a-f]{40})\n/.exec(new TextDecoder().decode(object.raw))?.[1]
+    if (target === undefined) throw new GitError(`invalid tag ${object.oid}`)
+    object = await rawObject(repo, target)
+  }
+  if (object.type !== 'commit') {
+    throw new Errors.ObjectTypeError(oid, object.type as 'blob' | 'tree', 'commit')
+  }
+  const raw = object.raw
+  const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw)
+  const split = text.indexOf('\n\n')
+  const message = split < 0 ? '' : text.slice(split + 2)
+  const headers = (split < 0 ? text : text.slice(0, split)).split('\n')
+  const value = (key: string): string =>
+    headers.find((line) => line.startsWith(`${key} `))?.slice(key.length + 1) ?? ''
+  const identity = (role: string) => {
+    const found = /^(.*) <(.*)> (-?[0-9]+) ([+-])([0-9]{2})([0-9]{2})$/.exec(value(role))
+    if (found === null) throw new GitError(`invalid ${role} in commit ${oid}`)
+    const [, name = '', email = '', timestamp = '', sign, hours = '', minutes = ''] = found
+    const offset = Number(hours) * 60 + Number(minutes)
+    return {
+      name,
+      email,
+      timestamp: Number(timestamp),
+      offset: sign === '-' ? -offset : offset,
+    }
+  }
+  const author = identity('author')
+  const committer = identity('committer')
+  const decoded = [message, author.name, author.email, committer.name, committer.email]
   // A byte that is no part of a character decoded as U+FFFD: the object's own
-  // bytes are read again, as surrogate-escaped text, for the filters that
+  // bytes are decoded again, as surrogate-escaped text, for the filters that
   // match them.
   let bytes: CommitFacts['bytes']
   if (decoded.some((text) => text.includes('\uFFFD'))) {
-    const text = decodeText((await rawObject(repo, oid)).raw)
+    const text = decodeText(raw)
     const split = text.indexOf('\n\n')
     const head = (split < 0 ? text : text.slice(0, split)).split('\n')
     const ident = (key: string): string =>
@@ -265,17 +286,17 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
   return {
     ...(bytes === undefined ? {} : { bytes }),
     oid,
-    tree: commit.tree,
-    message: commit.message,
-    authorName: commit.author.name,
-    authorEmail: commit.author.email,
-    authorTime: commit.author.timestamp,
-    authorTimezoneMinutes: -commit.author.timezoneOffset,
-    committerName: commit.committer.name,
-    committerEmail: commit.committer.email,
-    committerTime: commit.committer.timestamp,
-    committerTimezoneMinutes: -commit.committer.timezoneOffset,
-    parents: commit.parent,
+    tree: value('tree'),
+    message,
+    authorName: author.name,
+    authorEmail: author.email,
+    authorTime: author.timestamp,
+    authorTimezoneMinutes: author.offset,
+    committerName: committer.name,
+    committerEmail: committer.email,
+    committerTime: committer.timestamp,
+    committerTimezoneMinutes: committer.offset,
+    parents: headers.filter((line) => line.startsWith('parent ')).map((line) => line.slice(7)),
   }
 }
 

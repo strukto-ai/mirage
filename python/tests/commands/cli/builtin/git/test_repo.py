@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections import Counter
 
 import pytest
@@ -33,6 +34,27 @@ async def test_opens_a_loose_object_repository(workspace):
     head = repo[repo.refs[MAIN]]
     assert isinstance(head, Commit)
     assert head.message == b"third"
+
+
+@pytest.mark.asyncio
+async def test_reads_a_loose_commit_once(workspace, monkeypatch):
+    reads = Counter()
+    original = workspace.dispatch
+
+    async def counting(op, path, *args, **kwargs):
+        if op == "read":
+            reads[path.virtual] += 1
+        return await original(op, path, *args, **kwargs)
+
+    monkeypatch.setattr(workspace, "dispatch", counting)
+    repo = await open_mounted(workspace)
+    oid = await asyncio.to_thread(lambda: repo.refs[MAIN])
+    name = oid.decode()
+    reads.clear()
+    commit = await asyncio.to_thread(repo.__getitem__, oid)
+    assert isinstance(commit, Commit)
+    assert commit.message == b"third"
+    assert reads[f"/repo/.git/objects/{name[:2]}/{name[2:]}"] == 1
 
 
 @pytest.mark.asyncio

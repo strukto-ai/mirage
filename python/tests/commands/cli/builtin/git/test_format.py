@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from time import perf_counter
+
 import pytest
 from dulwich.objects import Commit
 
@@ -56,8 +58,46 @@ def test_short_id_is_seven_characters():
     assert short(b"cdd6234342b147880f5d86c55dad6c1fbe222bfe") == "cdd6234"
 
 
-def test_subject_is_the_first_line():
-    assert subject(_commit(b"first line\n\nbody here\n")) == "first line"
+@pytest.mark.parametrize(
+    "message",
+    [
+        b"first line\n\nbody here\n",
+        b"\r\n\r\nfirst\r\nline\r\n\r\nbody here\r\n",
+    ],
+)
+def test_subject_is_the_first_paragraph(message):
+    assert subject(_commit(message)) == "first line"
+
+
+@pytest.mark.parametrize(
+    "message,title,body",
+    [
+        ("  title \t\n \t\nbody", "  title", "body"),
+        ("\u00a0title\n\nbody", "\u00a0title", "body"),
+        ("title\v\n\nbody", "title\v", "body"),
+        ("title\n\v\nbody", "title \v body", ""),
+        ("one\n\n \t", "one", ""),
+        ("one\n \n \t", "one", ""),
+        ("one\n\n\r", "one", ""),
+    ],
+)
+def test_subject_whitespace_matches_git_2_51_2(message, title, body):
+    commit = _commit(message.encode())
+    assert subject(commit) == title
+    assert git_format.render_template("%s|%b|%B", commit, 7, None) == (
+        f"{title}|{body}|{message}"
+    )
+
+
+@pytest.mark.parametrize(
+    "newline,blank", [("\n", ""), ("\r\n", ""), ("\n", " \t")]
+)
+def test_short_preset_keeps_subject_paragraph_lines(newline, blank):
+    message = f"one{newline}continued{newline}{blank}{newline}body"
+    assert preset_block(_commit(message.encode()), "short", 7)[3:] == [
+        "    one",
+        "    continued",
+    ]
 
 
 def test_oneline_is_id_then_subject():
@@ -65,14 +105,41 @@ def test_oneline_is_id_then_subject():
     assert oneline(commit) == f"{short(commit.id)} second commit"
 
 
-def test_blank_message_lines_render_as_four_spaces():
+@pytest.mark.parametrize(
+    "message",
+    [b"title\n\nbody\n", b"title\r\n\r\nbody\r\n", b"\n\ntitle\n\nbody"],
+)
+def test_blank_message_lines_render_as_four_spaces(message):
     # git indents every line by four, blank ones included, so an empty
     # line inside a message carries trailing whitespace on purpose.
-    assert message_block(_commit(b"title\n\nbody\n")) == [
+    assert message_block(_commit(message)) == [
         "    title",
         "    ",
         "    body",
     ]
+
+
+@pytest.mark.parametrize("ending", ["", "\n", "\n \t", "\n \n\t"])
+def test_display_trims_blank_edge_lines_without_changing_raw_message(ending):
+    message = f" \t\ntitle\n\nbody{ending}"
+    commit = _commit(message.encode())
+    assert message_block(commit) == ["    title", "    ", "    body"]
+    assert git_format.render_template("%B", commit, 7, None) == message
+
+
+@pytest.mark.parametrize("prefix", [False, True])
+def test_display_handles_long_whitespace_runs_in_linear_time(prefix):
+    padding = " " * 128_000
+    title = padding + "title" if prefix else "title"
+    body = "body" if prefix else "body" + padding
+    commit = _commit(f"{title}\n\n{body}".encode())
+    started = perf_counter()
+    block = message_block(commit)
+    rendered_subject = subject(commit)
+    elapsed = perf_counter() - started
+    assert block == [f"    {title}", "    ", "    body"]
+    assert rendered_subject == title
+    assert elapsed < 2.0
 
 
 def test_medium_has_gits_header_block():
