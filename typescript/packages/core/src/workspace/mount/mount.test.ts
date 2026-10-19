@@ -405,7 +405,7 @@ describe('Mount.runCommand', () => {
         new IOResult(),
       ])
     }
-    const vfs = new Files(dispatch, null, null, () => null, { ledger: false })
+    const vfs = new Files(dispatch, null, null, { ledger: false })
 
     await m.runCommand('cat', [PathSpec.fromStrPath('/dir.tally')], [], {}, { vfs })
     expect(fired).toEqual([])

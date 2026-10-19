@@ -16,15 +16,14 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { missingOperandError } from '../../spec/usage.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat } from '../../../types.ts'
-import { FileType, PathSpec, type StatFn, type Visibility } from '../../../types.ts'
+import { FileType, PathSpec, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { eloop, enoent, enotdir, isMissingPath } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { parent } from '../../../utils/path.ts'
-import { pathVisible } from '../../../utils/hidden.ts'
 import { dispatchStat, linkTarget } from '../utils/paths.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import { linksOf, visibilityOf } from '../utils/links.ts'
+import { linksOf } from '../utils/links.ts'
 
 const MODES: Record<string, string> = { canonicalize_existing: 'e', canonicalize_missing: 'm' }
 const LINKS: Record<string, string> = { logical: 'L', physical: 'P', strip: 's', no_symlinks: 's' }
@@ -95,7 +94,8 @@ async function directory(stat: StatFn, path: string, word: string): Promise<void
  * Each named component is appended and, unless `nolinks`, a link there is
  * read (`readlink`, one link's target or null) and its target put in front
  * of the names left, so a `..` climbs from where a link leads. A link the
- * session cannot see is no link, as a hidden path is no path. A component
+ * session cannot see is no link, as a hidden path is no path: `readlink` is
+ * the dispatcher's reader, which answers none for it. A component
  * followed by `.` or `..` must be a directory. A trailing slash rejects an
  * existing non-directory. GNU 9.7's default mode accepts a missing final
  * component with a slash; `nolinks` also accepts missing parents. `e`
@@ -115,7 +115,6 @@ export async function canonicalize(
   nolinks: boolean,
   readlink: ((path: string) => string | null) | null,
   stat: StatFn,
-  visibility: Visibility | null = null,
 ): Promise<string> {
   if (word === '') throw enoent(word)
   const names = (word.startsWith('/') ? word : `${cwd}/${word}`).split('/').filter((n) => n !== '')
@@ -131,8 +130,7 @@ export async function canonicalize(
       continue
     }
     path = path === '/' ? `/${name}` : `${path}/${name}`
-    const target =
-      nolinks || readlink === null || !pathVisible(visibility, path) ? null : readlink(path)
+    const target = nolinks || readlink === null ? null : readlink(path)
     if (target !== null) {
       const here: Step = [path, [...names]]
       const key = JSON.stringify(here)
@@ -191,21 +189,12 @@ export async function realpath(
   cwd = '/',
   readlink: ((path: string) => string | null) | null = null,
   flags: RealpathFlags = parseFlags({}),
-  visibility: Visibility | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length === 0) throw missingOperandError('realpath', null)
   const canon = async (word: string): Promise<string> => {
-    const path = await canonicalize(
-      word,
-      cwd,
-      flags.mode,
-      flags.links !== 'P',
-      readlink,
-      stat,
-      visibility,
-    )
+    const path = await canonicalize(word, cwd, flags.mode, flags.links !== 'P', readlink, stat)
     if (flags.links !== 'L') return path
-    return canonicalize(path, cwd, flags.mode, false, readlink, stat, visibility)
+    return canonicalize(path, cwd, flags.mode, false, readlink, stat)
   }
   const relativeTo = flags.relativeTo ?? flags.relativeBase
   let to: string | null = null
@@ -266,6 +255,5 @@ export async function realpathGeneric(
     ctx.cwd.virtual,
     linkTarget(linksOf(ctx)),
     parseFlags(ctx.flags),
-    visibilityOf(ctx.vfs),
   )
 }

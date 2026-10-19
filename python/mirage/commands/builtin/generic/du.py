@@ -15,14 +15,12 @@ from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import usage_hint
-from mirage.context import session_visibility
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, PathRecord
-from mirage.types import FileStat, PathSpec, Visibility
-from mirage.utils.hidden import path_visible, visible_records
+from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.view.namespace_view import paths_scoped
@@ -309,26 +307,22 @@ async def du_operand_exists(
 
 
 async def du_has_content(
-    vis: Visibility | None, compute_entries: ComputeEntries, path: PathSpec
+    compute_entries: ComputeEntries, path: PathSpec
 ) -> bool:
     """Whether an operand holds anything the session may see.
 
-    The visibility filter is what makes this safe to ask after the
-    dispatcher already said no: ``compute_entries`` runs on the bound
-    accessor, which knows nothing of hides, so counting its raw answer
-    would confirm a walled-off subtree's parent. Entries are lifted onto
-    virtual paths first, since that is the space a hide is written in.
+    Safe to ask after the dispatcher already said no: ``compute_entries``
+    walks through the command's files, whose every listing the
+    dispatcher filters by the session's hides, so a walled-off subtree
+    answers no entries and its parent stays unconfirmed.
 
     Args:
-        vis (Visibility | None): the session's visibility.
         compute_entries (ComputeEntries): per-file breakdown.
         path (PathSpec): the operand to probe.
     """
     try:
         entries, _ = await compute_entries(path)
-        return any(
-            path_visible(vis, leaf) for leaf, _ in to_virtual(entries, path)
-        )
+        return bool(entries)
     except Exception as exc:
         # This runs only after stat already failed, to tell an implicit
         # directory from an absent path. Backends raise their own error
@@ -546,7 +540,6 @@ async def _du_one(
     directories: Callable[[], Sequence[str]] | None = None,
 ) -> tuple[list[str], int, list[PathRecord] | None]:
     label = path.raw_path
-    vis = session_visibility()
     roots = mounts.descendants(path.virtual) if mounts is not None else []
 
     if flags.s and not flags.S and not roots and not paths_scoped([path]):
@@ -563,14 +556,11 @@ async def _du_one(
     root_key = _norm(path.virtual)
     under = root_key.rstrip("/") + "/"
     met = drop_shadowed(
-        visible_records(
-            vis,
-            [
-                PathRecord(PathSpec.from_str_path(d), run)
-                for d in (directories() if directories is not None else ())
-                if _norm(d).startswith(under)
-            ],
-        ),
+        [
+            PathRecord(PathSpec.from_str_path(d), run)
+            for d in (directories() if directories is not None else ())
+            if _norm(d).startswith(under)
+        ],
         roots,
     )
     walked = directories is not None and any(
@@ -593,9 +583,9 @@ async def _du_one(
         PathRecord(PathSpec.from_str_path(leaf), run, size)
         for leaf, size in to_virtual(entries, path)
     ]
-    # Same honesty rule for hidden and shadowed leaves: the total is the
-    # sum of what survived, never the backend's own number.
-    kept = drop_shadowed(visible_records(vis, counted), roots)
+    # Shadowed leaves drop: the total is the sum of what survived, never
+    # the backend's own number.
+    kept = drop_shadowed(counted, roots)
     virtual = leaves_of(kept)
     if len(kept) != len(counted) or roots:
         total = sum(size for _, size in virtual)
@@ -805,11 +795,7 @@ async def du_generic(
         ctx.cwd,
         resolve_glob,
         stat,
-        partial(
-            du_has_content,
-            session_visibility(),
-            compute_entries,
-        ),
+        partial(du_has_content, compute_entries),
         stat_path=vfs_stat_path(ctx.vfs),
     )
     out = await du(

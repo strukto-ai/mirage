@@ -231,7 +231,7 @@ def _vfs(files: dict[str, bytes]) -> Files:
         assert op == "read"
         return files[path.virtual], None
 
-    return Files([], dispatch)
+    return Files(dispatch)
 
 
 @pytest.mark.asyncio
@@ -1310,7 +1310,7 @@ async def test_file_reader_keeps_resolved_path():
         return b"first second", None
 
     value = await read_cli_file(
-        Context(vfs=Files([], dispatch)), path, "--body-file"
+        Context(vfs=Files(dispatch)), path, "--body-file"
     )
     assert value == b"first second"
 

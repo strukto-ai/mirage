@@ -84,7 +84,10 @@ function sessionFollow(
 ): ((path: string) => string) | null {
   if (namespace.symlinkTargets().size === 0) return null
   const links = linkView(
-    new Files(dispatch, null, namespace, () => null, { visibility: () => session.visibility }),
+    new Files(
+      dispatch,
+      namespace.readers(() => session.visibility),
+    ),
   )
   return links === undefined ? null : (path: string) => links.resolve(path)
 }

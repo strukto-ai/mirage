@@ -45,7 +45,7 @@ from mirage.utils.stat_view import (
     mtime_ns,
     posix_mode,
 )
-from mirage.workspace.files import Files, namespace_of
+from mirage.workspace.files import Files, reader_of
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -1183,12 +1183,10 @@ class MountCore:
                 which may loop.
         """
         virtual = self.resolve(path)
-        links = namespace_of(self._files).links
-        if links is None:
-            return virtual
+        reader = reader_of(self._files)
         if follow:
-            return links.follow(virtual)
-        return links.follow_parent(virtual)
+            return reader.resolve(virtual)
+        return reader.resolve_parent(virtual)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.

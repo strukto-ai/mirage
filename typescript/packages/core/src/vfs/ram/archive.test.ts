@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { onMount } from '../../test-utils.ts'
+import { onMount, readers } from '../../test-utils.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { type Context, type Command } from '../../commands/config.ts'
 import { describe, expect, it } from 'vitest'
@@ -101,7 +101,7 @@ function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
     }
     throw new Error(`unexpected ${op}`)
   }
-  return new Files(dispatch, null, links)
+  return new Files(dispatch, readers([], links))
 }
 
 function rstrip(s: string): string {

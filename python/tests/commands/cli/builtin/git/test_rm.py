@@ -291,7 +291,7 @@ def hiding(present: bool = True, linked: bool = True) -> Files:
             return FileStat(name=name, type=FileType.FILE), None
         return FileStat(name=name, type=FileType.DIRECTORY), None
 
-    return Files([], dispatch)
+    return Files(dispatch)
 
 
 @pytest.mark.asyncio

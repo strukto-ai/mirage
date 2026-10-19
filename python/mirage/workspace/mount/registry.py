@@ -110,6 +110,9 @@ class MountRegistry:
         ) = None
         self.observer: Observer | None = None
         self._mounts: list[MountEntry] = []
+        # ``mount_rows`` as last built; a mount, an unmount or the
+        # anchor changing clears it.
+        self._rows: list[MountRow] | None = None
         self.retiring_mounts: dict[int, asyncio.Task[None]] = {}
         self.retired_mounts: WeakValueDictionary[int, BaseVFS] = (
             WeakValueDictionary()
@@ -378,6 +381,7 @@ class MountRegistry:
             self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
+        self._rows = None
         if norm_prefix == "/":
             self._root = m
         return m
@@ -399,6 +403,7 @@ class MountRegistry:
         for i, m in enumerate(self._mounts):
             if m.prefix == norm_prefix:
                 del self._mounts[i]
+                self._rows = None
                 if m is self._root:
                     self._root = None
                 if m is self._anchor:
@@ -681,6 +686,7 @@ class MountRegistry:
                 because no mount claims ``/``.
         """
         self._anchor = entry
+        self._rows = None
 
     @property
     def file_cache(self) -> FileCacheMixin | None:
@@ -694,8 +700,20 @@ class MountRegistry:
             m for m in self._mounts if m.visible is None or m.visible(None)
         ]
 
+    def rows_changed(self) -> None:
+        """Say a mount's row changed in place (its mode, who is told of
+        it), so ``mount_rows`` builds afresh."""
+        self._rows = None
+
     def mount_rows(self) -> list[MountRow]:
-        """One row per registered mount, for the ``Files`` facade."""
+        """One row per registered mount, for the namespace reader the
+        dispatcher hands out; built once per change to the table."""
+        if self._rows is None:
+            self._rows = self._built_rows()
+        return list(self._rows)
+
+    def _built_rows(self) -> list[MountRow]:
+        """The rows ``mount_rows`` serves, built from the mount list."""
         return [
             MountRow(
                 prefix=m.prefix,

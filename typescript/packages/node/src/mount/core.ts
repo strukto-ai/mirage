@@ -14,7 +14,7 @@
 
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
-import { type Files, namespaceOf } from '@struktoai/mirage-core/workspace/files'
+import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 import {
   ChunkedHandle,
   FileTable,
@@ -652,12 +652,11 @@ export class MountCore {
    */
   identity(path: string, follow = true): string {
     const virtual = this.resolve(path)
-    const links = namespaceOf(this.files).links
-    if (links === null) return virtual
-    if (follow) return links.follow(virtual)
+    const reader = readerOf(this.files)
+    if (follow) return reader.resolve(virtual)
     // An op on the entry itself (unlink, rename, lsetattr) names the link,
     // which may loop: only the links above it are followed.
-    return links.followParent(virtual)
+    return reader.resolveParent(virtual)
   }
 
   /**

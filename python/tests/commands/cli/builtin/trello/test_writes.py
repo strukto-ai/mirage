@@ -135,7 +135,7 @@ async def test_a_desc_file_is_read_through_the_session_files(monkeypatch):
         Context(
             flags={"card_id": "c1", "desc_file": operand},
             spec=_spec("card update"),
-            vfs=Files([], dispatch),
+            vfs=Files(dispatch),
         ),
     )
     assert json.loads(await materialize(out))["desc"] == "from a file"

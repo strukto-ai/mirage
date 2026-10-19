@@ -534,12 +534,10 @@ class Workspace:
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
         self._files = WorkspaceFiles(
-            self._registry.mount_rows(),
+            self._dispatcher.dispatch,
+            self._namespace.readers(self._facade_visibility),
             observer=self.observer,
-            links=self._namespace,
-            dispatch=self._dispatcher.dispatch,
             bind=self._bind_session,
-            visibility=self._facade_visibility,
         )
         self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
         self._documents = Documents(
@@ -979,7 +977,7 @@ class Workspace:
             vfs_ref=vfs_ref,
         )
         prepare_added_mount(self._registry, entry, previous)
-        self._files.set_mounts(self._registry.mount_rows())
+        self._registry.rows_changed()
         return entry
 
     async def unmount(self, prefix: str) -> None:
@@ -987,7 +985,6 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         await unmount_prefix(
             self._registry,
-            self._files,
             prefix,
             lambda: self._shutting_down,
             self._shared_mounts,
@@ -1005,7 +1002,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         mode = parse_mount_mode(mode)
         self._registry.mount_for_prefix(prefix).mode = mode
-        self._files.set_mounts(self._registry.mount_rows())
+        self._registry.rows_changed()
 
     def add_fuse_mount(
         self,
@@ -1142,10 +1139,10 @@ class Workspace:
                 self._runtime_binding,
                 ctx=Context(
                     vfs=Files(
-                        self._registry.mount_rows(),
                         self.dispatch,
-                        links=self._namespace,
-                        visibility=lambda _session: session.visibility,
+                        self._namespace.readers(
+                            lambda _session: session.visibility
+                        ),
                     ),
                     session=session_view(session, self.policies),
                     processes=self._process_view(session),

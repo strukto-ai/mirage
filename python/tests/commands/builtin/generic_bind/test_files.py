@@ -37,6 +37,7 @@ from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 from tests.fixtures.vfs_io import BatchedRAM
 
 
@@ -119,7 +120,7 @@ def _row(prefix: str = "/", **fields: Any) -> MountRow:
 
 
 def _ctx(dispatch: Any, *rows: MountRow) -> Context:
-    return Context(vfs=Files(list(rows), dispatch, ledger=False))
+    return Context(vfs=Files(dispatch, readers(list(rows)), ledger=False))
 
 
 @contextmanager

@@ -23,10 +23,10 @@ from mirage.errors.fs import eloop
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, PathSpec, Visibility
+from mirage.types import FileStat, PathSpec
 from mirage.utils.path import CycleError, resolve_path
 from mirage.view.types import FollowOperands, LinkView, MountView
-from mirage.workspace.files import Files, view_of
+from mirage.workspace.files import Files, operands_of, reader_of
 
 logger = logging.getLogger(__name__)
 
@@ -266,19 +266,19 @@ def link_view(files: Files | None) -> LinkView | None:
     """The symlink facts a walk goes by, read off the session's files, or
     None outside a workspace.
 
-    The files apply the session's hides (``FilesView``): a hidden link,
-    or one that leads where the session cannot see, has no row, no
-    listing entry and no target. Resolving a hidden path leaves it as
-    typed, for the dispatcher to refuse; a visible one resolves, so a
-    walker judges where it lands.
+    The dispatcher's reader answers (``NamespaceReader``), filtered by
+    the rule it refuses a call by: a hidden link, or one that leads where
+    the session cannot see, has no row, no listing entry and no target.
+    Resolving a hidden path leaves it as typed, for the dispatcher to
+    refuse; a visible one resolves, so a walker judges where it lands.
 
     Args:
         files (Files | None): the session's files.
     """
     if files is None:
         return None
-    seen = view_of(files)
-    if not seen.linked:
+    reader = reader_of(files)
+    if not reader.linked:
         return None
 
     async def exists(virtual: str) -> bool:
@@ -291,18 +291,18 @@ def link_view(files: Files | None) -> LinkView | None:
 
     async def target_stat(virtual: str | PathSpec) -> FileStat | None:
         path = virtual.virtual if isinstance(virtual, PathSpec) else virtual
-        if not seen.visible(path):
+        if not reader.visible(path):
             return None
         try:
-            return await files.stat(seen.resolve(path))
+            return await files.stat(reader.resolve(path))
         except (CycleError, *_MISSES) as exc:
             logger.debug("link target of %s has no row: %s", path, exc)
             return None
 
     return LinkView(
-        stat_at=seen.link_at,
-        subtree=seen.links_below,
-        resolve=seen.resolve,
+        stat_at=reader.link_at,
+        subtree=reader.links_below,
+        resolve=reader.resolve,
         exists=exists,
         target_stat=target_stat,
     )
@@ -317,15 +317,13 @@ def mount_view(
     Every mount below a path, hidden or not, is a boundary a backend's
     own walk stops at; only the visible ones are ever named. A walk
     through the dispatcher (``crossing``) has no boundary to stop at
-    (``FilesView.mounts``).
+    (``NamespaceReader.mounts``).
 
     Args:
         files (Files | None): the session's files.
         crossing (bool): the walk goes through the dispatcher.
     """
-    if files is None:
-        return None
-    return view_of(files).mounts(crossing)
+    return reader_of(files).mounts(crossing) if files is not None else None
 
 
 def owed_names(files: Files | None, directory: str) -> list[str]:
@@ -343,9 +341,7 @@ def owed_names(files: Files | None, directory: str) -> list[str]:
             workspace.
         directory (str): the directory's virtual path.
     """
-    if files is None:
-        return []
-    return view_of(files).owed(directory)
+    return reader_of(files).owed(directory) if files is not None else []
 
 
 def links_of(ctx: Context) -> LinkView | None:
@@ -399,15 +395,6 @@ def mounts_of(ctx: Context) -> MountView | None:
     return mount_view(ctx.vfs, crossing=crosses_mounts(ctx))
 
 
-def visibility_of(files: Files | None) -> Visibility | None:
-    """The visibility of the session the files run as, None for none.
-
-    Args:
-        files (Files | None): the session's files.
-    """
-    return view_of(files).vis() if files is not None else None
-
-
 def link_resolver(ctx: Context) -> LinkResolver | None:
     """The link resolver an invocation carries: None outside a workspace.
 
@@ -437,7 +424,7 @@ def follow_of(ctx: Context) -> FollowOperands | None:
     Args:
         ctx (Context): the invocation's context.
     """
-    return view_of(ctx.vfs).follow if ctx.vfs is not None else None
+    return operands_of(ctx.vfs) if ctx.vfs is not None else None
 
 
 __all__ = [
@@ -456,5 +443,4 @@ __all__ = [
     "owed_names",
     "serves",
     "typed_link",
-    "visibility_of",
 ]

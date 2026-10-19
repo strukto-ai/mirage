@@ -178,12 +178,13 @@ Commands (`commands/builtin/`) are the coreutils: a generic implements a
 family once (`generic/`), `generic_bind/` binds it to a backend,
 `crossmount/` and `executor/fanout.py` handle a line that spans mounts. The
 namespace (`workspace/mount/namespace/`) sits above every backend with the
-mount table, symlinks and the attribute overlay; a handler reads links and
-mount boundaries through `links_of` and `mounts_of`
-(`commands/builtin/utils/links`), as its session sees them: they read the
-`FilesView` its files hand out (`view_of`), hides already applied, and
-`ctx.vfs` itself hands out neither table. A `filetype` registration on a mount is the only
-renderer extension point.
+mount table, symlinks and the attribute overlay, and hands out the one way
+to read them, a `NamespaceReader` (`workspace/dispatcher/reader`) filtered by
+the rule the dispatcher refuses a call by. A handler reads links and mount
+boundaries through `links_of` and `mounts_of` (`commands/builtin/utils/links`),
+which ask its files' reader (`reader_of`), so no handler filters a hide of its
+own, and `ctx.vfs` itself hands out neither table. A `filetype` registration
+on a mount is the only renderer extension point.
 
 Pinned behavior: `find -size` rounds up and the start row is the generic's;
 `du` derives directory rows, sorts siblings, counts bytes and exits 1 on a

@@ -112,7 +112,7 @@ async function runCurl(
     stdin: null,
     flags,
     cwd: PathSpec.fromStrPath('/'),
-    vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
+    vfs: new Files(dispatch, null, null, { ledger: false }),
   })
   if (result === null) return { out: '', err: '', exitCode: -1, writes }
   const [out, ioResult] = result

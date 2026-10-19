@@ -44,6 +44,7 @@ from mirage.utils.path import CycleError
 from mirage.view.types import LinkView
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 
 def _spec(
@@ -201,9 +202,9 @@ def test_a_link_the_router_followed_can_vanish_before_its_turn():
 
 
 def test_an_invocation_without_files_or_links_has_no_link_resolver():
-    files = Files([], _Dispatch(), links=_Table({}))
+    files = Files(_Dispatch(), readers(links=_Table({})))
     assert link_resolver(Context()) is None
-    assert link_resolver(Context(vfs=Files([], _Dispatch()))) is None
+    assert link_resolver(Context(vfs=Files(_Dispatch()))) is None
     resolver = link_resolver(Context(vfs=files))
     assert resolver is not None and resolver.cwd == "/"
     assert resolver.dispatch == files.dispatch
@@ -238,7 +239,9 @@ def test_a_looping_link_is_the_eloop_a_walker_reports():
 
 
 def test_owed_names_derive_from_the_mount_table():
-    files = Files(_rows("/base/", "/base/inner/", "/dev/"), _Dispatch())
+    files = Files(
+        _Dispatch(), readers(_rows("/base/", "/base/inner/", "/dev/"))
+    )
     assert owed_names(files, "/base") == ["inner"]
     assert owed_names(files, "/") == ["base", "dev"]
     assert owed_names(files, "/dev") == []
@@ -249,9 +252,8 @@ def test_owed_names_include_link_ancestors():
     # ancestors, exactly as a nested mount prefix does, so `ls /` shows
     # the way to it.
     files = Files(
-        _rows("/base/"),
         _Dispatch(),
-        links=_Table({"/ghost/deep/lnk": "/base"}),
+        readers(_rows("/base/"), _Table({"/ghost/deep/lnk": "/base"})),
     )
     assert owed_names(files, "/") == ["base", "ghost"]
     assert owed_names(files, "/ghost") == ["deep"]
@@ -260,12 +262,12 @@ def test_owed_names_include_link_ancestors():
 
 def test_a_link_view_is_live_whenever_the_files_hold_a_table():
     table = _Table({})
-    view = link_view(Files([], _Dispatch(), links=table))
+    view = link_view(Files(_Dispatch(), readers(links=table)))
     assert view is not None
     assert view.subtree("/") == []
     table._targets["/data/l"] = "/data/a"
     assert view.stat_at("/data/l") is not None
-    assert link_view(Files([], _Dispatch())) is None
+    assert link_view(Files(_Dispatch())) is None
     assert link_view(None) is None
 
 
@@ -276,17 +278,19 @@ async def test_a_link_the_session_cannot_see_is_never_answered():
     # target; resolving a hidden path leaves it as typed.
     hidden = Visibility(paths=HiddenPaths(paths=("/data/secret",)))
     files = Files(
-        _rows("/data/"),
         _Dispatch(),
-        links=_Table(
-            {
-                "/data/open": "/data/a",
-                "/data/door": "/data/secret",
-                "/data/secret/l": "/data/a",
-                "/ghost/deep/lnk": "/data/secret",
-            }
+        readers(
+            _rows("/data/"),
+            _Table(
+                {
+                    "/data/open": "/data/a",
+                    "/data/door": "/data/secret",
+                    "/data/secret/l": "/data/a",
+                    "/ghost/deep/lnk": "/data/secret",
+                }
+            ),
+            hidden,
         ),
-        visibility=lambda _session: hidden,
     )
     view = link_view(files)
     assert view is not None
@@ -303,9 +307,10 @@ async def test_a_link_the_session_cannot_see_is_never_answered():
 def test_a_hidden_mount_is_a_boundary_but_never_named():
     hidden = Visibility(paths=HiddenPaths(paths=("/data/secret",)))
     files = Files(
-        _rows("/data/", "/data/open/", "/data/secret/"),
         _Dispatch(),
-        visibility=lambda _session: hidden,
+        readers(
+            _rows("/data/", "/data/open/", "/data/secret/"), visibility=hidden
+        ),
     )
     mounts = mount_view(files)
     assert mounts is not None
@@ -327,7 +332,9 @@ def test_a_command_in_a_mount_scope_walks_and_answers_as_that_mount():
         mode=MountMode.READ,
         calls=frozenset({"read_tree"}),
     )
-    ctx = Context(vfs=Files([facts, *_rows("/data/inner/")], _Dispatch()))
+    ctx = Context(
+        vfs=Files(_Dispatch(), readers([facts, *_rows("/data/inner/")]))
+    )
     across = mounts_of(ctx)
     assert across is not None and across.answers is not None
     assert (crosses_mounts(ctx), mount_root(ctx)) == (True, "")

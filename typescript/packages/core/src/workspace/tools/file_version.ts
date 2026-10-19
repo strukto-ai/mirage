@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Files, namespaceOf } from '../files.ts'
+import { type Files, readerOf } from '../files.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 
@@ -78,9 +78,9 @@ export class FileVersionTracker {
   // so `/w/./a.txt` and `/w/a.txt` share a stamp while `link/..` climbs from
   // where the link leads.
   private key(path: string): string {
-    const links = namespaceOf(this.vfs).links
-    if (links === null) return resolvePath(path, '/')
-    return links.follow(resolvePath(links.follow(path), '/'))
+    const reader = readerOf(this.vfs)
+    if (!reader.linked) return resolvePath(path, '/')
+    return reader.resolve(resolvePath(reader.resolve(path), '/'))
   }
 
   private async currentVersion(path: string): Promise<string | null> {

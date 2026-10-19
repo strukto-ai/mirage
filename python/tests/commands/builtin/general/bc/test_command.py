@@ -89,7 +89,7 @@ async def test_quit_in_a_file_leaves_the_files_after_it_unread():
         NOOPAccessor(),
         [PathSpec.from_str_path("/q.bc"), PathSpec.from_str_path("/later.bc")],
         [],
-        Context(stdin=b"8\n", vfs=Files([], dispatch, ledger=False)),
+        Context(stdin=b"8\n", vfs=Files(dispatch, ledger=False)),
     )
     assert output is not None and not isinstance(output, bytes)
     assert await materialize(output) == b"7\n"

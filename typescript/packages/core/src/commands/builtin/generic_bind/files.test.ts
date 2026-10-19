@@ -32,7 +32,7 @@ import {
   withReading,
 } from './files.ts'
 import { runWithRevisions } from '../../../observe/context.ts'
-import { BatchedRAM } from '../../../test-utils.ts'
+import { BatchedRAM, readers } from '../../../test-utils.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
@@ -106,10 +106,8 @@ function contextFor(
   dispatch: DispatchFn,
   { prefixes = [], row = null, signal }: Mounts = {},
 ): Context {
-  const vfs = new Files(dispatch, null, null, () => row, {
-    ledger: false,
-    prefixes: () => prefixes,
-  })
+  const rows = [...(row === null ? [] : [row]), ...prefixes.filter((p) => p !== row?.prefix)]
+  const vfs = new Files(dispatch, readers(rows), null, { ledger: false })
   return { stdin: null, flags: {}, cwd: at('/'), vfs, ...(signal === undefined ? {} : { signal }) }
 }
 

@@ -29,6 +29,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 
 def _stat_over(present: set[str], files: set[str] = frozenset()):
@@ -95,7 +96,7 @@ def _files(dispatch, stat_path, root: str = "/repo/") -> Files:
         return found, None
 
     row = MountRow(prefix=root, resource_type="ram", mode=MountMode.READ)
-    return Files([row], both)
+    return Files(both, readers([row]))
 
 
 async def _discover(

@@ -29,6 +29,7 @@ from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.view.types import MountView
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 TREE = {
     "/db": ["/db/a.txt", "/db/sub"],
@@ -109,7 +110,7 @@ async def _du(
 ) -> tuple[str, int, str]:
     ctx = Context(
         flags={**flags},
-        vfs=Files([mount.row], mount, links=links, ledger=False),
+        vfs=Files(mount, readers([mount.row], links), ledger=False),
     )
     token = set_mount_gate("/", MountMode.WRITE)
     try:

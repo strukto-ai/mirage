@@ -68,7 +68,7 @@ it('closes primed input when an in-place write is refused', async () => {
         stdin: null,
         flags: { i: true },
         cwd: PathSpec.fromStrPath('/'),
-        vfs: new Files(() => Promise.reject(error), null, null, undefined, { ledger: false }),
+        vfs: new Files(() => Promise.reject(error), null, null, { ledger: false }),
       } as Context,
       async function* () {
         try {

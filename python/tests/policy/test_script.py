@@ -62,6 +62,7 @@ from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 
 class FakeProgram(LanguageRuntime):
@@ -194,7 +195,7 @@ def _vfs() -> Files:
         for prefix in ("/", "/data/", "/vault/")
     ]
     vis = Visibility(paths=classify_paths(["/vault"]))
-    return Files(rows, _no_calls, visibility=lambda _session: vis)
+    return Files(_no_calls, readers(rows, visibility=vis))
 
 
 def _ctx(

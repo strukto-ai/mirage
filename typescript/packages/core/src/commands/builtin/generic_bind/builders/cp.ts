@@ -25,7 +25,6 @@ import {
   mountsOf,
   dispatchOf,
   mountRoot,
-  visibilityOf,
 } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { enotsup } from '../../../../errors/fs.ts'
@@ -119,7 +118,6 @@ export const BUILDER: GenericCommand = {
             links,
             ctx.vfs.dispatch,
             cwd,
-            visibilityOf(ctx.vfs) ?? undefined,
             (virtual) => serves(mountsOf(ctx), mountRoot(ctx), virtual),
           ),
       ctx.stdin,

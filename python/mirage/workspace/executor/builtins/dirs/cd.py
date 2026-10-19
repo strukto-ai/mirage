@@ -144,10 +144,8 @@ def _session_follow(
         return None
     links = link_view(
         Files(
-            [],
             dispatch,
-            links=namespace,
-            visibility=lambda _session: session.visibility,
+            namespace.readers(lambda _session: session.visibility),
         )
     )
     return links.resolve if links is not None else None

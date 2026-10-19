@@ -103,6 +103,9 @@ async def handle_readlink(
         newline = True
     lines: list[str] = []
     exit_code = 0
+    reader = namespace.readers(lambda _session: session.visibility)(
+        session.session_id
+    )
     for op in operands:
         abs_op = operand_abs(namespace, op, session.cwd)
         spec = PathSpec.from_str_path(op, cwd=session.cwd)
@@ -121,9 +124,8 @@ async def handle_readlink(
                         session.cwd,
                         mode,
                         False,
-                        namespace.readlink,
+                        reader.readlink,
                         partial(dispatch_stat, dispatch),
-                        session.visibility,
                     )
                 )
                 continue

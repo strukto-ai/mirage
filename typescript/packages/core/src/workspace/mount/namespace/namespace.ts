@@ -19,6 +19,7 @@ import {
   LINK_TARGET_KEY,
   type MountMode,
   type PathSpec,
+  type Visibility,
 } from '../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { epochToIso } from '../../../utils/dates.ts'
@@ -28,6 +29,7 @@ import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
 import type { MountRegistry } from '../registry.ts'
+import { NamespaceReader } from '../../dispatcher/reader.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
@@ -534,5 +536,25 @@ export class Namespace {
 
   isMountRoot(path: string): boolean {
     return this.registry.isMountRoot(path)
+  }
+
+  /**
+   * How a session's files read this namespace: the reader for whichever
+   * session an op runs as (`NamespaceReader`), over the link table and the
+   * mount registry this owns, read live. Mirrors Python's `Namespace.readers`.
+   *
+   * @param visibility the visibility of a session, by id; null names the
+   *   session bound when the question is asked.
+   */
+  readers(
+    visibility: (sessionId: string | null) => Visibility | null,
+  ): (sessionId: string | null) => NamespaceReader {
+    return (sessionId) =>
+      new NamespaceReader(
+        this,
+        () => this.registry.mountRows(),
+        sessionId,
+        () => visibility(sessionId),
+      )
   }
 }

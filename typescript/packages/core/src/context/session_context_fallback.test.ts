@@ -61,7 +61,8 @@ import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { pathVisible } from '../utils/hidden.ts'
-import { Files, namespaceOf } from '../workspace/files.ts'
+import { Files, readerOf } from '../workspace/files.ts'
+import { readers } from '../test-utils.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import type { Handed } from '../vfs/types.ts'
 
@@ -210,24 +211,17 @@ describe('session predicates on the fallback storage', () => {
       await hold
     })
     const short = runWithSession(other, () => {
-      const vis = namespaceOf(
-        new Files(dispatch, null, null, () => null, {
-          visibility: () => other.visibility,
-        }),
-      ).vis()
-      folded = pathVisible(vis, '/data/x')
+      folded = readerOf(new Files(dispatch, readers([], null, other.visibility))).visible(
+        '/data/x',
+      )
       release()
       return Promise.resolve()
     })
     await Promise.all([long, short])
     expect(folded).toBe(true)
     // A session named outside any line keeps its own view.
-    const own = namespaceOf(
-      new Files(dispatch, null, null, () => null, {
-        visibility: () => other.visibility,
-      }),
-    ).vis()
-    expect(pathVisible(own, '/data/x')).toBe(true)
+    const own = readerOf(new Files(dispatch, readers([], null, other.visibility)))
+    expect(own.visible('/data/x')).toBe(true)
   })
 
   it('a settle out of order cannot wipe a live hide into visibility', async () => {

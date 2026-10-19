@@ -113,7 +113,7 @@ async def test_pack_checksum_uses_bounded_ranges(length, known_size):
         return data[offset : offset + count], IOResult()
 
     await check_pack(
-        Files([], dispatch),
+        Files(dispatch),
         PathSpec.from_str_path("/repo/.git/objects/pack/large.pack"),
         checksum,
     )
@@ -137,7 +137,7 @@ async def test_pack_permission_failure_keeps_path_and_git_error(failed_op):
         GitError, match="cannot read pack /repo/denied.pack: Permission denied"
     ):
         await check_pack(
-            Files([], dispatch),
+            Files(dispatch),
             PathSpec.from_str_path("/repo/denied.pack"),
             b"0" * 20,
         )

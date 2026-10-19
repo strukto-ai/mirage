@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import functools
-import posixpath
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Any
 
 from mirage.context import (
@@ -43,17 +41,10 @@ from mirage.observe.context import (
     start_op,
 )
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
-from mirage.utils.hidden import leads_hidden, path_visible
-from mirage.utils.path import norm, norm_dir, owner_prefix
-from mirage.view.namespace_view import namespace_names
-from mirage.view.types import (
-    FollowOperands,
-    MountView,
-    NamespaceLinks,
-    SessionBind,
-)
-from mirage.workspace.types import MountRow
+from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.path import owner_prefix
+from mirage.view.types import FollowOperands, SessionBind
+from mirage.workspace.dispatcher.reader import NamespaceReader
 
 
 async def _recorded(
@@ -87,10 +78,13 @@ class Files:
     ``ws.vfs`` walk the same pipeline as a shell command: link follow,
     session grants, admission policies, cache read-through, namespace
     structure, and write invalidation all fire once, at that one dispatcher.
-    The facade keeps only what is its own: the typed surface, op
-    recording, and the mount-table helpers. What only the host asks of
-    ``ws.vfs`` (the ledger, keeping its mount table in step, the mounts
-    FUSE and the runtime's ``open()`` interception ask about) is on
+    The facade keeps only what is its own: the typed surface and op
+    recording. The link and mount tables are the namespace's the
+    dispatcher answers from, read through the ``NamespaceReader`` it
+    hands out for the session an op runs as (``namespace``), which the
+    mount helpers here answer from.
+    What only the host asks of ``ws.vfs`` (the ledger, the mounts FUSE
+    and the runtime's ``open()`` interception ask about) is on
     ``WorkspaceFiles``.
 
     ``dispatch`` is required, so there is no workspace-less mode. A
@@ -126,26 +120,20 @@ class Files:
 
     def __init__(
         self,
-        mounts: list[MountRow],
         dispatch: DispatchFn,
+        namespace: Callable[[str | None], NamespaceReader] | None = None,
         observer: Any | None = None,
         session_id: str | None = None,
-        links: NamespaceLinks | None = None,
         bind: SessionBind | None = None,
         records: list[OpRecord] | None = None,
-        visibility: Callable[[str | None], Visibility | None] | None = None,
         follow: FollowOperands | None = None,
         ledger: bool = True,
     ) -> None:
-        self._mounts: list[MountRow] = sorted(
-            mounts, key=lambda m: len(m.prefix), reverse=True
-        )
+        self._namespace = namespace
         self._observer = observer
         self._session_id = session_id
-        self._links = links
         self._dispatch = dispatch
         self._bind = bind
-        self._visibility = visibility
         self._follow = follow
         self._ledger = ledger
         self._records: list[OpRecord] = records if records is not None else []
@@ -163,25 +151,21 @@ class Files:
         own: a host binds a session with ``ws.session(id)`` (creating
         it when the id is new) or ``Session(ws, id)`` (adopting
         one that exists), so there is one way to say it rather than
-        two. Shares the mount table and the op ledger with this one, so
-        the workspace-wide account stays one list and a later mount is
-        seen by both.
+        two. Shares the op ledger with this one, so the workspace-wide
+        account stays one list, and reads the same dispatcher's tables,
+        so a later mount is seen by both.
 
         Args:
             session_id (str): the session whose profile judges the ops.
         """
-        derived = Files(
-            [],
+        return Files(
             self._dispatch,
+            self._namespace,
             observer=self._observer,
             session_id=session_id,
-            links=self._links,
             bind=self._bind,
             records=self._records,
-            visibility=self._visibility,
         )
-        derived._mounts = self._mounts
-        return derived
 
     def _over(self, dispatch: DispatchFn) -> "Files":
         """The same files over another dispatcher, keeping no ledger.
@@ -189,45 +173,23 @@ class Files:
         Args:
             dispatch (DispatchFn): the dispatcher the calls go to.
         """
-        derived = Files(
-            [],
+        return Files(
             dispatch,
+            self._namespace,
             session_id=self._session_id,
-            links=self._links,
-            visibility=self._visibility,
             follow=self._follow,
             ledger=False,
         )
-        derived._mounts = self._mounts
-        return derived
 
-    def _served(self) -> list[MountRow]:
-        """The mounts the session an op would run as is told of at all,
-        hides aside.
-
-        A session's own documents mount is one only it is told of.
-        """
-        return [
-            m
-            for m in self._mounts
-            if m.visible is None or m.visible(self._session_id)
-        ]
-
-    def _vis(self) -> Visibility | None:
-        """The visibility of the session an op would run as: the bound
-        one, else this facade's own."""
-        if self._visibility is None:
-            return session_visibility()
-        return self._visibility(self._session_id)
-
-    def _shown(self) -> list[MountRow]:
-        """The mounts whose root the session sees.
-
-        A hidden mount is left out of every list here, as it is left out
-        of a listing, so no list names it.
-        """
-        vis = self._vis()
-        return [m for m in self._served() if path_visible(vis, norm(m.prefix))]
+    def _reader(self) -> NamespaceReader:
+        """The namespace as the session an op would run as sees it: the
+        workspace's, else, for files outside one, no link and no mount
+        under the bound session's hides."""
+        if self._namespace is None:
+            return NamespaceReader(
+                None, list, self._session_id, session_visibility
+            )
+        return self._namespace(self._session_id)
 
     def mount_prefixes(self) -> list[str]:
         """Return the prefixes of the mounts the session sees.
@@ -235,7 +197,7 @@ class Files:
         Returns:
             list[str]: mount prefixes, longest first.
         """
-        return [m.prefix for m in self._shown()]
+        return [m.prefix for m in self._reader().shown()]
 
     def mount_of(self, path: str | PathSpec) -> str | None:
         """The mount prefix serving ``path``, without a trailing slash.
@@ -249,31 +211,7 @@ class Files:
         Args:
             path (str | PathSpec): virtual path.
         """
-        virtual = PathSpec.from_str_path(path, cwd="/").virtual
-        if not path_visible(self._vis(), virtual):
-            return None
-        owner = owner_prefix((m.prefix for m in self._served()), virtual)
-        return None if owner is None else norm(owner)
-
-    def _is_visible(self, path: str | PathSpec) -> bool:
-        """Whether the session sees ``path``: it is not hidden, and no
-        link on it leads where the session cannot see.
-
-        The rule the dispatcher refuses a call by. Not a handler's: a
-        handler hands its output over as rows (``IOResult.rows``), which
-        the command boundary filters by this rule; the command helpers
-        read it as ``FilesView.visible``.
-
-        Args:
-            path (str | PathSpec): virtual path.
-        """
-        virtual = PathSpec.from_str_path(path, cwd="/").virtual
-        vis = self._vis()
-        if not path_visible(vis, virtual):
-            return False
-        if vis is None or self._links is None:
-            return True
-        return not leads_hidden(vis, virtual, self._links.symlink_targets())
+        return self._reader().mount_of(path)
 
     def is_mount(self, path: str | PathSpec) -> bool:
         """Whether ``path`` is the root of a mount the session sees.
@@ -281,8 +219,7 @@ class Files:
         Args:
             path (str | PathSpec): virtual path.
         """
-        virtual = norm(PathSpec.from_str_path(path, cwd="/").virtual)
-        return any(norm(m.prefix) == virtual for m in self._shown())
+        return self._reader().is_mount(path)
 
     def submounts(self, path: str | PathSpec) -> list[str]:
         """The mount roots strictly under ``path``, sorted, without a
@@ -297,27 +234,7 @@ class Files:
         Args:
             path (str | PathSpec): virtual directory path.
         """
-        virtual = norm(PathSpec.from_str_path(path, cwd="/").virtual)
-        vis = self._vis()
-        if not path_visible(vis, virtual):
-            return []
-        below = norm_dir(virtual)
-        found: set[str] = set()
-        for m in self._served():
-            root = norm(m.prefix)
-            if root == virtual or not norm_dir(root).startswith(below):
-                continue
-            while root != virtual and not path_visible(vis, root):
-                root = posixpath.dirname(root)
-            found.add(root)
-        return sorted(found)
-
-    def _owner(self, path: str) -> MountRow | None:
-        """The mount owning ``path`` by longest prefix, or None."""
-        owner = owner_prefix((m.prefix for m in self._mounts), path)
-        if owner is None:
-            return None
-        return next(m for m in self._mounts if m.prefix == owner)
+        return self._reader().submounts(path)
 
     @staticmethod
     def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
@@ -510,7 +427,7 @@ class Files:
         if mine or not report.completed:
             return
         ran = report.path or typed.virtual
-        owner = self._owner(ran)
+        owner = self._reader().owner(ran)
         if owner is None:
             return
         moved = report.bytes
@@ -1052,10 +969,10 @@ class WorkspaceFiles(Files):
     """``ws.vfs``: the files the host holds, with what only the host asks.
 
     The op ledger every ledgered facade appends to (``records``, with
-    the network/cache split derived from it), the mount table kept in
-    step with the workspace's (``set_mounts``, ``unmount``), and the
-    mount questions FUSE and the runtime's ``open()`` interception ask
-    (``unsized_mounts``, ``writable_mounts``, ``is_mounted``). The
+    the network/cache split derived from it), and the mount questions
+    FUSE and the runtime's ``open()`` interception ask
+    (``unsized_mounts``, ``writable_mounts``, ``is_mounted``), answered
+    from the namespace's live mount table. The
     ``Files`` a handler, a CLI leaf, a runtime or ``session.vfs`` gets
     is a facade of its own, on which these would change or report only
     that facade, so it is a plain ``Files``.
@@ -1067,18 +984,6 @@ class WorkspaceFiles(Files):
         appends each shell line's ops too, so this is the one
         workspace-wide account."""
         return self._records
-
-    def set_mounts(self, mounts: list[MountRow]) -> None:
-        """Refresh mount metadata without replacing the facade or its ledger.
-
-        Args:
-            mounts (list[MountRow]): the workspace's current mount table.
-        """
-        # In place, so a facade derived for a session sees the
-        # refreshed table through the list it shares.
-        self._mounts[:] = sorted(
-            mounts, key=lambda m: len(m.prefix), reverse=True
-        )
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
         """Mounts the session sees whose files cannot be sized without
@@ -1095,7 +1000,7 @@ class WorkspaceFiles(Files):
         """
         root = root_prefix.rstrip("/")
         found = []
-        for m in self._shown():
+        for m in self._reader().shown():
             if root and not (
                 m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
             ):
@@ -1118,7 +1023,7 @@ class WorkspaceFiles(Files):
         """
         root = root_prefix.rstrip("/")
         found = []
-        for m in self._shown():
+        for m in self._reader().shown():
             if root and not (
                 m.prefix.rstrip("/") == root or m.prefix.startswith(root + "/")
             ):
@@ -1126,18 +1031,6 @@ class WorkspaceFiles(Files):
             if m.mode is not MountMode.READ:
                 found.append((m.prefix, m.resource_type))
         return found
-
-    def unmount(self, prefix: str) -> None:
-        """Drop a mount the workspace removed from the mount table.
-
-        Args:
-            prefix (str): the removed mount's prefix.
-        """
-        norm = norm_dir(prefix)
-        # In place, for the same reason ``set_mounts`` is: a facade
-        # derived for a session shares this list, and a retained one
-        # must stop reporting a mount the workspace dropped.
-        self._mounts[:] = [m for m in self._mounts if m.prefix != norm]
 
     @property
     def network_bytes(self) -> int:
@@ -1175,226 +1068,33 @@ class WorkspaceFiles(Files):
         """
         if not path.startswith("/"):
             return False
+        rows = self._reader().rows()
         return (
-            owner_prefix(
-                (m.prefix for m in self._mounts if not m.anchor), path
-            )
+            owner_prefix((m.prefix for m in rows if not m.anchor), path)
             is not None
         )
 
 
-@dataclass(frozen=True)
-class FilesNamespace:
-    """What a session's files hold of the namespace, hides aside.
+def reader_of(files: Files) -> NamespaceReader:
+    """The namespace as the session a command's files run as sees it,
+    for the helpers that walk it (``NamespaceReader``); outside a
+    workspace, no link and no mount.
 
-    The link table and the mount table as the workspace keeps them,
-    hidden entries included, so it is never a handler's: a handler asks
-    ``Files`` (``mount_of``, ``submounts``), which apply the session's
-    hides, and the command helpers read ``FilesView``, which applies
-    them. The code that walks the namespace beside the
-    dispatcher reads it: the mount core and the file tool mapping a path
-    the way the dispatcher does, the runtime's descriptors.
-
-    Args:
-        links (NamespaceLinks | None): the workspace link table,
-            unfiltered by any session's hides.
-        follow (FollowOperands | None): the line's operand resolution a
-            command's globs give their matches.
-        vis (Callable[[], Visibility | None]): the visibility of the
-            session an op would run as.
-        mounts (Callable[[], list[MountRow]]): the mounts that session
-            is told of at all, hides aside.
-    """
-
-    links: NamespaceLinks | None
-    follow: FollowOperands | None
-    vis: Callable[[], Visibility | None]
-    mounts: Callable[[], list[MountRow]]
-
-
-def namespace_of(files: Files) -> FilesNamespace:
-    """The namespace a session's files hold, for the code that walks it
-    beside the dispatcher; never a handler's (``FilesNamespace``).
+    The dispatcher's reader, never one of the facade's own: the link and
+    mount tables are the dispatcher's, and the reader filters every
+    answer by the rule the dispatcher refuses a call by.
 
     Args:
         files (Files): the session's files.
     """
-    return FilesNamespace(
-        links=files._links,
-        follow=files._follow,
-        vis=files._vis,
-        mounts=files._served,
-    )
+    return files._reader()
 
 
-@dataclass(frozen=True)
-class FilesView:
-    """What a session's files show of the namespace, the session's hides
-    applied.
-
-    The link and mount tables are read here, beside the dispatcher that
-    answers from them, and filtered by the rule it refuses a call by
-    (``visible``), so the command helpers that walk the
-    namespace (``links_of``, ``mounts_of``, globs, ``find -L``, ``cp
-    -L``, ``du``) read no table and filter no hide of their own: a
-    hidden link, or one that leads where the session cannot see, has no
-    row and no target; a hidden mount is a boundary a walk stops at but
-    is never named.
+def operands_of(files: Files) -> FollowOperands | None:
+    """The line's operand resolution a command's globs give their
+    matches, which a command's files carry; None outside a line.
 
     Args:
-        linked (bool): whether a link table stands behind the files.
-        link_at (Callable[[str], FileStat | None]): the link standing at
-            a path, its own row; None where none stands or the session
-            cannot see it.
-        links_below (Callable[[str], list[tuple[str, FileStat]]]): the
-            links under a directory the session sees, with their rows.
-        resolve (Callable[[str], str]): where a path the session sees
-            leads, every link followed; a hidden one is left as typed.
-            Raises CycleError where a link loop stands in the walk.
-        mounts (Callable[[bool], MountView]): where the mount
-            boundaries are, for a walk through the dispatcher (True) or
-            one bound to a mount.
-        owed (Callable[[str], list[str]]): the names a directory holds
-            only as namespace structure: the mounts below it and its
-            links, by their first segment under it.
-        vis (Callable[[], Visibility | None]): the visibility of the
-            session an op would run as.
-        visible (Callable[[str | PathSpec], bool]): whether the session
-            sees a path: it is not hidden, and no link on it leads where
-            the session cannot see. The rule the dispatcher refuses a call
-            by, for what a helper holds in data of its own (a link's
-            target, git's index) and the rows the command boundary
-            filters.
-        follow (FollowOperands | None): the line's operand resolution a
-            command's globs give their matches.
+        files (Files): the command's files.
     """
-
-    linked: bool
-    link_at: Callable[[str], FileStat | None]
-    links_below: Callable[[str], list[tuple[str, FileStat]]]
-    resolve: Callable[[str], str]
-    mounts: Callable[[bool], MountView]
-    owed: Callable[[str], list[str]]
-    vis: Callable[[], Visibility | None]
-    visible: Callable[[str | PathSpec], bool]
-    follow: FollowOperands | None
-
-
-def _mount_view(files: Files, crossing: bool) -> MountView:
-    """Where the mount boundaries are, as the session the files run as
-    sees them.
-
-    Every mount below a path, hidden or not, is a boundary a backend's
-    own walk stops at: a mount the session cannot see still shadows the
-    parent backend's keys under its prefix. Only the visible ones are
-    ever named. A walk through the dispatcher (``crossing``) descends
-    into each mount itself, so it has no boundary to stop at: no mount
-    below a path, and no mount root; and it takes no mount's shortcut,
-    so no mount answers a function for it, caps its globs or narrows
-    its search.
-
-    Args:
-        files (Files): the session's files.
-        crossing (bool): the walk goes through the dispatcher.
-    """
-
-    def below(virtual: str) -> list[str]:
-        if crossing:
-            return []
-        base = norm_dir(virtual)
-        return [
-            m.prefix.rstrip("/") or "/"
-            for m in sorted(files._served(), key=lambda m: m.prefix)
-            if m.prefix != base and m.prefix.startswith(base)
-        ]
-
-    def visible_below(virtual: str) -> list[str]:
-        vis = files._vis()
-        return [root for root in below(virtual) if path_visible(vis, root)]
-
-    def owner(virtual: str) -> MountRow | None:
-        served = files._served()
-        found = owner_prefix([m.prefix for m in served], virtual)
-        return next((m for m in served if m.prefix == found), None)
-
-    def is_root(virtual: str) -> bool:
-        if crossing:
-            return False
-        return any(m.prefix == norm_dir(virtual) for m in files._served())
-
-    def root_of(virtual: str) -> str:
-        row = owner(virtual)
-        return row.prefix if row is not None else "/"
-
-    def max_du_entries(virtual: str) -> int | None:
-        row = owner(virtual)
-        return row.max_du_entries if row is not None else None
-
-    def answers(virtual: str, name: str) -> bool:
-        row = None if crossing else owner(virtual)
-        return row is not None and name in row.calls
-
-    def max_glob_matches(virtual: str) -> int | None:
-        row = None if crossing else owner(virtual)
-        return row.max_glob_matches if row is not None else None
-
-    def searchable(virtual: str) -> tuple[str, ...] | None:
-        row = None if crossing else owner(virtual)
-        return row.searchable if row is not None else None
-
-    return MountView(
-        descendants=below,
-        visible_descendants=visible_below,
-        is_root=is_root,
-        root_of=root_of,
-        max_du_entries=max_du_entries,
-        answers=answers,
-        max_glob_matches=max_glob_matches,
-        searchable=searchable,
-    )
-
-
-def view_of(files: Files) -> FilesView:
-    """The namespace a session's files show, its hides applied, for the
-    command helpers that walk it (``FilesView``).
-
-    Args:
-        files (Files): the session's files.
-    """
-    table = files._links
-
-    def link_at(virtual: str) -> FileStat | None:
-        if table is None or not files._is_visible(virtual):
-            return None
-        return table.link_stat_at(virtual)
-
-    def links_below(directory: str) -> list[tuple[str, FileStat]]:
-        if table is None:
-            return []
-        return [
-            (path, row)
-            for path, row in table.link_stats_below(directory)
-            if files._is_visible(path)
-        ]
-
-    def resolve(virtual: str) -> str:
-        if table is None or not path_visible(files._vis(), virtual):
-            return virtual
-        return posixpath.normpath(table.follow(virtual))
-
-    def owed(directory: str) -> list[str]:
-        return namespace_names(
-            files._vis(), [m.prefix for m in files._served()], table, directory
-        )
-
-    return FilesView(
-        linked=table is not None,
-        link_at=link_at,
-        links_below=links_below,
-        resolve=resolve,
-        mounts=functools.partial(_mount_view, files),
-        owed=owed,
-        vis=files._vis,
-        visible=files._is_visible,
-        follow=files._follow,
-    )
+    return files._follow

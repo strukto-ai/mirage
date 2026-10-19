@@ -43,7 +43,7 @@ async def test_template_failure_refuses_transfer(
     request = AsyncMock()
     monkeypatch.setitem(curl.__wrapped__.__globals__, "http_request", request)
     dispatch = AsyncMock(side_effect=failure)
-    vfs = Files([], dispatch, ledger=False) if failure is not None else None
+    vfs = Files(dispatch, ledger=False) if failure is not None else None
     ctx = Context(
         vfs=vfs,
         flags={

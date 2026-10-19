@@ -21,6 +21,7 @@ import {
 import type { SessionView } from '../view/types.ts'
 import { classifyPaths } from '../utils/hidden.ts'
 import { Files } from '../workspace/files.ts'
+import { readers } from '../test-utils.ts'
 import { CALLS } from '../workspace/dispatcher/constants.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
@@ -198,13 +199,7 @@ function files(): Files {
   const vis = { ...DEFAULT_VISIBILITY, paths: classifyPaths(['/vault']) }
   return new Files(
     () => Promise.reject(new Error('no file calls here')),
-    null,
-    null,
-    () => null,
-    {
-      prefixes: () => ['/', '/data/', '/vault/'],
-      visibility: () => vis,
-    },
+    readers(['/', '/data/', '/vault/'], null, vis),
   )
 }
 

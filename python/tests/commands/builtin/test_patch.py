@@ -26,6 +26,7 @@ from mirage.workspace.types import MountRow
 from tests.commands.builtin.conftest import file_workspace as _ws
 from tests.commands.builtin.conftest import optional_output_bytes as _bytes
 from tests.commands.builtin.conftest import run_raw as _run_raw
+from tests.fixtures.readers import readers
 
 
 def test_patch_apply():
@@ -126,7 +127,7 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     ctx = Context(
         flags=flags,
         cwd=PathSpec.from_str_path(prefix or "/"),
-        vfs=Files(rows, AsyncMock(), ledger=False),
+        vfs=Files(AsyncMock(), readers(rows), ledger=False),
         stdin=patch_data if source == "stdin" else None,
     )
     operands = [orig_path, input_path] if source == "operand" else []

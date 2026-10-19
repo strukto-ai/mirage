@@ -119,7 +119,7 @@ async def run_dispatch(
         flags=virtual_flags(flag_kwargs),
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
-        vfs=vfs or Files([], dispatch, follow=follow, ledger=False),
+        vfs=vfs or Files(dispatch, follow=follow, ledger=False),
         argv=argv,
     )
     # No mount is bound to the run, a line that spans mounts walking

@@ -52,7 +52,7 @@ function files(removed?: string[]): Files {
       ...(removed === undefined ? {} : { unlink: remove, rm_r: remove }),
     },
     {},
-    { prefix: '/', kind: 'fake', calls: new Set(removed === undefined ? [] : ['unlink', 'rm_r']) },
+    [{ prefix: '/', kind: 'fake', calls: new Set(removed === undefined ? [] : ['unlink', 'rm_r']) }],
   )
 }
 
@@ -185,7 +185,8 @@ it('rm -r names a mount below and fails', async () => {
         throw walkDeclined('s3', 'rm_r', path)
       },
     },
-    { prefixes: () => ['/data/', '/data/inner/'] },
+    {},
+    ['/data/', '/data/inner/'],
   )
   const command = generic('rm')
   const result = await runWithMountGate('/data/', MountMode.WRITE, async () =>

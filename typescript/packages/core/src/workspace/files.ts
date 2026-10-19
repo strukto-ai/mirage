@@ -17,7 +17,7 @@ import { closeQuietly, ensureStream } from '../io/stream.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, record, type RecordingState, startOp } from '../observe/context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
-import type { FileStat, SetAttrFields, Visibility } from '../types.ts'
+import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import {
@@ -29,25 +29,11 @@ import {
   runWithCaller,
   sessionVisibility,
 } from '../context/session_context.ts'
-import { leadsHidden, pathVisible } from '../utils/hidden.ts'
-import { norm, posixNormpath } from '../utils/path.ts'
-import { normDir, ownerPrefix, rstripSlash } from '../utils/slash.ts'
-import { namespaceNames } from '../view/namespace_view.ts'
-import type { MountRow } from './types.ts'
-import { compareCodePoints } from '../utils/sort.ts'
-import type {
-  FollowOperands,
-  MountView,
-  NamespaceLinks,
-  OpKwargs,
-  SessionAccess,
-  SessionBind,
-} from '../view/types.ts'
+import type { FollowOperands, OpKwargs, SessionAccess, SessionBind } from '../view/types.ts'
+import { NamespaceReader } from './dispatcher/reader.ts'
 
 /** Receives each record with the id of the session the op ran as. */
 export type OpSink = (rec: OpRecord, sessionId: string) => Promise<void>
-
-export type OwnerOf = (path: string) => MountRow | null
 
 /** What a derived facade carries over and a constructor may set. */
 export interface FilesOptions {
@@ -60,12 +46,6 @@ export interface FilesOptions {
   dispatchAs?: ((owner: SessionAccess) => CallerDispatchFn) | null
   sessionId?: string | null
   records?: OpRecord[]
-  // The prefixes of the mounts the session a call through a facade of this
-  // session id runs as is told of, read live; its hides are applied over them.
-  prefixes?: ((sessionId: string | null) => readonly string[]) | null
-  // What the session a call would run as sees, given this facade's own; the
-  // bound session's when unset.
-  visibility?: ((sessionId: string | null) => Visibility | null) | null
   // The line's operand resolution a command's globs give their matches.
   follow?: FollowOperands | null
   // Record each op on the ledger; false where the dispatcher does the accounting.
@@ -75,74 +55,11 @@ export interface FilesOptions {
   served?: Caller['mount']
 }
 
-/**
- * What a session's files hold of the namespace, hides aside.
- *
- * The link table and the mount table as the workspace keeps them, hidden
- * entries included, so it is never a handler's: a handler asks `Files`
- * (`mountOf`, `submounts`), which apply the session's hides, and the command
- * helpers read `FilesView`, which applies them. The code that
- * walks the namespace beside the dispatcher reads it: the mount core and the
- * file tool mapping a path the way the dispatcher does, the runtime's
- * descriptors. Mirrors Python's `FilesNamespace`.
- */
-export interface FilesNamespace {
-  /** The workspace link table, unfiltered by any session's hides. */
-  readonly links: NamespaceLinks | null
-  /** The line's operand resolution a command's globs give their matches. */
-  readonly follow: FollowOperands | null
-  /** The visibility of the session an op would run as. */
-  vis(): Visibility | null
-  /** The prefixes of the mounts that session is told of at all, hides aside. */
-  prefixes(): readonly string[]
-  /** The mount serving a path, by longest prefix. */
-  readonly ownerOf: OwnerOf
-}
-
-/**
- * What a session's files show of the namespace, the session's hides applied.
- *
- * The link and mount tables are read here, beside the dispatcher that answers
- * from them, and filtered by the rule it refuses a call by (`visible`), so
- * the command helpers that walk the namespace (`linksOf`, `mountsOf`, globs,
- * `find -L`, `cp -L`, `du`) read no table and filter no hide of their own: a
- * hidden link, or one that leads where the session cannot see, has no row and
- * no target; a hidden mount is a boundary a walk stops at but is never named.
- * Mirrors Python's `FilesView`.
- */
-export interface FilesView {
-  /** Whether a link table stands behind the files. */
-  readonly linked: boolean
-  /** The link standing at a path, its own row; null where none stands or the
-   * session cannot see it. */
-  linkAt(path: string): FileStat | null
-  /** The links under a directory the session sees, with their rows. */
-  linksBelow(directory: string): [string, FileStat][]
-  /** Where a path the session sees leads, every link followed; a hidden one
-   * is left as typed. Throws CycleError where a link loop stands in the walk. */
-  resolve(path: string): string
-  /** Where the mount boundaries are, for a walk through the dispatcher
-   * (`crossing`) or one bound to a mount. */
-  mounts(crossing: boolean): MountView
-  /** The names a directory holds only as namespace structure: the mounts
-   * below it and its links, by their first segment under it. */
-  owed(directory: string): string[]
-  /** The visibility of the session an op would run as. */
-  vis(): Visibility | null
-  /** Whether the session sees a path: it is not hidden, and no link on it
-   * leads where the session cannot see. The rule the dispatcher refuses a
-   * call by, for what a helper holds in data of its own (a link's target,
-   * git's index) and the rows the command boundary filters. */
-  visible(path: string | PathSpec): boolean
-  /** The line's operand resolution a command's globs give their matches. */
-  readonly follow: FollowOperands | null
-}
-
 // TypeScript has no package-private: the class assigns these from its static
-// block, where its private members are in reach, and `namespaceOf`, `viewOf`
+// block, where its private members are in reach, and `readerOf`, `operandsOf`
 // and `withCaller` are the doors through them.
-let namespaceOfFiles: (files: Files) => FilesNamespace
-let viewOfFiles: (files: Files) => FilesView
+let readerOfFiles: (files: Files) => NamespaceReader
+let operandsOfFiles: (files: Files) => FollowOperands | null
 let callerFilesOf: (files: Files, changes: Partial<Caller>) => Files
 
 // The op's byte count for recording: the result first, else the input
@@ -215,20 +132,17 @@ async function* recorded(
  */
 export class Files {
   static {
-    namespaceOfFiles = (files) => files.namespace()
-    viewOfFiles = (files) => files.view()
+    readerOfFiles = (files) => files.reader()
+    operandsOfFiles = (files) => files.follow
     callerFilesOf = (files, changes) => files.forCaller(changes)
   }
 
   private readonly dispatchFn: CallerDispatchFn
+  private readonly namespace: ((sessionId: string | null) => NamespaceReader) | null
   private readonly sink: OpSink | null
-  private readonly links: NamespaceLinks | null
-  private readonly ownerOf: OwnerOf
   private readonly bind: SessionBind | null
   private readonly dispatchAs: ((owner: SessionAccess) => CallerDispatchFn) | null
   private readonly caller: Partial<Caller> | null
-  private readonly prefixesOf: (sessionId: string | null) => readonly string[]
-  private readonly visibilityOf: ((sessionId: string | null) => Visibility | null) | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
   /** The op ledger this facade records on; `WorkspaceFiles.records` reads it. */
@@ -244,24 +158,28 @@ export class Files {
    */
   readonly served: Caller['mount'] | undefined
 
+  /**
+   * @param dispatch the workspace dispatcher every op goes to.
+   * @param namespace the reader of the namespace for the session an op runs
+   *   as (`Namespace.readers`); null for files outside a workspace, which see
+   *   no link and no mount under the bound session's hides.
+   * @param sink receives each record with the session it ran as.
+   * @param options what a derived facade carries over.
+   */
   constructor(
     dispatch: CallerDispatchFn,
+    namespace: ((sessionId: string | null) => NamespaceReader) | null = null,
     sink: OpSink | null = null,
-    links: NamespaceLinks | null = null,
-    ownerOf: OwnerOf = () => null,
     options: FilesOptions = {},
   ) {
     this.dispatchFn = dispatch
+    this.namespace = namespace
     this.sink = sink
-    this.links = links
-    this.ownerOf = ownerOf
     this.bind = options.bind ?? null
     this.dispatchAs = options.dispatchAs ?? null
     this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
     this.recorded = options.records ?? []
-    this.prefixesOf = options.prefixes ?? (() => [])
-    this.visibilityOf = options.visibility ?? null
     this.follow = options.follow ?? null
     this.ledger = options.ledger ?? true
     this.served = options.served
@@ -273,8 +191,6 @@ export class Files {
       dispatchAs: this.dispatchAs,
       sessionId: this.sessionId,
       records: this.recorded,
-      prefixes: this.prefixesOf,
-      visibility: this.visibilityOf,
     }
   }
 
@@ -291,7 +207,7 @@ export class Files {
    * `Files._for_session`.
    */
   forSession(sessionId: string): Files {
-    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
+    return new Files(this.dispatchFn, this.namespace, this.sink, {
       ...this.options(),
       sessionId,
     })
@@ -307,7 +223,7 @@ export class Files {
    * through `withCaller`.
    */
   private forCaller(changes: Partial<Caller>): Files {
-    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
+    return new Files(this.dispatchFn, this.namespace, this.sink, {
       ...this.options(),
       caller: { ...this.caller, ...changes },
     })
@@ -323,7 +239,7 @@ export class Files {
    * mounts; Python's task context carries the caller instead.
    */
   servedBy(mount: Caller['mount']): Files {
-    return new Files(this.dispatchFn, this.sink, this.links, this.ownerOf, {
+    return new Files(this.dispatchFn, this.namespace, this.sink, {
       ...this.options(),
       caller: this.caller,
       follow: this.follow,
@@ -339,83 +255,23 @@ export class Files {
    * @param dispatch the dispatcher the calls go to.
    */
   over(dispatch: CallerDispatchFn): Files {
-    return new Files(dispatch, null, this.links, this.ownerOf, {
+    return new Files(dispatch, this.namespace, null, {
       sessionId: this.sessionId,
-      prefixes: this.prefixesOf,
-      visibility: this.visibilityOf,
       follow: this.follow,
       ledger: false,
     })
   }
 
   /**
-   * The prefixes of the mounts the session an op would run as is told of at
-   * all, hides aside: a session's own documents mount is one only it is told
-   * of. Mirrors Python's `Files._served`.
+   * The namespace as the session an op would run as sees it: the workspace's,
+   * else, for files outside one, no link and no mount under the bound
+   * session's hides. Mirrors Python's `Files._reader`.
    */
-  private prefixes(): readonly string[] {
-    return this.prefixesOf(this.sessionId)
-  }
-
-  /**
-   * The visibility of the session an op would run as: the bound one, else
-   * this facade's own. Mirrors Python's `Files._vis`.
-   */
-  private vis(): Visibility | null {
-    return this.visibilityOf === null ? sessionVisibility() : this.visibilityOf(this.sessionId)
-  }
-
-  /** What `viewOf` hands the command helpers that walk the namespace. */
-  private view(): FilesView {
-    const table = this.links
-    return {
-      linked: table !== null,
-      linkAt: (path) => (table !== null && this.isVisible(path) ? table.linkStatAt(path) : null),
-      linksBelow: (directory) =>
-        table === null
-          ? []
-          : table.linkStatsBelow(directory).filter(([path]) => this.isVisible(path)),
-      resolve: (path) =>
-        table !== null && pathVisible(this.vis(), path) ? posixNormpath(table.follow(path)) : path,
-      mounts: (crossing) =>
-        mountView(
-          () => this.prefixes(),
-          () => this.vis(),
-          this.ownerOf,
-          crossing,
-        ),
-      owed: (directory) => namespaceNames(this.vis(), this.prefixes(), table, directory),
-      vis: () => this.vis(),
-      visible: (path) => this.isVisible(path),
-      follow: this.follow,
+  private reader(): NamespaceReader {
+    if (this.namespace === null) {
+      return new NamespaceReader(null, () => [], this.sessionId, () => sessionVisibility())
     }
-  }
-
-  /** What `namespaceOf` hands the code that walks the namespace. */
-  private namespace(): FilesNamespace {
-    return {
-      links: this.links,
-      follow: this.follow,
-      vis: () => this.vis(),
-      prefixes: () => this.prefixes(),
-      ownerOf: this.ownerOf,
-    }
-  }
-
-  /**
-   * Whether the session sees `path`: it is not hidden, and no link on it leads
-   * where the session cannot see. The rule the dispatcher refuses a call by.
-   * Not a handler's: a handler hands its output over as rows
-   * (`IOResult.rows`), which the command boundary filters by this rule; the
-   * command helpers read it as `FilesView.visible`. Mirrors Python's
-   * `Files._is_visible`.
-   */
-  private isVisible(path: string | PathSpec): boolean {
-    const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
-    const vis = this.vis()
-    if (!pathVisible(vis, virtual)) return false
-    if (vis === null || this.links === null) return true
-    return !leadsHidden(vis, virtual, this.links.symlinkTargets())
+    return this.namespace(this.sessionId)
   }
 
   /**
@@ -427,18 +283,13 @@ export class Files {
    * Python's `Files.mount_of`.
    */
   mountOf(path: string | PathSpec): string | null {
-    const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
-    if (!pathVisible(this.vis(), virtual)) return null
-    const owner = ownerPrefix(this.prefixes(), virtual)
-    return owner === null ? null : norm(owner)
+    return this.reader().mountOf(path)
   }
 
   /** Whether `path` is the root of a mount the session sees. Mirrors Python's
    * `Files.is_mount`. */
   isMount(path: string | PathSpec): boolean {
-    const virtual = norm(PathSpec.fromStrPath(path, undefined, '/').virtual)
-    const vis = this.vis()
-    return this.prefixes().some((prefix) => norm(prefix) === virtual && pathVisible(vis, virtual))
+    return this.reader().isMount(path)
   }
 
   /**
@@ -452,20 +303,7 @@ export class Files {
    * mount's name. Mirrors Python's `Files.submounts`.
    */
   submounts(path: string | PathSpec): string[] {
-    const virtual = norm(PathSpec.fromStrPath(path, undefined, '/').virtual)
-    const vis = this.vis()
-    if (!pathVisible(vis, virtual)) return []
-    const below = normDir(virtual)
-    const found = new Set<string>()
-    for (const prefix of this.prefixes()) {
-      let root = norm(prefix)
-      if (root === virtual || !normDir(root).startsWith(below)) continue
-      while (root !== virtual && !pathVisible(vis, root)) {
-        root = root.slice(0, root.lastIndexOf('/')) || '/'
-      }
-      found.add(root)
-    }
-    return [...found].sort(compareCodePoints)
+    return this.reader().submounts(path)
   }
 
   /**
@@ -553,7 +391,7 @@ export class Files {
     // record without a fingerprint would drop the path's snapshot pin.
     const settle = async (answer: unknown, fallback = true): Promise<void> => {
       const ran = report.path ?? spelled
-      const owner = this.ownerOf(ran)
+      const owner = this.reader().owner(ran)
       const source = owner === null ? null : (report.source ?? owner.kind)
       const bytes = report.bytes ?? payloadBytes(answer, args)
       if (!isolated) {
@@ -914,9 +752,9 @@ export class Files {
  * network/cache split derived from it). The `Files` a handler, a CLI leaf, a
  * runtime or `session.vfs` gets is a facade of its own, on which the ledger
  * would report only that facade, so it is a plain `Files`. Mirrors Python's
- * `WorkspaceFiles`, which also keeps the mount table in step and answers the
- * mount questions FUSE and the runtime's `open()` interception ask; here the
- * workspace's registry answers those.
+ * `WorkspaceFiles`, which also answers the mount questions FUSE and the
+ * runtime's `open()` interception ask; here the workspace's registry answers
+ * those.
  */
 export class WorkspaceFiles extends Files {
   /**
@@ -944,61 +782,24 @@ export class WorkspaceFiles extends Files {
 }
 
 /**
- * The namespace a session's files hold, for the code that walks it beside the
- * dispatcher; never a handler's (`FilesNamespace`). Mirrors Python's
- * `namespace_of`.
- */
-export function namespaceOf(files: Files): FilesNamespace {
-  return namespaceOfFiles(files)
-}
-
-/**
- * The namespace a session's files show, its hides applied, for the command
- * helpers that walk it (`FilesView`). Mirrors Python's `view_of`.
- */
-export function viewOf(files: Files): FilesView {
-  return viewOfFiles(files)
-}
-
-/**
- * Where the mount boundaries are, as the session the files run as sees them.
+ * The namespace as the session a command's files run as sees it, for the
+ * helpers that walk it (`NamespaceReader`); outside a workspace, no link and
+ * no mount.
  *
- * Every mount below a path, hidden or not, is a boundary a backend's own walk
- * stops at: a mount the session cannot see still shadows the parent backend's
- * keys under its prefix. Only the visible ones are ever named. A walk through
- * the dispatcher (`crossing`) descends into each mount itself, so it has no
- * boundary to stop at: no mount below a path, and no mount root; and it takes
- * no mount's shortcut, so no mount answers a function for it, caps its globs
- * or narrows its search. Mirrors Python's `_mount_view`.
+ * The dispatcher's reader, never one of the facade's own: the link and mount
+ * tables are the namespace's, and the reader filters every answer by the rule
+ * the dispatcher refuses a call by. Mirrors Python's `reader_of`.
  */
-function mountView(
-  prefixes: () => readonly string[],
-  vis: () => Visibility | null,
-  ownerOf: OwnerOf,
-  crossing: boolean,
-): MountView {
-  const below = (path: string): string[] => {
-    if (crossing) return []
-    const base = normDir(path)
-    return [...prefixes()]
-      .filter((prefix) => prefix !== base && prefix.startsWith(base))
-      .sort(compareCodePoints)
-      .map((prefix) => rstripSlash(prefix) || '/')
-  }
-  return {
-    descendants: below,
-    visibleDescendants: (path: string) => {
-      const seen = vis()
-      return below(path).filter((root) => pathVisible(seen, root))
-    },
-    isRoot: (path: string) => !crossing && prefixes().includes(normDir(path)),
-    rootOf: (path: string) => ownerPrefix(prefixes(), path) ?? '/',
-    maxDuEntries: (path: string) => ownerOf(path)?.maxDuEntries ?? null,
-    answers: (path: string, name: string) =>
-      !crossing && (ownerOf(path)?.calls?.has(name) ?? false),
-    maxGlobMatches: (path: string) => (crossing ? null : (ownerOf(path)?.maxGlobMatches ?? null)),
-    searchable: (path: string) => (crossing ? null : (ownerOf(path)?.searchable ?? null)),
-  }
+export function readerOf(files: Files): NamespaceReader {
+  return readerOfFiles(files)
+}
+
+/**
+ * The line's operand resolution a command's globs give their matches, which a
+ * command's files carry; null outside a line. Mirrors Python's `operands_of`.
+ */
+export function operandsOf(files: Files): FollowOperands | null {
+  return operandsOfFiles(files)
 }
 
 /**

@@ -38,7 +38,7 @@ function statFiles(modified: string): Files {
     const stat = new FileStat({ name: path.virtual, type: FileType.FILE, modified })
     return Promise.resolve([stat, new IOResult()])
   }
-  return new Files(dispatch, null, null, () => null, { ledger: false })
+  return new Files(dispatch, null, null, { ledger: false })
 }
 
 function readdir(p: PathSpec): Promise<string[]> {

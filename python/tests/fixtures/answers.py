@@ -24,6 +24,7 @@ from mirage.io.stream import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 Answer = Callable[..., Awaitable[Any]]
 
@@ -82,7 +83,7 @@ async def run_generic(
         texts (Sequence[str]): its text operands.
         **flags (Any): its parsed flags.
     """
-    files = Files(mount.rows, mount, ledger=False)
+    files = Files(mount, readers(mount.rows), ledger=False)
     ctx = Context(flags=flags, cwd=PathSpec.from_str_path("/"), vfs=files)
     token = set_mount_gate(mount.prefix, MountMode.WRITE)
     try:

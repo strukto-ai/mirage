@@ -18,7 +18,7 @@ import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
 import type { RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { viewOf } from '../../../../workspace/files.ts'
+import { readerOf } from '../../../../workspace/files.ts'
 
 const MAGIC = ':'
 const SLASH = '/'
@@ -156,7 +156,7 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
  */
 export function visiblePath(location: RepoLocation, relative: string): boolean {
   const vfs = location.vfs
-  return vfs === undefined || vfs === null || viewOf(vfs).visible(location.worktree.join(relative))
+  return vfs === undefined || vfs === null || readerOf(vfs).visible(location.worktree.join(relative))
 }
 
 /** A session view of Git entries; the persistent mapping stays intact. */

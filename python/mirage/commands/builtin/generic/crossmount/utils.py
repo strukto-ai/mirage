@@ -57,7 +57,7 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.types import FileType, PathSpec, PrimitiveCopy, Visibility
+from mirage.types import FileType, PathSpec, PrimitiveCopy
 from mirage.view.types import LinkView
 
 
@@ -244,7 +244,6 @@ def transfer_links_of(
     links: LinkView,
     dispatch: DispatchFn,
     cwd: str,
-    visibility: Visibility | None,
     owns: Callable[[str], bool] | None = None,
 ) -> TransferLinks:
     """Namespace links with the dispatcher primitives shared by cp and mv.
@@ -253,7 +252,6 @@ def transfer_links_of(
         links (LinkView): the namespace's symlink facts.
         dispatch (DispatchFn): the dispatcher.
         cwd (str): the directory a typed operand resolves against.
-        visibility (Visibility | None): the session's visibility.
         owns (Callable[[str], bool] | None): whether the command's mount
             serves a path; None where every path is its own.
     """
@@ -271,7 +269,6 @@ def transfer_links_of(
             copy=prim["copy"],
         ),
         relay_stat=prim["stat"],
-        visibility=visibility,
         owns=owns,
     )
 

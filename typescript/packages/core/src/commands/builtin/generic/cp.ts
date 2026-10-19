@@ -14,7 +14,6 @@
 
 import { closeQuietly, primeStream } from '../../../io/stream.ts'
 
-import { pathVisible } from '../../../utils/hidden.ts'
 import { respelled } from '../../../utils/key_prefix.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
@@ -31,7 +30,6 @@ import {
   type PrimitiveMove,
   type ReaddirFn,
   type StatFn,
-  type Visibility,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { beforeFullScan } from '../utils/tree.ts'
@@ -114,8 +112,6 @@ export interface TransferLinks {
   cwd: string
   relay: PrimitiveCopy
   relayStat: StatFn
-  /** The session's visibility; a link it hides is not copied. */
-  visibility?: Visibility
   /** Whether the mount the copy runs on serves a path; absent where every path
    * is its own. */
   owns?: (virtual: string) => boolean
@@ -421,7 +417,6 @@ export async function copyTreeLinks(
   const shownDst = rstripSlash(target.rawPath) || target.rawPath
   const below = [...copies.links.subtree(base)].sort((a, b) => compareCodePoints(a[0], b[0]))
   for (const [virtual, row] of below) {
-    if (!pathVisible(copies.visibility, virtual)) continue
     // A source directory whose tree the copy left out keeps its links out too.
     if (blocked.some((root) => within(virtual, root))) continue
     const rel = virtual.slice(rstripSlash(base).length + 1)

@@ -14,15 +14,22 @@
 
 import asyncio
 import base64
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from mirage.shell.bytes import encode_text
-from mirage.types import LINK_TARGET_KEY, FileStat, FileType, MountMode
+from mirage.types import (
+    LINK_TARGET_KEY,
+    FileStat,
+    FileType,
+    MountMode,
+    Visibility,
+)
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
 from mirage.vfs.base import BaseVFS
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
@@ -184,6 +191,29 @@ class Namespace:
     @property
     def registry(self) -> MountRegistry:
         return self._registry
+
+    def readers(
+        self, visibility: Callable[[str | None], Visibility | None]
+    ) -> Callable[[str | None], NamespaceReader]:
+        """How a session's files read this namespace: the reader for
+        whichever session an op runs as (``NamespaceReader``), over the
+        link table and the mount registry this owns, read live.
+
+        Args:
+            visibility (Callable[[str | None], Visibility | None]): the
+                visibility of a session, by id; None names the session
+                bound when the question is asked.
+        """
+
+        def reader(session_id: str | None) -> NamespaceReader:
+            return NamespaceReader(
+                self,
+                self._registry.mount_rows,
+                session_id,
+                lambda: visibility(session_id),
+            )
+
+        return reader
 
     @property
     def nodes(self) -> dict[str, NodeMeta]:

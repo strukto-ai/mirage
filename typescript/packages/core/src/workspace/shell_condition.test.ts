@@ -20,6 +20,8 @@ import { efbig } from '../errors/fs.ts'
 import { handleTest } from './executor/builtins/condition/index.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
+import type { NamespaceLinks } from '../view/types.ts'
+import { readers } from '../test-utils.ts'
 import type { SessionState } from './session/session.ts'
 import type { Workspace } from './workspace/workspace.ts'
 import {
@@ -179,12 +181,14 @@ describe('[[ ]] semantics', () => {
   })
 })
 
-const stubNamespace = {
+const stubLinks = {
   symlinkTargets: () => new Map<string, string>(),
   isLink: () => false,
   follow: (path: string) => path,
   linkStatAt: () => null,
-} as unknown as Namespace
+} as unknown as NamespaceLinks
+
+const stubNamespace = { ...stubLinks, readers: () => readers([], stubLinks) } as unknown as Namespace
 
 const stubSession = { cwd: '/data', env: {}, arrays: {} } as unknown as SessionState
 

@@ -51,7 +51,7 @@ def _dispatch_returning(data: bytes):
         assert path.virtual == "/repo/.git/HEAD"
         return data, IOResult()
 
-    return Files([], dispatch)
+    return Files(dispatch)
 
 
 @pytest.mark.asyncio
@@ -277,7 +277,7 @@ async def _no_dispatch(op: str, path, **kwargs):
 async def test_write_ref_refuses_a_name_that_leaves_the_ref_tree():
     with pytest.raises(BadRefNameUpdateError) as caught:
         await write_ref(
-            Files([], _no_dispatch),
+            Files(_no_dispatch),
             PathSpec.from_str_path("/repo/.git"),
             "refs/heads/../../config",
             DETACHED_SHA.encode(),

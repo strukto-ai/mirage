@@ -25,6 +25,7 @@ from mirage.types import FileStat, FileType, MountMode, PathSpec, Visibility
 from mirage.utils.hidden import classify_paths
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 REPO = PathSpec.from_str_path("/repo")
 SLOT = PathSpec.from_str_path("/repo/slot")
@@ -52,7 +53,7 @@ def files(
         for root in ["/", *(roots or [])]
     ]
     vis = Visibility(paths=classify_paths(hidden)) if hidden else None
-    return Files(rows, dispatch, visibility=lambda _session: vis)
+    return Files(dispatch, readers(rows, visibility=vis))
 
 
 def stats(kind, links: set[str]):

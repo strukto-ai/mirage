@@ -19,7 +19,7 @@ import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, refuseReveal } from '../files.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
-import { linksOf, mountsOf, visibilityOf } from '../../utils/links.ts'
+import { linksOf, mountsOf } from '../../utils/links.ts'
 
 const mv: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
@@ -38,12 +38,7 @@ const mv: CommandFn = async (_accessor, paths, _texts, ctx) => {
     },
     links === undefined || ctx.vfs === undefined
       ? undefined
-      : transferLinksOf(
-          links,
-          ctx.vfs.dispatch,
-          ctx.cwd.virtual,
-          visibilityOf(ctx.vfs) ?? undefined,
-        ),
+      : transferLinksOf(links, ctx.vfs.dispatch, ctx.cwd.virtual),
     ctx.stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
   )

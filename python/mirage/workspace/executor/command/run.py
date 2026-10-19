@@ -283,10 +283,12 @@ async def run_on_mount(
                 stdin=stdin,
                 cwd=PathSpec.from_str_path(session.cwd),
                 vfs=Files(
-                    registry.mount_rows(),
                     dispatch,
-                    links=namespace,
-                    visibility=lambda _session: session.visibility,
+                    (
+                        namespace.readers(lambda _session: session.visibility)
+                        if namespace is not None
+                        else None
+                    ),
                     follow=follow,
                     ledger=False,
                 ),

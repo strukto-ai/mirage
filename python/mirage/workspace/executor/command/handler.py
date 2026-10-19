@@ -35,7 +35,7 @@ from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import Limit, PathSpec, Producer
-from mirage.workspace.files import Files, view_of
+from mirage.workspace.files import Files, reader_of
 
 logger = logging.getLogger(__name__)
 
@@ -307,8 +307,8 @@ async def _rendered(
     io.rows = None
     items = list(rows.items)
     if vfs is not None:
-        view = view_of(vfs)
-        items = [row for row in items if view.visible(row.path)]
+        reader = reader_of(vfs)
+        items = [row for row in items if reader.visible(row.path)]
     return await rows.render(items), io
 
 

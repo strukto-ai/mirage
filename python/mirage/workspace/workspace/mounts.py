@@ -33,7 +33,6 @@ from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.read_policy import check_read_capability
@@ -288,7 +287,6 @@ def prepare_added_mount(
 
 async def unmount(
     registry: MountRegistry,
-    files: WorkspaceFiles,
     prefix: str,
     is_shutting_down: Callable[[], bool],
     shared_mounts: set[int],
@@ -304,7 +302,6 @@ async def unmount(
 
     Args:
         registry (MountRegistry): the workspace's mount table.
-        files (WorkspaceFiles): the facade to detach the prefix from.
         prefix (str): the mount's virtual prefix.
         is_shutting_down: live admission check after asynchronous cleanup.
         shared_mounts: instances owned by another workspace.
@@ -340,7 +337,6 @@ async def unmount(
     except BaseException:
         entry.retiring = False
         raise
-    files.unmount(prefix)
     remaining = registry.mounts()
     still_instance = any(m.vfs is removed.vfs for m in remaining)
     # The mount owns its op table, so dropping the mount drops the ops

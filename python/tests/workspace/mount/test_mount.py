@@ -280,7 +280,7 @@ async def test_a_directory_does_not_route_to_a_filetype_handler():
         assert name == "stat"
         return await _stat_tally(path), IOResult()
 
-    context = Context(vfs=Files([], dispatch, ledger=False))
+    context = Context(vfs=Files(dispatch, ledger=False))
     await mount.run_command(
         "cat", [PathSpec.from_str_path("/dir.tally")], [], {}, context
     )
