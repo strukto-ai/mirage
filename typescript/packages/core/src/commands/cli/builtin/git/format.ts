@@ -204,10 +204,10 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
  */
 function messageBlock(commit: CommitFacts): string[] {
   return commit.message
-    .replace(/^(?:\r?\n)+/, '')
-    .replace(/(?:\r?\n)+$/, '')
+    .replace(/^(?:[ \t\r]*\n)+/, '')
+    .replace(/(?:[ \t\r]*\n)+$/, '')
     .split('\n')
-    .map((line) => `${INDENT}${line.replace(/\r$/, '')}`)
+    .map((line) => `${INDENT}${line.replace(/[ \t\r]+$/, '')}`)
 }
 
 /**
@@ -257,7 +257,11 @@ export function presetBlock(
     return lines
   }
   if (kind === 'short') {
-    lines.push(`Author: ${author}`, '', `${INDENT}${subject(commit)}`)
+    lines.push(
+      `Author: ${author}`,
+      '',
+      ...subjectLines(commit.message).map((line) => `${INDENT}${line}`),
+    )
     return lines
   }
   if (kind === 'full') {
@@ -275,21 +279,24 @@ export function presetBlock(
   return lines
 }
 
-/** git's %s: the first paragraph folded onto one line. */
-function subjectFolded(message: string): string {
-  const head = message.replace(/^(?:\r?\n)+/, '').split(/\r?\n\r?\n/, 1)[0] ?? ''
+/** The subject paragraph's lines, with Git's trailing whitespace removed. */
+function subjectLines(message: string): string[] {
+  const head = message.replace(/^(?:[ \t\r]*\n)+/, '').split(/\n[ \t\r]*\n/, 1)[0] ?? ''
   return head
     .split('\n')
-    .map((part) => part.replace(/\r$/, ''))
+    .map((part) => part.replace(/[ \t\r]+$/, ''))
     .filter((part) => part !== '')
-    .join(' ')
-    .trim()
 }
 
-/** git's %b: everything after the subject paragraph. */
+/** git's %s: the first paragraph folded onto one line. */
+function subjectFolded(message: string): string {
+  return subjectLines(message).join(' ')
+}
+
+/** git's %b: the text after the subject and blank separator lines. */
 function body(message: string): string {
-  const text = message.replace(/^(?:\r?\n)+/, '')
-  const separator = /\r?\n(?:\r?\n)+/.exec(text)
+  const text = message.replace(/^(?:[ \t\r]*\n)+/, '')
+  const separator = /\n(?:[ \t\r]*\n)+(?:[ \t\r]+$)?/.exec(text)
   return separator === null ? '' : text.slice(separator.index + separator[0].length)
 }
 

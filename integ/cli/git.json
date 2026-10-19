@@ -5384,6 +5384,76 @@
         "stdout": "subject=two\nbody=body two\nsubject=one\nbody=body one\nsubject=two\nbody=body two\nsubject=one\nbody=body one\nraw=\n\ntwo\n\nbody two\nraw=\n\none\n\nbody one\nraw=\n\ntwo\n\nbody two\nraw=\n\none\n\nbody one\nbody=body two|subject=two\nbody=body one|subject=one\nbody=body two|subject=two\nbody=body one|subject=one\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_message_whitespace_separator_0",
+      "seq": 9970048,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\ncontinued\n \nbody one' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\ncontinued\n \nbody two' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done; git -C /repo show -s --oneline \"$second\" | cut -d \" \" -f 2-; git -C /repo shortlog --format=%s \"$second\" | tail -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nsubject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nraw=two\ncontinued\n \nbody two\nraw=one\ncontinued\n \nbody one\nraw=two\ncontinued\n \nbody two\nraw=one\ncontinued\n \nbody one\nbody=body two|subject=two continued\nbody=body one|subject=one continued\nbody=body two|subject=two continued\nbody=body one|subject=one continued\ntwo continued\nExample (2):\n      one continued\n      two continued\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_message_whitespace_separator_1",
+      "seq": 9970049,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\ncontinued\n\t\nbody one' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\ncontinued\n\t\nbody two' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done; git -C /repo show -s --oneline \"$second\" | cut -d \" \" -f 2-; git -C /repo shortlog --format=%s \"$second\" | tail -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nsubject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nraw=two\ncontinued\n\t\nbody two\nraw=one\ncontinued\n\t\nbody one\nraw=two\ncontinued\n\t\nbody two\nraw=one\ncontinued\n\t\nbody one\nbody=body two|subject=two continued\nbody=body one|subject=one continued\nbody=body two|subject=two continued\nbody=body one|subject=one continued\ntwo continued\nExample (2):\n      one continued\n      two continued\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_message_whitespace_separator_2",
+      "seq": 9970050,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\ncontinued\n \t\r\nbody one' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\ncontinued\n \t\r\nbody two' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done; git -C /repo show -s --oneline \"$second\" | cut -d \" \" -f 2-; git -C /repo shortlog --format=%s \"$second\" | tail -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nsubject=two continued\nbody=body two\nsubject=one continued\nbody=body one\nraw=two\ncontinued\n \t\r\nbody two\nraw=one\ncontinued\n \t\r\nbody one\nraw=two\ncontinued\n \t\r\nbody two\nraw=one\ncontinued\n \t\r\nbody one\nbody=body two|subject=two continued\nbody=body one|subject=one continued\nbody=body two|subject=two continued\nbody=body one|subject=one continued\ntwo continued\nExample (2):\n      one continued\n      two continued\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_checkout_folds_paragraph_subjects",
+      "seq": 9970051,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git init -q -b main /repo/paragraph-case && tree=$(printf '' | git -C /repo/paragraph-case hash-object -t tree -w --stdin) && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\ncontinued\n \t\r\nbody one' | git -C /repo/paragraph-case hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\ncontinued\n \t\r\nbody two' | git -C /repo/paragraph-case hash-object -t commit -w --stdin) && git -C /repo/paragraph-case branch main \"$first\" && git -C /repo/paragraph-case branch integ-paragraph \"$second\" && git -C /repo/paragraph-case checkout --detach \"$second\" 2>&1 | sed -E \"s/(at|was) [0-9a-f]+ /\\1 COMMIT /\"; git -C /repo/paragraph-case checkout main 2>&1 | sed -E \"s/(at|was) [0-9a-f]+ /\\1 COMMIT /\"; rm -rf /repo/paragraph-case",
+      "expect": {
+        "exit": 0,
+        "stdout": "HEAD is now at COMMIT two continued\nPrevious HEAD position was COMMIT two continued\nSwitched to branch 'main'\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_message_blank_body_at_eof",
+      "seq": 9970052,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\n\n \t' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\n \t\n\r' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done; git -C /repo show -s --oneline \"$second\" | cut -d \" \" -f 2-; git -C /repo shortlog --format=%s \"$second\" | tail -4",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two\nbody=\nsubject=one\nbody=\nsubject=two\nbody=\nsubject=one\nbody=\nraw=two\n \t\n\r\nraw=one\n\n \t\nraw=two\n \t\n\r\nraw=one\n\n \t\nbody=|subject=two\nbody=|subject=one\nbody=|subject=two\nbody=|subject=one\ntwo\nExample (2):\n      one\n      two\n\n",
+        "stderr": ""
+      }
     }
   ]
 }

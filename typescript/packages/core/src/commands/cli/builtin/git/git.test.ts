@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,6 +29,7 @@ import { GIT } from './index.ts'
 import * as gitFsModule from './fs.ts'
 import { ensureDir } from './io.ts'
 import { commitFacts, openRepo } from './repo.ts'
+import { renderTemplate, subject } from './format.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -53,6 +54,7 @@ const MESSAGE_CASES = ['', '\n'].flatMap((ending) =>
     newline: '\n',
     prefix: '',
     continuation: false,
+    blank: '',
   })),
 )
 MESSAGE_CASES.push(
@@ -63,6 +65,7 @@ MESSAGE_CASES.push(
     newline: '\r\n',
     prefix: '',
     continuation: false,
+    blank: '',
   })),
   ...['\n', '\r\n'].map((newline) => ({
     id: `leading-${newline === '\n' ? 'lf' : 'crlf'}`,
@@ -71,6 +74,7 @@ MESSAGE_CASES.push(
     newline,
     prefix: newline + newline,
     continuation: false,
+    blank: '',
   })),
   {
     id: 'multiline-crlf',
@@ -79,6 +83,36 @@ MESSAGE_CASES.push(
     newline: '\r\n',
     prefix: '',
     continuation: true,
+    blank: '',
+  },
+)
+MESSAGE_CASES.push(
+  ...[' ', '\t', ' \t\r'].map((blank) => ({
+    id: `blank-${JSON.stringify(blank)}`,
+    ending: '',
+    hasBody: true,
+    newline: '\n',
+    prefix: '',
+    continuation: false,
+    blank,
+  })),
+  ...['\n', '\r\n'].map((newline) => ({
+    id: `leading-whitespace-${newline === '\n' ? 'lf' : 'crlf'}`,
+    ending: '',
+    hasBody: true,
+    newline,
+    prefix: ` \t${newline}\t ${newline}`,
+    continuation: false,
+    blank: ' \t',
+  })),
+  {
+    id: 'multiline-spaces',
+    ending: '',
+    hasBody: true,
+    newline: '\n',
+    prefix: '',
+    continuation: true,
+    blank: ' \t',
   },
 )
 const messageCommits = new Map<string, string[]>()
@@ -118,12 +152,12 @@ beforeAll(async () => {
       input: `tree ${tree}\n${parents.map((oid) => `parent ${oid}\n`).join('')}author Exämple <author@example.invalid> 123456789 +0530\ncommitter Other <committer@example.invalid> 987654321 -0230\ngpgsig test\n author Decoy <decoy@example.invalid> 0 +0000\n\nmetadata\n\nbody`,
     },
   ).trim()
-  for (const { id, ending, hasBody, newline, prefix, continuation } of MESSAGE_CASES) {
+  for (const { id, ending, hasBody, newline, prefix, continuation, blank } of MESSAGE_CASES) {
     const commits: string[] = []
     for (const subject of ['one', 'two']) {
       const title = subject + (continuation ? `${newline}continued` : '')
       const message =
-        prefix + title + (hasBody ? `${newline}${newline}body ${subject}${ending}` : ending)
+        prefix + title + (hasBody ? `${newline}${blank}${newline}body ${subject}${ending}` : ending)
       const parent = commits.at(-1)
       const oid = execFileSync(
         'git',
@@ -153,7 +187,7 @@ afterAll(() => {
 
 describe.each(MESSAGE_CASES)(
   'message endings match git 2.51.2: $id',
-  ({ id, ending, hasBody, newline, prefix, continuation }) => {
+  ({ id, ending, hasBody, newline, prefix, continuation, blank }) => {
     it.each(
       [1, 2].flatMap((count) =>
         ['show', 'log'].flatMap((verb) =>
@@ -179,7 +213,8 @@ describe.each(MESSAGE_CASES)(
           const body = hasBody ? `body ${subject}${ending}` : ''
           const title = subject + (continuation ? ' continued' : '')
           const storedTitle = subject + (continuation ? `${newline}continued` : '')
-          const message = prefix + storedTitle + (hasBody ? `${newline}${newline}${body}` : ending)
+          const message =
+            prefix + storedTitle + (hasBody ? `${newline}${blank}${newline}${body}` : ending)
           return {
             'subject=%s%nbody=%b': `subject=${title}\nbody=${body}\n`,
             'raw=%B': `raw=${message}\n`,
@@ -196,14 +231,69 @@ describe.each(MESSAGE_CASES)(
       const oid = commits[1]
       assert(oid)
       for (const verb of ['show', 'log']) {
-        for (const preset of ['oneline', 'medium', 'raw']) {
+        for (const preset of ['oneline', 'short', 'medium', 'raw']) {
           const args = [verb, verb === 'show' ? '-s' : '-1', `--pretty=${preset}`, oid]
           expect(await run(args.join(' '))).toEqual([0, realGit(args), ''])
         }
       }
+      expect(await run(`shortlog ${oid}`)).toEqual([0, realGit(['shortlog', oid]), ''])
     })
   },
 )
+
+it.each(['multiline-crlf', 'multiline-spaces'])(
+  'checkout folds both detached summaries: %s',
+  async (id) => {
+    const commits = messageCommits.get(id)
+    assert(commits)
+    const oid = commits[1]
+    assert(oid)
+    const branch = 'review-checkout'
+    realGit(['branch', branch, oid])
+    expect((await run(`branch ${branch} ${oid}`))[0]).toBe(0)
+    try {
+      for (const args of [
+        ['checkout', '--detach', oid],
+        ['checkout', 'main'],
+      ]) {
+        const native = spawnSync('git', ['-C', repoPath, ...args], { encoding: 'utf8' })
+        expect(native.status).toBe(0)
+        expect(await run(args.join(' '))).toEqual([0, native.stdout, native.stderr])
+      }
+    } finally {
+      realGit(['checkout', '-q', 'main'])
+      realGit(['branch', '-D', branch])
+      await run('checkout -q main')
+      await run(`branch -D ${branch}`)
+    }
+  },
+)
+
+it.each([
+  ['  title \t\n \t\nbody', '  title', 'body'],
+  ['\u00a0title\n\nbody', '\u00a0title', 'body'],
+  ['title\v\n\nbody', 'title\v', 'body'],
+  ['title\n\v\nbody', 'title \v body', ''],
+  ['one\n\n \t', 'one', ''],
+  ['one\n \n \t', 'one', ''],
+  ['one\n\n\r', 'one', ''],
+])('uses Git whitespace rules for subjects: %j', async (message, title, body) => {
+  const commits = messageCommits.get('body-unterminated')
+  assert(commits)
+  const oid = commits[1]
+  assert(oid)
+  const root = PathSpec.fromStrPath('/repo')
+  const gitdir = root.join('.git')
+  const repo = await openRepo(ws.vfs, {
+    gitdir,
+    commondir: gitdir,
+    worktree: root,
+    mountRoot: root,
+  })
+  const commit = { ...(await commitFacts(repo, oid)), message }
+  expect(subject(commit)).toBe(title)
+  expect(renderTemplate('%s|%b|%B', commit, 7, null)).toBe(`${title}|${body}|${message}`)
+})
 
 it('reads a loose commit once when loading its facts', async () => {
   const commits = messageCommits.get('body-unterminated')

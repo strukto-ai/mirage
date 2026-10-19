@@ -226,9 +226,9 @@ def message_block(commit: Commit) -> list[str]:
         commit (Commit): the commit to render.
     """
     text = commit.message.decode("utf-8", errors="replace")
-    text = re.sub(r"^(?:\r?\n)+", "", text)
-    text = re.sub(r"(?:\r?\n)+$", "", text)
-    return [INDENT + line.removesuffix("\r") for line in text.split("\n")]
+    text = re.sub(r"^(?:[ \t\r]*\n)+", "", text)
+    text = re.sub(r"(?:[ \t\r]*\n)+$", "", text)
+    return [INDENT + line.rstrip(" \t\r") for line in text.split("\n")]
 
 
 def _merge_line(commit: Commit, length: int) -> list[str]:
@@ -295,7 +295,14 @@ def preset_block(
         )
         return lines
     if kind == "short":
-        lines.extend([f"Author: {author}", "", f"{INDENT}{subject(commit)}"])
+        message = commit.message.decode("utf-8", errors="replace")
+        lines.extend(
+            [
+                f"Author: {author}",
+                "",
+                *[INDENT + line for line in _subject_lines(message)],
+            ]
+        )
         return lines
     if kind == "full":
         lines.extend(
@@ -345,27 +352,38 @@ def ident_email(ident: bytes) -> str:
     return text[start + 1 : end] if 0 <= start < end else ""
 
 
+def _subject_lines(message: str) -> list[str]:
+    """The subject paragraph's lines, with Git's trailing whitespace removed.
+
+    Args:
+        message (str): the decoded commit message.
+    """
+    text = re.sub(r"^(?:[ \t\r]*\n)+", "", message)
+    head = re.split(r"\n[ \t\r]*\n", text, maxsplit=1)[0]
+    return [
+        part.rstrip(" \t\r")
+        for part in head.split("\n")
+        if part.rstrip(" \t\r")
+    ]
+
+
 def _subject_folded(message: str) -> str:
     """git's %s: the first paragraph folded onto one line.
 
     Args:
         message (str): the decoded commit message.
     """
-    text = re.sub(r"^(?:\r?\n)+", "", message)
-    head = re.split(r"\r?\n\r?\n", text, maxsplit=1)[0]
-    return " ".join(
-        part.removesuffix("\r") for part in head.split("\n") if part
-    ).strip()
+    return " ".join(_subject_lines(message))
 
 
 def _body(message: str) -> str:
-    """git's %b: everything after the subject paragraph.
+    """git's %b: the text after the subject and blank separator lines.
 
     Args:
         message (str): the decoded commit message.
     """
-    text = re.sub(r"^(?:\r?\n)+", "", message)
-    separator = re.search(r"\r?\n(?:\r?\n)+", text)
+    text = re.sub(r"^(?:[ \t\r]*\n)+", "", message)
+    separator = re.search(r"\n(?:[ \t\r]*\n)+(?:[ \t\r]+$)?", text)
     return "" if separator is None else text[separator.end() :]
 
 

@@ -16,6 +16,7 @@ import posixpath
 from pathlib import Path
 
 import pytest
+from dulwich import porcelain
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
@@ -28,6 +29,7 @@ from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
+    AUTHOR,
     branch_with_gitlink,
     commit_gitlink,
     conflict_index,
@@ -342,6 +344,33 @@ async def test_switching_to_a_commit_detaches_head(git_rw, repo_path: Path):
     assert code == 0
     assert b"detached HEAD" in err
     assert head_ref(repo_path) == older.encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message", [b"one\r\ncontinued\r\n\r\nbody", b"one\ncontinued\n \t\nbody"]
+)
+async def test_detached_summaries_fold_the_subject(git_rw, repo_path, message):
+    with Repo(str(repo_path)) as repo:
+        original = repo.refs[b"HEAD"]
+    oid = porcelain.commit(
+        str(repo_path), message=message, author=AUTHOR, committer=AUTHOR
+    )
+    with Repo(str(repo_path)) as repo:
+        repo.refs[b"refs/heads/paragraph"] = oid
+        repo.refs[b"refs/heads/main"] = original
+    code, out, err = await run(git_rw, "checkout --detach paragraph")
+    assert (code, out) == (0, b"")
+    assert err == f"HEAD is now at {oid.decode()[:7]} one continued\n".encode()
+    code, out, err = await run(git_rw, "checkout main")
+    assert (code, out) == (0, b"")
+    assert (
+        err
+        == (
+            f"Previous HEAD position was {oid.decode()[:7]} one continued\n"
+            "Switched to branch 'main'\n"
+        ).encode()
+    )
 
 
 @pytest.mark.asyncio

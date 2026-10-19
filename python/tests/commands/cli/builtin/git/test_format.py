@@ -67,6 +67,37 @@ def test_subject_is_the_first_paragraph(message):
     assert subject(_commit(message)) == "first line"
 
 
+@pytest.mark.parametrize(
+    "message,title,body",
+    [
+        ("  title \t\n \t\nbody", "  title", "body"),
+        ("\u00a0title\n\nbody", "\u00a0title", "body"),
+        ("title\v\n\nbody", "title\v", "body"),
+        ("title\n\v\nbody", "title \v body", ""),
+        ("one\n\n \t", "one", ""),
+        ("one\n \n \t", "one", ""),
+        ("one\n\n\r", "one", ""),
+    ],
+)
+def test_subject_whitespace_matches_git_2_51_2(message, title, body):
+    commit = _commit(message.encode())
+    assert subject(commit) == title
+    assert git_format.render_template("%s|%b|%B", commit, 7, None) == (
+        f"{title}|{body}|{message}"
+    )
+
+
+@pytest.mark.parametrize(
+    "newline,blank", [("\n", ""), ("\r\n", ""), ("\n", " \t")]
+)
+def test_short_preset_keeps_subject_paragraph_lines(newline, blank):
+    message = f"one{newline}continued{newline}{blank}{newline}body"
+    assert preset_block(_commit(message.encode()), "short", 7)[3:] == [
+        "    one",
+        "    continued",
+    ]
+
+
 def test_oneline_is_id_then_subject():
     commit = _commit(b"second commit\n")
     assert oneline(commit) == f"{short(commit.id)} second commit"

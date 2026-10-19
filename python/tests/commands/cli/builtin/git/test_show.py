@@ -27,17 +27,23 @@ from tests.commands.cli.builtin.git.conftest import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "newline,ending,has_body,prefix,continuation",
+    "newline,ending,has_body,prefix,continuation,blank",
     [
-        ("\n", "", True, "", False),
-        ("\n", "", False, "", False),
-        ("\n", "\n", True, "", False),
-        ("\n", "\n", False, "", False),
-        ("\r\n", "", True, "", False),
-        ("\r\n", "\r\n", True, "", False),
-        ("\n", "", True, "\n\n", False),
-        ("\r\n", "", True, "\r\n\r\n", False),
-        ("\r\n", "\r\n", True, "", True),
+        ("\n", "", True, "", False, ""),
+        ("\n", "", False, "", False, ""),
+        ("\n", "\n", True, "", False, ""),
+        ("\n", "\n", False, "", False, ""),
+        ("\r\n", "", True, "", False, ""),
+        ("\r\n", "\r\n", True, "", False, ""),
+        ("\n", "", True, "\n\n", False, ""),
+        ("\r\n", "", True, "\r\n\r\n", False, ""),
+        ("\r\n", "\r\n", True, "", True, ""),
+        ("\n", "", True, "", False, " "),
+        ("\n", "", True, "", False, "\t"),
+        ("\n", "", True, "", False, " \t\r"),
+        ("\n", "", True, " \t\n\t \n", False, " \t"),
+        ("\r\n", "", True, " \t\r\n\t \r\n", False, " \t"),
+        ("\n", "", True, "", True, " \t"),
     ],
     ids=[
         "body-unterminated",
@@ -49,6 +55,12 @@ from tests.commands.cli.builtin.git.conftest import (
         "leading-lf",
         "leading-crlf",
         "multiline-crlf",
+        "blank-0",
+        "blank-1",
+        "blank-2",
+        "leading-whitespace-lf",
+        "leading-whitespace-crlf",
+        "multiline-spaces",
     ],
 )
 @pytest.mark.parametrize("count", [1, 2])
@@ -63,6 +75,7 @@ async def test_message_endings_match_git_2_51_2(
     has_body,
     prefix,
     continuation,
+    blank,
     count,
     template,
 ):
@@ -77,7 +90,7 @@ async def test_message_endings_match_git_2_51_2(
         message = (
             prefix
             + stored_title
-            + (f"{newline}{newline}{body}" if has_body else ending)
+            + (f"{newline}{blank}{newline}{body}" if has_body else ending)
         )
         commit_file(repo_path, "message.txt", subject, message)
         expected.append(
