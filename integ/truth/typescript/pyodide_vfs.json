@@ -5,7 +5,7 @@
         "node",
         "--import",
         "tsx/esm",
-        "pyodide/vfs.ts"
+        "runtime/pyodide/vfs.ts"
       ],
       "cwd": "examples/typescript"
     }

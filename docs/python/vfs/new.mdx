@@ -56,9 +56,9 @@ class JiraVFS(BaseVFS):
 
 Mount it like any builtin: `Workspace({"/jira/": JiraVFS(cfg)})`. A class rather than a
 factory function, because that is what the registry and the config reference below both name;
-`examples/python/other/custom_vfs.py` is the same shape end to end.
+`examples/python/vfs/new/custom_vfs.py` is the same shape end to end.
 
-For a smaller runnable example, see `examples/python/other/basevfs_views.py`.
+For a smaller runnable example, see `examples/python/vfs/new/basevfs_views.py`.
 Its read-only `NotesVFS` connects to a nested mount, a namespace symlink,
 a CLI using namespace and session views, and the filesystem and runtime APIs.
 
@@ -338,7 +338,7 @@ answers `read_tree`, `None` otherwise.
 Raise a `ValueError` from it (or from `files_containing`) to refuse: the command
 prints `<command>: <message>` and exits 1. From grep or rg, an `OSError` raised
 at a file is that file's read error.
-`examples/python/other/custom_vfs.py` defines `files_containing` for its wiki.
+`examples/python/vfs/new/custom_vfs.py` defines `files_containing` for its wiki.
 
 To make the backend constructible by name (workspace YAML, snapshots, the daemon), register it:
 
@@ -367,7 +367,7 @@ mounts:
     vfs: mypackage.backends:WikiVFS
 ```
 
-A relative path resolves against the config file's directory, not the server's working directory. A registry name always wins over a reference, so a name can never be reread as code. See `examples/python/other/custom_vfs.py` for a complete runnable backend in one file.
+A relative path resolves against the config file's directory, not the server's working directory. A registry name always wins over a reference, so a name can never be reread as code. See `examples/python/vfs/new/custom_vfs.py` for a complete runnable backend in one file.
 
 When mounting a driver built with `build_vfs` in code, preserve its loader name on the placement: `Mount(build_vfs("jira", config), vfs_ref="jira")`. YAML does this automatically. Snapshots also preserve the mount’s effective index settings. An index URL containing credentials is redacted; pass a `Mount(..., index=...)` override with fresh credentials when loading it.
 

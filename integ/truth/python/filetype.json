@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/filetype/filetype.py"
+        "examples/python/vfs/new/filetype.py"
       ]
     }
   },

@@ -96,7 +96,7 @@ above, annotated with the similarity score.
 `search` needs a vector for the query, and the config decides where it comes
 from. With `embed` set, a `(text: string) => Promise<number[]>` the caller
 brings, the query is vectorized in-process, so a self-hosted Qdrant works and
-mirage depends on no model runtime; `examples/typescript/qdrant/qdrant_vfs.ts`
+mirage depends on no model runtime; `examples/typescript/vfs/qdrant/qdrant_vfs.ts`
 feeds it a dependency-free hashed bag of words, and any model that returns a
 vector plugs in the same way. Without it, `cloudInference: true` sends the query
 text to the server, so the cluster must have inference enabled (Qdrant Cloud)

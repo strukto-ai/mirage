@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/other/custom_command.py"
+        "examples/python/vfs/new/custom_command.py"
       ]
     }
   },

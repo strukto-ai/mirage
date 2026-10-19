@@ -52,7 +52,7 @@ Examples under `examples/python/` load `.env.development` from the repository
 root. Run them from the root with the Python virtualenv interpreter:
 
 ```bash
-./python/.venv/bin/python examples/python/s3/s3.py
+./python/.venv/bin/python examples/python/vfs/s3/s3.py
 ```
 
 ## Common Commands

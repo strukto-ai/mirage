@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/permissions/policy_yaml.py"
+        "examples/python/policy/policy_yaml.py"
       ]
     },
     "typescript": {
@@ -13,7 +13,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "permissions/policy_yaml.ts"
+        "policy/policy_yaml.ts"
       ]
     }
   },

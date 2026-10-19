@@ -52,7 +52,7 @@ uses a Vite `define` fed from `UPSTASH_REDIS_URL` in `.env.development`.
 The browser store keeps every value byte-identical to what the Node mount writes: writes go out
 as raw request bodies and reads come back base64-encoded. A page over REST and a server over the
 Redis protocol can therefore share one database at the same time, and the
-[Node example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/redis/redis_browser.ts)
+[Node example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/redis/redis_browser.ts)
 shows the two reading each other's files. Python reaches the same database with the same URL
 through its [`RedisVFS`](/python/vfs/redis).
 

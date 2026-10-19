@@ -1,11 +1,16 @@
 # TypeScript examples
 
-Runnable scripts, one directory per backend or topic. The examples import the
-workspace packages from `typescript/`, so rebuild those dists first:
+Runnable scripts, laid out like the docs: `vfs/` holds one directory per
+backend and `vfs/new/` the custom-VFS examples, `agents/` one per agent
+framework, `runtime/` the Pyodide runtime and `runtime/sandbox/` one
+directory per sandbox, and `core/`, `cli/`, `policy/`, `configuration/`,
+`notifications/` and `fuse/` match the docs sections of the same name.
+`browser/` is the browser app. The examples import the workspace packages
+from `typescript/`, so rebuild those dists first:
 
 ```bash
 cd typescript && pnpm --filter @struktoai/mirage-core build && pnpm --filter @struktoai/mirage-node build
-cd ../examples/typescript && pnpm install && pnpm exec tsx s3/s3.ts
+cd ../examples/typescript && pnpm install && pnpm exec tsx vfs/s3/s3.ts
 ```
 
 Naming: `<backend>.ts` uses the command surface, `<backend>_fuse.ts` adds a

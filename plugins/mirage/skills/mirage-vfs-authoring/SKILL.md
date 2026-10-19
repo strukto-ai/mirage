@@ -38,9 +38,9 @@ Consult the relevant language's guide and runnable example, using the revision
 matching the target Mirage package:
 
 - [Python guide](https://github.com/strukto-ai/mirage/blob/main/docs/python/vfs/new.mdx)
-  and [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/other/custom_vfs.py).
+  and [example](https://github.com/strukto-ai/mirage/blob/main/examples/python/vfs/new/custom_vfs.py).
 - [TypeScript guide](https://github.com/strukto-ai/mirage/blob/main/docs/typescript/vfs/new.mdx)
-  and [example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/other/custom_vfs.ts).
+  and [example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/new/custom_vfs.ts).
 
 ## Implement the smallest VFS
 

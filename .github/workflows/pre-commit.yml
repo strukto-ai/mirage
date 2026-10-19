@@ -180,7 +180,7 @@ jobs:
 
       - name: Dropbox longpoll example
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-examples exec tsx --test notification/poll/dropbox.test.ts notification/poll/shutdown.test.ts
+        run: pnpm --filter @struktoai/mirage-examples exec tsx --test notifications/poll/dropbox.test.ts notifications/poll/shutdown.test.ts
 
       - name: VFS prompt parity
         run: ./python/.venv/bin/python scripts/check_prompt_parity.py --selftest

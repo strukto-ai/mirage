@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/ram/ram.py"
+        "examples/python/vfs/ram/ram.py"
       ]
     }
   },

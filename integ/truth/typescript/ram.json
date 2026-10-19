@@ -7,7 +7,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "ram/ram.ts"
+        "vfs/ram/ram.ts"
       ]
     }
   },

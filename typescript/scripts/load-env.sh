@@ -9,7 +9,7 @@
 #   . typescript/scripts/load-env.sh         # POSIX-compatible
 #
 # After sourcing, run any example from any directory:
-#   pnpm tsx ../examples/typescript/trello/trello_fuse.ts
+#   pnpm tsx ../examples/typescript/vfs/trello/trello_fuse.ts
 
 # Resolve script-relative path (zsh + bash compatible).
 if [ -n "${BASH_SOURCE[0]:-}" ]; then

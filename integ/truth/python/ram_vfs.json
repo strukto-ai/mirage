@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/ram/ram_vfs.py"
+        "examples/python/vfs/ram/ram_vfs.py"
       ]
     },
     "python_utf8_off": {
@@ -11,7 +11,7 @@
         "./python/.venv/bin/python",
         "-X",
         "utf8=0",
-        "examples/python/ram/ram_vfs.py"
+        "examples/python/vfs/ram/ram_vfs.py"
       ]
     }
   },
