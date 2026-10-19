@@ -19,7 +19,7 @@ import { commitEntries, treeEntries, type TreeEntry } from './tree.ts'
 import { compare, limited, renderChanges, parseDiffFlags, renamesEnabled } from './diff_output.ts'
 import { HEAD } from './constants.ts'
 
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -30,8 +30,9 @@ import {
   NoWorkspaceError,
   UsageError,
 } from './errors.ts'
-import { pathspecPatterns, visibleEntries } from './pathspec.ts'
+import { pathspecPatterns } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
+import { deltas, shownSides, type Delta } from './rows.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
 import { fatal, optionOperand, splitMarked, startPoint, STDERR, verbUsage } from './util.ts'
@@ -136,18 +137,25 @@ export async function diff(
         after = fresh
       }
     }
-    before = visibleEntries(repo.location, before)
-    after = visibleEntries(repo.location, after)
     const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
     const flags = { ...parsed, pathspecs }
-    const body = await renderChanges(
-      repo,
-      await compare(repo, limited(before, pathspecs), limited(after, pathspecs), flags.renames),
-      flags,
-    )
-    const result = warning ? new IOResult({ stderr: ENC.encode(warning) }) : new IOResult()
-    if (body === '') return [null, result]
-    return [encodeText(body), result]
+    const rows = deltas(repo.location, [[limited(before, pathspecs), limited(after, pathspecs)]])
+    const render = async (shown: Delta[]): Promise<ByteSource | null> => {
+      const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
+      const body = await renderChanges(
+        repo,
+        await compare(repo, oldSide, newSide, flags.renames),
+        flags,
+      )
+      return body === '' ? null : encodeText(body)
+    }
+    return [
+      null,
+      new IOResult({
+        ...(warning ? { stderr: ENC.encode(warning) } : {}),
+        rows: { items: rows, render },
+      }),
+    ]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

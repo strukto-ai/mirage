@@ -44,6 +44,12 @@ from mirage.commands.cli.builtin.git.patch import (
 )
 from mirage.commands.cli.builtin.git.pathspec import pathspec_selects
 from mirage.commands.cli.builtin.git.render import quote_path
+from mirage.commands.cli.builtin.git.rows import (
+    Delta,
+    Side,
+    deltas,
+    shown_sides,
+)
 from mirage.commands.cli.builtin.git.summary import (
     BINARY_SNIFF,
     FileStat,
@@ -489,40 +495,35 @@ def limited(
 
 def _block(
     repo: BaseRepo,
-    before: bytes | None,
-    after: bytes,
+    before: dict[bytes, tuple[int, bytes]],
+    after: dict[bytes, tuple[int, bytes]],
     flags: DiffFlags,
-    recursive: bool = True,
 ) -> bytes | None:
-    """One parent's diff block, None when the commit does not differ.
+    """One comparison's diff block, None when its sides do not differ.
 
     Args:
         repo (BaseRepo): repository to read.
-        before (bytes | None): the parent's tree, None for a root.
-        after (bytes): the commit's tree.
+        before (dict): the old side, path to (mode, id).
+        after (dict): the new side.
         flags (DiffFlags): the diff flags.
-        recursive (bool): whether to descend into subtrees.
     """
-    rows = compare(
-        repo,
-        entries(repo, before, recursive, flags.pathspecs),
-        entries(repo, after, recursive, flags.pathspecs),
-        flags.renames,
-    )
+    rows = compare(repo, before, after, flags.renames)
     return render_changes(repo, rows, flags) if rows else None
 
 
-def commit_output(
+def commit_sides(
     repo: BaseRepo,
     commit: Commit,
     flags: DiffFlags,
     recursive: bool = True,
     root: bool = True,
-) -> list[bytes | None]:
-    """A commit's diff blocks, one per parent the merge mode compares.
+) -> list[Side]:
+    """The comparisons a commit's diff makes, one per parent the merge
+    mode compares, each limited to the pathspec.
 
-    A parent the commit does not differ from is None, so its header is
-    not printed either (pinned against git 2.54).
+    A root commit compares with the empty tree when ``root`` says so,
+    and a merge under ``--diff-merges=off`` makes none. Synchronous, for
+    a worker thread: it reads trees.
 
     Args:
         repo (BaseRepo): repository to read.
@@ -534,27 +535,89 @@ def commit_output(
     parents = [repo.object_store[p] for p in commit.parents]
     assert all(isinstance(p, Commit) for p in parents)
     trees = [p.tree for p in parents if isinstance(p, Commit)]
-    if not trees:
-        return (
-            [_block(repo, None, commit.tree, flags, recursive)] if root else []
-        )
-    if len(trees) == 1 or flags.merge == "first-parent":
-        return [_block(repo, trees[0], commit.tree, flags, recursive)]
-    if flags.merge == "off":
+    if not trees and not root:
         return []
-    if flags.merge == "separate":
-        return [
-            _block(repo, tree, commit.tree, flags, recursive) for tree in trees
-        ]
+    if len(trees) == 1 or flags.merge == "first-parent":
+        trees = trees[:1]
+    elif len(trees) > 1 and flags.merge == "off":
+        return []
     after = entries(repo, commit.tree, recursive, flags.pathspecs)
-    comparisons = [
-        compare(
-            repo,
-            entries(repo, tree, recursive, flags.pathspecs),
-            after,
-            flags.renames,
-        )
+    if not trees:
+        return [({}, after)]
+    return [
+        (entries(repo, tree, recursive, flags.pathspecs), after)
         for tree in trees
+    ]
+
+
+def commit_deltas(
+    repo: BaseRepo,
+    location: RepoLocation,
+    commits: list[Commit],
+    flags: DiffFlags,
+    recursive: bool = True,
+    root: bool = True,
+) -> tuple[list[Delta], dict[bytes, range]]:
+    """Every commit's comparisons as rows, and which comparisons are
+    whose.
+
+    Made one commit at a time, so only the changed paths of a long log
+    are held. Synchronous, for a worker thread: it reads trees.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        location (RepoLocation): the discovered repository.
+        commits (list[Commit]): the commits whose diffs print.
+        flags (DiffFlags): the diff flags.
+        recursive (bool): whether to descend into subtrees.
+        root (bool): whether a root commit diffs against the empty tree.
+    """
+    rows: list[Delta] = []
+    spans: dict[bytes, range] = {}
+    count = 0
+    for commit in commits:
+        if commit.id in spans:
+            continue
+        sides = commit_sides(repo, commit, flags, recursive, root)
+        rows.extend(deltas(location, sides, count))
+        spans[commit.id] = range(count, count + len(sides))
+        count += len(sides)
+    return rows, spans
+
+
+def commit_shown(
+    shown: list[Delta], spans: dict[bytes, range]
+) -> dict[bytes, list[Side]]:
+    """Each commit's comparisons, holding only the rows the session sees.
+
+    Args:
+        shown (list[Delta]): the rows the command boundary kept.
+        spans (dict[bytes, range]): which comparisons are whose.
+    """
+    sides = shown_sides(shown, sum(len(span) for span in spans.values()))
+    return {
+        commit: sides[span.start : span.stop] for commit, span in spans.items()
+    }
+
+
+def commit_output(
+    repo: BaseRepo, commit: Commit, flags: DiffFlags, sides: list[Side]
+) -> list[bytes | None]:
+    """A commit's diff blocks, one per comparison ``commit_sides`` made.
+
+    A comparison that does not differ is None, so its header is not
+    printed either (pinned against git 2.54).
+
+    Args:
+        repo (BaseRepo): repository to read.
+        commit (Commit): the commit to diff.
+        flags (DiffFlags): the diff flags.
+        sides (list[Side]): its comparisons, as the session sees them.
+    """
+    if not sides or not is_combined(commit, flags):
+        return [_block(repo, before, after, flags) for before, after in sides]
+    comparisons = [
+        compare(repo, before, after, flags.renames) for before, after in sides
     ]
     common = set.intersection(
         *({row.path for row in rows} for rows in comparisons)
@@ -589,12 +652,12 @@ def commit_output(
         elif flags.name_status:
             lines.append(f"{status}\t{shown}")
         else:
-            sides = [*(m[path].old for m in maps), maps[0][path].new]
+            ends = [*(m[path].old for m in maps), maps[0][path].new]
             lines.append(
                 ":" * len(maps)
-                + " ".join(f"{_mode(e):06o}" for e in sides)
+                + " ".join(f"{_mode(e):06o}" for e in ends)
                 + " "
-                + " ".join(short_oid(e, width) for e in sides)
+                + " ".join(short_oid(e, width) for e in ends)
                 + f" {status}\t{shown}"
             )
     head = stat + encode_text("".join(line + "\n" for line in lines))
@@ -797,6 +860,7 @@ def commit_entry(
     commit: Commit,
     display: CommitDisplay,
     diff: DiffFlags,
+    sides: list[Side],
     decor: Decorations | None,
     empty_summary: bool = False,
 ) -> bytes:
@@ -811,6 +875,7 @@ def commit_entry(
         commit (Commit): the commit to show.
         display (CommitDisplay): the invocation's presentation flags.
         diff (DiffFlags): the diff options.
+        sides (list[Side]): its comparisons, as the session sees them.
         decor (Decorations | None): ref labels when the format asked.
         empty_summary (bool): put a blank line under a header whose
             diff is empty, as ``show`` does for a summary or a combined
@@ -820,7 +885,7 @@ def commit_entry(
     return join_output(
         commit,
         header,
-        commit_output(repo, commit, diff),
+        commit_output(repo, commit, diff, sides),
         display.pretty.kind,
         abbrev_for(repo),
         diff,

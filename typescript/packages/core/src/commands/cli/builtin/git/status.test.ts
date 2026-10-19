@@ -31,6 +31,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
+import type { SessionProfile } from '../../../../policy/profile.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
@@ -76,14 +77,20 @@ type Setup = (repo: string) => void
  * Both sides see the same bytes: the real binary answers off the disk copy and
  * mirage answers off the RAM one, so any difference is mirage's.
  */
-async function stage(setup: Setup): Promise<[Workspace, string]> {
+async function stage(
+  setup: Setup,
+  profiles: Record<string, SessionProfile> = {},
+): Promise<[Workspace, string]> {
   const repo = mkdtempSync(join(tmp, 'repo-'))
   roots.push(repo)
   execFileSync('bash', [BUILDER, repo], { stdio: 'ignore' })
   setup(repo)
 
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace(
+    { '/repo': ram },
+    { mode: MountMode.WRITE, shellParser: parser, profiles },
+  )
   const dispatch = ws.vfs
   for (const rel of walk(repo)) {
     const target = `/repo/${rel}`
@@ -303,5 +310,48 @@ describe('git status from a subdirectory against the real binary', () => {
   it.each(rows)('matches on %s', async (_name, setup, spelling) => {
     const [mine, theirs] = await both(setup, [...spelling], 'docs')
     expect(mine).toBe(theirs)
+  })
+})
+
+describe('status under a hide', () => {
+  it('a rename from a hidden path reads as an add', async () => {
+    // The source and the destination are two rows: the hide drops the source
+    // alone, so the session sees a file appear, and no format names or counts
+    // the path it came from.
+    const [ws, repo] = await stage(
+      (r) => {
+        git(r, ['mv', 'letters.txt', 'moved.txt'])
+      },
+      { veiled: { paths: { hide: ['/repo/letters.txt'] } } },
+    )
+    ws.createSession('v', { profile: 'veiled' })
+    const lines =
+      'git -C /repo status --porcelain; git -C /repo diff --cached --stat; ' +
+      'git -C /repo diff --cached --name-status'
+    const veiled = await ws.shell(lines, { sessionId: 'v' })
+    expect(DEC.decode(veiled.stdout)).toBe(
+      'A  moved.txt\n moved.txt | 4 ++++\n 1 file changed, 4 insertions(+)\nA\tmoved.txt\n',
+    )
+    const full = await ws.shell(lines)
+    expect(DEC.decode(full.stdout)).toBe(
+      git(repo, ['status', '--porcelain']) +
+        git(repo, ['diff', '--cached', '--stat']) +
+        git(repo, ['diff', '--cached', '--name-status']),
+    )
+  })
+
+  it('a directory whose only tracked file is hidden reads as untracked', async () => {
+    // The walk collapses by the session's view of the index, so the report has
+    // the shape a checkout of what the session sees has.
+    const [ws, repo] = await stage(
+      (r) => {
+        put(r, 'docs/new.txt', 'n\n')
+      },
+      { veiled: { paths: { hide: ['/repo/docs/readme.md'] } } },
+    )
+    ws.createSession('v', { profile: 'veiled' })
+    const line = 'git -C /repo status --porcelain'
+    expect(DEC.decode((await ws.shell(line, { sessionId: 'v' })).stdout)).toBe('?? docs/\n')
+    expect(DEC.decode((await ws.shell(line)).stdout)).toBe(git(repo, ['status', '--porcelain']))
   })
 })

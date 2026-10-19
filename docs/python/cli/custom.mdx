@@ -200,8 +200,47 @@ names the mount serving a path, `vfs.is_mount(path)` says whether a path is a
 mount root, and `vfs.submounts(path)` lists the mounts below a folder. A mount
 the session hides is listed as the nearest folder above it that the session
 sees, so a CLI that removes a folder can refuse without learning the hidden
-name. A CLI that keeps paths in its own data, as git keeps its index, checks
-`vfs.is_visible(path)` before it prints one.
+name.
+
+A CLI that prints paths from its own data, as git prints its index, hands its
+output over as rows instead of bytes: each row names the path it shows, and
+the command prints none of it itself. The workspace drops the rows the session
+hides, then calls the renderer with the rest, so no line, count, total or
+column width stands for a hidden path:
+
+```python
+from dataclasses import dataclass
+
+from mirage import Context, PathSpec
+from mirage.accessor import NOOPAccessor
+from mirage.io.types import IOResult, Rows
+
+
+@dataclass(frozen=True)
+class Entry:
+    path: PathSpec
+    size: int
+
+
+async def render(shown: list[Entry]) -> bytes:
+    lines = [f"{entry.path.virtual} {entry.size}\n" for entry in shown]
+    return "".join([*lines, f"{len(shown)} files\n"]).encode()
+
+
+async def tracked(
+    accessor: NOOPAccessor,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> tuple[None, IOResult]:
+    # The CLI's own record of the files it tracks.
+    kept = {"/data/a.txt": 1, "/data/b.txt": 3}
+    entries = [Entry(PathSpec.from_str_path(p), n) for p, n in kept.items()]
+    return None, IOResult(rows=Rows(entries, render))
+```
+
+The renderer runs inside the command's timeout. A handler hands over rows or
+stdout, never both.
 
 Declare file options and operands with `type="path"`; preserve the resulting
 `PathSpec` values when calling `ctx.vfs`. Use `PathSpec.from_str_path(value, cwd=ctx.cwd)` for a path string from

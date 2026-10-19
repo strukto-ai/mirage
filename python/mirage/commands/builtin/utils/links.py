@@ -291,7 +291,7 @@ def link_view(files: Files | None) -> LinkView | None:
 
     async def target_stat(virtual: str | PathSpec) -> FileStat | None:
         path = virtual.virtual if isinstance(virtual, PathSpec) else virtual
-        if not files.is_visible(path):
+        if not seen.visible(path):
             return None
         try:
             return await files.stat(seen.resolve(path))

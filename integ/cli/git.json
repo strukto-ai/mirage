@@ -4932,6 +4932,21 @@
       "session": "pathspec-veiled"
     },
     {
+      "id": "git_profile_output_neither_names_nor_counts_hidden_paths",
+      "seq": 567706,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo log --name-only --format=%s && git -C /repo diff --cached --stat && git -C /repo status && git -C /repo show --stat --format=%s HEAD~1",
+      "expect": {
+        "exit": 0,
+        "stdout": "add two\n\nnumbers.txt\nadd docs\nadd delta\nfirst commit\n\nnumbers.txt\n numbers.txt | 3 +--\n 1 file changed, 1 insertion(+), 2 deletions(-)\nOn branch main\nChanges to be committed:\n  (use \"git restore --staged <file>...\" to unstage)\n\tmodified:   numbers.txt\n\nadd docs\n",
+        "stderr": ""
+      },
+      "session": "pathspec-veiled"
+    },
+    {
       "id": "git_directory_failure_precedes_leaf_flag_refusal",
       "seq": 567707,
       "targets": [

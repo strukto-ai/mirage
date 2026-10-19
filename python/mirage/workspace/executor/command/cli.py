@@ -722,6 +722,7 @@ async def _run_cli(
             cli_voice(prog),
             drop=drop_caches if binding.write else None,
             frame=install.cli.script is None,
+            vfs=ctx.vfs,
         )
 
     return await run_walked(walked, session, stdin, context, limit, run)

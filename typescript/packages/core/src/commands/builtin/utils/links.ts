@@ -209,7 +209,7 @@ export function linkView(files: Files | undefined): LinkView | undefined {
       }
     },
     targetStat: async (path: string) => {
-      if (!files.isVisible(path)) return null
+      if (!seen.visible(path)) return null
       try {
         return await files.stat(seen.resolve(path))
       } catch (err) {

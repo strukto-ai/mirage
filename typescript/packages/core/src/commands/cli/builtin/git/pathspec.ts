@@ -18,6 +18,7 @@ import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
 import type { RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import { viewOf } from '../../../../workspace/files.ts'
 
 const MAGIC = ':'
 const SLASH = '/'
@@ -144,10 +145,18 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
   return fnmatch(byteView(path), byteView(pattern))
 }
 
-/** Whether a repository entry belongs to the session's visible tree. */
+/**
+ * Whether a repository entry belongs to the session's visible tree.
+ *
+ * For what git does to the index, never what it prints: a verb that
+ * stages, removes or resets acts only on the entries the session sees, and
+ * a hidden tracked file (absent from a worktree scan) is not taken for a
+ * deletion. What git prints it hands over as rows, which the command
+ * boundary filters.
+ */
 export function visiblePath(location: RepoLocation, relative: string): boolean {
   const vfs = location.vfs
-  return vfs === undefined || vfs === null || vfs.isVisible(location.worktree.join(relative))
+  return vfs === undefined || vfs === null || viewOf(vfs).visible(location.worktree.join(relative))
 }
 
 /** A session view of Git entries; the persistent mapping stays intact. */

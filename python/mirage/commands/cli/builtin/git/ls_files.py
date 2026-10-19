@@ -28,10 +28,10 @@ from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
-    visible_path,
 )
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
+from mirage.commands.cli.builtin.git.rows import Line, entry_path, printed
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import listed_tree, resolve_tree
 from mirage.commands.cli.builtin.git.util import (
@@ -42,8 +42,7 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import encode_text
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 
 
@@ -88,17 +87,16 @@ async def ls_files(
         out = []
         for path, stage, entry in sorted(rows, key=lambda row: row[:2]):
             name = path.decode("utf-8", "surrogateescape")
-            if not visible_path(location, name) or not pathspec_selects(
-                name, patterns or (prefix,)
-            ):
+            if not pathspec_selects(name, patterns or (prefix,)):
                 continue
             relative = posixpath.relpath(name, prefix or ".")
             label = relative if nul else quote_path(relative, False, fully)
             metadata = ""
             if fl.as_bool("stage"):
                 metadata = f"{entry.mode:06o} {entry.sha.decode()} {stage}\t"
-            out.append(metadata + label + ("\0" if nul else "\n"))
-        return "".join(out).encode("utf-8", "surrogateescape"), IOResult()
+            text = metadata + label + ("\0" if nul else "\n")
+            out.append(Line(entry_path(location, path), text))
+        return None, IOResult(rows=Rows(out, printed))
     except GitError as exc:
         return fatal(exc)
 
@@ -160,10 +158,8 @@ async def ls_tree(
         names = fl.as_bool("name_only") or fl.as_bool("name_status")
         full_name = full_tree or fl.as_bool("full_name")
         terminator = "\0" if nul else "\n"
-        out: list[str] = []
+        out: list[Line] = []
         for path, mode, oid in rows:
-            if not visible_path(location, path):
-                continue
             relative = (
                 path if full_name else posixpath.relpath(path, prefix or ".")
             )
@@ -175,11 +171,12 @@ async def ls_tree(
                 if mode == "160000"
                 else "blob"
             )
-            out.append(
+            text = (
                 ("" if names else f"{mode} {kind} {oid}\t")
                 + label
                 + terminator
             )
-        return encode_text("".join(out)), IOResult()
+            out.append(Line(location.worktree.join(path), text))
+        return None, IOResult(rows=Rows(out, printed))
     except GitError as exc:
         return fatal(exc)

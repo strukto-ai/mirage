@@ -1921,6 +1921,7 @@ export class MountEntry {
       ...(writes ? { drop: () => this.dropCaches() } : {}),
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
       ...(guard !== null ? { abort: guard } : {}),
+      ...(runCtx.vfs !== undefined ? { vfs: runCtx.vfs } : {}),
     })
   }
 

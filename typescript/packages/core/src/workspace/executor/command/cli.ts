@@ -611,6 +611,7 @@ async function runCli(
         abort,
         ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
         ...(script !== null ? { frame: false } : {}),
+        ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },
     )
   }

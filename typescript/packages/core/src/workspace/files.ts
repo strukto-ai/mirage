@@ -80,8 +80,8 @@ export interface FilesOptions {
  *
  * The link table and the mount table as the workspace keeps them, hidden
  * entries included, so it is never a handler's: a handler asks `Files`
- * (`isVisible`, `mountOf`, `submounts`), which apply the session's hides,
- * and the command helpers read `FilesView`, which applies them. The code that
+ * (`mountOf`, `submounts`), which apply the session's hides, and the command
+ * helpers read `FilesView`, which applies them. The code that
  * walks the namespace beside the dispatcher reads it: the mount core and the
  * file tool mapping a path the way the dispatcher does, the runtime's
  * descriptors. Mirrors Python's `FilesNamespace`.
@@ -103,7 +103,7 @@ export interface FilesNamespace {
  * What a session's files show of the namespace, the session's hides applied.
  *
  * The link and mount tables are read here, beside the dispatcher that answers
- * from them, and filtered by the rule it refuses a call by (`isVisible`), so
+ * from them, and filtered by the rule it refuses a call by (`visible`), so
  * the command helpers that walk the namespace (`linksOf`, `mountsOf`, globs,
  * `find -L`, `cp -L`, `du`) read no table and filter no hide of their own: a
  * hidden link, or one that leads where the session cannot see, has no row and
@@ -129,6 +129,11 @@ export interface FilesView {
   owed(directory: string): string[]
   /** The visibility of the session an op would run as. */
   vis(): Visibility | null
+  /** Whether the session sees a path: it is not hidden, and no link on it
+   * leads where the session cannot see. The rule the dispatcher refuses a
+   * call by, for what a helper holds in data of its own (a link's target,
+   * git's index) and the rows the command boundary filters. */
+  visible(path: string | PathSpec): boolean
   /** The line's operand resolution a command's globs give their matches. */
   readonly follow: FollowOperands | null
 }
@@ -381,6 +386,7 @@ export class Files {
         ),
       owed: (directory) => namespaceNames(this.vis(), this.prefixes(), table, directory),
       vis: () => this.vis(),
+      visible: (path) => this.isVisible(path),
       follow: this.follow,
     }
   }
@@ -398,12 +404,13 @@ export class Files {
 
   /**
    * Whether the session sees `path`: it is not hidden, and no link on it leads
-   * where the session cannot see. The rule the dispatcher refuses a call by,
-   * for a caller holding paths in data of its own (git's index, a manifest),
-   * so what it prints of them honours the same hides. Mirrors Python's
-   * `Files.is_visible`.
+   * where the session cannot see. The rule the dispatcher refuses a call by.
+   * Not a handler's: a handler hands its output over as rows
+   * (`IOResult.rows`), which the command boundary filters by this rule; the
+   * command helpers read it as `FilesView.visible`. Mirrors Python's
+   * `Files._is_visible`.
    */
-  isVisible(path: string | PathSpec): boolean {
+  private isVisible(path: string | PathSpec): boolean {
     const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
     const vis = this.vis()
     if (!pathVisible(vis, virtual)) return false

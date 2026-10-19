@@ -8,6 +8,7 @@ import { pathspecSelects } from './pathspec.ts'
 import { commitHeader, type CommitDisplay, type CommitFacts, type Decorations } from './format.ts'
 import { blobData, DEV_NULL, filePatch, HUNK_CONTEXT, OID_HEX, shortOid } from './patch.ts'
 import { quotePath } from './render.ts'
+import { deltas, shownSides, type Delta, type Side } from './rows.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
@@ -365,28 +366,23 @@ export async function commitSummary(
   })
 }
 
-/** One parent's diff block, null when the commit does not differ from it. */
+/** One comparison's diff block, null when its sides do not differ. */
 async function block(
   repo: Repo,
-  before: string | null,
-  after: string,
+  before: ReadonlyMap<string, TreeEntry>,
+  after: ReadonlyMap<string, TreeEntry>,
   flags: DiffFlags,
-  recursive = true,
 ): Promise<string | null> {
-  const rows = await compare(
-    repo,
-    await entries(repo, before, recursive, flags.pathspecs),
-    await entries(repo, after, recursive, flags.pathspecs),
-    flags.renames,
-  )
+  const rows = await compare(repo, before, after, flags.renames)
   return rows.length ? renderChanges(repo, rows, flags) : null
 }
 
 /**
- * A commit's diff blocks, one per parent the merge mode compares.
+ * The comparisons a commit's diff makes, one per parent the merge mode
+ * compares, each limited to the pathspec.
  *
- * A parent the commit does not differ from is null, so its header is not
- * printed either (pinned against git 2.54).
+ * A root commit compares with the empty tree when `root` says so, and a merge
+ * under `--diff-merges=off` makes none. Mirrors Python's `commit_sides`.
  *
  * @param repo repository to read
  * @param commit the commit to diff
@@ -394,35 +390,100 @@ async function block(
  * @param recursive whether to descend into subtrees
  * @param root whether a root commit diffs against the empty tree
  */
-export async function commitOutput(
+export async function commitSides(
   repo: Repo,
   commit: CommitFacts,
   flags: DiffFlags,
   recursive = true,
   root = true,
-): Promise<(string | null)[]> {
-  const trees: string[] = []
+): Promise<Side[]> {
+  let trees: string[] = []
   for (const p of commit.parents) trees.push((await commitFacts(repo, p)).tree)
-  if (!trees.length) return root ? [await block(repo, null, commit.tree, flags, recursive)] : []
-  if (trees.length === 1 || flags.merge === 'first-parent')
-    return [await block(repo, trees[0] ?? null, commit.tree, flags, recursive)]
-  if (flags.merge === 'off') return []
-  if (flags.merge === 'separate') {
+  if (!trees.length && !root) return []
+  if (trees.length === 1 || flags.merge === 'first-parent') trees = trees.slice(0, 1)
+  else if (trees.length > 1 && flags.merge === 'off') return []
+  const after = await entries(repo, commit.tree, recursive, flags.pathspecs)
+  if (!trees.length) return [[new Map(), after]]
+  const sides: Side[] = []
+  for (const tree of trees)
+    sides.push([await entries(repo, tree, recursive, flags.pathspecs), after])
+  return sides
+}
+
+/**
+ * Every commit's comparisons as rows, and which comparisons are whose.
+ *
+ * Made one commit at a time, so only the changed paths of a long log are
+ * held. Mirrors Python's `commit_deltas`.
+ *
+ * @param repo repository to read
+ * @param commits the commits whose diffs print
+ * @param flags the diff flags
+ * @param recursive whether to descend into subtrees
+ * @param root whether a root commit diffs against the empty tree
+ */
+export async function commitDeltas(
+  repo: Repo,
+  commits: readonly CommitFacts[],
+  flags: DiffFlags,
+  recursive = true,
+  root = true,
+): Promise<[Delta[], Map<string, [number, number]>]> {
+  const rows: Delta[] = []
+  const spans = new Map<string, [number, number]>()
+  let count = 0
+  for (const commit of commits) {
+    if (spans.has(commit.oid)) continue
+    const sides = await commitSides(repo, commit, flags, recursive, root)
+    rows.push(...deltas(repo.location, sides, count))
+    spans.set(commit.oid, [count, count + sides.length])
+    count += sides.length
+  }
+  return [rows, spans]
+}
+
+/**
+ * Each commit's comparisons, holding only the rows the session sees. Mirrors
+ * Python's `commit_shown`.
+ *
+ * @param shown the rows the command boundary kept
+ * @param spans which comparisons are whose, as `[start, stop)`
+ */
+export function commitShown(
+  shown: readonly Delta[],
+  spans: ReadonlyMap<string, readonly [number, number]>,
+): Map<string, Side[]> {
+  let count = 0
+  for (const [, stop] of spans.values()) count = Math.max(count, stop)
+  const sides = shownSides(shown, count)
+  return new Map([...spans].map(([commit, [start, stop]]) => [commit, sides.slice(start, stop)]))
+}
+
+/**
+ * A commit's diff blocks, one per comparison `commitSides` made.
+ *
+ * A comparison that does not differ is null, so its header is not printed
+ * either (pinned against git 2.54).
+ *
+ * @param repo repository to read
+ * @param commit the commit to diff
+ * @param flags the diff flags
+ * @param sides its comparisons, as the session sees them
+ */
+export async function commitOutput(
+  repo: Repo,
+  commit: CommitFacts,
+  flags: DiffFlags,
+  sides: readonly Side[],
+): Promise<(string | null)[]> {
+  if (!sides.length || !isCombined(commit, flags)) {
     const out: (string | null)[] = []
-    for (const tree of trees) out.push(await block(repo, tree, commit.tree, flags, recursive))
+    for (const [before, after] of sides) out.push(await block(repo, before, after, flags))
     return out
   }
-  const after = await entries(repo, commit.tree, recursive, flags.pathspecs),
-    comparisons: Change[][] = []
-  for (const tree of trees)
-    comparisons.push(
-      await compare(
-        repo,
-        await entries(repo, tree, recursive, flags.pathspecs),
-        after,
-        flags.renames,
-      ),
-    )
+  const comparisons: Change[][] = []
+  for (const [before, after] of sides)
+    comparisons.push(await compare(repo, before, after, flags.renames))
   const maps = comparisons.map((rows) => new Map(rows.map((row) => [row.path, row])))
   const common = [...(maps[0]?.keys() ?? [])]
     .filter((path) => maps.every((m) => m.has(path)))
@@ -441,12 +502,12 @@ export async function commitOutput(
         shown = quotePath(path, false, flags.quotePathFully)
       if (flags.nameOnly) return shown + '\n'
       if (flags.nameStatus) return `${status}\t${shown}\n`
-      const sides = [...rows.map((r) => r.old), rows[0]?.new ?? null]
+      const ends = [...rows.map((r) => r.old), rows[0]?.new ?? null]
       return (
         ':'.repeat(maps.length) +
-        sides.map((e) => e?.mode ?? '000000').join(' ') +
+        ends.map((e) => e?.mode ?? '000000').join(' ') +
         ' ' +
-        sides.map((e) => shortOid(e, width)).join(' ') +
+        ends.map((e) => shortOid(e, width)).join(' ') +
         ` ${status}\t${shown}\n`
       )
     })
@@ -605,6 +666,7 @@ export function joinOutput(
  * @param commit the commit to show
  * @param display the invocation's presentation flags
  * @param diff the diff options
+ * @param sides its comparisons, as the session sees them
  * @param decor ref labels when the format asked
  * @param emptySummary put a blank line under a header whose diff is empty, as
  *   `show` does for a summary or a combined diff
@@ -614,10 +676,11 @@ export async function commitEntry(
   commit: CommitFacts,
   display: CommitDisplay,
   diff: DiffFlags,
+  sides: readonly Side[],
   decor: Decorations | null,
   emptySummary = false,
 ): Promise<string> {
   const head = commitHeader(commit, display, repo.abbrev, decor)
-  const bodies = await commitOutput(repo, commit, diff)
+  const bodies = await commitOutput(repo, commit, diff, sides)
   return joinOutput(commit, head, bodies, display.pretty.kind, repo.abbrev, diff, emptySummary)
 }

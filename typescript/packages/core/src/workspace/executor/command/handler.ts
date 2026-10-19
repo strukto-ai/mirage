@@ -27,6 +27,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
 import { joinOrAbort } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { viewOf, type Files } from '../../files.ts'
 
 /**
  * What a voice says for one failure: the bytes the handler printed before
@@ -72,6 +73,11 @@ export interface RunHandlerOpts {
   signal?: AbortSignal
   /** Aborted when the limit trips, so a runtime can kill what it spawned. */
   abort?: AbortController
+  /**
+   * The handler's files, whose session's hides filter the rows it hands
+   * over; absent filters none.
+   */
+  vfs?: Files | null
 }
 
 /**
@@ -178,6 +184,9 @@ export async function answered(
  * has its stream framed so a failure while it streams is worded too; a
  * failure the runner framed carries no producer. Null is the handler
  * declining, which a mount's cascade reads as "try the next handler".
+ * Rows a handler hands over in place of stdout (`IOResult.rows`) lose those
+ * the session cannot see and are rendered here, inside the timeout, so this
+ * is the one place a command's output meets the session's hides.
  * Mirrors Python's `run_handler`.
  */
 export async function runHandler(
@@ -191,7 +200,11 @@ export async function runHandler(
   const timeout = limit?.timeoutSeconds ?? null
   let out: CommandFnResult
   try {
-    out = await runWithTimeout(joinOrAbort(body, opts.signal), timeout, name)
+    out = await runWithTimeout(
+      joinOrAbort(rendered(body, opts.vfs ?? null, name), opts.signal),
+      timeout,
+      name,
+    )
   } catch (err) {
     if (err instanceof CommandTimeoutError) opts.abort?.abort()
     abandon(body, err, name)
@@ -241,6 +254,30 @@ export async function runHandler(
     }),
     io,
   ]
+}
+
+/**
+ * A handler's answer with the rows it handed over rendered: those the
+ * session cannot see dropped first. Mirrors Python's `_rendered`.
+ */
+async function rendered(
+  body: Promise<CommandFnResult>,
+  vfs: Files | null,
+  name: string,
+): Promise<CommandFnResult> {
+  const out = await body
+  if (out === null) return out
+  const [stdout, io] = out
+  const rows = io.rows
+  if (rows === null) return out
+  if (stdout !== null) throw new Error(`${name}: hands over both rows and stdout`)
+  io.rows = null
+  let items = [...rows.items]
+  if (vfs !== null) {
+    const view = viewOf(vfs)
+    items = items.filter((row) => view.visible(row.path))
+  }
+  return [await rows.render(items), io]
 }
 
 /** Keep a deferred failure on its command, after any emitted bytes. */

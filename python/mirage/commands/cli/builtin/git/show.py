@@ -32,8 +32,11 @@ from mirage.commands.cli.builtin.git.dates import (
 )
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    commit_deltas,
     commit_entry,
     commit_output,
+    commit_shown,
+    commit_sides,
     is_combined,
     parse_diff_flags,
     renames_enabled,
@@ -59,6 +62,12 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
     resolve_object,
 )
+from mirage.commands.cli.builtin.git.rows import (
+    Delta,
+    Side,
+    deltas,
+    shown_sides,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
@@ -77,7 +86,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
@@ -196,10 +205,34 @@ def _tag_block(
     return block + ("" if end == -1 else text[end + 1 :]), target
 
 
+def _commits(
+    repo: BaseRepo,
+    objects: list[tuple[str, ShaFile]],
+    flags: ShowFlags,
+) -> list[Commit]:
+    """Every commit a line shows the diff of, tags peeled, synchronously.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        objects (list[tuple[str, ShaFile]]): each name as typed and the
+            object it resolved to.
+        flags (ShowFlags): the parsed invocation.
+    """
+    found = []
+    for _name, obj in objects:
+        target = obj
+        while isinstance(target, Tag):
+            _block, target = _tag_block(repo, target, flags)
+        if isinstance(target, Commit):
+            found.append(target)
+    return found
+
+
 def _render(
     repo: BaseRepo,
     objects: list[tuple[str, ShaFile]],
     flags: ShowFlags,
+    sides: dict[bytes, list[Side]],
 ) -> bytes:
     """Render every resolved object a line names, synchronously.
 
@@ -216,6 +249,8 @@ def _render(
         objects (list[tuple[str, ShaFile]]): each name as typed and the
             object it resolved to.
         flags (ShowFlags): the parsed invocation.
+        sides (dict[bytes, list[Side]]): each commit's comparisons, as
+            the session sees them.
     """
     decor = decorations(repo, flags.decorate)
     terminated = flags.pretty.kind in TERMINATED_KINDS
@@ -248,6 +283,7 @@ def _render(
                 target,
                 flags,
                 flags.diff,
+                sides[target.id],
                 decor,
                 (flags.diff.summary or combined) and not flags.diff.no_patch,
             )
@@ -313,10 +349,20 @@ async def show(
                 ),
             ),
         )
-        rendered = await asyncio.to_thread(_render, repo, objects, parsed)
+        commits = await asyncio.to_thread(_commits, repo, objects, parsed)
+        rows, spans = await asyncio.to_thread(
+            commit_deltas, repo, location, commits, parsed.diff
+        )
     except GitError as exc:
         return fatal(exc)
-    return yield_bytes(rendered), IOResult()
+
+    async def render(shown: list[Delta]) -> ByteSource | None:
+        rendered = await asyncio.to_thread(
+            _render, repo, objects, parsed, commit_shown(shown, spans)
+        )
+        return yield_bytes(rendered)
+
+    return None, IOResult(rows=Rows(rows, render))
 
 
 def _diff_tree(
@@ -324,7 +370,7 @@ def _diff_tree(
     commit: Commit,
     flags: DiffFlags,
     no_commit_id: bool,
-    recursive: bool,
+    sides: list[Side],
 ) -> bytes:
     """A resolved commit's diff against its parents, synchronously.
 
@@ -336,9 +382,9 @@ def _diff_tree(
         commit (Commit): the commit to compare.
         flags (DiffFlags): the parsed diff flags.
         no_commit_id (bool): whether to leave the commit id out.
-        recursive (bool): whether to descend into subtrees.
+        sides (list[Side]): its comparisons, as the session sees them.
     """
-    bodies = commit_output(repo, commit, flags, recursive, root=False)
+    bodies = commit_output(repo, commit, flags, sides)
     return b"".join(
         (b"" if no_commit_id else commit.id + b"\n") + body
         for body in bodies
@@ -386,14 +432,21 @@ async def diff_tree(
                 location, start_point(fl).virtual, pathspecs
             ),
         )
-        out = await asyncio.to_thread(
+        sides = await asyncio.to_thread(
+            commit_sides, repo, commit, parsed, fl.as_bool("r"), False
+        )
+        rows = deltas(location, sides)
+    except GitError as exc:
+        return fatal(exc)
+
+    async def render(shown: list[Delta]) -> ByteSource | None:
+        return await asyncio.to_thread(
             _diff_tree,
             repo,
             commit,
             parsed,
             fl.as_bool("no_commit_id"),
-            fl.as_bool("r"),
+            shown_sides(shown, len(sides)),
         )
-        return out, IOResult()
-    except GitError as exc:
-        return fatal(exc)
+
+    return None, IOResult(rows=Rows(rows, render))

@@ -23,10 +23,12 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { CLI } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
 import { Argument } from '../commands/spec/types.ts'
-import { IOResult } from '../io/types.ts'
+import { IOResult, type Rows } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { vfsCall } from '../vfs/call.ts'
+import { Effect } from '../vfs/types.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
@@ -650,5 +652,147 @@ describe('CLI dispatch under an aborted invocation', () => {
       name: 'AbortError',
     })
     expect(Date.now() - t0).toBeLessThan(1000)
+  })
+})
+
+interface Listed {
+  readonly path: PathSpec
+  readonly size: number
+}
+
+/** A leaf that hands its listing over as rows and totals what prints. */
+function listing(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): [null, IOResult] {
+  const names: [string, number][] = [
+    ['a.txt', 1],
+    ['secret.txt', 2],
+    ['door', 4],
+    ['b.txt', 3],
+  ]
+  const rows: Listed[] = names.map(([name, size]) => ({
+    path: PathSpec.fromStrPath(`/data/${name}`),
+    size,
+  }))
+  const rendered: Rows<Listed> = {
+    items: rows,
+    render: (shown) => {
+      const lines = shown.map((row) => `${row.path.virtual} ${String(row.size)}\n`)
+      const total = shown.reduce((sum, row) => sum + row.size, 0)
+      lines.push(`${String(shown.length)} files, ${String(total)} bytes\n`)
+      return Promise.resolve(new TextEncoder().encode(lines.join('')))
+    },
+  }
+  return [null, new IOResult({ rows: rendered })]
+}
+
+const LISTING = new CLI({
+  spec: new CommandSpec({ name: 'listing' }),
+  handlers: { '': new CLIHandler({ fn: listing }) },
+})
+
+interface Title {
+  readonly path: PathSpec
+}
+
+class Shelf extends RAMVFS {
+  @vfsCall({ effect: Effect.READ })
+  titles(_path: PathSpec): Promise<Title[]> {
+    return Promise.resolve(
+      ['a.txt', 'secret.txt'].map((name) => ({ path: PathSpec.fromStrPath(`/data/${name}`) })),
+    )
+  }
+}
+
+/** A leaf that prints what a mount's custom function answers. */
+async function shelf(
+  _config: unknown,
+  _paths: PathSpec[],
+  _texts: string[],
+  ctx: Context,
+): Promise<[Uint8Array, IOResult]> {
+  if (ctx.vfs === undefined) throw new Error('no files')
+  const [found] = (await ctx.vfs.dispatch('titles', PathSpec.fromStrPath('/data'))) as [
+    Title[],
+    IOResult,
+  ]
+  const lines = found.map((title) => `${title.path.virtual}\n`)
+  lines.push(`${String(found.length)} titles\n`)
+  return [new TextEncoder().encode(lines.join('')), new IOResult()]
+}
+
+const SHELF = new CLI({
+  spec: new CommandSpec({ name: 'shelf' }),
+  handlers: { '': new CLIHandler({ fn: shelf }) },
+})
+
+describe('a session hides reach what a CLI prints', () => {
+  it("a CLI's rows lose what the session hides before they print", async () => {
+    // The boundary drops a hidden row, and a link leading into hidden
+    // space, before the renderer counts: the total never stands for them.
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          hides: {
+            paths: { hide: ['/data/secret.txt'] },
+            commands: { allow: ['*', 'listing'] },
+          },
+        },
+      },
+    )
+    ws.registerCli('listing', LISTING)
+    await ws.shell('echo top > /data/secret.txt')
+    await ws.vfs.symlink('/data/door', '/data/secret.txt')
+    ws.createSession('s', { profile: 'hides' })
+    const hidden = await ws.shell('listing', { sessionId: 's' })
+    expect([hidden.exitCode, dec.decode(hidden.stdout)]).toEqual([
+      0,
+      '/data/a.txt 1\n/data/b.txt 3\n2 files, 4 bytes\n',
+    ])
+    const all = await ws.shell('listing')
+    expect([all.exitCode, dec.decode(all.stdout)]).toEqual([
+      0,
+      '/data/a.txt 1\n/data/secret.txt 2\n/data/door 4\n/data/b.txt 3\n4 files, 10 bytes\n',
+    ])
+  })
+
+  it('a CLI calling a custom function meets hides and its rules', async () => {
+    // The answer loses what the session hides, and a rule scoped to the
+    // CLI judges the call it makes.
+    const ws = new Workspace(
+      { '/data': new Shelf() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          hides: {
+            paths: { hide: ['/data/secret.txt'] },
+            commands: { allow: ['*', 'shelf'] },
+          },
+          sealed: parseSessionProfile({
+            commands: { deny: [{ reason: 'sealed', commands: { shelf: ['/data'] } }] },
+          }),
+        },
+      },
+    )
+    ws.registerCli('shelf', SHELF)
+    ws.createSession('hides', { profile: 'hides' })
+    ws.createSession('sealed', { profile: 'sealed' })
+    const hidden = await ws.shell('shelf', { sessionId: 'hides' })
+    expect([hidden.exitCode, dec.decode(hidden.stdout)]).toEqual([0, '/data/a.txt\n1 titles\n'])
+    const sealed = await ws.shell('shelf', { sessionId: 'sealed' })
+    expect([sealed.exitCode, dec.decode(sealed.stdout)]).toEqual([1, ''])
+    expect(sealed.refusal?.reason).toBe('sealed')
+    const all = await ws.shell('shelf')
+    expect([all.exitCode, dec.decode(all.stdout)]).toEqual([
+      0,
+      '/data/a.txt\n/data/secret.txt\n2 titles\n',
+    ])
   })
 })

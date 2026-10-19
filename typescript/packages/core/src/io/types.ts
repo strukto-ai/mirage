@@ -152,6 +152,27 @@ export interface ClosedPipe {
   readonly exitCode: number | null
 }
 
+/** A row a command hands over: it names the path it shows. Mirrors Python's PathRow. */
+export interface PathRow {
+  readonly path: PathSpec
+}
+
+/**
+ * A command's output as rows, each naming the path it shows, and the renderer
+ * that prints them.
+ *
+ * The command boundary drops every row whose path the session hides, by the
+ * rule the dispatcher refuses a call by, and renders the rest, so nothing the
+ * renderer prints (a name, a count, a total, a column width) stands for a
+ * hidden path, and no handler checks a hide of its own. A handler hands them
+ * over on `IOResult.rows` with no stdout; the renderer runs inside the
+ * command's timeout and returns null to print nothing. Mirrors Python's Rows.
+ */
+export interface Rows<R extends PathRow = PathRow> {
+  readonly items: readonly R[]
+  render(shown: R[]): Promise<ByteSource | null>
+}
+
 export interface IOResultInit {
   stdout?: ByteSource | null
   stderr?: ByteSource | null
@@ -160,6 +181,7 @@ export interface IOResultInit {
   records?: PathRecord[] | null
   refusal?: Refusal | null
   closedStdout?: ClosedPipe | null
+  rows?: Rows | null
 }
 
 export class IOResult {
@@ -168,6 +190,10 @@ export class IOResult {
   // find's matches, du's files and directories, wc's rows without the total,
   // in operand order; null when the command supplied none.
   records: PathRecord[] | null
+  // The command's output before it is rendered, handed over in place of
+  // stdout: the command boundary drops the rows the session cannot see and
+  // renders the rest. Never merged: the boundary consumes it.
+  rows: Rows | null
   stdout: ByteSource | null
   stderr: ByteSource | null
   private _exitCode: number
@@ -193,6 +219,7 @@ export class IOResult {
 
   constructor(init: IOResultInit = {}) {
     this.records = init.records ?? null
+    this.rows = init.rows ?? null
     this.stdout = init.stdout ?? null
     this.stderr = init.stderr ?? null
     this._exitCode = init.exitCode ?? 0

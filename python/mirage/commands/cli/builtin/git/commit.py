@@ -32,7 +32,6 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     LockExistsError,
     MissingMessageError,
-    NothingToCommitError,
     NoWorkspaceError,
     PartialCommitError,
     UnmergedIndexError,
@@ -40,7 +39,6 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
 from mirage.commands.cli.builtin.git.io import take_lock
 from mirage.commands.cli.builtin.git.objects import abbrev_for
-from mirage.commands.cli.builtin.git.pathspec import visible_entries
 from mirage.commands.cli.builtin.git.reflog import record
 from mirage.commands.cli.builtin.git.refs import (
     HEAD_REF,
@@ -50,8 +48,9 @@ from mirage.commands.cli.builtin.git.refs import (
     write_ref,
 )
 from mirage.commands.cli.builtin.git.repo import config_bool
+from mirage.commands.cli.builtin.git.rows import Delta, deltas, shown_sides
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.status import render_report
+from mirage.commands.cli.builtin.git.status import report_rows
 from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import (
@@ -62,7 +61,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 from mirage.view.types import SessionView
 
@@ -218,15 +217,12 @@ async def commit(
             and before == after
             and not fl.as_bool("allow_empty")
         ):
-            raise NothingToCommitError(
-                await render_report(
-                    vfs,
-                    repo,
-                    location,
-                    head,
-                    start_point(fl).virtual,
-                )
+            # Printed on stdout, where the status report it stands in
+            # for would have gone, and exits 1.
+            report_of = await report_rows(
+                vfs, repo, location, head, start_point(fl).virtual
             )
+            return None, IOResult(exit_code=1, rows=report_of)
         parents = [] if before is None else [repo.refs[HEAD_REF]]
         who = identity(fl, ctx.session)
         when = int(time.time())
@@ -257,18 +253,20 @@ async def commit(
             f"{message.splitlines()[0]}",
         )
         fully = await config_bool(vfs, location, b"core", b"quotepath", True)
-        changes = await asyncio.to_thread(
-            commit_summary,
-            repo,
-            visible_entries(location, before or {}),
-            visible_entries(location, after),
-            fully,
-        )
     except GitError as exc:
         return fatal(exc)
     if fl.as_bool("quiet"):
         return None, IOResult()
-    body = report(
-        written, head.branch, changes, abbrev_for(repo), before is None
-    )
-    return yield_bytes(body), IOResult()
+
+    async def render(shown: list[Delta]) -> ByteSource:
+        [(old_side, new_side)] = shown_sides(shown, 1)
+        changes = await asyncio.to_thread(
+            commit_summary, repo, old_side, new_side, fully
+        )
+        body = report(
+            written, head.branch, changes, abbrev_for(repo), before is None
+        )
+        return yield_bytes(body)
+
+    rows = deltas(location, [(before or {}, after)])
+    return None, IOResult(rows=Rows(rows, render))

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -25,13 +26,15 @@ from mirage.commands.cli.types import CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec, WordKind
 from mirage.config import load_config
 from mirage.io import IOResult
-from mirage.io.types import materialize
+from mirage.io.types import Rows, materialize
 from mirage.policy import Deny, Policy, RouteContext
 from mirage.policy.match import Outcome
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
 from mirage.runtime.types import ScriptSource
 from mirage.types import MountMode, PathSpec
+from mirage.vfs.call import vfs_call
 from mirage.vfs.ram import RAMVFS
+from mirage.vfs.types import Effect
 
 
 class TokenConfig(BaseModel):
@@ -616,3 +619,132 @@ async def test_yaml_script_entry_executes_end_to_end(tmp_path):
     code, out, _ = await run(ws, "pager report.txt")
     assert (code, out) == (0, b'yaml report.txt {"width": 80}\n')
     await ws.close()
+
+
+@dataclass(frozen=True)
+class Listed:
+    path: PathSpec
+    size: int
+
+
+async def listing(config: None, paths, texts, ctx: Context):
+    names = (("a.txt", 1), ("secret.txt", 2), ("door", 4), ("b.txt", 3))
+    rows = [Listed(PathSpec.from_str_path(f"/data/{n}"), k) for n, k in names]
+
+    async def render(shown: list[Listed]) -> bytes:
+        lines = [f"{row.path.virtual} {row.size}\n" for row in shown]
+        total = sum(row.size for row in shown)
+        return "".join(
+            [*lines, f"{len(shown)} files, {total} bytes\n"]
+        ).encode()
+
+    return None, IOResult(rows=Rows(rows, render))
+
+
+LISTING = CLI(
+    spec=CommandSpec(name="listing"), handlers={"": CLIHandler(fn=listing)}
+)
+
+
+@pytest.mark.asyncio
+async def test_a_clis_rows_lose_what_the_session_hides_before_they_print():
+    # The boundary drops a hidden row, and a link leading into hidden
+    # space, before the renderer counts: the total never stands for them.
+    workspace = Workspace(
+        {"/data": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "hides": {
+                "paths": {"hide": ["/data/secret.txt"]},
+                "commands": {"allow": ["*", "listing"]},
+            }
+        },
+    )
+    workspace.register_cli("listing", LISTING)
+    await workspace.shell("echo top > /data/secret.txt")
+    await workspace.vfs.symlink("/data/door", "/data/secret.txt")
+    workspace.create_session("s", profile="hides")
+    try:
+        io = await workspace.shell("listing", session_id="s")
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (
+            0,
+            b"/data/a.txt 1\n/data/b.txt 3\n2 files, 4 bytes\n",
+        )
+        code, out, _ = await run(workspace, "listing")
+        assert (code, out) == (
+            0,
+            b"/data/a.txt 1\n/data/secret.txt 2\n/data/door 4\n"
+            b"/data/b.txt 3\n4 files, 10 bytes\n",
+        )
+    finally:
+        await workspace.close()
+
+
+@dataclass(frozen=True)
+class Title:
+    path: PathSpec
+
+
+class Shelf(RAMVFS):
+    @vfs_call(effect=Effect.READ)
+    async def titles(self, path: PathSpec) -> list[Title]:
+        return [
+            Title(PathSpec.from_str_path(f"/data/{name}"))
+            for name in ("a.txt", "secret.txt")
+        ]
+
+
+async def shelf(config: None, paths, texts, ctx: Context):
+    assert ctx.vfs is not None
+    found, _ = await ctx.vfs.dispatch(
+        "titles", PathSpec.from_str_path("/data")
+    )
+    lines = [f"{title.path.virtual}\n" for title in found]
+    return "".join([*lines, f"{len(found)} titles\n"]).encode(), IOResult()
+
+
+SHELF = CLI(
+    spec=CommandSpec(name="shelf"), handlers={"": CLIHandler(fn=shelf)}
+)
+
+
+@pytest.mark.asyncio
+async def test_a_cli_calling_a_custom_function_meets_hides_and_its_rules():
+    # The answer loses what the session hides, and a rule scoped to the
+    # CLI judges the call it makes.
+    workspace = Workspace(
+        {"/data": (Shelf(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "hides": {
+                "paths": {"hide": ["/data/secret.txt"]},
+                "commands": {"allow": ["*", "shelf"]},
+            },
+            "sealed": {
+                "commands": {
+                    "deny": [
+                        {"reason": "sealed", "commands": {"shelf": ["/data"]}}
+                    ]
+                }
+            },
+        },
+    )
+    workspace.register_cli("shelf", SHELF)
+    workspace.create_session("hides", profile="hides")
+    workspace.create_session("sealed", profile="sealed")
+    try:
+        io = await workspace.shell("shelf", session_id="hides")
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (0, b"/data/a.txt\n1 titles\n")
+        io = await workspace.shell("shelf", session_id="sealed")
+        out = await materialize(io.stdout) if io.stdout else b""
+        assert (io.exit_code, out) == (1, b"")
+        assert io.refusal is not None and io.refusal.reason == "sealed"
+        code, out, _ = await run(workspace, "shelf")
+        assert (code, out) == (
+            0,
+            b"/data/a.txt\n/data/secret.txt\n2 titles\n",
+        )
+    finally:
+        await workspace.close()

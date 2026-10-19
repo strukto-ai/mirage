@@ -1300,6 +1300,7 @@ class MountEntry:
                     else None
                 ),
                 scope=self._streams,
+                vfs=ctx.vfs,
             )
 
     def _streams(self, result: CommandOutput) -> CommandOutput:
@@ -1384,6 +1385,7 @@ class MountEntry:
                             else None
                         ),
                         scope=self._streams,
+                        vfs=run_ctx.vfs,
                     )
 
     async def drop_caches(self) -> None:

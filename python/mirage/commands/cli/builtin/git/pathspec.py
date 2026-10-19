@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
 from mirage.utils.fnmatch import fnmatch
+from mirage.workspace.files import view_of
 
 T = TypeVar("T")
 
@@ -173,12 +174,20 @@ def _selects(path: str, pattern: str, directory: bool) -> bool:
 def visible_path(location: RepoLocation, relative: str) -> bool:
     """Whether a repository entry belongs to the session's visible tree.
 
+    For what git does to the index, never what it prints: a verb that
+    stages, removes or resets acts only on the entries the session sees,
+    and a hidden tracked file (absent from a worktree scan) is not
+    taken for a deletion. What git prints it hands over as rows, which
+    the command boundary filters.
+
     Args:
         location (RepoLocation): repository and the session's files.
         relative (str): Git's repository-relative entry name.
     """
     vfs = location.vfs
-    return vfs is None or vfs.is_visible(location.worktree.join(relative))
+    return vfs is None or view_of(vfs).visible(
+        location.worktree.join(relative)
+    )
 
 
 def decoded(paths: Iterable[bytes]) -> set[str]:

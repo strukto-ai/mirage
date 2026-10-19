@@ -12,11 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from dataclasses import dataclass
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.branch import branch_upstream
-from mirage.commands.cli.builtin.git.changes import collect
+from mirage.commands.cli.builtin.git.changes import (
+    StatusRow,
+    assembled,
+    collect,
+)
 from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
 from mirage.commands.cli.builtin.git.pathspec import repo_relative
 from mirage.commands.cli.builtin.git.ref_list import detached_line
@@ -29,11 +34,7 @@ from mirage.commands.cli.builtin.git.render import (
 )
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.session import opened
-from mirage.commands.cli.builtin.git.types import (
-    HeadRef,
-    RepoLocation,
-    StatusEntry,
-)
+from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
 from mirage.commands.cli.builtin.git.util import fatal, start_point
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
@@ -43,7 +44,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -95,13 +96,11 @@ def parse_flags(fl: FlagView) -> StatusFlags:
     )
 
 
-async def displayed(
-    vfs: Files,
-    location: RepoLocation,
-    start: str,
-    rows: list[StatusEntry],
-) -> list[StatusEntry]:
-    """Status rows as a person reads them, relative to where git runs.
+async def relative_prefix(
+    vfs: Files, location: RepoLocation, start: str
+) -> str:
+    """Where a person's status report names paths from, relative to the
+    work tree.
 
     git's human formats name paths from the invocation directory unless
     ``status.relativePaths`` is false; porcelain never does. From outside
@@ -111,21 +110,24 @@ async def displayed(
         vfs (Files): the session's files.
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
-        rows (list[StatusEntry]): repository-relative status entries.
+
+    Returns:
+        str: the invocation directory relative to the work tree, empty
+            for paths named from its root.
     """
     if not await config_bool(vfs, location, b"status", b"relativepaths", True):
-        return rows
-    return relative_entries(rows, repo_relative(location, start, "."))
+        return ""
+    return repo_relative(location, start, ".")
 
 
-async def render_report(
+async def report_rows(
     vfs: Files,
     repo: Repo,
     location: RepoLocation,
     head: HeadRef,
     start: str,
-) -> str:
-    """The default status report, as a string.
+) -> Rows[StatusRow]:
+    """The default status report, as rows and their renderer.
 
     Split out so ``commit`` can print it when it has nothing to commit:
     git shows the whole status there rather than a one-line refusal, and
@@ -147,16 +149,23 @@ async def render_report(
         "" if head.branch is not None else await detached_line(repo, head)
     )
     upstream = await branch_upstream(repo, head, no_commits)
-    return long_format(
-        await displayed(vfs, location, start, rows),
-        head.branch,
-        detached,
-        no_commits,
-        state.merging,
-        False,
-        fully,
-        upstream,
-    )
+    prefix = await relative_prefix(vfs, location, start)
+
+    async def render(shown: list[StatusRow]) -> ByteSource:
+        entries = await asyncio.to_thread(assembled, repo.object_store, shown)
+        body = long_format(
+            relative_entries(entries, prefix),
+            head.branch,
+            detached,
+            no_commits,
+            state.merging,
+            False,
+            fully,
+            upstream,
+        )
+        return yield_bytes(body.encode())
+
+    return Rows(rows, render)
 
 
 async def status(
@@ -167,7 +176,9 @@ async def status(
     Three sources, compared pairwise: HEAD's tree against the index says
     what a commit would record, and the index against the working tree
     says what it would leave behind. Everything the report prints is one
-    of those two answers, or a path neither side knows about.
+    of those two answers, or a path neither side knows about. Each path
+    is handed over as a row, so the report names and counts only the
+    paths the session sees.
 
     Args:
         accessor (Accessor): git reaches no service.
@@ -193,32 +204,41 @@ async def status(
             parsed.ignored,
         )
         fully = await config_bool(vfs, location, b"core", b"quotepath", True)
-        if not parsed.porcelain:
-            rows = await displayed(
-                vfs, location, start_point(fl).virtual, rows
-            )
+        prefix = (
+            ""
+            if parsed.porcelain
+            else await relative_prefix(vfs, location, start_point(fl).virtual)
+        )
         upstream = await branch_upstream(repo, head, no_commits)
         detached = (
             "" if head.branch is not None else await detached_line(repo, head)
         )
     except GitError as exc:
         return fatal(exc)
-    if parsed.porcelain or parsed.short:
-        header = (
-            branch_line(head.branch, no_commits, upstream)
-            if parsed.branch
-            else None
+
+    async def render(shown: list[StatusRow]) -> ByteSource:
+        entries = relative_entries(
+            await asyncio.to_thread(assembled, repo.object_store, shown),
+            prefix,
         )
-        body = short_format(rows, header, fully)
-    else:
-        body = long_format(
-            rows,
-            head.branch,
-            detached,
-            no_commits,
-            state.merging,
-            parsed.untracked == UNTRACKED_NO,
-            fully,
-            upstream,
-        )
-    return yield_bytes(body.encode()), IOResult()
+        if parsed.porcelain or parsed.short:
+            header = (
+                branch_line(head.branch, no_commits, upstream)
+                if parsed.branch
+                else None
+            )
+            body = short_format(entries, header, fully)
+        else:
+            body = long_format(
+                entries,
+                head.branch,
+                detached,
+                no_commits,
+                state.merging,
+                parsed.untracked == UNTRACKED_NO,
+                fully,
+                upstream,
+            )
+        return yield_bytes(body.encode())
+
+    return None, IOResult(rows=Rows(rows, render))
