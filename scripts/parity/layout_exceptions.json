@@ -7,7 +7,6 @@
    "runtime/python/host": "The `with ws:` entry point: the host interpreter's own builtins.open, io.open and os functions patched onto a workspace (fs, open, file, list, stat, constants), plus the re-entrancy bypass (host_io) the mount path sets so a backend serving an op reaches the host. Both ride the runtimes' file API (runtime/files RuntimeFiles) over ws.vfs. Its node twin is runtime/js/host (fs and constants, excused there): an npm consumer holds promises, not file objects, so file, open and the stat and listing shapes have nothing to mirror, and node needs no host_io because the patch swaps only the CommonJS fs and fs.promises functions, which every node backend's ESM node:fs/promises import never reaches (pinned by fs.test.ts, 'a disk root at its own prefix does not re-enter').",
    "bridge": "sync.py exists to run an event loop on a worker thread for the FUSE callbacks, which python needs because its FUSE loop is threaded and node's is not.",
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
-   "agents/openhands": "Ecosystem split: openhands is a python-only framework.",
    "agents/pydantic_ai": "Ecosystem split: pydantic-ai is a python-only framework.",
    "runtime/python/wasi": "CPython on Wasmtime is a Python host adapter. TypeScript hosts CPython through Pyodide, whose engine-specific subtree is excused separately."
   },

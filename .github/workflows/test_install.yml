@@ -128,7 +128,6 @@ jobs:
             "openai:mirage.agents.openai_agents"
             "agno:mirage.agents.agno"
             "deepagents:mirage.agents.langchain"
-            "openhands:mirage.agents.openhands:3.12"
           )
           failed=()
           for entry in "${entries[@]}"; do
