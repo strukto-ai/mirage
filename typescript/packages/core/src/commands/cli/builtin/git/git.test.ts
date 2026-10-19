@@ -28,6 +28,7 @@ import { Files } from '../../../../workspace/files.ts'
 import { GIT } from './index.ts'
 import * as gitFsModule from './fs.ts'
 import { ensureDir } from './io.ts'
+import { commitFacts, openRepo } from './repo.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -42,13 +43,43 @@ let tmp: string
 let repoPath: string
 let ws: Workspace
 let parser: ShellParser
+let metadataCommit: string
 
 const MESSAGE_CASES = ['', '\n'].flatMap((ending) =>
   [true, false].map((hasBody) => ({
     id: `${hasBody ? 'body' : 'empty-body'}-${ending ? 'terminated' : 'unterminated'}`,
     ending,
     hasBody,
+    newline: '\n',
+    prefix: '',
+    continuation: false,
   })),
+)
+MESSAGE_CASES.push(
+  ...['', '\r\n'].map((ending) => ({
+    id: `crlf-${ending ? 'terminated' : 'unterminated'}`,
+    ending,
+    hasBody: true,
+    newline: '\r\n',
+    prefix: '',
+    continuation: false,
+  })),
+  ...['\n', '\r\n'].map((newline) => ({
+    id: `leading-${newline === '\n' ? 'lf' : 'crlf'}`,
+    ending: '',
+    hasBody: true,
+    newline,
+    prefix: newline + newline,
+    continuation: false,
+  })),
+  {
+    id: 'multiline-crlf',
+    ending: '\r\n',
+    hasBody: true,
+    newline: '\r\n',
+    prefix: '',
+    continuation: true,
+  },
 )
 const messageCommits = new Map<string, string[]>()
 
@@ -78,10 +109,21 @@ beforeAll(async () => {
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore' })
 
   const tree = realGit(['rev-parse', 'HEAD^{tree}']).trim()
-  for (const { id, ending, hasBody } of MESSAGE_CASES) {
+  const parents = [realGit(['rev-parse', 'HEAD']).trim(), realGit(['rev-parse', 'HEAD~1']).trim()]
+  metadataCommit = execFileSync(
+    'git',
+    ['-C', repoPath, 'hash-object', '-t', 'commit', '-w', '--stdin'],
+    {
+      encoding: 'utf8',
+      input: `tree ${tree}\n${parents.map((oid) => `parent ${oid}\n`).join('')}author Exämple <author@example.invalid> 123456789 +0530\ncommitter Other <committer@example.invalid> 987654321 -0230\ngpgsig test\n author Decoy <decoy@example.invalid> 0 +0000\n\nmetadata\n\nbody`,
+    },
+  ).trim()
+  for (const { id, ending, hasBody, newline, prefix, continuation } of MESSAGE_CASES) {
     const commits: string[] = []
     for (const subject of ['one', 'two']) {
-      const message = hasBody ? `${subject}\n\nbody ${subject}${ending}` : subject + ending
+      const title = subject + (continuation ? `${newline}continued` : '')
+      const message =
+        prefix + title + (hasBody ? `${newline}${newline}body ${subject}${ending}` : ending)
       const parent = commits.at(-1)
       const oid = execFileSync(
         'git',
@@ -109,41 +151,97 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true })
 })
 
-describe.each(MESSAGE_CASES)('message endings match git 2.51.2: $id', ({ id, ending, hasBody }) => {
-  it.each(
-    [1, 2].flatMap((count) =>
-      ['show', 'log'].flatMap((verb) =>
-        ['subject=%s%nbody=%b', 'raw=%B', 'body=%b|subject=%s'].map((template) => ({
-          count,
-          verb,
-          template,
-        })),
+describe.each(MESSAGE_CASES)(
+  'message endings match git 2.51.2: $id',
+  ({ id, ending, hasBody, newline, prefix, continuation }) => {
+    it.each(
+      [1, 2].flatMap((count) =>
+        ['show', 'log'].flatMap((verb) =>
+          ['subject=%s%nbody=%b', 'raw=%B', 'body=%b|subject=%s'].map((template) => ({
+            count,
+            verb,
+            template,
+          })),
+        ),
       ),
-    ),
-  )('$verb $count commits --format=$template', async ({ count, verb, template }) => {
-    const commits = messageCommits.get(id)
-    assert(commits)
-    const newest = commits[1]
-    assert(newest)
-    const revisions = verb === 'show' ? commits.slice(-count).reverse() : [newest]
-    const options = verb === 'show' ? ['-s'] : [`-${String(count)}`]
-    const args = [verb, ...options, `--format=${template}`, ...revisions]
-    const expected = ['one', 'two']
-      .slice(-count)
-      .reverse()
-      .map((subject) => {
-        const body = hasBody ? `body ${subject}${ending}` : ''
-        const message = hasBody ? `${subject}\n\n${body}` : subject + ending
-        return {
-          'subject=%s%nbody=%b': `subject=${subject}\nbody=${body}\n`,
-          'raw=%B': `raw=${message}\n`,
-          'body=%b|subject=%s': `body=${body}|subject=${subject}\n`,
-        }[template]
-      })
-      .join('')
-    expect(realGit(args)).toBe(expected)
-    expect(await run(args.map((arg) => `'${arg}'`).join(' '))).toEqual([0, expected, ''])
+    )('$verb $count commits --format=$template', async ({ count, verb, template }) => {
+      const commits = messageCommits.get(id)
+      assert(commits)
+      const newest = commits[1]
+      assert(newest)
+      const revisions = verb === 'show' ? commits.slice(-count).reverse() : [newest]
+      const options = verb === 'show' ? ['-s'] : [`-${String(count)}`]
+      const args = [verb, ...options, `--format=${template}`, ...revisions]
+      const expected = ['one', 'two']
+        .slice(-count)
+        .reverse()
+        .map((subject) => {
+          const body = hasBody ? `body ${subject}${ending}` : ''
+          const title = subject + (continuation ? ' continued' : '')
+          const storedTitle = subject + (continuation ? `${newline}continued` : '')
+          const message = prefix + storedTitle + (hasBody ? `${newline}${newline}${body}` : ending)
+          return {
+            'subject=%s%nbody=%b': `subject=${title}\nbody=${body}\n`,
+            'raw=%B': `raw=${message}\n`,
+            'body=%b|subject=%s': `body=${body}|subject=${title}\n`,
+          }[template]
+        })
+        .join('')
+      expect(realGit(args)).toBe(expected)
+      expect(await run(args.map((arg) => `'${arg}'`).join(' '))).toEqual([0, expected, ''])
+    })
+    it('keeps the message correct in every preset', async () => {
+      const commits = messageCommits.get(id)
+      assert(commits)
+      const oid = commits[1]
+      assert(oid)
+      for (const verb of ['show', 'log']) {
+        for (const preset of ['oneline', 'medium', 'raw']) {
+          const args = [verb, verb === 'show' ? '-s' : '-1', `--pretty=${preset}`, oid]
+          expect(await run(args.join(' '))).toEqual([0, realGit(args), ''])
+        }
+      }
+    })
+  },
+)
+
+it('reads a loose commit once when loading its facts', async () => {
+  const commits = messageCommits.get('body-unterminated')
+  assert(commits)
+  const oid = commits[1]
+  assert(oid)
+  const root = PathSpec.fromStrPath('/repo')
+  const gitdir = root.join('.git')
+  const target = gitdir.join('objects', oid.slice(0, 2), oid.slice(2)).virtual
+  let reads = 0
+  const files = new Files(async (op, path, args, kwargs) => {
+    if (op === 'read' && path.virtual === target) reads++
+    return ws.vfs.dispatch(op, path, args, kwargs)
   })
+  const repo = await openRepo(files, { gitdir, commondir: gitdir, worktree: root, mountRoot: root })
+  const facts = await commitFacts(repo, oid)
+  expect(facts.message).toBe('two\n\nbody two')
+  expect(facts.parents).toEqual([commits[0]])
+  expect(reads).toBe(1)
+})
+
+it('keeps parents, timestamps, offsets and identities when reading raw metadata', async () => {
+  const root = PathSpec.fromStrPath('/repo')
+  const gitdir = root.join('.git')
+  const repo = await openRepo(ws.vfs, {
+    gitdir,
+    commondir: gitdir,
+    worktree: root,
+    mountRoot: root,
+  })
+  const facts = await commitFacts(repo, metadataCommit)
+  expect(facts.authorTime).toBe(123456789)
+  expect(facts.authorTimezoneMinutes).toBe(330)
+  expect(facts.committerTimezoneMinutes).toBe(-150)
+  expect(facts.parents).toHaveLength(2)
+  const template = '%T|%P|%an|%ae|%at|%aI|%cn|%ce|%ct|%cI|%B'
+  const args = ['show', '-s', `--format=${template}`, metadataCommit]
+  expect(await run(args.map((arg) => `'${arg}'`).join(' '))).toEqual([0, realGit(args), ''])
 })
 
 it.each([

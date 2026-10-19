@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -194,13 +195,13 @@ def short(sha: bytes, length: int = SHORT_SHA) -> str:
 
 
 def subject(commit: Commit) -> str:
-    """The first line of a commit message.
+    """The first paragraph of a commit message, folded onto one line.
 
     Args:
         commit (Commit): the commit to read.
     """
     text = commit.message.decode("utf-8", errors="replace")
-    return text.split("\n", 1)[0].rstrip()
+    return _subject_folded(text)
 
 
 def oneline(commit: Commit, length: int = SHORT_SHA) -> str:
@@ -224,8 +225,10 @@ def message_block(commit: Commit) -> list[str]:
     Args:
         commit (Commit): the commit to render.
     """
-    text = commit.message.decode("utf-8", errors="replace").rstrip("\n")
-    return [f"{INDENT}{line}" for line in text.split("\n")]
+    text = commit.message.decode("utf-8", errors="replace")
+    text = re.sub(r"^(?:\r?\n)+", "", text)
+    text = re.sub(r"(?:\r?\n)+$", "", text)
+    return [INDENT + line.removesuffix("\r") for line in text.split("\n")]
 
 
 def _merge_line(commit: Commit, length: int) -> list[str]:
@@ -348,8 +351,11 @@ def _subject_folded(message: str) -> str:
     Args:
         message (str): the decoded commit message.
     """
-    head = message.split("\n\n", 1)[0]
-    return " ".join(part for part in head.split("\n") if part).strip()
+    text = re.sub(r"^(?:\r?\n)+", "", message)
+    head = re.split(r"\r?\n\r?\n", text, maxsplit=1)[0]
+    return " ".join(
+        part.removesuffix("\r") for part in head.split("\n") if part
+    ).strip()
 
 
 def _body(message: str) -> str:
@@ -358,8 +364,9 @@ def _body(message: str) -> str:
     Args:
         message (str): the decoded commit message.
     """
-    _, separator, rest = message.partition("\n\n")
-    return rest if separator else ""
+    text = re.sub(r"^(?:\r?\n)+", "", message)
+    separator = re.search(r"\r?\n(?:\r?\n)+", text)
+    return "" if separator is None else text[separator.end() :]
 
 
 def render_template(

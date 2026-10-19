@@ -56,8 +56,15 @@ def test_short_id_is_seven_characters():
     assert short(b"cdd6234342b147880f5d86c55dad6c1fbe222bfe") == "cdd6234"
 
 
-def test_subject_is_the_first_line():
-    assert subject(_commit(b"first line\n\nbody here\n")) == "first line"
+@pytest.mark.parametrize(
+    "message",
+    [
+        b"first line\n\nbody here\n",
+        b"\r\n\r\nfirst\r\nline\r\n\r\nbody here\r\n",
+    ],
+)
+def test_subject_is_the_first_paragraph(message):
+    assert subject(_commit(message)) == "first line"
 
 
 def test_oneline_is_id_then_subject():
@@ -65,10 +72,14 @@ def test_oneline_is_id_then_subject():
     assert oneline(commit) == f"{short(commit.id)} second commit"
 
 
-def test_blank_message_lines_render_as_four_spaces():
+@pytest.mark.parametrize(
+    "message",
+    [b"title\n\nbody\n", b"title\r\n\r\nbody\r\n", b"\n\ntitle\n\nbody"],
+)
+def test_blank_message_lines_render_as_four_spaces(message):
     # git indents every line by four, blank ones included, so an empty
     # line inside a message carries trailing whitespace on purpose.
-    assert message_block(_commit(b"title\n\nbody\n")) == [
+    assert message_block(_commit(message)) == [
         "    title",
         "    ",
         "    body",

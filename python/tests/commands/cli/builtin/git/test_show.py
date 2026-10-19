@@ -27,27 +27,64 @@ from tests.commands.cli.builtin.git.conftest import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "ending", ["", "\n"], ids=["unterminated", "terminated"]
+    "newline,ending,has_body,prefix,continuation",
+    [
+        ("\n", "", True, "", False),
+        ("\n", "", False, "", False),
+        ("\n", "\n", True, "", False),
+        ("\n", "\n", False, "", False),
+        ("\r\n", "", True, "", False),
+        ("\r\n", "\r\n", True, "", False),
+        ("\n", "", True, "\n\n", False),
+        ("\r\n", "", True, "\r\n\r\n", False),
+        ("\r\n", "\r\n", True, "", True),
+    ],
+    ids=[
+        "body-unterminated",
+        "empty-body-unterminated",
+        "body-terminated",
+        "empty-body-terminated",
+        "crlf-unterminated",
+        "crlf-terminated",
+        "leading-lf",
+        "leading-crlf",
+        "multiline-crlf",
+    ],
 )
-@pytest.mark.parametrize("has_body", [True, False], ids=["body", "empty-body"])
 @pytest.mark.parametrize("count", [1, 2])
 @pytest.mark.parametrize(
     "template", ["subject=%s%nbody=%b", "raw=%B", "body=%b|subject=%s"]
 )
 async def test_message_endings_match_git_2_51_2(
-    git_ws, repo_path, ending, has_body, count, template
+    git_ws,
+    repo_path,
+    newline,
+    ending,
+    has_body,
+    prefix,
+    continuation,
+    count,
+    template,
 ):
     """Preserve message endings measured with git 2.51.2 commit-tree."""
     expected = []
     for subject in ("one", "two"):
         body = f"body {subject}{ending}" if has_body else ""
-        message = f"{subject}\n\n{body}" if has_body else subject + ending
+        title = subject + (" continued" if continuation else "")
+        stored_title = subject + (
+            f"{newline}continued" if continuation else ""
+        )
+        message = (
+            prefix
+            + stored_title
+            + (f"{newline}{newline}{body}" if has_body else ending)
+        )
         commit_file(repo_path, "message.txt", subject, message)
         expected.append(
             {
-                "subject=%s%nbody=%b": f"subject={subject}\nbody={body}\n",
+                "subject=%s%nbody=%b": f"subject={title}\nbody={body}\n",
                 "raw=%B": f"raw={message}\n",
-                "body=%b|subject=%s": f"body={body}|subject={subject}\n",
+                "body=%b|subject=%s": f"body={body}|subject={title}\n",
             }[template]
         )
     stdout = "".join(reversed(expected[-count:])).encode()

@@ -180,9 +180,9 @@ export function short(sha: string, length: number = SHORT_SHA): string {
   return sha.slice(0, length)
 }
 
-/** The first line of a commit message. */
+/** The first paragraph of a commit message, folded onto one line. */
 export function subject(commit: CommitFacts): string {
-  return (commit.message.split('\n', 1)[0] ?? '').replace(/\s+$/, '')
+  return subjectFolded(commit.message)
 }
 
 /**
@@ -204,9 +204,10 @@ export function oneline(commit: CommitFacts, length: number = SHORT_SHA): string
  */
 function messageBlock(commit: CommitFacts): string[] {
   return commit.message
-    .replace(/\n+$/, '')
+    .replace(/^(?:\r?\n)+/, '')
+    .replace(/(?:\r?\n)+$/, '')
     .split('\n')
-    .map((line) => `${INDENT}${line}`)
+    .map((line) => `${INDENT}${line.replace(/\r$/, '')}`)
 }
 
 /**
@@ -276,9 +277,10 @@ export function presetBlock(
 
 /** git's %s: the first paragraph folded onto one line. */
 function subjectFolded(message: string): string {
-  const head = message.split('\n\n', 1)[0] ?? ''
+  const head = message.replace(/^(?:\r?\n)+/, '').split(/\r?\n\r?\n/, 1)[0] ?? ''
   return head
     .split('\n')
+    .map((part) => part.replace(/\r$/, ''))
     .filter((part) => part !== '')
     .join(' ')
     .trim()
@@ -286,8 +288,9 @@ function subjectFolded(message: string): string {
 
 /** git's %b: everything after the subject paragraph. */
 function body(message: string): string {
-  const separator = message.indexOf('\n\n')
-  return separator === -1 ? '' : message.slice(separator + 2)
+  const text = message.replace(/^(?:\r?\n)+/, '')
+  const separator = /\r?\n(?:\r?\n)+/.exec(text)
+  return separator === null ? '' : text.slice(separator.index + separator[0].length)
 }
 
 /**

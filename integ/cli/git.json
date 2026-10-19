@@ -5356,6 +5356,34 @@
         "stdout": "subject=two\nbody=body two\n\nsubject=one\nbody=body one\n\nsubject=two\nbody=body two\n\nsubject=one\nbody=body one\n\nraw=two\n\nbody two\n\nraw=one\n\nbody one\n\nraw=two\n\nbody two\n\nraw=one\n\nbody one\n\nbody=body two\n|subject=two\nbody=body one\n|subject=one\nbody=body two\n|subject=two\nbody=body one\n|subject=one\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "git_message_crlf",
+      "seq": 9970046,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" 'one\r\ncontinued\r\n\r\nbody one\r\n' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" 'two\r\ncontinued\r\n\r\nbody two\r\n' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two continued\nbody=body two\r\n\nsubject=one continued\nbody=body one\r\n\nsubject=two continued\nbody=body two\r\n\nsubject=one continued\nbody=body one\r\n\nraw=two\r\ncontinued\r\n\r\nbody two\r\n\nraw=one\r\ncontinued\r\n\r\nbody one\r\n\nraw=two\r\ncontinued\r\n\r\nbody two\r\n\nraw=one\r\ncontinued\r\n\r\nbody one\r\n\nbody=body two\r\n|subject=two continued\nbody=body one\r\n|subject=one continued\nbody=body two\r\n|subject=two continued\nbody=body one\r\n|subject=one continued\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_message_leading_blank_lines",
+      "seq": 9970047,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "tree=$(git -C /repo rev-parse 'HEAD^{tree}') && first=$(printf 'tree %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" '\n\none\n\nbody one' | git -C /repo hash-object -t commit -w --stdin) && second=$(printf 'tree %s\\nparent %s\\nauthor Example <example@example.invalid> 1754388000 +0000\\ncommitter Example <example@example.invalid> 1754388000 +0000\\n\\n%s' \"$tree\" \"$first\" '\n\ntwo\n\nbody two' | git -C /repo hash-object -t commit -w --stdin) && for fmt in 'subject=%s%nbody=%b' 'raw=%B' 'body=%b|subject=%s'; do git -C /repo show -s --format=\"$fmt\" \"$second\" \"$first\"; git -C /repo log -2 --format=\"$fmt\" \"$second\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "subject=two\nbody=body two\nsubject=one\nbody=body one\nsubject=two\nbody=body two\nsubject=one\nbody=body one\nraw=\n\ntwo\n\nbody two\nraw=\n\none\n\nbody one\nraw=\n\ntwo\n\nbody two\nraw=\n\none\n\nbody one\nbody=body two|subject=two\nbody=body one|subject=one\nbody=body two|subject=two\nbody=body one|subject=one\n",
+        "stderr": ""
+      }
     }
   ]
 }
