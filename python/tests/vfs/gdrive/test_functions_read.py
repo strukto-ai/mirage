@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 from tests.fixtures.vfs_io import call_over
 
 
@@ -44,21 +45,18 @@ def accessor():
 
 
 @pytest.mark.asyncio
-async def test_read_downloads_plain_file(accessor):
+async def test_read_downloads_plain_file(accessor, monkeypatch):
     row = FileStat(
         name="readme.txt",
         type=FileType.FILE,
         modified="2026-04-01T00:00:00Z",
         extra={"file_id": "file123", "resource_type": "gdrive/file"},
     )
-    with patch(
-        "mirage.core.gdrive.read.download_file",
-        new_callable=AsyncMock,
-        return_value=b"file content",
-    ) as mock:
-        result = await read(accessor, _scope("/docs/readme.txt"), entry=row)
-        mock.assert_called_once_with(accessor.token_manager, "file123", None)
-        assert result == b"file content"
+    mock = AsyncMock(return_value=b"file content")
+    install_drive(monkeypatch, StubDrive(download_file=mock))
+    result = await read(accessor, _scope("/docs/readme.txt"), entry=row)
+    mock.assert_called_once_with("file123", None)
+    assert result == b"file content"
 
 
 @pytest.mark.asyncio

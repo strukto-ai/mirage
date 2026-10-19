@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
-import { deleteFile, listFiles, patchFile } from '../google/drive.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import { driveTargetName, eaccesOnDenied, parentFolder } from './resolve.ts'
 
@@ -31,7 +30,7 @@ async function renameImpl(
   dst: PathSpec,
   handed: Handed = {},
 ): Promise<FileStat | null> {
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const entry = await liveRow(accessor, src, handed.entry)
   if (entry === null) throw enoent(src)
   const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
@@ -41,14 +40,14 @@ async function renameImpl(
     // "Directory not empty", mirroring the msgraph rename_replace.
     if (dstEntry.type === FileType.DIRECTORY) {
       const driveId = dstEntry.extra.drive_id
-      const children = await listFiles(tm, {
+      const children = await drive.listFiles({
         folderId: dstEntry.extra.file_id as string,
         driveId: typeof driveId === 'string' ? driveId : null,
         limit: 1,
       })
       if (children.length > 0) throw enotempty(dst)
     }
-    await deleteFile(tm, dstEntry.extra.file_id as string)
+    await drive.deleteFile(dstEntry.extra.file_id as string)
   }
   const [srcParentId] = await parentFolder(accessor, src, handed.parent)
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
@@ -63,7 +62,7 @@ async function renameImpl(
   // land in.
   const fileId = entry.extra.file_id as string
   const modified = entry.modified
-  const item = await patchFile(tm, fileId, {
+  const item = await drive.patchFile(fileId, {
     body: modified ? { name, modifiedTime: modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })

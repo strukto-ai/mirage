@@ -15,8 +15,6 @@
 import aiohttp
 import pytest
 
-import mirage.core.gdrive.readdir as readdir_mod
-import mirage.core.gdrive.tree as tree_mod
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.tree import (
     PARENTS_PER_QUERY,
@@ -148,7 +146,7 @@ async def test_a_short_root_listing_is_left_to_the_walk(
     fake_drive, gdrive_accessor, monkeypatch
 ):
     fake_drive.folder("sub")
-    monkeypatch.setattr(readdir_mod, "list_shared_drives", _no_shared_drives)
+    monkeypatch.setattr(fake_drive, "list_shared_drives", _no_shared_drives)
     assert await tree(gdrive_accessor, scope()) is None
     assert fake_drive.child_queries == []
 
@@ -204,5 +202,5 @@ async def test_a_level_that_fails_is_left_to_the_walk(
     fake_drive, gdrive_accessor, monkeypatch
 ):
     fake_drive.folder("sub")
-    monkeypatch.setattr(tree_mod, "list_children", _drive_down)
+    monkeypatch.setattr(fake_drive, "list_children", _drive_down)
     assert await tree(gdrive_accessor, scope()) is None

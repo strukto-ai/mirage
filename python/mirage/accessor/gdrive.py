@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.core.gdrive.api import DriveApi, DriveClient
 
 
 class GDriveAccessor(GoogleApiAccessor):
@@ -20,3 +21,8 @@ class GDriveAccessor(GoogleApiAccessor):
     # shared drive id (None when the root is in My Drive). Unset until
     # the first resolution.
     root_drive_id: str | None
+
+    @property
+    def drive(self) -> DriveApi:
+        """The one door every gdrive core op reaches Drive through."""
+        return DriveClient(self.token_manager)

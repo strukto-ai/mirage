@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +24,7 @@ from mirage.core.google.config import GoogleConfig
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
+from tests.fixtures.gdrive_api import DriveCall, StubDrive, install_drive
 
 ROOT = PathSpec(vfs_path="", virtual="/", directory="/")
 
@@ -55,19 +56,26 @@ def _rows(listed: list[FileStat] | DirListing) -> dict[str, FileStat]:
     return {row.name: row for row in rows}
 
 
-def _patched(files, drives=()):
-    """``list_files`` answering ``files`` and ``list_shared_drives``
-    answering ``drives`` (an exception is raised instead)."""
+def _patched(monkeypatch, files, drives=()) -> DriveCall:
+    """Serve ``list_files`` answering ``files`` and ``list_shared_drives``
+    answering ``drives`` (an exception is raised instead), and hand back
+    the lister.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): the test's monkeypatch.
+        files (list[dict] | DriveCall): the listing, or a lister.
+        drives (Iterable[dict] | Exception): the shared drives.
+    """
     shared = (
         AsyncMock(side_effect=drives)
         if isinstance(drives, Exception)
         else AsyncMock(return_value=list(drives))
     )
     lister = files if callable(files) else AsyncMock(return_value=files)
-    return (
-        patch("mirage.core.gdrive.readdir.list_files", new=lister),
-        patch("mirage.core.gdrive.readdir.list_shared_drives", new=shared),
+    install_drive(
+        monkeypatch, StubDrive(list_files=lister, list_shared_drives=shared)
     )
+    return lister
 
 
 def _file(file_id: str, name: str, mime: str = "text/plain", **more) -> dict:
@@ -86,12 +94,12 @@ FOLDER = "application/vnd.google-apps.folder"
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["updated", "deleted", "renamed-folder"])
 async def test_a_stat_after_the_listings_drop_lists_the_ids_again(
-    accessor, change
+    accessor, change, monkeypatch
 ):
     refreshed = False
     calls = []
 
-    async def list_files(_tm, folder_id="root", **kwargs):
+    async def list_files(folder_id="root", **kwargs):
         calls.append(folder_id)
         if folder_id == "root":
             if not refreshed:
@@ -115,21 +123,20 @@ async def test_a_stat_after_the_listings_drop_lists_the_ids_again(
     )
     vfs.accessor = accessor
     ws = Workspace({"/drive/": vfs}, mode=MountMode.READ)
-    first, shared = _patched(list_files)
     try:
-        with first, shared:
-            await ws.dispatch("readdir", PathSpec.from_str_path("/drive/docs"))
-            await ws.mount("/drive/").index_store.invalidate()
-            refreshed = True
-            calls.clear()
-            path = PathSpec.from_str_path("/drive/docs/report.pdf")
-            if change == "updated":
-                result, _ = await ws.dispatch("stat", path)
-                assert result.extra["file_id"] == "new-file"
-                assert result.size == 42
-            else:
-                with pytest.raises(FileNotFoundError):
-                    await ws.dispatch("stat", path)
+        _patched(monkeypatch, list_files)
+        await ws.dispatch("readdir", PathSpec.from_str_path("/drive/docs"))
+        await ws.mount("/drive/").index_store.invalidate()
+        refreshed = True
+        calls.clear()
+        path = PathSpec.from_str_path("/drive/docs/report.pdf")
+        if change == "updated":
+            result, _ = await ws.dispatch("stat", path)
+            assert result.extra["file_id"] == "new-file"
+            assert result.size == 42
+        else:
+            with pytest.raises(FileNotFoundError):
+                await ws.dispatch("stat", path)
         assert calls[0] == "root"
         assert "old-folder" not in calls
     finally:
@@ -137,30 +144,28 @@ async def test_a_stat_after_the_listings_drop_lists_the_ids_again(
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor):
-    first, shared = _patched([_file("f1", "readme.txt")])
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+async def test_readdir_root(accessor, monkeypatch):
+    _patched(monkeypatch, [_file("f1", "readme.txt")])
+    rows = _rows(await readdir(accessor, ROOT))
     assert rows["readme.txt"].extra["file_id"] == "f1"
 
 
 @pytest.mark.asyncio
-async def test_readdir_lists_a_folder_by_the_id_its_row_names(accessor):
+async def test_readdir_lists_a_folder_by_the_id_its_row_names(
+    accessor, monkeypatch
+):
     folder = FileStat(
         name="docs", type=FileType.DIRECTORY, extra={"file_id": "folder1"}
     )
-    first, shared = _patched([_file("f2", "notes.txt")])
-    with first as mock_list, shared:
-        rows = _rows(
-            await readdir(
-                accessor,
-                PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
-                folder,
-            )
+    mock_list = _patched(monkeypatch, [_file("f2", "notes.txt")])
+    rows = _rows(
+        await readdir(
+            accessor,
+            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
+            folder,
         )
-        mock_list.assert_called_once_with(
-            accessor.token_manager, folder_id="folder1", drive_id=None
-        )
+    )
+    mock_list.assert_called_once_with(folder_id="folder1", drive_id=None)
     assert list(rows) == ["notes.txt"]
 
 
@@ -189,12 +194,13 @@ async def test_readdir_under_a_file_is_not_a_directory(accessor):
 
 
 @pytest.mark.asyncio
-async def test_readdir_root_includes_shared_drives(accessor):
-    first, shared = _patched(
-        [_file("f1", "readme.txt")], [{"id": "drive1", "name": "Team Drive"}]
+async def test_readdir_root_includes_shared_drives(accessor, monkeypatch):
+    _patched(
+        monkeypatch,
+        [_file("f1", "readme.txt")],
+        [{"id": "drive1", "name": "Team Drive"}],
     )
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+    rows = _rows(await readdir(accessor, ROOT))
     assert "readme.txt" in rows
     # Shared Drives appear as top-level directories carrying their id.
     assert rows["Team Drive"].type is FileType.DIRECTORY
@@ -202,15 +208,16 @@ async def test_readdir_root_includes_shared_drives(accessor):
 
 
 @pytest.mark.asyncio
-async def test_readdir_root_uniquifies_duplicate_shared_drive_names(accessor):
+async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
+    accessor, monkeypatch
+):
     drives = [
         {"id": "drive1", "name": "Team"},
         {"id": "drive2", "name": "Team"},
         {"id": "drive3", "name": "Team"},
     ]
-    first, shared = _patched([], drives)
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+    _patched(monkeypatch, [], drives)
+    rows = _rows(await readdir(accessor, ROOT))
     assert list(rows) == [
         "Team",
         "Team [Shared Drive 2]",
@@ -222,7 +229,9 @@ async def test_readdir_root_uniquifies_duplicate_shared_drive_names(accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_root_short_of_its_shared_drives_is_partial(accessor):
+async def test_a_root_short_of_its_shared_drives_is_partial(
+    accessor, monkeypatch
+):
     """A short root listing must not be kept as the directory.
 
     Kept, it would hold the mount My-Drive-only until it expires, long
@@ -230,36 +239,36 @@ async def test_a_root_short_of_its_shared_drives_is_partial(accessor):
     they are answered as a partial listing: kept as rows, not as the
     directory, and the next readdir retries enumeration.
     """
-    first, shared = _patched(
-        [_file("f1", "readme.txt")], RuntimeError("no scope")
+    _patched(
+        monkeypatch, [_file("f1", "readme.txt")], RuntimeError("no scope")
     )
-    with first, shared:
-        listed = await readdir(accessor, ROOT)
+    listed = await readdir(accessor, ROOT)
     assert isinstance(listed, DirListing)
     assert listed.partial
     assert _rows(listed)["readme.txt"].extra["file_id"] == "f1"
-    first, shared = _patched(
-        [_file("f1", "readme.txt")], [{"id": "drive1", "name": "Team"}]
+    _patched(
+        monkeypatch,
+        [_file("f1", "readme.txt")],
+        [{"id": "drive1", "name": "Team"}],
     )
-    with first, shared:
-        listed = await readdir(accessor, ROOT)
+    listed = await readdir(accessor, ROOT)
     assert not isinstance(listed, DirListing)
     assert "Team" in _rows(listed)
 
 
 @pytest.mark.asyncio
-async def test_readdir_workspace_files_get_extensions(accessor):
-    first, shared = _patched(
+async def test_readdir_workspace_files_get_extensions(accessor, monkeypatch):
+    _patched(
+        monkeypatch,
         [
             _file("d1", "My Document", "application/vnd.google-apps.document"),
             _file("s1", "My Sheet", "application/vnd.google-apps.spreadsheet"),
             _file(
                 "p1", "My Slides", "application/vnd.google-apps.presentation"
             ),
-        ]
+        ],
     )
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+    rows = _rows(await readdir(accessor, ROOT))
     assert set(rows) == {
         "My Document.gdoc.json",
         "My Sheet.gsheet.json",
@@ -268,8 +277,11 @@ async def test_readdir_workspace_files_get_extensions(accessor):
 
 
 @pytest.mark.asyncio
-async def test_readdir_size_binary_kept_google_apps_in_extra(accessor):
-    first, shared = _patched(
+async def test_readdir_size_binary_kept_google_apps_in_extra(
+    accessor, monkeypatch
+):
+    _patched(
+        monkeypatch,
         [
             _file("f1", "report.pdf", "application/pdf", size="2048"),
             _file(
@@ -278,10 +290,9 @@ async def test_readdir_size_binary_kept_google_apps_in_extra(accessor):
                 "application/vnd.google-apps.document",
                 quotaBytesUsed="9999",
             ),
-        ]
+        ],
     )
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+    rows = _rows(await readdir(accessor, ROOT))
     # Binary files download raw: Drive's size is the rendered byte length.
     assert rows["report.pdf"].size == 2048
     # Google-apps files render to JSON: Drive's source size must not
@@ -307,16 +318,13 @@ async def test_readdir_scoped_mount_lists_folder_children(
     "reported_size, expected", [("0", 0), ("42", 42), (None, None)]
 )
 async def test_binary_size_preserves_zero_and_never_uses_quota(
-    accessor, reported_size, expected
+    accessor, reported_size, expected, monkeypatch
 ):
     item = _file("binary", "file.txt", quotaBytesUsed="99")
     if reported_size is not None:
         item["size"] = reported_size
-    first, shared = _patched([item])
-    with first, shared:
-        rows = _rows(
-            await readdir(accessor, PathSpec.from_str_path("/drive", ""))
-        )
+    _patched(monkeypatch, [item])
+    rows = _rows(await readdir(accessor, PathSpec.from_str_path("/drive", "")))
     assert list(rows) == ["file.txt"]
     result = await stat(
         accessor,
@@ -327,10 +335,13 @@ async def test_binary_size_preserves_zero_and_never_uses_quota(
 
 
 @pytest.mark.asyncio
-async def test_readdir_carries_both_content_tokens_onto_the_row(accessor):
+async def test_readdir_carries_both_content_tokens_onto_the_row(
+    accessor, monkeypatch
+):
     """A read checks its bytes against the md5 the row carries, so the
     listing has to keep it."""
-    first, shared = _patched(
+    _patched(
+        monkeypatch,
         [
             _file(
                 "f1",
@@ -340,35 +351,39 @@ async def test_readdir_carries_both_content_tokens_onto_the_row(accessor):
                 md5Checksum="9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e",
                 headRevisionId="f1-r3",
             )
-        ]
+        ],
     )
-    with first, shared:
-        row = _rows(await readdir(accessor, ROOT))["report.pdf"]
+    row = _rows(await readdir(accessor, ROOT))["report.pdf"]
     assert row.extra["md5_checksum"] == "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
     assert row.extra["head_revision_id"] == "f1-r3"
     assert row.fingerprint == "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
 
 
 @pytest.mark.asyncio
-async def test_readdir_omits_the_tokens_a_native_file_does_not_have(accessor):
+async def test_readdir_omits_the_tokens_a_native_file_does_not_have(
+    accessor, monkeypatch
+):
     """A gdoc carries neither field, and the key must be absent, not None.
 
     Key presence is the observable because the listing omits what Drive did
     not send. If the fixture handed every item an md5 instead, the chain's
     second and third steps would never run in any test here.
     """
-    first, shared = _patched(
-        [_file("d1", "My Document", "application/vnd.google-apps.document")]
+    _patched(
+        monkeypatch,
+        [_file("d1", "My Document", "application/vnd.google-apps.document")],
     )
-    with first, shared:
-        row = _rows(await readdir(accessor, ROOT))["My Document.gdoc.json"]
+    row = _rows(await readdir(accessor, ROOT))["My Document.gdoc.json"]
     assert "md5_checksum" not in row.extra
     assert "head_revision_id" not in row.extra
 
 
 @pytest.mark.asyncio
-async def test_readdir_keeps_the_drive_beside_the_tokens(accessor):
-    first, shared = _patched(
+async def test_readdir_keeps_the_drive_beside_the_tokens(
+    accessor, monkeypatch
+):
+    _patched(
+        monkeypatch,
         [
             _file(
                 "f1",
@@ -386,10 +401,9 @@ async def test_readdir_keeps_the_drive_beside_the_tokens(accessor):
                 driveId="drive1",
                 quotaBytesUsed="9999",
             ),
-        ]
+        ],
     )
-    with first, shared:
-        rows = _rows(await readdir(accessor, ROOT))
+    rows = _rows(await readdir(accessor, ROOT))
     binary = rows["report.pdf"]
     assert binary.extra["drive_id"] == "drive1"
     assert binary.extra["md5_checksum"] == "9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e"
@@ -399,15 +413,16 @@ async def test_readdir_keeps_the_drive_beside_the_tokens(accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_shared_drive_root_carries_no_content_token(accessor):
+async def test_a_shared_drive_root_carries_no_content_token(
+    accessor, monkeypatch
+):
     """A shared drive root is a directory and has no content to fingerprint.
 
     The listing builds those rows at a second construction site, which
     the file-row guard cannot reach, so adding the keys there would go
     unnoticed by every other test in this file.
     """
-    first, shared = _patched([], [{"id": "drive1", "name": "Team Drive"}])
-    with first, shared:
-        row = _rows(await readdir(accessor, ROOT))["Team Drive"]
+    _patched(monkeypatch, [], [{"id": "drive1", "name": "Team Drive"}])
+    row = _rows(await readdir(accessor, ROOT))["Team Drive"]
     assert "md5_checksum" not in row.extra
     assert row.fingerprint is None

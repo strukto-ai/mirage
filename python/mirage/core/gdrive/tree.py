@@ -20,7 +20,7 @@ import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import readdir, stat_from_item
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, list_children
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -104,12 +104,11 @@ async def list_level(
     for folder_id, drive_id in folders:
         corpora.setdefault(drive_id, []).append(folder_id)
         children[folder_id] = []
+    drive = accessor.drive
     for drive_id, ids in corpora.items():
         for start in range(0, len(ids), PARENTS_PER_QUERY):
             asked = ids[start : start + PARENTS_PER_QUERY]
-            for item in await list_children(
-                accessor.token_manager, asked, drive_id
-            ):
+            for item in await drive.list_children(asked, drive_id):
                 filed = (
                     asked
                     if len(asked) == 1

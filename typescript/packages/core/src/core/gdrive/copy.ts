@@ -16,8 +16,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
-import type { TokenManager } from '../google/client.ts'
-import { copyFile, createFolder, deleteFile, listFiles } from '../google/drive.ts'
+import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
 import {
@@ -29,15 +28,15 @@ import {
   parentFolder,
 } from './resolve.ts'
 
-async function copyChildren(tm: TokenManager, src: DriveNode, dstFolderId: string): Promise<void> {
-  const children = await listFiles(tm, { folderId: src.id, driveId: src.driveId })
+async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string): Promise<void> {
+  const children = await drive.listFiles({ folderId: src.id, driveId: src.driveId })
   for (const item of children) {
     const child = nodeFromItem(item, src.driveId)
     if (isFolder(child)) {
-      const created = await createFolder(tm, child.name, dstFolderId)
-      await copyChildren(tm, child, created.id)
+      const created = await drive.createFolder(child.name, dstFolderId)
+      await copyChildren(drive, child, created.id)
     } else {
-      await copyFile(tm, child.id, child.name, dstFolderId)
+      await drive.copyFile(child.id, child.name, dstFolderId)
     }
   }
 }
@@ -58,7 +57,7 @@ async function copyImpl(
 ): Promise<FileStat | null> {
   const entry = handed.entry ?? null
   if (entry === null) throw enoent(src)
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const srcNode = nodeOf(entry)
   const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
   const dstKey = dst.vfsPath
@@ -69,20 +68,19 @@ async function copyImpl(
     let dstId: string
     if (dstEntry === null) {
       const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
-      const created = await createFolder(tm, basename, dstParentId)
+      const created = await drive.createFolder(basename, dstParentId)
       dstId = created.id
       made = statFromItem(created)
     } else {
       dstId = dstEntry.extra.file_id as string
     }
-    await copyChildren(tm, srcNode, dstId)
+    await copyChildren(drive, srcNode, dstId)
     return made
   }
   if (dstEntry !== null && dstEntry.type === FileType.DIRECTORY) throw eisdir(dst)
-  if (dstEntry !== null) await deleteFile(tm, dstEntry.extra.file_id as string)
+  if (dstEntry !== null) await drive.deleteFile(dstEntry.extra.file_id as string)
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
-  const item = await copyFile(
-    tm,
+  const item = await drive.copyFile(
     srcNode.id,
     driveTargetName(basename, srcNode.mimeType),
     dstParentId,

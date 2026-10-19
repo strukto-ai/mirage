@@ -16,7 +16,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
 import type { DriveFile } from '../google/drive.ts'
-import { FOLDER_MIME, MIME_TO_EXT, listChildren } from '../google/drive.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { readdir, statFromItem } from './readdir.ts'
 
@@ -75,6 +75,7 @@ export async function listLevel(
   accessor: GDriveAccessor,
   folders: readonly (readonly [string, string | null])[],
 ): Promise<Map<string, DriveFile[]>> {
+  const drive = accessor.drive
   const corpora = new Map<string | null, string[]>()
   const children = new Map<string, DriveFile[]>()
   for (const [folderId, driveId] of folders) {
@@ -86,7 +87,7 @@ export async function listLevel(
   for (const [driveId, ids] of corpora) {
     for (let start = 0; start < ids.length; start += PARENTS_PER_QUERY) {
       const asked = ids.slice(start, start + PARENTS_PER_QUERY)
-      for (const item of await listChildren(accessor.tokenManager, asked, driveId)) {
+      for (const item of await drive.listChildren(asked, driveId)) {
         const filed =
           asked.length === 1 ? asked : (item.parents ?? []).filter((p) => asked.includes(p))
         for (const parent of filed) children.get(parent)?.push(item)

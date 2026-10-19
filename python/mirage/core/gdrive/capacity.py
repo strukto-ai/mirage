@@ -14,7 +14,6 @@
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import root_context
-from mirage.core.google.client import drive_base, google_get
 from mirage.types import CapacityResult, CapacityState
 
 
@@ -31,11 +30,7 @@ async def capacity(accessor: GDriveAccessor) -> CapacityResult:
     _, shared = await root_context(accessor)
     if shared:
         return CapacityResult(state=CapacityState.UNKNOWN)
-    tm = accessor.token_manager
-    about = await google_get(
-        tm, f"{drive_base(tm)}/about", params={"fields": "storageQuota"}
-    )
-    quota = about.get("storageQuota") or {}
+    quota = await accessor.drive.storage_quota()
     if quota.get("limit") is None:
         return CapacityResult(state=CapacityState.ELASTIC)
     total = int(quota["limit"])

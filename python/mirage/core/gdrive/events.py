@@ -20,18 +20,10 @@ from typing import Any
 import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import unique_shared_drive_name
 from mirage.core.gdrive.resolve import root_context
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import (
-    FOLDER_MIME,
-    MIME_TO_EXT,
-    get_file,
-    list_changes,
-    list_files,
-    list_shared_drives,
-    start_page_token,
-)
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.core.google.events import feed_checkpoint, feed_state
 from mirage.events.base import DeltaHook
 from mirage.events.delta import (
@@ -79,20 +71,20 @@ class _Places:
 
     def __init__(
         self,
-        tm: TokenManager,
+        drive: DriveApi,
         top: str,
         scoped: bool,
         folders: dict[str, list[str]],
     ) -> None:
         """Args:
-        tm (TokenManager): The account's token manager.
+        drive (DriveApi): The account's Drive client.
         top (str): The mount root's folder id.
         scoped (bool): Whether the mount is scoped to a folder.
         folders (dict[str, list[str]]): Each known folder's name and
             parent, by id; "" for a parent outside the mount.
         """
         self.folders = folders
-        self._tm = tm
+        self._drive = drive
         self._top = top
         self._scoped = scoped
         self._drives: dict[str, str] | None = None
@@ -138,7 +130,7 @@ class _Places:
             folder_id (str): The folder's id.
         """
         try:
-            item = await get_file(self._tm, folder_id)
+            item = await self._drive.get_file(folder_id)
         except aiohttp.ClientResponseError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:
                 raise
@@ -160,13 +152,13 @@ class _Places:
         """
         if self._drives is None:
             taken = {
-                _filename_of(f) for f in await list_files(self._tm, "root")
+                _filename_of(f) for f in await self._drive.list_files("root")
             }
             self._drives = {}
-            for drive in await list_shared_drives(self._tm):
-                name = unique_shared_drive_name(drive["name"], taken)
+            for shared in await self._drive.list_shared_drives():
+                name = unique_shared_drive_name(shared["name"], taken)
                 taken.add(name)
-                self._drives[drive["id"]] = name
+                self._drives[shared["id"]] = name
         return self._drives.get(drive_id, "")
 
 
@@ -208,22 +200,22 @@ class GDriveDeltaHook:
             checkpoint (str | None): The previous read's state, or None
                 for a baseline.
         """
-        tm = self._accessor.token_manager
+        drive = self._accessor.drive
         observed = datetime.now(timezone.utc)
         folder_id, _ = await root_context(self._accessor)
         scoped = folder_id != "root"
         state = feed_state(checkpoint)
         if state is None:
-            token = await start_page_token(tm)
-            top = folder_id if scoped else (await get_file(tm, "root"))["id"]
+            token = await drive.start_page_token()
+            top = folder_id if scoped else (await drive.get_file("root"))["id"]
             return Delta(
                 (),
                 _encode(token, top, {}, {}),
             )
-        found, token = await list_changes(tm, state["token"])
+        found, token = await drive.list_changes(state["token"])
         top = str(state["root"])
         places = _Places(
-            tm,
+            drive,
             top,
             scoped,
             {k: list(v) for k, v in (state.get("folders") or {}).items()},

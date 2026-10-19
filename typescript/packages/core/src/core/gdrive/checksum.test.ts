@@ -12,25 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from '../google/client.ts'
-
-vi.mock('../google/client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('../google/client.ts')
-  return { ...actual, googleGet: vi.fn() }
-})
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import * as client from '../google/client.ts'
-import type { TokenManager } from '../google/client.ts'
+import {
+  type StubDrive,
+  makeGDriveAccessor,
+  stubDrive,
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { checksum } from './checksum.ts'
 
 const SCOPE = new PathSpec({ vfsPath: 'r.pdf', virtual: '/r.pdf', directory: '/' })
-const accessor = new GDriveAccessor({
-  tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-})
+let drive: StubDrive
+let accessor: GDriveAccessor
 
 function row(resourceType: string): FileStat {
   return new FileStat({
@@ -41,7 +36,8 @@ function row(resourceType: string): FileStat {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  drive = stubDrive()
+  accessor = makeGDriveAccessor(drive)
 })
 
 describe('Drive checksum', () => {
@@ -51,14 +47,21 @@ describe('Drive checksum', () => {
     ['sha1', 'sha1Checksum'],
     ['sha256', 'sha256Checksum'],
   ])('answers the %s Drive keeps', async (algorithm, field) => {
-    const reply = { md5Checksum: 'm5', headRevisionId: 'h1', [field]: 'ABC123' }
-    vi.mocked(client.googleGet).mockResolvedValue(reply)
+    const reply = {
+      id: 'f1',
+      name: 'r.pdf',
+      md5Checksum: 'm5',
+      headRevisionId: 'h1',
+      [field]: 'ABC123',
+    }
+    drive.getFile.mockResolvedValue(reply)
     const [found, records] = await runWithRecording(() =>
       checksum(accessor, SCOPE, algorithm, row('gdrive/file')),
     )
     expect(found).toBe('abc123')
-    const params = vi.mocked(client.googleGet).mock.calls[0]?.[2] as { fields: string }
-    const fields = params.fields.split(',')
+    const [fileId, asked] = drive.getFile.mock.calls[0] ?? []
+    expect(fileId).toBe('f1')
+    const fields = (asked ?? '').split(',')
     expect(fields[0]).toBe(field)
     expect(fields).toEqual(expect.arrayContaining(['md5Checksum', 'headRevisionId']))
     expect(records.map((r) => [r.op, r.path, r.fingerprint, r.revision])).toEqual([
@@ -70,7 +73,7 @@ describe('Drive checksum', () => {
   it('reads a native file or another algorithm', async () => {
     expect(await checksum(accessor, SCOPE, 'md5', row('gdrive/gdoc'))).toBeNull()
     expect(await checksum(accessor, SCOPE, 'sha512', row('gdrive/file'))).toBeNull()
-    expect(client.googleGet).not.toHaveBeenCalled()
+    expect(drive.getFile).not.toHaveBeenCalled()
   })
 
   // Mirrors python's test_a_pinned_revision_reads.
@@ -79,6 +82,6 @@ describe('Drive checksum', () => {
       checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
     )
     expect(found).toBeNull()
-    expect(client.googleGet).not.toHaveBeenCalled()
+    expect(drive.getFile).not.toHaveBeenCalled()
   })
 })

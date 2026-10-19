@@ -21,11 +21,13 @@ from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import (
     delete_file,
     download_file,
+    download_revision,
     get_file,
     list_all_files,
     list_files,
     list_shared_drives,
     search_files,
+    storage_quota,
 )
 
 
@@ -375,3 +377,57 @@ async def test_search_files_asks_full_text_under_the_parents(token_manager):
     assert seen[0]["corpora"] == "allDrives"
     assert "orderBy" not in seen[0]
     assert seen[1]["pageToken"] == "p2"
+
+
+@pytest.mark.asyncio
+async def test_download_revision_hits_revision_url(token_manager):
+    with patch(
+        "mirage.core.google.drive.google_get_bytes",
+        new_callable=AsyncMock,
+        return_value=b"old",
+    ) as get_bytes:
+        data = await download_revision(token_manager, "f1", "r1")
+    assert data == b"old"
+    assert "/files/f1/revisions/r1?alt=media" in get_bytes.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_get_file_sends_the_fields_it_is_asked_for(token_manager):
+    with patch(
+        "mirage.core.google.drive.google_get",
+        new_callable=AsyncMock,
+        return_value={"md5Checksum": "m5"},
+    ) as get:
+        item = await get_file(token_manager, "f1", "sha1Checksum,md5Checksum")
+    assert item == {"md5Checksum": "m5"}
+    assert get.await_args.args[1].endswith("/files/f1")
+    assert get.await_args.kwargs["params"] == {
+        "fields": "sha1Checksum,md5Checksum",
+        "supportsAllDrives": "true",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("about", "quota"),
+    [
+        (
+            {"storageQuota": {"limit": "10", "usage": "4"}},
+            {"limit": "10", "usage": "4"},
+        ),
+        ({"storageQuota": None}, {}),
+        ({}, {}),
+    ],
+    ids=["quota", "null", "absent"],
+)
+async def test_storage_quota_reads_the_about_resource(
+    token_manager, about, quota
+):
+    with patch(
+        "mirage.core.google.drive.google_get",
+        new_callable=AsyncMock,
+        return_value=about,
+    ) as get:
+        assert await storage_quota(token_manager) == quota
+    assert get.await_args.args[1].endswith("/about")
+    assert get.await_args.kwargs["params"] == {"fields": "storageQuota"}

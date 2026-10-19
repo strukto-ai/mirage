@@ -16,7 +16,7 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eacces, enoent, enotdir } from '../../errors/fs.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { FOLDER_MIME, MIME_TO_EXT, getFile } from '../google/drive.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
 import { stripSlash } from '../../utils/slash.ts'
 
@@ -39,7 +39,7 @@ export async function rootContext(accessor: GDriveAccessor): Promise<[string, st
   const folderId = accessor.tokenManager.config.folderId
   if (folderId === undefined || folderId === '') return ['root', null]
   if (!ROOT_DRIVE_IDS.has(accessor)) {
-    const item = await getFile(accessor.tokenManager, folderId)
+    const item = await accessor.drive.getFile(folderId)
     ROOT_DRIVE_IDS.set(accessor, item.driveId ?? null)
   }
   return [folderId, ROOT_DRIVE_IDS.get(accessor) ?? null]

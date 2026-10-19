@@ -23,7 +23,8 @@ import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type * as ClientModule from '../core/gridfs/client.ts'
 import type * as DriveModule from '@struktoai/mirage-core/core/google/drive'
 import * as googleDrive from '@struktoai/mirage-core/core/google/drive'
-import type * as DriveVersionsModule from '@struktoai/mirage-core/core/gdrive/versions'
+import { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
+import type { DriveApi } from '@struktoai/mirage-core/core/gdrive/api'
 import type * as DocsReadModule from '@struktoai/mirage-core/core/gdocs/read'
 import type * as GoogleClientModule from '@struktoai/mirage-core/core/google/client'
 import type * as JsonRenderModule from '@struktoai/mirage-core/core/render/json'
@@ -277,9 +278,9 @@ const GDRIVE_NATIVE = new Set([
 
 // Drive serves md5Checksum and headRevisionId only for a file with binary
 // content, and computes them from what is stored now.
-async function gdriveResource(item: GDriveItem): Promise<Record<string, unknown>> {
+async function gdriveResource(item: GDriveItem): Promise<DriveModule.DriveFile> {
   const { createHash: hash } = await import('node:crypto')
-  const out: Record<string, unknown> = {
+  const out: DriveModule.DriveFile = {
     id: item.id,
     name: item.name,
     mimeType: item.mimeType,
@@ -294,25 +295,79 @@ async function gdriveResource(item: GDriveItem): Promise<Record<string, unknown>
   return out
 }
 
+function gdriveItem(id: string): GDriveItem {
+  const found = H.gdrive.get(id)
+  if (found === undefined) throw new Error(`no drive item ${id}`)
+  return found
+}
+
+function gdriveUnserved(call: string): () => never {
+  return () => {
+    throw new Error(`the test Drive does not serve ${call}`)
+  }
+}
+
+const GDRIVE_API: DriveApi = {
+  listFiles: (opts) =>
+    Promise.all(
+      [...H.gdrive.values()].filter((i) => i.parents.includes(opts.folderId)).map(gdriveResource),
+    ),
+  listChildren: gdriveUnserved('listChildren'),
+  listSharedDrives: () => Promise.resolve([]),
+  searchFiles: gdriveUnserved('searchFiles'),
+  getFile: (id) => gdriveResource(gdriveItem(id)),
+  storageQuota: gdriveUnserved('storageQuota'),
+  deleteFile: gdriveUnserved('deleteFile'),
+  downloadFile: (id) => {
+    H.gdriveDownloads += 1
+    return Promise.resolve(gdriveItem(id).content)
+  },
+  downloadFileStream: async function* (id) {
+    H.gdriveDownloads += 1
+    yield* Readable.from(chunked(gdriveItem(id).content)) as AsyncIterable<Uint8Array>
+  },
+  createFolder: gdriveUnserved('createFolder'),
+  // A write's reply is the uploaded file resource, rendered through
+  // gdriveResource like a listing entry, so the token a write records and
+  // the token a later probe lists cannot disagree.
+  uploadFile: async (name, parentId, source) => {
+    const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
+    H.gdriveUploads += 1
+    const created: GDriveItem = {
+      id: `u${String(H.gdriveUploads)}`,
+      name,
+      mimeType: 'application/octet-stream',
+      parents: [parentId],
+      modifiedTime: `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`,
+      content: data,
+    }
+    H.gdrive.set(created.id, created)
+    return gdriveResource(created)
+  },
+  updateFileContent: async (id, source) => {
+    const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
+    H.gdriveUploads += 1
+    const found = gdriveItem(id)
+    found.content = data
+    found.modifiedTime = `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`
+    return gdriveResource(found)
+  },
+  patchFile: gdriveUnserved('patchFile'),
+  copyFile: gdriveUnserved('copyFile'),
+  startPageToken: gdriveUnserved('startPageToken'),
+  listChanges: gdriveUnserved('listChanges'),
+  captureFileMetadata: async (id) => {
+    const r = await gdriveResource(gdriveItem(id))
+    return [r.md5Checksum ?? null, r.headRevisionId ?? null]
+  },
+  downloadRevision: gdriveUnserved('downloadRevision'),
+  downloadRevisionStream: gdriveUnserved('downloadRevisionStream'),
+}
+
 vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
   const actual = await importOriginal<typeof DriveModule>()
-  const item = (id: string): GDriveItem => {
-    const found = H.gdrive.get(id)
-    if (found === undefined) throw new Error(`no drive item ${id}`)
-    return found
-  }
   return {
     ...actual,
-    listFiles: async (_tm: unknown, opts: { folderId?: string; name?: string | null } = {}) => {
-      const folder = opts.folderId ?? 'root'
-      const children = [...H.gdrive.values()].filter(
-        (i) =>
-          i.parents.includes(folder) &&
-          (opts.name === undefined || opts.name === null || i.name === opts.name),
-      )
-      return Promise.all(children.map(gdriveResource))
-    },
-    listSharedDrives: () => Promise.resolve([]),
     // Each of gdocs, gsheets and gslides lists only its own kind.
     listAllFiles: async (_tm: unknown, opts: { mimeType?: string | null } = {}) => ({
       files: await Promise.all(
@@ -328,58 +383,7 @@ vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
       ),
       complete: true,
     }),
-    getFile: async (_tm: unknown, id: string) => gdriveResource(item(id)),
-    downloadFile: (_tm: unknown, id: string) => {
-      H.gdriveDownloads += 1
-      return Promise.resolve(item(id).content)
-    },
-    downloadFileStream: async function* (_tm: unknown, id: string) {
-      H.gdriveDownloads += 1
-      yield* Readable.from(chunked(item(id).content)) as AsyncIterable<Uint8Array>
-    },
-    // A write's reply is the uploaded file resource, rendered through
-    // gdriveResource like a listing entry, so the token a write records and
-    // the token a later probe lists cannot disagree.
-    uploadFile: async (
-      _tm: unknown,
-      name: string,
-      parentId: string,
-      source: Uint8Array | ByteSpool,
-    ) => {
-      const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
-      H.gdriveUploads += 1
-      const created: GDriveItem = {
-        id: `u${String(H.gdriveUploads)}`,
-        name,
-        mimeType: 'application/octet-stream',
-        parents: [parentId],
-        modifiedTime: `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`,
-        content: data,
-      }
-      H.gdrive.set(created.id, created)
-      return gdriveResource(created)
-    },
-    updateFileContent: async (_tm: unknown, id: string, source: Uint8Array | ByteSpool) => {
-      const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
-      H.gdriveUploads += 1
-      const found = item(id)
-      found.content = data
-      found.modifiedTime = `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`
-      return gdriveResource(found)
-    },
-  }
-})
-
-vi.mock('@struktoai/mirage-core/core/gdrive/versions', async (importOriginal) => {
-  const actual = await importOriginal<typeof DriveVersionsModule>()
-  return {
-    ...actual,
-    captureFileMetadata: async (_tm: unknown, id: string) => {
-      const found = H.gdrive.get(id)
-      if (found === undefined) throw new Error(`no drive item ${id}`)
-      const r = await gdriveResource(found)
-      return [r.md5Checksum ?? null, r.headRevisionId ?? null]
-    },
+    getFile: async (_tm: unknown, id: string) => gdriveResource(gdriveItem(id)),
   }
 })
 
@@ -1336,6 +1340,7 @@ describe('the read-token contract', () => {
   })
 
   beforeEach(() => {
+    vi.spyOn(GDriveAccessor.prototype, 'drive', 'get').mockReturnValue(GDRIVE_API)
     for (const b of s3.store.allBuckets()) s3.store.objects(b).clear()
     H.unrecorded = false
     H.slots.length = 0

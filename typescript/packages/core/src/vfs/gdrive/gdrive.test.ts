@@ -12,40 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../../core/google/drive.ts'
-
-vi.mock('../../core/google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../../core/google/drive.ts')
-  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
-  return driveModuleMock(actual)
-})
-
-import type * as VersionsModule from '../../core/gdrive/versions.ts'
-
-// A byte read pins Drive's head revision and downloads that revision; the
-// shared fake serves neither, so they answer from it here, the way the
-// Python fake's `capture_file_metadata` does.
-const held = vi.hoisted(() => ({ fake: null as FakeDrive | null }))
-
-vi.mock('../../core/gdrive/versions.ts', async () => {
-  const actual = await vi.importActual<typeof VersionsModule>('../../core/gdrive/versions.ts')
-  return {
-    ...actual,
-    captureFileMetadata: async (tm: unknown, fileId: string) => {
-      if (held.fake === null) throw new Error('no fake drive')
-      const file = await held.fake.getFile(tm as never, fileId)
-      return [file.md5Checksum ?? null, file.headRevisionId ?? null]
-    },
-    downloadRevision: (tm: unknown, fileId: string) => {
-      if (held.fake === null) throw new Error('no fake drive')
-      return held.fake.downloadFile(tm as never, fileId)
-    },
-  }
-})
-
-import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import { resetFakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FakeDrive, installDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -63,8 +31,12 @@ const DEC = new TextDecoder()
 let fake: FakeDrive
 
 beforeEach(() => {
-  fake = resetFakeDrive()
-  held.fake = fake
+  fake = new FakeDrive()
+  installDrive(fake)
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 
 describe('GoogleDriveVFS re-list cleanup', () => {
@@ -81,8 +53,6 @@ describe('GoogleDriveVFS re-list cleanup', () => {
     )
     try {
       expect(DEC.decode((await ws.shell('ls /gd/dir')).stdout)).toBe('a.txt\nb.txt\n')
-      // Seeded directly: the byte read goes through Drive's revision API,
-      // which this fake does not serve, and only its leftover matters here.
       await ws.cache.set('/gd/dir/b.txt', ENC.encode('bravo\n'))
       await ws.namespace.setAttrs('/gd/dir/b.txt', { mode: 0o600 })
       expect(await ws.cache.exists('/gd/dir/b.txt')).toBe(true)
@@ -135,9 +105,6 @@ function freshWs(parser: Awaited<ReturnType<typeof getTestParser>>): Workspace {
   )
 }
 
-// Seeded under the token the stat answers, as the cold read would stamp it:
-// the byte read goes through Drive's revision API, which this fake does not
-// serve, so the warm half is what these tests can drive.
 async function warmFile(ws: Workspace, depth: number): Promise<string> {
   let parent = 'root'
   const parts: string[] = []
@@ -185,7 +152,8 @@ describe('GoogleDriveVFS warm read under fresh', () => {
       { policy: ReadPolicy.FRESH, ttl: 600 },
       { policy: ReadPolicy.BOUNDED, ttl: 600 },
     ]) {
-      fake = resetFakeDrive()
+      fake = new FakeDrive()
+      installDrive(fake)
       const ws = new Workspace(
         { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
         { mode: MountMode.READ, read, shellParser: parser },

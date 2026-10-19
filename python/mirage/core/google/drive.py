@@ -414,6 +414,52 @@ def _media_url(token_manager: TokenManager, file_id: str) -> str:
     )
 
 
+async def download_revision(
+    token_manager: TokenManager,
+    file_id: str,
+    revision_id: str,
+    window: ByteWindow | None = None,
+) -> bytes:
+    """Download a pinned revision's content (binary files only).
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        file_id (str): file ID.
+        revision_id (str): revision ID to read.
+        window (ByteWindow | None): the byte window to fetch, or None
+            for all of it.
+    """
+    return await google_get_bytes(
+        token_manager,
+        _revision_url(token_manager, file_id, revision_id),
+        window,
+    )
+
+
+def download_revision_stream(
+    token_manager: TokenManager, file_id: str, revision_id: str
+) -> AsyncGenerator[bytes, None]:
+    """Stream a pinned revision's content as it downloads.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        file_id (str): file ID.
+        revision_id (str): revision ID to read.
+    """
+    return google_get_stream(
+        token_manager, _revision_url(token_manager, file_id, revision_id)
+    )
+
+
+def _revision_url(
+    token_manager: TokenManager, file_id: str, revision_id: str
+) -> str:
+    return (
+        f"{drive_base(token_manager)}/files/{file_id}"
+        f"/revisions/{revision_id}?alt=media"
+    )
+
+
 FOLDER_MIME = "application/vnd.google-apps.folder"
 ITEM_FIELDS = (
     "id,name,mimeType,driveId,size,quotaBytesUsed,"
@@ -496,13 +542,14 @@ async def list_changes(
 
 
 async def get_file(
-    token_manager: TokenManager, file_id: str
+    token_manager: TokenManager, file_id: str, fields: str = ITEM_FIELDS
 ) -> dict[str, Any]:
     """Fetch a single file's metadata.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         file_id (str): file ID.
+        fields (str): the fields Drive returns, a listing's by default.
 
     Returns:
         dict: file metadata.
@@ -512,10 +559,24 @@ async def get_file(
         token_manager,
         url,
         params={
-            "fields": ITEM_FIELDS,
+            "fields": fields,
             "supportsAllDrives": "true",
         },
     )
+
+
+async def storage_quota(token_manager: TokenManager) -> dict[str, Any]:
+    """The account's ``storageQuota``, empty when Drive gives none.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+    """
+    about = await google_get(
+        token_manager,
+        f"{drive_base(token_manager)}/about",
+        params={"fields": "storageQuota"},
+    )
+    return about.get("storageQuota") or {}
 
 
 async def create_folder(

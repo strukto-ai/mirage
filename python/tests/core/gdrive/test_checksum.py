@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -26,6 +26,7 @@ from mirage.observe.context import (
     reset_revisions,
 )
 from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 SCOPE = PathSpec(vfs_path="r.pdf", virtual="/r.pdf", directory="/")
 
@@ -58,22 +59,21 @@ def _row(resource_type: str) -> FileStat:
         ("sha256", "sha256Checksum"),
     ],
 )
-async def test_drive_answers_the_digest_it_keeps(accessor, algorithm, field):
+async def test_drive_answers_the_digest_it_keeps(
+    accessor, monkeypatch, algorithm, field
+):
     reply = {"md5Checksum": "m5", "headRevisionId": "h1", field: "ABC123"}
+    get = AsyncMock(return_value=reply)
+    install_drive(monkeypatch, StubDrive(get_file=get))
     scope = RecordingScope()
     try:
-        with patch(
-            "mirage.core.gdrive.checksum.google_get",
-            new_callable=AsyncMock,
-            return_value=reply,
-        ) as get:
-            got = await checksum(
-                accessor, SCOPE, algorithm, _row("gdrive/file")
-            )
+        got = await checksum(accessor, SCOPE, algorithm, _row("gdrive/file"))
     finally:
         scope.close()
     assert got == "abc123"
-    fields = get.await_args.kwargs["params"]["fields"].split(",")
+    file_id, asked = get.await_args.args
+    assert file_id == "f1"
+    fields = asked.split(",")
     assert fields[0] == field
     assert {"md5Checksum", "headRevisionId"} <= set(fields)
     assert [
@@ -82,26 +82,24 @@ async def test_drive_answers_the_digest_it_keeps(accessor, algorithm, field):
 
 
 @pytest.mark.asyncio
-async def test_a_native_file_or_another_algorithm_reads(accessor):
-    with patch(
-        "mirage.core.gdrive.checksum.google_get", new_callable=AsyncMock
-    ) as get:
-        doc = _row("gdrive/gdoc")
-        assert await checksum(accessor, SCOPE, "md5", doc) is None
-        binary = _row("gdrive/file")
-        assert await checksum(accessor, SCOPE, "sha512", binary) is None
+async def test_a_native_file_or_another_algorithm_reads(accessor, monkeypatch):
+    get = AsyncMock()
+    install_drive(monkeypatch, StubDrive(get_file=get))
+    doc = _row("gdrive/gdoc")
+    assert await checksum(accessor, SCOPE, "md5", doc) is None
+    binary = _row("gdrive/file")
+    assert await checksum(accessor, SCOPE, "sha512", binary) is None
     get.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_revision_reads(accessor):
+async def test_a_pinned_revision_reads(accessor, monkeypatch):
+    get = AsyncMock()
+    install_drive(monkeypatch, StubDrive(get_file=get))
     token = push_revisions({SCOPE.virtual: "r7"})
     try:
-        with patch(
-            "mirage.core.gdrive.checksum.google_get", new_callable=AsyncMock
-        ) as get:
-            row = _row("gdrive/file")
-            assert await checksum(accessor, SCOPE, "md5", row) is None
-        get.assert_not_awaited()
+        row = _row("gdrive/file")
+        assert await checksum(accessor, SCOPE, "md5", row) is None
     finally:
         reset_revisions(token)
+    get.assert_not_awaited()

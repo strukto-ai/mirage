@@ -49,7 +49,7 @@ def cold():
     fake.add_file("tree/sub/deep/c.txt", b"ccc\n")
     gdrive = _vfs()
     stack = ExitStack()
-    stack.enter_context(patch_gdrive((gdrive.config, fake)))
+    stack.enter_context(patch_gdrive((gdrive.accessor.token_manager, fake)))
     try:
         yield Workspace(
             {

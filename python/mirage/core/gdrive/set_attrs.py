@@ -17,7 +17,6 @@ from datetime import datetime
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
-from mirage.core.google.drive import patch_file
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, PathSpec
 from mirage.utils.dates import to_iso_z
@@ -64,8 +63,7 @@ async def set_attrs(
     entry = await live_row(accessor, path, entry)
     if entry is None:
         raise enoent(path)
-    await patch_file(
-        accessor.token_manager,
+    await accessor.drive.patch_file(
         entry.extra["file_id"],
         {"modifiedTime": to_iso_z(datetime.fromisoformat(mtime))},
     )

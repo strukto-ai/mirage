@@ -12,29 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
-  return driveModuleMock(actual)
-})
-
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import {
-  DOC_MIME,
-  makeGDriveAccessor,
-  resetFakeDrive,
-} from '../../../tests/core/gdrive/_test_util.ts'
+import { DOC_MIME, FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
 
 const STAMP = '2026-04-01T00:00:00.000Z'
-const accessor = makeGDriveAccessor()
+let fake: FakeDrive
+let accessor: GDriveAccessor
+
+beforeEach(() => {
+  fake = new FakeDrive()
+  accessor = makeGDriveAccessor(fake)
+})
 
 async function workspace(): Promise<Workspace> {
   const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
@@ -80,7 +75,6 @@ describe('gdrive stat', () => {
 // test_a_failed_parent_listing_propagates.
 describe('gdrive stat through a mount', () => {
   it('lists its parent once when cold', async () => {
-    const fake = resetFakeDrive()
     const id = fake.add('fresh.pdf', 'root', undefined, new TextEncoder().encode('xy'))
     const listed = vi.spyOn(fake, 'listFiles')
     const ws = await workspace()
@@ -95,7 +89,6 @@ describe('gdrive stat through a mount', () => {
   })
 
   it('propagates a failed parent listing', async () => {
-    const fake = resetFakeDrive()
     vi.spyOn(fake, 'listFiles').mockRejectedValue(new Error('drive unavailable'))
     const ws = await workspace()
     try {
@@ -131,7 +124,6 @@ describe('the token a listed row stamps', () => {
 describe('a Drive item as a row', () => {
   it('renders every kind in full', () => {
     // Each kind's name suffix, size, token and extras.
-    const fake = resetFakeDrive()
     const doc = fake.add('Report', 'root', DOC_MIME)
     const folder = fake.folder('d')
     const blob = fake.add('a.bin', 'root', undefined, new TextEncoder().encode('hello'))

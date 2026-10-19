@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eexist } from '../../errors/fs.ts'
-import { createFolder } from '../google/drive.ts'
 import { statFromItem } from './readdir.ts'
 import { eaccesOnDenied, parentFolder } from './resolve.ts'
 
@@ -38,7 +37,7 @@ async function mkdirImpl(
   }
   const [parentId] = await parentFolder(accessor, path, handed.parent)
   const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-  return statFromItem(await createFolder(accessor.tokenManager, basename, parentId))
+  return statFromItem(await accessor.drive.createFolder(basename, parentId))
 }
 
 export const mkdir = eaccesOnDenied(mkdirImpl)

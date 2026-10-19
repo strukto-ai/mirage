@@ -12,27 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return {
-    ...actual,
-    startPageToken: vi.fn(),
-    listChanges: vi.fn(),
-    getFile: vi.fn(),
-    listFiles: vi.fn(),
-    listSharedDrives: vi.fn(),
-  }
-})
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
 import { FOLDER_MIME, type DriveChange, type DriveFile } from '../google/drive.ts'
+import { makeGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { buildDeltaHook } from './events.ts'
 
 const ROOT = new PathSpec({
@@ -76,25 +60,22 @@ async function pulls(
   feed: [DriveChange[], string][],
   rootNames: string[][],
 ): Promise<string[][][]> {
-  const hook = buildDeltaHook(
-    new GDriveAccessor({
-      tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-    }),
-  )
-  vi.mocked(drive.startPageToken).mockResolvedValue('1')
-  vi.mocked(drive.getFile).mockImplementation((_tm, id) => {
+  const drive = stubDrive()
+  const hook = buildDeltaHook(makeGDriveAccessor(drive))
+  drive.startPageToken.mockResolvedValue('1')
+  drive.getFile.mockImplementation((id) => {
     const found = FOLDERS[id]
     if (found === undefined) throw new Error(`no folder ${id}`)
     return Promise.resolve(found)
   })
   const listings = [...rootNames]
-  vi.mocked(drive.listFiles).mockImplementation(() =>
+  drive.listFiles.mockImplementation(() =>
     Promise.resolve(
       (listings.shift() ?? []).map((name) => ({ id: name, name, mimeType: FOLDER_MIME })),
     ),
   )
-  vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'D', name: 'Team' }])
-  const changes = vi.mocked(drive.listChanges).mockReset()
+  drive.listSharedDrives.mockResolvedValue([{ id: 'D', name: 'Team' }])
+  const changes = drive.listChanges
   for (const page of feed) changes.mockResolvedValueOnce(page)
   let delta = await hook.pull(ROOT, null)
   const out: string[][][] = []
@@ -108,20 +89,17 @@ async function pulls(
 // Twin of test_changes_are_placed_by_their_parents.
 describe('GDriveDeltaHook', () => {
   it('places changes by their parents', async () => {
-    const hook = buildDeltaHook(
-      new GDriveAccessor({
-        tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-      }),
-    )
-    vi.mocked(drive.startPageToken).mockResolvedValue('1')
-    vi.mocked(drive.getFile).mockImplementation((_tm, id) => {
+    const drive = stubDrive()
+    const hook = buildDeltaHook(makeGDriveAccessor(drive))
+    drive.startPageToken.mockResolvedValue('1')
+    drive.getFile.mockImplementation((id) => {
       const found = FOLDERS[id]
       if (found === undefined) throw new Error(`no folder ${id}`)
       return Promise.resolve(found)
     })
-    vi.mocked(drive.listFiles).mockResolvedValue([{ id: 'T', name: 'Team', mimeType: FOLDER_MIME }])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'D', name: 'Team' }])
-    vi.mocked(drive.listChanges)
+    drive.listFiles.mockResolvedValue([{ id: 'T', name: 'Team', mimeType: FOLDER_MIME }])
+    drive.listSharedDrives.mockResolvedValue([{ id: 'D', name: 'Team' }])
+    drive.listChanges
       .mockResolvedValueOnce([
         [
           item('F', 'Docs', 'R', { mime: FOLDER_MIME }),

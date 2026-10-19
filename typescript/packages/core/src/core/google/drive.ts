@@ -71,6 +71,8 @@ export interface DriveFile {
   createdTime?: string
   modifiedTime?: string
   md5Checksum?: string
+  sha1Checksum?: string
+  sha256Checksum?: string
   headRevisionId?: string
   trashed?: boolean
   owners?: DriveOwner[]
@@ -320,6 +322,29 @@ function mediaUrl(tm: TokenManager, fileId: string): string {
   return `${driveBase(tm)}/files/${fileId}?alt=media&supportsAllDrives=true`
 }
 
+/** A pinned revision's content (binary files only). */
+export async function downloadRevision(
+  tm: TokenManager,
+  fileId: string,
+  revisionId: string,
+  window?: ByteWindow,
+): Promise<Uint8Array> {
+  return googleGetBytes(tm, revisionUrl(tm, fileId, revisionId), window)
+}
+
+/** Stream a pinned revision's content as it downloads. */
+export function downloadRevisionStream(
+  tm: TokenManager,
+  fileId: string,
+  revisionId: string,
+): AsyncGenerator<Uint8Array, void> {
+  return googleGetStream(tm, revisionUrl(tm, fileId, revisionId))
+}
+
+function revisionUrl(tm: TokenManager, fileId: string, revisionId: string): string {
+  return `${driveBase(tm)}/files/${fileId}/revisions/${revisionId}?alt=media`
+}
+
 export async function deleteFile(tm: TokenManager, fileId: string): Promise<void> {
   const url = `${driveBase(tm)}/files/${fileId}?supportsAllDrives=true`
   await googleDelete(tm, url)
@@ -413,12 +438,25 @@ export async function listChanges(
   }
 }
 
-export async function getFile(tm: TokenManager, fileId: string): Promise<DriveFile> {
+/** A file's metadata, the fields a listing names unless `fields` says others. */
+export async function getFile(
+  tm: TokenManager,
+  fileId: string,
+  fields: string = ITEM_FIELDS,
+): Promise<DriveFile> {
   const url = `${driveBase(tm)}/files/${fileId}`
   return (await googleGet(tm, url, {
-    fields: ITEM_FIELDS,
+    fields,
     supportsAllDrives: 'true',
   })) as DriveFile
+}
+
+/** The account's `storageQuota`, empty when Drive gives none. Mirrors Python `storage_quota`. */
+export async function storageQuota(tm: TokenManager): Promise<{ limit?: string; usage?: string }> {
+  const about = (await googleGet(tm, `${driveBase(tm)}/about`, {
+    fields: 'storageQuota',
+  })) as { storageQuota?: { limit?: string; usage?: string } | null }
+  return about.storageQuota ?? {}
 }
 
 export async function createFolder(

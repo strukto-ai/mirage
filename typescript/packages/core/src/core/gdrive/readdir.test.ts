@@ -12,34 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listFiles: vi.fn(), listSharedDrives: vi.fn(), getFile: vi.fn() }
-})
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
+import {
+  type StubDrive,
+  makeGDriveAccessor,
+  stubDrive,
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+let drive: StubDrive
 
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return makeGDriveAccessor(drive)
 }
 
 function file(
@@ -57,9 +51,8 @@ function rows(listed: readonly FileStat[] | DirListing): Map<string, FileStat> {
 }
 
 beforeEach(() => {
-  vi.mocked(drive.listFiles).mockReset()
-  vi.mocked(drive.listSharedDrives).mockReset()
-  vi.mocked(drive.listSharedDrives).mockResolvedValue([])
+  drive = stubDrive()
+  drive.listSharedDrives.mockResolvedValue([])
 })
 
 // Mirrors python's test_a_stat_after_the_listings_drop_lists_the_ids_again.
@@ -67,8 +60,8 @@ describe('a stat after the listings drop', () => {
   it.each(['updated', 'deleted', 'renamed-folder'])('lists the ids again: %s', async (change) => {
     let refreshed = false
     const calls: string[] = []
-    vi.mocked(drive.listFiles).mockImplementation((_tm, options) => {
-      const folderId = options?.folderId ?? 'root'
+    drive.listFiles.mockImplementation((options) => {
+      const folderId = options.folderId
       calls.push(folderId)
       if (folderId === 'root') {
         if (!refreshed) return Promise.resolve([file('old-folder', 'docs', FOLDER_MIME)])
@@ -113,13 +106,13 @@ describe('a stat after the listings drop', () => {
 
 describe('gdrive readdir', () => {
   it('lists the root', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([file('f1', 'readme.txt')])
+    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
     const listed = rows(await readdir(makeAccessor(), ROOT))
     expect(listed.get('readme.txt')?.extra.file_id).toBe('f1')
   })
 
   it('lists a folder by the id its row names, in its shared drive', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([file('f2', 'notes.txt')])
+    drive.listFiles.mockResolvedValue([file('f2', 'notes.txt')])
     const folder = new FileStat({
       name: 'docs',
       type: FileType.DIRECTORY,
@@ -133,7 +126,7 @@ describe('gdrive readdir', () => {
       ),
     )
     expect([...listed.keys()]).toEqual(['notes.txt'])
-    expect(vi.mocked(drive.listFiles).mock.calls[0]?.[1]).toEqual({
+    expect(drive.listFiles.mock.calls[0]?.[0]).toEqual({
       folderId: 'folder1',
       driveId: 'drive1',
     })
@@ -166,8 +159,8 @@ describe('gdrive readdir', () => {
 
 describe('readdir shared drives', () => {
   it('surfaces shared drives as top-level directories', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([file('f1', 'readme.txt')])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
     const listed = rows(await readdir(makeAccessor(), ROOT))
     expect(listed.has('readme.txt')).toBe(true)
     expect(listed.get('Team Drive')?.type).toBe(FileType.DIRECTORY)
@@ -175,8 +168,8 @@ describe('readdir shared drives', () => {
   })
 
   it('uniquifies duplicate shared drive names', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([])
+    drive.listSharedDrives.mockResolvedValue([
       { id: 'drive1', name: 'Team' },
       { id: 'drive2', name: 'Team' },
       { id: 'drive3', name: 'Team' },
@@ -193,21 +186,21 @@ describe('readdir shared drives', () => {
     // the mount My-Drive-only until it expires, long after the cause (a
     // missing scope) is fixed. The rows are real, so they come back as a
     // partial listing, and the next readdir retries enumeration.
-    vi.mocked(drive.listFiles).mockResolvedValue([file('f1', 'readme.txt')])
-    vi.mocked(drive.listSharedDrives).mockRejectedValue(new Error('no scope'))
+    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
+    drive.listSharedDrives.mockRejectedValue(new Error('no scope'))
     const short = await readdir(makeAccessor(), ROOT)
     expect(short).toBeInstanceOf(DirListing)
     expect((short as DirListing).partial).toBe(true)
     expect(rows(short).get('readme.txt')?.extra.file_id).toBe('f1')
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team' }])
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team' }])
     const full = await readdir(makeAccessor(), ROOT)
     expect(full).not.toBeInstanceOf(DirListing)
     expect(rows(full).has('Team')).toBe(true)
   })
 
   it('leaves a shared drive root without a token', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([])
-    vi.mocked(drive.listSharedDrives).mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
+    drive.listFiles.mockResolvedValue([])
+    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
     const row = rows(await readdir(makeAccessor(), ROOT)).get('Team Drive')
     expect(row?.extra.md5_checksum).toBeUndefined()
     expect(row?.fingerprint).toBeNull()
@@ -216,7 +209,7 @@ describe('readdir shared drives', () => {
 
 describe('readdir rows', () => {
   it('render google-apps files with their extensions', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       file('d1', 'My Document', DOC_MIME),
       file('s1', 'My Sheet', 'application/vnd.google-apps.spreadsheet'),
       file('p1', 'My Slides', 'application/vnd.google-apps.presentation'),
@@ -230,7 +223,7 @@ describe('readdir rows', () => {
   })
 
   it('keep Drive size for binaries and move google-apps source size to extra', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       file('f1', 'report.pdf', 'application/pdf', { size: '2048' }),
       file('d1', 'My Document', DOC_MIME, { quotaBytesUsed: '9999' }),
     ])
@@ -249,7 +242,7 @@ describe('readdir rows', () => {
     ['42', 42],
     [undefined, null],
   ])('keep a binary size of %s and never use the quota', async (reported, expected) => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       file('binary', 'file.txt', 'text/plain', {
         quotaBytesUsed: '99',
         ...(reported === undefined ? {} : { size: reported }),
@@ -260,7 +253,7 @@ describe('readdir rows', () => {
   })
 
   it('carry both content tokens for a binary file', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       file('f1', 'report.pdf', 'application/pdf', {
         size: '2048',
         md5Checksum: '9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e',
@@ -274,7 +267,7 @@ describe('readdir rows', () => {
   })
 
   it('omit what a native file does not have, and keep the drive beside the tokens', async () => {
-    vi.mocked(drive.listFiles).mockResolvedValue([
+    drive.listFiles.mockResolvedValue([
       file('f1', 'report.pdf', 'application/pdf', {
         size: '2048',
         driveId: 'drive1',

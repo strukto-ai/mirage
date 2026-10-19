@@ -15,7 +15,6 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
-from mirage.core.google.drive import delete_file
 from mirage.errors.fs import eisdir, enoent
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -32,4 +31,4 @@ async def unlink(
         raise enoent(virtual)
     if entry.type is FileType.DIRECTORY:
         raise eisdir(virtual)
-    await delete_file(accessor.token_manager, entry.extra["file_id"])
+    await accessor.drive.delete_file(entry.extra["file_id"])

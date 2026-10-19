@@ -24,17 +24,9 @@ import {
   settle,
 } from '../../events/delta.ts'
 import { virtualOf } from '../../events/payload.ts'
-import { GoogleApiError, type TokenManager } from '../google/client.ts'
-import {
-  FOLDER_MIME,
-  MIME_TO_EXT,
-  getFile,
-  listChanges,
-  listFiles,
-  listSharedDrives,
-  startPageToken,
-  type DriveFile,
-} from '../google/drive.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { FOLDER_MIME, MIME_TO_EXT, type DriveFile } from '../google/drive.ts'
+import type { DriveApi } from './api.ts'
 import { feedCheckpoint, feedState } from '../google/events.ts'
 import { uniqueSharedDriveName } from './readdir.ts'
 import { rootContext } from './resolve.ts'
@@ -61,19 +53,19 @@ function filenameOf(item: DriveFile): string {
  */
 class Places {
   readonly folders: Record<string, [string, string]>
-  private readonly tm: TokenManager
+  private readonly drive: DriveApi
   private readonly top: string
   private readonly scoped: boolean
   private drives: Map<string, string> | null = null
   private readonly driveRoots = new Set<string>()
 
   constructor(
-    tm: TokenManager,
+    drive: DriveApi,
     top: string,
     scoped: boolean,
     folders: Record<string, [string, string]>,
   ) {
-    this.tm = tm
+    this.drive = drive
     this.top = top
     this.scoped = scoped
     this.folders = folders
@@ -111,7 +103,7 @@ class Places {
   private async lookUp(folderId: string): Promise<[string, string] | null> {
     let item: DriveFile
     try {
-      item = await getFile(this.tm, folderId)
+      item = await this.drive.getFile(folderId)
     } catch (err) {
       if (!(err instanceof GoogleApiError) || err.status !== 404) throw err
       console.debug(`drive folder ${folderId} is gone: ${err.message}`)
@@ -129,12 +121,12 @@ class Places {
   /** The name the root listing gives a shared drive, '' when it is no longer listed. */
   private async driveName(driveId: string): Promise<string> {
     if (this.drives === null) {
-      const taken = new Set((await listFiles(this.tm, { folderId: 'root' })).map(filenameOf))
+      const taken = new Set((await this.drive.listFiles({ folderId: 'root' })).map(filenameOf))
       this.drives = new Map()
-      for (const drive of await listSharedDrives(this.tm)) {
-        const name = uniqueSharedDriveName(drive.name, taken)
+      for (const shared of await this.drive.listSharedDrives()) {
+        const name = uniqueSharedDriveName(shared.name, taken)
         taken.add(name)
-        this.drives.set(drive.id, name)
+        this.drives.set(shared.id, name)
       }
     }
     return this.drives.get(driveId) ?? ''
@@ -173,19 +165,19 @@ export class GDriveDeltaHook implements DeltaHook {
   }
 
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
-    const tm = this.accessor.tokenManager
+    const drive = this.accessor.drive
     const observed = new Date()
     const [folderId] = await rootContext(this.accessor)
     const scoped = folderId !== 'root'
     const state = feedState(checkpoint)
     if (state === null) {
-      const token = await startPageToken(tm)
-      const top = scoped ? folderId : (await getFile(tm, 'root')).id
+      const token = await drive.startPageToken()
+      const top = scoped ? folderId : (await drive.getFile('root')).id
       return new Delta({ changes: [], checkpoint: encode(token, top, {}, {}) })
     }
-    const [found, token] = await listChanges(tm, state.token)
+    const [found, token] = await drive.listChanges(state.token)
     const top = String(state.root)
-    const places = new Places(tm, top, scoped, { ...(state.folders ?? {}) })
+    const places = new Places(drive, top, scoped, { ...(state.folders ?? {}) })
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
     const changes: [FileChangeKind, string][] = []
     let unknown = false

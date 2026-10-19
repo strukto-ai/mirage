@@ -17,7 +17,6 @@ import posixpath
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.resolve import eacces_on_denied, parent_folder
-from mirage.core.google.drive import create_folder
 from mirage.errors.fs import eexist
 from mirage.types import FileStat, PathSpec
 
@@ -46,7 +45,7 @@ async def mkdir(
             return None
         raise eexist(path.virtual)
     parent_id, _ = await parent_folder(accessor, path, parent)
-    item = await create_folder(
-        accessor.token_manager, posixpath.basename(key), parent_id
+    item = await accessor.drive.create_folder(
+        posixpath.basename(key), parent_id
     )
     return stat_from_item(item)

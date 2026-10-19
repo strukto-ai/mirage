@@ -12,28 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
-  return driveModuleMock(actual)
-})
-
+import { beforeEach, describe, expect, it } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
-import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import { makeGDriveAccessor, resetFakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { rmR } from './rm.ts'
 
 const ENC = new TextEncoder()
 let fake: FakeDrive
-const accessor = makeGDriveAccessor()
+let accessor: GDriveAccessor
 
 beforeEach(() => {
-  fake = resetFakeDrive()
+  fake = new FakeDrive()
+  accessor = makeGDriveAccessor(fake)
 })
 
 function spec(virtual: string): PathSpec {

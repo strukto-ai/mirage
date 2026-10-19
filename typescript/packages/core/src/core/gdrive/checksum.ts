@@ -15,12 +15,11 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { record, revisionFor, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { driveBase, googleGet } from '../google/client.ts'
 import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
 import { fileEntry } from './read.ts'
 
 // The digests Drive keeps for a file's content, by hashlib name.
-const DIGEST_FIELDS: Readonly<Record<string, string>> = {
+const DIGEST_FIELDS: Readonly<Record<string, 'md5Checksum' | 'sha1Checksum' | 'sha256Checksum'>> = {
   md5: 'md5Checksum',
   sha1: 'sha1Checksum',
   sha256: 'sha256Checksum',
@@ -47,13 +46,9 @@ export async function checksum(
   const row = fileEntry(path, entry)
   const resourceType = row.extra.resource_type as string
   if (NATIVE_RESOURCE_TYPES.has(resourceType)) return null
-  const tm = accessor.tokenManager
   const timer = startOp()
   const fields = [...new Set([field, 'md5Checksum', 'headRevisionId'])]
-  const item = (await googleGet(tm, `${driveBase(tm)}/files/${row.extra.file_id as string}`, {
-    fields: fields.join(','),
-    supportsAllDrives: 'true',
-  })) as Record<string, unknown>
+  const item = await accessor.drive.getFile(row.extra.file_id as string, fields.join(','))
   const found = item[field]
   if (typeof found !== 'string' || found === '') return null
   const revision = item.headRevisionId

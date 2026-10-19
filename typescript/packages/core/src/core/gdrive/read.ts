@@ -22,11 +22,9 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { readDoc } from '../gdocs/read.ts'
-import { downloadFile, downloadFileStream } from '../google/drive.ts'
-import { captureFileMetadata, downloadRevision, downloadRevisionStream } from './versions.ts'
 import { readSpreadsheet } from '../gsheets/read.ts'
 import { readPresentation } from '../gslides/read.ts'
-import type { TokenManager } from '../google/client.ts'
+import type { DriveApi } from './api.ts'
 import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
 import { Md5, md5HexAsync } from '../../utils/hash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -53,7 +51,7 @@ async function staleMd5(md5: unknown, data: Uint8Array): Promise<boolean> {
 // TTL old. Either md5 is checked against the bytes, and a stale one drops the
 // token and the revision with it.
 export async function readFileVersioned(
-  tm: TokenManager,
+  drive: DriveApi,
   fileId: string,
   virtual: string,
   entry: FileStat,
@@ -68,11 +66,11 @@ export async function readFileVersioned(
   let revision: string | null = pinned
   let data: Uint8Array
   if (pinned !== null) {
-    data = await downloadRevision(tm, fileId, pinned, window)
+    data = await drive.downloadRevision(fileId, pinned, window)
   } else if (recordingActive()) {
-    const [md5, captured] = await captureFileMetadata(tm, fileId)
+    const [md5, captured] = await drive.captureFileMetadata(fileId)
     revision = captured
-    data = await downloadFile(tm, fileId, window)
+    data = await drive.downloadFile(fileId, window)
     if (whole && (await staleMd5(md5, data))) revision = null
     else if (whole)
       fingerprint = driveFingerprint(
@@ -82,7 +80,7 @@ export async function readFileVersioned(
         entry.modified,
       )
   } else {
-    data = await downloadFile(tm, fileId, window)
+    data = await drive.downloadFile(fileId, window)
     if (whole && !(await staleMd5(entry.extra.md5_checksum, data))) fingerprint = entry.fingerprint
   }
   record('read', virtual, 'gdrive', data.length, timer, { fingerprint, revision })
@@ -125,7 +123,7 @@ export async function read(
   const fileId = found.extra.file_id as string
   const rt = found.extra.resource_type as string
   if (!NATIVE_RESOURCE_TYPES.has(rt))
-    return readFileVersioned(accessor.tokenManager, fileId, path.virtual, found, offset, size)
+    return readFileVersioned(accessor.drive, fileId, path.virtual, found, offset, size)
   const timer = startOp()
   let rendered: Uint8Array
   if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, fileId)
@@ -158,17 +156,17 @@ export async function* readStream(
     yield await read(accessor, path, undefined, found)
     return
   }
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const pinned = revisionFor(path.virtual)
   const rec = recordStream('read', path.virtual, 'gdrive', { revision: pinned })
   let md5: string | null = null
   let revision: string | null = null
   let chunks: AsyncGenerator<Uint8Array, void>
   if (pinned !== null) {
-    chunks = downloadRevisionStream(tm, fileId, pinned)
+    chunks = drive.downloadRevisionStream(fileId, pinned)
   } else {
-    if (rec !== null) [md5, revision] = await captureFileMetadata(tm, fileId)
-    chunks = downloadFileStream(tm, fileId)
+    if (rec !== null) [md5, revision] = await drive.captureFileMetadata(fileId)
+    chunks = drive.downloadFileStream(fileId)
   }
   const digest = md5 !== null && md5 !== '' ? new Md5() : null
   for await (const chunk of chunks) {

@@ -20,7 +20,7 @@ import pytest
 import mirage.core.gdrive.read as gdrive_read
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.fingerprint import drive_fingerprint
-from mirage.core.gdrive.read import read
+from mirage.core.gdrive.read import read, read_file_versioned
 from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
@@ -35,9 +35,10 @@ from mirage.types import FileStat, FileType, JsonValue, MountMode, PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 
-async def fail_list_files(_tm, folder_id, drive_id=None):
+async def fail_list_files(folder_id, drive_id=None):
     raise RuntimeError("drive unavailable")
 
 
@@ -109,7 +110,7 @@ def _workspace(accessor) -> Workspace:
 
 
 @pytest.mark.asyncio
-async def test_read_file(accessor):
+async def test_read_file(accessor, monkeypatch):
     row = _row(
         "file123",
         "report.pdf",
@@ -117,43 +118,37 @@ async def test_read_file(accessor):
         extra={"drive_id": "drive1"},
     )
     content = b"pdf content here"
-    with patch(
-        "mirage.core.gdrive.read.download_file",
-        new_callable=AsyncMock,
-        return_value=content,
-    ):
-        result = await read(
-            accessor,
-            PathSpec(
-                vfs_path="Team Drive/report.pdf",
-                virtual="/Team Drive/report.pdf",
-                directory="/Team Drive/report.pdf",
-            ),
-            entry=row,
-        )
+    install_drive(
+        monkeypatch, StubDrive(download_file=AsyncMock(return_value=content))
+    )
+    result = await read(
+        accessor,
+        PathSpec(
+            vfs_path="Team Drive/report.pdf",
+            virtual="/Team Drive/report.pdf",
+            directory="/Team Drive/report.pdf",
+        ),
+        entry=row,
+    )
     assert result == content
 
 
 @pytest.mark.asyncio
 async def test_a_ranged_read_of_a_binary_file_asks_drive_for_the_range(
     accessor,
+    monkeypatch,
 ):
-    with patch(
-        "mirage.core.gdrive.read.download_file",
-        new_callable=AsyncMock,
-        return_value=b"tent",
-    ) as mock_download:
-        result = await read(
-            accessor,
-            PathSpec.from_str_path("/report.pdf"),
-            offset=3,
-            size=4,
-            entry=_row("file123", "report.pdf"),
-        )
-    assert result == b"tent"
-    mock_download.assert_awaited_once_with(
-        accessor.token_manager, "file123", ByteWindow(3, 4)
+    mock_download = AsyncMock(return_value=b"tent")
+    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    result = await read(
+        accessor,
+        PathSpec.from_str_path("/report.pdf"),
+        offset=3,
+        size=4,
+        entry=_row("file123", "report.pdf"),
     )
+    assert result == b"tent"
+    mock_download.assert_awaited_once_with("file123", ByteWindow(3, 4))
 
 
 @pytest.mark.asyncio
@@ -179,25 +174,21 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
 
 
 @pytest.mark.asyncio
-async def test_read_shared_drive_raises_is_a_directory(accessor):
+async def test_read_shared_drive_raises_is_a_directory(accessor, monkeypatch):
     row = _row(
         "drive1",
         "Team Drive",
         "gdrive/shared_drive",
         extra={"drive_id": "drive1"},
     )
-    with patch(
-        "mirage.core.gdrive.read.download_file",
-        new_callable=AsyncMock,
-    ) as mock_download:
-        # The message is the bare operand, which is what the shell renders
-        # ("cat: /Team Drive: Is a directory"). The TS twin asserts the same
-        # string through the stamped virtualPath.
-        with pytest.raises(IsADirectoryError) as excinfo:
-            await read(
-                accessor, PathSpec.from_str_path("/Team Drive"), entry=row
-            )
-        assert excinfo.value.filename == "/Team Drive"
+    mock_download = AsyncMock()
+    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    # The message is the bare operand, which is what the shell renders
+    # ("cat: /Team Drive: Is a directory"). The TS twin asserts the same
+    # string through the stamped virtualPath.
+    with pytest.raises(IsADirectoryError) as excinfo:
+        await read(accessor, PathSpec.from_str_path("/Team Drive"), entry=row)
+    assert excinfo.value.filename == "/Team Drive"
     mock_download.assert_not_awaited()
 
 
@@ -208,8 +199,8 @@ async def test_read_of_nothing_is_not_found(accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_cold_read_lists_its_parent_first(accessor):
-    async def fake_list_files(_tm, folder_id, drive_id=None):
+async def test_a_cold_read_lists_its_parent_first(accessor, monkeypatch):
+    async def fake_list_files(folder_id, drive_id=None):
         if folder_id == "root":
             return [
                 {
@@ -223,34 +214,25 @@ async def test_a_cold_read_lists_its_parent_first(accessor):
 
     ws = _workspace(accessor)
     try:
-        with (
-            patch(
-                "mirage.core.gdrive.readdir.list_files", new=fake_list_files
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                list_files=fake_list_files,
+                list_shared_drives=AsyncMock(return_value=[]),
+                download_file=AsyncMock(return_value=b"pdf-bytes"),
+                capture_file_metadata=AsyncMock(return_value=(None, None)),
             ),
-            patch(
-                "mirage.core.gdrive.readdir.list_shared_drives",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                return_value=b"pdf-bytes",
-            ),
-            patch(
-                "mirage.core.gdrive.read.capture_file_metadata",
-                new_callable=AsyncMock,
-                return_value=(None, None),
-            ),
-        ):
-            assert await ws.vfs.read("/drive/report.pdf") == b"pdf-bytes"
+        )
+        assert await ws.vfs.read("/drive/report.pdf") == b"pdf-bytes"
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_name_its_parent_does_not_list_is_never_downloaded(accessor):
-    async def fake_list_files(_tm, folder_id, drive_id=None):
+async def test_a_name_its_parent_does_not_list_is_never_downloaded(
+    accessor, monkeypatch
+):
+    async def fake_list_files(folder_id, drive_id=None):
         if folder_id == "root":
             return [
                 {
@@ -264,65 +246,53 @@ async def test_a_name_its_parent_does_not_list_is_never_downloaded(accessor):
 
     ws = _workspace(accessor)
     try:
-        with (
-            patch(
-                "mirage.core.gdrive.readdir.list_files", new=fake_list_files
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                list_files=fake_list_files,
+                list_shared_drives=AsyncMock(return_value=[]),
+                download_file=AsyncMock(
+                    side_effect=AssertionError("should not call download_file")
+                ),
             ),
-            patch(
-                "mirage.core.gdrive.readdir.list_shared_drives",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                side_effect=AssertionError("should not call download_file"),
-            ),
-        ):
-            with pytest.raises(FileNotFoundError):
-                await ws.vfs.read("/drive/missing.txt")
+        )
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.read("/drive/missing.txt")
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_read_propagates_parent_listing_failure(accessor):
+async def test_read_propagates_parent_listing_failure(accessor, monkeypatch):
     ws = _workspace(accessor)
     try:
-        with patch(
-            "mirage.core.gdrive.readdir.list_files", new=fail_list_files
-        ):
-            with pytest.raises(RuntimeError, match="drive unavailable"):
-                await ws.vfs.read("/drive/missing.txt")
+        install_drive(monkeypatch, StubDrive(list_files=fail_list_files))
+        with pytest.raises(RuntimeError, match="drive unavailable"):
+            await ws.vfs.read("/drive/missing.txt")
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_recorded_read_names_the_virtual_path(accessor):
+async def test_recorded_read_names_the_virtual_path(accessor, monkeypatch):
     # The record must carry the full virtual path; a slashless vfs_path
     # ("m/k.txt") names no file the cache or a snapshot pin can match.
     scope = RecordingScope()
     try:
-        with (
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                return_value=b"bytes",
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                download_file=AsyncMock(return_value=b"bytes"),
+                capture_file_metadata=AsyncMock(return_value=(None, "rev")),
             ),
-            patch(
-                "mirage.core.gdrive.read.capture_file_metadata",
-                new_callable=AsyncMock,
-                return_value=(None, "rev"),
+        )
+        data = await read(
+            accessor,
+            PathSpec(
+                virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
             ),
-        ):
-            data = await read(
-                accessor,
-                PathSpec(
-                    virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
-                ),
-                entry=_row("file123", "k.txt"),
-            )
+            entry=_row("file123", "k.txt"),
+        )
     finally:
         scope.close()
     assert data == b"bytes"
@@ -351,6 +321,7 @@ def spec_for(name: str = "report.pdf", prefix: str = "") -> PathSpec:
 
 
 async def read_recording(
+    monkeypatch,
     accessor,
     path,
     entry,
@@ -365,6 +336,7 @@ async def read_recording(
     the window guard can keep a ranged read from stamping.
 
     Args:
+        monkeypatch (pytest.MonkeyPatch): the test's monkeypatch.
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): the path to read.
         entry (FileStat): what is at the path.
@@ -374,30 +346,29 @@ async def read_recording(
     """
     scope = RecordingScope()
     try:
-        with (
-            patch(
-                "mirage.core.gdrive.read.download_file",
-                new_callable=AsyncMock,
-                return_value=CONTENT,
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                download_file=AsyncMock(return_value=CONTENT),
+                capture_file_metadata=AsyncMock(return_value=capture),
             ),
-            patch(
-                "mirage.core.gdrive.read.capture_file_metadata",
-                new_callable=AsyncMock,
-                return_value=capture,
-            ),
-        ):
-            data = await read(
-                accessor, path, offset=offset, size=size, entry=entry
-            )
+        )
+        data = await read(
+            accessor, path, offset=offset, size=size, entry=entry
+        )
         return data, list(scope.records)
     finally:
         scope.close()
 
 
 @pytest.mark.asyncio
-async def test_the_read_record_and_the_listed_stat_stamp_one_token(accessor):
+async def test_the_read_record_and_the_listed_stat_stamp_one_token(
+    accessor, monkeypatch
+):
     path = spec_for()
-    _, records = await read_recording(accessor, path, binary_row())
+    _, records = await read_recording(
+        monkeypatch, accessor, path, binary_row()
+    )
     result = await stat(accessor, path, binary_row())
     assert records[0].fingerprint == DIGEST
     assert result.fingerprint == records[0].fingerprint
@@ -405,46 +376,63 @@ async def test_the_read_record_and_the_listed_stat_stamp_one_token(accessor):
 
 @pytest.mark.asyncio
 async def test_the_read_record_and_the_drive_item_stamp_one_token(
-    fake_drive, gdrive_accessor
+    fake_drive, gdrive_accessor, monkeypatch
 ):
     # The row a listing builds from Drive's own item.
     file_id = fake_drive.add("report.pdf", content=CONTENT)
     row = stat_from_item(fake_drive.public(file_id))
     _, records = await read_recording(
-        gdrive_accessor, spec_for(), row, capture=(DIGEST, f"{file_id}-r1")
+        monkeypatch,
+        gdrive_accessor,
+        spec_for(),
+        row,
+        capture=(DIGEST, f"{file_id}-r1"),
     )
     assert row.fingerprint == DIGEST
     assert row.fingerprint == records[0].fingerprint
 
 
 @pytest.mark.asyncio
-async def test_the_read_record_on_a_root_mount_has_one_slash(accessor):
-    _, records = await read_recording(accessor, spec_for(), binary_row())
+async def test_the_read_record_on_a_root_mount_has_one_slash(
+    accessor, monkeypatch
+):
+    _, records = await read_recording(
+        monkeypatch, accessor, spec_for(), binary_row()
+    )
     assert records[0].path == "/report.pdf"
 
 
 @pytest.mark.asyncio
 async def test_a_name_sharing_the_prefixs_leading_text_keeps_its_boundary(
     accessor,
+    monkeypatch,
 ):
     _, records = await read_recording(
-        accessor, spec_for("gd-report.pdf", "/gd"), binary_row()
+        monkeypatch, accessor, spec_for("gd-report.pdf", "/gd"), binary_row()
     )
     assert records[0].path == "/gd/gd-report.pdf"
 
 
 @pytest.mark.asyncio
-async def test_a_verified_md5_is_stamped_on_the_record(accessor):
-    _, records = await read_recording(accessor, spec_for(), binary_row())
+async def test_a_verified_md5_is_stamped_on_the_record(accessor, monkeypatch):
+    _, records = await read_recording(
+        monkeypatch, accessor, spec_for(), binary_row()
+    )
     assert (records[0].fingerprint, records[0].revision) == (DIGEST, REVISION)
 
 
 @pytest.mark.asyncio
-async def test_a_captured_md5_that_disagrees_drops_the_revision_too(accessor):
+async def test_a_captured_md5_that_disagrees_drops_the_revision_too(
+    accessor, monkeypatch
+):
     # The capture predates these bytes, and so does its revision: a pin
     # would replace the drift check and replay the older bytes.
     _, records = await read_recording(
-        accessor, spec_for(), binary_row(), capture=(STALE, REVISION)
+        monkeypatch,
+        accessor,
+        spec_for(),
+        binary_row(),
+        capture=(STALE, REVISION),
     )
     assert (records[0].fingerprint, records[0].revision) == (None, None)
 
@@ -454,18 +442,29 @@ async def test_a_captured_md5_that_disagrees_drops_the_revision_too(accessor):
 )
 @pytest.mark.asyncio
 async def test_a_windowed_read_stamps_no_token_but_keeps_the_revision(
-    accessor, offset, size
+    accessor, offset, size, monkeypatch
 ):
     _, records = await read_recording(
-        accessor, spec_for(), binary_row(), offset=offset, size=size
+        monkeypatch,
+        accessor,
+        spec_for(),
+        binary_row(),
+        offset=offset,
+        size=size,
     )
     assert (records[0].fingerprint, records[0].revision) == (None, REVISION)
 
 
 @pytest.mark.asyncio
-async def test_a_capture_with_no_md5_is_stamped_unverified(accessor):
+async def test_a_capture_with_no_md5_is_stamped_unverified(
+    accessor, monkeypatch
+):
     _, records = await read_recording(
-        accessor, spec_for(), binary_row(), capture=(None, REVISION)
+        monkeypatch,
+        accessor,
+        spec_for(),
+        binary_row(),
+        capture=(None, REVISION),
     )
     assert records[0].fingerprint == REVISION
 
@@ -501,8 +500,10 @@ async def read_unrecorded(
         return_value=BODY[offset : None if size is None else offset + size]
     )
     captured = AsyncMock(return_value=(None, None))
-    monkeypatch.setitem(vars(gdrive_read), "download_file", download)
-    monkeypatch.setitem(vars(gdrive_read), "capture_file_metadata", captured)
+    install_drive(
+        monkeypatch,
+        StubDrive(download_file=download, capture_file_metadata=captured),
+    )
     assert active_recorder() is None
     spec = PathSpec(virtual="/gd/a.txt", directory="/gd/", vfs_path="a.txt")
     await read(
@@ -611,8 +612,10 @@ async def test_a_pinned_unrecorded_read_stamps_no_entry_token(
     monkeypatch.setitem(vars(gdrive_read), "record", spy)
     download = AsyncMock(return_value=BODY)
     revision = AsyncMock(return_value=BODY)
-    monkeypatch.setitem(vars(gdrive_read), "download_file", download)
-    monkeypatch.setitem(vars(gdrive_read), "download_revision", revision)
+    install_drive(
+        monkeypatch,
+        StubDrive(download_file=download, download_revision=revision),
+    )
     token = push_revisions({"/gd/a.txt": "r1"})
     try:
         await read(
@@ -632,13 +635,12 @@ async def test_a_recorded_read_prefers_the_capture_over_the_entry(
     accessor, monkeypatch
 ):
     # The capture is the fresher of the two; the entry can be a TTL old.
-    monkeypatch.setitem(
-        vars(gdrive_read), "download_file", AsyncMock(return_value=BODY)
-    )
-    monkeypatch.setitem(
-        vars(gdrive_read),
-        "capture_file_metadata",
-        AsyncMock(return_value=(BODY_MD5, "r9")),
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            download_file=AsyncMock(return_value=BODY),
+            capture_file_metadata=AsyncMock(return_value=(BODY_MD5, "r9")),
+        ),
     )
     scope = RecordingScope()
     try:
@@ -744,3 +746,37 @@ async def test_a_windowed_native_read_records_its_window_and_no_token(
     )
     assert len(data) == 5
     assert (records[0].bytes, records[0].fingerprint) == (5, None)
+
+
+VERSIONED = FileStat(
+    name="f.txt",
+    type=FileType.FILE,
+    extra={"file_id": "f1", "resource_type": "gdrive/file"},
+)
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_path_reads_its_revision():
+    pinned_read = AsyncMock(return_value=b"pinned")
+    live_read = AsyncMock()
+    drive = StubDrive(download_revision=pinned_read, download_file=live_read)
+    token = push_revisions({"/data/f.txt": "r1"})
+    try:
+        data = await read_file_versioned(drive, "f1", "/data/f.txt", VERSIONED)
+    finally:
+        reset_revisions(token)
+    assert data == b"pinned"
+    pinned_read.assert_awaited_once_with("f1", "r1", None)
+    live_read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_unpinned_unrecorded_path_reads_live_without_a_capture():
+    capture = AsyncMock()
+    drive = StubDrive(
+        download_file=AsyncMock(return_value=b"live"),
+        capture_file_metadata=capture,
+    )
+    data = await read_file_versioned(drive, "f1", "/data/f.txt", VERSIONED)
+    assert data == b"live"
+    capture.assert_not_awaited()

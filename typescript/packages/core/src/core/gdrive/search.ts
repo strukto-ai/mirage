@@ -18,7 +18,6 @@ import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { searchFiles } from '../google/drive.ts'
 import { rootContext } from './resolve.ts'
 import { PARENTS_PER_QUERY, iterTree } from './tree.ts'
 
@@ -51,6 +50,7 @@ export async function filesContaining(
     const entryDriveId = entry.extra.drive_id
     driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
+  const drive = accessor.drive
   const found: PathSpec[] = []
   try {
     const folders = [root]
@@ -61,7 +61,7 @@ export async function filesContaining(
     }
     for (let start = 0; start < folders.length; start += PARENTS_PER_QUERY) {
       const parents = folders.slice(start, start + PARENTS_PER_QUERY)
-      const answer = await searchFiles(accessor.tokenManager, text, parents)
+      const answer = await drive.searchFiles(text, parents)
       if (!answer.complete) return null
       for (const id of answer.ids) found.push(...(files.get(id) ?? []))
     }

@@ -17,7 +17,6 @@ import { enoent } from '../../errors/fs.ts'
 import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
 import { toIsoZ } from '../../utils/dates.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { patchFile } from '../google/drive.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
@@ -45,7 +44,7 @@ export const setAttrs = eaccesOnDenied(async function setAttrs(
   }
   const live = await liveRow(accessor, path, entry)
   if (live === null) throw enoent(path)
-  await patchFile(accessor.tokenManager, live.extra.file_id as string, {
+  await accessor.drive.patchFile(live.extra.file_id as string, {
     body: { modifiedTime: toIsoZ(new Date(fields.mtime)) },
   })
   return residual

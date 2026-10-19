@@ -16,7 +16,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type { PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { deleteFile } from '../google/drive.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
@@ -29,7 +28,7 @@ async function rmRImpl(
   if (path.vfsPath === '') return
   const entry = await liveRow(accessor, path, handed.entry)
   if (entry === null) throw enoent(path)
-  await deleteFile(accessor.tokenManager, entry.extra.file_id as string)
+  await accessor.drive.deleteFile(entry.extra.file_id as string)
 }
 
 export const rmR = eaccesOnDenied(rmRImpl)

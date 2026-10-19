@@ -15,6 +15,7 @@
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import (
     DriveNode,
@@ -24,39 +25,28 @@ from mirage.core.gdrive.resolve import (
     node_of,
     parent_folder,
 )
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import (
-    copy_file,
-    create_folder,
-    delete_file,
-    list_files,
-)
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
 
 
 async def copy_children(
-    token_manager: TokenManager, src: DriveNode, dst_folder_id: str
+    drive: DriveApi, src: DriveNode, dst_folder_id: str
 ) -> None:
     """Recursively copy a folder's children into a destination folder.
 
     Args:
-        token_manager (TokenManager): OAuth2 token manager.
+        drive (DriveApi): the Drive client.
         src (DriveNode): source folder.
         dst_folder_id (str): destination folder id.
     """
-    children = await list_files(
-        token_manager, folder_id=src.id, drive_id=src.drive_id
-    )
+    children = await drive.list_files(folder_id=src.id, drive_id=src.drive_id)
     for item in children:
         child = node_from_item(item, src.drive_id)
         if child.is_folder:
-            created = await create_folder(
-                token_manager, child.name, dst_folder_id
-            )
-            await copy_children(token_manager, child, created["id"])
+            created = await drive.create_folder(child.name, dst_folder_id)
+            await copy_children(drive, child, created["id"])
         else:
-            await copy_file(token_manager, child.id, child.name, dst_folder_id)
+            await drive.copy_file(child.id, child.name, dst_folder_id)
 
 
 @eacces_on_denied
@@ -87,7 +77,7 @@ async def copy(
     """
     if entry is None:
         raise enoent(src.virtual)
-    token_manager = accessor.token_manager
+    drive = accessor.drive
     dst_entry = await live_row(accessor, dst, dst_entry)
     src_node = node_of(entry)
     if src_node.is_folder:
@@ -96,22 +86,22 @@ async def copy(
         made = None
         if dst_entry is None:
             dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
-            created = await create_folder(
-                token_manager, posixpath.basename(dst.vfs_path), dst_parent_id
+            created = await drive.create_folder(
+                posixpath.basename(dst.vfs_path), dst_parent_id
             )
             dst_id = created["id"]
             made = stat_from_item(created)
         else:
             dst_id = dst_entry.extra["file_id"]
-        await copy_children(token_manager, src_node, dst_id)
+        await copy_children(drive, src_node, dst_id)
         return made
     if dst_entry is not None and dst_entry.type is FileType.DIRECTORY:
         raise eisdir(dst.virtual)
     if dst_entry is not None:
-        await delete_file(token_manager, dst_entry.extra["file_id"])
+        await drive.delete_file(dst_entry.extra["file_id"])
     dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
     name = drive_target_name(
         posixpath.basename(dst.vfs_path), src_node.mime_type
     )
-    item = await copy_file(token_manager, src_node.id, name, dst_parent_id)
+    item = await drive.copy_file(src_node.id, name, dst_parent_id)
     return stat_from_item(item) if isinstance(item, dict) else None

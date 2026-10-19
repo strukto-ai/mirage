@@ -20,7 +20,7 @@ from typing import Any, ParamSpec, TypeVar
 import aiohttp
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT, get_file
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.errors.fs import eacces, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -66,12 +66,11 @@ async def root_context(accessor: GDriveAccessor) -> tuple[str, str | None]:
     Returns:
         tuple[str, str | None]: (root folder id, shared drive id or None).
     """
-    token_manager = accessor.token_manager
-    folder_id = token_manager.config.folder_id
+    folder_id = accessor.token_manager.config.folder_id
     if not folder_id:
         return "root", None
     if not hasattr(accessor, "root_drive_id"):
-        item = await get_file(token_manager, folder_id)
+        item = await accessor.drive.get_file(folder_id)
         accessor.root_drive_id = item.get("driveId")
     return folder_id, accessor.root_drive_id
 

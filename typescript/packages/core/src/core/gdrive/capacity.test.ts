@@ -12,24 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from '../google/client.ts'
-import type * as ResolveModule from './resolve.ts'
-
-vi.mock('../google/client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('../google/client.ts')
-  return { ...actual, googleGet: vi.fn() }
-})
-vi.mock('./resolve.ts', async () => {
-  const actual = await vi.importActual<typeof ResolveModule>('./resolve.ts')
-  return { ...actual, rootContext: vi.fn() }
-})
-
+import { describe, expect, it } from 'vitest'
 import { CapacityState, type CapacityResult } from '../../types.ts'
-import * as client from '../google/client.ts'
-import { makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
+import { makeScopedGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { capacity } from './capacity.ts'
-import * as resolve from './resolve.ts'
 
 describe('gdrive capacity', () => {
   it.each<[string | null, Record<string, string>, CapacityResult]>([
@@ -41,8 +27,15 @@ describe('gdrive capacity', () => {
     [null, { usage: '400' }, { state: CapacityState.ELASTIC }],
     ['drive-1', {}, { state: CapacityState.UNKNOWN }],
   ])('takes the storage quota as the capacity (%s)', async (shared, quota, expected) => {
-    vi.mocked(resolve.rootContext).mockResolvedValueOnce(['folder', shared])
-    vi.mocked(client.googleGet).mockResolvedValueOnce({ storageQuota: quota })
-    expect(await capacity(makeGDriveAccessor())).toEqual(expected)
+    const drive = stubDrive()
+    drive.getFile.mockResolvedValueOnce({
+      id: 'folder',
+      name: 'folder',
+      ...(shared === null ? {} : { driveId: shared }),
+    })
+    drive.storageQuota.mockResolvedValueOnce(quota)
+    expect(await capacity(makeScopedGDriveAccessor('folder', drive))).toEqual(expected)
+    expect(drive.getFile).toHaveBeenCalledWith('folder')
+    expect(drive.storageQuota).toHaveBeenCalledTimes(shared === null ? 1 : 0)
   })
 })

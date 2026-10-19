@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.core.gdrive.capacity import capacity
 from mirage.types import CapacityResult, CapacityState
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 
 @pytest.mark.parametrize(
@@ -36,13 +37,11 @@ from mirage.types import CapacityResult, CapacityState
 )
 @pytest.mark.asyncio
 async def test_the_storage_quota_is_the_capacity(
-    scoped_accessor, shared, quota, expected
+    scoped_accessor, monkeypatch, shared, quota, expected
 ):
     accessor = scoped_accessor("folder")
     accessor.root_drive_id = shared
-    with patch(
-        "mirage.core.gdrive.capacity.google_get",
-        new_callable=AsyncMock,
-        return_value={"storageQuota": quota},
-    ):
-        assert await capacity(accessor) == expected
+    install_drive(
+        monkeypatch, StubDrive(storage_quota=AsyncMock(return_value=quota))
+    )
+    assert await capacity(accessor) == expected
