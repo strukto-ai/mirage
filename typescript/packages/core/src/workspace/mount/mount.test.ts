@@ -427,6 +427,48 @@ describe('Mount.runCommand', () => {
       m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, null),
     ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
+
+  it('keeps the mount open while rows render past the timeout', async () => {
+    // The renderer is still reading the backend after the command timed
+    // out, so an unmount waiting on the mount's activity must wait for it.
+    const m = makeMount()
+    m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
+    let finish: () => void = () => undefined
+    const rendering = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const [cmd] = command({
+      name: 'cat',
+      vfs: 'ram',
+      spec: BASIC_SPEC,
+      fn: () => [
+        null,
+        new IOResult({
+          rows: {
+            items: [{ path: PathSpec.fromStrPath('/x.txt') }],
+            render: async () => {
+              await rendering
+              return new TextEncoder().encode('x\n')
+            },
+          },
+        }),
+      ],
+    })
+    if (cmd === undefined) throw new Error('missing')
+    m.register(cmd)
+    await expect(
+      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, null),
+    ).rejects.toThrow(/cat: timed out after 0.05s/)
+    let idle = false
+    const waited = m.activity.wait().then(() => {
+      idle = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(idle).toBe(false)
+    finish()
+    await waited
+    expect(idle).toBe(true)
+  })
 })
 
 describe('Mount.call', () => {

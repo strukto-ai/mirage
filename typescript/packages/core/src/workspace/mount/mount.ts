@@ -1916,7 +1916,12 @@ export class MountEntry {
             ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
           }
         : ctx
+    // Racing a promise does not stop its work: a body, or a renderer of the
+    // rows it handed over, still running past its timeout keeps this mount
+    // open until the answer settles, so an unmount waits for it.
+    const settled = this.activity.acquire()
     return runHandler(call(runCtx), name, limit, producer, voice, {
+      settle: settled,
       scope: (result) => wrapMountStreams(result, this.activity),
       ...(writes ? { drop: () => this.dropCaches() } : {}),
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
