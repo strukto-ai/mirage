@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import pickle
 import sys
 import threading
 
@@ -11,6 +12,17 @@ from mirage.rs.stream import open_stream, run_stream
 from mirage.workspace import Workspace
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
+
+
+@pytest.mark.parametrize("output", [b"", b"abc"])
+def test_a_refusal_survives_serialization(output):
+    original = StreamRefusal("invalid input", output)
+    restored = pickle.loads(pickle.dumps(original))
+    assert isinstance(restored, StreamRefusal)
+    assert restored.message == original.message
+    assert restored.output == output
+    assert str(restored) == str(original) == "invalid input"
+    assert restored.args == original.args == ("invalid input",)
 
 
 def test_a_bad_config_refuses_with_no_output():
