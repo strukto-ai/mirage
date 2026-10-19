@@ -74,6 +74,12 @@ export interface RunHandlerOpts {
   /** Aborted when the limit trips, so a runtime can kill what it spawned. */
   abort?: AbortController
   /**
+   * Called once the answer, its rows rendered, has settled, however the
+   * caller left: a handler and its renderer may run past a timeout, so a
+   * caller keeps what they use (a CLI's client) until then.
+   */
+  settle?: () => void
+  /**
    * The handler's files, whose session's hides filter the rows it hands
    * over; absent filters none.
    */
@@ -202,6 +208,7 @@ export async function runHandler(
   // The rendered answer is what a caller that left abandons: a renderer that
   // finishes late hands back output nobody reads.
   const answer = rendered(body, opts.vfs ?? null, name)
+  if (opts.settle !== undefined) void answer.then(opts.settle, opts.settle)
   try {
     out = await runWithTimeout(joinOrAbort(answer, opts.signal), timeout, name)
   } catch (err) {

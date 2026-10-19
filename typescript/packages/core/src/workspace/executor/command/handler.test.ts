@@ -16,8 +16,9 @@ import type { CommandFnResult } from '../../../commands/config.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import { PipeClosed } from '../../../io/errors.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, type Producer } from '../../../types.ts'
+import { IOResult, materialize, type ByteSource, type Rows } from '../../../io/types.ts'
+import { Limit, PathSpec, type Producer } from '../../../types.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { cliVoice, mountVoice, runHandler, type RunHandlerOpts } from './handler.ts'
 
 const ENC = new TextEncoder()
@@ -122,4 +123,52 @@ describe('runHandler', () => {
       expect(out?.[1].exitCode).toBe(1)
     },
   )
+})
+
+describe('runHandler with rows', () => {
+  it('holds until a renderer past its timeout settles, and closes what it hands back', async () => {
+    // A renderer cannot be cancelled, so what the caller holds for the
+    // handler (a CLI's client) is kept until the rendered answer settles,
+    // and the stream it hands back with no reader left is closed.
+    let finish: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    let closed = 0
+    const late: AsyncIterableIterator<Uint8Array> = {
+      next: () => Promise.resolve({ done: true, value: undefined }),
+      return: () => {
+        closed += 1
+        return Promise.resolve({ done: true, value: undefined })
+      },
+      [Symbol.asyncIterator]() {
+        return this
+      },
+    }
+    const rows: Rows = {
+      items: [],
+      render: async () => {
+        await gate
+        return late
+      },
+    }
+    let settled = 0
+    const out = runHandler(
+      Promise.resolve([null, new IOResult({ rows })]),
+      'x',
+      new Limit({ timeoutSeconds: 0.01 }),
+      PRODUCER,
+      LEAF,
+      {
+        settle: () => {
+          settled += 1
+        },
+      },
+    )
+    await expect(out).rejects.toBeInstanceOf(CommandTimeoutError)
+    expect(settled).toBe(0)
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect([settled, closed]).toEqual([1, 1])
+  })
 })

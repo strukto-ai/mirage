@@ -627,18 +627,16 @@ class Listed:
     size: int
 
 
+async def listed(shown: list[Listed]) -> bytes:
+    lines = [f"{row.path.virtual} {row.size}\n" for row in shown]
+    total = sum(row.size for row in shown)
+    return "".join([*lines, f"{len(shown)} files, {total} bytes\n"]).encode()
+
+
 async def listing(config: None, paths, texts, ctx: Context):
     names = (("a.txt", 1), ("secret.txt", 2), ("door", 4), ("b.txt", 3))
     rows = [Listed(PathSpec.from_str_path(f"/data/{n}"), k) for n, k in names]
-
-    async def render(shown: list[Listed]) -> bytes:
-        lines = [f"{row.path.virtual} {row.size}\n" for row in shown]
-        total = sum(row.size for row in shown)
-        return "".join(
-            [*lines, f"{len(shown)} files, {total} bytes\n"]
-        ).encode()
-
-    return None, IOResult(rows=Rows(rows, render))
+    return None, IOResult(rows=Rows(rows, listed))
 
 
 LISTING = CLI(
