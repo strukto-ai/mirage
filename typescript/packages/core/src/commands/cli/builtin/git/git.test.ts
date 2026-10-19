@@ -18,7 +18,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, assert, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
@@ -42,6 +42,15 @@ let tmp: string
 let repoPath: string
 let ws: Workspace
 let parser: ShellParser
+
+const MESSAGE_CASES = ['', '\n'].flatMap((ending) =>
+  [true, false].map((hasBody) => ({
+    id: `${hasBody ? 'body' : 'empty-body'}-${ending ? 'terminated' : 'unterminated'}`,
+    ending,
+    hasBody,
+  })),
+)
+const messageCommits = new Map<string, string[]>()
 
 function walk(root: string, base = root): string[] {
   const out: string[] = []
@@ -68,6 +77,22 @@ beforeAll(async () => {
   repoPath = join(tmp, 'repo')
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore' })
 
+  const tree = realGit(['rev-parse', 'HEAD^{tree}']).trim()
+  for (const { id, ending, hasBody } of MESSAGE_CASES) {
+    const commits: string[] = []
+    for (const subject of ['one', 'two']) {
+      const message = hasBody ? `${subject}\n\nbody ${subject}${ending}` : subject + ending
+      const parent = commits.at(-1)
+      const oid = execFileSync(
+        'git',
+        ['-C', repoPath, 'commit-tree', tree, ...(parent ? ['-p', parent] : [])],
+        { input: message, encoding: 'utf8' },
+      ).trim()
+      commits.push(oid)
+    }
+    messageCommits.set(id, commits)
+  }
+
   const ram = new RAMVFS()
   parser = await createShellParser({ engineWasm, grammarWasm })
   ws = new Workspace({ '/repo': ram }, { mode: MountMode.WRITE, shellParser: parser })
@@ -82,6 +107,43 @@ beforeAll(async () => {
 
 afterAll(() => {
   rmSync(tmp, { recursive: true, force: true })
+})
+
+describe.each(MESSAGE_CASES)('message endings match git 2.51.2: $id', ({ id, ending, hasBody }) => {
+  it.each(
+    [1, 2].flatMap((count) =>
+      ['show', 'log'].flatMap((verb) =>
+        ['subject=%s%nbody=%b', 'raw=%B', 'body=%b|subject=%s'].map((template) => ({
+          count,
+          verb,
+          template,
+        })),
+      ),
+    ),
+  )('$verb $count commits --format=$template', async ({ count, verb, template }) => {
+    const commits = messageCommits.get(id)
+    assert(commits)
+    const newest = commits[1]
+    assert(newest)
+    const revisions = verb === 'show' ? commits.slice(-count).reverse() : [newest]
+    const options = verb === 'show' ? ['-s'] : [`-${String(count)}`]
+    const args = [verb, ...options, `--format=${template}`, ...revisions]
+    const expected = ['one', 'two']
+      .slice(-count)
+      .reverse()
+      .map((subject) => {
+        const body = hasBody ? `body ${subject}${ending}` : ''
+        const message = hasBody ? `${subject}\n\n${body}` : subject + ending
+        return {
+          'subject=%s%nbody=%b': `subject=${subject}\nbody=${body}\n`,
+          'raw=%B': `raw=${message}\n`,
+          'body=%b|subject=%s': `body=${body}|subject=${subject}\n`,
+        }[template]
+      })
+      .join('')
+    expect(realGit(args)).toBe(expected)
+    expect(await run(args.map((arg) => `'${arg}'`).join(' '))).toEqual([0, expected, ''])
+  })
 })
 
 it.each([

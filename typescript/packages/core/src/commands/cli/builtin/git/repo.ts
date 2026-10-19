@@ -237,19 +237,25 @@ export async function readBlobBytes(repo: Repo, oid: string): Promise<Uint8Array
  */
 export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts> {
   const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
+  // readCommit normalizes message newlines. Pretty formats need the stored
+  // ending: %b and %B retain it before the format adds its own terminator.
+  const raw = (await rawObject(repo, oid)).raw
+  const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(raw)
+  const split = text.indexOf('\n\n')
+  const message = split < 0 ? '' : text.slice(split + 2)
   const decoded = [
-    commit.message,
+    message,
     commit.author.name,
     commit.author.email,
     commit.committer.name,
     commit.committer.email,
   ]
   // A byte that is no part of a character decoded as U+FFFD: the object's own
-  // bytes are read again, as surrogate-escaped text, for the filters that
+  // bytes are decoded again, as surrogate-escaped text, for the filters that
   // match them.
   let bytes: CommitFacts['bytes']
   if (decoded.some((text) => text.includes('\uFFFD'))) {
-    const text = decodeText((await rawObject(repo, oid)).raw)
+    const text = decodeText(raw)
     const split = text.indexOf('\n\n')
     const head = (split < 0 ? text : text.slice(0, split)).split('\n')
     const ident = (key: string): string =>
@@ -266,7 +272,7 @@ export async function commitFacts(repo: Repo, oid: string): Promise<CommitFacts>
     ...(bytes === undefined ? {} : { bytes }),
     oid,
     tree: commit.tree,
-    message: commit.message,
+    message,
     authorName: commit.author.name,
     authorEmail: commit.author.email,
     authorTime: commit.author.timestamp,

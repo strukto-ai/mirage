@@ -18,10 +18,46 @@ from dulwich import porcelain
 from mirage.commands.cli.builtin.git import GIT
 from tests.commands.cli.builtin.git.conftest import (
     AUTHOR,
+    commit_file,
     commit_merge,
     make_branch,
     mounted,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "ending", ["", "\n"], ids=["unterminated", "terminated"]
+)
+@pytest.mark.parametrize("has_body", [True, False], ids=["body", "empty-body"])
+@pytest.mark.parametrize("count", [1, 2])
+@pytest.mark.parametrize(
+    "template", ["subject=%s%nbody=%b", "raw=%B", "body=%b|subject=%s"]
+)
+async def test_message_endings_match_git_2_51_2(
+    git_ws, repo_path, ending, has_body, count, template
+):
+    """Preserve message endings measured with git 2.51.2 commit-tree."""
+    expected = []
+    for subject in ("one", "two"):
+        body = f"body {subject}{ending}" if has_body else ""
+        message = f"{subject}\n\n{body}" if has_body else subject + ending
+        commit_file(repo_path, "message.txt", subject, message)
+        expected.append(
+            {
+                "subject=%s%nbody=%b": f"subject={subject}\nbody={body}\n",
+                "raw=%B": f"raw={message}\n",
+                "body=%b|subject=%s": f"body={body}|subject={subject}\n",
+            }[template]
+        )
+    stdout = "".join(reversed(expected[-count:])).encode()
+    revisions = "HEAD" if count == 1 else "HEAD HEAD~1"
+    for command in (f"show -s {revisions}", f"log -{count} HEAD"):
+        result = await git_ws.shell(
+            f"git -C /repo {command} --format='{template}'"
+        )
+        assert (result.exit_code, result.stderr) == (0, None)
+        assert result.stdout == stdout
 
 
 @pytest.mark.asyncio
