@@ -183,8 +183,9 @@ export async function answered(
  * is worded in the caller's voice, so the rest of the line keeps running. A
  * handler that may have written past the dispatcher drops caches afterwards,
  * whether it answered, failed (in its own words too), timed out or was
- * cancelled, again when a body still running past its timeout settles, since
- * its write may land then, and again once an answer that streams has ended or
+ * cancelled, again when a body (or the renderer of the rows it handed over)
+ * still running past its timeout settles, since its write may land then, and
+ * again once an answer that streams has ended or
  * been closed, since a stream does its work as it is pulled. An answer
  * carries the producer the output limits resolve from and
  * has its stream framed so a failure while it streams is worded too; a
@@ -219,7 +220,7 @@ export async function runHandler(
       await drop()
       if (err instanceof CommandTimeoutError || opts.signal?.aborted === true) {
         const settle = (): Promise<void> => drop()
-        void body.then(settle, settle).catch((dropErr: unknown) => {
+        void answer.then(settle, settle).catch((dropErr: unknown) => {
           // The command already returned, so a drop that fails here (a
           // workspace torn down under it) has no stream to land on; it is
           // reported rather than left as an unhandled rejection.

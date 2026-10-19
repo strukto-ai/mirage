@@ -126,10 +126,11 @@ describe('runHandler', () => {
 })
 
 describe('runHandler with rows', () => {
-  it('holds until a renderer past its timeout settles, and closes what it hands back', async () => {
+  it('holds and drops caches until a renderer past its timeout settles', async () => {
     // A renderer cannot be cancelled, so what the caller holds for the
-    // handler (a CLI's client) is kept until the rendered answer settles,
-    // and the stream it hands back with no reader left is closed.
+    // handler (a CLI's client) is kept until the rendered answer settles, a
+    // write it makes late is followed by a cache drop, and the stream it
+    // hands back with no reader left is closed.
     let finish: () => void = () => undefined
     const gate = new Promise<void>((resolve) => {
       finish = resolve
@@ -153,6 +154,7 @@ describe('runHandler with rows', () => {
       },
     }
     let settled = 0
+    const drops = new Drops()
     const out = runHandler(
       Promise.resolve([null, new IOResult({ rows })]),
       'x',
@@ -160,15 +162,17 @@ describe('runHandler with rows', () => {
       PRODUCER,
       LEAF,
       {
+        drop: drops.drop,
         settle: () => {
           settled += 1
         },
       },
     )
     await expect(out).rejects.toBeInstanceOf(CommandTimeoutError)
-    expect(settled).toBe(0)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect([settled, drops.count]).toEqual([0, 1])
     finish()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect([settled, closed]).toEqual([1, 1])
+    expect([settled, closed, drops.count]).toEqual([1, 1, 2])
   })
 })
