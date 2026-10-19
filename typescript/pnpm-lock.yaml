@@ -115,6 +115,46 @@ importers:
         specifier: ^8.0.0
         version: 8.58.2(eslint@9.39.4(jiti@2.7.0))(typescript@6.0.3)
 
+  ../examples/browser:
+    dependencies:
+      '@struktoai/mirage-browser':
+        specifier: workspace:*
+        version: link:../../typescript/packages/browser
+      '@struktoai/mirage-node':
+        specifier: workspace:*
+        version: link:../../typescript/packages/node
+    devDependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1116.0
+        version: 3.1147.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.0.0
+        version: 3.1147.0
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      dotenv:
+        specifier: ^16.0.0
+        version: 16.6.1
+      mongodb:
+        specifier: ^6.21.0
+        version: 6.21.0(socks@2.8.7)
+      playwright-core:
+        specifier: ^1.59.1
+        version: 1.59.1
+      redis:
+        specifier: ^5.0.0
+        version: 5.12.1(@opentelemetry/api@1.9.1)
+      tsx:
+        specifier: ^4.20.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vite:
+        specifier: '>=7.3.5 <8'
+        version: 7.3.5(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
+
   ../examples/typescript:
     dependencies:
       '@ai-sdk/openai':
@@ -253,25 +293,6 @@ importers:
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
-
-  ../examples/typescript/browser:
-    dependencies:
-      '@struktoai/mirage-browser':
-        specifier: workspace:*
-        version: link:../../../typescript/packages/browser
-    devDependencies:
-      mongodb:
-        specifier: ^6.21.0
-        version: 6.21.0(socks@2.8.7)
-      playwright-core:
-        specifier: ^1.59.1
-        version: 1.59.1
-      typescript:
-        specifier: ^5.9.0
-        version: 5.9.3
-      vite:
-        specifier: '>=7.3.5 <8'
-        version: 7.3.5(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
 
   ../integ:
     dependencies:

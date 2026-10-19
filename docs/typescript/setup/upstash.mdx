@@ -36,7 +36,7 @@ await ws.shell('cat /r/greet')
 | `maxRequestBytes` | `8388608` | Browser only. Upstash caps a REST request at 10 MB; a larger file is written as one `SET` plus `APPEND`s of this size. |
 
 `process.env` in the browser snippet stands for however your bundler injects the value; the
-[page example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/redis.html)
+[page example](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/redis/redis.html)
 uses a Vite `define` fed from `UPSTASH_REDIS_URL` in `.env.development`.
 
 <Warning>
@@ -52,7 +52,7 @@ uses a Vite `define` fed from `UPSTASH_REDIS_URL` in `.env.development`.
 The browser store keeps every value byte-identical to what the Node mount writes: writes go out
 as raw request bodies and reads come back base64-encoded. A page over REST and a server over the
 Redis protocol can therefore share one database at the same time, and the
-[Node example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/redis/redis_browser.ts)
+[Node example](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/redis/main.ts)
 shows the two reading each other's files. Python reaches the same database with the same URL
 through its [`RedisVFS`](/python/vfs/redis).
 

@@ -52,7 +52,7 @@ unchecked scopes in tokens, even if the auth URL requests them.
 On the **Settings** tab, scroll to **OAuth 2 -> Redirect URIs** and add:
 
 - For the CLI flow below: `http://localhost:1`
-- For the browser PKCE example: `http://localhost:5173/dropbox_pkce.html`
+- For the browser PKCE example: `http://localhost:5173/vfs/dropbox/dropbox_pkce.html`
 
 Click **Add** after each.
 
@@ -122,10 +122,10 @@ If you're mounting Dropbox from a browser SPA and don't want to ship a client se
 PKCE flow. The bundled example does the dance end-to-end.
 
 1. In the Dropbox app **Settings** tab, ensure the redirect URI
-   `http://localhost:5173/dropbox_pkce.html` is registered (Step 3).
+   `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` is registered (Step 3).
 1. Set only `DROPBOX_APP_KEY` in `.env.development` at the repo root (no secret needed).
-1. From `examples/typescript/browser/`, run `pnpm dev`.
-1. Open `http://localhost:5173/dropbox_pkce.html` and click **Connect Dropbox**.
+1. From `examples/browser/`, run `pnpm dev`.
+1. Open `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` and click **Connect Dropbox**.
 
 The example persists the refresh token to `localStorage`, then mounts a `DropboxVFS` with
 just `{ clientId, refreshToken }` and runs `ls /dropbox/`. Inspect DevTools -> Network -> filter
@@ -168,7 +168,7 @@ access token whenever the cached one is within 5 minutes of expiry.
 | No `refresh_token` in token response                 | Add `token_access_type=offline` to the auth URL                                                |
 | `path/not_found/.` on `ls /dropbox/`                 | Account is empty, or app is **App folder** scoped and the sandbox folder hasn't been created  |
 | `missing_scope` on download                          | Check `files.content.read` is enabled in the **Permissions** tab and **submitted**             |
-| Browser PKCE: redirect URI mismatch                  | Dropbox is strict, `http://localhost:5173/dropbox_pkce.html` must match exactly (no trailing slash) |
+| Browser PKCE: redirect URI mismatch                  | Dropbox is strict, `http://localhost:5173/vfs/dropbox/dropbox_pkce.html` must match exactly (no trailing slash) |
 | Token works locally but fails after a while          | Access token expired, the `TokenManager` should auto-refresh; if not, refresh token may be revoked |
 
 For TypeScript usage, mount with:

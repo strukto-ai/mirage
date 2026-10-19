@@ -175,7 +175,7 @@ aws s3api put-bucket-cors --bucket $AWS_S3_BUCKET --cors-configuration file://co
 **Or** use the helper in the browser example, it signs the `PutBucketCors` call with your existing env credentials and applies the same policy to all configured buckets in one shot:
 
 ```bash
-cd examples/typescript/browser
+cd examples/browser
 npx tsx scripts/configure-cors.ts http://localhost:5173 https://app.example.com
 ```
 

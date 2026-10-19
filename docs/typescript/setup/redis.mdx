@@ -78,10 +78,10 @@ is several Redis commands (a directory listing costs a few per entry), which is 
 before pointing an agent at a metered database.
 
 Two examples exercise this path.
-[`examples/typescript/browser/redis.html`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/redis.html)
+[`examples/browser/vfs/redis/redis.html`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/redis/redis.html)
 mounts a database from a page against Upstash itself, reading `UPSTASH_REDIS_URL` from
 `.env.development`.
-[`examples/typescript/vfs/redis/redis_browser.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/redis/redis_browser.ts)
+[`examples/browser/vfs/redis/main.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/redis/main.ts)
 needs no account: it starts an in-process HTTP front that speaks the same REST shape over a local
 redis, mounts it through `@struktoai/mirage-browser`, and reads every key back through the Node
 mount to show the two stores agree byte for byte.

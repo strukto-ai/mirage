@@ -99,7 +99,7 @@ pnpm add @struktoai/mirage-browser
 ```ts
 import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-// Refresh token obtained via the PKCE flow, see examples/typescript/browser/src/box_pkce.ts.
+// Refresh token obtained via the PKCE flow, see examples/browser/vfs/box/box_pkce.ts.
 const box = new BoxVFS({
   clientId: import.meta.env.VITE_BOX_CLIENT_ID,
   refreshToken: localStorage.getItem('box-refresh')!,
@@ -112,7 +112,7 @@ await ws.shell('ls /box/')
 
 Box requires the origin to be allowlisted on the app's **Allowed Origins** config (see
 [setup](/home/setup/box#cors-notes)). The bundled
-[`examples/typescript/browser/src/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/src/box_pkce.ts)
+[`examples/browser/vfs/box/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/box/box_pkce.ts)
 runs the full PKCE dance and persists the rotated refresh token to `localStorage`.
 
 ## VFS mode (`patchNodeFs`)

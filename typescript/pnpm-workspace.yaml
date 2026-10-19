@@ -10,7 +10,7 @@ packages:
   - scripts
   - examples/*
   - ../examples/typescript
-  - ../examples/typescript/browser
+  - ../examples/browser
   - ../integ
 
 onlyBuiltDependencies:
