@@ -41,6 +41,11 @@ import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 
 const ENC = new TextEncoder()
+// gzip 1.13's zgrep with no pattern, exit 2; zegrep and zfgrep exec
+// zgrep, so they say the same. The host line also carries the
+// script's line number and its $0 path, which name a file mirage
+// does not have.
+const ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
 
 // Parsed zgrep flags; the complete set zgrep honors.
 interface ZgrepFlags {
@@ -109,7 +114,7 @@ export async function zgrepGeneric(
       null,
       new IOResult({
         exitCode: 2,
-        stderr: ENC.encode('zgrep: usage: zgrep [flags] pattern [path]\n'),
+        stderr: ENC.encode(`${ZGREP_NO_PATTERN}\n`),
       }),
     ]
   }

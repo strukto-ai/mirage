@@ -27,11 +27,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zgrep",
+      "command": "zgrep; echo rc=$?; zegrep; echo rc=$?; zfgrep",
       "expect": {
         "exit": 2,
-        "stdout": "",
-        "stderr": "zgrep: usage: zgrep [flags] pattern [path]\n"
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "zgrep: missing pattern; try `zgrep --help' for help\nzgrep: missing pattern; try `zgrep --help' for help\nzgrep: missing pattern; try `zgrep --help' for help\n"
       }
     }
   ]

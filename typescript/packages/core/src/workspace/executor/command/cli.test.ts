@@ -73,6 +73,7 @@ function makeInstall(name = 'prog'): CLIInstall {
               name: 'send',
               arguments: [
                 new Argument(['-t', '--to'], { required: true }),
+                new Argument('--style', { choices: ['top', 'bottom'] }),
                 new Argument('texts', { metavar: '', nargs: '*' }),
               ],
             }),
@@ -224,6 +225,17 @@ describe('handleCli', () => {
     expect(io.exitCode).toBe(2)
     expect(dec.decode(await materialize(io.stderr))).toMatch(
       /^prog message send: option '--to' is required/,
+    )
+    const [, refused] = await handleCli(
+      install,
+      ['prog', 'message', 'send', '-t', 'a', '--style=x'],
+      new SessionState({ sessionId: 't' }),
+    )
+    expect(refused.exitCode).toBe(2)
+    expect(dec.decode(await materialize(refused.stderr))).toBe(
+      "prog message send: invalid argument 'x' for '--style'\n" +
+        "Valid arguments are:\n  - 'top'\n  - 'bottom'\n" +
+        "Try 'prog message send --help' for more information.\n",
     )
   })
 
