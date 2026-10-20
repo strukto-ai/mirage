@@ -12,27 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LOOP_BUDGET } from '../../../concurrency/constants.ts'
-import { runIsolated } from '../../../concurrency/worker.ts'
-import { edScript, normalDiff, unifiedDiff } from '../diff_format.ts'
+import { chunks } from '../../../io/cooperative.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { DiffPool } from '../../../rs/diff_pool.ts'
+import type { DiffComputer, PairResult } from '../../../rs/diff_types.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 import type { Argument } from '../../spec/types.ts'
 import { compileSpec } from '../../spec/compile.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, PathSpec } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
 import type { StatPath } from '../../../view/types.ts'
 import { formatFsError } from '../../../errors/render.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
 import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
-import { splitLinesKeepends } from '../utils/lines.ts'
 import { UsageError } from '../../errors.ts'
 import { beforeFullScan } from '../utils/tree.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
@@ -104,6 +107,7 @@ function parseFlags(bag: Record<string, FlagValue>): DiffFlags {
 }
 
 interface Walk {
+  readonly computer: DiffComputer
   readonly signal: AbortSignal | undefined
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>
   readdir: Readdir
@@ -179,7 +183,7 @@ function childSpec(parent: PathSpec, name: string): PathSpec {
     virtual: childPath,
     directory: childPath,
     resolved: false,
-    vfsPath: stripSlash(childPath),
+    vfsPath: mountKey(childPath, mountPrefixOf(parent.virtual, parent.vfsPath)),
     rawPath: `${rstripSlash(parent.rawPath)}/${name}`,
   })
 }
@@ -245,75 +249,49 @@ export function switchWords(argv: readonly string[]): string[] {
   return words
 }
 
-async function side(walk: Walk, path: PathSpec, absent: boolean): Promise<string> {
-  return absent ? '' : DEC.decode(await materialize(walk.stream(path)))
-}
-
-/**
- * Diff two files' text in the format the flags choose. The matcher compares
- * up to every pair of lines and each comparison can walk a whole line, so a
- * diff whose line count times line count plus text length fits LOOP_BUDGET
- * runs here and a larger one in a worker, where Python runs every diff on the
- * loop (strukto-ai/mirage#1590).
- */
 async function diffPair(
   walk: Walk,
   path1: PathSpec,
   path2: PathSpec,
   absent: Absent = PRESENT,
-): Promise<Uint8Array> {
+): Promise<PairResult> {
   const flags = walk.flags
-  let textA = await side(walk, path1, absent[0])
-  let textB = await side(walk, path2, absent[1])
-  if (flags.ignoreCase) {
-    textA = textA.toLowerCase()
-    textB = textB.toLowerCase()
-  }
-  if (flags.ignoreAllSpace) {
-    textA = textA.replace(/\s+/g, '')
-    textB = textB.replace(/\s+/g, '')
-  }
-  if (flags.ignoreSpaceChange) {
-    textA = textA.replace(/[ \t]+/g, ' ')
-    textB = textB.replace(/[ \t]+/g, ' ')
-  }
-  if (textA === textB) {
-    return flags.identical
-      ? ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} are identical\n`)
-      : new Uint8Array(0)
-  }
-  if (flags.brief) return ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)
-  const aLines = splitLinesKeepends(textA)
-  const bLines = splitLinesKeepends(textB)
-  const lines = aLines.length + bLines.length
-  const here = lines * (lines + textA.length + textB.length) <= LOOP_BUDGET
-  let result: string[]
-  if (flags.ed)
-    result = here
-      ? edScript(aLines, bLines)
-      : await runIsolated<string[]>('edScript', [aLines, bLines], walk.signal)
-  else if (flags.unified) {
-    const args = [
-      aLines,
-      bLines,
-      quoteHeaderName(path1.rawPath),
-      quoteHeaderName(path2.rawPath),
-      flags.context,
-      await headerTime(walk, path1, absent[0]),
-      await headerTime(walk, path2, absent[1]),
-    ] as const
-    result = here
-      ? unifiedDiff(...args)
-      : await runIsolated<string[]>('unifiedDiff', args, walk.signal)
-  } else
-    result = here
-      ? normalDiff(aLines, bLines)
-      : await runIsolated<string[]>('normalDiff', [aLines, bLines], walk.signal)
-  return ENC.encode(result.join(''))
-}
-
-function isIdentical(body: Uint8Array): boolean {
-  return DEC.decode(body).endsWith(' are identical\n')
+  const headers =
+    flags.unified && !flags.brief && !flags.ed
+      ? {
+          old_header: `${quoteHeaderName(path1.rawPath)}\t${await headerTime(walk, path1, absent[0])}`,
+          new_header: `${quoteHeaderName(path2.rawPath)}\t${await headerTime(walk, path2, absent[1])}`,
+        }
+      : {}
+  const result = await walk.computer.compare(
+    {
+      mode: flags.ed ? 'ed' : flags.unified ? 'unified' : 'normal',
+      context: flags.context,
+      ignore_case: flags.ignoreCase,
+      ignore_all_space: flags.ignoreAllSpace,
+      ignore_space_change: flags.ignoreSpaceChange,
+      text: false,
+      brief: flags.brief,
+      old_label: path1.rawPath,
+      new_label: path2.rawPath,
+      old_header: headers.old_header ?? '',
+      new_header: headers.new_header ?? '',
+    },
+    () => (absent[0] ? new Uint8Array() : walk.stream(path1)),
+    () => (absent[1] ? new Uint8Array() : walk.stream(path2)),
+    walk.signal,
+  )
+  if (result.outcome === 'equal' && flags.identical && result.status === 0)
+    return {
+      ...result,
+      output: [ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} are identical\n`)],
+    }
+  if (result.outcome === 'different' && flags.brief)
+    return {
+      ...result,
+      output: [ENC.encode(`Files ${path1.rawPath} and ${path2.rawPath} differ\n`)],
+    }
+  return result
 }
 
 async function entries(walk: Walk, path: PathSpec, absent: boolean): Promise<Set<string>> {
@@ -355,7 +333,7 @@ async function diffDirs(
   dirB: PathSpec,
   absent: Absent = PRESENT,
   above: readonly [readonly string[], readonly string[]] = [[], []],
-): Promise<[Uint8Array, boolean]> {
+): Promise<[readonly Uint8Array[], boolean]> {
   const flags = walk.flags
   const real = walk.real
   const opened: readonly [readonly string[], readonly string[]] =
@@ -405,25 +383,25 @@ async function diffDirs(
         continue
       }
       const [body, changed] = await diffDirs(walk, childA, childB, gone, opened)
-      parts.push(body)
+      for (const chunk of body) parts.push(chunk)
       differ ||= changed
     } else if (!aDir && !bDir) {
-      const body = await diffPair(walk, childA, childB, gone)
-      if (body.byteLength === 0 || isIdentical(body)) {
-        parts.push(body)
+      const pair = await diffPair(walk, childA, childB, gone)
+      for (const chunk of pair.stderr) walk.trouble.push(chunk)
+      if (pair.status === 2 && pair.stderr.length === 0)
+        walk.trouble.push(ENC.encode('diff: comparison failed\n'))
+      if (pair.outcome === 'equal') {
+        for (const chunk of pair.output) parts.push(chunk)
         continue
       }
       differ = true
-      if (flags.brief) parts.push(body)
-      else
+      if (!flags.brief)
         parts.push(
-          concat([
-            ENC.encode(
-              `diff${walk.switches} ${quoteHeaderName(childA.rawPath)} ${quoteHeaderName(childB.rawPath)}\n`,
-            ),
-            body,
-          ]),
+          ENC.encode(
+            `diff${walk.switches} ${quoteHeaderName(childA.rawPath)} ${quoteHeaderName(childB.rawPath)}\n`,
+          ),
         )
+      for (const chunk of pair.output) parts.push(chunk)
     } else if (aDir) {
       differ = true
       parts.push(
@@ -440,7 +418,7 @@ async function diffDirs(
       )
     }
   }
-  return [concat(parts), differ]
+  return [parts, differ]
 }
 
 async function missing(stat: Stat, path: PathSpec, allowed: boolean): Promise<boolean> {
@@ -461,7 +439,7 @@ async function excludedPatterns(
   const patterns = [...flags.exclude]
   for (const path of flags.excludeFrom) {
     const text = DEC.decode(await materialize(stream(path)))
-    patterns.push(...text.split('\n').filter((line) => line !== ''))
+    for (const line of text.split('\n')) if (line !== '') patterns.push(line)
   }
   return patterns
 }
@@ -489,10 +467,14 @@ export async function diffGeneric(
   const errorPaths = [...paths, ...flags.excludeFrom]
   const links = linksOf(ctx)
   const trouble: Uint8Array[] = []
-  let output: Uint8Array | undefined
+  let output: readonly Uint8Array[] | undefined
   let differ = false
+  const owned = ctx.diff === undefined ? new DiffPool() : undefined
+  const computer = ctx.diff ?? owned
+  if (computer === undefined) throw new Error('diff computer is missing')
   try {
     const walk: Walk = {
+      computer,
       signal: ctx.signal,
       stream,
       readdir,
@@ -547,16 +529,46 @@ export async function diffGeneric(
       }
     }
     if (output === undefined) {
-      output = await diffPair(walk, p0, p1, absent)
-      differ = output.byteLength > 0 && !isIdentical(output)
+      const pair = await diffPair(walk, p0, p1, absent)
+      output = pair.output
+      differ = pair.outcome === 'different'
+      for (const chunk of pair.stderr) trouble.push(chunk)
+      if (pair.status === 2 && pair.stderr.length === 0)
+        trouble.push(ENC.encode('diff: comparison failed\n'))
     }
   } catch (err) {
-    if (!isFsError(err)) throw err
+    if (err instanceof StreamRefusal)
+      return [
+        err.output,
+        new IOResult({ exitCode: 2, stderr: ENC.encode(`diff: ${err.message}\n`) }),
+      ]
+    if (!isFsError(err)) {
+      if (
+        err instanceof UsageError ||
+        err instanceof CommandTimeoutError ||
+        err instanceof PipeClosed ||
+        (err instanceof Error && err.name === 'AbortError')
+      )
+        throw err
+      return [
+        null,
+        new IOResult({
+          exitCode: 2,
+          stderr: ENC.encode(`diff: ${err instanceof Error ? err.message : String(err)}\n`),
+        }),
+      ]
+    }
     // GNU diff reserves exit 1 for "files differ"; trouble (a missing or
     // unreadable operand) is exit 2.
     return [null, new IOResult({ exitCode: 2, stderr: formatFsError('diff', err, errorPaths) })]
+  } finally {
+    await owned?.close()
   }
-  const out: ByteSource = output
+  const out: ByteSource = outputChunks(output)
   if (trouble.length > 0) return [out, new IOResult({ exitCode: 2, stderr: concat(trouble) })]
   return [out, new IOResult({ exitCode: differ ? 1 : 0 })]
+}
+
+async function* outputChunks(parts: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const part of parts) yield* chunks(part)
 }

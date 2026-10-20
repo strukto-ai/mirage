@@ -23,3 +23,30 @@ async def test_cancel_kills_and_joins_the_owned_process():
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_stop_retains_child_and_refuses_more_work(monkeypatch):
+    worker = Worker()
+    await worker.call(time.monotonic)
+    process = worker._process
+    assert process is not None
+    kill = process.kill
+
+    def reject():
+        raise PermissionError("termination refused")
+
+    monkeypatch.setattr(process, "kill", reject)
+    try:
+        with pytest.raises(PermissionError, match="termination refused"):
+            await worker.close()
+        assert worker._process is process and process.returncode is None
+        with pytest.raises(PermissionError, match="termination refused"):
+            await worker.call(time.monotonic)
+        assert worker._process is process and process.returncode is None
+        monkeypatch.setattr(process, "kill", kill)
+        await worker.close(retry=True)
+        assert process.returncode is not None and worker._process is None
+    finally:
+        monkeypatch.setattr(process, "kill", kill)
+        await worker.close(retry=True)

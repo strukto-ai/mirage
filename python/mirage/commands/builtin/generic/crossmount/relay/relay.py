@@ -36,6 +36,7 @@ from mirage.commands.builtin.generic.crossmount.types import (
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource
+from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec
 from mirage.view.types import SessionView
@@ -56,6 +57,7 @@ async def run_relay(
     cwd: str = "/",
     argv: tuple[str, ...] = (),
     check_unlink: CheckFn | None = None,
+    diff: DiffComputer | None = None,
 ) -> CrossResult:
     """Run a command whose work must see every operand at once.
 
@@ -163,5 +165,6 @@ async def run_relay(
             vfs,
             stdin,
             argv,
+            diff=diff,
         )
     raise ValueError(f"No cross-mount composition for {cmd_name}")

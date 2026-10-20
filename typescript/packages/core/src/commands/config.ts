@@ -1,3 +1,4 @@
+import type { DiffComputer } from '../rs/diff_types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +41,7 @@ import type { Files } from '../workspace/files.ts'
  * Mirrors Python's `Context`.
  */
 export interface Context {
+  diff?: DiffComputer
   /** Piped standard input, if any. */
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */

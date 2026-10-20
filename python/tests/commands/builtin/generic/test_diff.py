@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic.diff import (
     quote_header_name,
     switch_words,
 )
+from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.timezone import resolve_tz
 
@@ -114,7 +115,7 @@ async def test_unified_headers_carry_each_side_mtime():
         flags=DiffFlags(unified=True),
     )
     assert io.exit_code == 1
-    assert isinstance(out, bytes)
+    out = await materialize(out)
     assert out.splitlines()[:2] == [
         b'--- "a b"\t2026-01-02 03:04:05.000000000 +0000',
         b"+++ c\t2026-01-02 03:04:05.000000000 +0000",
@@ -126,7 +127,7 @@ async def test_unified_headers_carry_each_side_mtime():
         stat_fn=stat,
         flags=DiffFlags(unified=True, new_file=True, new_first=True),
     )
-    assert isinstance(out, bytes)
+    out = await materialize(out)
     assert out.splitlines()[1] == (
         b"+++ gone\t1970-01-01 00:00:00.000000000 +0000"
     )
@@ -158,7 +159,7 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
         flags=DiffFlags(unified=True),
         stat_path=stat_path,
     )
-    assert isinstance(out, bytes)
+    out = await materialize(out)
     assert out.splitlines()[0] == b"--- a\t2021-06-15 12:00:00.000000000 +0000"
 
 
@@ -189,7 +190,7 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
         stat_path=stat_path,
         zone=resolve_tz("Asia/Hong_Kong"),
     )
-    assert isinstance(out, bytes)
+    out = await materialize(out)
     assert out.splitlines()[:2] == [
         b"--- a\t2026-03-04 13:06:07.123456789 +0800",
         b"+++ gone\t1970-01-01 08:00:00.000000000 +0800",

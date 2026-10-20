@@ -20,7 +20,11 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { IOResult } from '../../../io/types.ts'
+import { UsageError } from '../../errors.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import type { DiffComputer, PairOutcome } from '../../../rs/diff_types.ts'
 
 const ENC = new TextEncoder()
 
@@ -102,7 +106,7 @@ describe('diff headers', () => {
       readdir,
       backend,
     )
-    expect(new TextDecoder().decode(out as Uint8Array).split('\n')[0]).toBe(
+    expect(new TextDecoder().decode(await materialize(out)).split('\n')[0]).toBe(
       '--- a\t2021-06-15 12:00:00.000000000 +0000',
     )
   })
@@ -131,7 +135,7 @@ describe('diff headers', () => {
     )
     expect(
       new TextDecoder()
-        .decode(out as Uint8Array)
+        .decode(await materialize(out))
         .split('\n')
         .slice(0, 2),
     ).toEqual([
@@ -159,7 +163,7 @@ describe('diff headers', () => {
     expect(io.exitCode).toBe(1)
     expect(
       new TextDecoder()
-        .decode(out as Uint8Array)
+        .decode(await materialize(out))
         .split('\n')
         .slice(0, 2),
     ).toEqual([
@@ -177,8 +181,96 @@ describe('diff headers', () => {
       readdir,
       statOf,
     )
-    expect(new TextDecoder().decode(absent as Uint8Array).split('\n')[1]).toBe(
+    expect(new TextDecoder().decode(await materialize(absent)).split('\n')[1]).toBe(
       '+++ gone\t1970-01-01 00:00:00.000000000 +0000',
+    )
+  })
+})
+
+it.each([
+  new CommandTimeoutError('diff', 1),
+  new PipeClosed(),
+  new UsageError('diff: scope refused', 1),
+  new DOMException('execute aborted', 'AbortError'),
+])('preserves host control failures raised by filesystem work, %s', async (failure) => {
+  const unread = (_path: PathSpec): AsyncIterable<Uint8Array> => {
+    throw new Error('unexpected input read')
+  }
+  const ctx: Context = { flags: { recursive: true }, stdin: null, cwd: PathSpec.fromStrPath('/') }
+  await expect(
+    diffGeneric([operand('a', '/d/a'), operand('b', '/d/b')], ctx, unread, readdir, () =>
+      Promise.reject(failure),
+    ),
+  ).rejects.toBe(failure)
+})
+
+describe('diff with many output chunks', () => {
+  const output = Array.from({ length: 200_000 }, (_, i) => ENC.encode(i < 100_000 ? '<' : '>'))
+  const expected = '<'.repeat(100_000) + '>'.repeat(100_000)
+  const unread = (_path: PathSpec): AsyncIterable<Uint8Array> => {
+    throw new Error('unexpected input read')
+  }
+  const directories = new Set(['/d/a', '/d/b', '/d/a/sub', '/d/b/sub'])
+  const directoryStat = (path: PathSpec): Promise<FileStat> =>
+    Promise.resolve(
+      new FileStat({
+        name: path.virtual,
+        type: directories.has(path.virtual) ? FileType.DIRECTORY : FileType.FILE,
+      }),
+    )
+  const children = (path: PathSpec): Promise<string[]> =>
+    Promise.resolve(path.virtual.endsWith('/sub') ? ['x'] : ['sub'])
+
+  it.each<PairOutcome>(['equal', 'different'])(
+    'preserves %s output through nested directories',
+    async (outcome) => {
+      const computer: DiffComputer = {
+        compare: () =>
+          Promise.resolve({ outcome, status: outcome === 'equal' ? 0 : 1, output, stderr: [] }),
+      }
+      const ctx: Context = {
+        flags: { recursive: true },
+        argv: ['-r', 'a', 'b'],
+        stdin: null,
+        cwd: PathSpec.fromStrPath('/'),
+        diff: computer,
+      }
+      const [out, io] = await diffGeneric(
+        [operand('a', '/d/a'), operand('b', '/d/b')],
+        ctx,
+        unread,
+        children,
+        directoryStat,
+      )
+      expect(io.exitCode).toBe(outcome === 'equal' ? 0 : 1)
+      expect(new TextDecoder().decode(await materialize(io.stderr))).toBe('')
+      const header = outcome === 'different' ? 'diff -r a/sub/x b/sub/x\n' : ''
+      expect(new TextDecoder().decode(await materialize(out))).toBe(header + expected)
+    },
+  )
+
+  it.each([false, true])('preserves diagnostics with recursive=%s', async (recursive) => {
+    const computer: DiffComputer = {
+      compare: () =>
+        Promise.resolve({ outcome: 'different', status: 2, output: [], stderr: output }),
+    }
+    const ctx: Context = {
+      flags: { recursive },
+      stdin: null,
+      cwd: PathSpec.fromStrPath('/'),
+      diff: computer,
+    }
+    const [out, io] = await diffGeneric(
+      [operand('a', '/d/a'), operand('b', '/d/b')],
+      ctx,
+      unread,
+      children,
+      recursive ? directoryStat : stat,
+    )
+    expect(io.exitCode).toBe(2)
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(expected)
+    expect(new TextDecoder().decode(await materialize(out))).toBe(
+      recursive ? 'diff a/sub/x b/sub/x\n' : '',
     )
   })
 })

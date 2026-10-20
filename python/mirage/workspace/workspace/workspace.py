@@ -90,6 +90,7 @@ from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.process.types import SpawnRequest
 from mirage.process.view import ProcessView
+from mirage.rs.diff_pool import DiffPool
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import (
     RuntimeContext,
@@ -271,6 +272,8 @@ class Workspace:
         self._registry = MountRegistry(
             IOConfig.model_validate({} if io is None else io), self._clock
         )
+        self._diff_pool = DiffPool()
+        self._registry.diff = self._diff_pool
         self._registry.process_view = self._process_view
         self._registry.fill_env = self._fill_tree_env
         self._registry.command_limits = dict(command_limits or {})
@@ -1563,18 +1566,29 @@ class Workspace:
         # close lists. Keep _closed separate so runtime journals can still
         # dispatch.
         self._closing = True
+        self._diff_pool.stop()
         executions = list(self._shell_executions)
         for execution in executions:
             execution.cancel()
-        await asyncio.gather(*(execution.aclose() for execution in executions))
+        execution_results = await asyncio.gather(
+            *(execution.aclose() for execution in executions),
+            return_exceptions=True,
+        )
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
                     raise self._close_error
                 return
             self._state_dropped = drop_state
-            failures = await close_workspace(
-                self._close_deps(drop_state, blocked_loop)
+            failures = [
+                result
+                for result in execution_results
+                if isinstance(result, BaseException)
+            ]
+            failures.extend(
+                await close_workspace(
+                    self._close_deps(drop_state, blocked_loop)
+                )
             )
             self._closed = True
             self._async_closed = True
@@ -1607,6 +1621,7 @@ class Workspace:
             owns_state_store=self._owns_state_store,
             state_store=self._state_store,
             closers=[
+                self._diff_pool.close,
                 self._script_policy.close,
                 self._runtimes.close,
                 self._registry.clis.close,

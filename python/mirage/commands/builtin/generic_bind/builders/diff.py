@@ -39,4 +39,4 @@ async def diff(
     )
 
 
-BUILDER = GenericCommand("diff", diff, read=True)
+BUILDER = GenericCommand("diff", diff, read=True, streams=True)

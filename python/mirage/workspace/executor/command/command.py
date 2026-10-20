@@ -764,6 +764,7 @@ async def handle_command(
                 cmd_name, _operand_mounts(registry, cmd_name, cross_scopes)
             ),
             check_unlink=make_check_unlink(registry),
+            diff=registry.diff,
             follow=follow,
         )
         if cmd_name == "find":

@@ -1,3 +1,4 @@
+import type { DiffComputer } from '../../../rs/diff_types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,6 +71,7 @@ export async function runDispatch(
   signal?: AbortSignal,
   argv: readonly string[] = [],
   follow?: FollowOperands,
+  diff?: DiffComputer,
 ): Promise<[ByteSource | null, IOResult]> {
   return runWithCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
@@ -80,6 +82,7 @@ export async function runDispatch(
         vfs ?? new Files(dispatch, null, null, { follow: follow ?? null, ledger: false })
       ).servedBy(null),
       argv,
+      ...(diff === undefined ? {} : { diff }),
       ...(signal === undefined ? {} : { signal }),
     })
     if (result === null) return [null, new IOResult()]

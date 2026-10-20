@@ -692,6 +692,8 @@ export async function handleCommand(
       aggregateFor(cmdName, operandMounts(registry, cmdName, csScopes)),
       makeCheckUnlink(registry, sessionAccess(session)),
       follow,
+      registry.diff,
+      mergeSignals(signal, context.frame.abortSignal),
     )
     const csExec = new ExecutionNode({
       command: cmdStr,

@@ -174,6 +174,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "similar",
 ]
 
 [[package]]
@@ -397,6 +398,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
 ]
 
 [[package]]

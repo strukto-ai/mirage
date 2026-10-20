@@ -28,6 +28,9 @@ class StreamRefusal(Exception):
         self.message = message
         self.output = output
 
+    def __reduce__(self) -> tuple[type["StreamRefusal"], tuple[str, bytes]]:
+        return type(self), (self.message, self.output)
+
 
 class RegexError(Exception):
     """A pattern mirage-rs refused to compile.

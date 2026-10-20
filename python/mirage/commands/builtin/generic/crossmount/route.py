@@ -39,6 +39,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.types import CheckFn, PathSpec
@@ -62,6 +63,7 @@ async def handle_cross_mount(
     aggregate: AggregateFn | None = None,
     check_unlink: CheckFn | None = None,
     follow: FollowOperands | None = None,
+    diff: DiffComputer | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -172,6 +174,7 @@ async def handle_cross_mount(
                 cwd,
                 argv,
                 check_unlink,
+                diff=diff,
             )
         if strategy is Strategy.STREAM:
             return await run_stream(
