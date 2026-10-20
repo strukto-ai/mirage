@@ -72,6 +72,7 @@ async def main():
     print("\n--- shell equivalent: head -n 5 ---")
     result = await ws.shell("head -n 5 /s3/data/example.jsonl")
     print(await result.stdout_str())
+    await ws.close()
 
 
 asyncio.run(main())

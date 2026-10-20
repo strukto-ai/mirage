@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,7 +32,12 @@ const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
 
 const MOUNT = '/nc'
+// Docker Desktop forwards host.docker.internal to this loopback address;
+// where it does not (Linux), set WEBHOOK_HOST to an address the Nextcloud
+// container can reach.
+const HOST = process.env.WEBHOOK_HOST ?? '127.0.0.1'
 const PORT = Number.parseInt(process.env.WEBHOOK_PORT ?? '8990', 10)
+const SECRET_HEADER = 'X-Webhook-Secret'
 
 // The webhook_listeners event classes to register a webhook for.
 const EVENT_CLASSES = [
@@ -40,6 +46,34 @@ const EVENT_CLASSES = [
   'OCP\\Files\\Events\\Node\\NodeDeletedEvent',
   'OCP\\Files\\Events\\Node\\NodeRenamedEvent',
 ]
+
+function requiredEnv(name: string): string {
+  const value = process.env[name]
+  if (value === undefined || value === '') {
+    throw new Error(`${name} env var is required`)
+  }
+  return value
+}
+
+/** A header's raw bytes when it was sent exactly once, else empty. */
+function header(request: IncomingMessage, name: string): Buffer {
+  const values = request.headersDistinct[name.toLowerCase()] ?? []
+  if (values.length !== 1) return Buffer.alloc(0)
+  return Buffer.from(values[0] ?? '', 'latin1')
+}
+
+function sameBytes(given: Buffer, expected: Buffer): boolean {
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
+// Python's shlex.quote, so the commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+const SECRET = Buffer.from(requiredEnv('NEXTCLOUD_WEBHOOK_SECRET'), 'utf8')
 
 function buildConfig(): NextcloudConfig {
   const url = process.env.NEXTCLOUD_URL
@@ -59,9 +93,11 @@ const ws = new Workspace({ [MOUNT]: vfs }, { mode: MountMode.WRITE })
  * The consumer-owned push endpoint: Nextcloud POSTs here.
  *
  * Mirage hosts no server; this receiver lives in your own service and
- * just imports mirage. `NextcloudEventHook` maps each delivery onto the
- * mount, and every change goes to ws.notify. No polling anywhere, no
- * setup call: the event runtime attaches lazily on first use.
+ * just imports mirage. A delivery must carry the shared secret in
+ * `X-Webhook-Secret`; any other is refused before its body is read.
+ * `NextcloudEventHook` maps each delivery onto the mount, and every
+ * change goes to ws.notify. No polling anywhere, no setup call: the
+ * event runtime attaches lazily on first use.
  */
 class WebhookReceiver {
   private readonly hook = new NextcloudEventHook(vfs.accessor)
@@ -70,14 +106,19 @@ class WebhookReceiver {
   constructor(private readonly workspace: Workspace) {}
 
   async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (!sameBytes(header(request, SECRET_HEADER), SECRET)) {
+      response.writeHead(401, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ ok: false }))
+      return
+    }
     const chunks: Buffer[] = []
     for await (const chunk of request) chunks.push(chunk as Buffer)
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as JsonValue
     const event = isObject(payload) ? payload.event : undefined
     const eventClass = isObject(event) && typeof event.class === 'string' ? event.class : ''
     for (const change of await this.hook.toEvents(this.root, eventClass, payload)) {
-      await this.workspace.notify(change)
       console.log(`webhook: ${change.kind} ${change.path.virtual}`)
+      await this.workspace.notify(change)
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ ok: true }))
@@ -102,11 +143,17 @@ function printRegistrationHelp(): void {
       `     curl -u ${String(config.username)}:*** -H "OCS-APIRequest: true"` +
         ' -H "Content-Type: application/json"' +
         ` -X POST ${String(base)}/ocs/v2.php/apps/webhook_listeners` +
-        '/api/v1/webhooks/register' +
+        '/api/v1/webhooks' +
         ` -d '{"httpMethod": "POST", "uri": "${callback}",` +
-        ` "event": "${escaped}"}'`,
+        ` "event": "${escaped}", "authMethod": "header",` +
+        ` "authData": {"${SECRET_HEADER}": "***"}}'`,
     )
   }
+  console.log(
+    '     (*** in authData is NEXTCLOUD_WEBHOOK_SECRET: Nextcloud sends' +
+      ` it as ${SECRET_HEADER}, and the receiver refuses a delivery` +
+      ' without it.)',
+  )
   console.log(
     '  3. Delivery rides Nextcloud background jobs; with the docker' +
       ' image run `occ background:cron` (or enable system cron) so' +
@@ -126,8 +173,8 @@ async function main(): Promise<void> {
       response.writeHead(500).end()
     })
   })
-  await new Promise<void>((done) => server.listen(PORT, '0.0.0.0', done))
-  console.log(`consumer receiver listening on :${String(PORT)}/nextcloud/webhook\n`)
+  await new Promise<void>((done) => server.listen(PORT, HOST, done))
+  console.log(`consumer receiver listening on ${HOST}:${String(PORT)}/nextcloud/webhook\n`)
   printRegistrationHelp()
 
   // Ctrl-C closes the event runtime, which ends the loop below cleanly.
@@ -143,7 +190,7 @@ async function main(): Promise<void> {
     for await (const change of ws.events(PathSpec.fromStrPath(MOUNT))) {
       console.log(`event: ${change.kind} ${change.path.virtual}`)
       if (change.kind !== FileChangeKind.DELETE) {
-        const result = await ws.shell(`head -c 200 ${change.path.virtual}`)
+        const result = await ws.shell(`head -c 200 ${shellQuote(change.path.virtual)}`)
         const fresh = result.stdoutText.trim()
         console.log(`  fresh content: ${JSON.stringify(fresh.slice(0, 80))}`)
       }

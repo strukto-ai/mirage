@@ -38,6 +38,15 @@ function buildConfig(): SlackConfig {
   return { token }
 }
 
+const exists = (p: string): Promise<boolean> =>
+  fs.promises.stat(p).then(
+    () => true,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err
+      return false
+    },
+  )
+
 async function main(): Promise<void> {
   const vfs = new SlackVFS(buildConfig())
   const ws = new Workspace({ '/slack': vfs }, { mode: MountMode.READ })
@@ -84,7 +93,8 @@ async function main(): Promise<void> {
                 const user = rec.user ?? '?'
                 const text = (rec.text ?? '').slice(0, 80)
                 console.log(`  [${user}] ${text}`)
-              } catch {
+              } catch (err) {
+                if (!(err instanceof SyntaxError)) throw err
                 console.log(`  (unparseable: ${line.slice(0, 80)})`)
               }
             }
@@ -97,11 +107,6 @@ async function main(): Promise<void> {
         }
 
         console.log('\n--- exists via fs.promises.stat() ---')
-        const exists = (p: string): Promise<boolean> =>
-          fs.promises.stat(p).then(
-            () => true,
-            () => false,
-          )
         console.log(`  exists: ${String(await exists(path))}`)
         console.log(`  nonexistent: ${String(await exists('/slack/channels/nope'))}`)
       }

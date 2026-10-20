@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   ContentDriftError,
+  DriftPolicy,
   MountMode,
   RAMVFS,
   S3VFS,
@@ -562,7 +563,11 @@ async function driftAndPin(): Promise<void> {
     const s2 = (await driftWs.stat(probe)) as FileStat
     console.log(`  mutated on bucket: new revision=${String(s2.revision)}`)
 
-    const loaded = await Workspace.load(driftSnap, {}, { '/s3/': new S3VFS(config) })
+    const loaded = await Workspace.load(
+      driftSnap,
+      { driftPolicy: DriftPolicy.STRICT },
+      { '/s3/': new S3VFS(config) },
+    )
     loaded.cache.evictPaths([probe])
     try {
       const served = (await loaded.shell(`cat ${probe}`)).stdoutText.trim()
@@ -582,8 +587,9 @@ async function driftAndPin(): Promise<void> {
   } finally {
     try {
       await driftWs.shell(`rm ${probe}`)
-    } catch {
-      // Best-effort cleanup.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(`  cleanup: rm ${probe} failed: ${message}`)
     }
     await driftWs.close()
     if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true })

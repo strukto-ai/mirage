@@ -132,6 +132,7 @@ async def main() -> None:
     await show(ws, "cat /docs/refund-2026.pdf/004__102.txt")
     await show(ws, "cat /docs/refund-2026.pdf/004__102.json")
     await show(ws, 'search "how long does a refund take" /docs')
+    await ws.close()
 
 
 if __name__ == "__main__":

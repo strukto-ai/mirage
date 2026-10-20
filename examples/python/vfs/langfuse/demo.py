@@ -249,6 +249,7 @@ async def main():
         f"  cat /langfuse/zz-none-*/x.json -> exit={r.exit_code} {err[:120]}"
     )
     assert r.exit_code == 1 and "zz-none-*" in err
+    await ws.close()
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,7 +55,6 @@ async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
 
 function buildTests(testDir: string, testFile: string): [Test[], Test[], Test[]] {
   const commands: Test[] = [
-    ['mkdir', `mkdir "${testDir}"`],
     ['touch', `touch "${testFile}"`],
     ['echo write', `echo "hello world\nfoo bar\nhello again\napple\nbanana" > "${testFile}"`],
     ['ls', `ls "${testDir}"`],
@@ -231,6 +231,44 @@ function writeReport(
   console.log(`\nReport: ${REPORT_FILE}`)
 }
 
+async function makeScratchDir(ws: Workspace, path: string): Promise<void> {
+  const r = await ws.shell(`mkdir "${path}"`)
+  if (r.exitCode !== 0) throw new Error(`mkdir ${path} failed: ${r.stderrText.trim()}`)
+}
+
+async function runSuite(
+  ws: Workspace,
+  testDir: string,
+  testFile: string,
+): Promise<[Result[], Result[], Result[]]> {
+  const [commands, pipeTests, shellTests] = buildTests(testDir, testFile)
+
+  console.log('=== Individual Commands ===')
+  const cmdResults = await runSection(ws, commands)
+
+  console.log('\n=== Piping ===')
+  const pipeResults = await runSection(ws, pipeTests)
+
+  console.log('\n=== Shell Features ===')
+  const shellResults = await runSection(ws, shellTests)
+
+  // chmod/chown/touch never hit the Graph API: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on ${testFile} ===`)
+  const metaRes = await ws.shell(
+    `chmod 640 "${testFile}" && chown 500:dev "${testFile}" && touch -t 202601021530 "${testFile}"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', testFile)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
+
+  return [cmdResults, pipeResults, shellResults]
+}
+
 async function main(): Promise<void> {
   console.log('Token loaded ✓\n')
 
@@ -241,40 +279,21 @@ async function main(): Promise<void> {
   try {
     const [site, drive] = await pickSiteAndDrive(ws)
     const base = `/sharepoint/${site}/${drive}`
-    const testDir = `${base}/mirage-sp-test`
+    const testDir = `${base}/mirage-sp-test-${randomUUID().replaceAll('-', '').slice(0, 8)}`
     const testFile = `${testDir}/hello.txt`
     console.log(`Site: ${site}, Drive: ${drive}`)
     console.log(`Test dir: ${testDir}\n`)
 
-    const [commands, pipeTests, shellTests] = buildTests(testDir, testFile)
-
-    console.log('=== Individual Commands ===')
-    const cmdResults = await runSection(ws, commands)
-
-    console.log('\n=== Piping ===')
-    const pipeResults = await runSection(ws, pipeTests)
-
-    console.log('\n=== Shell Features ===')
-    const shellResults = await runSection(ws, shellTests)
-
-    // chmod/chown/touch never hit the Graph API: attrs land in the
-    // workspace namespace (durable, snapshot-captured) and merge into
-    // dispatch-level stat.
-    console.log(`=== metadata overlay on ${testFile} ===`)
-    const metaRes = await ws.shell(
-      `chmod 640 "${testFile}" && chown 500:dev "${testFile}" && touch -t 202601021530 "${testFile}"`,
-    )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', testFile)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
-    console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
-    )
-
-    // Cleanup
-    console.log('\n=== Cleanup ===')
-    await ws.shell(`rm -r "${testDir}"`)
-    console.log('  done')
+    await makeScratchDir(ws, testDir)
+    let results: [Result[], Result[], Result[]]
+    try {
+      results = await runSuite(ws, testDir, testFile)
+    } finally {
+      console.log('\n=== Cleanup ===')
+      await ws.shell(`rm -r "${testDir}"`)
+      console.log('  done')
+    }
+    const [cmdResults, pipeResults, shellResults] = results
 
     writeReport(site, drive, cmdResults, pipeResults, shellResults)
 

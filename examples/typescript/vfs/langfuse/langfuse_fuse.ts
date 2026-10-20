@@ -98,7 +98,8 @@ async function main(): Promise<void> {
           console.log(
             `  ${String(doc.name ?? "?")} v${String(doc.version ?? "?")}`,
           );
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err;
           console.log(`  (raw: ${promptBytes.slice(0, 100)})`);
         }
       }

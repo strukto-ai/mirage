@@ -148,8 +148,9 @@ async def main():
     )
     print(f"  chmod/chown/touch exit={r.exit_code}")
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path(file_path))
+    st_mode = oct(st.mode)[2:] if st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+        f"  dispatch stat: mode={st_mode} uid={st.uid} "
         f"gid={st.gid} mtime={st.modified}"
     )
 
@@ -400,6 +401,7 @@ async def main():
     err = (await r.stderr_str()).strip()
     print(f"  exit={r.exit_code}  {err[:120]}")
     assert r.exit_code == 1 and "zz-none-*" in err
+    await ws.close()
 
 
 if __name__ == "__main__":

@@ -12,11 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Build the "mirage-fuse" Daytona snapshot once. Sandbox creation from
-// a snapshot takes seconds; building this image inline would sit in
-// the first captured line's path for many minutes. Run again after a
-// mirage release to refresh the baked package.
-
 import { Daytona, Image } from '@daytona/sdk'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'node:path'

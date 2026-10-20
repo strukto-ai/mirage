@@ -99,8 +99,9 @@ async def main() -> None:
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(first_path))
+    meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+        f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
     await run(ws, f"head -n 5 {quoted_path}")
@@ -123,6 +124,7 @@ async def main() -> None:
         f"{len(records)} ops, {network_bytes} network bytes, "
         f"{cache_bytes} cache bytes"
     )
+    await ws.close()
 
 
 if __name__ == "__main__":

@@ -138,6 +138,7 @@ async def main():
         "\nNow run: ./python/.venv/bin/python "
         "examples/python/configuration/cross/load_check.py"
     )
+    await ws.close()
 
 
 if __name__ == "__main__":

@@ -51,6 +51,10 @@ function buildConfig(): EmailConfig {
   })
 }
 
+function pickFolder(folders: string[]): string {
+  return folders.find((f) => f.toLowerCase() === 'inbox') ?? folders[0] ?? ''
+}
+
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.promises.stat(p)
@@ -72,10 +76,7 @@ async function main(): Promise<void> {
       console.log(`  ${f}`)
     }
 
-    let folder = 'Inbox'
-    if (!folders.some((f) => f.includes('Inbox') || f.includes('INBOX'))) {
-      folder = folders[0] ?? ''
-    }
+    const folder = pickFolder(folders)
     if (folder === '') {
       console.log('No folders')
       return

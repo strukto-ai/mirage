@@ -90,8 +90,11 @@ async def main():
             meta_st, _ = await ws.dispatch(
                 "stat", PathSpec.from_str_path(target)
             )
+            meta_mode = (
+                oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
+            )
             print(
-                f"  dispatch stat: mode={oct(meta_st.mode)[2:]} "
+                f"  dispatch stat: mode={meta_mode} "
                 f"uid={meta_st.uid} gid={meta_st.gid} "
                 f"mtime={meta_st.modified}"
             )
@@ -101,6 +104,7 @@ async def main():
         await _run(ws, f'grep -n TODO "{target}"')
     else:
         print("\nSet DATABRICKS_VOLUME_SAMPLE_FILE to run file reads.")
+    await ws.close()
 
 
 if __name__ == "__main__":

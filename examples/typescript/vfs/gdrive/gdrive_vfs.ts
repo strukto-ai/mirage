@@ -43,7 +43,10 @@ function buildConfig(): GDriveConfig {
 const exists = (p: string): Promise<boolean> =>
   fs.promises.stat(p).then(
     () => true,
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err
+      return false
+    },
   )
 
 async function readJson<T>(path: string): Promise<{ content: string; parsed: T }> {

@@ -41,6 +41,20 @@ def ops_summary() -> str:
     return f"{len(records)} ops, {total} bytes transferred"
 
 
+async def measure(label: str, cmd: str) -> None:
+    before = sum(rec.bytes for rec in ws.vfs.records)
+    t0 = time.monotonic()
+    r = await ws.shell(cmd)
+    dt = time.monotonic() - t0
+    net = sum(rec.bytes for rec in ws.vfs.records) - before
+    head = (await r.stdout_str()).strip().splitlines()
+    first = head[0][:48] if head else ""
+    print(
+        f"  {label:42s} bytes={net:>10,}  t={dt:4.2f}s  "
+        f"lines={len(head):>4}  out0={json.dumps(first)}"
+    )
+
+
 async def main():
     # ── discover structure ────────────────────────────
     print("=== ls /gcs/ ===")
@@ -362,19 +376,6 @@ async def main():
     size = int((await r.stdout_str()).strip())
     print(f"  object size: {size:,} bytes")
 
-    async def measure(label: str, cmd: str) -> None:
-        before = sum(rec.bytes for rec in ws.vfs.records)
-        t0 = time.monotonic()
-        r = await ws.shell(cmd)
-        dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.vfs.records) - before
-        head = (await r.stdout_str()).strip().splitlines()
-        first = head[0][:48] if head else ""
-        print(
-            f"  {label:42s} bytes={net:>10,}  t={dt:4.2f}s  "
-            f"lines={len(head):>4}  out0={json.dumps(first)}"
-        )
-
     await ws.cache.clear()
     await measure("head -n 1 (line-streamed)", f"head -n 1 {target}")
     await ws.cache.clear()
@@ -423,10 +424,12 @@ async def main():
     meta_st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path("/gcs/data/example.jsonl")
     )
+    meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+        f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
+    await ws.close()
 
 
 if __name__ == "__main__":

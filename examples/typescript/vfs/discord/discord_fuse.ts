@@ -14,6 +14,8 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
   DiscordVFS,
@@ -24,7 +26,8 @@ import {
   type DiscordConfig,
 } from "@struktoai/mirage-node";
 
-dotenv.config({ path: ".env.development" });
+const __HERE = fileURLToPath(new URL(".", import.meta.url));
+dotenv.config({ path: resolve(__HERE, "../../../../.env.development") });
 
 function buildConfig(): DiscordConfig {
   const token = process.env.DISCORD_BOT_TOKEN;
@@ -97,7 +100,8 @@ async function main(): Promise<void> {
                 const author = msg.author?.username ?? "?";
                 const content = (msg.content ?? "").slice(0, 80);
                 console.log(`  [${author}] ${content}`);
-              } catch {
+              } catch (err) {
+                if (!(err instanceof SyntaxError)) throw err;
                 break;
               }
             }
@@ -110,8 +114,8 @@ async function main(): Promise<void> {
               console.log(`\n--- readdir() ${target}/files ---`);
               for (const a of atts.slice(0, 5)) console.log(`  ${a}`);
             }
-          } catch {
-            // no files dir
+          } catch (err) {
+            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
           }
         }
       }
@@ -133,7 +137,8 @@ async function main(): Promise<void> {
             };
             console.log(`  username: ${String(data.user?.username)}`);
             console.log(`  id: ${String(data.user?.id)}`);
-          } catch {
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) throw err;
             console.log(`  (raw: ${text.slice(0, 100)})`);
           }
         } else {

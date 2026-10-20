@@ -101,8 +101,9 @@ async def main() -> None:
     st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path(f"/gslides/owned/{first}")
     )
+    st_mode = oct(st.mode)[2:] if st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+        f"  dispatch stat: mode={st_mode} uid={st.uid} "
         f"gid={st.gid} mtime={st.modified}"
     )
 
@@ -153,7 +154,13 @@ async def main() -> None:
         "gws slides presentations create"
         ' --json \'{"title": "MIRAGE Slides Test"}\''
     )
-    pres = json.loads(await r.stdout_str())
+    out = await r.stdout_str()
+    if r.exit_code != 0 or not out.strip():
+        err = (await r.stderr_str()).strip() or "empty response"
+        print(f"  create failed (exit={r.exit_code}): {err}")
+        await ws.close()
+        return
+    pres = json.loads(out)
     pres_id = pres["presentationId"]
     print(f"Created: {pres_id}")
 
@@ -175,12 +182,19 @@ async def main() -> None:
         "gws slides presentations batchUpdate"
         f" --params '{params}' --json '{body}'"
     )
-    update = json.loads(await r.stdout_str())
+    out = await r.stdout_str()
+    if r.exit_code != 0 or not out.strip():
+        err = (await r.stderr_str()).strip() or "empty response"
+        print(f"  update failed (exit={r.exit_code}): {err}")
+        await ws.close()
+        return
+    update = json.loads(out)
     slide_id = update["replies"][0]["createSlide"]["objectId"]
     print(f"Added slide: {slide_id}")
 
     url = f"https://docs.google.com/presentation/d/{pres_id}/edit"
     print(f"\nOpen: {url}")
+    await ws.close()
 
 
 if __name__ == "__main__":

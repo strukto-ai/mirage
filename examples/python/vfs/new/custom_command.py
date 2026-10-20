@@ -65,6 +65,7 @@ async def main():
     print("=== greet on /disk/ (DiskAccessor wins) ===")
     result = await ws.shell("greet /disk/note.txt")
     print(await result.stdout_str())
+    await ws.close()
 
 
 asyncio.run(main())

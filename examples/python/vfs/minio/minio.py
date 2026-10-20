@@ -68,8 +68,9 @@ async def main():
     meta_st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path("/minio/notes.txt")
     )
+    meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+        f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
 
@@ -115,6 +116,7 @@ async def main():
     print("  cleaned")
 
     print(f"\nStats: {ops_summary()}")
+    await ws.close()
 
 
 if __name__ == "__main__":

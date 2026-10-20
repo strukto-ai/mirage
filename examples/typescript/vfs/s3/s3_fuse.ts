@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createReadStream } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -52,10 +51,11 @@ function baseConfig(): S3Config {
   }
 }
 
-// Streams only the head of a file through the kernel mount, the way
-// Python's line iteration stops reading once it breaks.
+// Streams only the head of a file, the way Python's line iteration
+// stops reading once it breaks. The patched fs serves /deep/ and passes
+// the kernel mount's paths through.
 async function firstLines(path: string, count: number): Promise<string[]> {
-  const stream = createReadStream(path, 'utf-8')
+  const stream = fs.createReadStream(path, 'utf-8')
   const lines: string[] = []
   try {
     for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) {
@@ -108,9 +108,8 @@ async function main(): Promise<void> {
       console.log(`  ${e}`)
     }
 
-    console.log("\n--- fs.promises.readFile('/deep/example.jsonl') + read 3 lines ---")
-    const deepText = await fs.promises.readFile('/deep/example.jsonl', 'utf-8')
-    for (const [i, line] of deepText.split('\n').slice(0, 3).entries()) {
+    console.log("\n--- createReadStream('/deep/example.jsonl') + read 3 lines ---")
+    for (const [i, line] of (await firstLines('/deep/example.jsonl', 3)).entries()) {
       console.log(`  [${String(i)}] ${line.trim().slice(0, 100)}...`)
     }
 

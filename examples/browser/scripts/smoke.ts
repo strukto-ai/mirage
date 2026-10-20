@@ -33,8 +33,8 @@ async function waitForServer(url: string, timeoutMs = 15_000): Promise<void> {
     try {
       const r = await fetch(url)
       if (r.ok) return
-    } catch {
-      // not up yet
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err
     }
     await new Promise((r) => setTimeout(r, 100))
   }
@@ -86,7 +86,13 @@ async function main(): Promise<void> {
         )
         text = await page.locator('#log').innerText()
       } catch (err) {
-        text = await page.locator('#log').innerText().catch(() => '')
+        text = await page
+          .locator('#log')
+          .innerText()
+          .catch((readErr: unknown) => {
+            console.error('reading #log failed:', readErr)
+            return ''
+          })
         console.error('waitForFunction failed; current log contents below')
         console.error(err)
       }

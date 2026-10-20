@@ -454,6 +454,7 @@ async def main():
     result = await ws.shell("grep grep /.bash_history | head -n 3")
     for line in (await result.stdout_str()).strip().splitlines():
         print(f"  {line[:120]}")
+    await ws.close()
 
 
 asyncio.run(main())

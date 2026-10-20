@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import json
 import os
 
@@ -90,7 +91,9 @@ with Workspace(
                             print(f"  {line[:120]}")
                 else:
                     print("  (empty)")
-            except Exception as exc:
+            except OSError as exc:
+                if exc.errno != errno.EFBIG:
+                    raise
                 print(f"  guard fired: {str(exc)[:160]}")
 
     print(f"\n>>> FUSE mounted at: {mp}")

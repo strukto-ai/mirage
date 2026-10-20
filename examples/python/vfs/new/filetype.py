@@ -73,6 +73,7 @@ async def main() -> None:
     # The renderer composes with the rest of the shell like any other command.
     out = await ws.shell("cat /data/hits.tally | sort -k2 -n | tail -1")
     print("largest:", out.stdout.decode().strip())
+    await ws.close()
 
 
 if __name__ == "__main__":

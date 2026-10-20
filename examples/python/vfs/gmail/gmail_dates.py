@@ -87,6 +87,7 @@ async def main():
             )
             return
     print("(no attachments found in scanned dates)")
+    await ws.close()
 
 
 if __name__ == "__main__":

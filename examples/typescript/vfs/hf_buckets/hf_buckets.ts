@@ -50,6 +50,24 @@ async function run(command: string): Promise<{ stdout: string; stderr: string; e
   return { stdout: r.stdoutText, stderr: r.stderrText, exitCode: r.exitCode }
 }
 
+async function measure(label: string, cmd: string): Promise<void> {
+  const before = ws.records.reduce((sum, rec) => sum + rec.bytes, 0)
+  const t0 = performance.now()
+  const res = await run(cmd)
+  const dt = (performance.now() - t0) / 1000
+  const net = ws.records.reduce((sum, rec) => sum + rec.bytes, 0) - before
+  const head = res.stdout
+    .trim()
+    .split('\n')
+    .filter((l) => l !== '')
+  const first = (head[0] ?? '').slice(0, 48)
+  console.log(
+    `  ${label.padEnd(42)} bytes=${net.toLocaleString('en-US').padStart(10)}  ` +
+      `t=${dt.toFixed(2).padStart(4)}s  lines=${String(head.length).padStart(4)}  ` +
+      `out0=${JSON.stringify(first)}`,
+  )
+}
+
 async function main(): Promise<void> {
   try {
     console.log('=== not-found errors show the full virtual path ===')
@@ -263,24 +281,6 @@ async function main(): Promise<void> {
     r = await run(`stat -c '%s' ${target}`)
     const size = Number.parseInt(r.stdout.trim(), 10)
     console.log(`  object size: ${size.toLocaleString('en-US')} bytes`)
-
-    const measure = async (label: string, cmd: string): Promise<void> => {
-      const before = ws.records.reduce((sum, rec) => sum + rec.bytes, 0)
-      const t0 = performance.now()
-      const res = await run(cmd)
-      const dt = (performance.now() - t0) / 1000
-      const net = ws.records.reduce((sum, rec) => sum + rec.bytes, 0) - before
-      const head = res.stdout
-        .trim()
-        .split('\n')
-        .filter((l) => l !== '')
-      const first = (head[0] ?? '').slice(0, 48)
-      console.log(
-        `  ${label.padEnd(42)} bytes=${net.toLocaleString('en-US').padStart(10)}  ` +
-          `t=${dt.toFixed(2).padStart(4)}s  lines=${String(head.length).padStart(4)}  ` +
-          `out0=${JSON.stringify(first)}`,
-      )
-    }
 
     await ws.cache.clear()
     await measure('head -n 1 (line-streamed)', `head -n 1 ${target}`)

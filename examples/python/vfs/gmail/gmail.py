@@ -127,8 +127,9 @@ async def main() -> None:
     )
     print(f"  chmod/chown/touch exit={result.exit_code}")
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path(msg_path))
+    st_mode = oct(st.mode)[2:] if st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+        f"  dispatch stat: mode={st_mode} uid={st.uid} "
         f"gid={st.gid} mtime={st.modified}"
     )
 
@@ -295,6 +296,7 @@ async def main() -> None:
             ' --to "zechengzhang97@gmail.com"'
         )
         print((await result.stdout_str())[:200])
+    await ws.close()
 
 
 if __name__ == "__main__":

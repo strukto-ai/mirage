@@ -114,7 +114,7 @@ with Workspace(
                 files_dir = f"{date_dir}/files"
                 try:
                     atts = os.listdir(files_dir)
-                except (FileNotFoundError, OSError):
+                except FileNotFoundError:
                     atts = []
                 if atts:
                     print(f"\n--- os.listdir() {target}/files ---")

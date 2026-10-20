@@ -15,8 +15,9 @@
 # The microVM guest has no /dev/fuse, so Mirage FUSE-mounts S3 on the HOST and
 # Microsandbox bind-mounts that path in over virtio-fs. The guest reads it
 # natively, with no S3 credentials and no network of its own.
-# Requires a running Microsandbox server (`msb server start`), host FUSE
-# (Linux fuse3 or macOS macFUSE), and AWS creds in .env.development.
+# Requires the Microsandbox SDK and `msb` runtime (the SDK runs it in-process;
+# there is no server to start), Linux fuse3 on the host (macOS does not work,
+# see README.md), and AWS creds in .env.development.
 
 import asyncio
 import os

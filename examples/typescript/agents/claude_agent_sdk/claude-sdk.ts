@@ -12,19 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Use the Claude Agent SDK with a Mirage FUSE-backed workspace.
-//
-// The agent reads, writes, and edits files, all intercepted by Mirage's
-// FUSE layer. Every file operation is recorded and can be inspected after
-// the agent finishes.
-//
-// Usage:
-//   pnpm --filter @struktoai/mirage-examples exec \
-//     tsx agents/claude_agent_sdk/claude-sdk.ts
-//   pnpm --filter @struktoai/mirage-examples exec \
-//     tsx agents/claude_agent_sdk/claude-sdk.ts \
-//     --prompt "create a python calculator module with tests"
-
 import { spawn } from 'node:child_process'
 import { parseArgs } from 'node:util'
 import { query, type SpawnOptions, type SpawnedProcess } from '@anthropic-ai/claude-agent-sdk'
@@ -35,8 +22,8 @@ const { values } = parseArgs({
     prompt: {
       type: 'string',
       default:
-        "Create a file called /hello.py that prints 'Hello from Mirage!' " +
-        'and a file called /utils.py with a function that reverses a string.',
+        "Create a file called hello.py that prints 'Hello from Mirage!' " +
+        'and a file called utils.py with a function that reverses a string.',
     },
   },
 })

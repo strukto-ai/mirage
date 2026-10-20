@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { MountMode, PostgresVFS, Workspace, type FileStat } from '@struktoai/mirage-node'
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 const dsn = process.env.POSTGRES_DSN
 if (dsn === undefined) {
@@ -73,7 +76,8 @@ try {
       console.log(
         `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
       )
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
       console.log('  dispatch stat: target missing in this environment')
     }
     await run('cat schema.json', `cat ${dir}/schema.json`)

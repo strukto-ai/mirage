@@ -85,6 +85,7 @@ async def main() -> None:
     print("\n=== find /fashion -name '*.md' | wc -l ===")
     r = await ws.shell("find /fashion -name '*.md' | wc -l")
     print(f"  product cards: {(await r.stdout_str()).strip()}")
+    await ws.close()
 
 
 if __name__ == "__main__":

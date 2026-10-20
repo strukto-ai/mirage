@@ -33,6 +33,13 @@ config = EmailConfig(
 vfs = EmailVFS(config=config)
 
 
+def pick_folder(folders: list[str]) -> str:
+    for name in folders:
+        if name.lower() == "inbox":
+            return name
+    return folders[0] if folders else ""
+
+
 async def main():
     with Workspace({"/email/": vfs}, mode=MountMode.READ) as ws:
         print("=== VFS MODE ===\n")
@@ -42,9 +49,7 @@ async def main():
         for f in folders:
             print(f"  {f}")
 
-        folder = "Inbox"
-        if not any("Inbox" in f or "INBOX" in f for f in folders):
-            folder = folders[0] if folders else ""
+        folder = pick_folder(folders)
         if not folder:
             print("No folders")
             return

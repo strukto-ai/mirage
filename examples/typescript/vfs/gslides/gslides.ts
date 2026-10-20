@@ -147,6 +147,11 @@ async function main(): Promise<void> {
 
     console.log('=== gws slides presentations create ===')
     r = await ws.shell("gws slides presentations create --json '{\"title\": \"MIRAGE TS Slides Test\"}'")
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
+      return
+    }
     const presId = (JSON.parse(r.stdoutText) as { presentationId: string }).presentationId
     console.log(`Created: ${presId}`)
 
@@ -163,6 +168,11 @@ async function main(): Promise<void> {
     })
     const params = JSON.stringify({ presentationId: presId })
     r = await ws.shell(`gws slides presentations batchUpdate --params '${params}' --json '${body}'`)
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  update failed (exit=${String(r.exitCode)}): ${err}`)
+      return
+    }
     const update = JSON.parse(r.stdoutText) as {
       replies: { createSlide: { objectId: string } }[]
     }

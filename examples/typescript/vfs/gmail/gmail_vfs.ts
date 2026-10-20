@@ -43,7 +43,10 @@ function buildConfig(): GmailConfig {
 const exists = (p: string): Promise<boolean> =>
   fs.promises.stat(p).then(
     () => true,
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err
+      return false
+    },
   )
 
 interface Message {

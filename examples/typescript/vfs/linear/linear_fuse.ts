@@ -84,7 +84,8 @@ async function main(): Promise<void> {
         console.log(
           `  ${data.issue_key ?? "?"}: ${data.title ?? ""} [${data.state_name ?? ""}]`,
         );
-      } catch {
+      } catch (err) {
+        if (!(err instanceof SyntaxError)) throw err;
         console.log(`  (raw: ${issueBytes.slice(0, 100)})`);
       }
     }

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import json
 import os
 
@@ -99,7 +100,9 @@ async def main():
             for line in lines[:3]:
                 doc = json.loads(line)
                 print(f"  {json.dumps(doc)[:120]}")
-        except Exception as exc:
+        except OSError as exc:
+            if exc.errno != errno.EFBIG:
+                raise
             print(f"  guard fired: {str(exc)[:160]}")
 
         print("\n--- bash history ---")

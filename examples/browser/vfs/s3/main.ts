@@ -224,6 +224,7 @@ async function main(): Promise<void> {
   } catch (err) {
     const httpStatus = (err as { $metadata?: { httpStatusCode?: number } }).$metadata
       ?.httpStatusCode
+    if (httpStatus !== 404) throw err
     console.log(`  ✓ ${testKey} deleted (S3 HEAD returns ${String(httpStatus)})`)
   }
 

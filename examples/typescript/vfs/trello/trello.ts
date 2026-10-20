@@ -168,7 +168,8 @@ async function main(): Promise<void> {
       try {
         cardId = (JSON.parse(created) as { card_id?: string; id?: string }).card_id ?? ''
         if (cardId === '') cardId = (JSON.parse(created) as { id?: string }).id ?? ''
-      } catch {
+      } catch (err) {
+        if (!(err instanceof SyntaxError)) throw err
         console.log('  could not parse created card payload, skipping write demos')
       }
       if (cardId !== '') {
@@ -185,7 +186,8 @@ async function main(): Promise<void> {
         try {
           commentId = (JSON.parse(comment) as { comment_id?: string; id?: string }).comment_id ?? ''
           if (commentId === '') commentId = (JSON.parse(comment) as { id?: string }).id ?? ''
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err
           commentId = ''
         }
         if (commentId !== '') {

@@ -18,8 +18,7 @@ import dotenv from 'dotenv'
 import { GitHubVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
-dotenv.config({ path: resolve(__HERE, '../.env.development') })
-dotenv.config({ path: '/Users/zecheng/strukto/mirage/.env.development' })
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 async function main(): Promise<void> {
   const vfs = await GitHubVFS.create({

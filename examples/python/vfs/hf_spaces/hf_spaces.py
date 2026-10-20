@@ -38,6 +38,16 @@ def ops_summary() -> str:
     return f"{len(records)} ops, {total} bytes transferred"
 
 
+async def measure(label: str, cmd: str) -> None:
+    before_bytes = sum(rec.bytes for rec in ws.vfs.records)
+    t0 = time.monotonic()
+    r = await ws.shell(cmd)
+    dt = time.monotonic() - t0
+    net = sum(rec.bytes for rec in ws.vfs.records) - before_bytes
+    out = (await r.stdout_str()).rstrip().splitlines()
+    print(f"  {label:38s} bytes={net:>6,}  t={dt:4.2f}s  lines={len(out):>3}")
+
+
 async def main():
     print(f"=== mounted {vfs.accessor.bucket_uri} at /s/ ===")
 
@@ -185,17 +195,6 @@ async def main():
     print("\n=== STREAMING (chain backpressure) ===")
     target = "/s/README.md"
 
-    async def measure(label: str, cmd: str) -> None:
-        before_bytes = sum(rec.bytes for rec in ws.vfs.records)
-        t0 = time.monotonic()
-        r = await ws.shell(cmd)
-        dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.vfs.records) - before_bytes
-        out = (await r.stdout_str()).rstrip().splitlines()
-        print(
-            f"  {label:38s} bytes={net:>6,}  t={dt:4.2f}s  lines={len(out):>3}"
-        )
-
     await ws.cache.clear()
     await measure("head -n 1 (line streamed)", f"head -n 1 {target}")
     await ws.cache.clear()
@@ -213,6 +212,8 @@ async def main():
     )
 
     print(f"\nFinal: {ops_summary()}")
+
+    await ws.close()
 
 
 if __name__ == "__main__":

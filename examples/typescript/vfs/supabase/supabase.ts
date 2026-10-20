@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import { MountMode, SupabaseVFS, Workspace, type FileStat, type SupabaseConfig } from '@struktoai/mirage-node'
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 function configFromEnv(): SupabaseConfig {
   const bucket = process.env.SUPABASE_BUCKET
@@ -110,7 +113,8 @@ async function main(): Promise<void> {
       console.log(
         `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
       )
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
       console.log('  dispatch stat: target unavailable (check bucket contents)')
     }
 

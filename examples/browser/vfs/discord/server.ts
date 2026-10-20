@@ -14,9 +14,12 @@
 
 import { Buffer } from 'node:buffer'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 const TOKEN = process.env.DISCORD_BOT_TOKEN
 if (TOKEN === undefined || TOKEN === '') {

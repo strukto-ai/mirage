@@ -86,7 +86,8 @@ async function main(): Promise<void> {
                 const user = msg.user ?? "?";
                 const content = (msg.text ?? "").slice(0, 80);
                 console.log(`  [${user}] ${content}`);
-              } catch {
+              } catch (err) {
+                if (!(err instanceof SyntaxError)) throw err;
                 break;
               }
             }
@@ -120,7 +121,8 @@ async function main(): Promise<void> {
           console.log(`  name: ${String(data.name)}`);
           console.log(`  id: ${String(data.id)}`);
           console.log(`  is_bot: ${String(data.is_bot)}`);
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err;
           console.log(`  (raw: ${text.slice(0, 100)})`);
         }
       } else {

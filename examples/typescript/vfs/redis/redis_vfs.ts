@@ -24,7 +24,8 @@ async function exists(p: string): Promise<boolean> {
   try {
     await fs.promises.stat(p)
     return true
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return false
   }
 }
@@ -32,7 +33,8 @@ async function exists(p: string): Promise<boolean> {
 async function isDir(p: string): Promise<boolean> {
   try {
     return (await fs.promises.stat(p)).isDirectory()
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return false
   }
 }

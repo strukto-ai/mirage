@@ -9,7 +9,9 @@ async function waitForServer(url, timeoutMs = 30_000) {
     try {
       const r = await fetch(url)
       if (r.ok) return
-    } catch {}
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err
+    }
     await new Promise((r) => setTimeout(r, 100))
   }
   throw new Error(`server did not start within ${timeoutMs}ms`)
@@ -21,7 +23,7 @@ const vite = spawn('pnpm', ['dev', '--port', '5175'], {
   cwd: fileURLToPath(new URL('..', import.meta.url)),
 })
 await once(vite.stdout, 'data')
-await waitForServer(`${base}/postgres.html`)
+await waitForServer(`${base}/vfs/postgres/postgres.html`)
 
 let exit = 0
 try {
@@ -37,7 +39,7 @@ try {
       console.log('[pageerror]', err.message)
       exit = 1
     })
-    await page.goto(`${base}/postgres.html`)
+    await page.goto(`${base}/vfs/postgres/postgres.html`)
     try {
       await page.waitForFunction(
         () => document.querySelector('#log')?.textContent?.includes('done.') ?? false,
@@ -60,6 +62,6 @@ try {
   exit = 1
 } finally {
   vite.kill('SIGTERM')
-  await once(vite, 'exit').catch(() => {})
+  await once(vite, 'exit').catch((err) => console.error('vite exit:', err))
 }
 process.exit(exit)

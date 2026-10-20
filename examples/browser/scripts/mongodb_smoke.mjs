@@ -9,7 +9,9 @@ async function waitForServer(url, timeoutMs = 30_000) {
     try {
       const r = await fetch(url)
       if (r.ok) return
-    } catch {}
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err
+    }
     await new Promise((r) => setTimeout(r, 100))
   }
   throw new Error(`server did not start within ${timeoutMs}ms`)
@@ -59,6 +61,6 @@ try {
   exit = 1
 } finally {
   vite.kill('SIGTERM')
-  await once(vite, 'exit').catch(() => {})
+  await once(vite, 'exit').catch((err) => console.error('vite exit:', err))
 }
 process.exit(exit)

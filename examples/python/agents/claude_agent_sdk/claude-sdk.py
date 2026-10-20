@@ -11,19 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-"""
-Example: Use the Claude Agent SDK with a Mirage FUSE-backed workspace.
-
-The agent reads, writes, and edits files — all intercepted by Mirage's
-FUSE layer.  Every file operation is recorded and can be inspected after
-the agent finishes.
-
-Usage:
-    pip install claude-agent-sdk
-    python examples/python/agents/claude_agent_sdk/claude-sdk.py
-    python examples/python/agents/claude_agent_sdk/claude-sdk.py \
-        --prompt "create a python calculator module with tests"
-"""
 
 import argparse
 import subprocess
@@ -69,7 +56,6 @@ async def run_agent(mountpoint: str, prompt: str) -> None:
         cwd=mountpoint,
         allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
         permission_mode="bypassPermissions",
-        allow_dangerously_skip_permissions=True,
     )
     async for message in query(prompt=prompt, options=options):
         if isinstance(message, ResultMessage):
@@ -81,8 +67,8 @@ def main() -> None:
     parser.add_argument(
         "--prompt",
         default=(
-            "Create a file called /hello.py that prints 'Hello from Mirage!' "
-            "and a file called /utils.py with a function"
+            "Create a file called hello.py that prints 'Hello from Mirage!' "
+            "and a file called utils.py with a function"
             " that reverses a string."
         ),
     )

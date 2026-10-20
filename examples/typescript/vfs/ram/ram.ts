@@ -29,6 +29,10 @@ async function runLabeled(ws: Workspace, label: string, cmd: string): Promise<vo
   print(res.stdout)
 }
 
+function repr(s: string): string {
+  return `'${s}'`
+}
+
 async function main(): Promise<void> {
   const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
 
@@ -149,7 +153,6 @@ async function main(): Promise<void> {
   console.log('')
   const tmpDir = mkdtempSync(join(tmpdir(), 'mirage-snap-'))
   const snapPath = join(tmpDir, 'snap.json')
-  const repr = (s: string): string => `'${s}'`
   try {
     await ws.snapshot(snapPath)
     const size = statSync(snapPath).size

@@ -16,13 +16,14 @@ import asyncio
 import copy as _copy
 import json
 import os
+import sys
 import tempfile
 import uuid
 
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.types import PathSpec
+from mirage.types import DriftPolicy, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.snapshot import ContentDriftError
@@ -62,6 +63,16 @@ def ops_summary() -> str:
     return f"{len(ops.records)} ops, {net} net, {cache} cache"
 
 
+async def run(cmd: str, label: str | None = None) -> str:
+    r = await ws.shell(cmd)
+    out = (await r.stdout_str()).strip()
+    tag = label or cmd
+    head = out.splitlines()[0] if out else ""
+    more = f" (+{len(out.splitlines()) - 1} more)" if "\n" in out else ""
+    print(f"  $ {tag}\n    {head[:110]}{more}  [exit={r.exit_code}]")
+    return out
+
+
 async def main():
     # ── key_prefix mount: multi-segment subpath scoping ──
     # Mounts the same bucket twice: /s3/ unscoped, /deep/ scoped to
@@ -72,15 +83,6 @@ async def main():
 
     print(f"  key_prefix = {deep_config.key_prefix!r}")
     print("  /deep/X  ←→  s3://bucket/subdata/subsubdata/X\n")
-
-    async def run(cmd: str, label: str | None = None) -> str:
-        r = await ws.shell(cmd)
-        out = (await r.stdout_str()).strip()
-        tag = label or cmd
-        head = out.splitlines()[0] if out else ""
-        more = f" (+{len(out.splitlines()) - 1} more)" if "\n" in out else ""
-        print(f"  $ {tag}\n    {head[:110]}{more}  [exit={r.exit_code}]")
-        return out
 
     # ── listings ──
     print("[listings]")
@@ -585,8 +587,9 @@ async def main():
         )
         print(f"  chmod/chown/touch exit={r.exit_code}")
         st, _ = await mv_ws.dispatch("stat", PathSpec.from_str_path(remote))
+        st_mode = oct(st.mode)[2:] if st.mode is not None else "-"
         print(
-            f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+            f"  dispatch stat: mode={st_mode} uid={st.uid} "
             f"gid={st.gid} mtime={st.modified}"
         )
     finally:
@@ -686,7 +689,9 @@ async def main():
         print(f"  mutated on bucket: new revision={s2.revision}")
 
         loaded = await Workspace.load(
-            drift_snap, mounts={"/s3/": S3VFS(config)}
+            drift_snap,
+            mounts={"/s3/": S3VFS(config)},
+            drift_policy=DriftPolicy.STRICT,
         )
         loaded._cache.evict_paths([probe])
         try:
@@ -708,10 +713,11 @@ async def main():
     finally:
         try:
             await drift_ws.shell(f"rm {probe}")
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  cleanup: rm {probe} failed: {exc}", file=sys.stderr)
         if os.path.exists(drift_snap):
             os.unlink(drift_snap)
+    await ws.close()
 
 
 asyncio.run(main())

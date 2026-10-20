@@ -46,8 +46,16 @@ async function main(): Promise<void> {
     if (cleaned) return
     cleaned = true
     void (async (): Promise<void> => {
-      try { await fm.close() } catch {}
-      try { await ws.close() } catch {}
+      try {
+        await fm.close()
+      } catch (err) {
+        console.error('fuse close failed:', err)
+      }
+      try {
+        await ws.close()
+      } catch (err) {
+        console.error('workspace close failed:', err)
+      }
       console.error(`\n>>> unmounted ${mp}`)
       process.exit(sig === 'SIGINT' ? 130 : 143)
     })()

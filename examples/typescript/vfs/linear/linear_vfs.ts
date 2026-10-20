@@ -91,7 +91,8 @@ async function main(): Promise<void> {
           const author = rec.user_name ?? '?'
           const body = (rec.body ?? '').slice(0, 80)
           console.log(`  [${author}] ${body}`)
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err
           console.log(`  (unparseable: ${line.slice(0, 80)})`)
         }
       }

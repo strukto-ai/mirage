@@ -14,6 +14,7 @@
 
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
@@ -42,9 +43,24 @@ function buildConfig(): HfBucketsConfig {
 async function isDir(path: string): Promise<boolean> {
   try {
     return (await fs.promises.stat(path)).isDirectory()
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return false
   }
+}
+
+async function firstLines(path: string, count: number): Promise<string[]> {
+  const stream = fs.createReadStream(path, 'utf-8')
+  const lines: string[] = []
+  try {
+    for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) {
+      lines.push(line)
+      if (lines.length >= count) break
+    }
+  } finally {
+    stream.destroy()
+  }
+  return lines
 }
 
 async function main(): Promise<void> {
@@ -71,9 +87,8 @@ async function main(): Promise<void> {
 
     if (target !== null) {
       console.log(`\n--- read first 3 lines of ${target} ---`)
-      // Split after each newline so the lines match a file iterator's.
-      const lines = (await fs.promises.readFile(target, 'utf-8')).split(/(?<=\n)/)
-      lines.slice(0, 3).forEach((line, i) => {
+      const lines = await firstLines(target, 3)
+      lines.forEach((line, i) => {
         console.log(`  [${String(i)}] ${line.trim().slice(0, 100)}`)
       })
     }

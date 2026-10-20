@@ -12,17 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Run Claude Code inside a memory-backed FUSE filesystem.
-//
-// All file operations from Claude happen in memory; nothing touches disk.
-// After Claude exits, the workspace still holds everything Claude created.
-//
-// Usage:
-//   pnpm --filter @struktoai/mirage-examples exec \
-//     tsx agents/claude_code/claude-memory.ts
-//   pnpm --filter @struktoai/mirage-examples exec \
-//     tsx agents/claude_code/claude-memory.ts --prompt "write a fibonacci.py"
-
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { parseArgs } from 'node:util'
@@ -30,7 +19,7 @@ import { FuseManager, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-nod
 
 const { values } = parseArgs({
   options: {
-    prompt: { type: 'string', default: 'write a hello world script in /hello.py' },
+    prompt: { type: 'string', default: 'write a hello world script in hello.py' },
   },
 })
 

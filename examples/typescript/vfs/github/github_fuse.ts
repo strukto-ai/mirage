@@ -64,7 +64,8 @@ async function main(): Promise<void> {
         console.log(`\n--- readFile() ${path} (first 200 chars) ---`);
         console.log(text.slice(0, 200));
         break;
-      } catch {
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         continue;
       }
     }

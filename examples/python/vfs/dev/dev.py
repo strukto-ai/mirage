@@ -15,11 +15,13 @@
 import asyncio
 
 from mirage import MountMode, Workspace
+from mirage.vfs.dev import DevVFS
 
 
 async def main() -> None:
-    # Every workspace mounts /dev itself; a second DevVFS there is refused.
-    ws = Workspace({}, mode=MountMode.WRITE)
+    # Every workspace mounts a DevVFS at /dev itself, so a second one there
+    # is refused; another prefix takes its own.
+    ws = Workspace({"/sandbox/dev": DevVFS()}, mode=MountMode.WRITE)
 
     print("=== ls /dev/ ===")
     result = await ws.shell("ls /dev/")
@@ -49,6 +51,12 @@ async def main() -> None:
     await ws.shell('echo "this disappears" | tee /dev/null')
     result = await ws.shell("wc -c /dev/null")
     print(f"after write: {await result.stdout_str()}")
+
+    print("=== a DevVFS of its own at /sandbox/dev/ ===")
+    result = await ws.shell(
+        "ls /sandbox/dev/ && head -c 4 /sandbox/dev/zero | wc -c"
+    )
+    print(await result.stdout_str())
 
     await ws.close()
 

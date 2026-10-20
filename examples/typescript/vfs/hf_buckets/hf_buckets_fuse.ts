@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,9 +42,24 @@ function buildConfig(): HfBucketsConfig {
 async function isDir(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory()
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return false
   }
+}
+
+async function firstLines(path: string, count: number): Promise<string[]> {
+  const stream = createReadStream(path, 'utf-8')
+  const lines: string[] = []
+  try {
+    for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) {
+      lines.push(line)
+      if (lines.length >= count) break
+    }
+  } finally {
+    stream.destroy()
+  }
+  return lines
 }
 
 async function main(): Promise<void> {
@@ -72,10 +88,9 @@ async function main(): Promise<void> {
     const target = entry !== undefined ? `${dataDir}/${entry}` : null
 
     if (target !== null) {
-      console.log(`\n--- readFile(${target}) + read 3 lines ---`)
-      // Split after each newline so the lines match a file iterator's.
-      const lines = (await readFile(target, 'utf-8')).split(/(?<=\n)/)
-      lines.slice(0, 3).forEach((line, i) => {
+      console.log(`\n--- createReadStream(${target}) + read 3 lines ---`)
+      const lines = await firstLines(target, 3)
+      lines.forEach((line, i) => {
         console.log(`  [${String(i)}] ${line.trim().slice(0, 100)}`)
       })
 

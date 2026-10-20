@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readdir, stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import {
   Mount,
@@ -22,7 +24,8 @@ import {
   Workspace,
 } from "@struktoai/mirage-node";
 
-dotenv.config({ path: ".env.development" });
+const __HERE = fileURLToPath(new URL(".", import.meta.url));
+dotenv.config({ path: resolve(__HERE, "../../../../.env.development") });
 
 function requireDsn(): string {
   const value = process.env.POSTGRES_DSN;

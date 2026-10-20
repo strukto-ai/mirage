@@ -239,6 +239,7 @@ async def main() -> None:
             f"{answer(res.stdout or b'', res.stderr or b'', res.exit_code)}"
         )
         print(f"{'':10} {'':42} {note}")
+    await ws.close()
 
 
 if __name__ == "__main__":

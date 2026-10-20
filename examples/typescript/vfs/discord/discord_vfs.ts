@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createRequire } from 'node:module'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import {
   DiscordVFS,
@@ -25,7 +27,8 @@ import {
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
 
-dotenv.config({ path: '.env.development' })
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
 
 function buildConfig(): DiscordConfig {
   const token = process.env.DISCORD_BOT_TOKEN
@@ -38,7 +41,10 @@ function buildConfig(): DiscordConfig {
 const exists = (p: string): Promise<boolean> =>
   fs.promises.stat(p).then(
     () => true,
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err
+      return false
+    },
   )
 
 async function main(): Promise<void> {
@@ -86,7 +92,8 @@ async function main(): Promise<void> {
             let content: string
             try {
               content = await fs.promises.readFile(chatPath, 'utf-8')
-            } catch {
+            } catch (err) {
+              if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
               continue
             }
             const lines = content
@@ -105,7 +112,8 @@ async function main(): Promise<void> {
                   const author = rec.author?.username ?? '?'
                   const text = (rec.content ?? '').slice(0, 80)
                   console.log(`  [${author}] ${text}`)
-                } catch {
+                } catch (err) {
+                  if (!(err instanceof SyntaxError)) throw err
                   console.log(`  (unparseable: ${line.slice(0, 80)})`)
                 }
               }
@@ -117,8 +125,8 @@ async function main(): Promise<void> {
                   console.log(`\n--- fs.readdir() ${d}/files ---`)
                   for (const a of atts.slice(0, 5)) console.log(`  ${a}`)
                 }
-              } catch {
-                // no files dir or unreadable
+              } catch (err) {
+                if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
               }
               path = chatPath
               found = true

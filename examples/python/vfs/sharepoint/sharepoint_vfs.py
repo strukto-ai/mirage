@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -108,25 +109,16 @@ def write_report(site, drive, all_sections):
     print(f"\nReport: {REPORT_FILE}")
 
 
-async def main():
-    print("Token loaded ✓\n")
+async def make_scratch_dir(ws: Workspace, path: str) -> None:
+    r = await ws.shell(f'mkdir "{path}"')
+    if r.exit_code != 0:
+        err = (await r.stderr_str()).strip()
+        raise RuntimeError(f"mkdir {path} failed: {err}")
 
-    ws = Workspace(
-        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
-        mode=MountMode.WRITE,
-    )
 
-    site, drive = await _pick_site_and_drive(ws)
-    base = f"/sharepoint/{site}/{drive}"
-    d = f"{base}/mirage-vfs-test"
-    f1 = f"{d}/hello.txt"
-    f2 = f"{d}/data.txt"
-    print(f"Site: {site}, Drive: {drive}")
-    print(f"Test dir: {d}")
-
+async def run_suite(ws: Workspace, d: str, f1: str, f2: str):
     # --- Setup ---
     setup = [
-        ("mkdir", f'mkdir "{d}"'),
         (
             "write f1",
             f'echo "hello world\nfoo bar\nhello again\napple\nbanana" > "{f1}"',
@@ -301,12 +293,7 @@ async def main():
     ]
     compare_results = await run_section(ws, compare_cmds, "Compare Commands")
 
-    # --- Cleanup ---
-    print("\n=== Cleanup ===")
-    await ws.shell(f'rm -r "{d}"')
-    print("  done")
-
-    all_sections = [
+    return [
         ("Setup", setup_results),
         ("Read Commands", read_results),
         ("Metadata Commands", meta_results),
@@ -318,12 +305,40 @@ async def main():
         ("Shell Features", shell_results),
         ("Compare Commands", compare_results),
     ]
+
+
+async def main():
+    print("Token loaded ✓\n")
+
+    ws = Workspace(
+        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
+        mode=MountMode.WRITE,
+    )
+
+    site, drive = await _pick_site_and_drive(ws)
+    base = f"/sharepoint/{site}/{drive}"
+    d = f"{base}/mirage-vfs-test-{uuid.uuid4().hex[:8]}"
+    f1 = f"{d}/hello.txt"
+    f2 = f"{d}/data.txt"
+    print(f"Site: {site}, Drive: {drive}")
+    print(f"Test dir: {d}")
+
+    await make_scratch_dir(ws, d)
+    try:
+        all_sections = await run_suite(ws, d, f1, f2)
+    finally:
+        # --- Cleanup ---
+        print("\n=== Cleanup ===")
+        await ws.shell(f'rm -r "{d}"')
+        print("  done")
+
     write_report(site, drive, all_sections)
 
     all_results = [r for section in all_sections for r in section[1]]
     total = len(all_results)
     passed = sum(1 for *_, ok, _, _ in all_results if ok)
     print(f"\n✓ {passed}/{total} tests passed ({passed / total * 100:.1f}%)")
+    await ws.close()
 
 
 asyncio.run(main())

@@ -47,6 +47,7 @@ async def main():
     print("find *.json:\n" + await r.stdout_str())
 
     print(f"\nStats: {ops_summary()}")
+    await ws.close()
 
 
 if __name__ == "__main__":

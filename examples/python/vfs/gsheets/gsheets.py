@@ -101,8 +101,9 @@ async def main() -> None:
     st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path(f"/gsheets/owned/{first}")
     )
+    st_mode = oct(st.mode)[2:] if st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(st.mode)[2:]} uid={st.uid} "
+        f"  dispatch stat: mode={st_mode} uid={st.uid} "
         f"gid={st.gid} mtime={st.modified}"
     )
 
@@ -155,6 +156,7 @@ async def main() -> None:
     if r.exit_code != 0 or not out.strip():
         err = (await r.stderr_str()).strip() or "empty response"
         print(f"  create failed (exit={r.exit_code}): {err}")
+        await ws.close()
         return
     sheet = json.loads(out)
     sheet_id = sheet["spreadsheetId"]
@@ -218,6 +220,7 @@ async def main() -> None:
 
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}"
     print(f"\nOpen: {url}")
+    await ws.close()
 
 
 if __name__ == "__main__":

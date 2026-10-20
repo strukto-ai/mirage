@@ -30,6 +30,7 @@ async def _seed():
     await ws.shell('echo "hello world" | tee /data/hello.txt')
     await ws.shell("mkdir /data/sub")
     await ws.shell('echo "nested" | tee /data/sub/nested.txt')
+    await ws.close()
 
 
 asyncio.run(_seed())

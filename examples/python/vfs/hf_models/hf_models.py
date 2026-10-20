@@ -38,6 +38,20 @@ def ops_summary() -> str:
     return f"{len(records)} ops, {total} bytes transferred"
 
 
+async def measure(label: str, cmd: str) -> None:
+    before_bytes = sum(rec.bytes for rec in ws.vfs.records)
+    t0 = time.monotonic()
+    r = await ws.shell(cmd)
+    dt = time.monotonic() - t0
+    net = sum(rec.bytes for rec in ws.vfs.records) - before_bytes
+    out = (await r.stdout_str()).rstrip().splitlines()
+    first = out[0][:40] + "..." if out else ""
+    print(
+        f"  {label:42s} bytes={net:>9,}  t={dt:4.2f}s  "
+        f"lines={len(out):>3}  out0={first!r}"
+    )
+
+
 async def main():
     print(f"=== mounted {vfs.accessor.bucket_uri} at /m/ ===")
 
@@ -208,19 +222,6 @@ async def main():
     # ── byte-range read of the safetensors header ───────
     print("\n=== STREAMING (range reads on 2GB weights) ===")
 
-    async def measure(label: str, cmd: str) -> None:
-        before_bytes = sum(rec.bytes for rec in ws.vfs.records)
-        t0 = time.monotonic()
-        r = await ws.shell(cmd)
-        dt = time.monotonic() - t0
-        net = sum(rec.bytes for rec in ws.vfs.records) - before_bytes
-        out = (await r.stdout_str()).rstrip().splitlines()
-        first = out[0][:40] + "..." if out else ""
-        print(
-            f"  {label:42s} bytes={net:>9,}  t={dt:4.2f}s  "
-            f"lines={len(out):>3}  out0={first!r}"
-        )
-
     await ws.cache.clear()
     await measure(
         "head -c 128 model.safetensors (range)",
@@ -243,6 +244,8 @@ async def main():
         "(2GB safetensors never fully downloaded; only header range "
         "+ configs read)"
     )
+
+    await ws.close()
 
 
 if __name__ == "__main__":

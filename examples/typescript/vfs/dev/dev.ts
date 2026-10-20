@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, Workspace } from '@struktoai/mirage-node'
+import { DevVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  // Every workspace mounts /dev itself; a second DevVFS there is refused.
-  const ws = new Workspace({}, { mode: MountMode.WRITE })
+  // Every workspace mounts a DevVFS at /dev itself, so a second one there
+  // is refused; another prefix takes its own.
+  const ws = new Workspace({ '/sandbox/dev': new DevVFS() }, { mode: MountMode.WRITE })
 
   console.log('=== ls /dev/ ===')
   const lsRes = await ws.shell('ls /dev/')
@@ -46,6 +47,10 @@ async function main(): Promise<void> {
   await ws.shell('echo "this disappears" | tee /dev/null')
   const after = await ws.shell('wc -c /dev/null')
   process.stdout.write(`after write: ${after.stdoutText}\n`)
+
+  console.log('=== a DevVFS of its own at /sandbox/dev/ ===')
+  const own = await ws.shell('ls /sandbox/dev/ && head -c 4 /sandbox/dev/zero | wc -c')
+  process.stdout.write(own.stdoutText + '\n')
 
   await ws.close()
 }

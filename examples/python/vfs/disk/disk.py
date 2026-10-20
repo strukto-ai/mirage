@@ -178,7 +178,8 @@ async def main() -> None:
                 print(f"  ✓ {op_name} raises: {str(e)[:60]}…")
     finally:
         os.unlink(snap)
-        shutil.rmtree(custom_root, ignore_errors=True)
+        shutil.rmtree(custom_root)
+    await ws.close()
 
 
 if __name__ == "__main__":

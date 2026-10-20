@@ -34,6 +34,13 @@ config = EmailConfig(
 vfs = EmailVFS(config=config)
 
 
+def pick_folder(folders: list[str]) -> str:
+    for name in folders:
+        if name.lower() == "inbox":
+            return name
+    return folders[0] if folders else ""
+
+
 async def main() -> None:
     ws = Workspace({"/email": vfs}, mode=MountMode.READ)
     # The mail verbs are a CLI install, separate from the mount: the
@@ -57,9 +64,7 @@ async def main() -> None:
     print(await result.stdout_str())
 
     folders = (await result.stdout_str()).strip().splitlines()
-    folder = "Inbox"
-    if not any("Inbox" in f or "INBOX" in f for f in folders):
-        folder = folders[0] if folders else ""
+    folder = pick_folder(folders)
     if not folder:
         print("No folders")
         return
@@ -136,8 +141,9 @@ async def main() -> None:
     meta_st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path(f"{first_msg}")
     )
+    meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+        f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
 
@@ -197,6 +203,7 @@ async def main() -> None:
     err = (await r.stderr_str()).strip()
     print(f"  exit={r.exit_code}  {err[:120]}")
     assert r.exit_code == 1 and "zz-none-*" in err
+    await ws.close()
 
 
 if __name__ == "__main__":

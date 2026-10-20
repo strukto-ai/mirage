@@ -45,12 +45,17 @@ function env(name: string): string {
 
 // Every probe of the mountpoint is async: the mount is served by this
 // process's event loop, so a synchronous call into it would deadlock.
+function missing(err: NodeJS.ErrnoException): null {
+  if (err.code !== 'ENOENT') throw err
+  return null
+}
+
 async function isFile(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => null))?.isFile() ?? false
+  return (await stat(path).catch(missing))?.isFile() ?? false
 }
 
 async function isDir(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => null))?.isDirectory() ?? false
+  return (await stat(path).catch(missing))?.isDirectory() ?? false
 }
 
 async function readHead(path: string, size: number): Promise<number> {

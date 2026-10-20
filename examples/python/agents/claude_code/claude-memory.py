@@ -11,17 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-"""
-Example: Run Claude Code inside a memory-backed FUSE filesystem.
-
-All file operations from Claude happen in-memory — nothing touches disk.
-After Claude exits, the workspace still holds everything Claude created.
-
-Usage:
-    python examples/python/agents/claude_code/claude-memory.py
-    python examples/python/agents/claude_code/claude-memory.py \
-        --prompt "write a fibonacci.py"
-"""
 
 import argparse
 import asyncio
@@ -57,7 +46,7 @@ async def print_files(ws: Workspace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--prompt", default="write a hello world script in /hello.py"
+        "--prompt", default="write a hello world script in hello.py"
     )
     args = parser.parse_args()
 

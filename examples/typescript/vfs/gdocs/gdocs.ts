@@ -143,6 +143,11 @@ async function main(): Promise<void> {
 
     console.log('=== gws docs documents create ===')
     r = await ws.shell("gws docs documents create --json '{\"title\": \"MIRAGE TS Example Doc\"}'")
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
+      return
+    }
     const docId = (JSON.parse(r.stdoutText) as { documentId: string }).documentId
     console.log(`Created: ${docId}`)
 

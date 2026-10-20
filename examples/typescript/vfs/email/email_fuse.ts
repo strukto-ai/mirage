@@ -50,6 +50,10 @@ function buildConfig(): EmailConfig {
   })
 }
 
+function pickFolder(folders: string[]): string {
+  return folders.find((f) => f.toLowerCase() === 'inbox') ?? folders[0] ?? ''
+}
+
 async function isDir(p: string): Promise<boolean> {
   try {
     return (await stat(p)).isDirectory()
@@ -76,10 +80,7 @@ async function main(): Promise<void> {
       console.log(`  ${f}`)
     }
 
-    let folder = 'Inbox'
-    if (!folders.some((f) => f.includes('Inbox') || f.includes('INBOX'))) {
-      folder = folders[0] ?? ''
-    }
+    const folder = pickFolder(folders)
 
     const folderPath = `${mp}/${folder}`
     if (await isDir(folderPath)) {

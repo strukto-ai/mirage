@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -35,9 +36,8 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
     return site, drives[0]
 
 
-def build_tests(base: str, test_dir: str, test_file: str):
+def build_tests(test_dir: str, test_file: str):
     commands = [
-        ("mkdir", f'mkdir "{test_dir}"'),
         ("touch", f'touch "{test_file}"'),
         (
             "echo write",
@@ -229,22 +229,15 @@ def write_report(
     print(f"\nReport: {REPORT_FILE}")
 
 
-async def main():
-    print("Token loaded ✓\n")
+async def make_scratch_dir(ws: Workspace, path: str) -> None:
+    r = await ws.shell(f'mkdir "{path}"')
+    if r.exit_code != 0:
+        err = (await r.stderr_str()).strip()
+        raise RuntimeError(f"mkdir {path} failed: {err}")
 
-    ws = Workspace(
-        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
-        mode=MountMode.WRITE,
-    )
 
-    site, drive = await _pick_site_and_drive(ws)
-    base = f"/sharepoint/{site}/{drive}"
-    test_dir = f"{base}/mirage-sp-test"
-    test_file = f"{test_dir}/hello.txt"
-    print(f"Site: {site}, Drive: {drive}")
-    print(f"Test dir: {test_dir}\n")
-
-    commands, pipe_tests, shell_tests = build_tests(base, test_dir, test_file)
+async def run_suite(ws: Workspace, test_dir: str, test_file: str):
+    commands, pipe_tests, shell_tests = build_tests(test_dir, test_file)
 
     print("=== Individual Commands ===")
     cmd_results = await run_section(ws, commands)
@@ -268,15 +261,39 @@ async def main():
     meta_st, _ = await ws.dispatch(
         "stat", PathSpec.from_str_path(f"{test_file}")
     )
+    meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
     print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+        f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
 
-    # Cleanup
-    print("\n=== Cleanup ===")
-    await ws.shell(f'rm -r "{test_dir}"')
-    print("  done")
+    return cmd_results, pipe_results, shell_results
+
+
+async def main():
+    print("Token loaded ✓\n")
+
+    ws = Workspace(
+        {"/sharepoint/": SharePointVFS(SharePointConfig(access_token=token))},
+        mode=MountMode.WRITE,
+    )
+
+    site, drive = await _pick_site_and_drive(ws)
+    base = f"/sharepoint/{site}/{drive}"
+    test_dir = f"{base}/mirage-sp-test-{uuid.uuid4().hex[:8]}"
+    test_file = f"{test_dir}/hello.txt"
+    print(f"Site: {site}, Drive: {drive}")
+    print(f"Test dir: {test_dir}\n")
+
+    await make_scratch_dir(ws, test_dir)
+    try:
+        cmd_results, pipe_results, shell_results = await run_suite(
+            ws, test_dir, test_file
+        )
+    finally:
+        print("\n=== Cleanup ===")
+        await ws.shell(f'rm -r "{test_dir}"')
+        print("  done")
 
     write_report(site, drive, cmd_results, pipe_results, shell_results)
 
@@ -284,6 +301,7 @@ async def main():
     total = len(all_results)
     passed = sum(1 for *_, ok, _, _ in all_results if ok)
     print(f"\n✓ {passed}/{total} tests passed ({passed / total * 100:.1f}%)")
+    await ws.close()
 
 
 asyncio.run(main())

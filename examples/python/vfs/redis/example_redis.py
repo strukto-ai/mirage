@@ -227,6 +227,7 @@ async def main() -> None:
             for key in sc.scan_iter(f"{prefix}*"):
                 sc.delete(key)
         sc.close()
+    await ws.close()
 
 
 if __name__ == "__main__":

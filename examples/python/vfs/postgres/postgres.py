@@ -90,8 +90,9 @@ async def main():
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     try:
         meta_st, _ = await ws.dispatch("stat", PathSpec.from_str_path(fp))
+        meta_mode = oct(meta_st.mode)[2:] if meta_st.mode is not None else "-"
         print(
-            f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
+            f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
             f"gid={meta_st.gid} mtime={meta_st.modified}"
         )
     except FileNotFoundError:
@@ -149,6 +150,7 @@ async def main():
     await _run(ws, "ls")
 
     await vfs.accessor.close()
+    await ws.close()
 
 
 if __name__ == "__main__":

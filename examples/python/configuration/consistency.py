@@ -28,10 +28,11 @@ def _banner(title: str) -> None:
 def refusals() -> None:
     """A policy that cannot act says so, at mount time.
 
-    `fresh` revalidates cached bytes against the backend before serving
-    them. A backend that does not cache reads never reaches that gate, so
-    declaring `fresh` on one would read as enabled and do nothing. That
-    silent downgrade is what the refusal exists to prevent.
+    `fresh` revalidates what a mount caches, bytes or listings, against
+    the backend before serving it. A backend that caches neither never
+    reaches that gate, so declaring `fresh` on one would read as enabled
+    and do nothing. That silent downgrade is what the refusal exists to
+    prevent. Disk caches no bytes but does cache listings, so it passes.
     """
     _banner("read: fresh is refused where it cannot act")
     fresh = ReadSpec(policy=ReadPolicy.FRESH)
@@ -39,7 +40,9 @@ def refusals() -> None:
         for name, vfs in (("ram", RAMVFS()), ("disk", DiskVFS(root=root))):
             try:
                 Workspace({"/data": vfs}, mode=MountMode.WRITE, read=fresh)
-                print(f"{name}: accepted (unexpected)")
+                print(
+                    f"{name}: accepted, it caches listings for fresh to check"
+                )
             except ValueError as exc:
                 print(f"{name}: {exc}")
 

@@ -139,6 +139,7 @@ async def main() -> None:
     )
     await run(ws, "patch -i /data/change.diff")
     await run(ws, "cat /data/orig.txt")
+    await ws.close()
 
 
 asyncio.run(main())

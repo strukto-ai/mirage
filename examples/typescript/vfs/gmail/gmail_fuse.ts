@@ -47,7 +47,10 @@ function buildConfig(): GmailConfig {
 const isDir = (p: string): Promise<boolean> =>
   stat(p).then(
     (s) => s.isDirectory(),
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== "ENOENT") throw err;
+      return false;
+    },
   );
 
 async function main(): Promise<void> {

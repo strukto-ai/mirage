@@ -254,6 +254,7 @@ async def main() -> None:
             f"refused: {exc}",
             "a profile is set once, at creation",
         )
+    await ws.close()
 
 
 if __name__ == "__main__":

@@ -47,7 +47,10 @@ function buildConfig(): GDriveConfig {
 const isFile = (p: string): Promise<boolean> =>
   stat(p).then(
     (s) => s.isFile(),
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== "ENOENT") throw err;
+      return false;
+    },
   );
 
 async function main(): Promise<void> {

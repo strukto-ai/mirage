@@ -41,10 +41,11 @@ function message(err: unknown): string {
 
 // A policy that cannot act says so, at mount time.
 //
-// `fresh` revalidates cached bytes against the backend before serving
-// them. A backend that does not cache reads never reaches that gate, so
-// declaring `fresh` on one would read as enabled and do nothing. That
-// silent downgrade is what the refusal exists to prevent.
+// `fresh` revalidates what a mount caches, bytes or listings, against
+// the backend before serving it. A backend that caches neither never
+// reaches that gate, so declaring `fresh` on one would read as enabled
+// and do nothing. That silent downgrade is what the refusal exists to
+// prevent. Disk caches no bytes but does cache listings, so it passes.
 async function refusals(): Promise<void> {
   banner('read: fresh is refused where it cannot act')
   const fresh: ReadSpec = { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL }
@@ -57,7 +58,7 @@ async function refusals(): Promise<void> {
     for (const [name, vfs] of backends) {
       try {
         const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE, read: fresh })
-        console.log(`${name}: accepted (unexpected)`)
+        console.log(`${name}: accepted, it caches listings for fresh to check`)
         await ws.close()
       } catch (err) {
         console.log(`${name}: ${message(err)}`)

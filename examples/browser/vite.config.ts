@@ -47,6 +47,7 @@ export default defineConfig({
     __DROPBOX_CLIENT_ID__: JSON.stringify(process.env.DROPBOX_CLIENT_ID ?? ''),
     __BOX_CLIENT_ID__: JSON.stringify(process.env.BOX_CLIENT_ID ?? ''),
     __UPSTASH_REDIS_URL__: JSON.stringify(process.env.UPSTASH_REDIS_URL ?? ''),
+    __POSTGRES_DSN__: JSON.stringify(process.env.POSTGRES_DSN ?? ''),
   },
   server: {
     port: 5173,
@@ -60,6 +61,7 @@ export default defineConfig({
       input: {
         main: resolve(here, 'index.html'),
         mongodb: resolve(here, 'vfs/mongodb/mongodb.html'),
+        postgres: resolve(here, 'vfs/postgres/postgres.html'),
         redis: resolve(here, 'vfs/redis/redis.html'),
         gdocs_pkce: resolve(here, 'vfs/gdocs/gdocs_pkce.html'),
         gdrive_pkce: resolve(here, 'vfs/gdrive/gdrive_pkce.html'),

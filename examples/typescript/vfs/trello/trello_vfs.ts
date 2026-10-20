@@ -50,7 +50,10 @@ function buildConfig(): TrelloConfig {
 const exists = (p: string): Promise<boolean> =>
   fs.promises.stat(p).then(
     () => true,
-    () => false,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'ENOENT') throw err
+      return false
+    },
   )
 
 async function main(): Promise<void> {
@@ -140,7 +143,8 @@ async function main(): Promise<void> {
             const author = rec.member_name ?? '?'
             const text = (rec.text ?? '').slice(0, 80)
             console.log(`  [${author}] ${text}`)
-          } catch {
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) throw err
             console.log(`  (unparseable: ${line.slice(0, 80)})`)
           }
         }

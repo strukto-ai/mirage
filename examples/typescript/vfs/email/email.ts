@@ -48,6 +48,10 @@ function buildConfig(): EmailConfig {
   })
 }
 
+function pickFolder(folders: string[]): string {
+  return folders.find((f) => f.toLowerCase() === 'inbox') ?? folders[0] ?? ''
+}
+
 async function run(
   ws: Workspace,
   cmd: string,
@@ -86,15 +90,7 @@ async function main(): Promise<void> {
       .trim()
       .split('\n')
       .filter((s) => s !== '')
-    let folder = 'Inbox'
-    if (!folders.some((f) => f.includes('Inbox') || f.includes('INBOX'))) {
-      folder = folders[0] ?? ''
-    } else {
-      folder =
-        folders.find((f) => f.includes('INBOX')) ??
-        folders.find((f) => f.includes('Inbox')) ??
-        folder
-    }
+    const folder = pickFolder(folders)
     if (folder === '') {
       console.log('No folders')
       return

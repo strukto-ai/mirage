@@ -132,6 +132,7 @@ async def main():
     r = await ws.shell("tail -n 6 /.bash_history")
     for line in (await r.stdout_str()).strip().splitlines():
         print(f"  {line[:120]}")
+    await ws.close()
 
 
 asyncio.run(main())

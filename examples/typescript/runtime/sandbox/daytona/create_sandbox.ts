@@ -12,13 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Create a sandbox from the mirage-fuse snapshot, provision the
-// in-sandbox workspace (S3 FUSE-mounted at /data, the same prefix the
-// host workspace uses), and print the sandbox id. The sandbox is
-// yours: mirage only connects to it, so delete it when done
-// (`daytona sandbox delete <id>` or the dashboard). The lifecycle
-// knobs below are the safety net for a forgotten demo box.
-
 import { Daytona, type Sandbox } from '@daytona/sdk'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'node:path'

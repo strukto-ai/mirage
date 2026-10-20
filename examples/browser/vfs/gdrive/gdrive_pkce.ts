@@ -79,7 +79,8 @@ function readTokens(): StoredTokens | null {
     const parsed = JSON.parse(raw) as Partial<StoredTokens>
     if (typeof parsed.refresh !== 'string' || !Array.isArray(parsed.scopes)) return null
     return { refresh: parsed.refresh, scopes: parsed.scopes }
-  } catch {
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err
     return null
   }
 }
@@ -150,7 +151,7 @@ async function exchangeCode(code: string, state: string): Promise<StoredTokens> 
     body: body.toString(),
   })
   if (!r.ok) {
-    const text = await r.text().catch(() => '')
+    const text = await r.text()
     throw new Error(`token exchange failed (${String(r.status)}): ${text}`)
   }
   const data = (await r.json()) as { refresh_token?: string; scope?: string }
@@ -169,8 +170,8 @@ async function exchangeCode(code: string, state: string): Promise<StoredTokens> 
 async function revoke(refresh: string): Promise<void> {
   try {
     await fetch(`${REVOKE_URL}?token=${encodeURIComponent(refresh)}`, { method: 'POST' })
-  } catch {
-    /* best effort */
+  } catch (err) {
+    console.error('token revoke failed:', err)
   }
 }
 

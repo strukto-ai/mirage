@@ -66,7 +66,7 @@ function makePresigner(backend: BackendName) {
       body: JSON.stringify({ path, op, opts }),
     })
     if (!r.ok) {
-      const body = await r.text().catch(() => '')
+      const body = await r.text()
       throw new Error(`presigner ${backend} → ${String(r.status)} ${body}`)
     }
     const { url } = (await r.json()) as { url: string }
@@ -80,7 +80,8 @@ async function fetchConfigured(): Promise<BackendName[]> {
     if (!r.ok) return []
     const { configured } = (await r.json()) as { configured: BackendName[] }
     return configured
-  } catch {
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err
     return []
   }
 }

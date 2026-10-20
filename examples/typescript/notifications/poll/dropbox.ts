@@ -81,11 +81,11 @@ export async function runWithShutdown(
   let deadline: ReturnType<typeof setTimeout> | undefined
   let settled = signal.aborted
   let closed = false
-  let wake: () => void = () => {}
+  let wake: (() => void) | undefined
   const stopped = new Promise<void>((resolve) => {
     wake = resolve
   })
-  const stop = (): void => wake()
+  const stop = (): void => wake?.()
   const finish = (): void => {
     settled = true
     if (closed) clearTimeout(deadline)

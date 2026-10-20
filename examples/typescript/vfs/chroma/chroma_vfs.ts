@@ -74,7 +74,8 @@ async function exists(path: string): Promise<boolean> {
   try {
     await fs.promises.stat(path)
     return true
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
     return false
   }
 }

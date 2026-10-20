@@ -30,6 +30,7 @@ async def main() -> None:
     print("\n=== curl a documentation page ===")
     result = await ws.shell("curl https://docs.python.org/3/library/json.html")
     print(await result.stdout_str())
+    await ws.close()
 
 
 asyncio.run(main())

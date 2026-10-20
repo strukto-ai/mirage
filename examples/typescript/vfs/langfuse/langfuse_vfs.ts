@@ -77,7 +77,8 @@ async function main(): Promise<void> {
         console.log(`  id: ${String(doc.id ?? '?')}`)
         const sid = doc.sessionId ?? doc.session_id ?? '?'
         console.log(`  session_id: ${String(sid)}`)
-      } catch {
+      } catch (err) {
+        if (!(err instanceof SyntaxError)) throw err
         for (const line of traceBytes.split('\n').slice(0, 5)) {
           console.log(`  ${line.slice(0, 120)}`)
         }
@@ -128,7 +129,8 @@ async function main(): Promise<void> {
           const prompt = doc.prompt
           const summary = typeof prompt === 'string' ? prompt.slice(0, 120) : JSON.stringify(prompt).slice(0, 120)
           console.log(`  prompt: ${summary}`)
-        } catch {
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err
           console.log(`  ${promptBytes.slice(0, 200)}`)
         }
       }
