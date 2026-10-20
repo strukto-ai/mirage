@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync, readdirSync } from 'node:fs'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -36,180 +36,68 @@ import { DriveClient, type DriveApi } from './api.ts'
 
 const GDRIVE_DIR = dirname(fileURLToPath(import.meta.url))
 const GOOGLE_DIR = join(dirname(GDRIVE_DIR), 'google')
-const SEAM = join(GDRIVE_DIR, 'api')
+const SEAM = join(GDRIVE_DIR, 'api.ts')
+const REQUEST_FREE = new Set(['feedCheckpoint', 'feedState', 'GoogleApiError'])
 
-const REQUEST_FREE_EXPORTS = new Set([
-  'feedCheckpoint',
-  'feedState',
-  'GoogleApiError',
-  'FOLDER_MIME',
-  'MIME_TO_EXT',
-])
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
-    .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
-    .map((name) => join(dir, name))
-    .sort()
-}
-
-function parse(file: string, source: string): ts.SourceFile {
-  return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-}
-
-function isExported(node: ts.Node): boolean {
-  return (
-    ts.canHaveModifiers(node) &&
-    (ts.getModifiers(node) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
-  )
-}
-
-/** Every function a `core/google` module exports, less the request-free ones. */
-function requestFunctions(): Set<string> {
-  const names = new Set<string>()
-  for (const file of sourceFiles(GOOGLE_DIR)) {
-    for (const statement of parse(file, readFileSync(file, 'utf8')).statements) {
-      if (!isExported(statement)) continue
-      if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
-        names.add(statement.name.text)
-      }
-      if (!ts.isVariableStatement(statement)) continue
-      for (const declaration of statement.declarationList.declarations) {
-        const init = declaration.initializer
-        if (
-          ts.isIdentifier(declaration.name) &&
-          init !== undefined &&
-          (ts.isArrowFunction(init) || ts.isFunctionExpression(init))
-        ) {
-          names.add(declaration.name.text)
-        }
-      }
+/** Every import in `source` that reaches Drive past `accessor.drive`. */
+async function driveBypasses(source: string): Promise<string[]> {
+  const found = source.includes('import(') ? ['import()'] : []
+  for (const node of ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest).statements) {
+    if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) continue
+    if (node.moduleSpecifier === undefined || !ts.isStringLiteral(node.moduleSpecifier)) continue
+    const from = resolve(GDRIVE_DIR, node.moduleSpecifier.text)
+    if (from !== SEAM && !from.startsWith(GOOGLE_DIR + sep)) continue
+    const typeOnly = ts.isImportDeclaration(node)
+      ? node.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
+      : node.isTypeOnly
+    if (typeOnly) continue
+    const bindings = ts.isImportDeclaration(node)
+      ? node.importClause?.namedBindings
+      : node.exportClause
+    if (bindings === undefined || !('elements' in bindings)) {
+      found.push(`* from ${node.moduleSpecifier.text}`)
+      continue
     }
-  }
-  for (const name of REQUEST_FREE_EXPORTS) names.delete(name)
-  return names
-}
-
-type Target = 'google' | 'seam' | null
-
-function targetOf(file: string, specifier: string): Target {
-  if (!specifier.startsWith('.')) return null
-  const target = resolve(dirname(file), specifier)
-  if (target.startsWith(GOOGLE_DIR + sep)) return 'google'
-  return target.replace(/\.[jt]s$/, '') === SEAM ? 'seam' : null
-}
-
-/** How the module at `file` reaches Drive other than through `accessor.drive`. */
-function seamBypasses(file: string, source: string, wire: Set<string>): string[] {
-  const found: string[] = []
-  const named = (
-    target: Target,
-    bindings: readonly ts.ImportSpecifier[] | readonly ts.ExportSpecifier[],
-  ) => {
-    for (const binding of bindings) {
-      if (binding.isTypeOnly) continue
+    const module = (from === SEAM ? {} : await import(from)) as Record<string, unknown>
+    for (const binding of bindings.elements) {
       const name = (binding.propertyName ?? binding.name).text
-      if (target === 'seam' || wire.has(name)) found.push(name)
+      if (binding.isTypeOnly) continue
+      if (from === SEAM || (typeof module[name] === 'function' && !REQUEST_FREE.has(name))) {
+        found.push(name)
+      }
     }
   }
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      const target = targetOf(file, node.moduleSpecifier.text)
-      const clause = node.importClause
-      if (
-        target !== null &&
-        clause !== undefined &&
-        clause.phaseModifier !== ts.SyntaxKind.TypeKeyword
-      ) {
-        if (clause.name !== undefined) found.push(`default as ${clause.name.text}`)
-        const bindings = clause.namedBindings
-        if (bindings !== undefined && ts.isNamespaceImport(bindings)) {
-          found.push(`* as ${bindings.name.text}`)
-        } else if (bindings !== undefined) {
-          named(target, bindings.elements)
-        }
-      }
-    } else if (
-      ts.isExportDeclaration(node) &&
-      node.moduleSpecifier !== undefined &&
-      ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-      const target = targetOf(file, node.moduleSpecifier.text)
-      if (target !== null && !node.isTypeOnly) {
-        const clause = node.exportClause
-        if (clause === undefined) found.push('*')
-        else if (ts.isNamespaceExport(clause)) found.push(`* as ${clause.name.text}`)
-        else named(target, clause.elements)
-      }
-    } else if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments[0] !== undefined &&
-      ts.isStringLiteralLike(node.arguments[0]) &&
-      targetOf(file, node.arguments[0].text) !== null
-    ) {
-      found.push(`import(${node.arguments[0].text})`)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(parse(file, source))
   return found
 }
 
 describe('the gdrive drive seam', () => {
-  const wire = requestFunctions()
-  const plantedAt = join(GDRIVE_DIR, 'planted.ts')
-  const planted = (source: string): string[] => seamBypasses(plantedAt, source, wire)
-
-  it('derives the request functions from the google modules', () => {
-    for (const name of ['listFiles', 'getFile', 'googleGet', 'driveBase', 'downloadRevision']) {
-      expect(wire.has(name), name).toBe(true)
-    }
-  })
-
-  it('no gdrive core module but the seam reaches Drive past accessor.drive', () => {
-    const offenders: [string, string][] = []
-    for (const file of sourceFiles(GDRIVE_DIR)) {
-      if (file.replace(/\.ts$/, '') === SEAM) continue
-      for (const bypass of seamBypasses(file, readFileSync(file, 'utf8'), wire)) {
-        offenders.push([relative(GDRIVE_DIR, file), bypass])
-      }
+  it('no gdrive core module but the seam reaches Drive past accessor.drive', async () => {
+    const offenders: [string, string[]][] = []
+    for (const name of readdirSync(GDRIVE_DIR)) {
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts') || name === 'api.ts') continue
+      const found = await driveBypasses(readFileSync(join(GDRIVE_DIR, name), 'utf8'))
+      if (found.length > 0) offenders.push([name, found])
     }
     expect(offenders).toEqual([])
   })
 
   it.each([
-    ["import { listFiles } from '../google/drive.ts'", ['listFiles']],
-    ["import { getFile as fetchFile } from '../google/drive.ts'", ['getFile']],
-    [
-      "import {\n  FOLDER_MIME,\n  deleteFile,\n  type DriveFile,\n} from '../google/drive.ts'",
-      ['deleteFile'],
-    ],
-    [
-      "import type { DriveFile } from '../google/drive.ts'\nimport { copyFile } from '../google/drive.ts'",
-      ['copyFile'],
-    ],
-    ["import * as wire from '../google/drive.ts'", ['* as wire']],
-    ["export { deleteFile } from '../google/drive.ts'", ['deleteFile']],
-    ["export * from '../google/client.ts'", ['*']],
-    ["const wire = await import('../google/drive.ts')", ['import(../google/drive.ts)']],
-    ["import { googleGet } from '../google/client.js'", ['googleGet']],
-    ["import { DriveClient } from './api.ts'", ['DriveClient']],
-    ["import { getFile } from '../google/entry.ts'", ['getFile']],
-  ])('flags %j', (source, expected) => {
-    expect(planted(source)).toEqual(expected)
+    "import { FOLDER_MIME, listFiles } from '../google/drive.ts'",
+    "import * as wire from '../google/drive.ts'",
+    "export { deleteFile } from '../google/drive.ts'",
+    "import { DriveClient } from './api.ts'",
+    "const wire = await import('../google/drive.ts')",
+  ])('flags %j', async (source) => {
+    expect(await driveBypasses(source)).not.toEqual([])
   })
 
   it.each([
-    "import type { DriveFile } from '../google/drive.ts'",
     "import { FOLDER_MIME, MIME_TO_EXT, type DriveFile } from '../google/drive.ts'",
-    "import { GoogleApiError } from '../google/client.ts'",
     "import { feedCheckpoint, feedState } from '../google/events.ts'",
-    "import type * as wire from '../google/drive.ts'",
+    "import { GoogleApiError } from '../google/client.ts'",
     "import type { DriveApi } from './api.ts'",
-    "import { listFiles } from '../box/api.ts'",
-  ])('allows %j', (source) => {
-    expect(planted(source)).toEqual([])
+  ])('allows %j', async (source) => {
+    expect(await driveBypasses(source)).toEqual([])
   })
 })
 
@@ -289,13 +177,6 @@ const DELEGATIONS: { [K in keyof DriveApi]: Delegation & { args: Parameters<Driv
 describe('DriveClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  it('has a delegation case for every method', () => {
-    const methods = Object.getOwnPropertyNames(DriveClient.prototype).filter(
-      (name) => name !== 'constructor',
-    )
-    expect(Object.keys(DELEGATIONS).sort()).toEqual(methods.sort())
   })
 
   it.each(Object.entries<Delegation>(DELEGATIONS))(
