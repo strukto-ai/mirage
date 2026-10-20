@@ -229,7 +229,13 @@ The same wiring from the side of a change. Every file under `python/` sets
 change selects the shared Git disk/RAM corpus through these broad filters.
 No per-verb allowlist is needed. The mirrored `commands/builtin/general/bc/`
 wrappers use these same whole-host filters, and `rust/` selects both hosts
-for their shared evaluator. `integ/unix/bc/` runs the GNU bc 1.07.1 arithmetic
+for their shared evaluator. The shared Rust diff engine, mirrored `rs/diff_*`
+adapters, workspace-owned pools and worker lifecycle use these same whole-host
+filters. `integ/unix/diff/shared_engine.json` pins byte preservation, explicit
+comparison status, ignore flags, missing final newlines and ed dot output.
+Diff uses Similar Myers matching, so repeated-line alignment and unified hunk
+grouping can differ from GNU while retaining valid edit scripts.
+`integ/unix/bc/` runs the GNU bc 1.07.1 arithmetic
 and math precision cases. The following paths select
 additional jobs:
 

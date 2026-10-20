@@ -1362,3 +1362,57 @@ async def test_a_write_from_outside_a_line_waits_for_a_capture():
         assert await ws.vfs.read("/f") == b"late"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_diff_worker_is_workspace_owned_for_single_and_cross_mount_commands():
+    ws = Workspace(
+        {"/left": RAMVFS(), "/right": RAMVFS()}, mode=MountMode.WRITE
+    )
+    try:
+        assert not ws._diff_pool._entries
+        await ws.shell(
+            "printf 'a\\n' > /left/a; printf 'b\\n' > /left/b; printf 'c\\n' > /right/c"
+        )
+        single = await ws.shell("diff /left/a /left/b")
+        assert single.exit_code == 1
+        entry = next(iter(ws._diff_pool._entries))
+        process = entry.worker._process
+        cross = await ws.shell("diff /left/a /right/c")
+        assert cross.exit_code == 1
+        assert next(iter(ws._diff_pool._entries)).worker._process is process
+        assert await cross.materialize_stdout() == b"1c1\n< a\n---\n> c\n"
+    finally:
+        await ws.close()
+    assert process is not None and process.returncode is not None
+    assert not ws._diff_pool._entries
+
+
+@pytest.mark.asyncio
+async def test_execution_cleanup_failure_still_stops_diff_pool_and_other_resources(
+    monkeypatch,
+):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf 'a\\n' > /a; printf 'b\\n' > /b; diff /a /b")
+    process = next(iter(ws._diff_pool._entries)).worker._process
+    closed = []
+
+    class FailedExecution:
+        def cancel(self):
+            closed.append("cancel")
+
+        async def aclose(self):
+            assert ws._diff_pool._stopped
+            raise ValueError("execution cleanup failed")
+
+    async def close_runtimes():
+        closed.append("runtimes")
+
+    execution = FailedExecution()
+    ws._shell_executions.add(execution)
+    monkeypatch.setattr(ws._runtimes, "close", close_runtimes)
+    with pytest.raises(ValueError, match="execution cleanup failed"):
+        await ws.close()
+    assert closed == ["cancel", "runtimes"]
+    assert process is not None and process.returncode is not None
+    assert not ws._diff_pool._entries

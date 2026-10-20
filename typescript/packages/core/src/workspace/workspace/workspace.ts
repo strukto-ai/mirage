@@ -1,3 +1,4 @@
+import { DiffPool } from '../../rs/diff_pool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,6 +202,7 @@ export class Workspace {
   readonly vfs: WorkspaceFiles
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
+  private readonly diffPool = new DiffPool()
   private readonly shellExecutions = new Set<ShellExecution>()
   private closed = false
   readonly documents: Documents
@@ -296,6 +298,7 @@ export class Workspace {
       this.io,
       this.clock,
     )
+    this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
     this.wsId = options.workspaceId ?? newWorkspaceId()
@@ -2129,9 +2132,18 @@ export class Workspace {
   }
 
   private async runClose(dropState: boolean): Promise<void> {
+    this.diffPool.stop()
     const executions = [...this.shellExecutions]
     for (const execution of executions) execution.cancel()
-    await Promise.all(executions.map((execution) => execution.close()))
+    const executionResults = await Promise.allSettled(
+      executions.map((execution) => execution.close()),
+    )
+    const executionErrors: unknown[] = []
+    for (const result of executionResults)
+      if (result.status === 'rejected') {
+        const error: unknown = result.reason
+        executionErrors.push(error)
+      }
     this.stateDropped = dropState
     try {
       await closeWorkspace({
@@ -2141,6 +2153,13 @@ export class Workspace {
         ownsStateStore: this.ownsStateStore,
         stateStore: this.stateStoreInternal,
         closers: [
+          () => this.diffPool.close(),
+          () =>
+            executionErrors.length > 0
+              ? Promise.reject(
+                  new AggregateError(executionErrors, 'shell execution cleanup failed'),
+                )
+              : Promise.resolve(),
           () => this.sessionManager.settle(),
           () => this.scriptPolicy.close(),
           ...this.closers.splice(0),

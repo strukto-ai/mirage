@@ -25,6 +25,7 @@ const diff: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'diff',
+  streams: true,
   read: true,
   fn: diff,
 }

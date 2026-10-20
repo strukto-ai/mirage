@@ -18,6 +18,7 @@ import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_co
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
+import { DiffRequest } from '@struktoai/mirage-core/rs/diff_worker'
 import { ICONV_MULTIBYTE_DIGESTS, iconvMultibyteDigests } from '@struktoai/mirage-core/test-utils'
 import { JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import {
@@ -41,6 +42,7 @@ import pipelineStatus from '../bash/param/pipestatus.json'
 import traps from '../bash/trap/exit.json'
 import processStreams from '../bash/procsub/stream.json'
 import rgShared from '../unix/rg/shared_engine.json'
+import diffShared from '../unix/diff/shared_engine.json'
 import printfBasic from '../bash/printf/basic.json'
 import printfAssignments from '../bash/printf/vflag.json'
 import printfShared from '../bash/printf/shared.json'
@@ -95,6 +97,7 @@ function battery(): [string, Check][] {
     traps,
     processStreams,
     rgShared,
+    diffShared,
     printfBasic,
     printfAssignments,
     printfShared,
@@ -124,6 +127,144 @@ function battery(): [string, Check][] {
 }
 
 const CHECKS: [string, Check][] = [
+  [
+    'diff workers are reused, expire while idle and belong to their workspace',
+    async (ws) => {
+      const NativeWorker = globalThis.Worker
+      const started: Worker[] = []
+      const stopped = new Set<Worker>()
+      globalThis.Worker = class extends NativeWorker {
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, options)
+          started.push(this)
+        }
+
+        override terminate(): void {
+          super.terminate()
+          stopped.add(this)
+        }
+      }
+      const peer = workspace()
+      try {
+        const command = 'echo a > /data/a; echo b > /data/b; diff /data/a /data/b'
+        const expected = [1, '1c1\n< a\n---\n> b\n', '']
+        equal(await shell(ws, command), expected)
+        equal(await shell(ws, 'diff /data/a /data/b'), expected)
+        equal(started.length, 1)
+        equal(await shell(peer, command), expected)
+        equal(started.length, 2)
+        await peer.close()
+        equal(stopped.size, 1)
+        equal(await shell(ws, 'diff /data/a /data/b'), expected)
+        equal(started.length, 2)
+        await settle(async () => stopped.size === 2)
+        equal(await shell(ws, 'diff /data/a /data/b'), expected)
+        equal(started.length, 3)
+        await ws.close()
+        equal(stopped.size, 3)
+      } finally {
+        await Promise.allSettled([ws.close(), peer.close()])
+        globalThis.Worker = NativeWorker
+      }
+    },
+  ],
+  [
+    'diff reports unavailable workers and recovers when creation becomes available',
+    async (ws) => {
+      const NativeWorker = globalThis.Worker
+      let attempts = 0
+      globalThis.Worker = new Proxy(NativeWorker, {
+        construct() {
+          attempts += 1
+          throw new DOMException('worker creation denied', 'SecurityError')
+        },
+      })
+      try {
+        const denied = await shell(ws, 'echo a > /data/a; echo b > /data/b; diff /data/a /data/b')
+        equal(denied.slice(0, 2), [2, ''])
+        equal(denied[2].includes('worker creation denied'), true)
+        equal(attempts, 1)
+      } finally {
+        globalThis.Worker = NativeWorker
+      }
+      equal(await shell(ws, 'diff /data/a /data/b'), [1, '1c1\n< a\n---\n> b\n', ''])
+    },
+  ],
+  [
+    'an active diff can be cancelled while the page remains responsive and reused',
+    async (ws) => {
+      equal(await shell(ws, 'echo a > /data/a; echo b > /data/b'), [0, '', ''])
+      const encode = new TextEncoder()
+      await ws.vfs.write(
+        '/data/old',
+        encode.encode(
+          Array.from({ length: 100_000 }, (_, index) => `old-${String(index)}\n`).join(''),
+        ),
+      )
+      await ws.vfs.write(
+        '/data/new',
+        encode.encode(
+          Array.from({ length: 100_000 }, (_, index) => `new-${String(index)}\n`).join(''),
+        ),
+      )
+      const NativeWorker = globalThis.Worker
+      const abort = new AbortController()
+      let cancel: ReturnType<typeof setTimeout> | undefined
+      let armed = false
+      let ticks = 0
+      let terminations = 0
+      const timer = setInterval(() => {
+        ticks += 1
+      }, 1)
+      globalThis.Worker = class extends NativeWorker {
+        override postMessage(message: unknown, transfer: Transferable[]): void
+        override postMessage(message: unknown, options?: StructuredSerializeOptions): void
+        override postMessage(
+          message: unknown,
+          options?: Transferable[] | StructuredSerializeOptions,
+        ): void {
+          if (Array.isArray(options)) super.postMessage(message, options)
+          else super.postMessage(message, options)
+          if (
+            typeof message !== 'object' ||
+            message === null ||
+            !('name' in message) ||
+            message.name !== 'diffDispatch' ||
+            !('args' in message) ||
+            !Array.isArray(message.args)
+          )
+            return
+          const request = DiffRequest.safeParse(message.args[0])
+          if (request.success && request.data.kind === 'end' && request.data.index === 1) {
+            armed = true
+            ticks = 0
+            cancel = setTimeout(() => abort.abort(), 15)
+          }
+        }
+
+        override terminate(): void {
+          super.terminate()
+          terminations += 1
+        }
+      }
+      try {
+        equal(
+          await aborted(shell(ws, 'diff /data/old /data/new', { signal: abort.signal })),
+          'AbortError',
+        )
+        equal(armed, true)
+        equal(ticks > 0, true)
+        equal(terminations, 1)
+        equal(await shell(ws, 'diff /data/a /data/b'), [1, '1c1\n< a\n---\n> b\n', ''])
+      } finally {
+        clearTimeout(cancel)
+        clearInterval(timer)
+        abort.abort()
+        await ws.close()
+        globalThis.Worker = NativeWorker
+      }
+    },
+  ],
   [
     'cancelling rg on a long line releases the search',
     async (ws) => {

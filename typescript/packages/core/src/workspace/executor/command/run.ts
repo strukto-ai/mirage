@@ -224,6 +224,7 @@ export async function runOnMount(
       flags,
       {
         admission: ctx.admission,
+        ...(registry.diff === undefined ? {} : { diff: registry.diff }),
         stdin: opts.stdin ?? null,
         cwd: PathSpec.fromStrPath(session.cwd),
         vfs: new Files(

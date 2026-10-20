@@ -37,6 +37,7 @@ from mirage.io.config import IOConfig
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.process.view import ProcessView
+from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn
 from mirage.runtime.workspace import WorkspaceRuntime
@@ -121,6 +122,7 @@ class MountRegistry:
             Callable[[SessionState, frozenset[str]], Awaitable[None]] | None
         ) = None
         self.observer: Observer | None = None
+        self.diff: DiffComputer | None = None
         self._mounts: list[MountEntry] = []
         # ``mount_rows`` as last built; a mount, an unmount or the
         # anchor changing clears it.

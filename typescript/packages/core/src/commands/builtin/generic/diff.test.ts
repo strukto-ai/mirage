@@ -20,7 +20,10 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { IOResult } from '../../../io/types.ts'
+import { UsageError } from '../../errors.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -102,7 +105,7 @@ describe('diff headers', () => {
       readdir,
       backend,
     )
-    expect(new TextDecoder().decode(out as Uint8Array).split('\n')[0]).toBe(
+    expect(new TextDecoder().decode(await materialize(out)).split('\n')[0]).toBe(
       '--- a\t2021-06-15 12:00:00.000000000 +0000',
     )
   })
@@ -131,7 +134,7 @@ describe('diff headers', () => {
     )
     expect(
       new TextDecoder()
-        .decode(out as Uint8Array)
+        .decode(await materialize(out))
         .split('\n')
         .slice(0, 2),
     ).toEqual([
@@ -159,7 +162,7 @@ describe('diff headers', () => {
     expect(io.exitCode).toBe(1)
     expect(
       new TextDecoder()
-        .decode(out as Uint8Array)
+        .decode(await materialize(out))
         .split('\n')
         .slice(0, 2),
     ).toEqual([
@@ -177,8 +180,25 @@ describe('diff headers', () => {
       readdir,
       statOf,
     )
-    expect(new TextDecoder().decode(absent as Uint8Array).split('\n')[1]).toBe(
+    expect(new TextDecoder().decode(await materialize(absent)).split('\n')[1]).toBe(
       '+++ gone\t1970-01-01 00:00:00.000000000 +0000',
     )
   })
+})
+
+it.each([
+  new CommandTimeoutError('diff', 1),
+  new PipeClosed(),
+  new UsageError('diff: scope refused', 1),
+  new DOMException('execute aborted', 'AbortError'),
+])('preserves host control failures raised by filesystem work, %s', async (failure) => {
+  const unread = (_path: PathSpec): AsyncIterable<Uint8Array> => {
+    throw new Error('unexpected input read')
+  }
+  const ctx: Context = { flags: { recursive: true }, stdin: null, cwd: PathSpec.fromStrPath('/') }
+  await expect(
+    diffGeneric([operand('a', '/d/a'), operand('b', '/d/b')], ctx, unread, readdir, () =>
+      Promise.reject(failure),
+    ),
+  ).rejects.toBe(failure)
 })
