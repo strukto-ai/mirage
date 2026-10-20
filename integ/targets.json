@@ -3205,7 +3205,11 @@
         "opener": "opener",
         "pruner": "pruner",
         "speaker": "speaker",
-        "linkwalled": "linkwalled"
+        "linkwalled": "linkwalled",
+        "auditprep": "auditprep",
+        "audithide": "audithide",
+        "auditrule": "auditrule",
+        "auditask": "auditask"
       },
       "profile": "default",
       "profiles": {
@@ -3492,6 +3496,46 @@
                     "/scratch/lw/secret"
                   ]
                 }
+              }
+            ]
+          }
+        },
+        "auditprep": {},
+        "audithide": {
+          "paths": {
+            "hide": [
+              "/scratch/audit/secret.txt",
+              "/scratch/audit/hdir",
+              "/scratch/audit/box/secret.txt"
+            ]
+          }
+        },
+        "auditrule": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "audit sealed",
+                "paths": [
+                  "/scratch/audit/secret.txt",
+                  "/scratch/audit/hdir",
+                  "/scratch/audit/box/secret.txt",
+                  "/scratch/audit/hdir/*"
+                ]
+              }
+            ]
+          }
+        },
+        "auditask": {
+          "commands": {
+            "ask": [
+              {
+                "reason": "audit nod",
+                "paths": [
+                  "/scratch/audit/secret.txt",
+                  "/scratch/audit/hdir",
+                  "/scratch/audit/box/secret.txt",
+                  "/scratch/audit/hdir/*"
+                ]
               }
             ]
           }

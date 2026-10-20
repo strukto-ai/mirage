@@ -252,10 +252,15 @@ async function runSessionProbe(
     }),
   })
   await ws.shell('ln -s pub.txt /data/hl')
+  // A link whose own name the session sees but which leads into the hide
+  // is as hidden as its target.
+  await ws.shell('ln -s vault/secret.txt /data/lv')
   const hidden = await ws.shell('cat /data/vault/secret.txt', { sessionId: 'agent' })
   result.session_shell_hidden_exit = hidden.exitCode
   const listing = await ws.shell('ls /data', { sessionId: 'agent' })
   result.session_shell_listing = dec.decode(listing.stdout).trim()
+  const into = await ws.shell('readlink -f /data/lv; echo $?', { sessionId: 'agent' })
+  result.session_shell_link_into_hide = dec.decode(into.stdout)
   const capped = await ws.shell('echo x > /data/pub.txt', { sessionId: 'agent' })
   result.session_shell_write_refused = capped.exitCode !== 0
   result.session_host_reads_hidden = dec.decode(await ws.vfs.read('/data/vault/secret.txt')).trim()
@@ -269,6 +274,7 @@ async function runSessionProbe(
     result.session_kernel_hidden_absent = await absent(() => readFile(`${data}/vault/secret.txt`))
     // A hidden link is absent too, not reported from the link table.
     result.session_kernel_hidden_link_absent = await absent(() => lstat(`${data}/hl`))
+    result.session_kernel_link_into_hide_absent = await absent(() => lstat(`${data}/lv`))
     result.session_kernel_create_under_hidden_absent = await absent(() =>
       writeFile(`${data}/vault/new.txt`, 'x\n'),
     )
