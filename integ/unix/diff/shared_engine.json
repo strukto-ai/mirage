@@ -339,6 +339,74 @@
         "stdout": " 31 63 31 0a 3c 20 ef bb bf 61 0a 2d 2d 2d 0a 3e\n 20 61 0a\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_shared_unicode_ignore_case",
+      "seq": 9973010,
+      "command": "mkdir -p /data/diff_engine; printf 'Ä\\nΟΣ\\nİ\\n' > /data/diff_engine/a; printf 'ä\\nος\\ni̇\\n' > /data/diff_engine/b; diff -i /data/diff_engine/a /data/diff_engine/b",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "diff_shared_unicode_original_output",
+      "seq": 9973011,
+      "command": "mkdir -p /data/diff_engine; printf 'Ä\\nÖ\\n' > /data/diff_engine/a; printf 'ä\\nü\\n' > /data/diff_engine/b; diff -i /data/diff_engine/a /data/diff_engine/b",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "expect": {
+        "exit": 1,
+        "stdout": "2c2\n< Ö\n---\n> ü\n",
+        "stderr": ""
+      }
     }
   ]
 }

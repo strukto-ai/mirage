@@ -60,6 +60,56 @@ fn normalization_preserves_original_bytes() {
 }
 
 #[test]
+fn ignore_case_uses_unicode_lowercase_without_case_folding() {
+    for (old, new) in [("Ä\n", "ä\n"), ("ΟΣ\n", "ος\n"), ("İ\n", "i\u{307}\n")] {
+        for mode in ["normal", "unified", "ed"] {
+            let config = format!(r#"{{"ignore_case":true,"mode":"{mode}"}}"#);
+            assert_eq!(
+                compare(&config, old.as_bytes(), new.as_bytes()),
+                (vec![], vec![], 0, br#"{"outcome":"equal"}"#.to_vec()),
+                "{mode}: {old:?} versus {new:?}"
+            );
+        }
+    }
+    let result = compare(
+        r#"{"ignore_case":true}"#,
+        "Straße\n".as_bytes(),
+        b"STRASSE\n",
+    );
+    assert_eq!(result.0, "1c1\n< Straße\n---\n> STRASSE\n".as_bytes());
+    assert_eq!(result.2, 1);
+    let result = compare(
+        r#"{"ignore_case":true,"ignore_all_space":true}"#,
+        "ΟΣ Α\n".as_bytes(),
+        "οςα\n".as_bytes(),
+    );
+    assert_eq!(result.2, 0);
+}
+
+#[test]
+fn ignore_case_preserves_invalid_utf8_and_original_output() {
+    let result = compare(
+        r#"{"ignore_case":true}"#,
+        "Ä\nÖ\n".as_bytes(),
+        "ä\nü\n".as_bytes(),
+    );
+    assert_eq!(result.0, "2c2\n< Ö\n---\n> ü\n".as_bytes());
+    assert_eq!(result.2, 1);
+    let result = compare(
+        r#"{"ignore_case":true}"#,
+        b"\xff\xc3\x84\nOld \xfe\n",
+        b"\xff\xc3\xa4\nNew \xfd\n",
+    );
+    assert_eq!(result.0, b"2c2\n< Old \xfe\n---\n> New \xfd\n");
+    assert!(result.1.is_empty());
+    assert_eq!(result.2, 1);
+    assert_eq!(
+        compare(r#"{"ignore_case":true}"#, b"\xff\n", b"\xfe\n").0,
+        b"1c1\n< \xff\n---\n> \xfe\n"
+    );
+}
+
+#[test]
 fn unified_preserves_invalid_utf8_cr_and_missing_lf() {
     let (output, stderr, status, _) = compare(
         r#"{"mode":"unified","old_header":"left\tstamp","new_header":"right\tstamp"}"#,
@@ -112,6 +162,69 @@ fn brief_retains_outcome_without_formatting() {
     assert!(result.0.is_empty());
     assert_eq!(result.2, 1);
     assert_eq!(result.3, br#"{"outcome":"different"}"#);
+}
+
+#[test]
+fn brief_compares_large_changed_inputs_without_an_edit_script() {
+    let old: String = (0..100_000).map(|n| format!("old {n}\n")).collect();
+    let new: String = (0..100_000).rev().map(|n| format!("old {n}\n")).collect();
+    assert_eq!(
+        compare(r#"{"brief":true}"#, old.as_bytes(), new.as_bytes()),
+        (vec![], vec![], 1, br#"{"outcome":"different"}"#.to_vec())
+    );
+}
+
+#[test]
+fn brief_preserves_normalization_newline_and_binary_rules() {
+    for (config, old, new, status) in [
+        (
+            r#"{"brief":true,"ignore_case":true}"#,
+            "Ä\n".as_bytes(),
+            "ä\n".as_bytes(),
+            0,
+        ),
+        (
+            r#"{"brief":true,"ignore_all_space":true}"#,
+            b"a \tb\r\n".as_slice(),
+            b"ab".as_slice(),
+            0,
+        ),
+        (
+            r#"{"brief":true,"ignore_all_space":true}"#,
+            b"a\nb\n",
+            b"ab\n",
+            1,
+        ),
+        (
+            r#"{"brief":true,"ignore_space_change":true}"#,
+            b"a  b\n",
+            b"a\tb",
+            0,
+        ),
+        (r#"{"brief":true}"#, b"a\n", b"a", 1),
+        (r#"{"brief":true,"mode":"ed"}"#, b"a\n", b"a", 0),
+        (
+            r#"{"brief":true,"ignore_case":true}"#,
+            b"A\0\n",
+            b"a\0\n",
+            1,
+        ),
+        (r#"{"brief":true}"#, b"same\0\n", b"same\0\n", 0),
+    ] {
+        let result = compare(config, old, new);
+        assert!(result.0.is_empty(), "{config}");
+        assert!(result.1.is_empty(), "{config}");
+        assert_eq!(result.2, status, "{config}");
+        assert_eq!(
+            result.3,
+            if status == 0 {
+                br#"{"outcome":"equal"}"#.as_slice()
+            } else {
+                br#"{"outcome":"different"}"#.as_slice()
+            },
+            "{config}"
+        );
+    }
 }
 
 #[test]

@@ -78,6 +78,18 @@ fn key(line: &&[u8], config: &Config) -> Vec<u8> {
     if newline {
         line = &line[..line.len() - 1];
     }
+    let lowercase;
+    if config.ignore_case {
+        lowercase = {
+            let mut bytes = Vec::with_capacity(line.len());
+            for chunk in line.utf8_chunks() {
+                bytes.extend_from_slice(chunk.valid().to_lowercase().as_bytes());
+                bytes.extend_from_slice(chunk.invalid());
+            }
+            bytes
+        };
+        line = &lowercase;
+    }
     let mut out = Vec::new();
     let mut spaces = false;
     for &byte in line {
@@ -94,11 +106,7 @@ fn key(line: &&[u8], config: &Config) -> Vec<u8> {
             out.push(b' ');
             spaces = false;
         }
-        out.push(if config.ignore_case {
-            byte.to_ascii_lowercase()
-        } else {
-            byte
-        });
+        out.push(byte);
     }
     if newline && !config.ignore_all_space && !config.ignore_space_change && config.mode != Mode::Ed
     {
@@ -265,22 +273,32 @@ impl Diff {
         }
         let old: Vec<&[u8]> = self.inputs[0].split_inclusive(|b| *b == b'\n').collect();
         let new: Vec<&[u8]> = self.inputs[1].split_inclusive(|b| *b == b'\n').collect();
-        let ops = if !self.config.ignore_case
-            && !self.config.ignore_all_space
-            && !self.config.ignore_space_change
-            && self.config.mode != Mode::Ed
-        {
-            capture_diff_slices(Algorithm::Myers, &old, &new)
-        } else {
+        let normalize = self.config.ignore_case
+            || self.config.ignore_all_space
+            || self.config.ignore_space_change
+            || self.config.mode == Mode::Ed;
+        if self.config.brief {
+            self.equal = if normalize {
+                old.len() == new.len()
+                    && old
+                        .iter()
+                        .zip(&new)
+                        .all(|(a, b)| key(a, &self.config) == key(b, &self.config))
+            } else {
+                old == new
+            };
+            self.status = if self.equal { 0 } else { 1 };
+            return;
+        }
+        let ops = if normalize {
             capture_diff_slices_by_key(Algorithm::Myers, &old, &new, |record| {
                 key(record, &self.config)
             })
+        } else {
+            capture_diff_slices(Algorithm::Myers, &old, &new)
         };
         self.equal = ops.iter().all(|op| op.tag() == DiffTag::Equal);
         self.status = if self.equal { 0 } else { 1 };
-        if self.config.brief {
-            return;
-        }
         if self.config.mode == Mode::Ed {
             for (bytes, label) in [
                 (&self.inputs[0], &self.config.old_label),

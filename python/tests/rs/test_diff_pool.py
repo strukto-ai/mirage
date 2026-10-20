@@ -1,18 +1,97 @@
 import asyncio
 import os
 import signal
+import subprocess
+import sys
 from functools import partial
 
 import pytest
 
+from mirage.commands.builtin.generic.diff import DiffFlags, diff
 from mirage.rs import diff_pool
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import DiffOptions
 from mirage.rs.errors import StreamRefusal
+from mirage.types import PathSpec
 
 
 async def _bytes(value: bytes = b"a\n") -> bytes:
     return value
+
+
+async def _unexpected_metadata(path):
+    raise AssertionError(f"unexpected metadata read for {path.virtual}")
+
+
+async def _standalone_diff_cleanup():
+    diff_pool.RETIRE_BYTES = 0
+    original = asyncio.create_subprocess_exec
+    processes = []
+    attempts = 0
+
+    async def start(*args, **kwargs):
+        process = await original(*args, **kwargs)
+        processes.append(process)
+        kill = process.kill
+
+        def stop():
+            nonlocal attempts
+            attempts += 1
+            assert process.returncode is None
+            if attempts == 1:
+                raise PermissionError("termination refused")
+            kill()
+
+        process.kill = stop
+        return process
+
+    files = {"/a": b"a\n", "/b": b"b\n"}
+
+    async def read(path):
+        return files[path.virtual]
+
+    asyncio.create_subprocess_exec = start
+    try:
+        await diff(
+            [PathSpec.from_str_path(path, "") for path in files],
+            read_bytes=read,
+            readdir_fn=_unexpected_metadata,
+            stat_fn=_unexpected_metadata,
+            flags=DiffFlags(),
+        )
+    except ExceptionGroup as exc:
+        assert len(exc.exceptions) == 1
+        assert isinstance(exc.exceptions[0], PermissionError)
+    else:
+        raise AssertionError("cleanup failure was not reported")
+    assert attempts == 2
+    assert len(processes) == 1 and processes[0].returncode is not None
+    print("cleanup retried and child joined")
+
+
+def test_standalone_diff_retries_failed_retirement_without_joining_caller():
+    with subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import asyncio, runpy, sys; "
+            "asyncio.run(runpy.run_path(sys.argv[1])"
+            "['_standalone_diff_cleanup']())",
+            __file__,
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGKILL)
+            stdout, stderr = child.communicate()
+            pytest.fail(f"standalone diff cleanup hung: {stdout}{stderr}")
+        assert child.returncode == 0, stderr
+        assert stdout == "cleanup retried and child joined\n"
 
 
 @pytest.mark.asyncio

@@ -253,6 +253,8 @@ class DiffPool:
         except BaseException:
             await settle(self._retire(lease.entry))
             raise
+        finally:
+            lease.owner = None
 
     def stop(self) -> None:
         """Reject new and queued comparisons before workspace teardown yields."""

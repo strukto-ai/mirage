@@ -383,26 +383,25 @@ async function diffDirs(
         continue
       }
       const [body, changed] = await diffDirs(walk, childA, childB, gone, opened)
-      parts.push(...body)
+      for (const chunk of body) parts.push(chunk)
       differ ||= changed
     } else if (!aDir && !bDir) {
       const pair = await diffPair(walk, childA, childB, gone)
-      if (pair.stderr.length > 0) walk.trouble.push(...pair.stderr)
+      for (const chunk of pair.stderr) walk.trouble.push(chunk)
       if (pair.status === 2 && pair.stderr.length === 0)
         walk.trouble.push(ENC.encode('diff: comparison failed\n'))
       if (pair.outcome === 'equal') {
-        parts.push(...pair.output)
+        for (const chunk of pair.output) parts.push(chunk)
         continue
       }
       differ = true
-      if (flags.brief) parts.push(...pair.output)
-      else
+      if (!flags.brief)
         parts.push(
           ENC.encode(
             `diff${walk.switches} ${quoteHeaderName(childA.rawPath)} ${quoteHeaderName(childB.rawPath)}\n`,
           ),
-          ...pair.output,
         )
+      for (const chunk of pair.output) parts.push(chunk)
     } else if (aDir) {
       differ = true
       parts.push(
@@ -440,7 +439,7 @@ async function excludedPatterns(
   const patterns = [...flags.exclude]
   for (const path of flags.excludeFrom) {
     const text = DEC.decode(await materialize(stream(path)))
-    patterns.push(...text.split('\n').filter((line) => line !== ''))
+    for (const line of text.split('\n')) if (line !== '') patterns.push(line)
   }
   return patterns
 }
@@ -533,7 +532,7 @@ export async function diffGeneric(
       const pair = await diffPair(walk, p0, p1, absent)
       output = pair.output
       differ = pair.outcome === 'different'
-      if (pair.stderr.length > 0) trouble.push(...pair.stderr)
+      for (const chunk of pair.stderr) trouble.push(chunk)
       if (pair.status === 2 && pair.stderr.length === 0)
         trouble.push(ENC.encode('diff: comparison failed\n'))
     }
