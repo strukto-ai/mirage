@@ -95,10 +95,14 @@ async function peeled(repo: Repo, obj: GitObject, want: string): Promise<GitObje
  * @param name the object name as typed
  * @param want the type asked for
  */
-async function typedBytes(repo: Repo, name: string, want: string): Promise<Uint8Array | null> {
+export async function typedBytes(
+  repo: Repo,
+  name: string,
+  want: string,
+): Promise<Uint8Array | null> {
   const obj = await peeled(repo, await namedObject(repo, name), want)
   if (obj === null) return null
-  return shownRaw(repo, obj, await placeNamed(repo, name, obj.oid))
+  return shownRaw(repo, obj, name)
 }
 
 /**
@@ -143,7 +147,7 @@ async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Arra
   const obj = await namedObject(repo, name)
   if (mode === 't') return [ENC.encode(`${obj.type}\n`), 0]
   if (mode === 's') {
-    const shown = await shownRaw(repo, obj, await placeNamed(repo, name, obj.oid))
+    const shown = await shownRaw(repo, obj, name)
     return [ENC.encode(`${String(shown.length)}\n`), 0]
   }
   if (mode === 'e') return [new Uint8Array(), 0]
@@ -151,10 +155,10 @@ async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Arra
 }
 
 /**
- * One `--batch`/`--batch-check` format line, the object it names and the place
- * the name gave it; `<name> missing` and null for a name that stands for
- * nothing. With `%(rest)` in the format the name ends at the first blank and
- * the rest of the line is `%(rest)`.
+ * One `--batch`/`--batch-check` format line, the object it names and the name;
+ * `<name> missing` and null for a name that stands for nothing. With `%(rest)`
+ * in the format the name ends at the first blank and the rest of the line is
+ * `%(rest)`.
  */
 async function batchHead(
   repo: Repo,
@@ -174,18 +178,17 @@ async function batchHead(
   try {
     obj = await resolveObject(repo, name)
   } catch (err) {
-    if (err instanceof GitError) return [ENC.encode(`${name} missing\n`), null, '']
+    if (err instanceof GitError) return [ENC.encode(`${name} missing\n`), null, name]
     throw err
   }
-  const base = await placeNamed(repo, name, obj.oid)
   const atoms: Record<string, string> = {
     objectname: obj.oid,
     objecttype: obj.type,
-    objectsize: String((await shownRaw(repo, obj, base)).length),
+    objectsize: String((await shownRaw(repo, obj, name)).length),
     rest,
   }
   const head = template.replace(FORMAT_ATOM, (_, atom: string) => atoms[atom] ?? '')
-  return [ENC.encode(`${head}\n`), obj, base]
+  return [ENC.encode(`${head}\n`), obj, name]
 }
 
 /**
@@ -198,8 +201,8 @@ async function* batchLines(
   heads: readonly [Uint8Array, GitObject | null, string][],
   contents: boolean,
 ): AsyncIterable<Uint8Array> {
-  for (const [head, obj, base] of heads) {
-    const body = contents && obj !== null ? await shownRaw(repo, obj, base) : null
+  for (const [head, obj, name] of heads) {
+    const body = contents && obj !== null ? await shownRaw(repo, obj, name) : null
     yield head
     if (body !== null) {
       yield body

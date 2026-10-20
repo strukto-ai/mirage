@@ -115,7 +115,7 @@ def typed_bytes(repo: BaseRepo, name: str, want: str) -> bytes | None:
     obj = peeled(repo, named_object(repo, name), want)
     if obj is None:
         return None
-    return shown_raw(repo, obj, place_named(repo, name, obj.id))
+    return shown_raw(repo, obj, name)
 
 
 def pretty(repo: BaseRepo, obj: ShaFile, name: str) -> bytes:
@@ -162,7 +162,7 @@ def _query(repo: BaseRepo, mode: str, name: str) -> tuple[bytes, int]:
     if mode == "t":
         return obj.type_name + b"\n", 0
     if mode == "s":
-        raw = shown_raw(repo, obj, place_named(repo, name, obj.id))
+        raw = shown_raw(repo, obj, name)
         return b"%d\n" % len(raw), 0
     if mode == "e":
         return b"", 0
@@ -173,10 +173,9 @@ def _batch_head(
     repo: BaseRepo, line: str, template: str
 ) -> tuple[bytes, ObjectID | None, str]:
     """One ``--batch``/``--batch-check`` format line, the id it names
-    and the place the name gave it; ``<name> missing`` and None for a
-    name that stands for nothing. With ``%(rest)`` in the format the
-    name ends at the first blank and the rest of the line is
-    ``%(rest)``.
+    and the name; ``<name> missing`` and None for a name that stands for
+    nothing. With ``%(rest)`` in the format the name ends at the first
+    blank and the rest of the line is ``%(rest)``.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -189,16 +188,15 @@ def _batch_head(
     try:
         obj = resolve_object(repo, name)
     except GitError:
-        return f"{name} missing\n".encode(), None, ""
-    base = place_named(repo, name, obj.id)
+        return f"{name} missing\n".encode(), None, name
     atoms = {
         "objectname": obj.id.decode(),
         "objecttype": obj.type_name.decode(),
-        "objectsize": str(len(shown_raw(repo, obj, base))),
+        "objectsize": str(len(shown_raw(repo, obj, name))),
         "rest": rest,
     }
     head = FORMAT_ATOM.sub(lambda m: atoms[m.group(1)], template)
-    return f"{head}\n".encode(), obj.id, base
+    return f"{head}\n".encode(), obj.id, name
 
 
 async def _batch_lines(
@@ -213,15 +211,15 @@ async def _batch_lines(
     Args:
         repo (BaseRepo): the opened repository.
         heads (list[tuple[bytes, ObjectID | None, str]]): each line's
-            format answer, the id it names and that object's place.
+            format answer, the id it names and the name.
         contents (bool): ``--batch``, which prints the bytes too.
     """
-    for head, sha, base in heads:
+    for head, sha, name in heads:
         if not contents or sha is None:
             yield head
             continue
         obj = await asyncio.to_thread(repo.__getitem__, sha)
-        raw = await asyncio.to_thread(shown_raw, repo, obj, base)
+        raw = await asyncio.to_thread(shown_raw, repo, obj, name)
         yield head + raw + b"\n"
 
 

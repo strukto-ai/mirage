@@ -22,10 +22,12 @@ from dulwich.objects import ObjectID
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.cat_file import typed_bytes
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.seen import (
     located,
+    place_of,
     readable,
     shown_entries,
 )
@@ -363,6 +365,19 @@ class OnePlaceGate:
             raise PermissionError(virtual)
 
 
+async def guarded_repo(ws: Workspace):
+    """The mounted repository, opened the way a git verb opens it.
+
+    Args:
+        ws (Workspace): the workspace with the repository at /repo.
+    """
+    ws.register_cli("git", GIT)
+    vfs = repo_context(ws).vfs
+    assert vfs is not None
+    location = await discover(vfs, REPO)
+    return await open_repo(vfs, replace(location, vfs=vfs))
+
+
 @pytest.mark.asyncio
 async def test_a_blob_reads_where_any_place_lets_it(history: Path):
     # The same bytes stand at secret.txt in history and at copy.txt; a
@@ -370,11 +385,7 @@ async def test_a_blob_reads_where_any_place_lets_it(history: Path):
     with Workspace(
         {"/repo/": DiskVFS(root=str(history))}, mode=MountMode.WRITE
     ) as ws:
-        ws.register_cli("git", GIT)
-        vfs = repo_context(ws).vfs
-        assert vfs is not None
-        location = await discover(vfs, REPO)
-        repo = await open_repo(vfs, replace(location, vfs=vfs))
+        repo = await guarded_repo(ws)
         blob = ObjectID(repo[b"HEAD"].tree)
         _, copy = repo[blob].lookup_path(
             repo.object_store.__getitem__, b"copy.txt"
@@ -419,3 +430,41 @@ async def test_a_refused_checkout_over_a_directory_leaves_the_index(
     )
     assert await shell(path, "git ls-files -s") == before
     assert (path / "boxf" / "secret.txt").read_text() == "S3CR3T dir\n"
+
+
+@pytest.mark.asyncio
+async def test_a_commit_read_walks_no_history(history: Path):
+    with Workspace(
+        {"/repo/": DiskVFS(root=str(history))}, mode=MountMode.WRITE
+    ) as ws:
+        repo = await guarded_repo(ws)
+        token = bind_caller(
+            replace(current_caller(), gate=OnePlaceGate("/repo/copy.txt"))
+        )
+        try:
+            raw = await asyncio.to_thread(typed_bytes, repo, "HEAD", "commit")
+            assert raw is not None and raw.startswith(b"tree ")
+            assert repo.sightings is None
+        finally:
+            reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_the_history_walk_sights_each_place_once(history: Path):
+    with Workspace(
+        {"/repo/": DiskVFS(root=str(history))}, mode=MountMode.WRITE
+    ) as ws:
+        repo = await guarded_repo(ws)
+        head = repo[b"HEAD"]
+        _, ok = repo[head.tree].lookup_path(
+            repo.object_store.__getitem__, b"ok.txt"
+        )
+        token = bind_caller(
+            replace(current_caller(), gate=OnePlaceGate("/repo/copy.txt"))
+        )
+        try:
+            # A commit stands at no place, so this walks all of history.
+            await asyncio.to_thread(place_of, repo, head.id)
+            assert repo.seen[ok] == ["ok.txt"]
+        finally:
+            reset_caller(token)

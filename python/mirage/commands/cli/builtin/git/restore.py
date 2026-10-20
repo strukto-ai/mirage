@@ -63,7 +63,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_object,
     unwrapped,
 )
-from mirage.commands.cli.builtin.git.seen import check_rules
+from mirage.commands.cli.builtin.git.seen import check_rules, ruled_under
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
@@ -255,6 +255,8 @@ async def refuse_ruled(
     Raises:
         PolicyDenied: a rule refuses one of them.
     """
+    if not ruled_under(location):
+        return
     for name in (*replacing, *dropped):
         check_rules(location, name)
     for name in replacing:
@@ -262,8 +264,13 @@ async def refuse_ruled(
         if above is not None:
             check_rules(location, _relative(location, above))
             continue
+        # Only a directory the file replaces is removed whole, and only
+        # one a rule could reach inside is walked.
         where = location.worktree.join(name)
-        if not await is_link(vfs, where):
+        if not ruled_under(location, name) or await is_link(vfs, where):
+            continue
+        info = await stat_of(vfs, where)
+        if info is not None and info.type is FileType.DIRECTORY:
             await _refuse_ruled_under(vfs, location, where)
 
 
@@ -272,7 +279,8 @@ async def _refuse_ruled_under(
 ) -> None:
     """Ask the rules about every name under a directory the restore
     removes whole, walked as ``remove_tree`` walks it: a link is not
-    descended into, and a file lists as nothing below it.
+    descended into, a file lists as nothing below it, and a name no
+    rule could reach at or under is passed over.
 
     Args:
         vfs (Files): the session's files.
@@ -284,7 +292,10 @@ async def _refuse_ruled_under(
         if not name:
             continue
         child = path.join(name)
-        check_rules(location, _relative(location, child))
+        relative = _relative(location, child)
+        if not ruled_under(location, relative):
+            continue
+        check_rules(location, relative)
         if not await is_link(vfs, child):
             await _refuse_ruled_under(vfs, location, child)
 

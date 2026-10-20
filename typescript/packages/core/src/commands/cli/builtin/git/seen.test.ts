@@ -23,11 +23,12 @@ import type { CommandRule, EntryGate } from '../../../../policy/types.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { typedBytes } from './cat_file.ts'
 import { discover } from './discover.ts'
 import { GIT } from './index.ts'
 import { ensureDir, readOptional } from './io.ts'
-import { openRepo } from './repo.ts'
-import { located, readable, shownEntries } from './seen.ts'
+import { openRepo, type Repo } from './repo.ts'
+import { located, placeOf, readable, shownEntries } from './seen.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -121,6 +122,13 @@ async function shell(
 ): Promise<[number, string, string]> {
   const [code, out, err] = await rawShell(ws, line, session)
   return [code, DEC.decode(out), DEC.decode(err)]
+}
+
+/** The repository at /repo, opened the way a git verb opens it. */
+async function guardedRepo(ws: Workspace): Promise<Repo> {
+  const vfs = ws.vfs
+  const location = await discover(vfs, PathSpec.fromStrPath('/repo'))
+  return openRepo(vfs, { ...location, vfs })
 }
 
 /** A gate whose rules could reach every place but refuse only one. */
@@ -323,9 +331,7 @@ describe('what a session is shown of history', () => {
     const ws = await history()
     const [, copied] = await shell(ws, 'git rev-parse HEAD:copy.txt')
     const copy = copied.trim()
-    const vfs = ws.vfs
-    const location = await discover(vfs, PathSpec.fromStrPath('/repo'))
-    const repo = await openRepo(vfs, { ...location, vfs })
+    const repo = await guardedRepo(ws)
     await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
       expect(await located(repo, { oid: copy, type: 'blob' })).not.toBeNull()
       expect(repo.places.get(copy)).toBe('secret.txt')
@@ -352,5 +358,27 @@ describe('what a session is shown of history', () => {
     expect(await shell(ws, 'git ls-files -s')).toEqual(before)
     const data = await readOptional(ws.vfs, PathSpec.fromStrPath('/repo/boxf/secret.txt'))
     expect(DEC.decode(data ?? new Uint8Array())).toBe('S3CR3T dir\n')
+  })
+
+  it('reads a commit without walking history', async () => {
+    const ws = await history()
+    const repo = await guardedRepo(ws)
+    await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
+      const raw = await typedBytes(repo, 'HEAD', 'commit')
+      expect(DEC.decode(raw ?? new Uint8Array()).startsWith('tree ')).toBe(true)
+      expect(repo.sightings).toBeNull()
+    })
+  })
+
+  it('sights each place once in the history walk', async () => {
+    const ws = await history()
+    const [, head] = await shell(ws, 'git rev-parse HEAD')
+    const [, ok] = await shell(ws, 'git rev-parse HEAD:ok.txt')
+    const repo = await guardedRepo(ws)
+    await runWithAdmission(new OnePlaceGate('/repo/copy.txt'), async () => {
+      // A commit stands at no place, so this walks all of history.
+      await placeOf(repo, head.trim())
+      expect(repo.seen.get(ok.trim())).toEqual(['ok.txt'])
+    })
   })
 })

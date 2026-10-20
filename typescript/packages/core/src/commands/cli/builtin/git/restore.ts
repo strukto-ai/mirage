@@ -52,7 +52,7 @@ import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
 import { restored } from './reset.ts'
 import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
-import { checkRules } from './seen.ts'
+import { checkRules, ruledUnder } from './seen.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
 import type { GitObject, IndexEntry, RepoLocation } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
@@ -207,12 +207,13 @@ export async function restore(
  * @param dropped the entries removed
  * @throws PolicyDenied a rule refuses one of them
  */
-async function refuseRuled(
+export async function refuseRuled(
   vfs: Files,
   location: RepoLocation,
   replacing: readonly string[],
   dropped: readonly string[],
 ): Promise<void> {
+  if (!ruledUnder(location)) return
   for (const name of [...replacing, ...dropped]) checkRules(location, name)
   for (const name of replacing) {
     const above = await blockingAncestor(vfs, location.worktree, name)
@@ -220,15 +221,21 @@ async function refuseRuled(
       checkRules(location, relative(location, above))
       continue
     }
+    // Only a directory the file replaces is removed whole, and only one a rule
+    // could reach inside is walked.
     const where = location.worktree.join(name)
-    if (!(await isLink(vfs, where))) await refuseRuledUnder(vfs, location, where)
+    if (!ruledUnder(location, name) || (await isLink(vfs, where))) continue
+    const info = await statOf(vfs, where)
+    if (info !== null && info.type === FileType.DIRECTORY)
+      await refuseRuledUnder(vfs, location, where)
   }
 }
 
 /**
  * Ask the rules about every name under a directory the restore removes whole,
- * walked as `removeTree` walks it: a link is not descended into, and a file
- * lists as nothing below it.
+ * walked as `removeTree` walks it: a link is not descended into, a file lists
+ * as nothing below it, and a name no rule could reach at or under is passed
+ * over.
  *
  * @param vfs the session's files
  * @param location the discovered repository
@@ -239,7 +246,9 @@ async function refuseRuledUnder(vfs: Files, location: RepoLocation, path: PathSp
     const name = entryName(entry)
     if (name === '') continue
     const child = path.join(name)
-    checkRules(location, relative(location, child))
+    const place = relative(location, child)
+    if (!ruledUnder(location, place)) continue
+    checkRules(location, place)
     if (!(await isLink(vfs, child))) await refuseRuledUnder(vfs, location, child)
   }
 }

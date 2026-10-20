@@ -69,6 +69,19 @@ export function checkRules(location: RepoLocation, relative: string): void {
 }
 
 /**
+ * Whether a rule in force could refuse anything at or under a place for the
+ * running command; when none can, nothing there is asked.
+ *
+ * @param location the discovered repository
+ * @param relative the repository-relative place, the root by default
+ */
+export function ruledUnder(location: RepoLocation, relative = ''): boolean {
+  const gate = getAdmission()
+  if (gate === null || location.vfs === undefined || location.vfs === null) return false
+  return gate.scopes(location.worktree.join(relative).virtual)
+}
+
+/**
  * Whether no rule in force refuses a place for the running command, asked
  * without refusing it.
  *
@@ -204,7 +217,8 @@ export async function shownItems(
 
 /**
  * An object's stored bytes as the session is shown them: a tree's with only the
- * entries it sees, so neither the bytes nor their count name a hidden one.
+ * entries it sees, so neither the bytes nor their count name a hidden one. Only
+ * a tree is placed, so a commit's or a blob's bytes cost no lookup.
  *
  * A tree's entries stand in its bytes in git's order, each its mode, its name
  * and its id, so dropping the ones the session does not see leaves exactly the
@@ -212,16 +226,17 @@ export async function shownItems(
  *
  * @param repo the opened repository
  * @param obj the object
- * @param base a tree's place, null for where this command found it
+ * @param name the operand that named it, whose place a tree is listed at; null
+ *   for where this command found it
  */
 export async function shownRaw(
   repo: Repo,
   obj: GitObject,
-  base: string | null = null,
+  name: string | null = null,
 ): Promise<Uint8Array> {
   const { raw } = await rawObject(repo, obj.oid)
   if (obj.type !== 'tree' || !guarded(repo)) return raw
-  const where = base ?? (await placeOf(repo, obj.oid))
+  const where = name === null ? await placeOf(repo, obj.oid) : await placeNamed(repo, name, obj.oid)
   // Each entry ends in its id's twenty bytes, right after the NUL.
   const idBytes = 20
   const kept: Uint8Array[] = []
@@ -321,9 +336,9 @@ async function find(repo: Repo, oid: string, content: boolean): Promise<string |
  * Every object the index and the history hold, each with a place the session
  * sees, in the order a lookup wants them: the index first, then each commit any
  * ref reaches. A subtree is read once per place, however many commits share
- * it, and a hidden place is never descended into: what stands under it is
- * hidden too. An object only a ref names directly stands at no place and is
- * never sighted.
+ * it, an object is sighted once per place, and a hidden place is never
+ * descended into: what stands under it is hidden too. An object only a ref
+ * names directly stands at no place and is never sighted.
  *
  * @param repo the opened repository
  */
@@ -335,22 +350,26 @@ async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
     for (const side of [conflict.ancestor, conflict.this, conflict.other])
       if (side !== null) staged.push([name, side.oid])
   }
+  const sighted = new Set<string>()
+  const fresh = (oid: string, place: string): boolean => {
+    const key = `${oid}\0${place}`
+    if (sighted.has(key)) return false
+    sighted.add(key)
+    return true
+  }
   for (const [relative, sha] of staged)
-    if (relative && visiblePath(location, relative)) yield [sha, relative]
-  const walked = new Set<string>()
+    if (relative && visiblePath(location, relative) && fresh(sha, relative)) yield [sha, relative]
   const walk = async function* (
     treeId: string,
     base: string,
   ): AsyncGenerator<[string, string], void> {
-    const key = `${treeId}\0${base}`
-    if (walked.has(key)) return
-    walked.add(key)
+    if (!fresh(treeId, base)) return
     yield [treeId, base]
     for (const entry of (await git.readTree({ ...repoArgs(repo), oid: treeId })).tree) {
       const relative = base ? `${base}/${entry.path}` : entry.path
       if (!visiblePath(location, relative)) continue
       if (entry.type === 'tree') yield* walk(entry.oid, relative)
-      else yield [entry.oid, relative]
+      else if (fresh(entry.oid, relative)) yield [entry.oid, relative]
     }
   }
   const refs = await loadRefs(repo.vfs, location.gitdir, location.commondir)

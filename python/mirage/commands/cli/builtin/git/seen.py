@@ -79,6 +79,21 @@ def check_rules(location: RepoLocation, relative: str) -> None:
         gate.check(location.worktree.join(relative).virtual)
 
 
+def ruled_under(location: RepoLocation, relative: str = "") -> bool:
+    """Whether a rule in force could refuse anything at or under a place
+    for the running command; when none can, nothing there is asked.
+
+    Args:
+        location (RepoLocation): the discovered repository.
+        relative (str): the repository-relative place, the root by
+            default.
+    """
+    gate = current_caller().gate
+    if gate is None or location.vfs is None:
+        return False
+    return gate.scopes(location.worktree.join(relative).virtual)
+
+
 def permitted(location: RepoLocation, relative: str) -> bool:
     """Whether no rule in force refuses a place for the running command,
     asked without refusing it.
@@ -227,19 +242,25 @@ def shown_items(
             yield entry
 
 
-def shown_raw(repo: BaseRepo, obj: ShaFile, base: str | None = None) -> bytes:
+def shown_raw(repo: BaseRepo, obj: ShaFile, name: str | None = None) -> bytes:
     """An object's stored bytes as the session is shown them: a tree's
     re-encoded with only the entries it sees, so neither the bytes nor
-    their count name a hidden one.
+    their count name a hidden one. Only a tree is placed, so a commit's
+    or a blob's bytes cost no lookup.
 
     Args:
         repo (BaseRepo): the opened repository.
         obj (ShaFile): the object.
-        base (str | None): a tree's place, None for where this command
-            found it.
+        name (str | None): the operand that named it, whose place a tree
+            is listed at; None for where this command found it.
     """
     if not isinstance(obj, Tree) or not guarded(repo):
         return obj.as_raw_string()
+    base = (
+        place_of(repo, obj.id)
+        if name is None
+        else place_named(repo, name, obj.id)
+    )
     kept = Tree()
     for entry in shown_items(repo, obj, base):
         kept.add(entry.path, entry.mode, entry.sha)
@@ -340,9 +361,10 @@ def _sightings(repo: Repo) -> Iterator[tuple[bytes, str]]:
     """Every object the index and the history hold, each with a place
     the session sees, in the order a lookup wants them: the index first,
     then each commit any ref reaches. A subtree is read once per place,
-    however many commits share it, and a hidden place is never descended
-    into: what stands under it is hidden too. An object only a ref names
-    directly stands at no place and is never sighted.
+    however many commits share it, an object is sighted once per place,
+    and a hidden place is never descended into: what stands under it is
+    hidden too. An object only a ref names directly stands at no place
+    and is never sighted.
 
     Args:
         repo (Repo): the opened repository.
@@ -358,16 +380,26 @@ def _sightings(repo: Repo) -> Iterator[tuple[bytes, str]]:
             for side in (conflict.ancestor, conflict.this, conflict.other)
             if side is not None
         )
+    sighted: set[tuple[bytes, str]] = set()
+
+    def fresh(oid: bytes, place: str) -> bool:
+        if (oid, place) in sighted:
+            return False
+        sighted.add((oid, place))
+        return True
+
     for name, sha in staged:
         relative = name.decode("utf-8", "surrogateescape")
-        if relative and visible_path(location, relative):
+        if (
+            relative
+            and visible_path(location, relative)
+            and fresh(sha, relative)
+        ):
             yield sha, relative
-    walked: set[tuple[bytes, str]] = set()
 
     def walk(tree_id: bytes, base: str) -> Iterator[tuple[bytes, str]]:
-        if (tree_id, base) in walked:
+        if not fresh(tree_id, base):
             return
-        walked.add((tree_id, base))
         yield tree_id, base
         tree = repo.object_store[ObjectID(tree_id)]
         if not isinstance(tree, Tree):
@@ -380,7 +412,7 @@ def _sightings(repo: Repo) -> Iterator[tuple[bytes, str]]:
                 continue
             if entry.mode == TREE:
                 yield from walk(entry.sha, relative)
-            else:
+            elif fresh(entry.sha, relative):
                 yield entry.sha, relative
 
     pending: list[bytes] = []
