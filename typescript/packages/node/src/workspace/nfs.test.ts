@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, unlinkSync } from 'node:fs'
 import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +21,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ConstantsModule from '../mount/constants.ts'
+import { canonicalMountpoint } from '../fuse/mount.ts'
 import type * as NFSModule from '../mount/nfs.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -82,12 +83,26 @@ describe('NFSManager', () => {
     const mountpoint = await ws.addFuseMount('/a/', pinned, undefined, MountBackend.NFS)
     expect(ws.fuseMountpoints).toEqual({ '/a/': mountpoint })
     const [port, at] = calls.mounted[0] ?? [0, '']
-    expect(at).toBe(mountpoint)
+    expect(at).toBe(canonicalMountpoint(mountpoint))
     expect(await nullCall(port)).toBe(7)
     await ws.removeFuseMount('/a/')
-    expect(calls.unmounted).toEqual([mountpoint])
+    expect(calls.unmounted).toEqual([canonicalMountpoint(mountpoint)])
     expect(ws.fuseMountpoints).toEqual({})
     await expect(nullCall(port)).rejects.toThrow()
+    await ws.close()
+  })
+
+  it('keeps the mountpoint as the path the kernel mounts', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'nfs-test-'))
+    mkdirSync(join(base, 'real'))
+    symlinkSync(join(base, 'real'), join(base, 'link'))
+    const kernel = join(realpathSync(join(base, 'real')), 'mp')
+    const ws = new Workspace({ '/a/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.addFuseMount('/a/', join(base, 'link', 'mp'), undefined, MountBackend.NFS)
+    unlinkSync(join(base, 'link'))
+    await ws.removeFuseMount('/a/')
+    expect(calls.mounted[0]?.[1]).toBe(kernel)
+    expect(calls.unmounted).toEqual([kernel])
     await ws.close()
   })
 
@@ -115,8 +130,8 @@ describe('NFSManager', () => {
     })
     await ws.fuseReady()
     expect(ws.fuseMountpoints).toEqual({ '/a/': mountpoint })
-    expect(calls.mounted[0]?.[1]).toBe(mountpoint)
+    expect(calls.mounted[0]?.[1]).toBe(canonicalMountpoint(mountpoint))
     await ws.close()
-    expect(calls.unmounted).toEqual([mountpoint])
+    expect(calls.unmounted).toEqual([canonicalMountpoint(mountpoint)])
   })
 })

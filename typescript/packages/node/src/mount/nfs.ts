@@ -161,8 +161,8 @@ export class MirageNFSServer {
       })
     })
     const bound = (server.address() as AddressInfo).port
-    this.engine = await NFSEngine.open(this.exportPath, Date.now(), bound)
     this.server = server
+    this.engine = await NFSEngine.open(this.exportPath, Date.now(), bound)
     return bound
   }
 
@@ -229,7 +229,14 @@ export class MirageNFSServer {
   private async run(engine: NFSEngine, request: NFSRequest): Promise<void> {
     const [reply, data] = await this.answer(request)
     if (this.engine !== engine) return
-    const [conn, out] = engine.complete(request.id, reply, data)
+    let completed: [number | null, Uint8Array]
+    try {
+      completed = engine.complete(request.id, reply, data)
+    } catch (err) {
+      console.debug(`nfs: ${request.op} ${request.path}: ${String(err)}`)
+      completed = engine.complete(request.id, { error: 'EIO' }, new Uint8Array())
+    }
+    const [conn, out] = completed
     const socket = conn === null ? undefined : this.sockets.get(conn)
     if (socket !== undefined && out.length > 0) socket.write(out)
     this.dispatch(engine)
@@ -267,7 +274,12 @@ export class MirageNFSServer {
     limit: number,
   ): Promise<[JsonValue[], boolean]> {
     const names = (await this.core.readdir(path))
-      .filter((name) => name !== '.' && name !== '..')
+      .filter((name) => {
+        if (name === '.' || name === '..') return false
+        if (!/\p{Cs}/u.test(name)) return true
+        console.debug(`nfs: ${JSON.stringify(name)} left out, not UTF-8`)
+        return false
+      })
       .sort(compareCodePoints)
     const found = after === null ? 0 : names.findIndex((name) => compareCodePoints(name, after) > 0)
     const start = found === -1 ? names.length : found

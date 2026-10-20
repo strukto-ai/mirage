@@ -20,6 +20,7 @@ import { MountBackend } from '@struktoai/mirage-core/types'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { checkSizes } from '../fuse/backend.ts'
+import { canonicalMountpoint } from '../fuse/mount.ts'
 import { MountCore } from '../mount/core.ts'
 import { MirageNFSServer, mountNfs, unmountArgs, unmountNfs } from '../mount/nfs.ts'
 import { CLEANUP, type CleanupEntry, removeMountpointIfOwned } from './fuse.ts'
@@ -34,9 +35,10 @@ import { CLEANUP, type CleanupEntry, removeMountpointIfOwned } from './fuse.ts'
 export class NFSManager {
   private server: MirageNFSServer | null = null
   private entry: CleanupEntry | null = null
+  private given: string | null = null
 
   get mountpoint(): string | null {
-    return this.entry?.mountpoint ?? null
+    return this.given
   }
 
   /** Serve the workspace's files over NFS, mount them, and return the live mountpoint. */
@@ -44,20 +46,25 @@ export class NFSManager {
     ws: Workspace,
     options: { mountpoint?: string; rootPrefix?: string; session?: SessionState } = {},
   ): Promise<string> {
-    if (this.entry !== null) return this.entry.mountpoint
+    if (this.given !== null) return this.given
     checkSizes(MountBackend.NFS, ws, options.rootPrefix ?? '')
     const owns = options.mountpoint === undefined
     const mountpoint = options.mountpoint ?? mkdtempSync(join(tmpdir(), 'mirage-'))
     if (!owns) mkdirSync(mountpoint, { recursive: true })
+    const kernel = canonicalMountpoint(mountpoint)
     const server = new MirageNFSServer(
       new MountCore(ws.vfs, {
         ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
         ...(options.session !== undefined ? { session: options.session } : {}),
       }),
     )
-    const entry: CleanupEntry = { mountpoint, ownsMountpoint: owns, release: NFSManager.release }
+    const entry: CleanupEntry = {
+      mountpoint: kernel,
+      ownsMountpoint: owns,
+      release: NFSManager.release,
+    }
     try {
-      await mountNfs(await server.start(), mountpoint)
+      await mountNfs(await server.start(), kernel)
     } catch (err) {
       await server.close()
       removeMountpointIfOwned(entry)
@@ -65,6 +72,7 @@ export class NFSManager {
     }
     this.server = server
     this.entry = entry
+    this.given = mountpoint
     CLEANUP.register(entry)
     return mountpoint
   }
@@ -78,6 +86,7 @@ export class NFSManager {
     this.server = null
     CLEANUP.unregister(entry)
     this.entry = null
+    this.given = null
     removeMountpointIfOwned(entry)
   }
 

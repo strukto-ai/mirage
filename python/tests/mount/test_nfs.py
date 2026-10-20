@@ -502,3 +502,33 @@ async def test_more_concurrent_reads_than_the_cap_all_finish(
         for c in clients:
             c.writer.close()
         await server.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_that_is_not_utf8_is_left_out_of_a_listing(
+    client: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = await client.root()
+    _, docs = await client.lookup(root, "docs")
+    core = MountCore.readdir
+
+    async def readdir(self: MountCore, path: str) -> list[str]:
+        return [*await core(self, path), "bad\udcff"]
+
+    monkeypatch.setattr(MountCore, "readdir", readdir)
+    listed, eof = await client.readdir(docs, 0, 4096)
+    assert [name for name, _ in listed] == ["a.txt", "sub"]
+    assert eof
+
+
+@pytest.mark.asyncio
+async def test_a_reply_the_engine_refuses_is_answered_with_eio(
+    client: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def readlink(self: MountCore, path: str) -> str:
+        return "bad\udcff"
+
+    monkeypatch.setattr(MountCore, "readlink", readlink)
+    handle = await client.handle("docs", "a.txt")
+    reply = await asyncio.wait_for(client.call(NFS, 5, opaque(handle)), 5)
+    assert reply.u32() == 5

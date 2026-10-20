@@ -636,3 +636,61 @@ fn a_call_cut_off_by_a_close_runs_again_on_a_new_connection() {
     assert_eq!(ran, 1);
     assert_eq!(replies(&out)[0].0, 50);
 }
+
+/// The first request for `op` a record leads to, answering the ones
+/// before it.
+fn asked(tree: &Tree, server: &mut Server, input: &[u8], op: &str) -> Value {
+    let mut out = Vec::new();
+    server.feed(1, input, &mut out).unwrap();
+    loop {
+        let mut raw = Vec::new();
+        server.requests(&mut raw);
+        let requests: Vec<Value> = serde_json::from_slice(&raw).unwrap();
+        assert!(!requests.is_empty(), "no {op} request");
+        for request in requests {
+            if request["op"] == json!(op) {
+                return request;
+            }
+            let id = request["id"].as_u64().unwrap() as u32;
+            let (reply, data) = tree.answer(&request);
+            let reply = serde_json::to_vec(&reply).unwrap();
+            server.complete(id, &reply, &data, &mut out).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_read_or_listing_count_past_the_transfer_size_is_cut_to_it() {
+    let tree = Tree::sample();
+    let mut server = server();
+    let (_, handle) = lookup(&tree, &mut server, 1, "a.txt");
+    let handle = handle.unwrap();
+    let read = record(
+        60,
+        nfs::PROGRAM,
+        6,
+        &args(&[
+            &|o| handle.serialize(o).unwrap(),
+            &|o| 0_u64.serialize(o).unwrap(),
+            &|o| u32::MAX.serialize(o).unwrap(),
+        ]),
+    );
+    assert_eq!(
+        asked(&tree, &mut server, &read, "read")["size"],
+        json!(1 << 20)
+    );
+    let listing = record(
+        61,
+        nfs::PROGRAM,
+        17,
+        &args(&[
+            &|o| fh(1).serialize(o).unwrap(),
+            &|o| 0_u64.serialize(o).unwrap(),
+            &|o| [0_u8; 8].serialize(o).unwrap(),
+            &|o| u32::MAX.serialize(o).unwrap(),
+            &|o| u32::MAX.serialize(o).unwrap(),
+        ]),
+    );
+    let listed = asked(&tree, &mut self::server(), &listing, "readdir");
+    assert_eq!(listed["limit"], json!((1 << 20) / 16));
+}

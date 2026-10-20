@@ -99,3 +99,20 @@ def test_a_declared_nfs_mount_comes_up_with_the_workspace(
         assert ws.fuse_mountpoints == {"/a/": mountpoint}
         assert fake.mounted[0][1] == mountpoint
     assert fake.unmounted == [mountpoint]
+
+
+def test_a_mountpoint_is_kept_as_the_path_the_kernel_mounts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = FakeMount(monkeypatch)
+    (tmp_path / "base").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "base")
+    kernel = os.path.join(os.path.realpath(tmp_path / "base"), "mp")
+    with Workspace({"/a/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        ws.add_fuse_mount(
+            "/a/", str(tmp_path / "link" / "mp"), backend=MountBackend.NFS
+        )
+        (tmp_path / "link").unlink()
+        ws.remove_fuse_mount("/a/")
+    assert fake.mounted[0][1] == kernel
+    assert fake.unmounted == [kernel]

@@ -13,6 +13,9 @@ use super::vfs::{DirEntry, ReadDirResult, VFSCapabilities};
 use crate::StreamError;
 
 pub const ROOT_ID: fileid3 = 1;
+/// The most bytes one READ or directory page carries, as FSINFO tells
+/// the client: a larger count is answered short.
+pub const TRANSFER: u32 = 1 << 20;
 
 /// A file operation a call asks the host to run on its mount core.
 #[derive(Serialize)]
@@ -264,6 +267,7 @@ impl HostFs {
         count: u32,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
         let path = self.path(id)?;
+        let count = count.min(TRANSFER);
         let reply = self
             .call(Op::Read {
                 path,

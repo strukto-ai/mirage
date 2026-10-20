@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Socket, connect } from 'node:net'
+import { Server, type Socket, connect } from 'node:net'
+import { NFSEngine } from '@struktoai/mirage-core/rs/nfs'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -399,6 +400,56 @@ describe('MirageNFSServer handles and shutdown', () => {
       vi.restoreAllMocks()
       for (const socket of sockets) socket.destroy()
       await server.close()
+    }
+  })
+
+  it('leaves a name that is not UTF-8 out of a listing', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir -p /docs/sub && echo hi > /docs/a.txt')
+    const [server, core, socket, client] = await serve(ws)
+    const real = core.readdir.bind(core)
+    vi.spyOn(core, 'readdir').mockImplementation(async (path: string) => [
+      ...(await real(path)),
+      'bad\uDCFF',
+    ])
+    try {
+      const [listed, eof] = await client.readdir(await client.handle('docs'), 0, 4096)
+      expect(listed.map(([name]) => name)).toEqual(['a.txt', 'sub'])
+      expect(eof).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('answers a reply the engine refuses with EIO', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir -p /docs && echo hi > /docs/a.txt')
+    const [server, core, socket, client] = await serve(ws)
+    vi.spyOn(core, 'readlink').mockResolvedValue('bad\uDCFF')
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const reply = await client.call(NFS, 5, opaque(await client.handle('docs', 'a.txt')))
+      expect(reply.u32()).toBe(5)
+    } finally {
+      vi.restoreAllMocks()
+      socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('closes its listener when the engine fails to start', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const server = new MirageNFSServer(new MountCore(ws.vfs), '/', false)
+    vi.spyOn(NFSEngine, 'open').mockRejectedValue(new Error('no engine'))
+    const close = vi.spyOn(Server.prototype, 'close')
+    try {
+      await expect(server.start()).rejects.toThrow('no engine')
+      await server.close()
+      expect(close).toHaveBeenCalled()
+    } finally {
+      vi.restoreAllMocks()
     }
   })
 

@@ -19,6 +19,7 @@ import tempfile
 from threading import Thread
 
 from mirage.fuse.backend import check_sizes
+from mirage.fuse.mount import canonical_mountpoint
 from mirage.mount.core import MountCore
 from mirage.mount.nfs import (
     MOUNT_TIMEOUT,
@@ -42,6 +43,9 @@ class NFSManager:
 
     def __init__(self) -> None:
         self._mountpoint: str | None = None
+        # Where the kernel mounts: the path resolved at mount time, which
+        # every unmount targets.
+        self._kernel_mountpoint: str | None = None
         # True only for tempfile mountpoints Mirage created and may delete.
         self._owns_mountpoint = False
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -81,6 +85,7 @@ class NFSManager:
             mountpoint = tempfile.mkdtemp(prefix="mirage-")
         else:
             os.makedirs(mountpoint, exist_ok=True)
+        kernel = canonical_mountpoint(mountpoint)
         loop = asyncio.new_event_loop()
         thread = Thread(
             target=loop.run_forever, name="mirage-nfs", daemon=True
@@ -92,25 +97,26 @@ class NFSManager:
         self._loop, self._thread, self._server = loop, thread, server
         try:
             started = asyncio.run_coroutine_threadsafe(server.start(), loop)
-            mount_nfs(started.result(MOUNT_TIMEOUT), mountpoint)
+            mount_nfs(started.result(MOUNT_TIMEOUT), kernel)
         except BaseException:
             self._stop()
             if owns:
-                self._remove(mountpoint)
+                self._remove(kernel)
             raise
         self._mountpoint, self._owns_mountpoint = mountpoint, owns
+        self._kernel_mountpoint = kernel
         return mountpoint
 
     def unmount(self) -> None:
         """Unmount, then stop the server: the other order would leave the
         kernel waiting on a server that is gone."""
-        mountpoint = self._mountpoint
-        if mountpoint is not None:
-            unmount_nfs(mountpoint)
+        kernel = self._kernel_mountpoint
+        if kernel is not None:
+            unmount_nfs(kernel)
         self._stop()
-        if mountpoint is not None and self._owns_mountpoint:
-            self._remove(mountpoint)
-        self._mountpoint = None
+        if kernel is not None and self._owns_mountpoint:
+            self._remove(kernel)
+        self._mountpoint = self._kernel_mountpoint = None
         self._owns_mountpoint = False
 
     def _stop(self) -> None:

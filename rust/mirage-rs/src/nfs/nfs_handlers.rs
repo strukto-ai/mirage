@@ -900,11 +900,12 @@ pub async fn nfsproc3_readdirplus(
     let mut fixed = Vec::new();
     dir_attr.serialize(&mut fixed)?;
     dirversion.serialize(&mut fixed)?;
-    let max_bytes_allowed = (args.maxcount as usize).saturating_sub(fixed.len() + 8);
+    let max_bytes_allowed =
+        (args.maxcount.min(super::host::TRANSFER) as usize).saturating_sub(fixed.len() + 8);
     // args.dircount is bytes of just fileid, name, cookie.
     // This is hard to ballpark, so we just divide it by 16
-    let estimated_max_results = args.dircount / 16;
-    let max_dircount_bytes = args.dircount as usize;
+    let estimated_max_results = args.dircount.min(super::host::TRANSFER) / 16;
+    let max_dircount_bytes = args.dircount.min(super::host::TRANSFER) as usize;
     let mut ctr = 0;
     match context
         .vfs
@@ -1029,10 +1030,11 @@ pub async fn nfsproc3_readdir(
     let mut fixed = Vec::new();
     dir_attr.serialize(&mut fixed)?;
     dirversion.serialize(&mut fixed)?;
-    let max_bytes_allowed = (args.dircount as usize).saturating_sub(fixed.len() + 8);
+    let max_bytes_allowed =
+        (args.dircount.min(super::host::TRANSFER) as usize).saturating_sub(fixed.len() + 8);
     // args.dircount is bytes of just fileid, name, cookie.
     // This is hard to ballpark, so we just divide it by 16
-    let estimated_max_results = args.dircount / 16;
+    let estimated_max_results = args.dircount.min(super::host::TRANSFER) / 16;
     let mut ctr = 0;
     match context
         .vfs

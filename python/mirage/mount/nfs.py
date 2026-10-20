@@ -276,7 +276,11 @@ class MirageNFSServer:
         reply, data = await on_auxiliary_loop(partial(self._answer, request))
         if self._engine is not engine:
             return
-        conn, out = engine.complete(request["id"], reply, data)
+        try:
+            conn, out = engine.complete(request["id"], reply, data)
+        except StreamRefusal as exc:
+            logger.debug("nfs: %s %s: %s", request["op"], request["path"], exc)
+            conn, out = engine.complete(request["id"], {"error": "EIO"}, b"")
         writer = self._writers.get(conn) if conn is not None else None
         if writer is not None and out:
             writer.write(out)
@@ -328,9 +332,17 @@ class MirageNFSServer:
                     return {"name": name, "attrs": None}
             return {"name": name, "attrs": wire_attrs(attrs)}
 
-        names = sorted(
-            n for n in await self._core.readdir(path) if n not in (".", "..")
-        )
+        names = []
+        for name in await self._core.readdir(path):
+            if name in (".", ".."):
+                continue
+            try:
+                name.encode()
+            except UnicodeEncodeError as exc:
+                logger.debug("nfs: %r left out, not UTF-8: %r", name, exc)
+                continue
+            names.append(name)
+        names.sort()
         start = 0 if after is None else bisect.bisect_right(names, after)
         page = names[start : start + limit]
         rows = list(await asyncio.gather(*(entry(name) for name in page)))
