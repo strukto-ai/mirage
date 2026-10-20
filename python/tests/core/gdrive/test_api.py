@@ -64,7 +64,9 @@ def drive_bypasses(source: str) -> list[str]:
     found = [hook for hook in ("__import__", "importlib") if hook in source]
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            found += [a.name for a in node.names if a.name.startswith(GOOGLE)]
+            found += [
+                a.name for a in node.names if a.name.startswith((GOOGLE, API))
+            ]
         elif isinstance(node, ast.ImportFrom) and node.level:
             found.append(f"relative import of {node.module}")
         elif isinstance(node, ast.ImportFrom) and node.module:
@@ -84,6 +86,7 @@ def drive_bypasses(source: str) -> list[str]:
         "from mirage.core.google.drive import *",
         "from mirage.core.google import drive",
         "import mirage.core.google.drive",
+        "import mirage.core.gdrive.api",
         "from ..google.drive import list_files",
         "from mirage.core.gdrive.api import DriveClient",
         "wire = __import__('mirage.core.google.drive')",

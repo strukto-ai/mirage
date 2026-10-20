@@ -39,13 +39,21 @@ const GOOGLE_DIR = join(dirname(GDRIVE_DIR), 'google')
 const SEAM = join(GDRIVE_DIR, 'api.ts')
 const REQUEST_FREE = new Set(['feedCheckpoint', 'feedState', 'GoogleApiError'])
 
+function dynamicImport(node: ts.Node): boolean {
+  return (
+    (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) ||
+    (ts.forEachChild(node, dynamicImport) ?? false)
+  )
+}
+
 /** Every import in `source` that reaches Drive past `accessor.drive`. */
 async function driveBypasses(source: string): Promise<string[]> {
-  const found = source.includes('import(') ? ['import()'] : []
-  for (const node of ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest).statements) {
+  const file = ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest)
+  const found = dynamicImport(file) ? ['import()'] : []
+  for (const node of file.statements) {
     if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) continue
     if (node.moduleSpecifier === undefined || !ts.isStringLiteral(node.moduleSpecifier)) continue
-    const from = resolve(GDRIVE_DIR, node.moduleSpecifier.text)
+    const from = resolve(GDRIVE_DIR, node.moduleSpecifier.text).replace(/\.js$/, '.ts')
     if (from !== SEAM && !from.startsWith(GOOGLE_DIR + sep)) continue
     const typeOnly = ts.isImportDeclaration(node)
       ? node.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
@@ -86,7 +94,8 @@ describe('the gdrive drive seam', () => {
     "import * as wire from '../google/drive.ts'",
     "export { deleteFile } from '../google/drive.ts'",
     "import { DriveClient } from './api.ts'",
-    "const wire = await import('../google/drive.ts')",
+    "const wire = await import /* lazy */ ('../google/drive.ts')",
+    "import { DriveClient } from './api.js'",
   ])('flags %j', async (source) => {
     expect(await driveBypasses(source)).not.toEqual([])
   })
