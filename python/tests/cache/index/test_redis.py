@@ -25,6 +25,7 @@ from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat, FileType
+from mirage.utils.clock import ManualClock
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 pytestmark = pytest.mark.skipif(not REDIS_URL, reason="REDIS_URL not set")
@@ -165,6 +166,7 @@ NOT_COUNTING = {
 
 READS = {
     "ttl",
+    "clock",
     "scope_snapshot",
     "get",
     "get_many",
@@ -233,6 +235,26 @@ async def test_a_write_on_another_keyspace_keeps_the_listing_read(
         await other.clear()
         await other.close()
     assert len(mgets) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_listing_read_in_a_command_ends_at_its_store_clock_expiry(
+    redis_prefix,
+):
+    clock = ManualClock(start=4_000_000_000.0)
+    store = RedisIndexCacheStore(
+        ttl=60, url=REDIS_URL, key_prefix=redis_prefix, clock=clock
+    )
+    try:
+        await store.set_dir("/d", LISTED)
+        async with command_scope():
+            assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
+            clock.advance(60)
+            after = await store.list_dir("/d")
+        assert after.status is LookupStatus.EXPIRED
+    finally:
+        await store.clear()
+        await store.close()
 
 
 @pytest.mark.asyncio

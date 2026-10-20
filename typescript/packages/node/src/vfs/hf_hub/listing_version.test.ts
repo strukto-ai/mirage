@@ -21,6 +21,7 @@ import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { FileType, MountMode, PathSpec, ReadPolicy } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
@@ -71,11 +72,14 @@ function prefixedOf(fake: FakeHub, keyPrefix?: string, revision?: string): Promi
   return buildVfs('hf_models', config)
 }
 
-function wsOf(vfs: BaseVFS, index: IndexCacheStore | null = null): Workspace {
-  const w = new Workspace({
-    '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
-    '/r': [new RAMVFS(), MountMode.WRITE],
-  })
+function wsOf(vfs: BaseVFS, index: IndexCacheStore | null = null, clock?: ManualClock): Workspace {
+  const w = new Workspace(
+    {
+      '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
+      '/r': [new RAMVFS(), MountMode.WRITE],
+    },
+    clock === undefined ? {} : { clock },
+  )
   if (index !== null) {
     ;(w.registry.mountFor('/m') as { indexStore: IndexCacheStore }).indexStore = index
   }
@@ -222,15 +226,13 @@ describe('hf_hub versions a listing by its head commit', () => {
   // through the mount's own index names none and reads neither the index nor
   // the backend, however stale the trust is (it used to answer the stored one).
   it('names no root version through the mount index', async () => {
-    const real = performance.now.bind(performance)
-    let offset = 0
-    vi.spyOn(performance, 'now').mockImplementation(() => real() + offset)
+    const clock = new ManualClock(100)
     const fake = await hubOf()
     const vfs = await vfsOf(fake)
-    const w = wsOf(vfs)
+    const w = wsOf(vfs, null, clock)
     await out(w, 'ls /m')
     const version = await stored(w)
-    offset += LISTING_TRUST_WINDOW * 2000
+    clock.advance(LISTING_TRUST_WINDOW * 2)
     fake.log.length = 0
     const index = w.registry.mountFor('/m').index
     const reads = countListDirs(w.registry.mountFor('/m').indexStore)
@@ -416,17 +418,15 @@ describe('hf_hub versions a listing by its head commit', () => {
   // A FUSE or programmatic read belongs to no command: it trusts a listing
   // for the window, then pays one version check, never a tree walk.
   it('checks once past the window on an unscoped read', async () => {
-    const real = performance.now.bind(performance)
-    let offset = 0
-    vi.spyOn(performance, 'now').mockImplementation(() => real() + offset)
+    const clock = new ManualClock(100)
     const fake = await hubOf()
-    const w = wsOf(await vfsOf(fake))
+    const w = wsOf(await vfsOf(fake), null, clock)
     await out(w, 'ls /m')
     fake.log.length = 0
     expect(await w.vfs.readdir('/m/docs/sub')).toEqual(['/m/docs/sub/b.txt'])
     await w.vfs.stat('/m/docs/sub/b.txt')
     expect(counts(fake)).toEqual([0, 0, 0, 0])
-    offset += LISTING_TRUST_WINDOW * 1000
+    clock.advance(LISTING_TRUST_WINDOW)
     await w.vfs.readdir('/m/docs/sub')
     await w.vfs.stat('/m/docs/sub/b.txt')
     expect(counts(fake)).toEqual([1, 0, 0, 0])

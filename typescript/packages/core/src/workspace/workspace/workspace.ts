@@ -140,6 +140,7 @@ import {
 } from '../../policy/profile.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
@@ -193,6 +194,7 @@ export class Workspace {
   readonly processes = new ProcessSupervisor(runWithExecution)
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
+  private readonly clock: Clock
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
@@ -270,7 +272,8 @@ export class Workspace {
     this.writeDefault = coerceWritePolicy(options.write)
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
     // Before the mounts: the write verdict asks whether the cache keeps anything.
-    this.cache = buildFileCache(options.cache, options.cacheLimit)
+    this.clock = options.clock ?? new SystemClock()
+    this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
       write: this.writeDefault,
@@ -291,6 +294,7 @@ export class Workspace {
         writes: normalized.write,
       },
       this.io,
+      this.clock,
     )
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
@@ -2063,6 +2067,7 @@ export class Workspace {
       // the copy does not carry. A caller's own profile table brings its
       // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
+      clock: options.clock ?? this.clock,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),

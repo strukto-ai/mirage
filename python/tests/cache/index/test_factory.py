@@ -22,6 +22,7 @@ from mirage.cache.index import (
 )
 from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.factory import build_index
+from mirage.utils.clock import ManualClock
 
 
 @pytest.mark.asyncio
@@ -45,3 +46,25 @@ def test_redis_config_builds_a_redis_store():
         RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="t:"), -1
     )
     assert isinstance(store, RedisIndexCacheStore)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("config", [None, IndexConfig(ttl=60)])
+async def test_a_ram_store_expires_on_the_given_clock(config):
+    clock = ManualClock(start=1000.0)
+    store = build_index(config, 60, clock)
+    await store.set_dir("/listing", [])
+    clock.advance(59)
+    assert (await store.list_dir("/listing")).status is None
+    clock.advance(1)
+    assert (await store.list_dir("/listing")).status == LookupStatus.EXPIRED
+
+
+def test_a_redis_store_reads_the_given_clock():
+    clock = ManualClock()
+    store = build_index(
+        RedisIndexConfig(url="redis://127.0.0.1:1/0", key_prefix="t:"),
+        -1,
+        clock,
+    )
+    assert store.clock is clock

@@ -14,7 +14,7 @@
 
 import asyncio
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -24,6 +24,7 @@ from mirage.cache.index.view import IndexView
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.tree import fetch_tree
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.github import GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -36,18 +37,6 @@ NEW = b"version two, longer\n"
 LISTED = b"a.txt\nb.txt\n"
 GROWN = b"a.txt\nb.txt\nc.txt\n"
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-
-class _Clock(datetime):
-    at: datetime = T0
-
-    @classmethod
-    def now(cls, tz=None):
-        return cls.at
-
-    @classmethod
-    def advance(cls, seconds: float) -> None:
-        cls.at += timedelta(seconds=seconds)
 
 
 def _hub() -> FakeGitHub:
@@ -393,17 +382,17 @@ async def test_two_prefixes_over_one_vfs_keep_their_own_bound():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("after,expected", [(599, LISTED), (601, GROWN)])
 async def test_a_mount_without_a_ttl_caps_listings_at_the_default(
-    monkeypatch, after, expected
+    after, expected
 ):
-    _Clock.at = T0
-    for module in ("view", "ram"):
-        monkeypatch.setattr(f"mirage.cache.index.{module}.datetime", _Clock)
+    clock = ManualClock(start=T0.timestamp())
     with serve(_hub()) as hub:
-        ws = Workspace({"/gh": Mount(vfs=_vfs(hub), mode=MountMode.READ)})
+        ws = Workspace(
+            {"/gh": Mount(vfs=_vfs(hub), mode=MountMode.READ)}, clock=clock
+        )
         try:
             assert await _out(ws, "ls /gh/docs") == LISTED
             hub.files["docs/c.txt"] = b"charlie\n"
-            _Clock.advance(after)
+            clock.advance(after)
             assert await _out(ws, "ls /gh/docs") == expected
         finally:
             await ws.close()
@@ -436,12 +425,15 @@ def _three() -> FakeGitHub:
     )
 
 
-def _fresh(hub: FakeGitHub, prefix: str = "/gh") -> Workspace:
+def _fresh(
+    hub: FakeGitHub, prefix: str = "/gh", clock: ManualClock | None = None
+) -> Workspace:
     return Workspace(
         {
             prefix: _mount(_vfs(hub), policy=ReadPolicy.FRESH, ttl=600),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        clock=clock,
     )
 
 
@@ -578,18 +570,17 @@ async def test_seven_fresh_sessions_share_one_refetch():
 
 
 @pytest.mark.asyncio
-async def test_an_unscoped_read_trusts_a_listing_for_the_window(monkeypatch):
+async def test_an_unscoped_read_trusts_a_listing_for_the_window():
     # A FUSE or programmatic read belongs to no command, so it trusts a
     # listing written within the window: a burst refetches once, not once
     # per call. Task 1.3 is what makes the refetch itself cheaper.
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
+    clock = ManualClock(start=100.0)
     readdir = PathSpec(virtual="/gh/d1", directory="/gh/d1", vfs_path="d1")
     stat = PathSpec(
         virtual="/gh/d1/a.txt", directory="/gh/d1", vfs_path="d1/a.txt"
     )
     with serve(_three()) as hub:
-        ws = _fresh(hub)
+        ws = _fresh(hub, clock=clock)
         try:
             await _out(ws, "ls /gh")
             hub.log.clear()
@@ -597,7 +588,7 @@ async def test_an_unscoped_read_trusts_a_listing_for_the_window(monkeypatch):
             assert listed == ["/gh/d1/a.txt", "/gh/d1/b.txt", "/gh/d1/c.txt"]
             await ws.dispatch("stat", stat)
             assert hub.counts() == (0, 0, 0)
-            now[0] += LISTING_TRUST_WINDOW
+            clock.advance(LISTING_TRUST_WINDOW)
             await ws.dispatch("readdir", readdir)
             await ws.dispatch("stat", stat)
             # One version check answers both calls inside the window; it

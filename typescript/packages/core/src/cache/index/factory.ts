@@ -16,6 +16,7 @@ import { IndexType, type IndexConfig, type RedisIndexConfig } from './config.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import type { IndexCacheStore } from './store.ts'
+import type { Clock } from '../../utils/clock.ts'
 
 /**
  * The index store a mount runs its driver under.
@@ -28,16 +29,23 @@ import type { IndexCacheStore } from './store.ts'
  *
  * @param config the configured store, or undefined for a RAM store at the driver's TTL
  * @param ttl the driver's `indexTtl`, read when `config` is undefined
+ * @param clock the clock the store's listings expire on; undefined means the real one
  */
-export function buildIndex(config: IndexConfig | undefined, ttl: number): IndexCacheStore {
-  if (config === undefined) return new RAMIndexCacheStore({ ttl })
+export function buildIndex(
+  config: IndexConfig | undefined,
+  ttl: number,
+  clock?: Clock,
+): IndexCacheStore {
+  const timed = clock === undefined ? {} : { clock }
+  if (config === undefined) return new RAMIndexCacheStore({ ttl, ...timed })
   if (config.type === IndexType.REDIS) {
     const redis = config as RedisIndexConfig
     return new RedisIndexCacheStore({
       ttl: redis.ttl ?? 600,
+      ...timed,
       ...(redis.url !== undefined ? { url: redis.url } : {}),
       ...(redis.keyPrefix !== undefined ? { keyPrefix: redis.keyPrefix } : {}),
     })
   }
-  return new RAMIndexCacheStore({ ttl: config.ttl ?? 600 })
+  return new RAMIndexCacheStore({ ttl: config.ttl ?? 600, ...timed })
 }

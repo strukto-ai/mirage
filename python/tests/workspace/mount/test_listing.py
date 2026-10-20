@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +19,7 @@ import pytest
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.base import BaseVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.listing import (
@@ -190,8 +190,10 @@ class Folders(BaseVFS):
         return self.stat_of(moved)
 
 
-def _workspace(store: Folders) -> Workspace:
-    return Workspace({"/f/": (store, MountMode.WRITE)}, mode=MountMode.WRITE)
+def _workspace(store: Folders, clock: ManualClock | None = None) -> Workspace:
+    return Workspace(
+        {"/f/": (store, MountMode.WRITE)}, mode=MountMode.WRITE, clock=clock
+    )
 
 
 def _at(path: str) -> PathSpec:
@@ -318,14 +320,13 @@ async def test_a_subtree_read_is_kept_and_answers_the_walk_after_it():
 async def test_a_stat_asks_the_backend_once_its_listing_expires():
     store = Folders()
     a = store.add("a.txt", data=b"a")
-    ws = _workspace(store)
-    with patch("mirage.cache.index.ram.datetime") as clock:
-        clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        await ws.dispatch("readdir", _at("/f"))
-        await ws.dispatch("stat", _at("/f/a.txt"))
-        assert store.calls == [("list", "root")]
-        clock.now.return_value += timedelta(seconds=store.index_ttl + 1)
-        await ws.dispatch("stat", _at("/f/a.txt"))
+    clock = ManualClock(start=1000.0)
+    ws = _workspace(store, clock)
+    await ws.dispatch("readdir", _at("/f"))
+    await ws.dispatch("stat", _at("/f/a.txt"))
+    assert store.calls == [("list", "root")]
+    clock.advance(store.index_ttl + 1)
+    await ws.dispatch("stat", _at("/f/a.txt"))
     assert store.calls == [("list", "root"), ("list", "root"), ("stat", a)]
 
 

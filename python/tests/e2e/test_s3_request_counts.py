@@ -3,7 +3,7 @@ import os
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -12,10 +12,13 @@ from mirage.cache.index import redis as redis_index
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+
+T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 @contextmanager
@@ -240,33 +243,18 @@ async def test_deleted_recursive_root_is_not_reported_after_expiry(warmup):
             aws_secret_access_key="fake",
         )
     )
-    ws = Workspace({"/s3": (vfs, MountMode.WRITE)})
-    with (
-        patch_s3_session(session),
-        patch("mirage.cache.index.ram.datetime") as clock,
-    ):
-        clock.now.return_value = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    clock = ManualClock(start=T0.timestamp())
+    ws = Workspace({"/s3": (vfs, MountMode.WRITE)}, clock=clock)
+    with patch_s3_session(session):
         first = await ws.shell(warmup + " /s3/d")
         await first.stdout_str()
         assert first.exit_code == 0
         objects.clear()
-        clock.now.return_value += timedelta(seconds=601)
+        clock.advance(601)
         for command in ["stat", "find"]:
             result = await ws.shell(command + " /s3/d")
             assert await result.stdout_str() == ""
             assert result.exit_code == 1
-
-
-class _Clock(datetime):
-    at: datetime = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-    @classmethod
-    def now(cls, tz=None):
-        return cls.at
-
-    @classmethod
-    def advance(cls, seconds: float) -> None:
-        cls.at += timedelta(seconds=seconds)
 
 
 @pytest.mark.asyncio
@@ -278,11 +266,9 @@ class _Clock(datetime):
     ],
 )
 async def test_a_listing_lives_as_long_as_the_shorter_of_index_and_mount_ttl(
-    monkeypatch, index_ttl, mount_ttl, steps
+    index_ttl, mount_ttl, steps
 ):
-    _Clock.at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    for module in ("view", "ram"):
-        monkeypatch.setattr(f"mirage.cache.index.{module}.datetime", _Clock)
+    clock = ManualClock(start=T0.timestamp())
     objects = {"a.txt": b"hello"}
     with _counted(MultiBucketSession({"bucket": objects})) as counts:
         ws = Workspace(
@@ -294,6 +280,7 @@ async def test_a_listing_lives_as_long_as_the_shorter_of_index_and_mount_ttl(
                 )
             },
             index=IndexConfig(ttl=index_ttl),
+            clock=clock,
         )
         try:
             first = await ws.shell("ls /s3")
@@ -303,7 +290,7 @@ async def test_a_listing_lives_as_long_as_the_shorter_of_index_and_mount_ttl(
             )
             objects["b.txt"] = b"new"
             for seconds, shown, listed in steps:
-                _Clock.advance(seconds)
+                clock.advance(seconds)
                 before = counts["list"]
                 result = await ws.shell("ls /s3")
                 assert (result.exit_code, await result.stdout_str()) == (

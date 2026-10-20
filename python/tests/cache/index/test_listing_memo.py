@@ -38,7 +38,7 @@ class Clock:
     def monotonic(self) -> float:
         return 1_000.0 + self.elapsed
 
-    def time(self) -> float:
+    def now(self) -> float:
         return WALL + self.elapsed
 
 
@@ -74,13 +74,12 @@ class Folder:
 def clock(monkeypatch):
     fake = Clock()
     monkeypatch.setattr(listing_memo, "monotonic", fake.monotonic)
-    monkeypatch.setattr(listing_memo, "time", fake.time)
     return fake
 
 
 @pytest.fixture
 def memo(clock):
-    return ListingMemo(f"test:{uuid4()}:")
+    return ListingMemo(f"test:{uuid4()}:", clock)
 
 
 def held(memo: ListingMemo) -> set[str]:
@@ -127,22 +126,24 @@ async def test_a_listing_without_an_expiry_is_read_each_time(memo):
 
 
 @pytest.mark.asyncio
-async def test_a_finished_write_on_the_prefix_drops_the_listing_read(memo):
+async def test_a_finished_write_on_the_prefix_drops_the_listing_read(
+    memo, clock
+):
     folder = Folder()
-    other = ListingMemo(f"test:{uuid4()}:")
+    other = ListingMemo(f"test:{uuid4()}:", clock)
     async with command_scope():
         await memo.read("/d", folder)
         other.wrote()
         await memo.read("/d", folder)
         assert folder.reads == 1
-        ListingMemo(memo._key_prefix).wrote()
+        ListingMemo(memo._key_prefix, clock).wrote()
         await memo.read("/d", folder)
     assert folder.reads == 2
 
 
-def test_the_last_close_on_a_prefix_releases_its_count(memo):
+def test_the_last_close_on_a_prefix_releases_its_count(memo, clock):
     prefix = memo._key_prefix
-    peer = ListingMemo(prefix)
+    peer = ListingMemo(prefix, clock)
     peer.wrote()
     memo.close()
     assert listing_memo._WRITES_BY_PREFIX[prefix] == 1
@@ -152,9 +153,9 @@ def test_the_last_close_on_a_prefix_releases_its_count(memo):
 
 
 @pytest.mark.asyncio
-async def test_a_closed_peer_leaves_a_live_memo_its_count(memo):
+async def test_a_closed_peer_leaves_a_live_memo_its_count(memo, clock):
     folder = Folder()
-    peer = ListingMemo(memo._key_prefix)
+    peer = ListingMemo(memo._key_prefix, clock)
     peer.wrote()
     async with command_scope():
         await memo.read("/d", folder)
@@ -162,7 +163,7 @@ async def test_a_closed_peer_leaves_a_live_memo_its_count(memo):
         peer.close()
         await memo.read("/d", folder)
         assert folder.reads == 1
-        ListingMemo(memo._key_prefix).wrote()
+        ListingMemo(memo._key_prefix, clock).wrote()
         await memo.read("/d", folder)
     assert folder.reads == 2
 
@@ -170,9 +171,9 @@ async def test_a_closed_peer_leaves_a_live_memo_its_count(memo):
 @pytest.mark.asyncio
 async def test_a_write_that_finishes_after_close_still_counts(clock):
     prefix = f"test:{uuid4()}:"
-    closed = ListingMemo(prefix)
+    closed = ListingMemo(prefix, clock)
     closed.close()
-    memo = ListingMemo(prefix)
+    memo = ListingMemo(prefix, clock)
     folder = Folder()
     async with command_scope():
         await memo.read("/d", folder)

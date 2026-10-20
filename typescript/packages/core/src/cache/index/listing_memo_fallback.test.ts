@@ -15,6 +15,7 @@
 import type * as AsyncContext from '../../utils/async_context.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type { ListResult } from './config.ts'
+import { SystemClock } from '../../utils/clock.ts'
 import { ListingMemo } from './listing_memo.ts'
 import { runInCommandScope } from './scope.ts'
 
@@ -46,7 +47,7 @@ function counted(): { reads: () => number; fetch: () => Promise<[ListResult, num
 
 describe('ListingMemo on the fallback storage', () => {
   it('reads every time while two commands are live', async () => {
-    const memo = new ListingMemo(`test:${Math.random().toString(36).slice(2)}:`)
+    const memo = new ListingMemo(`test:${Math.random().toString(36).slice(2)}:`, new SystemClock())
     const folder = counted()
     const live = gate()
     const entered = gate()
@@ -70,7 +71,7 @@ describe('ListingMemo on the fallback storage', () => {
   })
 
   it('does not keep a read that a second command overlapped', async () => {
-    const memo = new ListingMemo(`test:${Math.random().toString(36).slice(2)}:`)
+    const memo = new ListingMemo(`test:${Math.random().toString(36).slice(2)}:`, new SystemClock())
     const reading = gate()
     const release = gate()
     let reads = 0

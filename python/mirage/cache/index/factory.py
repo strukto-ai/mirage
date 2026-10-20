@@ -17,6 +17,7 @@ from collections.abc import Callable
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
+from mirage.utils.clock import Clock
 
 redis_store: Callable[..., IndexCacheStore] | None
 try:
@@ -27,7 +28,9 @@ except ImportError:
     redis_store = None
 
 
-def build_index(config: IndexConfig | None, ttl: float) -> IndexCacheStore:
+def build_index(
+    config: IndexConfig | None, ttl: float, clock: Clock | None = None
+) -> IndexCacheStore:
     """The index store a mount runs its driver under.
 
     A mount builds one when it is placed, from the workspace or mount
@@ -40,9 +43,12 @@ def build_index(config: IndexConfig | None, ttl: float) -> IndexCacheStore:
             a RAM store at the driver's TTL.
         ttl (float): the driver's ``index_ttl``, read when ``config``
             is None.
+        clock (Clock | None): the workspace's clock, which the store
+            stamps and compares every expiry on; None means the system
+            clock.
     """
     if config is None:
-        return RAMIndexCacheStore(ttl=ttl)
+        return RAMIndexCacheStore(ttl=ttl, clock=clock)
     if isinstance(config, RedisIndexConfig):
         if redis_store is None:
             raise ImportError(
@@ -50,6 +56,9 @@ def build_index(config: IndexConfig | None, ttl: float) -> IndexCacheStore:
                 "Install with: pip install mirage-ai[redis]"
             )
         return redis_store(
-            ttl=config.ttl, url=config.url, key_prefix=config.key_prefix
+            ttl=config.ttl,
+            url=config.url,
+            key_prefix=config.key_prefix,
+            clock=clock,
         )
-    return RAMIndexCacheStore(ttl=config.ttl)
+    return RAMIndexCacheStore(ttl=config.ttl, clock=clock)

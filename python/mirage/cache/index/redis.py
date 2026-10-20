@@ -49,6 +49,7 @@ from mirage.cache.index.constants import (
 from mirage.cache.index.listing_memo import ListingMemo
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat, FileType
+from mirage.utils.clock import Clock
 from mirage.utils.ids import uuid7
 
 
@@ -615,6 +616,8 @@ class RedisIndexCacheStore(IndexCacheStore):
             the store will not close it on ``close()``.
         key_prefix (str): Namespace prefix prepended to every Redis key,
             allowing multiple stores to coexist on the same server.
+        clock (Clock | None): the clock listing expiries are stamped and
+            compared on; None means the system clock.
     """
 
     def __init__(
@@ -623,8 +626,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         url: str = "redis://localhost:6379/0",
         client: Redis | None = None,
         key_prefix: str = DEFAULT_KEY_PREFIX,
+        clock: Clock | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(clock)
         self._ttl = ttl
         self._client = (
             client
@@ -643,7 +647,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         self._generation_key = f"{p}{GENERATION_KEY}"
         self._paths_key = f"{p}{PATHS_KEY}"
         self._directory_generation_prefix = f"{self._generation_key}:"
-        self._listings = ListingMemo(p)
+        self._listings = ListingMemo(p, self.clock)
 
     def _entry_key(self, vfs_path: str) -> str:
         return f"{self._entry_prefix}{vfs_path}"
@@ -972,7 +976,7 @@ class RedisIndexCacheStore(IndexCacheStore):
     ) -> None:
         await self._flush_seed()
         folder = vfs_path.rsplit("/", 1)[0] or "/"
-        now = datetime.now(timezone.utc)
+        now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
         lifetime = now + timedelta(seconds=self._ttl)
         generation = await self._generation(self._generation_key)
         directory_generation = await self._generation(
@@ -1061,7 +1065,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             current is None
             or directory is None
             or listing.generation != f"{_text(current)}:{_text(directory)}"
-            or datetime.now(timezone.utc).timestamp() >= listing.expires_at
+            or self.clock.now() >= listing.expires_at
         ):
             return ListResult(status=LookupStatus.EXPIRED), None
         if listing.partial:
@@ -1123,7 +1127,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         version: str | None = None,
     ) -> list[Evicted]:
         await self._flush_seed()
-        now = datetime.now(timezone.utc)
+        now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
         prefix = "/" if vfs_path == "/" else vfs_path + "/"
 
         generation = await self._generation(self._generation_key)

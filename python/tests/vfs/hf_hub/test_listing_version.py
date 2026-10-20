@@ -34,6 +34,7 @@ from mirage.types import (
     ReadPolicy,
     ReadSpec,
 )
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
@@ -60,7 +61,7 @@ def _vfs(hub: FakeHub, revision: str | None = None):
     return build_vfs("hf_models", config)
 
 
-def _ws(vfs, index=None) -> Workspace:
+def _ws(vfs, index=None, clock: ManualClock | None = None) -> Workspace:
     ws = Workspace(
         {
             "/m": Mount(
@@ -69,7 +70,8 @@ def _ws(vfs, index=None) -> Workspace:
                 read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        clock=clock,
     )
     if index is not None:
         ws.mount("/m").index_store = index
@@ -77,8 +79,10 @@ def _ws(vfs, index=None) -> Workspace:
 
 
 @asynccontextmanager
-async def _open(vfs, index=None) -> AsyncIterator[Workspace]:
-    ws = _ws(vfs, index)
+async def _open(
+    vfs, index=None, clock: ManualClock | None = None
+) -> AsyncIterator[Workspace]:
+    ws = _ws(vfs, index, clock)
     try:
         yield ws
     finally:
@@ -87,10 +91,10 @@ async def _open(vfs, index=None) -> AsyncIterator[Workspace]:
 
 @asynccontextmanager
 async def _served(
-    make=_vfs, index=None
+    make=_vfs, index=None, clock: ManualClock | None = None
 ) -> AsyncIterator[tuple[FakeHub, Workspace]]:
     with serve(_hub()) as hub:
-        async with _open(make(hub), index) as ws:
+        async with _open(make(hub), index, clock) as ws:
             yield hub, ws
 
 
@@ -213,12 +217,11 @@ def _count_list_dirs(monkeypatch, store) -> list[str]:
 async def test_a_root_stat_through_the_mount_index_names_no_version(
     monkeypatch,
 ):
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
-    async with _served() as (hub, ws):
+    clock = ManualClock(start=100.0)
+    async with _served(clock=clock) as (hub, ws):
         await _out(ws, "ls /m")
         stored = await _stored(ws)
-        now[0] += LISTING_TRUST_WINDOW * 2
+        clock.advance(LISTING_TRUST_WINDOW * 2)
         hub.log.clear()
         mount = ws.mount("/m")
         reads = _count_list_dirs(monkeypatch, mount.index_store)
@@ -508,9 +511,8 @@ async def test_an_unreachable_hub_keeps_the_listing(caplog, monkeypatch):
 # A FUSE or programmatic read belongs to no command: it trusts a listing
 # for the window, then pays one version check, never a tree walk.
 @pytest.mark.asyncio
-async def test_an_unscoped_read_checks_once_past_the_window(monkeypatch):
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
+async def test_an_unscoped_read_checks_once_past_the_window():
+    clock = ManualClock(start=100.0)
     readdir = PathSpec(
         virtual="/m/docs/sub", directory="/m/docs/sub", vfs_path="docs/sub"
     )
@@ -519,14 +521,14 @@ async def test_an_unscoped_read_checks_once_past_the_window(monkeypatch):
         directory="/m/docs/sub",
         vfs_path="docs/sub/b.txt",
     )
-    async with _served() as (hub, ws):
+    async with _served(clock=clock) as (hub, ws):
         await _out(ws, "ls /m")
         hub.log.clear()
         listed, _ = await ws.dispatch("readdir", readdir)
         assert listed == ["/m/docs/sub/b.txt"]
         await ws.dispatch("stat", one)
         assert _counts(hub) == (0, 0, 0, 0)
-        now[0] += LISTING_TRUST_WINDOW
+        clock.advance(LISTING_TRUST_WINDOW)
         await ws.dispatch("readdir", readdir)
         await ws.dispatch("stat", one)
         assert _counts(hub) == (1, 0, 0, 0)

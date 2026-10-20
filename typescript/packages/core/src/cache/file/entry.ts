@@ -48,8 +48,13 @@ export class CacheEntry {
     return this.holds !== Holds.VERSION
   }
 
-  get expired(): boolean {
+  /**
+   * Whether the entry has outlived its TTL at `now`.
+   *
+   * @param now whole seconds since the unix epoch, as `cachedAt` records it.
+   */
+  isExpired(now: number): boolean {
     if (this.ttl === null) return false
-    return Math.floor(Date.now() / 1000) - this.cachedAt >= this.ttl
+    return now - this.cachedAt >= this.ttl
   }
 }

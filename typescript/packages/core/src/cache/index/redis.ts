@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { KeyLock } from '../lock.ts'
+import type { Clock } from '../../utils/clock.ts'
 import { uuid7 } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -560,6 +561,7 @@ export interface RedisClientLike {
 
 export interface RedisIndexCacheOptions {
   ttl?: number
+  clock?: Clock
   url?: string
   client?: RedisClientLike
   keyPrefix?: string
@@ -587,7 +589,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   private closed = false
 
   constructor(options: RedisIndexCacheOptions = {}) {
-    super()
+    super(options.clock)
     this.ttl = options.ttl ?? 600
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.providedClient = options.client ?? null
@@ -598,7 +600,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     this.tombstonePrefix = `${prefix}${TOMBSTONE_PREFIX}`
     this.generationKey = `${prefix}${GENERATION_KEY}`
     this.pathsKey = `${prefix}${PATHS_KEY}`
-    this.listings = new ListingMemo(prefix)
+    this.listings = new ListingMemo(prefix, this.clock)
   }
 
   private entryKey(path: string): string {
@@ -886,7 +888,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       await this.flushSeed()
       const c = await this.client()
       const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
-      const now = new Date()
+      const now = new Date(this.clock.now() * 1000)
       const lifetime = now.getTime() + this.ttl * 1000
       const generation = await this.generation(c, this.generationKey)
       const directory = await this.generation(c, `${this.generationKey}:${folder}`)
@@ -975,7 +977,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       current == null ||
       directory == null ||
       listing.generation !== `${current}:${directory}` ||
-      Date.now() / 1000 >= listing.expires_at
+      this.clock.now() >= listing.expires_at
     )
       return [{ status: LookupStatus.EXPIRED }, null]
     if (listing.partial) {
@@ -1024,7 +1026,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     return this.listings.writing(async () => {
       await this.flushSeed()
       const c = await this.client()
-      const now = new Date()
+      const now = new Date(this.clock.now() * 1000)
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
       const generation = await this.generation(c, this.generationKey)
       const directory = await this.generation(c, `${this.generationKey}:${vfsPath}`)

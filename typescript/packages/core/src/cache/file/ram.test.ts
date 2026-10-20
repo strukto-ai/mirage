@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
+import { ManualClock } from '../../utils/clock.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMFileCacheStore } from './ram.ts'
 
@@ -299,17 +300,13 @@ describe('a version kept without bytes', () => {
   })
 
   it('keeps a version an expiry leaves within the limit', async () => {
-    vi.useFakeTimers()
-    try {
-      const c = new RAMFileCacheStore({ limit: 20 })
-      await c.set('/a-long-key', encode('x'), { fingerprint: 'v1234567890', ttl: 1 })
-      await c.keepFingerprints({ '/a-long-key': 'v1234567890' })
-      vi.setSystemTime(Date.now() + 10_000)
-      expect(await c.get('/a-long-key')).toBeNull()
-      expect(c.cacheSize).toBeLessThanOrEqual(20)
-    } finally {
-      vi.useRealTimers()
-    }
+    const clock = new ManualClock(1000)
+    const c = new RAMFileCacheStore({ limit: 20, clock })
+    await c.set('/a-long-key', encode('x'), { fingerprint: 'v1234567890', ttl: 1 })
+    await c.keepFingerprints({ '/a-long-key': 'v1234567890' })
+    clock.advance(10)
+    expect(await c.get('/a-long-key')).toBeNull()
+    expect(c.cacheSize).toBeLessThanOrEqual(20)
   })
 
   it.each([
@@ -318,18 +315,33 @@ describe('a version kept without bytes', () => {
   ] as const)('answers the version of an expired entry: %s', async (_name, kept) => {
     // The token stays true for the bytes read, all a condition says; a
     // version kept for a conditional mount outlives its bytes, as on redis.
-    vi.useFakeTimers()
-    try {
-      const c = new RAMFileCacheStore()
-      await c.set('/a', encode('x'), { fingerprint: 'v1', ttl: 1 })
-      if (kept) await c.keepFingerprints({ '/a': 'v1' })
-      vi.setSystemTime(Date.now() + 10_000)
-      expect(await c.exists('/a')).toBe(false)
-      expect(await c.fingerprint('/a')).toBe('v1')
-      expect(await c.get('/a')).toBeNull()
-      expect(await c.fingerprint('/a')).toBe(kept ? 'v1' : null)
-    } finally {
-      vi.useRealTimers()
-    }
+    const clock = new ManualClock(1000)
+    const c = new RAMFileCacheStore({ clock })
+    await c.set('/a', encode('x'), { fingerprint: 'v1', ttl: 1 })
+    if (kept) await c.keepFingerprints({ '/a': 'v1' })
+    clock.advance(10)
+    expect(await c.exists('/a')).toBe(false)
+    expect(await c.fingerprint('/a')).toBe('v1')
+    expect(await c.get('/a')).toBeNull()
+    expect(await c.fingerprint('/a')).toBe(kept ? 'v1' : null)
+  })
+
+  it('serves an entry at ttl-1 and expires it at ttl', async () => {
+    const clock = new ManualClock(1000)
+    const c = new RAMFileCacheStore({ limit: 1024, clock })
+    await c.set('/f.txt', encode('hello'), { ttl: 10 })
+    clock.advance(9)
+    expect(await c.exists('/f.txt')).toBe(true)
+    expect(decode(await c.get('/f.txt'))).toBe('hello')
+    clock.advance(1)
+    expect(await c.exists('/f.txt')).toBe(false)
+    expect(await c.get('/f.txt')).toBeNull()
+    expect(c.cacheEntries).toBe(0)
+  })
+
+  it('stamps cachedAt in whole seconds of its clock', async () => {
+    const c = new RAMFileCacheStore({ limit: 1024, clock: new ManualClock(4242.7) })
+    await c.set('/f.txt', encode('hello'))
+    expect(c.snapshotEntries()[0]?.entry.cachedAt).toBe(4242)
   })
 })

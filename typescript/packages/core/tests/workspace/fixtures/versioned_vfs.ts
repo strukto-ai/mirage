@@ -15,6 +15,7 @@
 import { vi } from 'vitest'
 import { FileStat, FileType, MountMode, type PathSpec, ReadPolicy } from '../../../src/types.ts'
 import { enotsup } from '../../../src/errors/fs.ts'
+import { type Clock, SystemClock } from '../../../src/utils/clock.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
 import type { MountEntry } from '../../../src/workspace/mount/mount.ts'
 import { Reconciler } from '../../../src/workspace/reconcile.ts'
@@ -100,8 +101,12 @@ export class VersionedVFS extends RAMVFS {
 export function versionedWorkspace(
   vfs: VersionedVFS,
   policy: ReadPolicy = ReadPolicy.FRESH,
+  clock: Clock = new SystemClock(),
 ): { ws: Workspace; mount: MountEntry; rec: Reconciler; asked: string[] } {
-  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE, read: { policy, ttl: 600 } })
+  const ws = new Workspace(
+    { '/m': vfs },
+    { mode: MountMode.WRITE, read: { policy, ttl: 600 }, clock },
+  )
   const mount = ws.namespace.mountFor('/m/a')
   const call = mount.callKeyed.bind(mount)
   const asked: string[] = []

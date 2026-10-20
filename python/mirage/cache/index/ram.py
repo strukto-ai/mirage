@@ -26,14 +26,21 @@ from mirage.cache.index.config import (
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
 from mirage.types import FileStat, FileType
+from mirage.utils.clock import Clock
 from mirage.utils.key_prefix import under_path
 
 
 class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
-    """In-memory index cache using plain dicts + asyncio locks."""
+    """In-memory index cache using plain dicts + asyncio locks.
 
-    def __init__(self, ttl: float = 600) -> None:
-        super().__init__()
+    Args:
+        ttl (float): seconds a listing lives when its writer names no expiry.
+        clock (Clock | None): the clock expiries are stamped and compared
+            on; None means the system clock.
+    """
+
+    def __init__(self, ttl: float = 600, clock: Clock | None = None) -> None:
+        super().__init__(clock)
         self._ttl = ttl
         self._entries: dict[str, FileStat] = {}
         self._children: dict[str, list[str]] = {}
@@ -105,7 +112,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     ) -> None:
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         async with self._lock_for(folder):
-            now = datetime.now(timezone.utc)
+            now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
             children = self._children.get(folder, [])
             exp = self._expiry.get(folder)
             was_folder = self._is_folder(vfs_path) or self._folder_flags.get(
@@ -154,7 +161,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         exp = self._expiry.get(vfs_path)
         if exp is None:
             return ListResult(status=LookupStatus.NOT_FOUND)
-        if datetime.now(timezone.utc) >= exp:
+        if datetime.fromtimestamp(self.clock.now(), timezone.utc) >= exp:
             return ListResult(status=LookupStatus.EXPIRED)
         children = self._children.get(vfs_path)
         version = self._versions.get(vfs_path)
@@ -208,7 +215,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         version: str | None = None,
     ) -> list[Evicted]:
         async with self._lock_for(vfs_path):
-            now = datetime.now(timezone.utc)
+            now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
             exp = expired_at or (now + timedelta(seconds=self._ttl))
             prefix = "/" if vfs_path == "/" else vfs_path + "/"
             rows: dict[str, FileStat] = {
@@ -439,7 +446,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._versions.pop(exp_key, None)
 
     async def invalidate(self) -> None:
-        past = datetime.now(timezone.utc) - timedelta(seconds=1)
+        past = datetime.fromtimestamp(
+            self.clock.now(), timezone.utc
+        ) - timedelta(seconds=1)
         for key in list(self._expiry):
             self._expiry[key] = past
 
@@ -467,7 +476,7 @@ class ListingCheckStore(RAMIndexCacheStore):
     """
 
     def __init__(self, hints: IndexCacheStore | None = None) -> None:
-        super().__init__()
+        super().__init__(clock=hints.clock if hints is not None else None)
         self._hints = hints
         self.hinted_rows: dict[str, str] = {}
 

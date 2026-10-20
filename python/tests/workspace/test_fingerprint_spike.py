@@ -26,6 +26,7 @@ from mirage.types import (
     ReadSpec,
     Visibility,
 )
+from mirage.utils.clock import ManualClock
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -623,7 +624,7 @@ def test_metadata_command_reconciles_its_operand():
     assert client.calls["head_object"] == 4
 
 
-def _bounded_mount(objects, ttl=600):
+def _bounded_mount(objects, ttl=600, clock: ManualClock | None = None):
     config = S3Config(
         bucket="test-bucket",
         region="us-east-1",
@@ -635,6 +636,7 @@ def _bounded_mount(objects, ttl=600):
         {"/s3": (S3VFS(config), MountMode.WRITE)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=ttl),
+        clock=clock,
     )
 
 
@@ -659,12 +661,11 @@ def test_bounded_serves_within_the_bound_then_goes_cold():
     """Cost is the contract: `bounded` costs no probe, and does expire.
 
     `fresh` and `bounded` differ only in call count, so a functional
-    assertion alone cannot tell one from the other. The clock is advanced
-    by ageing the entry rather than sleeping: CacheEntry.expired reads
-    time.time() at property-read time and there is no clock seam.
+    assertion alone cannot tell one from the other.
     """
     objects = {"a.txt": b"v1\n"}
-    session, ws = _bounded_mount(objects, ttl=30)
+    clock = ManualClock(start=1000.0)
+    session, ws = _bounded_mount(objects, ttl=30, clock=clock)
     client = session._client
 
     async def run() -> tuple[bytes, dict[str, int], bytes]:
@@ -674,8 +675,7 @@ def test_bounded_serves_within_the_bound_then_goes_cold():
             warm = (await ws.shell("cat /s3/a.txt")).stdout
             warm_calls = dict(client.calls)
             objects["a.txt"] = b"v2\n"
-            entry = ws.cache._entries["/s3/a.txt"]
-            entry.cached_at -= 31
+            clock.advance(31)
             cold = (await ws.shell("cat /s3/a.txt")).stdout
             await ws.close()
             return warm, warm_calls, cold

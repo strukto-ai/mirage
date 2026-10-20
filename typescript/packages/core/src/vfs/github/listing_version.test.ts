@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { shiftPerformanceNow } from '../../../tests/cache/_test_util.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -68,13 +68,14 @@ async function wsOf(
   vfs: GitHubVFS,
   policy: ReadPolicy = ReadPolicy.FRESH,
   index: IndexCacheStore | null = null,
+  clock?: ManualClock,
 ): Promise<Workspace> {
   const w = new Workspace(
     {
       '/gh': new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: 600 } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { shellParser: await getTestParser() },
+    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
   )
   if (index !== null) {
     ;(w.registry.mountFor('/gh') as { indexStore: IndexCacheStore }).indexStore = index
@@ -142,13 +143,13 @@ describe('github versions a listing by its head commit', () => {
   it.each([true, false])(
     'names no root version through the mount index (scoped=%s)',
     async (scoped) => {
-      const clock = shiftPerformanceNow()
+      const clock = new ManualClock(100)
       const vfs = await vfsOf()
       expect(vfs.listingVersion).toBe(ListingVersion.MOUNT)
-      const w = await wsOf(vfs)
+      const w = await wsOf(vfs, ReadPolicy.FRESH, null, clock)
       await out(w, 'ls /gh')
       const version = await stored(w)
-      clock.advance(LISTING_TRUST_WINDOW * 2000)
+      clock.advance(LISTING_TRUST_WINDOW * 2)
       gh.log.length = 0
       const index = w.registry.mountFor('/gh').index
       const reads = countListDirs(w.registry.mountFor('/gh').indexStore)
