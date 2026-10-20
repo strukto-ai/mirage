@@ -18,8 +18,11 @@ import io
 
 import pytest
 
+from mirage.cache.index import IndexConfig
+from mirage.cache.index.config import LookupStatus
 from mirage.context import reset_current_session, set_current_session
 from mirage.types import MountMode
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
@@ -377,3 +380,32 @@ def test_every_exemption_says_it_is_internal():
     for name in INTERNAL:
         assert f"{name}: Internal." in doc, name
         assert name not in inspect.signature(Session.shell).parameters
+
+
+@pytest.mark.asyncio
+async def test_one_clock_ages_the_file_cache_and_every_mount_index():
+    clock = ManualClock(start=1000.0)
+    ws = Workspace(
+        {"/a": RAMVFS()},
+        mode=MountMode.WRITE,
+        index=IndexConfig(ttl=60),
+        clock=clock,
+    )
+    try:
+        ws.add_mount("/b", RAMVFS(), MountMode.WRITE)
+        stores = [ws.mount(p).index_store for p in ("/a", "/b")]
+        await ws.cache.set("/a/f.txt", b"hello", ttl=60)
+        for prefix, store in zip(("/a", "/b"), stores):
+            await store.set_dir(prefix, [])
+        clock.advance(59)
+        assert await ws.cache.exists("/a/f.txt") is True
+        for prefix, store in zip(("/a", "/b"), stores):
+            assert (await store.list_dir(prefix)).status is None
+        clock.advance(1)
+        assert await ws.cache.exists("/a/f.txt") is False
+        for prefix, store in zip(("/a", "/b"), stores):
+            assert (
+                await store.list_dir(prefix)
+            ).status == LookupStatus.EXPIRED
+    finally:
+        await ws.close()
