@@ -35,8 +35,9 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondContext,
     CondError,
 )
-from mirage.workspace.executor.builtins.links import operand_abs
+from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
+from mirage.workspace.executor.builtins.shared import abs_path
 from mirage.workspace.session.elements import element_is_set
 
 
@@ -127,9 +128,22 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # other thing that ends it.
             raise exc.signal(fatal=True) from exc
     if op in ("-L", "-h"):
-        where = operand_abs(
-            ctx.namespace.session_links(ctx.session), val, ctx.session.cwd
+        if not isinstance(val, PathSpec) and not text:
+            return False
+        # A builtin's operand never passes the router's pathname walk, so
+        # it is walked here as the router walks one whose last name
+        # lstat(2) keeps: a link above it resolves, and so does the last
+        # name of one typed with a trailing slash.
+        spec = (
+            val
+            if isinstance(val, PathSpec)
+            else PathSpec.from_str_path(val, cwd=ctx.session.cwd)
         )
+        links = ctx.namespace.session_links(ctx.session)
+        (walked,) = follow_paths(links, [spec], follow_last=False)
+        if isinstance(walked, PathSpec) and walked.walk_error is not None:
+            return False
+        where = abs_path(walked, ctx.session.cwd)
         return ctx.links is not None and ctx.links.stat_at(where) is not None
     if op in FILE_UNARY:
         if not isinstance(val, PathSpec) and not text:

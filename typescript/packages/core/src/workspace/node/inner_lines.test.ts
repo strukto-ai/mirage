@@ -15,8 +15,16 @@
 import { assert, describe, expect, it } from 'vitest'
 
 import { getParts } from '../../shell/helpers.ts'
+import { NodeType as NT } from '../../shell/types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
+import {
+  innerLines,
+  innerReadable,
+  readWord,
+  readsOfTest,
+  wordValue,
+  type Word,
+} from './inner_lines.ts'
 
 // Mirrors python/tests/workspace/node/test_inner_lines.py.
 
@@ -138,5 +146,32 @@ describe('innerLines', () => {
       expect(inner).toHaveLength(1)
       expect(inner[0] && innerReadable(inner[0])).toBe(false)
     }
+  })
+})
+
+describe('readsOfTest', () => {
+  it.each<[string, [string[], boolean][]]>([
+    ['[ -e /x ]', [[['[', '-e', '/x', ']'], true]]],
+    ['[ 1 -lt -2 ]', [[['[', '1', '-lt', '-2', ']'], true]]],
+    [
+      '[[ ! -e /x && a == b* ]]',
+      [
+        [['[[', '-e', '/x'], true],
+        [['[[', 'a', '==', 'b*'], false],
+      ],
+    ],
+  ])('reads %s as the tests the gate admits', async (line, reads) => {
+    // `[ ]` whole with its bracket, as the command `[` is; `[[ ]]` a leaf at
+    // a time, its pattern side left to the gate, which reads it in the
+    // matcher's dialect.
+    const stack = [(await getTestParser()).parse(line)]
+    while (stack.length > 0 && stack[stack.length - 1]?.type !== NT.TEST_COMMAND) {
+      const node = stack.pop()
+      if (node !== undefined) stack.push(...[...node.children].reverse())
+    }
+    const test = stack[stack.length - 1]
+    assert(test)
+    const got = readsOfTest(test).map((read) => [read.words.map(wordValue), read.stated])
+    expect(got).toEqual(reads)
   })
 })

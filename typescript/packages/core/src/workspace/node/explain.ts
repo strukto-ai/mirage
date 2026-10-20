@@ -67,8 +67,8 @@ import {
   innerLines,
   innerReadable,
   readWord,
+  readsOfTest,
   wordValue,
-  wordsOfTest,
   type Word,
 } from './inner_lines.ts'
 import {
@@ -161,7 +161,9 @@ export interface Judgment {
  * words, the redirect targets of its statement, the session it is
  * judged in, and where it stands. Mirrors the Python Walked. `lost`
  * says a `cd` the walk could not follow ran before the command, so the
- * session's cwd is not where it stands.
+ * session's cwd is not where it stands. `stated` (true when absent) says
+ * whether the gate admits the command on these words once each is literal
+ * (`TestRead.stated`).
  */
 export interface Walked {
   readonly words: Word[]
@@ -171,6 +173,7 @@ export interface Walked {
   readonly intrinsic?: boolean
   readonly lost?: boolean
   readonly stdin?: Uint8Array | null
+  readonly stated?: boolean
 }
 
 /**
@@ -523,15 +526,19 @@ function* walkNode(
 ): Walk {
   if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
   if (node.type === NodeType.TEST_COMMAND) {
-    // The shell's own test, judged as a command of its own name.
-    yield {
-      words: wordsOfTest(node, home),
-      redirects: statementRedirects(node, home),
-      stdin: statementStdin(node),
-      session,
-      occurrence: occurrenceIn(node, frame),
-      intrinsic: true,
-      lost,
+    // The shell's own test, judged as a command of its own name, a test at
+    // a time as the gate admits it.
+    for (const test of readsOfTest(node, home)) {
+      yield {
+        words: test.words,
+        redirects: statementRedirects(node, home),
+        stdin: statementStdin(node),
+        session,
+        occurrence: occurrenceIn(node, frame),
+        intrinsic: true,
+        lost,
+        stated: test.stated,
+      }
     }
     for (const child of node.children) yield* walkNode(child, session, home, frame, reparse, lost)
     return [session, lost]
@@ -753,7 +760,7 @@ export async function lineJudgments(
         namespace,
         reparse,
         item.redirects,
-        true,
+        item.stated ?? true,
         item.intrinsic,
         false,
         item.lost,
@@ -998,7 +1005,7 @@ async function commandRefused(
     namespace,
     reparse,
     item.redirects,
-    true,
+    item.stated ?? true,
     false,
     false,
     item.lost,
@@ -1414,7 +1421,7 @@ async function judgeLine(
         namespace,
         reparse,
         item.redirects,
-        stated,
+        stated && (item.stated ?? true),
         item.intrinsic,
         wholeLine,
         item.lost,

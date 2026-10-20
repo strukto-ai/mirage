@@ -431,7 +431,10 @@ export function hidesIntersect(hidden: HiddenPaths | null | undefined, virtual: 
  * The reveal half of the subtree law: a session's mutation may destroy
  * what it cannot see (`rm -r`, a remnant `rmdir`), but may never reveal
  * it, and a rename or a native directory copy is the relocation that
- * would. Three arms, one per entry kind. A component pattern follows
+ * would. A source the session reaches only through a show below it is
+ * hidden itself, so whatever the show does not reopen reveals wherever the
+ * session sees `dst`. Beyond that, three arms, one per entry kind. A
+ * component pattern follows
  * the name wherever the content goes, so it never reveals. An exact
  * entry anchored strictly below `src` re-anchors to `dst` plus its
  * suffix, and reveals when the session would see that mapped path (a
@@ -450,6 +453,19 @@ export function moveReveals(vis: Visibility | null | undefined, src: string, dst
   const s = normAbs(src)
   const d = normAbs(dst)
   if (s === '/') return true
+  // A source hidden itself, which the session reaches only through a show
+  // below it: what no show reopens stays covered by a hide that does not
+  // move with it, so it lands in view wherever the session sees the
+  // destination.
+  const deepestHide = hideDepth(hidden, s)
+  if (
+    deepestHide !== null &&
+    pathVisible(vis, s) &&
+    (showDepth(vis?.shown, s) ?? 0) <= deepestHide &&
+    pathVisible(vis, d)
+  ) {
+    return true
+  }
   for (const entry of paths) {
     const e = normAbs(entry)
     if (!e.startsWith(s + '/')) continue

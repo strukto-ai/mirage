@@ -189,7 +189,7 @@ export async function expandArgv(
     // test reads its own words: the operand of a file operator is a file
     // however it is spelled, as the gate reads it.
     const leading: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
-    wordKinds = [...leading, ...fileOperands(lineWords.slice(consumed))]
+    wordKinds = [...leading, ...fileOperands(name, lineWords.slice(consumed))]
   }
   const globOpts = globOptions(session)
   if (program) {

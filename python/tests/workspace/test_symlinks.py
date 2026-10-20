@@ -1924,6 +1924,28 @@ async def test_touch_h_meets_a_link_into_a_hide_as_a_name_it_cannot_write():
 
 
 @pytest.mark.asyncio
+async def test_a_link_through_a_hide_writes_nothing_it_leads_to():
+    # The link's target passes through the hide on its way to a file the
+    # session sees, so the link is hidden: touching it must not reach the
+    # visible file at the end of the walk.
+    ws = await _box(False)
+    await ws.shell(
+        "touch -d 2001-01-01 /data/box/f; ln -s /data/vault/../box/f /data/box/via"
+    )
+    r = await ws.shell(
+        "touch -h /data/box/via; echo $?; touch /data/box/via; echo $?",
+        session_id="agent",
+    )
+    assert r.stdout == b"1\n1\n"
+    assert r.stderr == (
+        b"touch: cannot touch '/data/box/via': No such file or directory\n" * 2
+    )
+    year = await ws.shell("stat -c %y /data/box/f | cut -c1-4")
+    assert year.stdout == b"2001\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line", ["rm -f /data/lk.sec", "rm -f /data/*.sec", "rm -rf /data/*"]
 )
@@ -1936,3 +1958,25 @@ async def test_rm_leaves_a_hidden_link_it_never_met(line):
     r = await ws.shell(line, session_id="agent")
     assert r.exit_code == 0
     assert ws.namespace.readlink("/data/lk.sec") == "f.txt"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "[", "[["])
+@pytest.mark.parametrize(
+    ("where", "status"),
+    [("d/lnk", "0"), ("/data/d/lnk", "0"), ("d", "0"), ("d/", "1")],
+)
+async def test_l_walks_the_links_above_the_name(name, where, status):
+    # -L reads the link table, which no op walks, so the operand is
+    # walked as the router walks an lstat(2) operand, however it is
+    # spelled: d -> real reaches the link real/lnk, and a trailing slash
+    # resolves d itself, which leaves no link to find.
+    ws = _ws()
+    await ws.shell(
+        "mkdir -p /data/real; echo x > /data/real/f;"
+        " ln -s f /data/real/lnk; ln -s real /data/d"
+    )
+    close = {"test": "", "[": " ]", "[[": " ]]"}[name]
+    r = await ws.shell(f"cd /data && {name} -L {where}{close}; echo $?")
+    assert r.stdout == f"{status}\n".encode()
+    await ws.close()

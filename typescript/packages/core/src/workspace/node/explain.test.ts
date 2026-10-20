@@ -341,6 +341,35 @@ describe('explain', () => {
     expect(w.decisions.pending()).toEqual([])
   })
 
+  it.each([
+    ['[[ ! -e /data/secret.txt ]]', '1'],
+    ['[[ -e /data/a.txt && -e /data/secret.txt ]]', '0'],
+    ['[ ! -e /data/secret.txt ]', '1'],
+  ])('runs an asked test once on its one nod: %s', async (test, status) => {
+    // Every reader of the line reads a test by the run's own tokens and
+    // grammar, a [[ ]] a leaf at a time, so the question the pass asked is
+    // the one the gate answers: the line runs once, on one nod.
+    const w = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(w)
+    await w.vfs.write('/data/a.txt', 'a\n')
+    await w.vfs.write('/data/secret.txt', 's\n')
+    w.createSession('s', {
+      profile: { commands: { ask: [{ reason: 'nod', paths: ['/data/secret.txt'] }] } },
+    })
+    const line = `echo before; ${test}; echo rc=$?`
+    const held = await w.shell(line, { sessionId: 's' })
+    expect([held.exitCode, DEC.decode(held.stdout)]).toEqual([126, ''])
+    const [pending] = w.decisions.pending()
+    expect(w.decisions.pending()).toHaveLength(1)
+    await w.decisions.answer(pending?.id ?? '', Outcome.ALLOW, Scope.ONCE)
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect(DEC.decode(ran.stdout)).toBe(`before\nrc=${status}\n`)
+    expect(w.decisions.pending()).toEqual([])
+  })
+
   it('holds no line on a question the gate asks where it runs', async () => {
     // find -exec hands cat words the runtime completes, so the run leaves
     // cat's question to the gate where it runs and holds nothing; explain

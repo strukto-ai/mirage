@@ -39,9 +39,10 @@ import { encodeText } from '../../../../shell/bytes.ts'
  *
  * `[ ]` and `[[ ]]` are the shell's own tests, which no command gate
  * admitted, so each is admitted here by its own name on what it tests
- * (`admit`): `[`'s whole argv before it runs, each `[[` leaf as it is
- * reached. A refusal is the test's answer, as it is `test`'s. `admit` is
- * absent where the command was admitted already.
+ * (`admit`), read as every reader of the line reads it (`readsOfTest`):
+ * `[`'s whole argv before it runs, each `[[` leaf as it is reached. A
+ * refusal is the test's answer, as it is `test`'s. `admit` is absent where
+ * the command was admitted already.
  */
 export async function handleTest(
   dispatch: DispatchFn,
@@ -111,8 +112,9 @@ export async function handleTest(
 }
 
 /**
- * The status of a flat test, admitted whole first where it has to be
- * (`admit`, absent where the command was admitted already).
+ * The status of a flat test, admitted whole first where it has to be: on
+ * its words and its closing `]`, as the command `[` is (`admit`, absent
+ * where the command was admitted already).
  */
 async function flatStatus(
   ctx: CondContext,
@@ -120,7 +122,8 @@ async function flatStatus(
   admit: AdmitTest | undefined,
 ): Promise<number> {
   if (admit === undefined) return (await evalFlat(ctx, args)) ? 0 : 1
-  const gate = await admit(args.map((a) => wordText(a)))
+  const words = args.map((a) => wordText(a))
+  const gate = await admit([...words, ']'])
   return runWithAdmission(gate, async () => ((await evalFlat(ctx, args)) ? 0 : 1))
 }
 

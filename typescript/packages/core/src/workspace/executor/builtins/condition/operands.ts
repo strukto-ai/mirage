@@ -13,47 +13,32 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ValueType } from '../../../../commands/spec/types.ts'
-import { BINARY_OPS, FILE_PAIR_BINARY, FILE_UNARY } from './constants.ts'
+import { FILE_PAIR_BINARY, FILE_UNARY } from './constants.ts'
+import { flatLeaves, flatShape } from './shape.ts'
 
 // The names test's words are read under: `test`, `[` (a command word, as in
 // `command [ -e x ]`, or the shell's own `[ ]`) and the leaves of `[[ ]]`.
 export const TEST_NAMES: ReadonlySet<string> = new Set(['test', '[', '[['])
-// The words that begin a test of their own inside a test's argv: test's
-// connectives, and `[[`'s, which a line's reader keeps as words.
-const OPENERS: ReadonlySet<string> = new Set(['!', '(', '-a', '-o', '&&', '||'])
-// The words that end one.
-const CLOSERS: ReadonlySet<string> = new Set([')', '-a', '-o', '&&', '||'])
 
 /**
- * Which of a test's words name a file, as the kinds a classifier reads: the
- * operand of a file operator (`-e x`) and both sides of `-nt`, `-ot` and
- * `-ef` are paths, however they are spelled, so a relative name a rule covers
- * is judged as `stat` judges it; every other word is left to the shape rules.
- * A file operator that is the left operand of a binary one (`[ -e = x ]`)
- * compares as a string, as test reads it. `words` are the test's words after
- * its name, `]` included for `[`. Mirrors Python's file_operands.
+ * Which of a test's words name a file, as the kinds a classifier reads, by
+ * test's own reading of them (`flatShape`): the operand of a file operator
+ * (`-e x`) and both sides of `-nt`, `-ot` and `-ef` are paths, however they
+ * are spelled, so a relative name a rule covers is judged as `stat` judges
+ * it; every other word is left to the shape rules. `name` is `test`, `[` or
+ * `[[`; `words` are the test's words after its name: `]` included for `[`,
+ * one leaf's for `[[`. Mirrors Python's file_operands.
  */
-export function fileOperands(words: readonly string[]): (ValueType | null)[] {
+export function fileOperands(name: string, words: readonly string[]): (ValueType | null)[] {
+  const closed = name === '[' && words.length > 0 && words[words.length - 1] === ']'
   const kinds: (ValueType | null)[] = new Array<ValueType | null>(words.length).fill(null)
-  words.forEach((word, i) => {
-    if (FILE_PAIR_BINARY.has(word) && i > 0 && i < words.length - 1) {
-      kinds[i - 1] = 'path'
-      kinds[i + 1] = 'path'
-    } else if (
-      FILE_UNARY.has(word) &&
-      i + 1 < words.length &&
-      (i === 0 || OPENERS.has(words[i - 1] ?? '')) &&
-      !leftOperand(words, i)
-    ) {
-      kinds[i + 1] = 'path'
+  for (const leaf of flatLeaves(flatShape(name, closed ? words.slice(0, -1) : words))) {
+    if (leaf.kind === 'unary' && FILE_UNARY.has(leaf.op)) {
+      kinds[leaf.at] = 'path'
+    } else if (leaf.kind === 'binary' && FILE_PAIR_BINARY.has(leaf.op)) {
+      kinds[leaf.left] = 'path'
+      kinds[leaf.right] = 'path'
     }
-  })
+  }
   return kinds
-}
-
-/** Whether the word at `i` is the left operand of a binary test. */
-function leftOperand(words: readonly string[], i: number): boolean {
-  if (i + 2 >= words.length || !BINARY_OPS.has(words[i + 1] ?? '')) return false
-  const after = words[i + 3]
-  return after === undefined || CLOSERS.has(after) || after === ']'
 }

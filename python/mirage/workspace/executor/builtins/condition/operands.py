@@ -16,56 +16,42 @@ from collections.abc import Sequence
 
 from mirage.commands.spec.types import ValueType
 from mirage.workspace.executor.builtins.condition.constants import (
-    BINARY_OPS,
     FILE_PAIR_BINARY,
     FILE_UNARY,
+)
+from mirage.workspace.executor.builtins.condition.shape import (
+    flat_leaves,
+    flat_shape,
+)
+from mirage.workspace.executor.builtins.condition.types import (
+    FlatBinary,
+    FlatUnary,
 )
 
 # The names test's words are read under: ``test``, ``[`` (a command
 # word, as in ``command [ -e x ]``, or the shell's own ``[ ]``) and the
 # leaves of ``[[ ]]``.
 TEST_NAMES = frozenset({"test", "[", "[["})
-# The words that begin a test of their own inside a test's argv: test's
-# connectives, and ``[[``'s, which a line's reader keeps as words.
-_OPENERS = frozenset({"!", "(", "-a", "-o", "&&", "||"})
-# The words that end one.
-_CLOSERS = frozenset({")", "-a", "-o", "&&", "||"})
 
 
-def file_operands(words: Sequence[str]) -> list[ValueType | None]:
+def file_operands(name: str, words: Sequence[str]) -> list[ValueType | None]:
     """Which of a test's words name a file, as the kinds a classifier
-    reads: the operand of a file operator (``-e x``) and both sides of
-    ``-nt``, ``-ot`` and ``-ef`` are paths, however they are spelled, so
-    a relative name a rule covers is judged as ``stat`` judges it; every
-    other word is left to the shape rules. A file operator that is the
-    left operand of a binary one (``[ -e = x ]``) compares as a string,
-    as test reads it.
+    reads, by test's own reading of them (``flat_shape``): the operand
+    of a file operator (``-e x``) and both sides of ``-nt``, ``-ot`` and
+    ``-ef`` are paths, however they are spelled, so a relative name a
+    rule covers is judged as ``stat`` judges it; every other word is
+    left to the shape rules.
 
     Args:
-        words (Sequence[str]): the test's words after its name, ``]``
-            included for ``[``.
+        name (str): ``test``, ``[`` or ``[[``.
+        words (Sequence[str]): the test's words after its name: ``]``
+            included for ``[``, one leaf's for ``[[``.
     """
+    closed = name == "[" and bool(words) and words[-1] == "]"
     kinds: list[ValueType | None] = [None] * len(words)
-    for i, word in enumerate(words):
-        if word in FILE_PAIR_BINARY and 0 < i < len(words) - 1:
-            kinds[i - 1] = kinds[i + 1] = "path"
-        elif (
-            word in FILE_UNARY
-            and i + 1 < len(words)
-            and (i == 0 or words[i - 1] in _OPENERS)
-            and not _left_operand(words, i)
-        ):
-            kinds[i + 1] = "path"
+    for leaf in flat_leaves(flat_shape(name, words[:-1] if closed else words)):
+        if isinstance(leaf, FlatUnary) and leaf.op in FILE_UNARY:
+            kinds[leaf.at] = "path"
+        elif isinstance(leaf, FlatBinary) and leaf.op in FILE_PAIR_BINARY:
+            kinds[leaf.left] = kinds[leaf.right] = "path"
     return kinds
-
-
-def _left_operand(words: Sequence[str], i: int) -> bool:
-    """Whether the word at ``i`` is the left operand of a binary test.
-
-    Args:
-        words (Sequence[str]): the test's words.
-        i (int): the word's index.
-    """
-    if i + 2 >= len(words) or words[i + 1] not in BINARY_OPS:
-        return False
-    return i + 3 == len(words) or words[i + 3] in _CLOSERS | {"]"}

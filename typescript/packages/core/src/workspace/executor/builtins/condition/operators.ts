@@ -23,7 +23,8 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
-import { operandAbs } from '../links/index.ts'
+import { followPaths } from '../links/links.ts'
+import { absPath } from '../shared.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
@@ -96,7 +97,17 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    const where = operandAbs(ctx.namespace.sessionLinks(ctx.session), val, ctx.session.cwd)
+    if (!(val instanceof PathSpec) && text === '') return false
+    // A builtin's operand never passes the router's pathname walk, so it is
+    // walked here as the router walks one whose last name lstat(2) keeps: a
+    // link above it resolves, and so does the last name of one typed with a
+    // trailing slash.
+    const spec =
+      val instanceof PathSpec ? val : PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
+    const links = ctx.namespace.sessionLinks(ctx.session)
+    const walked = followPaths(links, [spec], false)[0] ?? spec
+    if (walked instanceof PathSpec && walked.walkError !== null) return false
+    const where = absPath(walked, ctx.session.cwd)
     return ctx.links !== undefined && ctx.links.statAt(where) !== null
   }
   if (FILE_UNARY.has(op)) {

@@ -231,22 +231,24 @@ export class NamespaceReader implements NamespaceLinks {
   }
 
   /**
-   * Where a path the session sees leads, every link followed; a hidden one is
-   * left as typed, for the dispatcher to refuse. Throws CycleError where a
-   * link loop stands in the walk.
+   * Where a path the session sees leads, every link followed; one it cannot
+   * see, a link on it leading through a hide included, is left as typed, for
+   * the dispatcher to refuse. Throws CycleError where a link loop stands in
+   * the walk.
    */
   follow(path: string): string {
-    if (this.links === null || !pathVisible(this.visibility(), path)) return path
+    if (this.links === null || !this.visible(path)) return path
     return this.links.follow(path)
   }
 
   /**
    * A path with every link above its final name followed, the walk a call
-   * that acts on the name itself is given; a hidden path is left as typed.
+   * that acts on the name itself is given; a path the session cannot see is
+   * left as typed.
    * Throws CycleError where a link loop stands in the walk.
    */
   followParent(path: string): string {
-    if (this.links === null || !pathVisible(this.visibility(), path)) return path
+    if (this.links === null || !this.visible(path)) return path
     return this.links.followParent(path)
   }
 

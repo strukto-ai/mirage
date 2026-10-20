@@ -223,7 +223,7 @@ async def expand_argv(
         # test reads its own words: the operand of a file operator is a
         # file however it is spelled, as the gate reads it.
         leading: list[ValueType | None] = ["str"] * (consumed - 1)
-        word_kinds = leading + file_operands(expanded[consumed:])
+        word_kinds = leading + file_operands(name, expanded[consumed:])
     if program:
         # bash globs every unquoted word before the program reads any of
         # them, whatever slot it fills and whatever it looks like:

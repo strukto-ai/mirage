@@ -115,7 +115,7 @@ from mirage.workspace.node.inner_lines import (
     Word,
     inner_lines,
     read_word,
-    words_of_test,
+    reads_of_test,
 )
 from mirage.workspace.node.occurrence import (
     Frame,
@@ -864,7 +864,7 @@ def _word_hints(
     consumed = registry.match_command_prefix(line)
     joined = " ".join(line[:consumed])
     if joined in TEST_NAMES:
-        return file_operands(line[1:]), None
+        return file_operands(joined, line[1:]), None
     consumer = lookup(joined, session, registry)
     if joined in session.functions or not (
         word_policy(consumer) is WordPolicy.MOUNT
@@ -1128,37 +1128,39 @@ async def admit_line(
         frame = root_frame(ast, handed.origin if handed is not None else None)
     for node in command_nodes(ast):
         if node.type == NT.TEST_COMMAND:
-            words = words_of_test(node, home)
+            reads = [test.words for test in reads_of_test(node, home)]
         else:
             _, parts = split_env_prefix(get_parts(node))
-            words = [read_word(part, home) for part in parts]
-        if not words:
-            continue
-        if await registry.policies.wants_for(
-            "post_command", session.session_id
-        ):
-            # The runtime runs the commands itself: no command's result
-            # comes back for a post_command policy to judge.
-            return _refuse(
-                words[0].raw,
-                "a post_command policy cannot judge a line a runtime runs whole",
+            reads = [[read_word(part, home) for part in parts]]
+        for words in reads:
+            if not words:
+                continue
+            if await registry.policies.wants_for(
+                "post_command", session.session_id
+            ):
+                # The runtime runs the commands itself: no command's
+                # result comes back for a post_command policy to judge.
+                return _refuse(
+                    words[0].raw,
+                    "a post_command policy cannot judge a line a runtime "
+                    "runs whole",
+                )
+            refusal = await _admit_words(
+                words,
+                open_,
+                session,
+                registry,
+                namespace,
+                rules,
+                redirect_words=statement_redirects(node, home),
+                stdin=statement_stdin(node),
+                cancel=cancel,
+                claimant=Claimant(handed, occurrence_in(node, frame))
+                if handed is not None
+                else None,
             )
-        refusal = await _admit_words(
-            words,
-            open_,
-            session,
-            registry,
-            namespace,
-            rules,
-            redirect_words=statement_redirects(node, home),
-            stdin=statement_stdin(node),
-            cancel=cancel,
-            claimant=Claimant(handed, occurrence_in(node, frame))
-            if handed is not None
-            else None,
-        )
-        if refusal is not None:
-            return refusal
+            if refusal is not None:
+                return refusal
     return None
 
 

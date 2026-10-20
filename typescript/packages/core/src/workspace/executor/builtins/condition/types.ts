@@ -34,6 +34,63 @@ export type CondNode =
   | { kind: 'and'; left: CondNode; right: CondNode }
   | { kind: 'or'; left: CondNode; right: CondNode }
 
+// test's own reading of a flat argv (`flatShape`): which words each
+// operator takes, each named by its place in the argv, and where a grammar
+// error stands, so it is raised where test's own parse meets it.
+
+/** The word at `at`, true when it is not empty. */
+export interface FlatString {
+  kind: 'string'
+  at: number
+}
+
+export interface FlatUnary {
+  kind: 'unary'
+  op: string
+  at: number
+}
+
+export interface FlatBinary {
+  kind: 'binary'
+  left: number
+  op: string
+  right: number
+}
+
+export interface FlatNot {
+  kind: 'not'
+  inner: FlatNode
+}
+
+export interface FlatAnd {
+  kind: 'and'
+  left: FlatNode
+  right: FlatNode
+}
+
+export interface FlatOr {
+  kind: 'or'
+  left: FlatNode
+  right: FlatNode
+}
+
+/** A grammar error, the test's whole answer once it is reached. */
+export interface FlatFail {
+  kind: 'fail'
+  message: string
+}
+
+/** Null is the empty test, which is false. */
+export type FlatNode =
+  | FlatString
+  | FlatUnary
+  | FlatBinary
+  | FlatNot
+  | FlatAnd
+  | FlatOr
+  | FlatFail
+  | null
+
 /** A test/[/[[ usage error: bash prints the message and returns 2. */
 /**
  * A test/[/[[ usage error: bash prints the message and returns 2. A `[[`

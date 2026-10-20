@@ -688,15 +688,17 @@ describe("the shell's own tests", () => {
   const spell = (name: string, expr: string): string =>
     name === 'test' ? `test ${expr}` : `${name} ${expr} ${name === '[' ? ']' : ']]'}`
 
-  async function run(profile: object, name: string, prefix: string, expr: string) {
+  async function run(profile: SessionProfile, name: string, prefix: string, expr: string) {
     const w = await ws(null)
     await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
-    w.createSession('s', { profile: profile as SessionProfile })
+    w.createSession('s', { profile })
     const r = await w.shell(`${prefix}${spell(name, expr)}; echo $?`, { sessionId: 's' })
     return [r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr)]
   }
 
-  const DENY = { commands: { deny: [{ reason: 'secret', paths: ['/data/secret.txt'] }] } }
+  const DENY: SessionProfile = {
+    commands: { deny: [{ reason: 'secret', paths: ['/data/secret.txt'] }] },
+  }
 
   it.each(['test', '[', '[['])('%s reads a file operand as a path rule does', async (name) => {
     expect(await run(DENY, name, 'cd /data && ', '-e secret.txt')).toEqual([

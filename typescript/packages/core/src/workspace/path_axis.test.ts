@@ -456,13 +456,14 @@ describe('the path axis end to end', () => {
   })
 })
 
-async function boxed(profile: object): Promise<Workspace> {
+async function boxed(profile: object, ...more: string[]): Promise<Workspace> {
   const parser = await getTestParser()
   const repo = new RAMVFS()
-  const ws = new Workspace(
-    { '/repo': [repo, MountMode.WRITE] as const },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const mounts: Record<string, readonly [RAMVFS, MountMode]> = {
+    '/repo': [repo, MountMode.WRITE] as const,
+  }
+  for (const m of more) mounts[m] = [new RAMVFS(), MountMode.WRITE] as const
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
   open.push(ws)
   const io = await ws.shell(
     'mkdir -p /repo/box/sec /repo/only && ' +
@@ -490,6 +491,26 @@ describe('subtree mutations against hides', () => {
     const intact = await ws.shell('test -e /repo/box/sec/k')
     expect(intact.exitCode).toBe(0)
   })
+
+  it.each(['/repo/moved', '/out/moved'])(
+    'mv of a hidden source a show reaches refuses: %s',
+    async (dst) => {
+      // /repo/box is hidden and the session reaches it only through its
+      // shown a.txt: moving it, within the mount or across one, would carry
+      // sec/k out from under the hide, so it refuses and the source stays.
+      const ws = await boxed(
+        { paths: { hide: ['/repo/box'], show: { '/repo/box/a.txt': 'rw' } } },
+        '/out',
+      )
+      const refused = await ws.shell(`mv /repo/box ${dst}`, { sessionId: 'rev' })
+      expect(refused.exitCode).toBe(1)
+      expect(stderrStr(refused)).toBe(
+        `mv: cannot move '/repo/box' to '${dst}': Permission denied\n`,
+      )
+      const intact = await ws.shell('cat /repo/box/sec/k')
+      expect(stdoutStr(intact)).toBe('s\n')
+    },
+  )
 
   it('mv rides a component-pattern hide along', async () => {
     // *.tkn follows the name wherever the content goes, so nothing is

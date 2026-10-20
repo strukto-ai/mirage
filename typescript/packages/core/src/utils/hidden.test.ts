@@ -380,6 +380,19 @@ describe('moveReveals', () => {
     expect(moveReveals(vis(hidden, shown), '/m/d', '/m/moved')).toBe(true)
     expect(moveReveals(vis(hidden), '/m/d', '/m/moved')).toBe(false)
   })
+
+  it('a source reached through a show reveals what it leaves hidden', () => {
+    // /m/box is hidden and reached only through its shown pub.txt, so the
+    // rest of it sits under a hide that does not move with it.
+    const shown = classifyShows([{ path: '/m/box/pub.txt', mode: null }])
+    expect(moveReveals(vis(classifyPaths(['/m/box']), shown), '/m/box', '/v/mb')).toBe(true)
+    expect(moveReveals(vis(classifyPaths(['/m']), shown), '/m/box', '/v/mb')).toBe(true)
+    // Into a place the session does not see, nothing comes into view.
+    expect(moveReveals(vis(classifyPaths(['/m/box', '/v']), shown), '/m/box', '/v/mb')).toBe(false)
+    // A show at the source reopens all of it.
+    const whole = classifyShows([{ path: '/m/box', mode: null }])
+    expect(moveReveals(vis(classifyPaths(['/m']), whole), '/m/box', '/v/mb')).toBe(false)
+  })
 })
 
 const LINKS = new Map([

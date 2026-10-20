@@ -333,6 +333,41 @@ async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("test", "status"),
+    [
+        ("[[ ! -e /data/secret.txt ]]", "1"),
+        ("[[ -e /data/a.txt && -e /data/secret.txt ]]", "0"),
+        ("[ ! -e /data/secret.txt ]", "1"),
+    ],
+)
+async def test_an_asked_test_runs_once_on_its_one_nod(test, status):
+    # Every reader of the line reads a test by the run's own tokens and
+    # grammar, a [[ ]] a leaf at a time, so the question the pass asked
+    # is the one the gate answers: the line runs once, on one nod.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/data/a.txt", b"a\n")
+    await ws.vfs.write("/data/secret.txt", b"s\n")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {
+                "ask": [{"reason": "nod", "paths": ["/data/secret.txt"]}]
+            }
+        },
+    )
+    line = f"echo before; {test}; echo rc=$?"
+    held = await ws.shell(line, session_id="s")
+    assert (held.exit_code, held.stdout) == (126, b"")
+    (pending,) = ws.decisions.pending()
+    await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
+    ran = await ws.shell(line, session_id="s")
+    assert ran.stdout == f"before\nrc={status}\n".encode()
+    assert ws.decisions.pending() == ()
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_question_the_gate_asks_where_it_runs_holds_no_line():
     # find -exec hands cat words the runtime completes, so the run
     # leaves cat's question to the gate where it runs and holds nothing;

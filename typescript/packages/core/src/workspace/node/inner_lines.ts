@@ -18,6 +18,15 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
+import {
+  CondParser,
+  CondSyntax,
+  type ExprToken,
+  PATTERN_OPS,
+  condLeaves,
+  condTokens,
+  flatTokens,
+} from './test_tokens.ts'
 
 /**
  * One word of a line as the gate reads it: `raw` as typed, `text` what
@@ -59,14 +68,75 @@ const TEST_NESTS: ReadonlySet<string> = new Set([
 const TEST_SKIPS: ReadonlySet<string> = new Set(['[', ']', '[[', ']]'])
 
 /**
- * A `[ ]` or `[[ ]]` test as the command a reader of the line judges it as:
- * its opener, then its operators and operands in source order, as the
- * evaluator admits it. `home` is the home directory a leading tilde names.
- * Mirrors Python's words_of_test.
+ * One test of a `[ ]` or `[[ ]]` as the gate admits it: its opener, then
+ * what it tests. `stated` says whether the gate admits it on these very
+ * words once each is literal; a comparison's pattern side is read in the
+ * matcher's dialect instead, and a `[[` its grammar cannot read is admitted
+ * test by test as the run reaches each, so a question about either is left
+ * to the gate.
  */
-export function wordsOfTest(node: TSNodeLike, home: string | null = null): Word[] {
-  const opener = node.children[0]?.type === '[[' ? '[[' : '['
-  const words: Word[] = [{ raw: opener, text: opener }]
+export interface TestRead {
+  readonly words: Word[]
+  readonly stated: boolean
+}
+
+/**
+ * A `[ ]` or `[[ ]]` as the tests the gate admits, read with the tokens and
+ * the grammar the run evaluates it by. `home` is the home directory a
+ * leading tilde names.
+ *
+ * A `[ ]` is one test, admitted whole on its words and its closing `]`, as
+ * the command `[` is. A `[[ ]]` is a test per leaf, each admitted as the
+ * run reaches it, since a branch never reached never expands; every reader
+ * of the line reads the same leaves, so a question one asked is the one the
+ * gate answers. Mirrors Python's reads_of_test.
+ */
+export function readsOfTest(node: TSNodeLike, home: string | null = null): TestRead[] {
+  if (node.children[0]?.type !== '[[') {
+    const words = flatTokens(node).map((token) => tokenWord(token, home))
+    return [{ words: [{ raw: '[', text: '[' }, ...words, { raw: ']', text: ']' }], stated: true }]
+  }
+  const opener: Word = { raw: '[[', text: '[[' }
+  let leaves: ReturnType<typeof condLeaves>
+  try {
+    leaves = condLeaves(new CondParser(condTokens(node)).parse())
+  } catch (error) {
+    if (!(error instanceof CondSyntax)) throw error
+    return [{ words: [opener, ...testWords(node, home)], stated: false }]
+  }
+  return leaves.map((leaf) => {
+    let words: Word[]
+    if (leaf.kind === 'unary') {
+      words = [{ raw: leaf.op, text: leaf.op }, tokenWord(leaf.operand, home)]
+    } else if (leaf.kind === 'binary') {
+      words = [
+        tokenWord(leaf.left, home),
+        { raw: leaf.op, text: leaf.op },
+        tokenWord(leaf.right, home),
+      ]
+    } else {
+      words = [tokenWord(leaf.operand, home)]
+    }
+    const stated = leaf.kind !== 'binary' || !PATTERN_OPS.has(leaf.op)
+    return { words: [opener, ...words], stated }
+  })
+}
+
+/** One token of a test as a word of the line. */
+function tokenWord(token: ExprToken, home: string | null): Word {
+  if (token.op !== null) return { raw: token.op, text: token.op }
+  const word = readWord(token.operand, home)
+  if (!token.negative) return word
+  const text = word.text === null ? null : '-' + word.text
+  return { raw: '-' + word.raw, text, glob: word.glob === true }
+}
+
+/**
+ * Every operator and operand of a test in source order, for a `[[` its
+ * grammar cannot read.
+ */
+function testWords(node: TSNodeLike, home: string | null): Word[] {
+  const words: Word[] = []
   const stack = [...node.children].reverse()
   for (let child = stack.pop(); child !== undefined; child = stack.pop()) {
     if (TEST_SKIPS.has(child.type)) continue

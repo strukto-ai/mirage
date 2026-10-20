@@ -277,8 +277,9 @@ class NamespaceReader:
         return self._links.readlink(path)
 
     def follow(self, path: str) -> str:
-        """Where a path the session sees leads, every link followed; a
-        hidden one is left as typed, for the dispatcher to refuse.
+        """Where a path the session sees leads, every link followed; one
+        it cannot see, a link on it leading through a hide included, is
+        left as typed, for the dispatcher to refuse.
 
         Args:
             path (str): absolute virtual path.
@@ -286,14 +287,14 @@ class NamespaceReader:
         Raises:
             CycleError: a link loop stands in the walk.
         """
-        if self._links is None or not path_visible(self._visibility(), path):
+        if self._links is None or not self.visible(path):
             return path
         return self._links.follow(path)
 
     def follow_parent(self, path: str) -> str:
         """A path with every link above its final name followed, the
-        walk a call that acts on the name itself is given; a hidden path
-        is left as typed.
+        walk a call that acts on the name itself is given; a path the
+        session cannot see is left as typed.
 
         Args:
             path (str): absolute virtual path.
@@ -301,7 +302,7 @@ class NamespaceReader:
         Raises:
             CycleError: a link loop stands in the walk.
         """
-        if self._links is None or not path_visible(self._visibility(), path):
+        if self._links is None or not self.visible(path):
             return path
         return self._links.follow_parent(path)
 

@@ -438,8 +438,11 @@ def test_a_fork_carries_the_carve_out():
     assert ok.exit_code == 0
 
 
-def _boxed(profile: dict) -> Workspace:
-    ws = Workspace({"/repo": RAMVFS()}, mode=MountMode.WRITE)
+def _boxed(profile: dict, *more: str) -> Workspace:
+    ws = Workspace(
+        {"/repo": RAMVFS(), **{m: RAMVFS() for m in more}},
+        mode=MountMode.WRITE,
+    )
 
     async def seed():
         io = await ws.shell(
@@ -475,6 +478,24 @@ def test_mv_that_would_reveal_hidden_content_refuses():
     )
     intact = _host(ws, "test -e /repo/box/sec/k")
     assert intact.exit_code == 0
+
+
+@pytest.mark.parametrize("dst", ["/repo/moved", "/out/moved"])
+def test_mv_of_a_hidden_source_a_show_reaches_refuses(dst):
+    # /repo/box is hidden and the session reaches it only through its
+    # shown a.txt: moving it, within the mount or across one, would carry
+    # sec/k out from under the hide, so it refuses and the source stays.
+    ws = _boxed(
+        {"paths": {"hide": ["/repo/box"], "show": {"/repo/box/a.txt": "rw"}}},
+        "/out",
+    )
+    refused = _run(ws, f"mv /repo/box {dst}")
+    assert refused.exit_code == 1
+    assert (refused.stderr or b"") == (
+        f"mv: cannot move '/repo/box' to '{dst}': Permission denied\n".encode()
+    )
+    intact = _host(ws, "cat /repo/box/sec/k")
+    assert (intact.stdout or b"") == b"s\n"
 
 
 def test_mv_rides_a_component_pattern_hide_along():

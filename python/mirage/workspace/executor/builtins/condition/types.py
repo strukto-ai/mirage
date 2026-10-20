@@ -77,6 +77,59 @@ class CondOr:
     right: CondNode
 
 
+# test's own reading of a flat argv (``flat_shape``): which words each
+# operator takes, each named by its place in the argv, and where a
+# grammar error stands, so it is raised where test's own parse meets it.
+@dataclass(frozen=True, slots=True)
+class FlatString:
+    """The word at ``at``, true when it is not empty."""
+
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatUnary:
+    op: str
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatBinary:
+    left: int
+    op: str
+    right: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatNot:
+    inner: "FlatNode"
+
+
+@dataclass(frozen=True, slots=True)
+class FlatAnd:
+    left: "FlatNode"
+    right: "FlatNode"
+
+
+@dataclass(frozen=True, slots=True)
+class FlatOr:
+    left: "FlatNode"
+    right: "FlatNode"
+
+
+@dataclass(frozen=True, slots=True)
+class FlatFail:
+    """A grammar error, the test's whole answer once it is reached."""
+
+    message: str
+
+
+# None is the empty test, which is false.
+FlatNode = Union[
+    FlatString, FlatUnary, FlatBinary, FlatNot, FlatAnd, FlatOr, FlatFail, None
+]
+
+
 class CondError(Exception):
     """A test/[/[[ usage error: bash prints the message and returns 2.
 

@@ -9107,7 +9107,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "touch: cannot touch '/vault/ax/lnk': Permission denied\n"
+        "stderr": "touch: cannot touch '/vault/ax/lnk': No such file or directory\n"
       },
       "seq": 17330651,
       "targets": [
@@ -9149,7 +9149,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "touch: cannot touch '/vault/ax/lnk': Permission denied\n"
+        "stderr": "touch: cannot touch '/vault/ax/lnk': No such file or directory\n"
       },
       "seq": 17330654,
       "targets": [

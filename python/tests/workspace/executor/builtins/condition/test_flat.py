@@ -117,3 +117,9 @@ async def test_equal_mtimes_are_neither_newer_nor_older():
     await ws.shell("mkdir -p /w; touch -d '2020-01-01 00:00:00' /w/a /w/b")
     assert (await ws.shell("[ /w/a -nt /w/b ]")).exit_code == 1
     assert (await ws.shell("[ /w/a -ot /w/b ]")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_flat_reaches_a_term_before_a_grammar_error_after_it():
+    with pytest.raises(CondError, match="x: integer expression expected"):
+        await eval_flat(_ctx(), ["1", "-eq", "x", "-a"])

@@ -1567,6 +1567,24 @@ it('touch -h meets a link into a hide as a name it cannot write', async () => {
   await ws.close()
 })
 
+it('a link through a hide writes nothing it leads to', async () => {
+  // The link's target passes through the hide on its way to a file the
+  // session sees, so the link is hidden: touching it must not reach the
+  // visible file at the end of the walk.
+  const ws = await box(false)
+  await ws.shell('touch -d 2001-01-01 /data/box/f; ln -s /data/vault/../box/f /data/box/via')
+  const r = await ws.shell('touch -h /data/box/via; echo $?; touch /data/box/via; echo $?', {
+    sessionId: 'agent',
+  })
+  expect(dec(r.stdout)).toBe('1\n1\n')
+  expect(dec(r.stderr)).toBe(
+    "touch: cannot touch '/data/box/via': No such file or directory\n".repeat(2),
+  )
+  const year = await ws.shell('stat -c %y /data/box/f | cut -c1-4')
+  expect(dec(year.stdout)).toBe('2001\n')
+  await ws.close()
+})
+
 it.each(['rm -f /data/lk.sec', 'rm -f /data/*.sec', 'rm -rf /data/*'])(
   'rm leaves a hidden link it never met: %s',
   async (line) => {
@@ -1581,3 +1599,25 @@ it.each(['rm -f /data/lk.sec', 'rm -f /data/*.sec', 'rm -rf /data/*'])(
     await ws.close()
   },
 )
+
+describe.each(['test', '[', '[['])('%s -L', (name) => {
+  it.each([
+    ['d/lnk', '0'],
+    ['/data/d/lnk', '0'],
+    ['d', '0'],
+    ['d/', '1'],
+  ])('walks the links above the name: %s', async (where, status) => {
+    // -L reads the link table, which no op walks, so the operand is walked
+    // as the router walks an lstat(2) operand, however it is spelled:
+    // d -> real reaches the link real/lnk, and a trailing slash resolves d
+    // itself, which leaves no link to find.
+    const ws = buildWorkspace()
+    await ws.shell(
+      'mkdir -p /data/real; echo x > /data/real/f; ln -s f /data/real/lnk; ln -s real /data/d',
+    )
+    const close = ({ '[': ' ]', '[[': ' ]]' } as Record<string, string>)[name] ?? ''
+    const r = await ws.shell(`cd /data && ${name} -L ${where}${close}; echo $?`)
+    expect(dec(r.stdout)).toBe(`${status}\n`)
+    await ws.close()
+  })
+})

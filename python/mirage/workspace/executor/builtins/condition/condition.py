@@ -52,7 +52,8 @@ async def handle_test(
 
     ``[ ]`` and ``[[ ]]`` are the shell's own tests, which no command
     gate admitted, so each is admitted here by its own name on what it
-    tests: ``[``'s whole argv before it runs, each ``[[`` leaf as it is
+    tests, read as every reader of the line reads it (``reads_of_test``):
+    ``[``'s whole argv before it runs, each ``[[`` leaf as it is
     reached. A refusal is the test's answer, as it is ``test``'s.
 
     Args:
@@ -130,7 +131,7 @@ async def _flat_status(
     ctx: CondContext, args: list[str | PathSpec], admit: AdmitTest | None
 ) -> int:
     """The status of a flat test, admitted whole first where it has
-    to be.
+    to be: on its words and its closing ``]``, as the command ``[`` is.
 
     Args:
         ctx (CondContext): evaluation context.
@@ -140,7 +141,8 @@ async def _flat_status(
     """
     if admit is None:
         return 0 if await eval_flat(ctx, args) else 1
-    token = set_admission(await admit([word_text(a) for a in args]))
+    words = [word_text(a) for a in args]
+    token = set_admission(await admit([*words, "]"]))
     try:
         return 0 if await eval_flat(ctx, args) else 1
     finally:

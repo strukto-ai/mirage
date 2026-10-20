@@ -91,8 +91,8 @@ import {
   innerLines,
   innerReadable,
   readWord,
+  readsOfTest,
   wordValue,
-  wordsOfTest,
   type Word,
 } from './inner_lines.ts'
 import {
@@ -724,7 +724,7 @@ function wordHints(
 ): [(ValueType | null)[] | null, (string | null)[] | null] {
   const consumed = registry.matchCommandPrefix([...line])
   const joined = line.slice(0, consumed).join(' ')
-  if (TEST_NAMES.has(joined)) return [fileOperands(line.slice(1)), null]
+  if (TEST_NAMES.has(joined)) return [fileOperands(joined, line.slice(1)), null]
   const consumer = lookup(joined, session, registry)
   // A mount command's spec is read, and so is a native capture's and an
   // interpreter's: `python3 steal.py` runs on the runtime's own disk or
@@ -929,36 +929,38 @@ export async function admitLine(
   const home = homeDir(session)
   const scope = frame ?? rootFrame(root, handed?.origin ?? null)
   for (const node of commandNodes(root)) {
-    let words: Word[]
+    let reads: Word[][]
     if (node.type === NodeType.TEST_COMMAND) {
-      words = wordsOfTest(node, home)
+      reads = readsOfTest(node, home).map((test) => test.words)
     } else {
       const [, parts] = splitEnvPrefix(getParts(node))
-      words = parts.map((part) => readWord(part, home))
+      reads = [parts.map((part) => readWord(part, home))]
     }
-    if (words.length === 0) continue
-    // The runtime runs the commands itself: no command's result comes back
-    // for a postCommand policy to judge.
-    if (await registry.policies.wantsFor('postCommand', session.sessionId)) {
-      return refuse(
-        words[0]?.raw ?? '',
-        'a post_command policy cannot judge a line a runtime runs whole',
+    for (const words of reads) {
+      if (words.length === 0) continue
+      // The runtime runs the commands itself: no command's result comes
+      // back for a postCommand policy to judge.
+      if (await registry.policies.wantsFor('postCommand', session.sessionId)) {
+        return refuse(
+          words[0]?.raw ?? '',
+          'a post_command policy cannot judge a line a runtime runs whole',
+        )
+      }
+      const refusal = await admitWords(
+        words,
+        open,
+        session,
+        registry,
+        namespace,
+        rules,
+        reparse,
+        statementRedirects(node, home),
+        signal,
+        handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
+        statementStdin(node),
       )
+      if (refusal !== null) return refusal
     }
-    const refusal = await admitWords(
-      words,
-      open,
-      session,
-      registry,
-      namespace,
-      rules,
-      reparse,
-      statementRedirects(node, home),
-      signal,
-      handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
-      statementStdin(node),
-    )
-    if (refusal !== null) return refusal
   }
   return null
 }
