@@ -483,15 +483,25 @@ async def handle_command(
     # A mount may register its own command under a builtin's name. The
     # steps below that read the line with the builtin's grammar then skip
     # a line whose operands (or cwd) pick such a mount, as resolve_mount
-    # picks it; a file an option reads (`grep -f`) picks nothing.
-    own_mount = registry.command_mount(
-        cmd_name,
-        positional_scopes(
+    # picks it. Only a word classified as a path in an operand slot picks
+    # one: not a file an option reads (`grep -f`), nor a word the cwd's
+    # spec left as text.
+    operands = {
+        scope.virtual
+        for scope in positional_scopes(
             cmd_name,
             [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]],
             session.cwd,
             parts[1:],
-        ),
+        )
+    }
+    own_mount = registry.command_mount(
+        cmd_name,
+        [
+            p
+            for p in parts[1:]
+            if isinstance(p, PathSpec) and p.virtual in operands
+        ],
         session.cwd,
     )
     borrowed = (

@@ -612,10 +612,11 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
   },
 )
 
-// The mount a line runs on is picked by its operands, never by a file an
-// option reads, so a builtin grep on /b still reads its pattern file from the
-// mount whose own grep is borrowed.
-it('leaves the builtin on another mount alone when a name is borrowed', async () => {
+// The mount a line runs on is picked by the words the cwd's spec classified as
+// operand paths, never by a file an option reads or a word it left as text: a
+// builtin grep on /b reads its pattern file from /a, whose own grep is
+// borrowed, and that grep keeps `/b/input` as text.
+it('keeps a borrowed name and the builtin on their own lines', async () => {
   const ws = new Workspace(
     { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
@@ -630,8 +631,10 @@ it('leaves the builtin on another mount alone when a name is borrowed', async ()
       }),
     )
     await ws.shell("echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input")
-    const result = await ws.shell('cd /b && grep -f /a/patterns /b/input')
-    expect([result.exitCode, result.stdoutText]).toEqual([0, 'hi\n'])
+    const builtin = await ws.shell('cd /b && grep -f /a/patterns /b/input')
+    const borrowed = await ws.shell('cd /a && grep hi /b/input')
+    expect([builtin.exitCode, builtin.stdoutText]).toEqual([0, 'hi\n'])
+    expect([borrowed.exitCode, borrowed.stdoutText]).toEqual([0, '[[],["hi","/b/input"]]'])
   } finally {
     await ws.close()
   }

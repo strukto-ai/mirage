@@ -234,11 +234,12 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
     )
 
 
-# The mount a line runs on is picked by its operands, never by a file an
-# option reads, so a builtin grep on /b still reads its pattern file from
-# the mount whose own grep is borrowed.
+# The mount a line runs on is picked by the words the cwd's spec
+# classified as operand paths, never by a file an option reads or a word
+# it left as text: a builtin grep on /b reads its pattern file from /a,
+# whose own grep is borrowed, and that grep keeps `/b/input` as text.
 @pytest.mark.asyncio
-async def test_a_borrowed_name_leaves_the_builtin_on_another_mount(
+async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
     ws_two_mounts,
 ):
     ws_two_mounts.mount("/a/").register(
@@ -253,5 +254,12 @@ async def test_a_borrowed_name_leaves_the_builtin_on_another_mount(
     await ws_two_mounts.shell(
         "echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input"
     )
-    result = await ws_two_mounts.shell("cd /b && grep -f /a/patterns /b/input")
-    assert (result.exit_code, result.stdout) == (0, b"hi\n")
+    builtin = await ws_two_mounts.shell(
+        "cd /b && grep -f /a/patterns /b/input"
+    )
+    borrowed = await ws_two_mounts.shell("cd /a && grep hi /b/input")
+    assert (builtin.exit_code, builtin.stdout) == (0, b"hi\n")
+    assert (borrowed.exit_code, borrowed.stdout) == (
+        0,
+        b"[] ['hi', '/b/input']\n",
+    )
