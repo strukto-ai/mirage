@@ -41,7 +41,10 @@ try {
     await page.goto(`${base}/vfs/mongodb/mongodb.html`)
     try {
       await page.waitForFunction(
-        () => document.querySelector('#log')?.textContent?.includes('done.') ?? false,
+        () => {
+          const text = document.querySelector('#log')?.textContent ?? ''
+          return text.includes('done.') || text.includes('failed.')
+        },
         { timeout: 120_000 },
       )
     } catch (err) {
@@ -52,7 +55,7 @@ try {
     const text = await page.locator('#log').innerText()
     console.log('\n─── log content ───')
     console.log(text)
-    if (!text.includes('done.')) exit = 1
+    if (!text.includes('done.') || text.includes('failed.')) exit = 1
   } finally {
     await browser.close()
   }

@@ -30,6 +30,10 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
+// Set by any command that exits non-zero, so the page ends in `failed.`
+// and the smoke test that waits for its last line fails with it.
+let failed = false
+
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
   const r = await ws.shell(cmd)
@@ -37,7 +41,10 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
   if (out !== '') line(out)
   const err = r.stderrText.replace(/\s+$/, '')
   if (err !== '') line(err, 'err')
-  if (r.exitCode !== 0) line(`exit=${String(r.exitCode)}`, 'err')
+  if (r.exitCode !== 0) {
+    line(`exit=${String(r.exitCode)}`, 'err')
+    failed = true
+  }
 }
 
 async function main(): Promise<void> {
@@ -48,7 +55,7 @@ async function main(): Promise<void> {
   const dsn = __POSTGRES_DSN__
   if (dsn === '') {
     line('set POSTGRES_DSN (a Neon DSN) in .env.development', 'err')
-    line('done.', 'ok')
+    line('failed.', 'err')
     return
   }
   const vfs = new PostgresVFS({ dsn, schemas: ['public'] })
@@ -62,7 +69,7 @@ async function main(): Promise<void> {
     const tables = tablesRes.stdoutText.split('\n').filter((s) => s.length > 0)
     if (tables.length === 0) {
       line('no tables in the public schema', 'err')
-      line('done.', 'ok')
+      line('failed.', 'err')
       return
     }
     const dir = `/pg/public/tables/${tables[0]!}`
@@ -73,7 +80,8 @@ async function main(): Promise<void> {
     await run(ws, `wc -l ${shellQuote(`${dir}/rows.jsonl`)}`)
     await run(ws, `jq ".name" ${shellQuote(`${dir}/schema.json`)}`)
 
-    line('\ndone.', 'ok')
+    line('')
+    line(failed ? 'failed.' : 'done.', failed ? 'err' : 'ok')
   } finally {
     await ws.close()
   }
@@ -81,5 +89,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
-  line('done.', 'ok')
+  line('failed.', 'err')
 })

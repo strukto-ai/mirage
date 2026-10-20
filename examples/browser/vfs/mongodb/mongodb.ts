@@ -30,6 +30,10 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
+// Set by any command that exits non-zero, so the page ends in `failed.`
+// and the smoke test that waits for its last line fails with it.
+let failed = false
+
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
   const r = await ws.shell(cmd)
@@ -37,7 +41,10 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
   if (out !== '') line(out)
   const err = r.stderrText.replace(/\s+$/, '')
   if (err !== '') line(err, 'err')
-  if (r.exitCode !== 0) line(`exit=${String(r.exitCode)}`, 'err')
+  if (r.exitCode !== 0) {
+    line(`exit=${String(r.exitCode)}`, 'err')
+    failed = true
+  }
 }
 
 async function main(): Promise<void> {
@@ -57,7 +64,7 @@ async function main(): Promise<void> {
     const dbs = dbsRes.stdoutText.split('\n').filter((s) => s.length > 0)
     if (dbs.length === 0) {
       line('no databases visible — set MONGODB_URI in .env.development', 'err')
-      line('done.', 'ok')
+      line('failed.', 'err')
       return
     }
     const target = dbs[0]!
@@ -67,7 +74,7 @@ async function main(): Promise<void> {
     const cols = colsRes.stdoutText.split('\n').filter((s) => s.endsWith('.jsonl'))
     if (cols.length === 0) {
       line(`no collections in ${target}`, 'err')
-      line('done.', 'ok')
+      line('failed.', 'err')
       return
     }
     const path = `/mongodb/${target}/${cols[0]!}`
@@ -77,7 +84,8 @@ async function main(): Promise<void> {
     await run(ws, `jq "._id" ${shellQuote(path)} | head -n 3`)
     await run(ws, `grep _id ${shellQuote(path)} | head -n 2`)
 
-    line('\ndone.', 'ok')
+    line('')
+    line(failed ? 'failed.' : 'done.', failed ? 'err' : 'ok')
   } finally {
     await ws.close()
   }
@@ -85,5 +93,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
-  line('done.', 'ok')
+  line('failed.', 'err')
 })

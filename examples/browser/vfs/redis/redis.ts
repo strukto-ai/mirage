@@ -9,6 +9,10 @@ function line(text: string, cls?: string): void {
   logEl.appendChild(div)
 }
 
+// Set by any command that exits non-zero, so the page ends in `failed.`
+// and the smoke test that waits for its last line fails with it.
+let failed = false
+
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
   const r = await ws.shell(cmd)
@@ -16,14 +20,17 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
   if (out !== '') line(out)
   const err = r.stderrText.replace(/\s+$/, '')
   if (err !== '') line(err, 'err')
-  if (r.exitCode !== 0) line(`exit=${String(r.exitCode)}`, 'err')
+  if (r.exitCode !== 0) {
+    line(`exit=${String(r.exitCode)}`, 'err')
+    failed = true
+  }
 }
 
 async function main(): Promise<void> {
   line('=== Redis via the Upstash REST API, straight from the page ===', 'ok')
   if (__UPSTASH_REDIS_URL__ === '') {
     line('set UPSTASH_REDIS_URL in .env.development', 'err')
-    line('done.', 'ok')
+    line('failed.', 'err')
     return
   }
   // __UPSTASH_REDIS_URL__ is a Vite define, so the password lands in the served
@@ -45,9 +52,10 @@ async function main(): Promise<void> {
     await run(ws, 'du -a /redis/notes')
     await run(ws, 'rm -r /redis/notes')
     await run(ws, 'ls /redis')
-    line('done.', 'ok')
+    line(failed ? 'failed.' : 'done.', failed ? 'err' : 'ok')
   } catch (err) {
     line(`error: ${err instanceof Error ? err.message : String(err)}`, 'err')
+    line('failed.', 'err')
   } finally {
     await ws.close()
   }
