@@ -440,10 +440,12 @@ async def walk_owned(
     """
     walked = await walk_stats(links, dispatch, root, root_stat)
     unread = {path.virtual for path, _stat, exc in walked if exc is not None}
+    # The root as well, which ``ancestors`` leaves out: a refused listing
+    # of ``/`` keeps every link below it unwalked.
     owned = [
         path
         for path, _stat in links.link_stats_below(root.virtual)
-        if unread.isdisjoint(ancestors(path))
+        if unread.isdisjoint(["/", *ancestors(path)])
     ]
     return walked, owned
 

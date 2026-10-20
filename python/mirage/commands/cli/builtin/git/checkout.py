@@ -287,6 +287,28 @@ def _blocked_descendants(writing: Tree, dirty: set[str]) -> list[str]:
     )
 
 
+def _hidden_in_the_way(writing: Tree, unseen: set[str]) -> list[str]:
+    """Which written paths would take a hidden entry with them, named by
+    the written path, since the hidden one cannot be.
+
+    The move leaves an entry the session cannot see alone, but a target
+    recording a file where a hidden entry sits inside a directory, or a
+    directory where a hidden file stands, cannot be written without
+    removing it. Refused as the descendant and ancestor cases above
+    are, so hidden work is never destroyed, and the refusal names only
+    the path the session sees.
+
+    Args:
+        writing (Tree): the entries the switch writes, from ``_written``.
+        unseen (set[str]): the tracked paths the session cannot see.
+    """
+    return sorted(
+        name
+        for name in decoded(writing)
+        if any(under(hidden, name) or under(name, hidden) for hidden in unseen)
+    )
+
+
 def _lost_directories(writing: Tree, untracked: list[str]) -> list[str]:
     """Which directories the switch would empty of untracked files.
 
@@ -677,6 +699,9 @@ async def _carry_across(
     # inside such a directory, so the list has to hold it.
     found = await scan(vfs, location, tracked, UNTRACKED_ALL)
     seen = visible_entries(location, state.entries)
+    unseen = decoded({*(head or {}), *state.entries}) - decoded(
+        {*before, *seen}
+    )
     unstaged = await work_changes(vfs, location.worktree, seen, found)
     staged = _stage_letters(before, seen)
     # Both kinds of uncommitted change count: an edit in the working
@@ -691,6 +716,7 @@ async def _carry_across(
         set(_conflicts(before, after, dirty))
         | set(_blocked_ancestors(writing, dirty))
         | set(_blocked_descendants(writing, dirty))
+        | set(_hidden_in_the_way(writing, unseen))
     )
     overwritten = _overwritten(writing, found.untracked)
     lost = _lost_directories(writing, found.untracked)

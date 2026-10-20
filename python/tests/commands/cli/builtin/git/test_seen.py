@@ -264,6 +264,32 @@ async def test_a_switch_neither_names_nor_writes_a_hidden_file(
 
 
 @pytest.mark.asyncio
+async def test_a_switch_that_would_remove_a_hidden_file_is_refused(
+    history: Path,
+):
+    # A branch recording a file at `box` cannot be written without
+    # removing the directory and the hidden box/secret.txt in it, so the
+    # switch is refused, naming the path the session sees.
+    await shell(
+        history,
+        "git checkout -q -b flat && git rm -rq box && echo f > box"
+        " && git add box && git commit -qm flat && git checkout -q main",
+    )
+    _, out, err = await shell(
+        history,
+        "git checkout -q flat; echo $?; git branch --show-current",
+        "boxed",
+    )
+    assert (out, err) == (
+        "1\nmain\n",
+        "error: Your local changes to the following files would be "
+        "overwritten by checkout:\n\tbox\nPlease commit your changes or "
+        "stash them before you switch branches.\nAborting\n",
+    )
+    assert (history / "box" / "secret.txt").read_text() == "S3CR3T boxed\n"
+
+
+@pytest.mark.asyncio
 async def test_a_path_in_a_tree_named_by_id_stands_where_the_tree_does(
     history: Path,
 ):

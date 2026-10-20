@@ -274,6 +274,32 @@ describe('what a session is shown of history', () => {
     },
   )
 
+  it('refuses a switch that would remove a hidden file', async () => {
+    // A branch recording a file at `box` cannot be written without removing
+    // the directory and the hidden box/secret.txt in it, so the switch is
+    // refused, naming the path the session sees.
+    const ws = await history()
+    const [, branch] = await shell(ws, 'git branch --show-current')
+    await shell(
+      ws,
+      'git checkout -q -b flat && git rm -rq box && echo f > box' +
+        ' && git add box && git commit -qm flat && git checkout -q ' +
+        branch.trim(),
+    )
+    const [, out, err] = await shell(
+      ws,
+      'git checkout -q flat; echo $?; git branch --show-current',
+      'boxed',
+    )
+    expect([out, err]).toEqual([
+      `1\n${branch}`,
+      'error: Your local changes to the following files would be overwritten by checkout:\n' +
+        '\tbox\nPlease commit your changes or stash them before you switch branches.\nAborting\n',
+    ])
+    const data = await readOptional(ws.vfs, PathSpec.fromStrPath('/repo/box/secret.txt'))
+    expect(DEC.decode(data ?? new Uint8Array())).toBe('S3CR3T boxed\n')
+  })
+
   it('stands a path in a tree named by id where the tree does', async () => {
     const ws = await history()
     const [, box] = await shell(ws, 'git rev-parse HEAD:box')

@@ -296,10 +296,12 @@ export async function walkOwned(
 ): Promise<{ walked: WalkEntry[]; owned: string[] }> {
   const walked = await walkStats(links, dispatch, root, rootStat)
   const unread = new Set(walked.filter(([, , err]) => err !== null).map(([p]) => p.virtual))
+  // The root as well, which `ancestors` leaves out: a refused listing of `/`
+  // keeps every link below it unwalked.
   const owned = links
     .linkStatsBelow(root.virtual)
     .map(([path]) => path)
-    .filter((path) => !ancestors(path).some((dir) => unread.has(dir)))
+    .filter((path) => !['/', ...ancestors(path)].some((dir) => unread.has(dir)))
   return { walked, owned }
 }
 

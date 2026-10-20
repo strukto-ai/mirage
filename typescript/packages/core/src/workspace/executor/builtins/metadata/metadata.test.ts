@@ -15,12 +15,11 @@
 import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import type { FileStat } from '../../../../types.ts'
-import { MountMode } from '../../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { parseSessionProfile } from '../../../../policy/profile.ts'
-import { parseGroup, parseOwner, parseTouchStamp } from './metadata.ts'
+import { parseGroup, parseOwner, parseTouchStamp, walkOwned } from './metadata.ts'
 
 describe('parseOwner', () => {
   it('parses owner and group forms', () => {
@@ -527,43 +526,43 @@ describe('recursive metadata flags (-R)', () => {
   })
 })
 
+// The rule lives on a session so the tree is seeded under the
+// unrestricted default session; every probe runs as "g". A deny rule
+// lets a stat through and refuses the attribute write and the listing.
+async function sealedWs(): Promise<Workspace> {
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: parser },
+  )
+  ws.createSession('g', {
+    profile: parseSessionProfile({
+      commands: {
+        deny: [
+          {
+            reason: 'sealed',
+            paths: ['/data/t/secret.txt', '/data/t/sealed', '/data/t/sealed/*'],
+          },
+        ],
+      },
+    }),
+  })
+  await ws.shell(
+    'mkdir -p /data/t/box /data/t/sealed && echo s > /data/t/secret.txt' +
+      ' && echo o > /data/t/ok.txt && echo p > /data/t/box/pub.txt' +
+      ' && echo i > /data/t/sealed/in.txt' +
+      ' && ln -s /data/t/secret.txt /data/lnk' +
+      ' && ln -s /data/t/ok.txt /data/t/sealed/il',
+  )
+  return ws
+}
+
+async function guarded(ws: Workspace, line: string): Promise<[number, string, string]> {
+  const r = await ws.shell(line, { sessionId: 'g' })
+  return [r.exitCode, r.stdoutText, r.stderrText]
+}
+
 describe("a rule's refusal is one file's error", () => {
-  // The rule lives on a session so the tree is seeded under the
-  // unrestricted default session; every probe runs as "g". A deny rule
-  // lets a stat through and refuses the attribute write and the listing.
-  async function sealedWs(): Promise<Workspace> {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
-    ws.createSession('g', {
-      profile: parseSessionProfile({
-        commands: {
-          deny: [
-            {
-              reason: 'sealed',
-              paths: ['/data/t/secret.txt', '/data/t/sealed', '/data/t/sealed/*'],
-            },
-          ],
-        },
-      }),
-    })
-    await ws.shell(
-      'mkdir -p /data/t/box /data/t/sealed && echo s > /data/t/secret.txt' +
-        ' && echo o > /data/t/ok.txt && echo p > /data/t/box/pub.txt' +
-        ' && echo i > /data/t/sealed/in.txt' +
-        ' && ln -s /data/t/secret.txt /data/lnk' +
-        ' && ln -s /data/t/ok.txt /data/t/sealed/il',
-    )
-    return ws
-  }
-
-  async function guarded(ws: Workspace, line: string): Promise<[number, string, string]> {
-    const r = await ws.shell(line, { sessionId: 'g' })
-    return [r.exitCode, r.stdoutText, r.stderrText]
-  }
-
   it.each([
     ['chmod 600', 'chmod: /data/lnk: Permission denied\n', '%a', '600'],
     ['chown 7', 'chown: /data/lnk: Permission denied\n', '%u', '7'],
@@ -608,4 +607,25 @@ describe("a rule's refusal is one file's error", () => {
     expect((await guarded(ws, `stat -c ${fmt} /data/t/box/pub.txt`))[1]).toBe(`${value}\n`)
     await ws.close()
   })
+})
+
+it('keeps every link below a root it was refused to list', async () => {
+  // A mount that stats `/` but refuses to list it: the walk never goes below
+  // the root, so no link there is changed either.
+  const links = {
+    isLink: () => false,
+    linkStatsBelow: () => [['/a/lnk', new FileStat({ name: 'lnk', type: FileType.SYMLINK })]],
+  } as unknown as Parameters<typeof walkOwned>[0]
+  const dispatch = ((op: string) => {
+    expect(op).toBe('readdir')
+    return Promise.reject(Object.assign(new Error('Permission denied'), { code: 'EACCES' }))
+  }) as unknown as Parameters<typeof walkOwned>[1]
+  const { walked, owned } = await walkOwned(
+    links,
+    dispatch,
+    PathSpec.fromStrPath('/'),
+    new FileStat({ name: '/', type: FileType.DIRECTORY }),
+  )
+  expect(owned).toEqual([])
+  expect(walked[0]?.[2]).not.toBeNull()
 })

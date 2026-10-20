@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -11,6 +11,7 @@ from mirage.workspace.executor.builtins.metadata import (
     parse_owner,
     parse_touch_stamp,
 )
+from mirage.workspace.executor.builtins.metadata.metadata import walk_owned
 from tests.fixtures.vfs_io import OverlayRAM as _OverlayRAMVFS
 from tests.fixtures.vfs_io import metadata_workspace as _make_ws
 from tests.fixtures.vfs_io import overlay_workspace as _make_overlay_ws
@@ -346,3 +347,32 @@ async def test_disk_mv_carries_clamped_mode(tmp_path):
     _, out, _ = await _run(ws, "ls -l /data")
     assert "----------" in out
     assert os.stat(os.path.join(tmp_path, "g.txt")).st_mode & 0o777 == 0o600
+
+
+class _LinkUnderRoot:
+    """A link table holding one link below the root."""
+
+    def is_link(self, path: str) -> bool:
+        return False
+
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
+        return [("/a/lnk", FileStat(name="lnk", type=FileType.SYMLINK))]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_root_listing_keeps_every_link_below_it():
+    # A mount that stats `/` but refuses to list it: the walk never goes
+    # below the root, so no link there is changed either.
+    async def dispatch(op: str, path: PathSpec, *args, **kwargs):
+        assert op == "readdir"
+        raise PermissionError(13, "Permission denied", path.virtual)
+
+    root = PathSpec.from_str_path("/")
+    walked, owned = await walk_owned(
+        _LinkUnderRoot(),
+        dispatch,
+        root,
+        FileStat(name="/", type=FileType.DIRECTORY),
+    )
+    assert owned == []
+    assert isinstance(walked[0][2], PermissionError)

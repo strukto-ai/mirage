@@ -238,6 +238,25 @@ function blockedDescendants(
 }
 
 /**
+ * Which written paths would take a hidden entry with them, named by the
+ * written path, since the hidden one cannot be.
+ *
+ * The move leaves an entry the session cannot see alone, but a target
+ * recording a file where a hidden entry sits inside a directory, or a
+ * directory where a hidden file stands, cannot be written without removing
+ * it. Refused as the descendant and ancestor cases above are, so hidden work
+ * is never destroyed, and the refusal names only the path the session sees.
+ */
+function hiddenInTheWay(
+  writing: ReadonlyMap<string, TreeEntry>,
+  unseen: ReadonlySet<string>,
+): string[] {
+  return [...writing.keys()]
+    .filter((name) => [...unseen].some((hidden) => inside(hidden, name) || inside(name, hidden)))
+    .sort(compareCodePoints)
+}
+
+/**
  * Which directories the switch would empty of untracked files.
  *
  * The mirror of the case above: the target records a *file* where the working
@@ -544,10 +563,8 @@ async function carryAcross(
   // A path the session cannot see is no part of the move: neither tree names
   // it, so it is never reported, rewritten or dropped, and its index entry and
   // working copy stay as they are.
-  const before = visibleEntries(
-    repo.location,
-    (await headEntries(repo)) ?? new Map<string, TreeEntry>(),
-  )
+  const head = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
+  const before = visibleEntries(repo.location, head)
   const after = visibleEntries(repo.location, await commitEntries(repo, oid))
   const state = await readIndex(repo, vfs)
   // First, before either tree is compared and before the working tree is
@@ -563,6 +580,11 @@ async function carryAcross(
   // list has to hold it.
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
   const seen = visibleEntries(repo.location, state.entries)
+  const unseen = new Set(
+    [...head.keys(), ...state.entries.keys()].filter(
+      (path) => !before.has(path) && !seen.has(path),
+    ),
+  )
   const unstaged = await workChanges(repo, vfs, repo.location.worktree, seen, found)
   // Both kinds of uncommitted change count: an edit in the working tree, and
   // one already staged. Leaving the staged ones out is what silently threw
@@ -576,6 +598,7 @@ async function carryAcross(
       ...conflicts(before, after, dirty),
       ...blockedAncestors(writing, dirty),
       ...blockedDescendants(writing, dirty),
+      ...hiddenInTheWay(writing, unseen),
     ]),
   ].sort(compareCodePoints)
   const clobbered = overwritten(writing, found.untracked)
