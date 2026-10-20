@@ -421,7 +421,11 @@ describe('parseProfilePolicy', () => {
 // holds the same literal, so either host reads what the other wrote.
 const DOCUMENT = {
   cwd: '/repo',
-  env: { PAGER: 'cat' },
+  env: {
+    PAGER: 'cat',
+    ROLE: { value: 'agent', readonly: true },
+    TOKEN: { from: 'vault', ref: 'kv/agent', key: 'token' },
+  },
   vars: { hide: ['TOKEN', 'AWS_*'] },
   policy: {
     pre_command: [

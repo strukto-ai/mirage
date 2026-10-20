@@ -163,7 +163,6 @@ from mirage.workspace.node.explain import (
 from mirage.workspace.session import SessionManager, SessionState, SessionStore
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
-    apply_profile,
     compile_profile,
     resolve_profile,
     with_inline,
@@ -371,7 +370,14 @@ class Workspace:
         for block in self._declared_sources.values():
             source_for(block.source)
         seed_vars = vars_from_entries(env) if env else None
-        for var in (seed_vars or {}).values():
+        # A profile's env names pointers in the same grammar, so the
+        # sources it names are checked here too, before a session runs.
+        profile_vars = [
+            var
+            for doc in self._profiles.values()
+            for var in vars_from_entries(doc.env or {}).values()
+        ]
+        for var in [*(seed_vars or {}).values(), *profile_vars]:
             if (
                 var.managed is not None
                 and var.managed.source not in self._declared_sources
@@ -1922,9 +1928,7 @@ class Workspace:
             with_inline(base, inline), self._profile_name(profile)
         )
         check_cli_verbs(compiled.policies.commands, self._cli_verbs())
-        session = self._session_mgr.create(session_id)
-        apply_profile(session, compiled)
-        return session
+        return self._session_mgr.create(session_id, profile=compiled)
 
     async def session(
         self,

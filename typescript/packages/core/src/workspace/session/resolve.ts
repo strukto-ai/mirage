@@ -45,7 +45,8 @@ import {
   type VarsBlock,
 } from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
-import { varsFromEnv, type SessionState } from './session.ts'
+import { varsFromEntries, type SessionState } from './session.ts'
+import type { EnvEntries } from '../../secrets/config.ts'
 import { setCwd } from './shell_dirs.ts'
 
 /**
@@ -215,7 +216,7 @@ export function withInline(
   const hideVars = unionHide(base.vars, inline.vars)
   const out: {
     cwd?: string | null
-    env?: Readonly<Record<string, string>> | null
+    env?: Readonly<EnvEntries> | null
     mounts?: ReadonlyMap<string, ProfileMount> | null
     paths?: PathsBlock | null
     vars?: VarsBlock | null
@@ -488,16 +489,17 @@ export function narrowingOf(session: SessionState): CompiledProfile {
 
 /**
  * Narrow a fresh session and seed its scratch state from the profile.
- * A profile's env is a *process* environment, the same shape
- * `ws.env = {...}` speaks, so every name in it is exported: seeding
- * them plain left `$TOKEN` expanding while every command, CLI and
- * guest runtime in the profiled session saw nothing, since all three
- * read `envSnapshot` and that is the exported set. The cwd is where
- * the session starts; both are the agent's to change afterwards, which
- * is why hydration keeps the stored ones and re-stamps only `narrow`.
+ * A profile's env speaks the workspace `env` block's grammar, so a bare
+ * string is exported: seeding it plain left `$TOKEN` expanding while
+ * every command, CLI and guest runtime in the profiled session saw
+ * nothing, since all three read `envSnapshot` and that is the exported
+ * set. A managed entry lands as its pointer, fetched when a line names
+ * it. The cwd is where the session starts; both are the agent's to
+ * change afterwards, which is why hydration keeps the stored ones and
+ * re-stamps only `narrow`.
  */
 export function applyProfile(session: SessionState, compiled: CompiledProfile): void {
   narrow(session, compiled)
-  if (compiled.setup.env != null) Object.assign(session.vars, varsFromEnv(compiled.setup.env))
+  if (compiled.setup.env != null) Object.assign(session.vars, varsFromEntries(compiled.setup.env))
   if (compiled.setup.cwd !== null) setCwd(session, compiled.setup.cwd)
 }

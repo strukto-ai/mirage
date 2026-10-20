@@ -140,7 +140,7 @@ import {
   profileFromDict,
   type SessionProfile,
 } from '../../policy/profile.ts'
-import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
+import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
@@ -383,6 +383,16 @@ export class Workspace {
       }
       if (profile.policy != null) {
         parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
+      }
+      // Its env names pointers in the workspace env grammar, so the
+      // sources it names are checked here too, before a session runs.
+      for (const entry of Object.values(varsFromEntries(profile.env ?? {}))) {
+        if (
+          entry.managed !== undefined &&
+          !Object.hasOwn(this.declaredSecretSources, entry.managed.source)
+        ) {
+          sourceFor(entry.managed.source)
+        }
       }
     }
     // Admission policies, consulted in registration order after the
@@ -1018,9 +1028,7 @@ export class Workspace {
       this.profileName(options.profile ?? null),
     )
     checkCliVerbs(compiled.policies.commands, this.cliVerbs())
-    const session = this.sessionManager.create(sessionId)
-    applyProfile(session, compiled)
-    return session
+    return this.sessionManager.create(sessionId, { profile: compiled })
   }
 
   /**

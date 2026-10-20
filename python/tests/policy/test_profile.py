@@ -90,7 +90,11 @@ def test_profile_from_dict_regroups_paths_and_vars():
 # holds the same literal, so either host reads what the other wrote.
 DOCUMENT = {
     "cwd": "/repo",
-    "env": {"PAGER": "cat"},
+    "env": {
+        "PAGER": "cat",
+        "ROLE": {"value": "agent", "readonly": True},
+        "TOKEN": {"from": "vault", "ref": "kv/agent", "key": "token"},
+    },
     "vars": {"hide": ["TOKEN", "AWS_*"]},
     "policy": {
         "pre_command": [

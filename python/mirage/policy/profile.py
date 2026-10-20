@@ -34,6 +34,7 @@ from mirage.policy.types import (
 )
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import EnvVar
 from mirage.types import (
     DEFAULT_VISIBILITY,
     Limit,
@@ -658,8 +659,11 @@ class SessionProfile(BaseModel):
 
     Args:
         cwd (str | None): the session's working directory at creation.
-        env (dict[str, str] | None): a process environment seeded and
-            exported into the session at creation.
+        env (dict[str, str | EnvVar] | None): the env entries seeded
+            into the session at creation, in the workspace ``env``
+            grammar: a bare string is an exported literal, and a
+            ``from:`` entry a managed pointer, so a credential is
+            named here and fetched, never written as its value.
         mounts (dict[str, ProfileMount] | None): per-mount settings,
             keyed by prefix: a mode, ask and deny rules for lines
             working inside the mount, and hides under it. A mount the
@@ -676,7 +680,7 @@ class SessionProfile(BaseModel):
     model_config = _DOC
 
     cwd: str | None = None
-    env: dict[str, str] | None = None
+    env: dict[str, str | EnvVar] | None = None
     mounts: dict[str, ProfileMount] | None = None
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
@@ -777,8 +781,10 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     entry dumps as a row rather than a path mapped to its mode, and a
     rule dumps its compiled ``mount`` and, when it names commands and
     paths, a pair the document refuses. Those blocks are spelled here,
-    and the limits and process scopes keep their unset fields, as the
-    session record writes them on both hosts.
+    the limits and process scopes keep their unset fields, as the
+    session record writes them on both hosts, and an env entry is
+    written with the fields its author set, a managed one as its
+    pointer.
 
     Args:
         profile (SessionProfile): the profile.
@@ -786,8 +792,29 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     doc = profile.model_dump(
         mode="json",
         exclude_none=True,
-        exclude={"mounts", "paths", "commands", "command_limits", "processes"},
+        exclude={
+            "env",
+            "mounts",
+            "paths",
+            "commands",
+            "command_limits",
+            "processes",
+        },
     )
+    if profile.env is not None:
+        doc["env"] = {
+            name: (
+                entry
+                if isinstance(entry, str)
+                else entry.model_dump(
+                    mode="json",
+                    by_alias=True,
+                    exclude_unset=True,
+                    exclude_none=True,
+                )
+            )
+            for name, entry in profile.env.items()
+        }
     if profile.command_limits is not None:
         doc["command_limits"] = {
             name: limit.model_dump(mode="json")
@@ -871,11 +898,11 @@ class ProfileSetup:
     afterwards, so a stored session keeps its own.
 
     Args:
-        env (dict[str, str] | None): variables to seed and export.
+        env (dict[str, str | EnvVar] | None): the env entries to seed.
         cwd (str | None): the working directory to start in.
     """
 
-    env: dict[str, str] | None = None
+    env: dict[str, str | EnvVar] | None = None
     cwd: str | None = None
 
 

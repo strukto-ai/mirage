@@ -24,6 +24,7 @@ import type {
   ScriptMethod,
 } from './types.ts'
 import { type Language, ScriptSource } from '../runtime/types.ts'
+import { EnvVarSchema, type EnvEntries } from '../secrets/config.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode } from '../types.ts'
 import type { HideReason } from './types.ts'
@@ -137,7 +138,13 @@ export interface ProfileMount {
  */
 export interface SessionProfile {
   readonly cwd?: string | null
-  readonly env?: Readonly<Record<string, string>> | null
+  /**
+   * The env entries seeded into the session at creation, in the
+   * workspace `env` grammar: a bare string is an exported literal, and a
+   * `from` entry a managed pointer, so a credential is named here and
+   * fetched, never written as its value.
+   */
+  readonly env?: Readonly<EnvEntries> | null
   readonly mounts?: ReadonlyMap<string, ProfileMount> | null
   readonly paths?: PathsBlock | null
   readonly vars?: VarsBlock | null
@@ -186,7 +193,7 @@ export type ProfilePolicy = Readonly<Partial<Record<ScriptMethod, readonly Profi
  * afterwards, so a stored session keeps its own.
  */
 export interface ProfileSetup {
-  readonly env: Readonly<Record<string, string>> | null
+  readonly env: Readonly<EnvEntries> | null
   readonly cwd: string | null
 }
 
@@ -679,7 +686,7 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   rejectUnknownKeys(obj, PROFILE_FIELDS, where)
   const out: {
     cwd?: string | null
-    env?: Readonly<Record<string, string>> | null
+    env?: Readonly<EnvEntries> | null
     mounts?: ReadonlyMap<string, ProfileMount> | null
     paths?: PathsBlock | null
     vars?: VarsBlock | null
@@ -700,9 +707,16 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   if (obj.env !== undefined && obj.env !== null) {
     const env = asObject(obj.env, `${where}.env`)
     for (const [k, v] of Object.entries(env)) {
-      if (typeof v !== 'string') throw new Error(`${where}.env.${k} must be a string`)
+      if (typeof v === 'string') continue
+      if (!isPlainObject(v)) throw new Error(`${where}.env.${k} must be a string or an env entry`)
+      const parsed = EnvVarSchema.safeParse(v)
+      if (!parsed.success) {
+        throw new Error(
+          `${where}.env.${k}: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
+        )
+      }
     }
-    out.env = env as Record<string, string>
+    out.env = env as EnvEntries
   }
   if (obj.mounts !== undefined && obj.mounts !== null) {
     out.mounts = parseProfileMounts(obj.mounts, `${where}.mounts`)

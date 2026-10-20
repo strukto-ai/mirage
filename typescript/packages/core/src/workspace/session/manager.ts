@@ -144,7 +144,10 @@ export class SessionManager extends SessionOwner {
    */
   set defaultProfile(compiled: CompiledProfile | null) {
     this.defaultProfileInternal = compiled
-    if (compiled !== null) applyProfile(this.defaultSession(), compiled)
+    if (compiled === null) return
+    const session = this.defaultSession()
+    applyProfile(session, compiled)
+    this.hasManaged = this.hasManaged || holdsManaged(session)
   }
 
   /** Replace an existing, hydrated session's restrictions, preserving its scratch state. */
@@ -385,11 +388,17 @@ export class SessionManager extends SessionOwner {
   /**
    * Create a session, seeded with the workspace's env template.
    * `options.env` is this session's own env entries, literal or
-   * managed, merged over the template (session entries win).
+   * managed, merged over the template (session entries win), and
+   * `options.profile` the profile it is created under, applied here so
+   * a pointer its env names counts toward `hasManagedEnv`.
    */
   create(
     sessionId: string,
-    options: { mountModes?: ReadonlyMap<string, MountMode> | null; env?: EnvEntries } = {},
+    options: {
+      mountModes?: ReadonlyMap<string, MountMode> | null
+      env?: EnvEntries
+      profile?: CompiledProfile
+    } = {},
   ): SessionState {
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
@@ -401,6 +410,7 @@ export class SessionManager extends SessionOwner {
       mountModes: options.mountModes ?? null,
       vars: seeded,
     })
+    if (options.profile !== undefined) applyProfile(session, options.profile)
     this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)
     return session

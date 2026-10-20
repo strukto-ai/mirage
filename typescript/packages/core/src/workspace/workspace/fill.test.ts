@@ -43,6 +43,7 @@ import {
 } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { guestBound } from './fill.ts'
 import { Workspace } from './workspace.ts'
+import { toStateDict } from '../snapshot/state.ts'
 
 const FakeConfig = z.strictObject({})
 type FakeConfig = z.infer<typeof FakeConfig>
@@ -391,6 +392,30 @@ describe('fillEnv through execute', () => {
     await expect(makeWs({ T: { from: 'nope-never', ref: 'r' } })).rejects.toThrow(
       /unknown secrets source/,
     )
+    const profile = parseSessionProfile({ env: { T: { from: 'nope-never', ref: 'r' } } })
+    await expect(makeWs(undefined, profile)).rejects.toThrow(/unknown secrets source/)
+  })
+
+  // A profile's env speaks the workspace env grammar, so a credential a
+  // profile names is a pointer: fetched when a line reads it, in the
+  // default session and a created one alike, and written as its pointer by
+  // the snapshot that carries every declared profile.
+  it('a profile env pointer fetches and snapshots as a pointer', async () => {
+    const { fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-profile', FakeConfig, fetch)
+    const pointer = { from: 'fake-profile', ref: 'r' }
+    const ws = await makeWs(undefined, parseSessionProfile({ env: { TOKEN: pointer } }))
+    try {
+      ws.createSession('agent')
+      for (const sessionId of [ws.defaultSessionId, 'agent']) {
+        expect(stdoutStr(await ws.shell('echo $TOKEN', { sessionId }))).toBe('t0\n')
+      }
+      const state = await toStateDict(ws)
+      expect(state.profiles?.p?.env).toEqual({ TOKEN: pointer })
+      expect(JSON.stringify([state.profiles, state.sessions])).not.toContain('t0')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('a mutating export detaches without fetching', async () => {

@@ -165,7 +165,9 @@ class SessionManager(SessionOwner):
         """
         self._default_profile = compiled
         if compiled is not None:
-            apply_profile(self._sessions[self._default_id], compiled)
+            default = self._sessions[self._default_id]
+            apply_profile(default, compiled)
+            self._has_managed = self._has_managed or _holds_managed(default)
 
     def commands_of(self, session_id: str) -> AdmissionRules | None:
         """The admission rules one session runs under
@@ -452,6 +454,7 @@ class SessionManager(SessionOwner):
         session_id: str,
         mount_modes: dict[str, MountMode] | None = None,
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
+        profile: CompiledProfile | None = None,
     ) -> SessionState:
         """Create a session, seeded with the workspace's env template.
 
@@ -461,6 +464,9 @@ class SessionManager(SessionOwner):
             env (Mapping[str, str | EnvVar | Mapping[str, Any]] | None):
                 this session's own env entries, literal or managed,
                 merged over the template (session entries win).
+            profile (CompiledProfile | None): the profile it is created
+                under, applied here so a pointer its env names counts
+                toward ``has_managed_env``.
         """
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
@@ -470,6 +476,8 @@ class SessionManager(SessionOwner):
         session = SessionState(
             session_id=session_id, mount_modes=mount_modes, vars=seeded
         )
+        if profile is not None:
+            apply_profile(session, profile)
         self._has_managed = self._has_managed or _holds_managed(session)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()

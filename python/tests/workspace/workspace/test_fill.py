@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+import json
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -325,6 +326,30 @@ async def test_failed_fetch_sets_the_exit_status():
 def test_an_unknown_source_fails_at_construction():
     with pytest.raises(SecretsError, match="unknown secrets source"):
         _ws({"T": {"from": "nope", "ref": "r"}})
+    with pytest.raises(SecretsError, match="unknown secrets source"):
+        _ws(None, profiles={"p": {"env": {"T": {"from": "nope", "ref": "r"}}}})
+
+
+# A profile's env speaks the workspace env grammar, so a credential a
+# profile names is a pointer: fetched when a line reads it, in the default
+# session and a created one alike, and written as its pointer by the
+# snapshot that carries every declared profile.
+@pytest.mark.asyncio
+async def test_a_profile_env_pointer_fetches_and_snapshots_as_a_pointer():
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake", FakeConfig, fetch)
+    pointer = {"from": "fake", "ref": "r"}
+    ws = _ws(None, profiles={"default": {"env": {"TOKEN": pointer}}})
+    try:
+        ws.create_session("agent")
+        for sid in (ws.default_session_id, "agent"):
+            io = await ws.shell("echo $TOKEN", session_id=sid)
+            assert (await io.stdout_str()) == "t0\n"
+        state = await to_state_dict(ws)
+        assert state["profiles"]["default"]["env"] == {"TOKEN": pointer}
+        assert "t0" not in json.dumps([state["profiles"], state["sessions"]])
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
