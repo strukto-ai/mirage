@@ -17,6 +17,7 @@ from collections.abc import Iterable
 
 from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.github.config import GhConfig
+from mirage.core.github.constants import API_BASE
 from mirage.core.github.tree_entry import TreeEntry
 
 
@@ -34,6 +35,11 @@ class GitHubAccount(SessionAccessor):
         super().__init__()
         self.config = config
 
+    @property
+    def api_base(self) -> str:
+        """The REST base its calls go to: github.com's when none is set."""
+        return (self.config.base_url or API_BASE).rstrip("/")
+
     def _peer(self, peer: Accessor) -> "GitHubAccount | None":
         """The account behind a peer (a gh install's, or a github
         mount's) on this API base; None for any other.
@@ -44,7 +50,7 @@ class GitHubAccount(SessionAccessor):
         account = peer.account if isinstance(peer, GitHubAccessor) else peer
         if (
             isinstance(account, GitHubAccount)
-            and account.config.base_url == self.config.base_url
+            and account.api_base == self.api_base
         ):
             return account
         return None

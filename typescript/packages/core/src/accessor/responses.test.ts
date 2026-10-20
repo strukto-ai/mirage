@@ -68,6 +68,16 @@ describe('ResponseCache', () => {
     expect(await cache.get('q', answer)).toBe(2)
   })
 
+  it('drops what it kept when a stricter mount governs it', async () => {
+    // Kept under a 600 s bound, an answer would outlive a 30 s one.
+    const answer = service()
+    const cache = new ResponseCache<string, number>()
+    cache.govern({ policy: ReadPolicy.BOUNDED, ttl: 600 })
+    expect(await cache.get('q', answer)).toBe(1)
+    cache.govern({ policy: ReadPolicy.BOUNDED, ttl: 30 })
+    expect(await cache.get('q', answer)).toBe(2)
+  })
+
   it('does not keep an answer that raced a clear', async () => {
     // The clear may be for the very write the answer predates.
     const cache = new ResponseCache<string, string>()

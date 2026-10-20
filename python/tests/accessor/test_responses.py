@@ -78,6 +78,16 @@ async def test_the_strictest_bound_wins(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_stricter_mount_drops_what_a_looser_one_kept():
+    # Kept under a 600 s bound, an answer would outlive a 30 s one.
+    service, cache = _Service(), ResponseCache[str, int]()
+    cache.govern(ReadSpec(policy=ReadPolicy.BOUNDED, ttl=600))
+    assert await cache.get("q", service.answer) == 1
+    cache.govern(ReadSpec(policy=ReadPolicy.BOUNDED, ttl=30))
+    assert await cache.get("q", service.answer) == 2
+
+
+@pytest.mark.asyncio
 async def test_an_answer_that_raced_a_clear_is_not_kept():
     # The clear may be for the very write the answer predates.
     cache = ResponseCache[str, str]()

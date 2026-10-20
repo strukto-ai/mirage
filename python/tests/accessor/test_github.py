@@ -54,3 +54,17 @@ async def test_a_gh_write_reaches_github_mounts_on_its_api_base_alone():
     assert not gh.reaches(elsewhere.accessor)
     assert not gh.reaches(ram.accessor)
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_github_api_base_is_the_default_one():
+    # A gh install naming github.com's API reaches, and shares with, a
+    # mount that leaves the base unset: both call the same API.
+    vfs = GitHubVFS(GitHubConfig(token="t", owner="o", repo="r"))
+    ws = Workspace({"/gh": vfs})
+    gh = ws.register_cli(
+        "gh", GH, {"token": "t", "base_url": "https://api.github.com/"}
+    ).accessor
+    assert gh.reaches(vfs.accessor)
+    assert gh.pool is vfs.accessor.account.pool
+    await ws.close()

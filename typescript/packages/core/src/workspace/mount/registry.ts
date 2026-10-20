@@ -24,6 +24,7 @@ import type { Accessor } from '../../accessor/base.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { WorkspaceRuntime } from '../../runtime/workspace.ts'
+import { mutationLock } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { CacheManager } from '../../cache/manager.ts'
@@ -175,9 +176,18 @@ export class MountRegistry {
   async dropCaches(by: Accessor | null = null): Promise<void> {
     const mounts = this.allMounts()
     const reached = mounts.filter((m) => by === null || (by.reaches?.(m.vfs.accessor) ?? true))
+    const cache = this.cacheStore
     // Every mount: one clear of the file cache, not a scan per mount.
-    const every = this.cacheStore !== null && reached.length === mounts.length
-    if (every) await this.cacheStore?.clear()
+    const every = cache !== null && reached.length === mounts.length
+    if (every) {
+      // Under the lock a fill checks its read generation with, so a read begun
+      // before the write keeps nothing on any mount, as each mount's own drop
+      // retires and evicts in one step.
+      await mutationLock(cache, async () => {
+        for (const mount of reached) mount.cacheManager?.retire()
+        await cache.clear()
+      })
+    }
     for (const mount of reached) await mount.dropCaches(!every)
   }
 

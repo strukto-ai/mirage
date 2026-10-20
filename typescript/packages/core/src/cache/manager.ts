@@ -136,7 +136,7 @@ export class CacheManager {
    * stamp the cache after it, and a probe answer from before it must not be
    * served after it.
    */
-  private retire(): void {
+  retire(): void {
     this.readGeneration += 1
     this.probed.clear()
     this.probeBound = PROBED_LIMIT

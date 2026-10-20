@@ -14,7 +14,7 @@
 import { CLIHandler } from '../../commands/cli/types.ts'
 
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CLI } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
@@ -536,4 +536,49 @@ describe("a client's own answers", () => {
     })
     expect([await accessor.ask(), await accessor.ask()]).toEqual([1, 2])
   })
+})
+
+it('a read in flight keeps nothing after every mount drops', async () => {
+  // The read began before the write and lands once the file cache is cleared,
+  // while an earlier mount is still dropping. Its own mount was retired with
+  // the clear, so the old bytes are handed back, not kept.
+  const cache = new RAMFileCacheStore()
+  const registry = new MountRegistry({}, MountMode.READ)
+  registry.attachFileCache(cache)
+  const first = new RAMVFS()
+  const second = new RAMVFS()
+  ;(first as unknown as { cachesReads: boolean }).cachesReads = true
+  ;(second as unknown as { cachesReads: boolean }).cachesReads = true
+  const earlier = registry.mount('/a/', first, MountMode.WRITE)
+  const reading = registry.mount('/b/', second, MountMode.WRITE)
+  const manager = reading.cacheManager
+  if (manager === null) throw new Error('no cache manager')
+  let fetched = (): void => undefined
+  let endFetch = (): void => undefined
+  let droppingA = (): void => undefined
+  let endDrop = (): void => undefined
+  const fetchStarted = new Promise<void>((resolve) => (fetched = resolve))
+  const fetchMayEnd = new Promise<void>((resolve) => (endFetch = resolve))
+  const dropStarted = new Promise<void>((resolve) => (droppingA = resolve))
+  const dropMayEnd = new Promise<void>((resolve) => (endDrop = resolve))
+  const invalidate = earlier.indexStore.invalidate.bind(earlier.indexStore)
+  vi.spyOn(earlier.indexStore, 'invalidate').mockImplementation(async () => {
+    droppingA()
+    await dropMayEnd
+    await invalidate()
+  })
+  const read = manager.fill(PathSpec.fromStrPath('/b/x.txt'), async () => {
+    fetched()
+    await fetchMayEnd
+    return new TextEncoder().encode('old')
+  })
+  await fetchStarted
+  const dropping = registry.dropCaches()
+  await dropStarted
+  endFetch()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  endDrop()
+  await dropping
+  expect(new TextDecoder().decode(await read)).toBe('old')
+  expect(await cache.exists('/b/x.txt')).toBe(false)
 })

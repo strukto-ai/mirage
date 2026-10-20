@@ -166,7 +166,7 @@ class CacheManager:
                 clears the whole file cache itself.
         """
         async with self.mutation():
-            self._retire()
+            self.retire()
             if self._owns_path(self._prefix or "/"):
                 await index.invalidate()
             if bodies and self._caches_reads and self._file_cache is not None:
@@ -213,11 +213,11 @@ class CacheManager:
             return
         # A re-list found children gone: the backend changed under the
         # command, so nothing its probes saw is safe to serve.
-        self._retire()
+        self.retire()
         if self._on_gone is not None:
             await self._on_gone(gone)
 
-    def _retire(self) -> None:
+    def retire(self) -> None:
         """Retire every in-flight read and every remembered probe answer.
 
         The one step every cache drop takes: a read that began before it
@@ -449,7 +449,7 @@ class CacheManager:
         The answer is served only inside the command that probed, and only
         while no cache drop has landed since: a write in the command
         (``sed -i``, ``> f``), the clear after an external program, and a
-        re-list that found the path gone all retire it (``_retire``), so the
+        re-list that found the path gone all retire it (``retire``), so the
         next stat goes back to the backend.
 
         Args:
@@ -931,7 +931,7 @@ class CacheManager:
             parent = parent.rsplit("/", 1)[0]
 
     async def _invalidate_path(self, path: PathSpec) -> str:
-        self._retire()
+        self.retire()
         key = self._cache_key(path)
         if self._caches_reads and self._file_cache is not None:
             await self._file_cache.remove(key)

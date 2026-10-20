@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Iterable
 from typing import Any
 
@@ -570,3 +571,50 @@ async def test_a_fresh_mount_never_serves_its_clients_kept_answers():
         "/s/", vfs, MountMode.READ, ReadSpec(policy=ReadPolicy.FRESH)
     )
     assert (await vfs.accessor.ask(), await vfs.accessor.ask()) == (1, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_read_in_flight_keeps_nothing_after_every_mount_drops(
+    monkeypatch,
+):
+    # The read began before the write and lands once the file cache is
+    # cleared, while an earlier mount is still dropping. Its own mount was
+    # retired with the clear, so the old bytes are handed back, not kept.
+    cache = RAMFileCacheStore()
+    registry = MountRegistry()
+    registry.attach_file_cache(cache)
+    first, second = RAMVFS(), RAMVFS()
+    first.caches_reads = second.caches_reads = True
+    earlier = registry.mount("/a/", first, MountMode.WRITE)
+    reading_mount = registry.mount("/b/", second, MountMode.WRITE)
+    assert reading_mount.cache_manager is not None
+    fetched, fetch_may_end = asyncio.Event(), asyncio.Event()
+    dropping_a, drop_may_end = asyncio.Event(), asyncio.Event()
+
+    async def old_bytes() -> bytes:
+        fetched.set()
+        await fetch_may_end.wait()
+        return b"old"
+
+    invalidate = earlier.index_store.invalidate
+
+    async def held_invalidate() -> None:
+        dropping_a.set()
+        await drop_may_end.wait()
+        await invalidate()
+
+    monkeypatch.setattr(earlier.index_store, "invalidate", held_invalidate)
+    reading = asyncio.create_task(
+        reading_mount.cache_manager.fill(
+            PathSpec.from_str_path("/b/x.txt"), old_bytes
+        )
+    )
+    await fetched.wait()
+    dropping = asyncio.create_task(registry.drop_caches())
+    await dropping_a.wait()
+    fetch_may_end.set()
+    await asyncio.sleep(0.01)
+    drop_may_end.set()
+    await dropping
+    assert await reading == b"old"
+    assert not await cache.exists("/b/x.txt")

@@ -53,7 +53,10 @@ class ResponseCache(Generic[K, V]):
             read (ReadSpec): the mount's read policy.
         """
         bound = 0 if read.policy is ReadPolicy.FRESH else read.ttl
-        self._ttl = bound if self._ttl is None else min(self._ttl, bound)
+        if self._ttl is None or bound < self._ttl:
+            self._ttl = bound
+            # Kept under the looser bound, an answer would outlive this one.
+            self.clear()
 
     async def get(self, key: K, fetch: Callable[[], Awaitable[V]]) -> V:
         """The kept answer for ``key``, else ``fetch``'s, kept.

@@ -42,7 +42,11 @@ export class ResponseCache<K, V> {
    */
   govern(read: ReadSpec): void {
     const bound = read.policy === ReadPolicy.FRESH ? 0 : read.ttl
-    this.ttl = this.ttl === null ? bound : Math.min(this.ttl, bound)
+    if (this.ttl === null || bound < this.ttl) {
+      this.ttl = bound
+      // Kept under the looser bound, an answer would outlive this one.
+      this.clear()
+    }
   }
 
   /** The kept answer for `key`, else `fetch`'s, kept. */

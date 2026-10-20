@@ -19,6 +19,7 @@ from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
 from mirage.accessor.base import Accessor
+from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
@@ -199,10 +200,18 @@ class MountRegistry:
         reached = [
             m for m in mounts if by is None or by.reaches(m.vfs.accessor)
         ]
+        cache = self._file_cache
         # Every mount: one clear of the file cache, not a scan per mount.
-        every = self._file_cache is not None and len(reached) == len(mounts)
-        if every and self._file_cache is not None:
-            await self._file_cache.clear()
+        every = cache is not None and len(reached) == len(mounts)
+        if every and cache is not None:
+            # Under the lock a fill checks its read generation with, so a
+            # read begun before the write keeps nothing on any mount, as
+            # each mount's own drop retires and evicts in one step.
+            async with mutation_lock(cache):
+                for mount in reached:
+                    if mount.cache_manager is not None:
+                        mount.cache_manager.retire()
+                await cache.clear()
         for mount in reached:
             await mount.drop_caches(bodies=not every)
 

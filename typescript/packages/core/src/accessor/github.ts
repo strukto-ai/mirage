@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import { HttpGitHubTransport, type GitHubTransport } from '../core/github/client.ts'
+import {
+  GITHUB_API_BASE,
+  HttpGitHubTransport,
+  type GitHubTransport,
+} from '../core/github/client.ts'
 import type { GhConfig } from '../core/github/config.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 
@@ -32,15 +36,18 @@ export class GitHubAccount extends Accessor {
     this.transport = transport ?? new HttpGitHubTransport(config)
   }
 
+  /** The REST base its calls go to: github.com's when none is set. */
+  get apiBase(): string {
+    return (this.config.baseUrl ?? GITHUB_API_BASE).replace(/\/+$/, '')
+  }
+
   /**
    * The account behind a peer (a gh install's, or a github mount's) on this
    * API base; null for any other.
    */
   private peer(peer: Accessor): GitHubAccount | null {
     const account = peer instanceof GitHubAccessor ? peer.account : peer
-    return account instanceof GitHubAccount && account.config.baseUrl === this.config.baseUrl
-      ? account
-      : null
+    return account instanceof GitHubAccount && account.apiBase === this.apiBase ? account : null
   }
 
   /**
