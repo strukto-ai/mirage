@@ -446,3 +446,30 @@ describe('a value is what bash reads', () => {
     )
   })
 })
+
+describe('prototype-named arithmetic variables', () => {
+  it.each(['constructor', 'toString', '__proto__'])('treats %s as an ordinary variable', (name) => {
+    expect(evaluateArith(name, {}).value).toBe(0n)
+    expect(evaluateArith(name, Object.fromEntries([[name, '7']])).value).toBe(7n)
+    expect(evaluateArith(`${name}=5,${name}+=1,${name}`, {})).toEqual({
+      value: 6n,
+      writes: [
+        { name, key: null, value: '5' },
+        { name, key: null, value: '6' },
+      ],
+    })
+    expect(() => evaluateArith(name, {}, null, null, null, true)).toThrow(UnboundVariable)
+  })
+})
+
+it('exposes a prototype-named pending write during element resolution', () => {
+  const elements: ElementOps = {
+    resolve: (_name, _key, env) => env['__proto__'] ?? '',
+    read: (_name, key) => (key === '2' ? '9' : null),
+    isAssoc: () => true,
+  }
+  expect(evaluateArith('__proto__=2,a[x]', {}, elements)).toEqual({
+    value: 9n,
+    writes: [{ name: '__proto__', key: null, value: '2' }],
+  })
+})

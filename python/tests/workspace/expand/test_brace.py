@@ -112,3 +112,77 @@ def test_substitute_without_atoms_is_one_literal_piece():
 
 def test_substitute_empty_word_has_no_pieces():
     assert substitute("", []) == []
+
+
+EXACT_RANGE_CASES = [
+    ("{9007199254740993..9007199254740993..2}", ["9007199254740993"]),
+    (
+        "{9007199254740992..9007199254740994}",
+        ["9007199254740992", "9007199254740993", "9007199254740994"],
+    ),
+    (
+        "{9007199254740994..9007199254740992}",
+        ["9007199254740994", "9007199254740993", "9007199254740992"],
+    ),
+    (
+        "{9223372036854775806..9223372036854775807}",
+        ["9223372036854775806", "9223372036854775807"],
+    ),
+    (
+        "{-9223372036854775808..-9223372036854775807}",
+        ["-9223372036854775808", "-9223372036854775807"],
+    ),
+    ("{1..9..-9223372036854775807}", ["1"]),
+    ("{a..z..9223372036854775807}", ["a"]),
+    ("{3..1..0}", ["3", "2", "1"]),
+]
+
+INVALID_RANGE_CASES = [
+    "{9223372036854775808..9223372036854775808..9223372036854775807}",
+    "{-9223372036854775809..-9223372036854775809..9223372036854775807}",
+    "{1..9..-9223372036854775808}",
+    "{1..9..9223372036854775808}",
+    "{a..z..-9223372036854775808}",
+    "{a..z..9223372036854775808}",
+    "{١..٣}",
+    "{a..z..٢}",
+    "{1..3\n}",
+    "{a..c\n}",
+]
+
+
+@pytest.mark.parametrize("template,expected", EXACT_RANGE_CASES)
+def test_exact_decimal_ranges(template, expected):
+    assert expand_template(template) == expected
+
+
+@pytest.mark.parametrize("template", INVALID_RANGE_CASES)
+def test_invalid_decimal_ranges_stay_literal(template):
+    assert expand_template(template) is None
+
+
+@pytest.mark.parametrize(
+    "template,expected",
+    [
+        ("{+1..3}", ["1", "2", "3"]),
+        ("{1..3..+1}", ["1", "2", "3"]),
+        ("{+01..+03}", ["1", "2", "3"]),
+        ("{-01..+1}", ["-01", "000", "001"]),
+        ("{a..e..+2}", ["a", "c", "e"]),
+        ("{1..5..+02}", ["1", "3", "5"]),
+    ],
+)
+def test_explicit_signed_ranges(template, expected):
+    assert expand_template(template) == expected
+
+
+def test_oversized_decimal_range_stays_literal_without_integer_conversion():
+    assert expand_template("{" + "9" * 5000 + "..3}") is None
+
+
+def test_many_leading_zeros_preserve_padding():
+    zeros = "0" * 5000
+    assert expand_template("{" + zeros + "1.." + zeros + "2}") == [
+        zeros + "1",
+        zeros + "2",
+    ]

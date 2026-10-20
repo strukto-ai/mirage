@@ -404,3 +404,25 @@ def test_nounset_reads_what_is_set_and_skips_what_is_never_read():
 
 def test_without_nounset_an_unset_name_reads_0():
     assert evaluate_arith("v + 1", {}).value == 1
+
+
+@pytest.mark.parametrize("name", ["constructor", "toString", "__proto__"])
+def test_prototype_names_are_normal_arithmetic_variables(name):
+    assert evaluate_arith(name, {}).value == 0
+    assert evaluate_arith(name, {name: "7"}).value == 7
+    result = evaluate_arith(f"{name}=5,{name}+=1,{name}", {})
+    assert result.value == 6
+    assert _writes(result) == [(name, None, "5"), (name, None, "6")]
+    with pytest.raises(UnboundVariable):
+        evaluate_arith(name, {}, nounset=True)
+
+
+def test_prototype_named_pending_write_is_visible_during_element_resolution():
+    elements = ElementOps(
+        resolve=lambda _name, _key, env: env["__proto__"],
+        read=lambda _name, key: "9" if key == "2" else None,
+        is_assoc=lambda _name: True,
+    )
+    result = evaluate_arith("__proto__=2,a[x]", {}, elements)
+    assert result.value == 9
+    assert _writes(result) == [("__proto__", None, "2")]
