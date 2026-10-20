@@ -1,6 +1,7 @@
 mod base64;
 mod bc;
 mod compress;
+mod cut;
 mod digest;
 mod generated;
 mod glob;
@@ -14,6 +15,7 @@ mod rg_format;
 mod rg_grapheme;
 mod rg_matcher;
 mod sort;
+mod tr;
 mod utf8;
 mod wc;
 mod width;
@@ -68,6 +70,12 @@ pub trait Stream: Send + Sync {
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let _ = out;
         Ok(())
+    }
+
+    /// Stop processing and schedule bounded retirement through `drain`.
+    /// False means the stream has no incremental cancellation protocol.
+    fn cancel(&mut self) -> bool {
+        false
     }
 
     /// For a stream that reads one input after another, start the next
@@ -280,6 +288,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "base64" => base64::open(config),
         "bc" => bc::open(config),
         "compress" => compress::open(config),
+        "cut" => cut::open(config),
         "digest" => digest::open(config),
         "glob" => glob::open(config),
         "grep" => grep::open(config),
@@ -291,6 +300,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
         "sort" => sort::open(config),
+        "tr" => tr::open(config),
         "wc" => wc::open(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),
     }

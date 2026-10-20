@@ -68,21 +68,6 @@ def translate_bracket(pattern: str, start: int, out: list[str]) -> int:
     raise re.error("Unmatched [, [^, [:, [., or [=")
 
 
-def class_characters(name: str) -> str | None:
-    """Expand a class to its ordered C-locale characters for tr.
-
-    Args:
-        name (str): a POSIX character class name.
-
-    Returns:
-        str | None: the class's characters, or None for no such class.
-    """
-    if name not in POSIX_CLASSES:
-        return None
-    pattern = re.compile("[" + POSIX_CLASSES[name] + "]")
-    return "".join(chr(n) for n in range(128) if pattern.fullmatch(chr(n)))
-
-
 # What each `.` and negated bracket checks first under a UTF-8 locale: a
 # byte that is no part of a character rides the text as its surrogate
 # escape, and glibc matches it with neither.

@@ -19,7 +19,9 @@ from contextlib import aclosing
 from mirage_rs import Stream, StreamError
 
 from mirage.io.cooperative import chunks
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource
+from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue
 
@@ -59,6 +61,10 @@ class OpenStream:
     def busy(self) -> bool:
         """Whether ``drain`` has work or output left."""
         return self._stream.busy()
+
+    def cancel(self) -> bool:
+        """Stop processing and report whether bounded retirement is available."""
+        return self._stream.cancel()
 
     def drain(self) -> bytes:
         """One bounded step of the work ``busy`` reports, and its output."""
@@ -147,9 +153,66 @@ async def run_stream(
         source (ByteSource): The input bytes.
     """
     stream = open_stream(kind, config)
-    async with aclosing(chunks(source)) as bounded:
-        async for chunk in bounded:
-            if output := stream.feed(chunk):
+    async with aclosing(stream_output(stream, source)) as output:
+        async for chunk in output:
+            yield chunk
+
+
+def stream_output(stream: OpenStream, source: ByteSource) -> OutputStream:
+    """Drive an already validated stream through bounded calls.
+
+    Args:
+        stream (OpenStream): The eagerly opened command engine.
+        source (ByteSource): Its input bytes.
+    """
+    started = False
+
+    async def output() -> AsyncGenerator[bytes, None]:
+        nonlocal started
+        started = True
+        async with aclosing(stream_output_chunks(stream, source)) as bounded:
+            async for chunk in bounded:
+                yield chunk
+
+    async def close() -> None:
+        await close_stream(stream)
+        if not started:
+            await close_quietly(source)
+
+    return OutputStream(output(), close)
+
+
+async def stream_output_chunks(
+    stream: OpenStream, source: ByteSource
+) -> AsyncGenerator[bytes, None]:
+    budget = YieldBudget()
+    try:
+        async with aclosing(chunks(source)) as bounded:
+            async for chunk in bounded:
+                if output := stream.feed(chunk):
+                    yield output
+                while stream.busy():
+                    await budget.run()
+                    if output := stream.drain():
+                        yield output
+        if output := stream.finish():
+            yield output
+        while stream.busy():
+            await budget.run()
+            if output := stream.drain():
                 yield output
-    if output := stream.finish():
-        yield output
+    finally:
+        await close_stream(stream)
+
+
+async def close_stream(stream: OpenStream) -> None:
+    """Retire cancelled records through bounded calls before native release.
+
+    Args:
+        stream (OpenStream): The owned command engine.
+    """
+    if stream.cancel():
+        budget = YieldBudget()
+        while stream.busy():
+            await budget.run()
+            stream.drain()

@@ -286,6 +286,10 @@ S3's shared `core/s3/types` modules and the consolidated `vfs/types` find
 options also select the whole-host jobs. Pyodide's `runtime/python/pyodide/config.ts`
 stays in the broad TypeScript and runtime filters.
 
+The `cut` and `tr` Rust engines and their shared stream adapters use the
+existing whole-host `core` and `ts` filters. The paired cut corpus also pins
+invalid-list refusal before a missing input is inspected.
+
 The shared `utils/abort` cancellation primitives remain in both whole-host
 filters and the runtime filters, alongside the `workspace/abort` line
 orchestration that consumes them.

@@ -19,7 +19,7 @@ import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 import { Glob } from './glob.ts'
 import { PosixRegex } from './regex.ts'
-import { openStream } from './stream.ts'
+import { openStream, streamOutput } from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
 
@@ -162,4 +162,24 @@ it('foreground parameter cancellation closes the matcher before returning', asyn
     closeSpy.mockRestore()
     await ws.close()
   }
+})
+
+it('closes an unstarted output without pulling its source', async () => {
+  let closed = 0
+  const source: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      throw new Error('unstarted output pulled input')
+    },
+    return() {
+      closed += 1
+      return Promise.resolve({ done: true, value: undefined })
+    },
+  }
+  const output = streamOutput(await openStream('base64', DECODE), source)
+  await output.return?.()
+  await output.return?.()
+  expect(closed).toBe(1)
 })

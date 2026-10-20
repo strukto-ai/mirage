@@ -7,7 +7,7 @@ import pytest
 
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.glob import Glob
-from mirage.rs.stream import open_stream, run_stream
+from mirage.rs.stream import open_stream, run_stream, stream_output
 from mirage.workspace import Workspace
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
@@ -134,3 +134,25 @@ async def test_foreground_parameter_cancellation_closes_matcher_before_returning
             pending.cancel()
         task.cancel()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_unstarted_output_closes_its_source_without_pulling():
+    class Source:
+        def __init__(self):
+            self.closed = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise AssertionError("unstarted output pulled input")
+
+        async def aclose(self):
+            self.closed += 1
+
+    source = Source()
+    output = stream_output(open_stream("base64", DECODE), source)
+    await output.aclose()
+    await output.aclose()
+    assert source.closed == 1
