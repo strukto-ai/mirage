@@ -14,11 +14,11 @@
 
 import { byteView } from '../../../shell/bytes.ts'
 import { IOResult } from '../../../io/types.ts'
-import { openStream, streamOutput, type OpenStream } from '../../../rs/stream.ts'
+import { openStream, type OpenStream } from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import type { JsonValue, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { resolveSource, streamOutput } from '../utils/stream.ts'
 import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'

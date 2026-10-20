@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.stream import resolve_source
+from mirage.commands.builtin.utils.stream import resolve_source, stream_output
 from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -13,7 +13,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import open_stream, stream_output
+from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec
 

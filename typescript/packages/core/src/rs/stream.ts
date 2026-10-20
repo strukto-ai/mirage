@@ -16,7 +16,6 @@ import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
 import { chunks } from '../io/cooperative.ts'
 import type { util } from 'zod'
 import { YieldBudget } from '../io/yield_budget.ts'
-import { OutputStream, closeQuietly } from '../io/stream.ts'
 import { concat } from '../utils/bytes.ts'
 import { decodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
@@ -316,27 +315,10 @@ export async function* runStream(
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   const stream = await openStream(kind, config)
-  yield* streamOutput(stream, source, signal)
+  yield* streamOutputChunks(stream, source, signal)
 }
 
-/** Drive an already validated stream through bounded calls. Mirrors Python's stream_output. */
-export function streamOutput(
-  stream: OpenStream,
-  source: Uint8Array | AsyncIterable<Uint8Array>,
-  signal?: AbortSignal,
-): AsyncIterableIterator<Uint8Array> {
-  let started = false
-  async function* output(): AsyncGenerator<Uint8Array> {
-    started = true
-    yield* streamOutputChunks(stream, source, signal)
-  }
-  return new OutputStream(output(), async () => {
-    await closeStream(stream)
-    if (!started) await closeQuietly(source)
-  })
-}
-
-async function* streamOutputChunks(
+export async function* streamOutputChunks(
   stream: OpenStream,
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,

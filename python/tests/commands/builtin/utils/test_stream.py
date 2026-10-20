@@ -19,7 +19,9 @@ from mirage.commands.builtin.utils.stream import (
     operand_label,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
+from mirage.rs.stream import open_stream
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -76,3 +78,28 @@ async def test_stdin_stat_and_stream_honor_dash():
     assert b"".join([c async for c in stream(dev)]) == b"piped"
     assert b"".join([c async for c in stream(dash)]) == b"backend"
     assert backend_hits == ["/-", "/-"]
+
+
+@pytest.mark.asyncio
+async def test_unstarted_output_closes_its_source_without_pulling():
+    class Source:
+        def __init__(self):
+            self.closed = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise AssertionError("unstarted output pulled input")
+
+        async def aclose(self):
+            self.closed += 1
+
+    source = Source()
+    output = stream_output(
+        open_stream("base64", {"mode": "decode", "ignore_garbage": False}),
+        source,
+    )
+    await output.aclose()
+    await output.aclose()
+    assert source.closed == 1

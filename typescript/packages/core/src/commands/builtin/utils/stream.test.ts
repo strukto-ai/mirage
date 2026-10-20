@@ -14,8 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { openStream } from '../../../rs/stream.ts'
 import { materialize } from '../../../io/types.ts'
-import { isStdin, operandLabel, stdinStat, stdinStream } from './stream.ts'
+import { isStdin, operandLabel, stdinStat, stdinStream, streamOutput } from './stream.ts'
 
 function operand(raw: string, virtual: string): PathSpec {
   return new PathSpec({
@@ -73,4 +74,27 @@ describe('dash', () => {
     expect(DEC.decode(await materialize(stream(dash)))).toBe('backend')
     expect(backendHits).toEqual(['/-', '/-'])
   })
+})
+
+it('closes an unstarted output without pulling its source', async () => {
+  let closed = 0
+  const source: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      throw new Error('unstarted output pulled input')
+    },
+    return() {
+      closed += 1
+      return Promise.resolve({ done: true, value: undefined })
+    },
+  }
+  const output = streamOutput(
+    await openStream('base64', { mode: 'decode', ignore_garbage: false }),
+    source,
+  )
+  await output.return?.()
+  await output.return?.()
+  expect(closed).toBe(1)
 })

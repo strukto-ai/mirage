@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, materialize
+from mirage.rs.stream import OpenStream, close_stream, stream_output_chunks
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 
@@ -185,3 +188,27 @@ def stdin_stat(
         return await stat(path)
 
     return probe
+
+
+def stream_output(stream: OpenStream, source: ByteSource) -> OutputStream:
+    """Drive an already validated stream through bounded calls.
+
+    Args:
+        stream (OpenStream): The eagerly opened command engine.
+        source (ByteSource): Its input bytes.
+    """
+    started = False
+
+    async def output() -> AsyncGenerator[bytes, None]:
+        nonlocal started
+        started = True
+        async with aclosing(stream_output_chunks(stream, source)) as bounded:
+            async for chunk in bounded:
+                yield chunk
+
+    async def close() -> None:
+        await close_stream(stream)
+        if not started:
+            await close_quietly(source)
+
+    return OutputStream(output(), close)

@@ -19,7 +19,6 @@ from contextlib import aclosing
 from mirage_rs import Stream, StreamError
 
 from mirage.io.cooperative import chunks
-from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
@@ -153,33 +152,9 @@ async def run_stream(
         source (ByteSource): The input bytes.
     """
     stream = open_stream(kind, config)
-    async with aclosing(stream_output(stream, source)) as output:
+    async with aclosing(stream_output_chunks(stream, source)) as output:
         async for chunk in output:
             yield chunk
-
-
-def stream_output(stream: OpenStream, source: ByteSource) -> OutputStream:
-    """Drive an already validated stream through bounded calls.
-
-    Args:
-        stream (OpenStream): The eagerly opened command engine.
-        source (ByteSource): Its input bytes.
-    """
-    started = False
-
-    async def output() -> AsyncGenerator[bytes, None]:
-        nonlocal started
-        started = True
-        async with aclosing(stream_output_chunks(stream, source)) as bounded:
-            async for chunk in bounded:
-                yield chunk
-
-    async def close() -> None:
-        await close_stream(stream)
-        if not started:
-            await close_quietly(source)
-
-    return OutputStream(output(), close)
 
 
 async def stream_output_chunks(

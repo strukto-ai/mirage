@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { closeStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
@@ -131,4 +133,21 @@ export function stdinStat(
     isStdin(path, dash)
       ? Promise.resolve(new FileStat({ name: '-', type: FileType.FIFO }))
       : stat(path)
+}
+
+/** Drive an already validated stream through bounded calls. Mirrors Python's stream_output. */
+export function streamOutput(
+  stream: OpenStream,
+  source: Uint8Array | AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncIterableIterator<Uint8Array> {
+  let started = false
+  async function* output(): AsyncGenerator<Uint8Array> {
+    started = true
+    yield* streamOutputChunks(stream, source, signal)
+  }
+  return new OutputStream(output(), async () => {
+    await closeStream(stream)
+    if (!started) await closeQuietly(source)
+  })
 }

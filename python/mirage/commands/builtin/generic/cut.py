@@ -12,6 +12,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.config import Context
 from mirage.commands.quote import quote_text
@@ -22,7 +23,7 @@ from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import OpenStream, open_stream, stream_output
+from mirage.rs.stream import OpenStream, open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 
