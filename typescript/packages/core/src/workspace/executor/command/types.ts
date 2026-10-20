@@ -60,6 +60,7 @@ export interface ParsedCommand {
   // dialect, which is why they carry names and order at all.
   missingRequiredOperands: readonly string[]
   typedDests: readonly string[]
+  builtin: boolean
 }
 
 /** Per-call overrides a caller can layer onto the walker's deps. */

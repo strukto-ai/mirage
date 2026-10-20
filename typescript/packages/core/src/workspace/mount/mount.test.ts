@@ -526,6 +526,42 @@ it('runs a command registered for one filetype only on that filetype', async () 
   }
 })
 
+// The per-program refusal voices and codes (grep's 2, diff's prefixed hint,
+// CPython's and curl's wording, tar's old-option 2) describe the real
+// program, so a command a mount registers under its name is refused like the
+// control `mycmd`.
+it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
+  'refuses a borrowed %s like a custom command',
+  async (name) => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+    )
+    try {
+      const spec = new CommandSpec({
+        arguments: [new Argument('-k'), new Argument('rest', { nargs: '*' })],
+        oldOptionStyle: true,
+      })
+      ws.mount('/data/').register(new Command({ name, spec, vfs: null, fn: OK_CMD_STDOUT }))
+      const hint = `Try '${name} --help' for more information.\n`
+      const ok = await ws.shell(`cd /data && ${name} -k a x`)
+      const bad = await ws.shell(`cd /data && ${name} --bogus x`)
+      const old = await ws.shell(`cd /data && ${name} k`)
+      expect([ok.exitCode, ok.stdoutText]).toEqual([0, 'ok'])
+      expect([bad.exitCode, bad.stderrText]).toEqual([
+        1,
+        `${name}: unrecognized option '--bogus'\n${hint}`,
+      ])
+      expect([old.exitCode, old.stderrText]).toEqual([
+        1,
+        `${name}: Old option 'k' requires an argument.\n${hint}`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
 it.each([false, true])(
   'closes native output and releases mount admission (started=%s)',
   async (started) => {

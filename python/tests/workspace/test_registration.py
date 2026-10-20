@@ -17,6 +17,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Command, command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.vfs.ram import RAMVFS
 
@@ -142,3 +143,39 @@ def test_register_commands_multi_vfs_filters_to_matching(ws):
     m = ws.mount("/data/")
     m.register_commands([multi])
     assert "multi" in m.commands()
+
+
+# The per-program refusal voices and codes (grep's 2, diff's prefixed
+# hint, CPython's and curl's wording, tar's old-option 2) describe the
+# real program, so a command a mount registers under its name is refused
+# like the control `mycmd`.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name", ["grep", "diff", "python3", "curl", "tar", "mycmd"]
+)
+async def test_a_borrowed_builtin_name_is_refused_like_a_custom_command(
+    ws, name
+):
+    async def custom(accessor, paths, *texts, **kw):
+        return b"custom\n", IOResult()
+
+    spec = CommandSpec(
+        arguments=(Argument("-k"), Argument("rest", nargs="*")),
+        old_option_style=True,
+    )
+    ws.mount("/data/").register(
+        Command(name, spec=spec, vfs=None, filetype=None, fn=custom)
+    )
+    hint = f"Try '{name} --help' for more information.\n"
+    ok = await ws.shell(f"cd /data && {name} -k a x")
+    bad = await ws.shell(f"cd /data && {name} --bogus x")
+    old = await ws.shell(f"cd /data && {name} k")
+    assert (ok.exit_code, ok.stdout) == (0, b"custom\n")
+    assert (bad.exit_code, bad.stderr) == (
+        1,
+        f"{name}: unrecognized option '--bogus'\n{hint}".encode(),
+    )
+    assert (old.exit_code, old.stderr) == (
+        1,
+        f"{name}: Old option 'k' requires an argument.\n{hint}".encode(),
+    )

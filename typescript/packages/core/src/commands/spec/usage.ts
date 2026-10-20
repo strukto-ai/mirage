@@ -34,9 +34,15 @@ import {
 import { CommandName } from './types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 
-/** GNU usage-error exit code for a command. */
-export function usageExitCode(cmdName: string): number {
-  return USAGE_EXIT[cmdName] ?? 1
+/**
+ * GNU usage-error exit code for a command.
+ *
+ * `builtin` says whether the line was parsed against the builtin's own
+ * grammar. The per-program voices and codes describe the real program, so a
+ * command registered under its name answers like any other custom command.
+ */
+export function usageExitCode(cmdName: string, builtin = true): number {
+  return builtin ? (USAGE_EXIT[cmdName] ?? 1) : 1
 }
 
 /** Exit code of a command refused on one operand before it ran. */
@@ -160,17 +166,21 @@ export function curlOptionError(line: string): [Uint8Array, number] {
   return [encodeText(line + hint), usageExitCode('curl')]
 }
 
-export function unknownOptionError(cmdName: string, token: string): [Uint8Array, number] {
-  if (cmdName === 'curl') {
+export function unknownOptionError(
+  cmdName: string,
+  token: string,
+  builtin = true,
+): [Uint8Array, number] {
+  if (builtin && cmdName === 'curl') {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return curlOptionError(`curl: option ${dashed}: is unknown\n`)
   }
-  if (cmdName === (CommandName.FIND as string)) {
+  if (builtin && cmdName === (CommandName.FIND as string)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return [encodeText(`find: unknown predicate \`${dashed}'\n`), usageExitCode(cmdName)]
   }
-  if (cmdName === 'rg') return rgUnknownFlag(token)
-  if (PYTHON_NAMES.has(cmdName)) {
+  if (builtin && cmdName === 'rg') return rgUnknownFlag(token)
+  if (builtin && PYTHON_NAMES.has(cmdName)) {
     // CPython names the whole typed token, long or short (pinned on 3.14.7;
     // 3.12 still spelled a long one `unknown option`).
     const dashed = token.startsWith('-') ? token : `-${token}`
@@ -179,8 +189,8 @@ export function unknownOptionError(cmdName: string, token: string): [Uint8Array,
   const line = token.startsWith('--')
     ? `${cmdName}: unrecognized option '${token}'\n`
     : `${cmdName}: invalid option -- '${token}'\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 // ripgrep's `find_similar_names` threshold: the share of 3-grams a flag name
@@ -246,12 +256,16 @@ function trigrams(name: string): Set<string> {
  * NOT_GETOPT_LONG quote the value along with the option and getopt_long drops
  * it.
  */
-export function unexpectedValueError(cmdName: string, token: string): [Uint8Array, number] {
-  if (NOT_GETOPT_LONG.has(cmdName)) return unknownOptionError(cmdName, token)
+export function unexpectedValueError(
+  cmdName: string,
+  token: string,
+  builtin = true,
+): [Uint8Array, number] {
+  if (builtin && NOT_GETOPT_LONG.has(cmdName)) return unknownOptionError(cmdName, token)
   const option = token.split('=', 1)[0] ?? token
   const line = `${cmdName}: option '${option}' doesn't allow an argument\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /**
@@ -266,11 +280,12 @@ export function ambiguousOptionError(
   cmdName: string,
   token: string,
   candidates: readonly string[],
+  builtin = true,
 ): [Uint8Array, number] {
   const listed = candidates.map((c) => `'${c}'`).join(' ')
   const line = `${cmdName}: option '${token}' is ambiguous; possibilities: ${listed}\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /**
@@ -285,10 +300,11 @@ export function invalidIntError(
   cmdName: string,
   option: string,
   value: string,
+  builtin = true,
 ): [Uint8Array, number] {
   const line = `${cmdName}: invalid int value: '${value}' for '${option}'\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /**
@@ -300,30 +316,35 @@ export function invalidFloatError(
   cmdName: string,
   option: string,
   value: string,
+  builtin = true,
 ): [Uint8Array, number] {
-  if (cmdName === 'curl') {
+  if (builtin && cmdName === 'curl') {
     return curlOptionError(`curl: option ${option}: expected a proper numerical parameter\n`)
   }
   const line = `${cmdName}: invalid float value: '${value}' for '${option}'\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /** GNU-shaped error for a declared value flag with no argument left. */
-export function missingValueError(cmdName: string, token: string): [Uint8Array, number] {
-  if (PYTHON_NAMES.has(cmdName)) {
+export function missingValueError(
+  cmdName: string,
+  token: string,
+  builtin = true,
+): [Uint8Array, number] {
+  if (builtin && PYTHON_NAMES.has(cmdName)) {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return pythonOptionError(cmdName, `Argument expected for the ${dashed} option\n`)
   }
-  if (cmdName === 'curl') {
+  if (builtin && cmdName === 'curl') {
     const dashed = token.startsWith('-') ? token : `-${token}`
     return curlOptionError(`curl: option ${dashed}: requires parameter\n`)
   }
   const line = token.startsWith('--')
     ? `${cmdName}: option '${token}' requires an argument\n`
     : `${cmdName}: option requires an argument -- '${token}'\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /**
@@ -341,10 +362,14 @@ export function missingValueError(cmdName: string, token: string): [Uint8Array, 
  * shorter hint, and every other refusal here words it this way, so tar's
  * two refusals stay consistent with each other.
  */
-export function oldOptionError(cmdName: string, letter: string): [Uint8Array, number] {
+export function oldOptionError(
+  cmdName: string,
+  letter: string,
+  builtin = true,
+): [Uint8Array, number] {
   const line = `${cmdName}: Old option '${letter}' requires an argument.\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), OLD_OPTION_EXIT]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), builtin ? OLD_OPTION_EXIT : 1]
 }
 
 /**
@@ -408,10 +433,11 @@ export function invalidArgumentError(
   choices: WordChoices,
   exitCode?: number,
   kind: WordRefusalKind = 'invalid',
+  builtin = true,
 ): [Uint8Array, number] {
   const line = `${wordRefusalLine(cmdName, option, value, kind)}\n${validWordsBlock(choices)}\n`
-  const hint = usageHint(cmdName) + '\n'
-  const code = exitCode ?? usageExitCode(cmdName)
+  const hint = usageHint(cmdName, builtin) + '\n'
+  const code = exitCode ?? usageExitCode(cmdName, builtin)
   return [encodeText(line + hint), code]
 }
 
@@ -444,10 +470,14 @@ export function wordRefusalError(
  * GNU shape to pin; this follows the unrecognized-option pattern (click
  * reports the same condition as "Missing option").
  */
-export function missingRequiredError(cmdName: string, option: string): [Uint8Array, number] {
+export function missingRequiredError(
+  cmdName: string,
+  option: string,
+  builtin = true,
+): [Uint8Array, number] {
   const line = `${cmdName}: option '${option}' is required\n`
-  const hint = usageHint(cmdName) + '\n'
-  return [encodeText(line + hint), usageExitCode(cmdName)]
+  const hint = usageHint(cmdName, builtin) + '\n'
+  return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
 }
 
 /**
@@ -456,8 +486,8 @@ export function missingRequiredError(cmdName: string, option: string): [Uint8Arr
  * coreutils writes the hint bare; diffutils routes it through `error()`,
  * so cmp and diff carry the command prefix on the hint line too.
  */
-export function usageHint(cmdName: string): string {
-  const prefix = USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
+export function usageHint(cmdName: string, builtin = true): string {
+  const prefix = builtin && USAGE_HINT_PREFIX.has(cmdName) ? `${cmdName}: ` : ''
   return `${prefix}Try '${cmdName} --help' for more information.`
 }
 
