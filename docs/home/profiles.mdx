@@ -100,9 +100,11 @@ A repository's history counts as the path too. Under a hide, no revision ever
 held it: `git show HEAD:secret.txt` answers as it would for a path never
 committed, `git log -S` finds nothing in it, and an object id stored only
 there names nothing. A checkout or a branch switch leaves a hidden file as it
-is: an edit to it neither blocks the switch nor is named in git's refusal. Under a deny rule, git refuses to print the path's content
-from any revision (`git log -p`, `git show HEAD:secret.txt`) as it refuses the
-file, and still lists the name.
+is: an edit to it neither blocks the switch nor is named in git's refusal. A
+switch that would remove it, by writing a file where its directory stands, is
+refused, naming only the visible path. Under a deny rule, git refuses to print
+the path's content from any revision (`git log -p`, `git show HEAD:secret.txt`)
+as it refuses the file, and still lists the name.
 
 Use [Explain](/home/policy/explain) to check a rule before running a line.
 For conditions beyond these patterns, attach a [policy script](/home/policy/scripts).
