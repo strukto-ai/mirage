@@ -541,15 +541,12 @@ export class Workspace {
         if (this.isShuttingDown()) throw new Error('Workspace is closed')
         return this.dispatcher.dispatch(op, path, args, kwargs, report, caller)
       },
+      this.namespace.readers((sessionId) => this.facadeVisibility(sessionId)),
       async (rec, sessionId) => {
         await this.observer.logOp(rec, sessionId)
       },
-      this.namespace,
-      (path) => this.registry.mountOwner(path),
       {
         bind: (sessionId, run) => this.bindSession(sessionId, run),
-        prefixes: (sessionId) => this.registry.visibleMounts(sessionId).map((m) => m.prefix),
-        visibility: (sessionId) => this.facadeVisibility(sessionId),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
         dispatchAs: (owner) => {
@@ -699,13 +696,7 @@ export class Workspace {
         ctx: {
           vfs: new Files(
             dispatcher.dispatch,
-            null,
-            this.namespace,
-            (path) => this.registry.mountOwner(path),
-            {
-              prefixes: () => this.registry.mountPrefixes(),
-              visibility: () => session.visibility,
-            },
+            this.namespace.readers(() => session.visibility),
           ),
           session: sessionView(session, this.policies),
           processes: this.processView(session),
@@ -1516,7 +1507,7 @@ export class Workspace {
   }
 
   /**
-   * The session a facade's call would run as, as `sessionForOps` picks it;
+   * The session a facade's call would run as, as `bindSession` picks it;
    * null for one not loaded yet. Mirrors Python's `_facade_session`.
    */
   private facadeSession(sessionId: string | null): SessionState | null {
@@ -1544,25 +1535,6 @@ export class Workspace {
     const ambient = getCurrentSessionUnlessForeign(this.sessionManager)
     if (ambient !== null && (sessionId === null || asyncContextIsolatesTasks)) return ambient
     return null
-  }
-
-  /**
-   * The session the dispatcher would run a facade's op as, from here.
-   *
-   * The rule is `bindSession`'s, so an adapter that reads namespace
-   * state outside the dispatcher (a link table consulted before a dispatch)
-   * judges it as the session the dispatch will then run as, ambient
-   * one included, rather than as the one it was configured with.
-   * Sessions must already be hydrated: this is a lookup, not a bind.
-   *
-   * @param sessionId the facade's session, or null for the default.
-   * @returns the session an op through that facade runs as.
-   */
-  sessionForOps(sessionId: string | null): SessionState {
-    return (
-      this.ambientFor(sessionId) ??
-      this.sessionManager.get(sessionId ?? this.sessionManager.defaultId)
-    )
   }
 
   async dispatch(

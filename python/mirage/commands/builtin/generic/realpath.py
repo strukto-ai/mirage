@@ -10,13 +10,11 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.commands.spec.usage import missing_operand_error
-from mirage.context import session_visibility
 from mirage.errors.fs import eloop, enoent, enotdir
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
-from mirage.types import FileType, PathSpec, StatFn, Visibility
-from mirage.utils.hidden import path_visible
+from mirage.types import FileType, PathSpec, StatFn
 
 _MODES = {"canonicalize_existing": "e", "canonicalize_missing": "m"}
 _LINKS = {"logical": "L", "physical": "P", "strip": "s", "no_symlinks": "s"}
@@ -100,7 +98,6 @@ async def canonicalize(
     nolinks: bool,
     readlink: Callable[[str], str | None] | None,
     stat: StatFn,
-    visibility: Visibility | None = None,
 ) -> str:
     """A path with its links resolved, the walk ``realpath`` and
     ``readlink -f`` share.
@@ -109,7 +106,8 @@ async def canonicalize(
     is appended and, unless ``nolinks``, a link there is read and its
     target put in front of the names left, so a ``..`` climbs from where a
     link leads. A link the session cannot see is no link, as a hidden path
-    is no path. A component followed by ``.`` or ``..`` must be a
+    is no path: ``readlink`` is the dispatcher's reader, which answers
+    none for it. A component followed by ``.`` or ``..`` must be a
     directory. A trailing slash rejects an existing non-directory. GNU
     9.7's default mode accepts a missing final component with a slash;
     ``nolinks`` also accepts missing parents. ``e`` requires existence;
@@ -127,11 +125,9 @@ async def canonicalize(
         mode (str): ``e``, ``m`` or empty, as ``RealpathFlags.mode``.
         nolinks (bool): resolve no link (``-s``, and ``-L``'s first pass).
         readlink (Callable[[str], str | None] | None): one link's target,
-            None for a path that is not a link; None while the namespace
-            holds no link.
+            None for a path that is not a link or one the session cannot
+            see; None while the namespace holds no link.
         stat (StatFn): the workspace's stat of one path.
-        visibility (Visibility | None): the session's visibility; a link
-            it hides is no link.
 
     Raises:
         OSError: the first check the walk fails.
@@ -150,13 +146,7 @@ async def canonicalize(
             path = posixpath.dirname(path) if name == ".." else path
             continue
         path = posixpath.join(path, name)
-        target = (
-            None
-            if nolinks
-            or readlink is None
-            or not path_visible(visibility, path)
-            else readlink(path)
-        )
+        target = None if nolinks or readlink is None else readlink(path)
         if target is not None:
             here = (path, tuple(names))
             again = step_of.get(here)
@@ -211,7 +201,6 @@ async def realpath(
     cwd: str = "/",
     readlink: Callable[[str], str | None] | None = None,
     flags: RealpathFlags = RealpathFlags(),
-    visibility: Visibility | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Print each operand's canonical path, GNU ``realpath`` (9.7).
 
@@ -226,8 +215,6 @@ async def realpath(
         readlink (Callable[[str], str | None] | None): one link's target,
             None while the namespace holds no link.
         flags (RealpathFlags): the parsed options.
-        visibility (Visibility | None): the session's visibility; a link
-            it hides is no link.
     """
     if not paths:
         raise missing_operand_error("realpath", None)
@@ -240,13 +227,10 @@ async def realpath(
             flags.links != "P",
             readlink,
             stat,
-            visibility,
         )
         if flags.links != "L":
             return path
-        return await canonicalize(
-            path, cwd, flags.mode, False, readlink, stat, visibility
-        )
+        return await canonicalize(path, cwd, flags.mode, False, readlink, stat)
 
     async def directory(word: str) -> str:
         path = await canon(word)
@@ -313,5 +297,4 @@ async def realpath_generic(
         cwd=ctx.cwd.virtual,
         readlink=link_target(links_of(ctx)),
         flags=parse_flags(ctx.flags),
-        visibility=session_visibility(),
     )

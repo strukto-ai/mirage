@@ -23,6 +23,7 @@ import type { SessionView } from '../../../../../view/types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { DispatchFn } from '../types.ts'
 import { runLs } from './ls.ts'
+import { readers } from '../../../../../test-utils.ts'
 
 // Two mounts, /a/ and /b/, as a plain virtual-path tree. The relayed
 // primitives route by full virtual path, so one table stands for both, and
@@ -120,9 +121,7 @@ describe('runLs — cross-mount ls', () => {
   it('is not stopped at a mount root by the mount table', async () => {
     const nested = new Set(['/a/one'])
     const calls: Calls = { readdir: [], stat: [] }
-    const files = new Files(makeDispatch(calls, nested), null, null, () => null, {
-      prefixes: () => ['/a/', '/a/one/', '/b/'],
-    })
+    const files = new Files(makeDispatch(calls, nested), readers(['/a/', '/a/one/', '/b/']))
     const { out, io } = await run(['/a', '/b'], { recursive: true }, files, nested)
     expect(io.exitCode).toBe(0)
     expect(out).toBe('/a:\none\nz.txt\n\n/a/one:\nx.txt\n\n/b:\ntwo\n\n/b/two:\ny.txt\n')

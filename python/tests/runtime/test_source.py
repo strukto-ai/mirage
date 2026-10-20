@@ -56,7 +56,7 @@ async def resolve(
     rules: Argv0Rules = Argv0Rules(),
     **fields,
 ) -> Program | RunResult:
-    ctx = Context(vfs=Files([], fake_dispatch, ledger=False), **fields)
+    ctx = Context(vfs=Files(fake_dispatch, ledger=False), **fields)
     return await resolve_program(
         paths, texts, ctx, "python3", rules, no_module, "echo"
     )

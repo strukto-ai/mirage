@@ -50,8 +50,11 @@ def command_files(ws: Workspace) -> Files:
     Args:
         ws (Workspace): the workspace.
     """
-    rows = ws._registry.mount_rows()
-    return Files(rows, ws.dispatch, links=ws._namespace, ledger=False)
+    return Files(
+        ws.dispatch,
+        ws._namespace.readers(lambda _session: None),
+        ledger=False,
+    )
 
 
 async def run_on_mount(

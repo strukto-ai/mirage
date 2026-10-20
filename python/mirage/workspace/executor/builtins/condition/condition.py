@@ -65,10 +65,8 @@ async def handle_test(
         view=view,
         links=link_view(
             Files(
-                [],
                 dispatch,
-                links=namespace,
-                visibility=lambda _session: session.visibility,
+                namespace.readers(lambda _session: session.visibility),
             )
         ),
     )

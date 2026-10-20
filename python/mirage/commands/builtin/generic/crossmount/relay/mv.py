@@ -31,7 +31,6 @@ from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context import session_visibility
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec, PrimitiveMove
@@ -88,7 +87,7 @@ async def run_mv(
         backend_key=storage_key,
         guard=refuse_reveal,
         copies=(
-            transfer_links_of(links, dispatch, "/", session_visibility())
+            transfer_links_of(links, dispatch, "/")
             if links is not None
             else None
         ),

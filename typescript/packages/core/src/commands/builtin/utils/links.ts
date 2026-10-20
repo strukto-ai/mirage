@@ -16,14 +16,14 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { Context } from '../../config.ts'
 import type { FollowOperands, LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { FileStat, Visibility } from '../../../types.ts'
+import type { FileStat } from '../../../types.ts'
 import { type Caller, currentCaller } from '../../../context/session_context.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import { type Files, viewOf } from '../../../workspace/files.ts'
+import { type Files, operandsOf, readerOf } from '../../../workspace/files.ts'
 import { resolvePathStat } from './paths.ts'
 
 /**
@@ -183,15 +183,15 @@ export function landingRoot(mounts: MountView, links: LinkView | null, virtual: 
  * The symlink facts a walk goes by, read off the session's files, or
  * undefined outside a workspace.
  *
- * The files apply the session's hides (`FilesView`): a hidden link, or one
- * that leads where the session cannot see, has no row, no listing entry and
- * no target. Resolving a hidden path leaves it as typed, for the dispatcher
- * to refuse; a visible one resolves, so a walker judges where it lands.
- * Mirrors Python's link_view.
+ * The dispatcher's reader answers (`NamespaceReader`), filtered by the rule
+ * it refuses a call by: a hidden link, or one that leads where the session
+ * cannot see, has no row, no listing entry and no target. Resolving a hidden
+ * path leaves it as typed, for the dispatcher to refuse; a visible one
+ * resolves, so a walker judges where it lands. Mirrors Python's link_view.
  */
 export function linkView(files: Files | undefined): LinkView | undefined {
   if (files === undefined) return undefined
-  const seen = viewOf(files)
+  const seen = readerOf(files)
   if (!seen.linked) return undefined
   return {
     statAt: (path: string) => seen.linkAt(path),
@@ -226,11 +226,11 @@ export function linkView(files: Files | undefined): LinkView | undefined {
  * outside a workspace. Every mount below a path, hidden or not, is a boundary
  * a backend's own walk stops at; only the visible ones are ever named. A walk
  * through the dispatcher (`crossing`) has no boundary to stop at
- * (`FilesView.mounts`). Mirrors Python's mount_view.
+ * (`NamespaceReader.mounts`). Mirrors Python's mount_view.
  */
 export function mountView(files: Files | undefined, crossing = false): MountView | undefined {
   if (files === undefined) return undefined
-  return viewOf(files).mounts(crossing)
+  return readerOf(files).mounts(crossing)
 }
 
 /**
@@ -245,7 +245,7 @@ export function mountView(files: Files | undefined, crossing = false): MountView
  */
 export function owedNames(files: Files | undefined, directory: string): string[] {
   if (files === undefined) return []
-  return viewOf(files).owed(directory)
+  return readerOf(files).owed(directory)
 }
 
 /** The workspace's links as the command's session sees them, read off its
@@ -295,12 +295,6 @@ export function mountsOf(ctx: Context): MountView | undefined {
   return mountView(ctx.vfs, crossesMounts(ctx))
 }
 
-/** The visibility of the session the files run as, null for none. Mirrors
- * Python's visibility_of. */
-export function visibilityOf(files: Files | undefined): Visibility | null {
-  return files === undefined ? null : viewOf(files).vis()
-}
-
 /** The link resolver an invocation carries: null outside a workspace.
  * Mirrors Python's link_resolver. */
 export function linkResolver(ctx: Context): LinkResolver | null {
@@ -316,5 +310,5 @@ export function dispatchOf(ctx: Context): DispatchFn | undefined {
 
 /** The line's operand resolution its files carry. Mirrors Python's follow_of. */
 export function followOf(ctx: Context): FollowOperands | undefined {
-  return ctx.vfs === undefined ? undefined : (viewOf(ctx.vfs).follow ?? undefined)
+  return ctx.vfs === undefined ? undefined : (operandsOf(ctx.vfs) ?? undefined)
 }

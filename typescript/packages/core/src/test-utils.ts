@@ -20,7 +20,7 @@ import type { Handed } from './vfs/types.ts'
 import type { NamespaceLinks, OpKwargs } from './view/types.ts'
 import type { MountRow } from './workspace/types.ts'
 import type { WriteContext } from './cache/types.ts'
-import { type FileStat, MountMode, type PathSpec } from './types.ts'
+import { type FileStat, MountMode, type PathSpec, type Visibility } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import { RAMVFS } from './vfs/ram/ram.ts'
 import { stripSlash } from './utils/slash.ts'
@@ -30,6 +30,7 @@ import { runWithMountGate } from './context/session_context.ts'
 import { MountEntry } from './workspace/mount/mount.ts'
 import { Workspace } from './workspace/workspace/workspace.ts'
 import { Files, type FilesOptions } from './workspace/files.ts'
+import { NamespaceReader } from './workspace/dispatcher/reader.ts'
 import { enotsup } from './errors/fs.ts'
 import { IOResult } from './io/types.ts'
 import type { DispatchFn } from './runtime/types.ts'
@@ -213,14 +214,14 @@ type Answer = (path: PathSpec, args: readonly unknown[], kwargs: OpKwargs) => un
 /**
  * Files whose dispatcher answers each op `answers` names, and refuses any
  * other the way a mount without that function does (ENOTSUP): a command's
- * files over a fake backend, for a test that drives a builder alone. `row`
- * is the mount every path is on, `links` the namespace's link table. Mirrors
+ * files over a fake backend, for a test that drives a builder alone. `rows`
+ * is the mount table (`readers`), `links` the namespace's link table. Mirrors
  * Python's `tests/fixtures/answers.Answers`.
  */
 export function answeringFiles(
   answers: Readonly<Record<string, Answer>>,
   options: FilesOptions = {},
-  row: MountRow | null = null,
+  rows: readonly (MountRow | string)[] = [],
   links: NamespaceLinks | null = null,
 ): Files {
   const dispatch: DispatchFn = async (name, path, args = [], kwargs = {}) => {
@@ -228,11 +229,34 @@ export function answeringFiles(
     if (answer === undefined) throw enotsup('fake', name, path)
     return [await answer(path, args, kwargs), new IOResult()]
   }
-  return new Files(dispatch, null, links, () => row, {
-    ...(row === null ? {} : { prefixes: () => [row.prefix] }),
-    ...options,
-    ledger: false,
-  })
+  return new Files(
+    dispatch,
+    rows.length === 0 && links === null ? null : readers(rows, links),
+    null,
+    { ...options, ledger: false },
+  )
+}
+
+/**
+ * A namespace's readers over a fixed mount table and link table, for files
+ * that stand outside a workspace; a prefix alone stands for a RAM mount
+ * there. Mirrors Python's `tests.fixtures.readers`.
+ */
+export function readers(
+  rows: readonly (MountRow | string)[] = [],
+  links: NamespaceLinks | null = null,
+  visibility: Visibility | null = null,
+): (sessionId: string | null) => NamespaceReader {
+  const table = rows.map((row): MountRow =>
+    typeof row === 'string' ? { prefix: row, kind: 'ram' } : row,
+  )
+  return (sessionId) =>
+    new NamespaceReader(
+      links,
+      () => table,
+      sessionId,
+      () => visibility,
+    )
 }
 
 const WORKSPACES = new WeakMap<BaseVFS, Workspace>()

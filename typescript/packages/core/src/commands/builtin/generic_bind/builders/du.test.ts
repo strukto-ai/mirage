@@ -76,12 +76,15 @@ async function du(
       ...(table.readTree === undefined ? {} : { read_tree: (p) => table.readTree?.(p) }),
     },
     {},
-    {
-      prefix: '/',
-      kind: 'fake',
-      maxDuEntries: table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries,
-      calls: new Set(table.readTree === undefined ? [] : ['read_tree']),
-    },
+    [
+      {
+        prefix: '/',
+        kind: 'fake',
+        maxDuEntries:
+          table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries,
+        calls: new Set(table.readTree === undefined ? [] : ['read_tree']),
+      },
+    ],
     links,
   )
   return runWithMountGate('/', MountMode.WRITE, async () =>

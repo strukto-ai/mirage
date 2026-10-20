@@ -77,8 +77,7 @@ export async function runDispatch(
       flags: virtualFlags(bag),
       cwd: PathSpec.fromStrPath(cwd),
       vfs: (
-        vfs ??
-        new Files(dispatch, null, null, () => null, { follow: follow ?? null, ledger: false })
+        vfs ?? new Files(dispatch, null, null, { follow: follow ?? null, ledger: false })
       ).servedBy(null),
       argv,
       ...(signal === undefined ? {} : { signal }),

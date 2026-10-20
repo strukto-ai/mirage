@@ -10,6 +10,7 @@ from mirage.utils.key_prefix import mount_key
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.answers import memory_tree as _make_backend
+from tests.fixtures.readers import readers
 
 
 def _spec(path: str) -> PathSpec:
@@ -184,11 +185,15 @@ def _on_a_mount(descendant: str) -> Context:
     return Context(
         flags={"recursive": True},
         vfs=Files(
-            [
-                MountRow(prefix=p, resource_type="ram", mode=MountMode.READ)
-                for p in ("/", descendant + "/")
-            ],
             _nothing,
+            readers(
+                [
+                    MountRow(
+                        prefix=p, resource_type="ram", mode=MountMode.READ
+                    )
+                    for p in ("/", descendant + "/")
+                ]
+            ),
         ),
     )
 

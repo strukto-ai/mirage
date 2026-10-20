@@ -64,7 +64,7 @@ async function runWget(
   }
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], {
     ...ctx({ flags }),
-    vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
+    vfs: new Files(dispatch, null, null, { ledger: false }),
   })
   if (result === null) throw new Error('null result')
   const [out, io] = result

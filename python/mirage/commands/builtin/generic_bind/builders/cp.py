@@ -33,7 +33,6 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
     serves,
     typed_link,
-    visibility_of,
 )
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
@@ -172,7 +171,6 @@ async def cp(
                 links,
                 ctx.vfs.dispatch,
                 cwd,
-                visibility_of(ctx.vfs),
                 partial(serves, mounts_of(ctx), mount_root(ctx)),
             )
             if links is not None and ctx.vfs is not None

@@ -74,10 +74,8 @@ from mirage.types import (
     PrimitiveMove,
     ReaddirFn,
     StatFn,
-    Visibility,
 )
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError, parent, resolve_path
 from mirage.utils.quote import shell_quote_always
 from mirage.view.namespace_view import followed_stat
@@ -121,8 +119,6 @@ class TransferLinks:
         relay (PrimitiveCopy): the dispatcher's own transfer primitives, which
             copy what a followed link leads to on whatever mount it lives.
         relay_stat (StatFn): the dispatcher's stat, for the same walk.
-        visibility (Visibility | None): the session's visibility; a link
-            it hides is not copied.
         owns (Callable[[str], bool] | None): whether the mount the copy
             runs on serves a path; None where every path is its own.
     """
@@ -132,7 +128,6 @@ class TransferLinks:
     cwd: str
     relay: PrimitiveCopy
     relay_stat: StatFn
-    visibility: Visibility | None = None
     owns: Callable[[str], bool] | None = None
 
 
@@ -555,8 +550,6 @@ async def copy_tree_links(
     shown_dst = target.raw_path.rstrip("/") or target.raw_path
     below = sorted(copies.links.subtree(base), key=lambda row: row[0])
     for virtual, row in below:
-        if not path_visible(copies.visibility, virtual):
-            continue
         if any(within(virtual, root) for root in blocked):
             continue
         rel = virtual[len(base.rstrip("/")) + 1 :]

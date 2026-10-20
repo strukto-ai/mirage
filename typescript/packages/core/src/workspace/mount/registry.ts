@@ -110,6 +110,8 @@ export class MountRegistry {
   fillEnv?: (session: SessionState, names: ReadonlySet<string>) => Promise<void>
   observer: Observer | null = null
   private readonly mountList: MountEntry[]
+  // `mountRows`, built once per change to the mount list.
+  private rowCache: MountRow[] | null = null
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
@@ -427,6 +429,7 @@ export class MountRegistry {
     if (this.cacheStore !== null) this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
+    this.rowCache = null
     if (norm === '/') this.rootRef = m
     return m
   }
@@ -446,6 +449,7 @@ export class MountRegistry {
       throw new Error(`no mount at prefix: ${norm}`)
     }
     const [removed] = this.mountList.splice(idx, 1)
+    this.rowCache = null
     if (removed === undefined) {
       throw new Error(`no mount at prefix: ${norm}`)
     }
@@ -554,22 +558,27 @@ export class MountRegistry {
   }
 
   /**
-   * What the `Files` facade knows of the mount serving a path, or null when
-   * none does: the functions its VFS answers are the ones its mount read
-   * when it was mounted (`MountEntry.calls`). Mirrors Python's mount_rows.
+   * One row per registered mount, for the namespace reader the dispatcher
+   * hands out; built once per change to the mount list. The functions a VFS
+   * answers are the ones its mount read when it was mounted
+   * (`MountEntry.calls`); who is told of a mount is read off the mount when
+   * asked, since a session's documents mount is narrowed after it is made.
+   * Mirrors Python's `mount_rows`.
    */
-  mountOwner(path: string): MountRow | null {
-    const mount = this.tryMountFor(path)
-    if (mount === null) return null
-    const vfs = mount.vfs
-    return {
-      prefix: mount.prefix,
-      kind: vfs.name,
-      maxDuEntries: vfs.maxDuEntries,
-      calls: mount.calls,
-      maxGlobMatches: vfs.maxGlobMatches,
-      searchable: vfs.searchable,
-    }
+  mountRows(): MountRow[] {
+    this.rowCache ??= this.mountList.map((mount) => {
+      const vfs = mount.vfs
+      return {
+        prefix: mount.prefix,
+        kind: vfs.name,
+        visible: (sessionId: string | null) => mount.visible === null || mount.visible(sessionId),
+        maxDuEntries: vfs.maxDuEntries,
+        calls: mount.calls,
+        maxGlobMatches: vfs.maxGlobMatches,
+        searchable: vfs.searchable,
+      }
+    })
+    return [...this.rowCache]
   }
 
   /** The mounts the session a call through a facade of `sessionId` runs as

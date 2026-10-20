@@ -117,7 +117,7 @@ async def test_a_run_binds_what_its_kind_decides(builder, split):
         read=builder.read,
         pass_through=builder.pass_through,
     )
-    ctx = Context(vfs=Files([], _nothing, ledger=False))
+    ctx = Context(vfs=Files(_nothing, ledger=False))
     await _bind(run, None, None).fn(None, [], [], ctx)
     assert seen == [Reading(split=split)]
     assert _READINGS.get() is None
@@ -143,7 +143,7 @@ async def test_a_stream_hook_changes_only_the_streamed_read():
             None,
             [PathSpec.from_str_path("/f")],
             [],
-            Context(vfs=Files([], _nothing, ledger=False)),
+            Context(vfs=Files(_nothing, ledger=False)),
         )
     finally:
         reset_mount_gate(token)

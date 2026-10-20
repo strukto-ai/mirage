@@ -27,6 +27,7 @@ import {
   type WalkErrno,
 } from '../../../types.ts'
 import { Files } from '../../../workspace/files.ts'
+import { readers } from '../../../test-utils.ts'
 import { isDotWalkError } from '../../../errors/fs.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { Context } from '../../config.ts'
@@ -171,7 +172,9 @@ describe('the link resolver', () => {
     const base: Context = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
     expect(linkResolver(base)).toBeNull()
     expect(linkResolver({ ...base, vfs: new Files(dispatch) })).toBeNull()
-    expect(linkResolver({ ...base, vfs: new Files(dispatch, null, table({})) })?.cwd).toBe('/')
+    expect(linkResolver({ ...base, vfs: new Files(dispatch, readers([], table({}))) })?.cwd).toBe(
+      '/',
+    )
   })
 })
 
@@ -198,10 +201,7 @@ function table(targets: Record<string, string>): NamespaceLinks {
 
 function files(prefixes: string[], links: NamespaceLinks | null = null, vis?: Visibility) {
   const [dispatch] = recorder()
-  return new Files(dispatch, null, links, () => null, {
-    prefixes: () => prefixes,
-    ...(vis === undefined ? {} : { visibility: () => vis }),
-  })
+  return new Files(dispatch, readers(prefixes, links, vis ?? null))
 }
 
 describe('owedNames', () => {
@@ -296,9 +296,7 @@ describe('mountsOf', () => {
   it('walks and answers as its mount inside a mount scope, and across outside one', async () => {
     const row = { prefix: '/data/', kind: 'ram', calls: new Set(['read_tree']) }
     const [dispatch] = recorder()
-    const ctx = ctxOf(
-      new Files(dispatch, null, null, () => row, { prefixes: () => ['/data/', '/data/inner/'] }),
-    )
+    const ctx = ctxOf(new Files(dispatch, readers([row, '/data/inner/'])))
     const across = mountsOf(ctx)
     expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([true, ''])
     expect(across?.descendants('/data')).toEqual([])

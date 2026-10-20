@@ -49,6 +49,7 @@ import {
 import type { CallerDispatchFn } from '../../../../context/session_context.ts'
 import { classifyPaths } from '../../../../utils/hidden.ts'
 import { Files } from '../../../../workspace/files.ts'
+import { readers } from '../../../../test-utils.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 const BUILDER = fileURLToPath(
@@ -2670,10 +2671,7 @@ describe('blockingRef', () => {
 /** The session's files over a fake dispatcher, a mount table and a hide list. */
 function filesOver(dispatch: CallerDispatchFn, roots: string[] = [], hidden: string[] = []): Files {
   const vis = hidden.length === 0 ? null : { ...DEFAULT_VISIBILITY, paths: classifyPaths(hidden) }
-  return new Files(dispatch, null, null, () => null, {
-    prefixes: () => ['/', ...roots.map((root) => `${root}/`)],
-    visibility: () => vis,
-  })
+  return new Files(dispatch, readers(['/', ...roots.map((root) => `${root}/`)], null, vis))
 }
 
 /** A dispatcher that records every op and lists nothing. */

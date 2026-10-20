@@ -95,7 +95,8 @@ export async function handleReadlink(
     newline = true
   }
   const follow = (v: string): string => namespace.follow(v)
-  const readlink = (v: string): string | null => namespace.readlink(v)
+  const reader = namespace.readers(() => session.visibility)(session.sessionId)
+  const readlink = (v: string): string | null => reader.readlink(v)
   const lines: string[] = []
   let exitCode = 0
   for (const op of operands) {
@@ -117,7 +118,6 @@ export async function handleReadlink(
             false,
             readlink,
             dispatchStat(dispatch),
-            session.visibility,
           ),
         )
         continue

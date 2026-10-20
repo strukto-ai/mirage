@@ -12,19 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
+
 import pytest
 
 from mirage.commands.errors import PartialOutputError, UsageError
+from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent
 from mirage.io import IOResult
 from mirage.io.errors import PipeClosed
-from mirage.io.types import materialize
-from mirage.types import PathSpec, Producer
+from mirage.io.types import Rows, materialize
+from mirage.types import HiddenPaths, PathSpec, Producer, Visibility
 from mirage.workspace.executor.command.handler import (
     cli_voice,
     mount_voice,
     run_handler,
 )
+from mirage.workspace.files import Files
+from mirage.workspace.session import SessionState
 
 PRODUCER = Producer(command="cat", prefixes=("/data/",))
 MOUNT = mount_voice("cat", [])
@@ -134,3 +139,33 @@ async def test_an_answer_carries_the_producer_and_words_a_deferred_failure(
     assert io.producer is PRODUCER
     assert await materialize(out) == stdout
     assert (io.exit_code, io.stderr) == (1, stderr)
+
+
+@dataclass(frozen=True)
+class _Row:
+    path: PathSpec
+
+
+async def test_rows_outside_a_workspace_lose_what_the_bound_session_hides():
+    # Files with no namespace behind them hold no link and no mount, but
+    # the session a line binds still hides its paths from the rows.
+    async def listed(shown):
+        return "".join(row.path.virtual + "\n" for row in shown).encode()
+
+    async def body():
+        rows = [_Row(PathSpec.from_str_path(p)) for p in ("/m/a", "/m/b.txt")]
+        return None, IOResult(rows=Rows(rows, listed))
+
+    async def no_calls(*_args, **_kwargs):
+        raise AssertionError("no op expected")
+
+    session = SessionState(
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(patterns=("/m/*.txt",))),
+    )
+    token = set_current_session(session)
+    try:
+        stdout, _io = await _run(body(), vfs=Files(no_calls))
+    finally:
+        reset_current_session(token)
+    assert await materialize(stdout) == b"/m/a\n"

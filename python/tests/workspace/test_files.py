@@ -67,16 +67,16 @@ class TestMountPrefixes:
         assert "/data/" in ops.mount_prefixes()
 
     def test_mount_prefixes_reflects_unmount(self):
-        ops, _ = make_ops()
-        ops.unmount("/data/")
-        assert "/data/" not in ops.mount_prefixes()
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.unmount("/data/"))
+        assert "/data/" not in ws.vfs.mount_prefixes()
 
     def test_a_derived_facade_sees_an_unmount(self):
-        # A derived facade shares the mount list so a later mount reaches
-        # both; an unmount has to reach both the same way.
-        ops, _ = make_ops()
-        derived = ops._for_session("agent")
-        ops.unmount("/data/")
+        # Every facade reads the one mount table the namespace owns, so an
+        # unmount reaches a derived facade with nothing to keep in step.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        derived = ws.vfs._for_session("agent")
+        run(ws.unmount("/data/"))
         assert "/data/" not in derived.mount_prefixes()
         assert derived.mount_of("/data/x") != "/data"
 

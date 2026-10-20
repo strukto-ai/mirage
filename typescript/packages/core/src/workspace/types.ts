@@ -16,16 +16,17 @@ import type { OpRecord } from '../observe/record.ts'
 import type { PathSpec } from '../types.ts'
 
 /**
- * What the `Files` facade knows about one mount: its prefix, its VFS's name
- * (recorded on each op), the VFS's du walk budget (null for no cap), the
- * functions the VFS answers itself (the dispatcher's names, `read_range`
- * for a ranged read), how many matches one glob word keeps there, and the
- * globs its search covers (null for every file). Mirrors Python's
- * `MountRow`.
+ * What the namespace's reader knows about one mount: its prefix, its VFS's
+ * name (recorded on each op), which sessions are told of it (null for every
+ * one), the VFS's du walk budget (null for no cap), the functions the VFS
+ * answers itself (the dispatcher's names, `read_range` for a ranged read),
+ * how many matches one glob word keeps there, and the globs its search covers
+ * (null for every file). Mirrors Python's `MountRow`.
  */
 export interface MountRow {
   readonly prefix: string
   readonly kind: string
+  readonly visible?: ((sessionId: string | null) => boolean) | null
   readonly maxDuEntries?: number | null
   readonly calls?: ReadonlySet<string>
   readonly maxGlobMatches?: number | null

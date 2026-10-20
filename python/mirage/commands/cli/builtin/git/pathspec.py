@@ -24,7 +24,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.shell.bytes import byte_view
 from mirage.utils.fnmatch import fnmatch
-from mirage.workspace.files import view_of
+from mirage.workspace.files import reader_of
 
 T = TypeVar("T")
 
@@ -184,8 +184,7 @@ def visible_path(location: RepoLocation, relative: str) -> bool:
         location (RepoLocation): repository and the session's files.
         relative (str): Git's repository-relative entry name.
     """
-    vfs = location.vfs
-    return vfs is None or view_of(vfs).visible(
+    return location.vfs is None or reader_of(location.vfs).visible(
         location.worktree.join(relative)
     )
 

@@ -92,5 +92,5 @@ def view():
             return None, None
         raise AssertionError(f"unexpected op {op}")
 
-    record = Files([], dispatch)
+    record = Files(dispatch)
     return record, calls, tree, dirs

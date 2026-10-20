@@ -325,7 +325,7 @@ def repo_context(ws) -> Context:
         ws (Workspace): the workspace under test.
     """
     return Context(
-        vfs=Files(ws._registry.mount_rows(), ws.dispatch, links=ws._namespace),
+        vfs=Files(ws.dispatch, ws._namespace.readers(lambda _session: None)),
         session=session_view(SessionState(session_id="test")),
     )
 

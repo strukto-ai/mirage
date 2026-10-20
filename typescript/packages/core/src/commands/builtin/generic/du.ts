@@ -14,13 +14,12 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { PathSpec, type Visibility } from '../../../types.ts'
+import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { UsageError } from '../../errors.ts'
 import { usageHint } from '../../spec/usage.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
-import { pathVisible, visibleRecords } from '../../../utils/hidden.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
@@ -31,11 +30,10 @@ import { scaledSize } from '../utils/formatting.ts'
 import { quoteText } from '../../quote.ts'
 import { INTMAX } from '../constants.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
-import type { Files } from '../../../workspace/files.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import { posixPhrase } from '../../../errors/posix.ts'
-import { mountsOf, visibilityOf } from '../utils/links.ts'
+import { mountsOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type DuEntries = [entries: [string, number][], total: number]
@@ -161,19 +159,14 @@ function cwdSpec(cwd: PathSpec | string): PathSpec {
 /**
  * Whether an operand holds anything, for the unstattable case.
  */
-async function duHasContent(
-  vis: Visibility | undefined,
-  computeEntries: ComputeEntries,
-  path: PathSpec,
-): Promise<boolean> {
+async function duHasContent(computeEntries: ComputeEntries, path: PathSpec): Promise<boolean> {
   try {
     const [entries] = await computeEntries(path)
-    // The visibility filter is what makes this safe to ask after the
-    // dispatcher already said no: `computeEntries` runs on the bound
-    // accessor, which knows nothing of hides, so counting its raw answer
-    // would confirm a walled-off subtree's parent. Entries are lifted onto
-    // virtual paths first, since that is the space a hide is written in.
-    return toVirtual(entries, path).some(([leaf]) => pathVisible(vis, leaf))
+    // Safe to ask after the dispatcher already said no: `computeEntries`
+    // walks through the command's files, whose every listing the dispatcher
+    // filters by the session's hides, so a walled-off subtree answers no
+    // entries and its parent stays unconfirmed.
+    return entries.length > 0
   } catch {
     // This runs only after stat already failed, to tell an implicit
     // directory from an absent path. Backends raise their own error types
@@ -462,10 +455,8 @@ async function duOne(
   flags: DuFlags,
   mounts: MountView | null,
   directories?: () => readonly string[],
-  vfs?: Files,
 ): Promise<[string[], number, PathRecord[] | null]> {
   const label = path.rawPath
-  const vis = visibilityOf(vfs) ?? undefined
   const roots = mounts?.descendants(path.virtual) ?? []
 
   if (flags.s && !flags.S && roots.length === 0 && !pathsScoped([path])) {
@@ -482,12 +473,9 @@ async function duOne(
   const rootKey = norm(path.virtual)
   const under = rootKey.replace(/\/$/, '') + '/'
   const met = dropShadowed(
-    visibleRecords(
-      vis,
-      (directories?.() ?? [])
-        .filter((d) => norm(d).startsWith(under))
-        .map((d): PathRecord => ({ path: PathSpec.fromStrPath(d), run })),
-    ),
+    (directories?.() ?? [])
+      .filter((d) => norm(d).startsWith(under))
+      .map((d): PathRecord => ({ path: PathSpec.fromStrPath(d), run })),
     roots,
   )
   const walked = (directories?.() ?? []).some((d) => norm(d) === rootKey)
@@ -506,9 +494,9 @@ async function duOne(
     run,
     size,
   }))
-  // Same honesty rule for hidden and shadowed leaves: the total is the sum
-  // of what survived, never the backend's own number.
-  const kept = dropShadowed(visibleRecords(vis, counted), roots)
+  // Shadowed leaves drop: the total is the sum of what survived, never the
+  // backend's own number.
+  const kept = dropShadowed(counted, roots)
   const entries = leavesOf(kept)
   if (kept.length !== counted.length || roots.length > 0) {
     total = entries.reduce((acc, [, size]) => acc + size, 0)
@@ -574,7 +562,6 @@ export async function du(
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
-  vfs?: Files,
   inaccessible?: () => readonly (readonly [string, string | null])[],
   // Asked before each operand's walk whether an earlier one already counted
   // it, which GNU then skips without a row.
@@ -593,7 +580,6 @@ export async function du(
       flags,
       mounts,
       directories,
-      vfs,
     )
     lines.push(...block)
     grand += total
@@ -664,7 +650,7 @@ export async function duGeneric(
     ctx.cwd,
     resolveGlob,
     stat,
-    (p) => duHasContent(visibilityOf(ctx.vfs) ?? undefined, computeEntries, p),
+    (p) => duHasContent(computeEntries, p),
     vfsStatPath(ctx.vfs) ?? null,
   )
   const out = await du(
@@ -677,7 +663,6 @@ export async function duGeneric(
     mountsOf(ctx) ?? null,
     unreadable,
     directories,
-    ctx.vfs,
     inaccessible,
     repeated,
   )

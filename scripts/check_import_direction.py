@@ -110,12 +110,6 @@ RULES: tuple[Rule, ...] = (
         ("commands",),
         ("cache", "vfs", "workspace/mount"),
         names=VFS_OBJECTS,
-        # The link and mount views are built from the namespace here, and
-        # only here, until they hide in one place.
-        allowed=(
-            ("commands/builtin/utils/links", "namespace_of"),
-            ("commands/builtin/utils/links", "namespaceOf"),
-        ),
     ),
     *(
         Rule(
@@ -618,7 +612,7 @@ SELFTEST_PY = [
     (
         "commands/builtin/utils/links.py",
         "from mirage.workspace.files import namespace_of",
-        [],
+        ["mirage.workspace.files:namespace_of"],
     ),
     (
         "commands/cli/builtin/gh/planted.py",
@@ -665,7 +659,7 @@ SELFTEST_TS_RULES = [
     (
         "core/src/commands/builtin/utils/links.ts",
         "import { namespaceOf } from '../../../workspace/files.ts'",
-        [],
+        ["typescript/packages/core/src/workspace/files.ts:namespaceOf"],
     ),
     (
         "core/src/commands/builtin/generic/planted.ts",

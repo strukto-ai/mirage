@@ -248,12 +248,12 @@ export async function runOnMount(
         admission: ctx.admission,
         stdin: opts.stdin ?? null,
         cwd: PathSpec.fromStrPath(session.cwd),
-        vfs: new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
-          prefixes: () => registry.mountPrefixes(),
-          visibility: () => session.visibility,
-          follow: ctx.follow ?? null,
-          ledger: false,
-        }),
+        vfs: new Files(
+          dispatch,
+          namespace === undefined ? null : namespace.readers(() => session.visibility),
+          null,
+          { follow: ctx.follow ?? null, ledger: false },
+        ),
         env: envSnapshot(session),
         session: sessionView(session, registry.policies, context.frame.diagnostics),
         ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),

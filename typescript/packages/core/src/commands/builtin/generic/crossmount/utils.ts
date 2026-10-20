@@ -26,7 +26,7 @@ import { eisdir, isFsError } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { type FileStat, FileType, type Visibility } from '../../../../types.ts'
+import { type FileStat, FileType } from '../../../../types.ts'
 import type { Context } from '../../../config.ts'
 import type { DispatchFn, OperandRun, RunSingle } from './types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
@@ -189,7 +189,6 @@ export function transferLinksOf(
   links: LinkView,
   dispatch: DispatchFn,
   cwd: string,
-  visibility: Visibility | undefined,
   owns?: (virtual: string) => boolean,
 ): TransferLinks {
   const relayStat = statOp(dispatch)
@@ -197,7 +196,6 @@ export function transferLinksOf(
     links,
     dispatch,
     cwd,
-    ...(visibility !== undefined ? { visibility } : {}),
     ...(owns !== undefined ? { owns } : {}),
     relay: {
       readBytes: readBytesOp(dispatch),

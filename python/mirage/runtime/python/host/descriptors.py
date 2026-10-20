@@ -16,6 +16,7 @@ import errno
 import functools
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import IO, Any, cast
 
@@ -36,7 +37,6 @@ from mirage.runtime.python.host.syscall import syscall
 from mirage.runtime.types import VFSStat
 from mirage.types import PathSpec
 from mirage.utils.path import CycleError, resolve_path
-from mirage.view.types import NamespaceLinks
 
 logger = logging.getLogger(__name__)
 
@@ -131,16 +131,20 @@ class Descriptors:
     Args:
         adapter (RuntimeFiles): the file adapter files land through.
         host (Any): the host ``os`` functions the router snapshotted.
-        links (NamespaceLinks | None): the namespace's links, which a
-            walk follows; None while the workspace keeps none.
+        follow (Callable[[str], str] | None): where a path leads, every
+            link followed, as the session sees the namespace; None while
+            the workspace keeps no link.
     """
 
     def __init__(
-        self, adapter: RuntimeFiles, host: Any, links: NamespaceLinks | None
+        self,
+        adapter: RuntimeFiles,
+        host: Any,
+        follow: Callable[[str], str] | None,
     ) -> None:
         self._adapter = adapter
         self._host = host
-        self._links = links
+        self._follow = follow
         self._open: dict[int, Descriptor] = {}
         self._unnumbered: dict[int, Descriptor] = {}
 
@@ -178,14 +182,14 @@ class Descriptors:
                 removal acts on the name itself.
         """
         spec = PathSpec.from_str_path(path, cwd="/")
-        if self._links is None:
+        if self._follow is None:
             return spec.virtual
         try:
-            spelled = walk_spelling(spec, self._links.follow)
+            spelled = walk_spelling(spec, self._follow)
             head, _, name = spelled.rpartition("/")
             if follow or name in ("", ".", ".."):
-                return resolve_path(self._links.follow(spelled), "/")
-            above = resolve_path(self._links.follow(head or "/"), "/")
+                return resolve_path(self._follow(spelled), "/")
+            above = resolve_path(self._follow(head or "/"), "/")
         except CycleError:
             raise fs_error(path, FsCondition.ELOOP) from None
         return above.rstrip("/") + "/" + name

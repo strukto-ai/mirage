@@ -27,7 +27,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
 import { joinOrAbort } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { viewOf, type Files } from '../../files.ts'
+import { readerOf, type Files } from '../../files.ts'
 
 /**
  * What a voice says for one failure: the bytes the handler printed before
@@ -284,8 +284,8 @@ async function rendered(
   io.rows = null
   let items = [...rows.items]
   if (vfs !== null) {
-    const view = viewOf(vfs)
-    items = items.filter((row) => view.visible(row.path))
+    const reader = readerOf(vfs)
+    items = items.filter((row) => reader.visible(row.path))
   }
   return [await rows.render(items), io]
 }

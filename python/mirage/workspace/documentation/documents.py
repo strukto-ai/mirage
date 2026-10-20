@@ -193,7 +193,7 @@ class Documents:
                 == self._session(session_id).created_at
             )
             self.views[path] = view
-            self._files.set_mounts(self._registry.mount_rows())
+            self._registry.rows_changed()
         if session is None:
             view.global_view = True
         else:

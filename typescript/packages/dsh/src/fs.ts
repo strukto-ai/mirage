@@ -28,14 +28,12 @@ import type {
 } from '@deepseek-ai/dsh-fs'
 import { DiskVFS } from '@struktoai/mirage-node'
 import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
-import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { type Files, namespaceOf } from '@struktoai/mirage-core/workspace/files'
+import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
-import { pathVisible } from '@struktoai/mirage-core/utils/hidden'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
 import {
@@ -45,8 +43,6 @@ import {
   normalizeLineEndings,
   restoreLineEndings,
 } from './text.ts'
-
-type Host = Awaited<Context['mirage']['ready']>
 
 // Read off the seam's own signature rather than imported: the policy type
 // lives in `@deepseek-ai/dsh-sandbox`, which reaches this package only as a
@@ -183,7 +179,6 @@ export class MirageFileSystem extends FileSystem {
   static readonly inject = ['mirage']
 
   private fsOps: Files | null = null
-  private host: Host | null = null
   private readonly cwd: string
   private readonly sessionId: string | undefined
   private readonly diffBasisMaxBytes: number
@@ -207,50 +202,31 @@ export class MirageFileSystem extends FileSystem {
   //
   // `ready` does not hydrate: a workspace freshly attached to a shared
   // store still holds a minted default session and an empty link table
-  // until its first op loads both. This adapter reads the session and
-  // the links outside the dispatcher, so it hydrates before either is
+  // until its first op loads both. This adapter reads the links off the
+  // dispatcher's reader outside a dispatch, so it hydrates before they are
   // consulted, or a persisted hide would be judged by the wrong session.
   private async files(signal?: AbortSignal, operation = 'ready'): Promise<Files> {
     if (this.fsOps === null) {
       const host = await this.ctx.mirage.ready
       await host.ensureSessionsLoaded()
       await host.namespace.ensureLoaded()
-      this.host = host
       this.fsOps = this.sessionId === undefined ? host.vfs : new Session(host, this.sessionId).vfs
     }
     assertNotAborted(signal, operation)
     return this.fsOps
   }
 
-  private get links(): NamespaceLinks | null {
+  /**
+   * The namespace as the session this adapter's ops run as sees it: the
+   * dispatcher's reader, so a link the session cannot see is never followed
+   * (the typed path reaches the dispatcher and is refused as absent, not
+   * resolved to the visible target it points at), and never listed.
+   */
+  private get reader(): ReturnType<typeof readerOf> {
     if (this.fsOps === null) {
       throw new Error('mirage: filesystem used before the workspace is ready')
     }
-    return namespaceOf(this.fsOps).links
-  }
-
-  /**
-   * The session the dispatcher judges this adapter's ops as, asked of the
-   * workspace so it is the one a dispatch from this context will bind:
-   * the configured session, unless an ambient one of this workspace is
-   * kept (a callback reaching `ctx.fs` from inside its `shell`).
-   */
-  private session(): SessionState {
-    if (this.host === null) {
-      throw new Error('mirage: filesystem used before the workspace is ready')
-    }
-    return this.host.sessionForOps(this.sessionId ?? null)
-  }
-
-  /**
-   * Whether the session may be told a path exists. The link table is
-   * read here, outside the dispatcher, so it is read the way the dispatcher would:
-   * a link the session cannot see is never followed (the typed path
-   * reaches the dispatcher and is refused as absent, not resolved to the
-   * visible target it points at), and never listed.
-   */
-  private visible(path: string): boolean {
-    return pathVisible(this.session().visibility, path)
+    return readerOf(this.fsOps)
   }
 
   /**
@@ -316,10 +292,8 @@ export class MirageFileSystem extends FileSystem {
   }
 
   private follow(path: string): string {
-    const links = this.links
-    if (links === null || !this.visible(path)) return path
     try {
-      return links.follow(path)
+      return this.reader.resolve(path)
     } catch (err) {
       throw mapMirageError(err, 'resolve', path)
     }
@@ -443,12 +417,10 @@ export class MirageFileSystem extends FileSystem {
       normalized === '/'
         ? '/'
         : posix.join(this.follow(posix.dirname(normalized)), posix.basename(normalized))
-    // The leaf is read off the link table outside the dispatcher, so it is
-    // gated the way the dispatcher would gate it: a link the session cannot
+    // The leaf is read off the dispatcher's reader: a link the session cannot
     // see is not a link here, and the stat below reports it absent.
-    const links = this.links
-    if (links?.isLink(parentFollowed) === true && this.visible(parentFollowed)) {
-      const linkTarget = links.readlink(parentFollowed) ?? ''
+    const linkTarget = this.reader.readlink(parentFollowed)
+    if (linkTarget !== null) {
       return {
         version: FsVersion(`link:${linkTarget}`),
         type: 'symlink',
@@ -587,19 +559,7 @@ export class MirageFileSystem extends FileSystem {
     }
     // Namespace symlinks live above every backend, so a listing merges
     // them in here exactly as mirage's own ls does.
-    const links = this.links
-    if (links !== null) {
-      const base = key === '/' ? '/' : `${key}/`
-      for (const linkPath of links.symlinkTargets().keys()) {
-        if (
-          linkPath.startsWith(base) &&
-          !linkPath.slice(base.length).includes('/') &&
-          this.visible(linkPath)
-        ) {
-          names.add(linkPath.slice(base.length))
-        }
-      }
-    }
+    for (const name of this.reader.linkNames(key)) names.add(name)
     const entries: FsDirEntry[] = []
     for (const name of [...names].sort(compareCodePoints)) {
       // Per entry, not just at the entry point: a listing is one classification

@@ -45,7 +45,7 @@ from mirage.utils.stat_view import (
     mtime_ns,
     posix_mode,
 )
-from mirage.workspace.files import Files, namespace_of
+from mirage.workspace.files import Files, reader_of
 from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -1183,12 +1183,22 @@ class MountCore:
                 which may loop.
         """
         virtual = self.resolve(path)
-        links = namespace_of(self._files).links
-        if links is None:
-            return virtual
-        if follow:
-            return links.follow(virtual)
-        return links.follow_parent(virtual)
+        reader = reader_of(self._files)
+        # Judged as the bound session judges every op (``_op``): outside
+        # it the facade's session is the default one, whose profile may
+        # hide a link this session's handles were opened through.
+        token = (
+            None
+            if self._session is None
+            else set_current_session(self._session)
+        )
+        try:
+            if follow:
+                return reader.resolve(virtual)
+            return reader.resolve_parent(virtual)
+        finally:
+            if token is not None:
+                reset_current_session(token)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.

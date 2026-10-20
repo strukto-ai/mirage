@@ -25,6 +25,7 @@ from mirage.errors.fs import eacces
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
+from tests.fixtures.readers import readers
 
 _DIRS = {"/a": ["/a/d", "/a/f", "/a/m"], "/a/d": ["/a/d/g"], "/a/m": []}
 _ROOTS = ["/a", "/a/m"]
@@ -36,11 +37,15 @@ async def _nothing(op: str, path: PathSpec, **_):
 
 def _files() -> Files:
     return Files(
-        [
-            MountRow(prefix=r + "/", resource_type="ram", mode=MountMode.READ)
-            for r in _ROOTS
-        ],
         _nothing,
+        readers(
+            [
+                MountRow(
+                    prefix=r + "/", resource_type="ram", mode=MountMode.READ
+                )
+                for r in _ROOTS
+            ]
+        ),
     )
 
 

@@ -14,7 +14,7 @@
 
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
-import { type Files, namespaceOf } from '@struktoai/mirage-core/workspace/files'
+import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 import {
   ChunkedHandle,
   FileTable,
@@ -38,7 +38,11 @@ import {
   mtimeMs,
   posixMode,
 } from '@struktoai/mirage-core/utils/stat_view'
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import {
+  callsAs,
+  currentCaller,
+  runWithSession,
+} from '@struktoai/mirage-core/context/session_context'
 import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
@@ -652,12 +656,16 @@ export class MountCore {
    */
   identity(path: string, follow = true): string {
     const virtual = this.resolve(path)
-    const links = namespaceOf(this.files).links
-    if (links === null) return virtual
-    if (follow) return links.follow(virtual)
+    const reader = readerOf(this.files)
     // An op on the entry itself (unlink, rename, lsetattr) names the link,
     // which may loop: only the links above it are followed.
-    return links.followParent(virtual)
+    const resolved = (): string =>
+      follow ? reader.resolve(virtual) : reader.resolveParent(virtual)
+    // Judged as the bound session judges every op (`op`): outside it the
+    // facade's session is the default one, whose profile may hide a link
+    // this session's handles were opened through.
+    if (this.session === null) return resolved()
+    return callsAs({ ...currentCaller(), session: this.session }, resolved)()
   }
 
   /**

@@ -350,7 +350,7 @@ async def test_ensure_dir_tolerates_a_parent_another_worker_just_made():
         raise AssertionError(f"unexpected op {op}")
 
     await asyncio.gather(
-        ensure_dir(Files([], dispatch), PathSpec.from_str_path("/work/out")),
-        ensure_dir(Files([], dispatch), PathSpec.from_str_path("/work/out")),
+        ensure_dir(Files(dispatch), PathSpec.from_str_path("/work/out")),
+        ensure_dir(Files(dispatch), PathSpec.from_str_path("/work/out")),
     )
     assert dirs == {"/work", "/work/out"}

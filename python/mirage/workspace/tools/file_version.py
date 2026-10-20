@@ -16,7 +16,7 @@ import base64
 import hashlib
 
 from mirage.utils.path import resolve_path
-from mirage.workspace.files import Files, namespace_of
+from mirage.workspace.files import Files, reader_of
 
 
 class StaleMirageFileError(Exception):
@@ -86,10 +86,10 @@ class FileVersionTracker:
             str: The path with symlink prefixes resolved and its dots
             collapsed.
         """
-        links = namespace_of(self.vfs).links
-        if links is None:
+        reader = reader_of(self.vfs)
+        if not reader.linked:
             return resolve_path(path, "/")
-        return links.follow(resolve_path(links.follow(path), "/"))
+        return reader.resolve(resolve_path(reader.resolve(path), "/"))
 
     async def _current_version(self, path: str) -> str | None:
         if not await self.vfs.exists(path):

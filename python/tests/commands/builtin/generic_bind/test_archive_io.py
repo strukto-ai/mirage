@@ -38,7 +38,7 @@ def _probe(stat_error: type[OSError], listed: bool) -> Any:
     token = set_mount_gate("/", MountMode.WRITE)
     try:
         return is_dir_of(
-            command_files(Context(vfs=Files([], dispatch, ledger=False)))
+            command_files(Context(vfs=Files(dispatch, ledger=False)))
         )
     finally:
         reset_mount_gate(token)

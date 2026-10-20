@@ -37,10 +37,10 @@ import {
   type PredNode,
 } from '../../../core/generic/find_eval.ts'
 import { printfKind } from '../../../core/generic/find_eval.ts'
-import { pathVisible } from '../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { linksOf, visibilityOf } from '../utils/links.ts'
+import { linksOf } from '../utils/links.ts'
+import { readerOf } from '../../../workspace/files.ts'
 
 const ENC = new TextEncoder()
 
@@ -460,11 +460,7 @@ export function findGeneric(
           stat !== undefined
             ? await applyMtimeFilter(rootRows, effMtimeMin, effMtimeMax, stat)
             : rootRows
-        first = respellRaw(
-          checked.filter((row) => pathVisible(visibilityOf(ctx.vfs), row)),
-          root.virtual,
-          root.rawPath,
-        )
+        first = respellRaw(checked, root.virtual, root.rawPath)
         for (const row of first) yield ENC.encode(row + '\n')
       }
       let keys: string[]
@@ -539,8 +535,10 @@ export function findGeneric(
       const unpruned = dropPruned(filtered, tree)
       // Hidden rows drop here, above the native-op/walk fork, so a mount's
       // visibility behavior cannot depend on whether its backend ships a
-      // native find op.
-      const visibleRows = unpruned.filter((row) => pathVisible(visibilityOf(ctx.vfs), row))
+      // native find op: a walk through the dispatcher meets no hidden row,
+      // but a backend's own find knows nothing of hides.
+      const reader = ctx.vfs === undefined ? null : readerOf(ctx.vfs)
+      const visibleRows = reader === null ? unpruned : unpruned.filter((row) => reader.visible(row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) records.push({ path: matchedPath(r, root), run })

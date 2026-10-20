@@ -1,5 +1,5 @@
 {
-  "baseline": 3220,
+  "baseline": 3219,
  "modules": {
   "runtime/sandbox/microsandbox/config": {
    "typescript_only": {
@@ -859,8 +859,8 @@
   "workspace/files": {
    "typescript_only": {
     "callerFilesOf": "TypeScript has no package-private: Files assigns it from its static block so withCaller reaches the private forCaller.",
-    "namespaceOfFiles": "TypeScript has no package-private: Files assigns it from its static block so namespaceOf reaches the private members; Python's namespace_of reads them directly.",
-    "viewOfFiles": "TypeScript has no package-private: Files assigns it from its static block so viewOf reaches the private members; Python's view_of reads them directly.",
+    "operandsOfFiles": "TypeScript has no package-private: Files assigns it from its static block so operandsOf reaches the private follow; Python's operands_of reads it directly.",
+    "readerOfFiles": "TypeScript has no package-private: Files assigns it from its static block so readerOf reaches the private reader; Python's reader_of calls it directly.",
     "withCaller": "The door to the private forCaller for the file tool and explain.vfs; Python's task context carries the caller instead, so it has no counterpart."
    }
   },

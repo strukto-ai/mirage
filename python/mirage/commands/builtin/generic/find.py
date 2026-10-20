@@ -23,7 +23,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context import session_visibility
 from mirage.core.generic import find_eval
 from mirage.core.generic.find import modified_ts, walk_find
 from mirage.core.generic.find_eval import printf_kind
@@ -33,8 +32,7 @@ from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
-from mirage.types import FileStat, FileType, FindType, PathSpec, Visibility
-from mirage.utils.hidden import path_visible
+from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
 
@@ -380,7 +378,6 @@ async def early_root(
     search: PathSpec,
     args: find_eval.FindArgs,
     start: StartPoint,
-    visibility: Visibility | None,
 ) -> list[str]:
     """Emit an independently known start point before asking for descendants.
 
@@ -391,7 +388,6 @@ async def early_root(
         search (PathSpec): the start point, as the operand named it.
         args (FindArgs): parsed find expression, shared across operands.
         start (StartPoint): the start point as resolve_start found it.
-        visibility (Visibility | None): the session's visibility.
 
     Returns:
         list[str]: the start point's own row, or nothing when it cannot
@@ -402,7 +398,6 @@ async def early_root(
         or args.mtime_min is not None
         or args.mtime_max is not None
         or start.stat is None
-        or not path_visible(visibility, search.virtual)
     ):
         return []
     tree = find_eval.bind_tree(
@@ -515,7 +510,6 @@ async def find_walk_generic(
                 search,
                 args,
                 start,
-                session_visibility(),
             )
             for row in first:
                 yield (row + "\n").encode()

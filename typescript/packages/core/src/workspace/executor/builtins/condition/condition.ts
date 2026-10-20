@@ -46,7 +46,10 @@ export async function handleTest(
   view?: SessionView,
 ): Promise<Result> {
   const links = linkView(
-    new Files(dispatch, null, namespace, () => null, { visibility: () => session.visibility }),
+    new Files(
+      dispatch,
+      namespace.readers(() => session.visibility),
+    ),
   )
   const ctx: CondContext = {
     dispatch,

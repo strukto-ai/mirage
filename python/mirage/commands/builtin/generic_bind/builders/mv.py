@@ -25,7 +25,6 @@ from mirage.commands.builtin.generic_bind.files import (
 from mirage.commands.builtin.utils.links import (
     links_of,
     mounts_of,
-    visibility_of,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -64,7 +63,6 @@ async def mv(
                 links,
                 ctx.vfs.dispatch,
                 ctx.cwd.virtual,
-                visibility_of(ctx.vfs),
             )
             if links is not None and ctx.vfs is not None
             else None

@@ -1208,3 +1208,26 @@ async def test_a_flush_onto_a_name_a_rename_replaces_waits_for_it():
     assert await core.read("/b", 100, 0, reader) == b"old-body"
     assert await core.read("/b", 100, 0, writer) == b"NEW-body"
     assert await ws.vfs.read("/b") == b"fresh"
+
+
+@pytest.mark.asyncio
+async def test_a_sessions_handles_meet_through_a_link_the_default_hides():
+    # Handle keys are resolved outside the op, where the facade would judge
+    # links by the default profile: one hiding the link must not split a
+    # handle opened through it from one on its target, under a session
+    # that sees both.
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("tee /a.txt", stdin=b"hello world")
+    await ws.shell("ln -s a.txt /lk")
+    await ws.set_session_profile(
+        ws.default_session_id, {"paths": {"hide": ["/lk"]}}
+    )
+    core = MountCore(ws.vfs, session=ws.create_session("agent", profile={}))
+    assert core.identity("/lk") == core.identity("/a.txt")
+    first = await core.open("/a.txt", os.O_WRONLY)
+    await core.write("/a.txt", b"QUEUED", 0, first)
+    second = await core.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    await core.write("/lk", b"BB\n", 0, second)
+    await core.release(second)
+    await core.release(first)
+    assert await core.read("/a.txt", 100, 0, None) == b"BB\n"

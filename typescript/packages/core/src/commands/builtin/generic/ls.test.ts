@@ -35,6 +35,7 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
+import { readers } from '../../../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -178,8 +179,7 @@ describe('structure-only directories', () => {
   // the namespace merely owes children is still descended. Each run is a
   // mount's own, through its table (`io`), so those roots are boundaries.
   const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
-  const owing = (...prefixes: string[]): Files =>
-    new Files(nothing, null, null, () => null, { prefixes: () => prefixes })
+  const owing = (...prefixes: string[]): Files => new Files(nothing, readers(prefixes))
 
   // A structure chain (a link's ancestors) continues below the first
   // level, so -R descends it: only a mount root stops the walk.

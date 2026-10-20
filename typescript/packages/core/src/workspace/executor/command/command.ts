@@ -326,12 +326,12 @@ export async function handleCommand(
     )
   // The command's own files keep no ledger: the dispatcher accounts for the line.
   const commandFiles = (follow: FollowOperands | null): Files =>
-    new Files(dispatch, null, namespace ?? null, (path) => registry.mountOwner(path), {
-      prefixes: () => registry.mountPrefixes(),
-      visibility: () => session.visibility,
-      follow,
-      ledger: false,
-    })
+    new Files(
+      dispatch,
+      namespace === undefined ? null : namespace.readers(() => session.visibility),
+      null,
+      { follow, ledger: false },
+    )
 
   // Installed CLIs: dispatch by name, never by operand path. Sits
   // below functions (a user can wrap an installed CLI, bash-style)

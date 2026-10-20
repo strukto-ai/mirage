@@ -20,6 +20,7 @@ import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { mountStarts, ownedScopes, reached } from './scopes.ts'
 import type { OwnedScope } from './types.ts'
+import { readers } from '../../../../test-utils.ts'
 
 const DIRS: Record<string, string[]> = {
   '/a': ['/a/d', '/a/f', '/a/m'],
@@ -30,9 +31,7 @@ const ROOTS = ['/a', '/a/m']
 
 function files(): Files {
   const nothing: DispatchFn = () => Promise.resolve([null, new IOResult()])
-  return new Files(nothing, null, null, () => null, {
-    prefixes: () => ROOTS.map((r) => `${r}/`),
-  })
+  return new Files(nothing, readers(ROOTS.map((r) => `${r}/`)))
 }
 
 function dispatcher(refused?: string): [DispatchFn, string[]] {

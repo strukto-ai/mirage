@@ -159,7 +159,7 @@ def capture_binding(
         vfs=(
             ctx.vfs._over(dispatch)
             if ctx.vfs is not None
-            else Files([], dispatch, ledger=False)
+            else Files(dispatch, ledger=False)
         ),
     )
     # A read of the session reads the session it is bound to; only a

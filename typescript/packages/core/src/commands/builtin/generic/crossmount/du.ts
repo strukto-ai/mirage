@@ -160,7 +160,6 @@ export async function runDu(
       [...measured.values()].flatMap((rows) =>
         rows.flatMap((r) => (r.size === undefined ? [r.path.virtual] : [])),
       ),
-    vfs,
   )
   merged.stderr = new Uint8Array([...out.stderr, ...(await materialize(merged.stderr))])
   merged.exitCode = Math.max(out.exitCode, ...done.map(({ io }) => io.exitCode))

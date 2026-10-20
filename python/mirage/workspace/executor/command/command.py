@@ -373,10 +373,12 @@ async def handle_command(
 
         dispatch = made_by_command
     files = Files(
-        registry.mount_rows(),
         dispatch,
-        links=namespace,
-        visibility=lambda _session: session.visibility,
+        (
+            namespace.readers(lambda _session: session.visibility)
+            if namespace is not None
+            else None
+        ),
         follow=follow,
         ledger=False,
     )

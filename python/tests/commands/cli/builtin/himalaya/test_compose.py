@@ -45,7 +45,7 @@ async def fake_dispatch(op, path, *args, **kwargs):
 
 
 def files_with_note() -> Files:
-    return Files([], fake_dispatch)
+    return Files(fake_dispatch)
 
 
 @pytest.fixture

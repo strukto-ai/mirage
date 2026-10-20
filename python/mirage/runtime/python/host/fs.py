@@ -53,7 +53,7 @@ from mirage.runtime.types import VFSStat
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
-from mirage.workspace.files import WorkspaceFiles, namespace_of
+from mirage.workspace.files import WorkspaceFiles, reader_of
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -221,12 +221,10 @@ def make_rmtree(
         loop (asyncio.AbstractEventLoop | None): the block's loop.
     """
     original = shutil.rmtree
-    links = namespace_of(files).links
+    reader = reader_of(files)
 
     async def follow(path: str) -> str:
-        return posixpath.normpath(
-            path if links is None else links.follow(path)
-        )
+        return posixpath.normpath(reader.resolve(path))
 
     def resolve(path: str) -> str:
         return run_async_from_sync(follow(path), loop)
@@ -314,8 +312,11 @@ class HostFs:
         # there; mirrors mount/core.py.
         self._uid = _real_os.getuid() if hasattr(_real_os, "getuid") else 0
         self._gid = _real_os.getgid() if hasattr(_real_os, "getgid") else 0
+        reader = reader_of(files)
         self._descriptors = Descriptors(
-            self._adapter, self._host, namespace_of(files).links
+            self._adapter,
+            self._host,
+            reader.resolve if reader.linked else None,
         )
 
     @property

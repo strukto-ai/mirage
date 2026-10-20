@@ -22,6 +22,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import { treeGeneric } from './tree.ts'
+import { readers } from '../../../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -99,7 +100,7 @@ describe('treeGeneric operand that is not a directory', () => {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, () => null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
     } as unknown as Context
   }
 
@@ -180,10 +181,7 @@ describe('treeGeneric across a nested mount', () => {
     }
     return {
       ...ctx({}),
-      vfs: new Files(dispatch, null, null, () => null, {
-        prefixes: () => ['/', `${ROOT}/`],
-        ledger: false,
-      }),
+      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { ledger: false }),
     } as unknown as Context
   }
 

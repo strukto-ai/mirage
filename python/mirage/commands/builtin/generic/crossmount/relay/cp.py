@@ -31,7 +31,6 @@ from mirage.commands.builtin.utils.links import (
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context import session_visibility
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec, PrimitiveCopy
@@ -148,7 +147,6 @@ async def run_cp(
                 cwd=cwd,
                 relay=strategy,
                 relay_stat=primitives["stat"],
-                visibility=session_visibility(),
             )
             if links is not None
             else None
