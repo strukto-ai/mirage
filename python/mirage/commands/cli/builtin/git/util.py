@@ -198,13 +198,9 @@ def offending(
     marker survives the parser.
 
     Which side of the marker an operand fell on says nothing about what
-    it *means* here. ``diff``, ``show`` and ``diff-tree`` read what
-    follows the marker as pathspecs (``split_marked``); a walk (``log``,
-    ``rev-list``, ``shortlog``) reads an escaped word as a revision and
-    fails with git's own "unknown revision or path" wording, where git
-    would narrow the walk by it instead. That divergence is deliberate,
-    because limiting by nothing would print every commit and look like
-    an answer.
+    it *means* here. ``diff``, ``show``, ``diff-tree`` and the walks
+    (``log``, ``rev-list``, ``shortlog``) read what follows the marker
+    as pathspecs (``split_marked``).
 
     Args:
         texts (Sequence[str]): positional text operands, as typed.

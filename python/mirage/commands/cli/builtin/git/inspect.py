@@ -1,6 +1,7 @@
 import asyncio
 import posixpath
 import re
+from dataclasses import replace
 from io import BytesIO
 
 from dulwich.config import ConfigFile
@@ -23,9 +24,12 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.format import FULL_SHA
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
+    in_print_order,
     parse_flags,
     ref_commits,
-    select,
+    walk_ends,
+    walk_operands,
+    walked,
 )
 from mirage.commands.cli.builtin.git.io import read_file, read_optional
 from mirage.commands.cli.builtin.git.objects import abbrev_for
@@ -45,7 +49,6 @@ from mirage.commands.cli.builtin.git.revparse import (
     refs_named,
     resolve_commit,
     resolve_object,
-    split_revisions,
 )
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
@@ -448,12 +451,29 @@ async def show_ref(
 
 
 def _revisions(
-    repo: BaseRepo, revisions: tuple[str, ...], flags: LogFlags
+    repo: BaseRepo,
+    revisions: tuple[str, ...],
+    flags: LogFlags,
+    dashed: bool = False,
 ) -> list[bytes]:
-    starts, hidden = split_revisions(repo, revisions)
+    """The lines rev-list prints for its commits: an id each, with
+    ``-`` in front of a ``--boundary`` one (git 2.47.3).
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        revisions (tuple[str, ...]): the revision operands.
+        flags (LogFlags): the parsed invocation.
+        dashed (bool): whether ``--`` is on the line.
+    """
+    starts, hidden = walk_ends(repo, revisions, dashed)
     if flags.all_refs:
         starts[:0] = ref_commits(repo)
-    return [commit.id for commit in select(repo, starts, flags, tuple(hidden))]
+    walk = walked(repo, starts, flags, tuple(hidden))
+    boundary = {commit.id for commit in walk.boundary}
+    return [
+        (b"-" if commit.id in boundary else b"") + commit.id
+        for commit in in_print_order(walk, flags)
+    ]
 
 
 async def rev_list(
@@ -464,12 +484,20 @@ async def rev_list(
         sole = ctx.argv[-2:] == ("rev-list", HELP_SWITCH)
         if option_operand(ctx, texts, STDOUT if sole else STDERR):
             raise UsageError("", verb_usage(ctx))
-        repo, _ = await opened(ctx, fl)
+        repo, location = await opened(ctx, fl)
         flags = parse_flags(fl)
-        if not texts and not flags.all_refs:
+        revisions, patterns, dashed = await walk_operands(
+            ctx, fl, repo, location, texts
+        )
+        # A line naming only paths has no revision either (git 2.47.3).
+        if not revisions and not flags.all_refs:
             raise UsageError("", verb_usage(ctx))
         commits = await asyncio.to_thread(
-            _revisions, repo, tuple(texts), flags
+            _revisions,
+            repo,
+            revisions,
+            replace(flags, pathspecs=patterns),
+            dashed,
         )
         return (
             f"{len(commits)}\n".encode()

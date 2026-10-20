@@ -14,9 +14,16 @@
 
 import git from 'isomorphic-git'
 import { RegexError } from '../../../../rs/errors.ts'
-import { byteView, utf8Locale } from '../../../../shell/bytes.ts'
+import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { posixRegex, type PosixRegex } from '../../../../rs/regex.ts'
-import { GitError, PatternCompileError } from './errors.ts'
+import {
+  AmbiguousArgumentError,
+  BadRevisionError,
+  GitError,
+  NoSuchPathError,
+  PatternCompileError,
+  RevisionAndFilenameError,
+} from './errors.ts'
 import { HEAD, TEMPLATE_KINDS } from './constants.ts'
 
 import type { FlagView } from '../../../spec/flag_view.ts'
@@ -35,20 +42,49 @@ import {
   type CommitFacts,
   type LogFormat,
 } from './format.ts'
-import { greps, touches } from './pickaxe.ts'
+import { entries, shows, type DiffFlags } from './diff_output.ts'
+import { HUNK_CONTEXT } from './patch.ts'
+import type { Pickaxe } from './pickaxe.ts'
 import { BRANCH_PREFIX, loadRefs, REMOTE_PREFIX, SYMREF_PREFIX, TAG_PREFIX } from './refs.ts'
 import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { sha1Hex } from '../../../../utils/hash.ts'
 import { compilePosixRegex, POSIX_CLASSES } from '../../../../utils/posix.ts'
 import { loadMailmap, mappedIdentity, useMailmap } from './mailmap.ts'
 import { dateClock, parseDateMode } from './dates.ts'
 import { configValues } from './fs.ts'
-import { maybeBool } from './util.ts'
+import { MARKER, maybeBool, splitMarked, startPoint } from './util.ts'
+import { absoluteOperand, pathspecPatterns } from './pathspec.ts'
+import { exists } from './io.ts'
+import { splitRevisions } from './revparse.ts'
+import { PathSpec } from '../../../../types.ts'
+import type { Context } from '../../../config.ts'
 import { Decoration, type DateMode, type MailmapEntry } from './types.ts'
 
 // How many hidden commits a limited walk takes past the point where only
 // hidden ones are queued, git's SLOP.
 const SLOP = 5
+// The diff a walk's pickaxe searches when the caller read no diff options: no
+// renames paired and merges not diffed.
+const PLUMBING_DIFF: DiffFlags = {
+  nameOnly: false,
+  nameStatus: false,
+  stat: false,
+  numstat: false,
+  shortstat: false,
+  summary: false,
+  patch: false,
+  noPatch: false,
+  renames: null,
+  merge: 'off',
+  raw: false,
+  abbrev: false,
+  functionContext: false,
+  forceText: false,
+  context: HUNK_CONTEXT,
+  quotePathFully: true,
+  pathspecs: [],
+}
 const BASIC_REGEXP = 'basic_regexp'
 const EXTENDED_REGEXP = 'extended_regexp'
 const FIXED_STRINGS = 'fixed_strings'
@@ -97,12 +133,8 @@ export interface LogFlags {
   readonly oneline: boolean
   /** `--reverse`, oldest first. */
   readonly reverse: boolean
-  /** `-S`, the pickaxe string, or its pattern under `--pickaxe-regex`. */
-  readonly search: string | PosixRegex | null
-  /** `-G`, the pattern an added or removed line must match. */
-  readonly changed: PosixRegex | null
-  /** Search binary changed lines under `--text`. */
-  readonly forceText: boolean
+  /** `-S` or `-G`, null for neither. */
+  readonly pickaxe: Pickaxe | null
   /** `--since` as an epoch second. */
   readonly since: number | null
   /** `--until` as an epoch second. */
@@ -126,6 +158,16 @@ export interface LogFlags {
    * `--graph` implies) or `date` (`--date-order`).
    */
   readonly order: 'default' | 'topo' | 'date'
+  /** `--boundary`, print the commits the walk stops at after the ones it shows. */
+  readonly boundary: boolean
+  /** The repository-relative patterns the history is limited to, none for the whole tree. */
+  readonly pathspecs: readonly string[]
+  /**
+   * Whether `-m` or `--diff-merges` asks for merges' diffs against their
+   * parents. Only then does a path walk keep merges' whole history; the
+   * first-parent diff `--first-parent` implies leaves it simplified (git 2.47.3).
+   */
+  readonly mergeDiffs: boolean
 }
 
 /** One commit of a walk: drawn by `--graph` always, printed unless `-S` passed it by. */
@@ -142,6 +184,23 @@ export interface Walk {
    * it a parent `--graph` draws a line to. Filled only for an ordered walk.
    */
   readonly interesting: ReadonlySet<string>
+  /** The `--boundary` commits, in the order they print after the walk. */
+  readonly boundary: readonly CommitFacts[]
+  /**
+   * The parents a path-limited walk prints each of its commits with: under
+   * `--graph` the nearest shown commits along the history it kept, otherwise
+   * the ones it followed; empty when the walk is not limited.
+   */
+  readonly parents: ReadonlyMap<string, readonly string[]>
+}
+
+/**
+ * What a walk records for `--boundary`: every commit it took off its queue,
+ * hidden ones included, in that order, and the commits it hid.
+ */
+interface Trace {
+  readonly popped: string[]
+  readonly hidden: Set<string>
 }
 
 /**
@@ -346,7 +405,7 @@ export function parseFlags(
         .split('\n')
         .map((value) => pattern(value, syntax, ignoreCase, COMMAND_LINE_ORIGIN, utf8)),
     )
-  let search: string | PosixRegex | null = fl.asStr('S') ?? null
+  const search = fl.asStr('S') ?? null
   const changed = fl.asStr('G') ?? null
   for (const [option, value] of [
     ['-S', search],
@@ -357,8 +416,18 @@ export function parseFlags(
   if (search !== null && changed !== null) {
     throw new IncompatibleLogOptionsError('-G', '-S', '--find-object')
   }
-  if (typeof search === 'string' && fl.asBool('pickaxe_regex')) {
-    search = pickaxePattern(search, ignoreCase, utf8)
+  let pickaxe: Pickaxe | null = null
+  if (search !== null || changed !== null) {
+    pickaxe = {
+      needle:
+        search !== null && fl.asBool('pickaxe_regex')
+          ? pickaxePattern(search, ignoreCase, utf8)
+          : search,
+      changed: changed === null ? null : pickaxePattern(changed, ignoreCase, utf8),
+      ignoreCase,
+      forceText: fl.asBool('text'),
+      every: fl.asBool('pickaxe_all'),
+    }
   }
   const maxCount = fl.asInt('max_count') ?? null
   const clock = dateClock(env)
@@ -378,9 +447,7 @@ export function parseFlags(
     firstParent: fl.asBool('first_parent'),
     oneline,
     reverse: fl.asBool('reverse'),
-    search,
-    changed: changed === null ? null : pickaxePattern(changed, ignoreCase, utf8),
-    forceText: fl.asBool('text'),
+    pickaxe,
     since: windowEnd(fl, ['after', 'since'], '--since', clock.now),
     until: windowEnd(fl, ['before', 'until'], '--until', clock.now),
     allRefs: fl.asBool('all'),
@@ -388,6 +455,130 @@ export function parseFlags(
     abbrevCommit: oneline,
     graph,
     order,
+    boundary: fl.asBool('boundary'),
+    mergeDiffs: fl.asBool('m') || PARENT_DIFFS.has(fl.asStr('diff_merges', 'off')),
+    pathspecs: [],
+  }
+}
+
+// The `--diff-merges` values that diff a merge against its parents, one by one
+// or the first alone.
+const PARENT_DIFFS = new Set(['on', '1', 'm', 'separate', 'first-parent'])
+
+// What makes an operand a pattern git reads as a path unseen.
+const WILDCARDS = ['*', '?', '[', '\\']
+
+/**
+ * A walk's operands as revisions and the patterns of the paths it is limited
+ * to, and whether `--` was on the line; see `operands`.
+ *
+ * @param ctx the line's context, carrying its argv
+ * @param fl the verb's flags, for `-C`
+ * @param repo the opened repository
+ * @param texts the operands
+ */
+export async function walkOperands(
+  ctx: Context,
+  fl: FlagView,
+  repo: Repo,
+  texts: readonly string[],
+): Promise<[string[], string[], boolean]> {
+  const argv = ctx.argv ?? []
+  const start = startPoint(fl).virtual
+  const [leading, marked] = splitMarked(texts, argv)
+  const dashed = argv.includes(MARKER)
+  const present = dashed ? new Set<string>() : await presentOperands(repo, start, leading)
+  const [revisions, paths] = await operands(repo, leading, dashed, present)
+  return [revisions, pathspecPatterns(repo.location, start, [...paths, ...marked]), dashed]
+}
+
+/**
+ * The commits a walk starts from and hides, as `splitRevisions` reads them,
+ * except that with `--` on the line a revision that resolves to nothing is a
+ * bad revision (git 2.47.3).
+ *
+ * @param repo the opened repository
+ * @param revisions the revision operands
+ * @param dashed whether `--` is on the line
+ */
+export async function walkEnds(
+  repo: Repo,
+  revisions: readonly string[],
+  dashed: boolean,
+): Promise<[CommitFacts[], CommitFacts[]]> {
+  try {
+    return await splitRevisions(repo, revisions)
+  } catch (err) {
+    if (!dashed || !(err instanceof AmbiguousArgumentError)) throw err
+    throw new BadRevisionError(err.revision)
+  }
+}
+
+/**
+ * The operands that name something in the working tree, as git looks before it
+ * reads an operand as a path.
+ */
+async function presentOperands(
+  repo: Repo,
+  start: string,
+  texts: readonly string[],
+): Promise<Set<string>> {
+  const found = new Set<string>()
+  for (const text of texts) {
+    if (text && (await exists(repo.vfs, PathSpec.fromStrPath(absoluteOperand(start, text)))))
+      found.add(text)
+  }
+  return found
+}
+
+/** Whether an operand is a pattern, which git takes as a path without looking for it. */
+function wildcard(text: string): boolean {
+  return WILDCARDS.some((char) => text.includes(char))
+}
+
+/**
+ * Split the operands before any `--` into revisions and paths.
+ *
+ * With `--` on the line they are all revisions. Without it each is a revision
+ * while it resolves as one, and one that also names a file is refused as
+ * ambiguous; the first that does not resolve starts the paths, which then have
+ * to name something in the working tree, as every later operand does, unless it
+ * is a wildcard pattern (git 2.47.3).
+ */
+async function operands(
+  repo: Repo,
+  leading: readonly string[],
+  dashed: boolean,
+  present: ReadonlySet<string>,
+): Promise<[string[], string[]]> {
+  if (dashed) return [[...leading], []]
+  for (const [index, text] of leading.entries()) {
+    if (!(await resolves(repo, text))) {
+      if (!present.has(text) && !wildcard(text)) throw new AmbiguousArgumentError(text)
+      for (const later of leading.slice(index + 1)) {
+        if (!present.has(later) && !wildcard(later)) throw new NoSuchPathError(later)
+      }
+      return [leading.slice(0, index), leading.slice(index)]
+    }
+    if (present.has(text)) throw new RevisionAndFilenameError(text)
+  }
+  return [[...leading], []]
+}
+
+/**
+ * Whether an operand resolves as a revision, the warnings resolving it gives
+ * left to the walk, which resolves it again.
+ */
+async function resolves(repo: Repo, text: string): Promise<boolean> {
+  const kept = repo.ambiguous?.length ?? 0
+  try {
+    await splitRevisions(repo, [text])
+    return true
+  } catch (err) {
+    if (err instanceof AmbiguousArgumentError) return false
+    throw err
+  } finally {
+    repo.ambiguous?.splice(kept)
   }
 }
 
@@ -597,6 +788,148 @@ async function decorateHead(
 }
 
 /**
+ * git's default history simplification, for a walk limited to paths.
+ *
+ * A commit is shown when it is not TREESAME to its parents, its tree and
+ * theirs holding the same entries at the paths: a root when the paths hold
+ * anything, a commit with one parent when it changed them, and a merge only
+ * when no parent is TREESAME to it. A merge TREESAME to a parent leads on to
+ * the first such parent alone, so history the paths came by some other way
+ * drops out. A parent the walk hid on its way down does not count, while one it
+ * was told to hide (`^A`, a range's left end, the merge base of `A...B`) does
+ * (git 2.47.3). When merges are diffed against each parent (`-m`,
+ * `--diff-merges=first-parent`) git keeps their whole history instead: a merge
+ * leads on to every parent and is shown when it differs from any of them, or
+ * always where `--graph` draws the history. Mirrors _Simplifier in history.py.
+ */
+class Simplifier {
+  private readonly views = new Map<string, string | null>()
+  private readonly nearest = new Map<string, readonly string[]>()
+  private hidden: ReadonlySet<string> = new Set()
+  readonly followed = new Map<string, readonly string[]>()
+  readonly shown = new Map<string, boolean>()
+
+  constructor(
+    private readonly repo: Repo,
+    private readonly patterns: readonly string[],
+    private readonly full = false,
+    private readonly graph = false,
+    private readonly bottoms: ReadonlySet<string> = new Set(),
+  ) {}
+
+  /**
+   * A digest of the entries one commit holds at the paths, null when they hold
+   * nothing.
+   *
+   * The walk only asks whether two commits hold the same entries, so only the
+   * digest is kept, and a path log over a long history does not hold every
+   * file at every commit.
+   */
+  private async view(oid: string): Promise<string | null> {
+    let found = this.views.get(oid)
+    if (found === undefined) {
+      const tree = (await commitFacts(this.repo, oid)).tree
+      const held = await entries(this.repo, tree, true, this.patterns)
+      const lines = [...held]
+        .sort(([a], [b]) => compareCodePoints(a, b))
+        .map(([path, entry]) => `${entry.mode} ${path}\0${entry.oid}`)
+      found = held.size ? await sha1Hex(encodeText(lines.join(''))) : null
+      this.views.set(oid, found)
+    }
+    return found
+  }
+
+  /** Whether two commits hold the same entries at the paths. */
+  private async same(a: string, b: string): Promise<boolean> {
+    return (await this.view(a)) === (await this.view(b))
+  }
+
+  /**
+   * Settle whether a walked commit is shown, and the parents it leads on to.
+   *
+   * @param commit the commit, just taken off the queue
+   * @param parents the parents the walk would follow
+   * @param hidden the commits hidden so far
+   */
+  async follow(
+    commit: CommitFacts,
+    parents: readonly string[],
+    hidden: ReadonlySet<string>,
+  ): Promise<readonly string[]> {
+    this.hidden = hidden
+    let followed = parents
+    let shown: boolean
+    const [first] = commit.parents
+    if (first === undefined) shown = (await this.view(commit.oid)) !== null
+    else if (commit.parents.length === 1) shown = !(await this.same(commit.oid, first))
+    else if (this.full) {
+      shown = this.graph
+      for (const parent of parents) if (!(await this.same(commit.oid, parent))) shown = true
+    } else {
+      let same: string | null = null
+      for (const parent of parents) {
+        if (hidden.has(parent) && !this.bottoms.has(parent)) continue
+        if (await this.same(commit.oid, parent)) {
+          same = parent
+          break
+        }
+      }
+      shown = same === null
+      if (same !== null) followed = [same]
+    }
+    this.shown.set(commit.oid, shown)
+    this.followed.set(commit.oid, followed)
+    return followed
+  }
+
+  /**
+   * A shown commit's parents as `--graph` sees them: each followed parent, or
+   * the nearest shown commits it leads on to when it is not shown itself, a
+   * hidden one standing for itself.
+   */
+  rewritten(commit: CommitFacts): readonly string[] {
+    const out = new Set<string>()
+    for (const parent of this.followed.get(commit.oid) ?? []) {
+      for (const oid of this.shownBelow(parent)) out.add(oid)
+    }
+    return [...out]
+  }
+
+  /** The nearest shown commits at or below one, null while not worked out. */
+  private known(oid: string): readonly string[] | null {
+    if (this.shown.get(oid) === true || this.hidden.has(oid)) return [oid]
+    if (!this.followed.has(oid)) return []
+    return this.nearest.get(oid) ?? null
+  }
+
+  /**
+   * The nearest shown commits at or below one the walk followed, itself when
+   * it is shown. Worked out from the bottom on a stack of its own, since a path
+   * can go unchanged for longer than the engine can recurse.
+   */
+  private shownBelow(oid: string): readonly string[] {
+    const stack = [oid]
+    for (let top = stack.at(-1); top !== undefined; top = stack.at(-1)) {
+      if (this.known(top) !== null) {
+        stack.pop()
+        continue
+      }
+      const followed = this.followed.get(top) ?? []
+      const waiting = followed.filter((parent) => this.known(parent) === null)
+      if (waiting.length) {
+        stack.push(...waiting.reverse())
+        continue
+      }
+      const out = new Set<string>()
+      for (const parent of followed) for (const below of this.known(parent) ?? []) out.add(below)
+      this.nearest.set(top, [...out])
+      stack.pop()
+    }
+    return this.known(oid) ?? []
+  }
+}
+
+/**
  * Walk history from a set of commits, newest first, along every parent.
  *
  * Ordered by committer time with ties broken by insertion, which is what a
@@ -617,9 +950,11 @@ async function* walkHistory(
   starts: readonly CommitFacts[],
   firstParent: boolean,
   hidden: readonly CommitFacts[] = [],
+  trace: Trace | null = null,
+  simplify: Simplifier | null = null,
 ): AsyncGenerator<CommitFacts> {
   const seen = new Set<string>()
-  const excluded = new Set<string>()
+  const excluded = trace?.hidden ?? new Set<string>()
   const visited = new Map<string, CommitFacts>()
   const queue: CommitFacts[] = []
   const held: CommitFacts[] = []
@@ -655,6 +990,7 @@ async function* walkHistory(
     const next = queue.shift()
     if (next === undefined) break
     visited.set(next.oid, next)
+    trace?.popped.push(next.oid)
     if (excluded.has(next.oid)) {
       await hide(next.parents)
       if (queue.length === 0) break
@@ -665,9 +1001,11 @@ async function* walkHistory(
       continue
     }
     date = next.committerTime
+    let parents = firstParent ? next.parents.slice(0, 1) : next.parents
+    if (simplify !== null) parents = await simplify.follow(next, parents, excluded)
     if (limited) held.push(next)
     else yield next
-    for (const parent of firstParent ? next.parents.slice(0, 1) : next.parents) {
+    for (const parent of parents) {
       if (seen.has(parent)) continue
       seen.add(parent)
       queue.push(await commitFacts(repo, parent))
@@ -690,12 +1028,19 @@ async function* walkHistory(
  *
  * @param list the walk, newest first
  * @param order `--topo-order` or `--date-order`
+ * @param parents the parents to order by, each commit's own when null
  */
-function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): CommitFacts[] {
+function sortCommits(
+  list: readonly CommitFacts[],
+  order: 'topo' | 'date',
+  parents: ReadonlyMap<string, readonly string[]> | null = null,
+): CommitFacts[] {
+  const parentsOf = (commit: CommitFacts): readonly string[] =>
+    parents === null ? commit.parents : (parents.get(commit.oid) ?? [])
   const byOid = new Map(list.map((commit) => [commit.oid, commit]))
   const unprintedChildren = new Map(list.map((commit) => [commit.oid, 0]))
   for (const commit of list) {
-    for (const parent of commit.parents) {
+    for (const parent of parentsOf(commit)) {
       const count = unprintedChildren.get(parent)
       if (count !== undefined) unprintedChildren.set(parent, count + 1)
     }
@@ -705,7 +1050,7 @@ function sortCommits(list: readonly CommitFacts[], order: 'topo' | 'date'): Comm
   const printCommit = (commit: CommitFacts): CommitFacts[] => {
     printed.push(commit)
     const freed: CommitFacts[] = []
-    for (const parent of commit.parents) {
+    for (const parent of parentsOf(commit)) {
       const count = unprintedChildren.get(parent)
       if (count === undefined) continue
       unprintedChildren.set(parent, count - 1)
@@ -818,6 +1163,77 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
 }
 
 /**
+ * The commits `--boundary` prints after the walk, in git's order.
+ *
+ * A boundary commit is a parent, any parent, of a walked commit that the walk
+ * did not take itself: a hidden one, one a filter left out, or one past `-n`. A
+ * pickaxe does not leave a commit out of the walk, so the parents of a commit
+ * it passed by count too; the paths do.
+ *
+ * Under `--date-order` they print newest first. Otherwise they follow the walk:
+ * each one leaving the queue with no boundary child listed goes to the front,
+ * and each listed one puts its boundary parents right after itself, in parent
+ * order, so a run of commits git reaches through one another prints together
+ * and later runs print first. The ones `-n` cut off print before them all, and
+ * the ones the walk never reached after, newest first (git 2.47.3; the order
+ * differs at times where git reaches one only through another's merge).
+ *
+ * @param repo repository holding the commits
+ * @param steps the walked commits
+ * @param trace the walk's queue order and hidden set
+ * @param byDate `--date-order`
+ * @param stopped whether `-n` cut the walk short
+ * @param parents the parents the walk prints its commits with, each commit's
+ *   own when absent
+ */
+async function boundaryOf(
+  repo: Repo,
+  steps: readonly WalkStep[],
+  trace: Trace,
+  byDate: boolean,
+  stopped: boolean,
+  parents: ReadonlyMap<string, readonly string[]>,
+): Promise<CommitFacts[]> {
+  const walkedIds = new Set(steps.map((step) => step.commit.oid))
+  const found = new Map<string, CommitFacts>()
+  for (const step of steps) {
+    for (const parent of parents.get(step.commit.oid) ?? step.commit.parents) {
+      if (!walkedIds.has(parent) && !found.has(parent))
+        found.set(parent, await commitFacts(repo, parent))
+    }
+  }
+  const time = (oid: string): number => found.get(oid)?.committerTime ?? 0
+  const newest = (oids: Iterable<string>): string[] => [...oids].sort((a, b) => time(b) - time(a))
+  const facts = (oids: readonly string[]): CommitFacts[] =>
+    oids.flatMap((oid) => {
+      const commit = found.get(oid)
+      return commit === undefined ? [] : [commit]
+    })
+  if (byDate) return facts(newest(found.keys()))
+  const lastStep = steps[steps.length - 1]
+  const last =
+    stopped && lastStep !== undefined
+      ? trace.popped.indexOf(lastStep.commit.oid)
+      : trace.popped.length
+  const passed = trace.popped.slice(0, last + 1)
+  const reached = new Set(passed)
+  const cut = newest([...found.keys()].filter((oid) => !trace.hidden.has(oid) && !reached.has(oid)))
+  const cutSet = new Set(cut)
+  const listed: string[] = []
+  for (const oid of passed) {
+    if (found.has(oid) && !cutSet.has(oid) && !listed.includes(oid)) listed.unshift(oid)
+    const at = listed.indexOf(oid)
+    if (at === -1) continue
+    for (const parent of found.get(oid)?.parents ?? []) {
+      if (found.has(parent) && !cutSet.has(parent) && !listed.includes(parent))
+        listed.splice(at + 1, 0, parent)
+    }
+  }
+  const rest = newest([...found.keys()].filter((oid) => !cutSet.has(oid) && !listed.includes(oid)))
+  return facts([...cut, ...listed, ...rest])
+}
+
+/**
  * The commits a log walks, in the order it walks them.
  *
  * Order of operations is git's: walk history, drop what the filters reject,
@@ -832,51 +1248,78 @@ function filtersPass(commit: CommitFacts, flags: LogFlags): boolean {
  *   seeds every ref
  * @param flags the parsed invocation
  * @param hidden commits whose whole history is left out, the `A` of `A..B`
+ * @param diff the diff the pickaxe searches: its renames, its merge diff and its paths
  */
-/**
- * Whether the pickaxe, if any, keeps a commit: `-G`'s changed line, or `-S`'s
- * change in the count of a string or pattern.
- */
-async function picked(repo: Repo, commit: CommitFacts, flags: LogFlags): Promise<boolean> {
-  if (flags.changed !== null)
-    return greps(repo, commit.oid, commit.parents, flags.changed, flags.forceText)
-  if (flags.search === null) return true
-  if (typeof flags.search === 'string') {
-    return touches(repo, commit.oid, commit.parents, flags.search, flags.ignoreCase)
-  }
-  return touches(repo, commit.oid, commit.parents, flags.search)
-}
-
 export async function walked(
   repo: Repo,
   starts: readonly CommitFacts[],
   flags: LogFlags,
   hidden: readonly CommitFacts[] = [],
+  diff: DiffFlags = PLUMBING_DIFF,
 ): Promise<Walk> {
   const steps: WalkStep[] = []
   const interesting = new Set<string>()
-  if (flags.maxCount === 0) return { steps, interesting }
+  // The parents a path-limited walk prints its commits with: the ones `--graph`
+  // draws, and for a merge the paths cut down to the parent it follows, which
+  // only `--boundary` ever prints, that one parent.
+  const parents = new Map<string, readonly string[]>()
+  if (flags.maxCount === 0) return { steps, interesting, boundary: [], parents }
+  const searched: DiffFlags = { ...diff, pickaxe: flags.pickaxe }
+  const trace: Trace | null = flags.boundary ? { popped: [], hidden: new Set() } : null
+  const simplify = flags.pathspecs.length
+    ? new Simplifier(
+        repo,
+        flags.pathspecs,
+        flags.mergeDiffs && (diff.merge === 'separate' || diff.merge === 'first-parent'),
+        flags.graph,
+        new Set(hidden.map((commit) => commit.oid)),
+      )
+    : null
+  const kept = (commit: CommitFacts): boolean =>
+    simplify === null || simplify.shown.get(commit.oid) === true
   let source: AsyncIterable<CommitFacts> | Iterable<CommitFacts> = walkHistory(
     repo,
     starts,
     flags.firstParent,
     hidden,
+    trace,
+    simplify,
   )
   if (flags.order !== 'default') {
+    // The commits the paths leave out still take their place in the order,
+    // merges leading only to the parent they follow; they drop out after,
+    // which is where a log draws its graph from.
     const window: CommitFacts[] = []
     for await (const commit of source) if (inWindow(commit, flags)) window.push(commit)
-    for (const commit of window) if (filtersPass(commit, flags)) interesting.add(commit.oid)
-    source = sortCommits(window, flags.order)
+    for (const commit of window) {
+      if (simplify !== null && flags.graph && kept(commit))
+        parents.set(commit.oid, simplify.rewritten(commit))
+      if (filtersPass(commit, flags) && kept(commit)) interesting.add(commit.oid)
+    }
+    source = sortCommits(window, flags.order, simplify?.followed ?? null)
   }
   let printed = 0
   for await (const commit of source) {
-    if (!inWindow(commit, flags) || !filtersPass(commit, flags)) continue
-    const shown = await picked(repo, commit, flags)
+    if (!inWindow(commit, flags) || !filtersPass(commit, flags) || !kept(commit)) continue
+    const shown = await shows(repo, commit, searched)
     steps.push({ commit, shown })
     if (shown) printed += 1
     if (flags.maxCount !== null && printed >= flags.maxCount) break
   }
-  return { steps, interesting }
+  const stopped = flags.maxCount !== null && printed >= flags.maxCount
+  if (trace === null) return { steps, interesting, boundary: [], parents }
+  const boundary: CommitFacts[] = []
+  const date = flags.order === 'date'
+  for (const commit of await boundaryOf(repo, steps, trace, date, stopped, parents)) {
+    if (await shows(repo, commit, searched)) boundary.push(commit)
+  }
+  for (const commit of boundary) {
+    interesting.add(commit.oid)
+    const followed = simplify?.followed.get(commit.oid)
+    if (simplify?.shown.get(commit.oid) === false && followed !== undefined)
+      parents.set(commit.oid, followed)
+  }
+  return { steps, interesting, boundary, parents }
 }
 
 /**
@@ -890,16 +1333,28 @@ export async function walked(
  * @param starts the commits to walk back from
  * @param flags the parsed invocation
  * @param hidden commits whose whole history is left out, the `A` of `A..B`
+ * @param diff the diff the pickaxe searches
  */
 export async function select(
   repo: Repo,
   starts: readonly CommitFacts[],
   flags: LogFlags,
   hidden: readonly CommitFacts[] = [],
+  diff: DiffFlags = PLUMBING_DIFF,
 ): Promise<CommitFacts[]> {
-  const selected = (await walked(repo, starts, flags, hidden)).steps
-    .filter((step) => step.shown)
-    .map((step) => step.commit)
+  return inPrintOrder(await walked(repo, starts, flags, hidden, diff), flags)
+}
+
+/**
+ * The commits a walk prints, in the order it prints them: the shown ones, then
+ * the `--boundary` ones, all of them reversed under `--reverse`.
+ *
+ * @param walk the walk
+ * @param flags the parsed invocation
+ */
+export function inPrintOrder(walk: Walk, flags: LogFlags): CommitFacts[] {
+  const selected = walk.steps.filter((step) => step.shown).map((step) => step.commit)
+  selected.push(...walk.boundary)
   if (flags.reverse) selected.reverse()
   return selected
 }

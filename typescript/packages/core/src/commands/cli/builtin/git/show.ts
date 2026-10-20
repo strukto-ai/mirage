@@ -32,7 +32,6 @@ import {
   commitOutput,
   commitShown,
   commitSides,
-  isCombined,
   parseDiffFlags,
   renamesEnabled,
   type DiffFlags,
@@ -233,7 +232,6 @@ export async function show(
         if (shownCommits.has(target.oid)) continue
         shownCommits.add(target.oid)
         const facts = await commitFacts(repo, target.oid)
-        const combined = isCombined(facts, parsed.diff)
         const entry = await commitEntry(
           repo,
           facts,
@@ -241,7 +239,7 @@ export async function show(
           parsed.diff,
           sides.get(facts.oid) ?? [],
           decor,
-          (parsed.diff.summary || combined) && !parsed.diff.noPatch,
+          parsed.diff.summary && !parsed.diff.noPatch && parsed.pretty.kind !== 'oneline',
         )
         parts.push(encodeText(`${shownOne && !terminated ? '\n' : ''}${entry}`))
         shownOne = true

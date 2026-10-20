@@ -325,3 +325,34 @@ it('widens the separator by an octopus dashes', () => {
     '| |/|\\ \\c1',
   ])
 })
+
+it('pads a skip row to the merge it stands before', () => {
+  // `git log --graph -S` passing by the commit above a merge pads the `...` row
+  // to the merge's own row (git 2.47.3).
+  const walked = walk('X: M\nM: A B\nB: A\nA:')
+  expect(log(walked, { shown: 'M B A' })[0]).toBe('... ')
+})
+
+it('draws a boundary commit with an o', () => {
+  const walked = walk('M: A B\nB: A\nA:')
+  const ids = new Set(walked.map((each) => each.oid))
+  const graph = new CommitGraph((oid) => ids.has(oid), false, new Set(['A']))
+  let out = ''
+  for (const each of walked) {
+    graph.walk(each)
+    out += graph.leadIn() + graph.around(`${each.oid}\n`)
+  }
+  expect(out.split('\n').slice(0, -1)).toEqual(['*   M', '|\\  ', '| * B', '|/  ', 'o A'])
+})
+
+it('draws the parents a path-limited walk hands over', () => {
+  const walked = walk('X: Y\nA:')
+  const ids = new Set(walked.map((each) => each.oid))
+  const graph = new CommitGraph((oid) => ids.has(oid), false, new Set(), new Map([['X', ['A']]]))
+  let out = ''
+  for (const each of walked) {
+    graph.walk(each)
+    out += graph.leadIn() + graph.around(`${each.oid}\n`)
+  }
+  expect(out.split('\n').slice(0, -1)).toEqual(['* X', '* A'])
+})

@@ -26,13 +26,13 @@ import {
   UnknownSubcommandError,
   UsageError,
 } from './errors.ts'
-import { parseFlags, refCommits, select } from './history.ts'
+import { inPrintOrder, parseFlags, refCommits, walkEnds, walkOperands, walked } from './history.ts'
 import { resolveRef, uniqueAbbreviations } from './ref_list.ts'
 import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { configLines, type ConfigLine } from './fs.ts'
 import { readFile, readOptional } from './io.ts'
-import { mergeBases, resolveCommit, refsNamed, splitRevisions, resolveObject } from './revparse.ts'
+import { mergeBases, resolveCommit, refsNamed, resolveObject } from './revparse.ts'
 import {
   checkOperands,
   checkSwitches,
@@ -405,14 +405,20 @@ export async function revList(
       throw new UsageError('', verbUsage(ctx))
     }
     const repo = await opened(ctx, fl)
-    const flags = parseFlags(fl)
-    if (!texts.length && !flags.allRefs) throw new UsageError('', verbUsage(ctx))
-    const [shown, hidden] = await splitRevisions(repo, texts)
+    const parsed = parseFlags(fl)
+    const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
+    // A line naming only paths has no revision either (git 2.47.3).
+    if (!revisions.length && !parsed.allRefs) throw new UsageError('', verbUsage(ctx))
+    const flags = { ...parsed, pathspecs }
+    const [shown, hidden] = await walkEnds(repo, revisions, dashed)
     const starts = flags.allRefs ? [...(await refCommits(repo)), ...shown] : shown
-    const commits = await select(repo, starts, flags, hidden)
+    const walk = await walked(repo, starts, flags, hidden)
+    const commits = inPrintOrder(walk, flags)
+    // A `--boundary` commit's line starts with `-` (git 2.47.3).
+    const boundary = new Set(walk.boundary.map((commit) => commit.oid))
     const out = fl.asBool('count')
       ? `${String(commits.length)}\n`
-      : commits.map((c) => `${c.oid}\n`).join('')
+      : commits.map((c) => `${boundary.has(c.oid) ? '-' : ''}${c.oid}\n`).join('')
     return [ENC.encode(out), new IOResult()]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)

@@ -7,9 +7,8 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError, ShortlogOptionError } from './errors.ts'
 import { subject } from './format.ts'
-import { parseFlags, refCommits, select } from './history.ts'
+import { parseFlags, refCommits, select, walkEnds, walkOperands } from './history.ts'
 import { opened } from './session.ts'
-import { splitRevisions } from './revparse.ts'
 import { fatal, optionOperand, verbUsage } from './util.ts'
 
 /** Summarize repository history by author. */
@@ -25,10 +24,12 @@ export async function shortlog(
     if (word !== null) throw new ShortlogOptionError(word, verbUsage(ctx))
     const repo = await opened(ctx, fl)
     const mailmap = await loadMailmap(repo.vfs, repo.location)
-    const flags = parseFlags(fl)
-    const [starts, hidden] = await splitRevisions(
+    const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
+    const flags = { ...parseFlags(fl), pathspecs }
+    const [starts, hidden] = await walkEnds(
       repo,
-      texts.length ? texts : flags.allRefs ? [] : ['HEAD'],
+      revisions.length ? revisions : flags.allRefs ? [] : ['HEAD'],
+      dashed,
     )
     if (flags.allRefs) starts.push(...(await refCommits(repo)))
     const groups = new Map<string, string[]>()

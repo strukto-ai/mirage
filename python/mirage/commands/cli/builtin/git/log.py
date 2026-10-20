@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace
 
 from dulwich.objects import Commit
@@ -25,16 +26,21 @@ from mirage.commands.cli.builtin.git.constants import (
     TERMINATED_KINDS,
 )
 from mirage.commands.cli.builtin.git.diff_output import (
+    COMBINED_MODE,
     DiffFlags,
     commit_deltas,
     commit_entry,
     commit_output,
     commit_shown,
+    is_combined,
     parse_diff_flags,
     renames_enabled,
     separator_line,
 )
-from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
+from mirage.commands.cli.builtin.git.errors import (
+    GitError,
+    NoWorkspaceError,
+)
 from mirage.commands.cli.builtin.git.format import (
     FULL_SHA,
     Decorations,
@@ -46,20 +52,25 @@ from mirage.commands.cli.builtin.git.graph import CommitGraph
 from mirage.commands.cli.builtin.git.history import (
     LogFlags,
     Walk,
+    WalkStep,
     decorations,
     displayed,
+    in_print_order,
     parse_flags,
     ref_commits,
-    select,
+    walk_ends,
+    walk_operands,
     walked,
 )
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.repo import config_bool
-from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.rows import Delta, Side
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
-from mirage.commands.cli.builtin.git.util import check_operands, fatal
+from mirage.commands.cli.builtin.git.util import (
+    check_operands,
+    fatal,
+)
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
@@ -67,12 +78,19 @@ from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
+# How ``--boundary`` marks a commit outside ``--graph``, and the word a
+# block preset's header starts with.
+BOUNDARY_PREFIX = b"- "
+COMMIT_WORD = b"commit "
+
 
 def _collect(
     repo: BaseRepo,
     revisions: tuple[str, ...],
     flags: LogFlags,
-) -> tuple[list[Commit], Walk | None, Decorations | None]:
+    diff: DiffFlags,
+    dashed: bool = False,
+) -> tuple[list[Commit], Walk, Decorations | None]:
     """Resolve the starting points and walk them, synchronously.
 
     Runs on a worker thread. dulwich's walker is synchronous and now
@@ -87,14 +105,33 @@ def _collect(
             HEAD when none was given.
         flags (LogFlags): the parsed invocation, whose decoration style
             says whether to load ref labels and how to spell them.
+        diff (DiffFlags): the diff the pickaxe searches.
+        dashed (bool): whether ``--`` is on the line, which makes an
+            operand that resolves to nothing a bad revision.
     """
-    starts, hidden = split_revisions(repo, revisions or (HEAD,))
+    starts, hidden = walk_ends(repo, revisions or (HEAD,), dashed)
     if flags.all_refs:
         starts.extend(ref_commits(repo))
     decor = decorations(repo, flags.decorate)
-    if flags.graph:
-        return [], walked(repo, starts, flags, tuple(hidden)), decor
-    return select(repo, starts, flags, tuple(hidden)), None, decor
+    walk = walked(repo, starts, flags, tuple(hidden), diff)
+    return in_print_order(walk, flags), walk, decor
+
+
+def _marked(entry: bytes, kind: str) -> bytes:
+    """A ``--boundary`` commit's entry outside ``--graph``: a oneline row
+    starts ``- ``, and a block preset's header reads ``commit - <id>``;
+    a user format and email print it as they print any commit (git
+    2.47.3).
+
+    Args:
+        entry (bytes): the entry as any commit's would read.
+        kind (str): the pretty format's kind.
+    """
+    if kind == "oneline":
+        return BOUNDARY_PREFIX + entry
+    if kind in TEMPLATE_KINDS or not entry.startswith(COMMIT_WORD):
+        return entry
+    return COMMIT_WORD + BOUNDARY_PREFIX + entry[len(COMMIT_WORD) :]
 
 
 def _rendered(
@@ -102,6 +139,8 @@ def _rendered(
     flags: LogFlags,
     width: int,
     decor: Decorations | None,
+    boundary: frozenset[bytes] = frozenset(),
+    parents: Mapping[bytes, tuple[bytes, ...]] | None = None,
 ) -> bytes:
     """The bytes a log invocation prints for its selected commits.
 
@@ -117,10 +156,22 @@ def _rendered(
         flags (LogFlags): the parsed invocation.
         width (int): abbreviated id width for this repository.
         decor (Decorations | None): ref labels when the format asked.
+        boundary (frozenset[bytes]): the ``--boundary`` commits.
+        parents (Mapping[bytes, tuple[bytes, ...]] | None): the parents a
+            path-limited walk prints its commits with.
     """
     terminated = flags.pretty.kind in TERMINATED_KINDS
+    drawn = parents or {}
+    entries = (
+        (
+            commit,
+            commit_header(commit, flags, width, decor, drawn.get(commit.id)),
+        )
+        for commit in commits
+    )
     return (b"" if terminated else b"\n").join(
-        commit_header(commit, flags, width, decor) for commit in commits
+        _marked(entry, flags.pretty.kind) if commit.id in boundary else entry
+        for commit, entry in entries
     )
 
 
@@ -150,8 +201,12 @@ def _graphed(
     padding line, the one between the message and the diff included.
     That line is ``---`` when both a diffstat and a patch follow, and is
     left out for oneline, except before a combined diff, which git
-    prints from its own path. Synchronous, for a worker thread: the
-    diffs read objects.
+    prints from its own path: a merge's combined diff gets the line
+    even when nothing follows it, as does an empty ``--summary`` outside
+    oneline, and the combined diff's ``mode`` lines and its
+    ``--name-only`` or ``--name-status`` rows go out with no graph in
+    front of them at all (git 2.47.3). Synchronous, for a worker thread:
+    the diffs read objects.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -167,7 +222,12 @@ def _graphed(
             asked for.
     """
     width = abbrev_for(repo)
-    graph = CommitGraph(walk.interesting.__contains__, flags.first_parent)
+    graph = CommitGraph(
+        walk.interesting.__contains__,
+        flags.first_parent,
+        frozenset(commit.id for commit in walk.boundary),
+        walk.parents or None,
+    )
     mailmap = flags.mailmap if flags.use_mailmap else ()
     fmt = flags.pretty
     user = fmt.kind in TEMPLATE_KINDS
@@ -181,7 +241,7 @@ def _graphed(
     out = ""
     shown_one = False
     missing_newline = False
-    for step in walk.steps:
+    for step in (*walk.steps, *(WalkStep(c, True) for c in walk.boundary)):
         commit = step.commit
         graph.walk(commit)
         if not step.shown:
@@ -229,10 +289,16 @@ def _graphed(
                     decor,
                     flags.date,
                     flags.mailmap,
+                    walk.parents.get(commit.id),
                 )
             else:
                 head, *rest = preset_block(
-                    commit, fmt.kind, width, flags.date, mailmap
+                    commit,
+                    fmt.kind,
+                    width,
+                    flags.date,
+                    mailmap,
+                    walk.parents.get(commit.id),
                 )
                 out += f"{head}{source}{labels}\n{graph.next_row()}"
                 text = "".join(f"{line}\n" for line in rest)
@@ -242,15 +308,24 @@ def _graphed(
                 if not missing_newline:
                     out += graph.filler()
                 out += "\n"
-            if body == "" or diff is None:
+            combined = diff is not None and is_combined(commit, diff)
+            if diff is None or not blocks:
+                continue
+            if body == "" and not (
+                combined or (diff.summary and fmt.kind != "oneline")
+            ):
                 continue
             separator = (
                 None if empty else separator_line(commit, fmt.kind, diff)
             )
             if separator is not None:
                 out += f"{graph.filler()}{separator}\n"
+            names = combined and (diff.name_only or diff.name_status)
             for line in body.split("\n")[:-1]:
-                out += f"{graph.filler()}{line}\n"
+                if names or (combined and line.startswith(COMBINED_MODE)):
+                    out += f"{line}\n"
+                else:
+                    out += f"{graph.filler()}{line}\n"
     return encode_text(out)
 
 
@@ -275,66 +350,93 @@ async def log(
         check_operands(ctx, texts)
         parsed = parse_flags(fl, ctx.env)
         repo, location = await opened(ctx, fl)
+        revisions, patterns, dashed = await walk_operands(
+            ctx, fl, repo, location, texts
+        )
+        parsed = replace(parsed, pathspecs=patterns)
         mailmap, mapped, decorate = await displayed(
             vfs, location, fl, parsed.pretty
         )
         parsed = replace(
             parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
         )
-        commits, walk, decor = await asyncio.to_thread(
-            _collect, repo, tuple(texts), parsed
-        )
         diff_flags = parse_diff_flags(fl, default_patch=False)
+        # The pickaxe searches the diff, renames paired, whether or not
+        # any of it is printed, which is how ``-S -m`` comes to name the
+        # parent each printed entry matched against.
+        diffing = parsed.pickaxe is not None or any(
+            (
+                diff_flags.patch,
+                diff_flags.stat,
+                diff_flags.name_only,
+                diff_flags.name_status,
+                diff_flags.numstat,
+                diff_flags.shortstat,
+                diff_flags.summary,
+                diff_flags.raw,
+            )
+        )
+        if diffing:
+            diff_flags = parse_diff_flags(
+                fl,
+                default_patch=False,
+                default_renames=await renames_enabled(vfs, location),
+                quote_path_fully=await config_bool(
+                    vfs, location, b"core", b"quotepath", True
+                ),
+            )
+        diff_flags = replace(
+            diff_flags, pickaxe=parsed.pickaxe, pathspecs=patterns
+        )
+        commits, walk, decor = await asyncio.to_thread(
+            _collect, repo, revisions, parsed, diff_flags, dashed
+        )
     except GitError as exc:
         return fatal(exc)
-    diffing = any(
-        (
-            diff_flags.patch,
-            diff_flags.stat,
-            diff_flags.name_only,
-            diff_flags.name_status,
-            diff_flags.numstat,
-            diff_flags.shortstat,
-            diff_flags.summary,
-            diff_flags.raw,
-        )
-    )
-    if diffing:
-        diff_flags = parse_diff_flags(
-            fl,
-            default_patch=False,
-            default_renames=await renames_enabled(vfs, location),
-            quote_path_fully=await config_bool(
-                vfs, location, b"core", b"quotepath", True
-            ),
-        )
+    boundary = frozenset(commit.id for commit in walk.boundary)
     if not diffing:
         out = (
             await asyncio.to_thread(
                 _graphed, repo, walk, parsed, decor, None, {}
             )
-            if walk is not None
-            else _rendered(commits, parsed, abbrev_for(repo), decor)
+            if parsed.graph
+            else _rendered(
+                commits,
+                parsed,
+                abbrev_for(repo),
+                decor,
+                boundary,
+                walk.parents,
+            )
         )
         return (yield_bytes(out) if out else None), IOResult()
     shown_commits = (
-        [step.commit for step in walk.steps if step.shown]
-        if walk is not None
+        [*(step.commit for step in walk.steps if step.shown), *walk.boundary]
+        if parsed.graph
         else commits
     )
     rows, spans = await asyncio.to_thread(
         commit_deltas, repo, location, shown_commits, diff_flags
     )
+    # A commit whose summary is empty still gets the blank line under its
+    # header, as ``show`` gives one, though not under oneline (git
+    # 2.47.3).
+    summary = (
+        diff_flags.summary
+        and not diff_flags.no_patch
+        and parsed.pretty.kind != "oneline"
+    )
 
     async def render(shown: list[Delta]) -> ByteSource | None:
         sides = commit_shown(shown, spans)
-        if walk is not None:
+        if parsed.graph:
             out = await asyncio.to_thread(
                 _graphed, repo, walk, parsed, decor, diff_flags, sides
             )
         else:
-            blocks = [
-                await asyncio.to_thread(
+            blocks = []
+            for commit in commits:
+                entry = await asyncio.to_thread(
                     commit_entry,
                     repo,
                     commit,
@@ -342,9 +444,12 @@ async def log(
                     diff_flags,
                     sides[commit.id],
                     decor,
+                    summary,
+                    walk.parents.get(commit.id),
                 )
-                for commit in commits
-            ]
+                if commit.id in boundary:
+                    entry = _marked(entry, parsed.pretty.kind)
+                blocks.append(entry)
             out = (
                 b"" if parsed.pretty.kind in TERMINATED_KINDS else b"\n"
             ).join(blocks)

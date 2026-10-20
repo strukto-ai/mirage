@@ -225,10 +225,17 @@ function messageBlock(commit: CommitFacts): string[] {
 /**
  * The `Merge:` line every block preset prints for a merge, which git puts
  * between the id and the author for both `log` and `show`.
+ *
+ * @param parents the parents to print, the commit's own when null
  */
-function mergeLine(commit: CommitFacts, length: number): string[] {
-  if (commit.parents.length <= 1) return []
-  return [`Merge: ${commit.parents.map((p) => short(p, length)).join(' ')}`]
+function mergeLine(
+  commit: CommitFacts,
+  length: number,
+  parents: readonly string[] | null = null,
+): string[] {
+  const shown = parents ?? commit.parents
+  if (shown.length <= 1) return []
+  return [`Merge: ${shown.map((p) => short(p, length)).join(' ')}`]
 }
 
 /**
@@ -238,6 +245,10 @@ function mergeLine(commit: CommitFacts, length: number): string[] {
  * indented message; `short` is the id, author and indented subject; `full`
  * adds `Commit:` and drops both dates; `fuller` aligns four header lines to
  * the `AuthorDate:` column.
+ *
+ * @param parents the parents to print, the commit's own when null; a
+ *   path-limited log prints the ones it kept, though raw prints the stored ones
+ *   whatever the graph draws (git 2.47.3)
  */
 export function presetBlock(
   commit: CommitFacts,
@@ -245,6 +256,7 @@ export function presetBlock(
   length: number,
   date: DateMode = DEFAULT_DATE,
   mailmap: readonly MailmapEntry[] = [],
+  parents: readonly string[] | null = null,
 ): string[] {
   if (kind === 'raw')
     return [
@@ -258,7 +270,7 @@ export function presetBlock(
     ]
   const author = mappedIdentity(`${commit.authorName} <${commit.authorEmail}>`, mailmap)
   const committer = mappedIdentity(`${commit.committerName} <${commit.committerEmail}>`, mailmap)
-  const lines = [`commit ${commit.oid}`, ...mergeLine(commit, length)]
+  const lines = [`commit ${commit.oid}`, ...mergeLine(commit, length, parents)]
   if (kind === 'medium') {
     lines.push(
       `Author: ${author}`,
@@ -328,6 +340,7 @@ export function renderTemplate(
   decor: Decorations | null,
   date: DateMode = DEFAULT_DATE,
   mailmap: readonly MailmapEntry[] = [],
+  parents: readonly string[] | null = null,
 ): string {
   const labels = decor?.get(commit.oid) ?? []
   const out: string[] = []
@@ -340,7 +353,7 @@ export function renderTemplate(
       continue
     }
     const marker = template[i + 1] ?? ''
-    const expanded = simplePlaceholder(marker, commit, length, labels)
+    const expanded = simplePlaceholder(marker, commit, length, labels, parents)
     if (expanded !== null) {
       out.push(expanded)
       i += 2
@@ -376,7 +389,9 @@ function simplePlaceholder(
   commit: CommitFacts,
   length: number,
   labels: readonly string[],
+  parents: readonly string[] | null = null,
 ): string | null {
+  const shown = parents ?? commit.parents
   switch (marker) {
     case 'H':
       return commit.oid
@@ -387,9 +402,9 @@ function simplePlaceholder(
     case 't':
       return short(commit.tree, length)
     case 'P':
-      return commit.parents.join(' ')
+      return shown.join(' ')
     case 'p':
-      return commit.parents.map((p) => short(p, length)).join(' ')
+      return shown.map((p) => short(p, length)).join(' ')
     case 's':
       return subjectFolded(commit.message)
     case 'b':
@@ -468,6 +483,7 @@ export function commitHeader(
   display: CommitDisplay,
   width: number,
   decor: Decorations | null,
+  parents: readonly string[] | null = null,
 ): string {
   const fmt = display.pretty
   const decorated = display.decorate !== Decoration.NONE
@@ -483,6 +499,7 @@ export function commitHeader(
       decor,
       display.date,
       display.mailmap,
+      parents,
     )
     if (fmt.kind === 'tformat') {
       return fmt.template === null || fmt.template === '' ? '' : `${text}\n`
@@ -495,6 +512,7 @@ export function commitHeader(
     width,
     display.date,
     display.useMailmap ? display.mailmap : [],
+    parents,
   )
   if (decorated && block[0]?.startsWith('commit '))
     block[0] += renderTemplate('%d', commit, width, decor)

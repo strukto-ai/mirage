@@ -91,7 +91,7 @@ export class InvalidGitFileError extends GitError {
  * alike).
  */
 export class AmbiguousArgumentError extends GitError {
-  constructor(revision: string) {
+  constructor(readonly revision: string) {
     super(
       `ambiguous argument '${revision}': unknown revision or path not in the ` +
         `working tree.\nUse '--' to separate paths from revisions, like this:\n` +
@@ -109,6 +109,34 @@ export class AmbiguousArgumentError extends GitError {
 export class BadRevisionError extends GitError {
   constructor(revision: string) {
     super(`bad revision '${revision}'`)
+  }
+}
+
+/**
+ * A walk's operand, with no `--` on the line, that names both a revision and a
+ * file in the working tree, which git refuses to guess between (pinned against
+ * git 2.47.3).
+ */
+export class RevisionAndFilenameError extends GitError {
+  constructor(operand: string) {
+    super(
+      `ambiguous argument '${operand}': both revision and filename\n` +
+        `Use '--' to separate paths from revisions, like this:\n` +
+        `'git <command> [<revision>...] -- [<file>...]'`,
+    )
+  }
+}
+
+/**
+ * An operand after a walk's first path, with no `--` on the line, that names
+ * nothing in the working tree (pinned against git 2.47.3).
+ */
+export class NoSuchPathError extends GitError {
+  constructor(operand: string) {
+    super(
+      `${operand}: no such path in the working tree.\n` +
+        `Use 'git <command> -- <path>...' to specify paths that do not exist locally.`,
+    )
   }
 }
 

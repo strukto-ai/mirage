@@ -98,16 +98,10 @@ pub(crate) fn splits_char(hay: &[u8], pos: usize) -> bool {
 }
 
 impl Automata {
-    /// `prefilter` lets the search skip ahead to the literals every match
-    /// holds. With it, regex-automata 0.4.7 (ripgrep 14.1.1's version, which
-    /// this crate pins) can report a match that is not there once a class
-    /// takes the line terminator: `\w[^x]*[ab][a-]` finds `aa` in `aaxcx`.
-    /// grep's classes never take it, so only its patterns keep the skip.
     pub(crate) fn new(
         hirs: &[Hir],
         terminator: u8,
         extents: bool,
-        prefilter: bool,
     ) -> Result<Automata, &'static str> {
         let first = meta::Builder::new()
             .configure(
@@ -115,7 +109,6 @@ impl Automata {
                     .match_kind(MatchKind::LeftmostFirst)
                     .utf8_empty(false)
                     .line_terminator(terminator)
-                    .auto_prefilter(prefilter)
                     .which_captures(WhichCaptures::Implicit),
             )
             .build_many_from_hir(hirs)
@@ -222,7 +215,7 @@ impl Engine {
         let automata = if hirs.is_empty() {
             None
         } else {
-            Some(Automata::new(&hirs, options.terminator, extents, true)?)
+            Some(Automata::new(&hirs, options.terminator, extents)?)
         };
         Ok(Engine {
             automata,

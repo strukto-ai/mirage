@@ -19,10 +19,12 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError } from './errors.ts'
 import {
+  COMBINED_MODE,
   commitDeltas,
   commitEntry,
   commitOutput,
   commitShown,
+  isCombined,
   parseDiffFlags,
   renamesEnabled,
   separatorLine,
@@ -40,21 +42,41 @@ import { CommitGraph } from './graph.ts'
 import {
   displayed,
   decorations,
+  inPrintOrder,
   parseFlags,
   refCommits,
-  select,
+  walkEnds,
+  walkOperands,
   walked,
   type LogFlags,
   type Walk,
 } from './history.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { splitRevisions } from './revparse.ts'
 import type { Delta, Side } from './rows.ts'
 import { checkOperands, fatal } from './util.ts'
 import { HEAD, TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
 import { Decoration } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+
+// How `--boundary` marks a commit outside `--graph`, and the word a block
+// preset's header starts with.
+const BOUNDARY_PREFIX = '- '
+const COMMIT_WORD = 'commit '
+
+/**
+ * A `--boundary` commit's entry outside `--graph`: a oneline row starts `- `,
+ * and a block preset's header reads `commit - <id>`; a user format and email
+ * print it as they print any commit (git 2.47.3).
+ *
+ * @param entry the entry as any commit's would read
+ * @param kind the pretty format's kind
+ */
+function marked(entry: string, kind: string): string {
+  if (kind === 'oneline') return BOUNDARY_PREFIX + entry
+  if (TEMPLATE_KINDS.includes(kind) || !entry.startsWith(COMMIT_WORD)) return entry
+  return COMMIT_WORD + BOUNDARY_PREFIX + entry.slice(COMMIT_WORD.length)
+}
 
 /**
  * The text a log invocation prints for its selected commits.
@@ -70,10 +92,15 @@ function rendered(
   flags: LogFlags,
   width: number,
   decor: Decorations | null,
+  boundary: ReadonlySet<string> = new Set(),
+  parents: ReadonlyMap<string, readonly string[]> = new Map(),
 ): string {
   const terminated = TERMINATED_KINDS.includes(flags.pretty.kind)
   return commits
-    .map((commit) => commitHeader(commit, flags, width, decor))
+    .map((commit) => {
+      const entry = commitHeader(commit, flags, width, decor, parents.get(commit.oid) ?? null)
+      return boundary.has(commit.oid) ? marked(entry, flags.pretty.kind) : entry
+    })
     .join(terminated ? '' : '\n')
 }
 
@@ -94,7 +121,11 @@ function rendered(
  * each naming its parent, and every diff line sits behind a padding line,
  * the one between the message and the diff included. That line is `---` when
  * both a diffstat and a patch follow, and is left out for oneline, except
- * before a combined diff, which git prints from its own path.
+ * before a combined diff, which git prints from its own path: a merge's
+ * combined diff gets the line even when nothing follows it, as does an empty
+ * `--summary` outside oneline, and the combined diff's `mode` lines and its
+ * `--name-only` or `--name-status` rows go out with no graph in front of them
+ * at all (git 2.47.3).
  *
  * @param repo the opened repository
  * @param walk the walked commits and the ones an edge may lead to
@@ -113,7 +144,12 @@ async function graphed(
   sides: ReadonlyMap<string, readonly Side[]>,
 ): Promise<string> {
   const width = repo.abbrev
-  const graph = new CommitGraph((oid) => walk.interesting.has(oid), flags.firstParent)
+  const graph = new CommitGraph(
+    (oid) => walk.interesting.has(oid),
+    flags.firstParent,
+    new Set(walk.boundary.map((commit) => commit.oid)),
+    walk.parents.size ? walk.parents : null,
+  )
   const mailmap = flags.useMailmap ? flags.mailmap : []
   const fmt = flags.pretty
   const user = TEMPLATE_KINDS.includes(fmt.kind)
@@ -123,7 +159,10 @@ async function graphed(
   let out = ''
   let shownOne = false
   let missingNewline = false
-  for (const { commit, shown } of walk.steps) {
+  for (const { commit, shown } of [
+    ...walk.steps,
+    ...walk.boundary.map((commit) => ({ commit, shown: true })),
+  ]) {
     graph.walk(commit)
     if (!shown) continue
     const bodies =
@@ -133,7 +172,8 @@ async function graphed(
       if (body !== null)
         blocks.push([bodies.length > 1 ? (commit.parents[index] ?? null) : null, body])
     })
-    if (!blocks.length) blocks.push([null, ''])
+    const differs = blocks.length > 0
+    if (!differs) blocks.push([null, ''])
     for (const [parent, body] of blocks) {
       if (shownOne && !terminated) {
         if (!missingNewline) out += graph.filler()
@@ -152,9 +192,24 @@ async function graphed(
         out += `${renderTemplate('%h', commit, length, decor)}${from}${labels} `
         text = renderTemplate('%s', commit, length, decor)
       } else if (user) {
-        text = renderTemplate(fmt.template ?? '', commit, width, decor, flags.date, flags.mailmap)
+        text = renderTemplate(
+          fmt.template ?? '',
+          commit,
+          width,
+          decor,
+          flags.date,
+          flags.mailmap,
+          walk.parents.get(commit.oid) ?? null,
+        )
       } else {
-        const [head = '', ...rest] = presetBlock(commit, fmt.kind, width, flags.date, mailmap)
+        const [head = '', ...rest] = presetBlock(
+          commit,
+          fmt.kind,
+          width,
+          flags.date,
+          mailmap,
+          walk.parents.get(commit.oid) ?? null,
+        )
         out += `${head}${from}${labels}\n${graph.nextRow()}`
         text = rest.map((line) => `${line}\n`).join('')
       }
@@ -164,10 +219,16 @@ async function graphed(
         if (!missingNewline) out += graph.filler()
         out += '\n'
       }
-      if (body === '' || diff === null) continue
+      const combined = diff !== null && isCombined(commit, diff)
+      if (diff === null || !differs) continue
+      if (body === '' && !(combined || (diff.summary && fmt.kind !== 'oneline'))) continue
       const separator = empty ? null : separatorLine(commit, fmt.kind, diff)
       if (separator !== null) out += `${graph.filler()}${separator}\n`
-      for (const line of body.split('\n').slice(0, -1)) out += `${graph.filler()}${line}\n`
+      const names = combined && (diff.nameOnly || diff.nameStatus)
+      for (const line of body.split('\n').slice(0, -1)) {
+        const bare = names || (combined && line.startsWith(COMBINED_MODE))
+        out += `${bare ? '' : graph.filler()}${line}\n`
+      }
     }
   }
   return out
@@ -181,8 +242,9 @@ async function startingPoints(
   repo: Repo,
   revisions: readonly string[],
   flags: LogFlags,
+  dashed: boolean,
 ): Promise<[CommitFacts[], CommitFacts[]]> {
-  const [starts, hidden] = await splitRevisions(repo, revisions.length ? revisions : [HEAD])
+  const [starts, hidden] = await walkEnds(repo, revisions.length ? revisions : [HEAD], dashed)
   if (flags.allRefs) starts.push(...(await refCommits(repo)))
   return [starts, hidden]
 }
@@ -199,12 +261,17 @@ export async function log(
     checkOperands(ctx, texts)
     const flags = parseFlags(fl, ctx.env)
     const repo = await opened(ctx, fl)
+    const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
     const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)
-    const parsed = { ...flags, mailmap, useMailmap: mapped, decorate }
-    const [starts, hidden] = await startingPoints(repo, texts, parsed)
+    const parsed = { ...flags, mailmap, useMailmap: mapped, decorate, pathspecs }
+    const [starts, hidden] = await startingPoints(repo, revisions, parsed, dashed)
     const decor = await decorations(repo, parsed.decorate)
     let diffFlags = parseDiffFlags(fl, false)
+    // The pickaxe searches the diff, renames paired, whether or not any of it is
+    // printed, which is how `-S -m` comes to name the parent each printed entry
+    // matched against.
     const diffing =
+      parsed.pickaxe !== null ||
       diffFlags.patch ||
       diffFlags.stat ||
       diffFlags.nameOnly ||
@@ -223,28 +290,41 @@ export async function log(
         await configBool(repo, 'core.quotepath', true),
       )
     }
-    const walk = parsed.graph ? await walked(repo, starts, parsed, hidden) : null
-    const commits = walk === null ? await select(repo, starts, parsed, hidden) : []
+    diffFlags = { ...diffFlags, pickaxe: parsed.pickaxe, pathspecs }
+    const walk = await walked(repo, starts, parsed, hidden, diffFlags)
+    const commits = inPrintOrder(walk, parsed)
+    const boundary = new Set(walk.boundary.map((commit) => commit.oid))
     if (!diffing) {
-      const out =
-        walk !== null
-          ? await graphed(repo, walk, parsed, decor, null, new Map())
-          : rendered(commits, parsed, repo.abbrev, decor)
+      const out = parsed.graph
+        ? await graphed(repo, walk, parsed, decor, null, new Map())
+        : rendered(commits, parsed, repo.abbrev, decor, boundary, walk.parents)
       return [out === '' ? null : encodeText(out), new IOResult()]
     }
-    const shownCommits =
-      walk !== null ? walk.steps.filter((step) => step.shown).map((step) => step.commit) : commits
+    const shownCommits = parsed.graph
+      ? [...walk.steps.filter((step) => step.shown).map((step) => step.commit), ...walk.boundary]
+      : commits
     const [rows, spans] = await commitDeltas(repo, shownCommits, diffFlags)
+    // A commit whose summary is empty still gets the blank line under its
+    // header, as `show` gives one, though not under oneline (git 2.47.3).
+    const summary = diffFlags.summary && !diffFlags.noPatch && parsed.pretty.kind !== 'oneline'
     const render = async (shown: Delta[]): Promise<ByteSource | null> => {
       const sides = commitShown(shown, spans)
       let out: string
-      if (walk !== null) out = await graphed(repo, walk, parsed, decor, diffFlags, sides)
+      if (parsed.graph) out = await graphed(repo, walk, parsed, decor, diffFlags, sides)
       else {
         const blocks: string[] = []
         for (const commit of commits) {
-          blocks.push(
-            await commitEntry(repo, commit, parsed, diffFlags, sides.get(commit.oid) ?? [], decor),
+          const entry = await commitEntry(
+            repo,
+            commit,
+            parsed,
+            diffFlags,
+            sides.get(commit.oid) ?? [],
+            decor,
+            summary,
+            walk.parents.get(commit.oid) ?? null,
           )
+          blocks.push(boundary.has(commit.oid) ? marked(entry, parsed.pretty.kind) : entry)
         }
         out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
       }

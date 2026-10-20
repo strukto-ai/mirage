@@ -315,6 +315,11 @@ LOG_OPTIONS = (
         action="store_true",
         help="Start from every ref as well as the revision",
     ),
+    Argument(
+        "--boundary",
+        action="store_true",
+        help="Also show the excluded commits the history stops at",
+    ),
     PRETTY_OPTION,
     FORMAT_OPTION,
     # The pickaxe, and the reason `git log -S <name> --reverse` answers
@@ -334,6 +339,12 @@ LOG_OPTIONS = (
         "--pickaxe-regex",
         action="store_true",
         help="Treat the -S string as an extended regular expression",
+    ),
+    Argument(
+        "--pickaxe-all",
+        action="store_true",
+        help="Show every file a matching commit changed, not only the "
+        "files -S or -G matched",
     ),
     Argument(
         "--since",

@@ -35,7 +35,7 @@ const SLASH = '/'
  * @param start absolute virtual path git is running in
  * @param operand the operand as the user spelled it
  */
-function absoluteOperand(start: string, operand: string): string {
+export function absoluteOperand(start: string, operand: string): string {
   if (operand.startsWith('/')) return posixNormpath(operand)
   return posixNormpath(`${start}/${operand}`)
 }

@@ -221,6 +221,10 @@ const LOG_OPTIONS = [
     action: 'store_true',
     help: 'Start from every ref as well as the revision',
   }),
+  new Argument('--boundary', {
+    action: 'store_true',
+    help: 'Also show the excluded commits the history stops at',
+  }),
   PRETTY_OPTION,
   FORMAT_OPTION,
   // The pickaxe, and the reason `git log -S <name> --reverse` answers "which
@@ -233,6 +237,10 @@ const LOG_OPTIONS = [
   new Argument('--pickaxe-regex', {
     action: 'store_true',
     help: 'Treat the -S string as an extended regular expression',
+  }),
+  new Argument('--pickaxe-all', {
+    action: 'store_true',
+    help: 'Show every file a matching commit changed, not only the files -S or -G matched',
   }),
   new Argument('--since', { help: 'Commits more recent than a date (ISO-8601 or epoch)' }),
   new Argument('--until', { help: 'Commits older than a date (ISO-8601 or epoch)' }),

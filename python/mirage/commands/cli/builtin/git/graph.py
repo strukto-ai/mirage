@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Iterator, Set
+from collections.abc import Callable, Iterator, Mapping, Set
 from dataclasses import dataclass
 
 from dulwich.objects import Commit
 
 SKIPPED = "..."
+# The cell a ``--boundary`` commit is drawn with, in place of ``*``.
+BOUNDARY = "o"
 
 
 @dataclass(eq=False, slots=True)
@@ -98,17 +100,30 @@ class CommitGraph:
     line stands in, and slide under a run of standing columns with
     ``_``; a printed commit owes the rows its lines need to settle.
 
+    A ``--boundary`` commit is drawn with ``o``; a line leads on from it
+    only to a parent the graph draws too.
+
     Args:
         interesting (Callable[[bytes], bool]): whether a commit is in
             the walk, so that a line leads to it.
         first_parent (bool): follow only first parents.
+        boundary (frozenset[bytes]): the ``--boundary`` commits.
+        parents (Mapping[bytes, tuple[bytes, ...]] | None): the parents
+            a path-limited walk drew its history with, each commit's own
+            when None.
     """
 
     def __init__(
-        self, interesting: Callable[[bytes], bool], first_parent: bool
+        self,
+        interesting: Callable[[bytes], bool],
+        first_parent: bool,
+        boundary: frozenset[bytes] = frozenset(),
+        parents: Mapping[bytes, tuple[bytes, ...]] | None = None,
     ) -> None:
         self._interesting = interesting
         self._first_parent = first_parent
+        self._boundary = boundary
+        self._parents = parents
         self._lines: list[_Line] = []
         self._pending: Commit | None = None
         self._skipped = False
@@ -141,7 +156,9 @@ class CommitGraph:
         self._pending = None
         out = self._skip_row(commit) + "\n" if self._skipped else ""
         rows, self._ahead = self._ahead or list(self._place(commit)), []
-        star = next(i for i, row in enumerate(rows) if "*" in row)
+        star = next(
+            i for i, row in enumerate(rows) if "*" in row or BOUNDARY in row
+        )
         self._owed = rows[star + 1 :]
         return out + "".join(row + "\n" for row in rows[:star]) + rows[star]
 
@@ -197,8 +214,7 @@ class CommitGraph:
         return out + "".join("\n" + row for row in owed)
 
     def _skip_row(self, commit: Commit) -> str:
-        columns = self._columns()
-        width = 2 * (len(columns) + (commit.id not in columns))
+        width = self._shape(commit).width
         self._rest(width, settle=True)
         self._skipped = False
         return SKIPPED.ljust(max(len(SKIPPED), width))
@@ -210,7 +226,12 @@ class CommitGraph:
     def _parents_of(
         self, commit: Commit, columns: list[bytes], col: int
     ) -> _Parents:
-        followed = commit.parents[:1] if self._first_parent else commit.parents
+        own = (
+            commit.parents
+            if self._parents is None
+            else self._parents.get(commit.id, tuple(commit.parents))
+        )
+        followed = own[:1] if self._first_parent else own
         parents = list(
             dict.fromkeys(p for p in followed if self._interesting(p))
         )
@@ -293,9 +314,12 @@ class CommitGraph:
             yield from self._spread_rows(
                 others, right, base, here, width, lift
             )
-        yield self._commit_row(
+        row = self._commit_row(
             others, right, base, here, width, lift, spread, goal_of, extra
         )
+        if commit.id in self._boundary:
+            row = row[:here] + BOUNDARY + row[here + 1 :]
+        yield row
         born = [_Line(sha, here, goal_of[sha]) for sha in parents.opened]
         led = (
             [_Line(parents.lead, here, goal_of[parents.lead])]

@@ -33,6 +33,7 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import exists, read_optional
+from mirage.commands.cli.builtin.git.ref_fields import MINIMUM_ABBREV
 from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
 from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep, RevOp
@@ -423,7 +424,9 @@ def object_at(repo: BaseRepo, revision: str) -> ShaFile:
     the caller's to try first, and this is what is left for the tree or
     blob id git also takes wherever an object is wanted. An
     abbreviation is expanded through the store rather than looked up,
-    since a store answers only a whole id.
+    since a store answers only a whole id, and one shorter than four
+    hex digits names nothing, however few objects it would match
+    (git 2.47.3).
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -436,6 +439,8 @@ def object_at(repo: BaseRepo, revision: str) -> ShaFile:
     try:
         return repo[ObjectID(wanted)]
     except KeyError:
+        if len(wanted) < MINIMUM_ABBREV:
+            raise
         found = list(repo.object_store.iter_prefix(wanted))
         if len(found) != 1:
             raise
@@ -647,7 +652,7 @@ def note_ambiguity(repo: BaseRepo, name: str) -> None:
         repo.ambiguous.append(f"warning: refname '{name}' is ambiguous.\n")
 
 
-def _named_object(repo: BaseRepo, revision: str) -> ShaFile:
+def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
     """The object a name or id stands for, an annotated tag unpeeled.
 
     A name two refs answer to reads as the first, with git's warning
@@ -655,19 +660,20 @@ def _named_object(repo: BaseRepo, revision: str) -> ShaFile:
 
     Args:
         repo (BaseRepo): the opened repository.
-        revision (str): the name or id as typed.
+        name (str): the name or id, operators already split off.
+        revision (str): the whole revision, which a failure names.
     """
     known = [ref.decode(errors="replace") for ref in repo.refs.allkeys()]
-    named = refs_named(known, revision)
+    named = refs_named(known, name)
     if named:
         try:
             sha = repo.refs[Ref(named[0].encode())]
         except KeyError as exc:
             raise AmbiguousArgumentError(revision) from exc
-        note_ambiguity(repo, revision)
+        note_ambiguity(repo, name)
         return _object_by_id(repo, ObjectID(sha), revision)
     try:
-        return object_at(repo, revision)
+        return object_at(repo, name)
     except (KeyError, ValueError) as exc:
         raise AmbiguousArgumentError(revision) from exc
 
@@ -728,10 +734,11 @@ def resolve_object(repo: BaseRepo, revision: str) -> ShaFile:
         # annotated tag is the tag rather than the commit behind it: git
         # does not peel one until a caller asks for a commit-ish, and
         # ``git rev-parse v1`` prints the tag's id.
-        return _named_object(repo, revision)
+        return _named_object(repo, revision, revision)
     # Every operator but ``^{tag}`` and ``^{object}`` unwraps a tag,
-    # which is git's own rule and costs nothing here.
-    obj = resolve_object(repo, base)
+    # which is git's own rule and costs nothing here. A base that names
+    # nothing fails naming the whole revision, as git's does.
+    obj = _named_object(repo, base, revision)
     for op in ops:
         if isinstance(op, PeelStep):
             obj = _peeled(repo, obj, op.want, revision)
