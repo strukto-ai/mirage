@@ -23,7 +23,11 @@ import time
 from functools import partial
 
 from mirage.bridge.sync import on_auxiliary_loop
-from mirage.mount.constants import LISTING_CONCURRENCY
+from mirage.mount.constants import (
+    LISTING_CONCURRENCY,
+    OPEN_HANDLES,
+    RESERVED_PORTS,
+)
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
@@ -122,9 +126,13 @@ def unmount_nfs(mountpoint: str) -> None:
         mountpoint (str): the mounted directory.
     """
     for args in unmount_args(mountpoint):
-        done = subprocess.run(
-            args, capture_output=True, text=True, timeout=MOUNT_TIMEOUT
-        )
+        try:
+            done = subprocess.run(
+                args, capture_output=True, text=True, timeout=MOUNT_TIMEOUT
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.debug("nfs: %s failed: %r", " ".join(args), exc)
+            continue
         if done.returncode == 0:
             return
         logger.debug("nfs: %s failed: %s", " ".join(args), done.stderr.strip())
@@ -165,21 +173,33 @@ class MirageNFSServer:
     The protocol is mirage-rs's (``NFSEngine``); this owns the sockets
     and runs each file operation the engine asks for on the core, so a
     kernel NFS client mounts the core's tree with no driver installed.
+    NFS has no open or close: a read opens its file on the core and
+    later reads reuse that handle until the file's size or mtime moves.
 
     Args:
         core (MountCore): the mount core to serve.
         export (str): the path a client mounts.
+        secure (bool): take only clients on a reserved port, as a kernel
+            client mounted by root is; on by default on Linux.
     """
 
-    def __init__(self, core: MountCore, export: str = "/") -> None:
+    def __init__(
+        self,
+        core: MountCore,
+        export: str = "/",
+        secure: bool = sys.platform.startswith("linux"),
+    ) -> None:
         self._core = core
         self._export = export
+        self._secure = secure
         self._engine: NFSEngine | None = None
         self._server: asyncio.Server | None = None
         self._writers: dict[int, asyncio.StreamWriter] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._next_conn = 0
         self._stats = asyncio.Semaphore(LISTING_CONCURRENCY)
+        self._handles: dict[str, asyncio.Future[int]] = {}
+        self._versions: dict[str, tuple[int, int]] = {}
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
         """Listen on ``host``, and return the port a client mounts.
@@ -196,19 +216,27 @@ class MirageNFSServer:
         return bound
 
     async def close(self) -> None:
-        """Stop listening and drop every connection."""
+        """Stop listening, drop every connection and release every
+        file the server holds open."""
+        self._engine = None
         if self._server is not None:
             self._server.close()
         for writer in list(self._writers.values()):
             writer.close()
         for task in list(self._tasks):
             task.cancel()
+        await on_auxiliary_loop(self._release_all)
         if self._server is not None:
             await self._server.wait_closed()
 
     async def _serve(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        port = int(writer.get_extra_info("peername")[1])
+        if self._secure and port >= RESERVED_PORTS:
+            logger.warning("nfs: refused a client on unreserved port %d", port)
+            writer.close()
+            return
         engine = self._engine
         if engine is None:
             writer.close()
@@ -242,6 +270,8 @@ class MirageNFSServer:
 
     async def _run(self, engine: NFSEngine, request: NFSRequest) -> None:
         reply, data = await on_auxiliary_loop(partial(self._answer, request))
+        if self._engine is not engine:
+            return
         conn, out = engine.complete(request["id"], reply, data)
         writer = self._writers.get(conn) if conn is not None else None
         if writer is not None and out:
@@ -256,7 +286,7 @@ class MirageNFSServer:
             match request["op"]:
                 case "getattr":
                     return {
-                        "attrs": wire_attrs(await self._core.getattr(path))
+                        "attrs": wire_attrs(await self._getattr(path))
                     }, b""
                 case "readdir":
                     return {"entries": await self._listing(path)}, b""
@@ -265,7 +295,7 @@ class MirageNFSServer:
                         request.get("offset", 0),
                         request.get("size", 0),
                     )
-                    return {}, await self._core.read(path, size, offset, None)
+                    return {}, await self._read(path, offset, size)
                 case "readlink":
                     return {"target": await self._core.readlink(path)}, b""
                 case op:
@@ -293,3 +323,49 @@ class MirageNFSServer:
             n for n in await self._core.readdir(path) if n not in (".", "..")
         ]
         return list(await asyncio.gather(*(entry(name) for name in names)))
+
+    async def _getattr(self, path: str) -> MountAttrs:
+        attrs = await self._core.getattr(path)
+        held = self._versions.get(path)
+        if held is not None and held != (attrs.mtime, attrs.size):
+            await self._release(path)
+        return attrs
+
+    async def _read(self, path: str, offset: int, size: int) -> bytes:
+        opened = self._handles.pop(path, None)
+        if opened is None:
+            opened = asyncio.ensure_future(self._open(path))
+        self._handles[path] = opened
+        while len(self._handles) > OPEN_HANDLES:
+            await self._release(next(iter(self._handles)))
+        try:
+            fh = await asyncio.shield(opened)
+        except Exception:
+            if self._handles.get(path) is opened:
+                del self._handles[path]
+            raise
+        return await self._core.read(path, size, offset, fh)
+
+    async def _open(self, path: str) -> int:
+        attrs = await self._core.getattr(path)
+        fh = await self._core.open(path)
+        self._versions[path] = (attrs.mtime, attrs.size)
+        return fh
+
+    async def _release(self, path: str) -> None:
+        opened = self._handles.pop(path, None)
+        if opened is None:
+            return
+        try:
+            fh = await opened
+        except Exception as exc:
+            logger.debug("nfs: %s never opened: %r", path, exc)
+            return
+        finally:
+            if path not in self._handles:
+                self._versions.pop(path, None)
+        await self._core.release(fh)
+
+    async def _release_all(self) -> None:
+        for path in list(self._handles):
+            await self._release(path)

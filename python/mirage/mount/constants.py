@@ -17,6 +17,17 @@
 # request, so a wide directory does not put every one on the wire.
 LISTING_CONCURRENCY = 16
 
+# The files an NFS server keeps open between reads. NFS has no open or
+# close, so a read opens its file and later reads reuse that handle; the
+# least recently read is released past this many.
+OPEN_HANDLES = 64
+
+# A client port below this one is bound by root. Linux's own NFS server
+# takes only those by default (its `secure` export option), so on Linux,
+# where mounting needs root, an unprivileged local user cannot reach the
+# served tree by speaking NFS to it directly.
+RESERVED_PORTS = 1024
+
 # SFTP carries paths as bytes. surrogateescape is the one error policy
 # under which every byte survives the str round trip.
 ENCODING = "utf-8"

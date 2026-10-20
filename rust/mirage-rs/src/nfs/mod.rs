@@ -40,7 +40,6 @@ mod rpc;
 mod rpcwire;
 mod transaction_tracker;
 mod vfs;
-mod write_counter;
 mod xdr;
 
 use std::collections::HashMap;
@@ -180,6 +179,7 @@ impl Server {
         self.tasks.retain(|_, (owner, _)| *owner != conn);
         let tasks = &self.tasks;
         lock(&self.shared).forget(|task| !tasks.contains_key(&task));
+        self.context.transaction_tracker.forget(&conn.to_string());
     }
 
     fn spawn(&mut self, conn: u32, record: Vec<u8>, out: &mut Vec<u8>) {

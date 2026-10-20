@@ -19,7 +19,7 @@ import { posix } from 'node:path'
 import { promisify } from 'node:util'
 import { NFSEngine, type NFSRequest } from '@struktoai/mirage-core/rs/nfs'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import { LISTING_CONCURRENCY } from './constants.ts'
+import { LISTING_CONCURRENCY, OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
 import type { MountCore } from './core.ts'
 import { classifyErrno } from './errors.ts'
 import type { MountAttrs } from './types.ts'
@@ -125,17 +125,24 @@ export function wireAttrs(attrs: MountAttrs): Record<string, JsonValue> {
  * An NFSv3 server over a mount core, on a local TCP port. The protocol is
  * mirage-rs's (`NFSEngine`); this owns the sockets and runs each file
  * operation the engine asks for on the core, so a kernel NFS client mounts
- * the core's tree with no driver installed. Mirrors Python's MirageNFSServer.
+ * the core's tree with no driver installed. NFS has no open or close: a read
+ * opens its file on the core and later reads reuse that handle until the
+ * file's size or mtime moves. `secure` takes only clients on a reserved
+ * port, as a kernel client mounted by root is; it is on by default on Linux.
+ * Mirrors Python's MirageNFSServer.
  */
 export class MirageNFSServer {
   private engine: NFSEngine | null = null
   private server: Server | null = null
   private readonly sockets = new Map<number, Socket>()
   private nextConn = 0
+  private readonly handles = new Map<string, Promise<number>>()
+  private readonly versions = new Map<string, string>()
 
   constructor(
     private readonly core: MountCore,
     private readonly exportPath = '/',
+    private readonly secure = process.platform === 'linux',
   ) {}
 
   /** Listen on `host`, and return the port a client mounts. */
@@ -155,8 +162,10 @@ export class MirageNFSServer {
     return bound
   }
 
-  /** Stop listening and drop every connection. */
+  /** Stop listening, drop every connection and release every file the server holds open. */
   async close(): Promise<void> {
+    const engine = this.engine
+    this.engine = null
     for (const socket of this.sockets.values()) socket.destroy()
     const server = this.server
     if (server !== null) {
@@ -166,11 +175,17 @@ export class MirageNFSServer {
         })
       })
     }
-    this.engine?.dispose()
-    this.engine = null
+    await this.releaseAll()
+    engine?.dispose()
   }
 
   private serve(socket: Socket): void {
+    const port = socket.remotePort
+    if (this.secure && (port === undefined || port >= RESERVED_PORTS)) {
+      console.warn(`nfs: refused a client on unreserved port ${String(port)}`)
+      socket.destroy()
+      return
+    }
     const engine = this.engine
     if (engine === null) {
       socket.destroy()
@@ -200,11 +215,16 @@ export class MirageNFSServer {
   }
 
   private dispatch(engine: NFSEngine): void {
-    for (const request of engine.requests()) void this.run(engine, request)
+    for (const request of engine.requests()) {
+      this.run(engine, request).catch((err: unknown) => {
+        console.debug(`nfs: request ${String(request.id)} failed: ${String(err)}`)
+      })
+    }
   }
 
   private async run(engine: NFSEngine, request: NFSRequest): Promise<void> {
     const [reply, data] = await this.answer(request)
+    if (this.engine !== engine) return
     const [conn, out] = engine.complete(request.id, reply, data)
     const socket = conn === null ? undefined : this.sockets.get(conn)
     if (socket !== undefined && out.length > 0) socket.write(out)
@@ -215,14 +235,11 @@ export class MirageNFSServer {
     try {
       switch (request.op) {
         case 'getattr':
-          return [{ attrs: wireAttrs(await this.core.getattr(request.path)) }, new Uint8Array()]
+          return [{ attrs: wireAttrs(await this.getattr(request.path)) }, new Uint8Array()]
         case 'readdir':
           return [{ entries: await this.listing(request.path) }, new Uint8Array()]
         case 'read':
-          return [
-            {},
-            await this.core.read(request.path, -1, request.offset ?? 0, request.size ?? 0),
-          ]
+          return [{}, await this.read(request.path, request.offset ?? 0, request.size ?? 0)]
         case 'readlink':
           return [{ target: await this.core.readlink(request.path) }, new Uint8Array()]
       }
@@ -253,5 +270,60 @@ export class MirageNFSServer {
     }
     await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, names.length) }, worker))
     return rows
+  }
+
+  private async getattr(path: string): Promise<MountAttrs> {
+    const attrs = await this.core.getattr(path)
+    const held = this.versions.get(path)
+    if (held !== undefined && held !== `${String(attrs.mtime.getTime())}:${String(attrs.size)}`) {
+      await this.release(path)
+    }
+    return attrs
+  }
+
+  private async read(path: string, offset: number, size: number): Promise<Uint8Array> {
+    const opened = this.handles.get(path) ?? this.open(path)
+    this.handles.delete(path)
+    this.handles.set(path, opened)
+    while (this.handles.size > OPEN_HANDLES) {
+      const oldest = this.handles.keys().next()
+      if (oldest.done === true) break
+      await this.release(oldest.value)
+    }
+    let fd: number
+    try {
+      fd = await opened
+    } catch (err) {
+      if (this.handles.get(path) === opened) this.handles.delete(path)
+      throw err
+    }
+    return this.core.read(path, fd, offset, size)
+  }
+
+  private async open(path: string): Promise<number> {
+    const attrs = await this.core.getattr(path)
+    const fd = await this.core.open(path)
+    this.versions.set(path, `${String(attrs.mtime.getTime())}:${String(attrs.size)}`)
+    return fd
+  }
+
+  private async release(path: string): Promise<void> {
+    const opened = this.handles.get(path)
+    if (opened === undefined) return
+    this.handles.delete(path)
+    let fd: number
+    try {
+      fd = await opened
+    } catch (err) {
+      console.debug(`nfs: ${path} never opened: ${String(err)}`)
+      return
+    } finally {
+      if (!this.handles.has(path)) this.versions.delete(path)
+    }
+    await this.core.release(fd)
+  }
+
+  private async releaseAll(): Promise<void> {
+    for (const path of [...this.handles.keys()]) await this.release(path)
   }
 }

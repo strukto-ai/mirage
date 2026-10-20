@@ -15,10 +15,16 @@
 import { type Socket, connect } from 'node:net'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
+import type * as ConstantsModule from './constants.ts'
 import { MountCore } from './core.ts'
 import { MirageNFSServer, mountArgs, unmountArgs } from './nfs.ts'
+
+vi.mock('./constants.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof ConstantsModule>()),
+  OPEN_HANDLES: 2,
+}))
 
 const NFS = 100003
 const MOUNT = 100005
@@ -127,6 +133,21 @@ class Client {
     return [status, status === 0 ? reply.opaque() : new Uint8Array()]
   }
 
+  async handle(...names: string[]): Promise<Uint8Array> {
+    let handle = await this.root()
+    for (const name of names) [, handle] = await this.lookup(handle, name)
+    return handle
+  }
+
+  async read(handle: Uint8Array, offset: number, count: number): Promise<string> {
+    const reply = await this.call(NFS, 6, concat([opaque(handle), u64(offset), u32(count)]))
+    expect(reply.u32()).toBe(0)
+    reply.postOpAttr()
+    reply.u32()
+    reply.u32()
+    return new TextDecoder().decode(reply.opaque())
+  }
+
   private async record(): Promise<Uint8Array> {
     for (;;) {
       if (this.buffer.length >= 4) {
@@ -153,7 +174,7 @@ describe('MirageNFSServer', () => {
   beforeEach(async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
-    server = new MirageNFSServer(new MountCore(ws.vfs))
+    server = new MirageNFSServer(new MountCore(ws.vfs), '/', false)
     const port = await server.start()
     socket = connect(port, '127.0.0.1')
     await new Promise<void>((resolve) => socket.once('connect', resolve))
@@ -218,6 +239,94 @@ describe('MirageNFSServer', () => {
       concat([opaque(root), opaque('new'), new Uint8Array(24)]),
     )
     expect(reply.u32()).toBe(30)
+  })
+})
+
+describe('MirageNFSServer handles and shutdown', () => {
+  async function serve(
+    ws: Workspace,
+    secure = false,
+  ): Promise<[MirageNFSServer, MountCore, Socket, Client]> {
+    const core = new MountCore(ws.vfs)
+    const server = new MirageNFSServer(core, '/', secure)
+    const port = await server.start()
+    const socket = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => socket.once('connect', resolve))
+    return [server, core, socket, new Client(socket)]
+  }
+
+  it('refuses a client on an unreserved port when secure', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const [server, , socket] = await serve(ws, true)
+    await new Promise<void>((resolve) => {
+      socket.once('close', () => {
+        resolve()
+      })
+    })
+    await server.close()
+  })
+
+  it('shares one open between reads until the file changes', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("printf 'hello world\\n' > /a.txt")
+    const [server, core, socket, client] = await serve(ws)
+    const open = vi.spyOn(core, 'open')
+    const release = vi.spyOn(core, 'release')
+    try {
+      const handle = await client.handle('a.txt')
+      expect(await client.read(handle, 0, 5)).toBe('hello')
+      expect(await client.read(handle, 6, 100)).toBe('world\n')
+      expect(open).toHaveBeenCalledTimes(1)
+      await ws.shell("printf 'bye\\n' > /a.txt")
+      await client.call(NFS, 1, opaque(handle))
+      expect(await client.read(handle, 0, 100)).toBe('bye\n')
+      expect(open).toHaveBeenCalledTimes(2)
+      expect(release).toHaveBeenCalledTimes(1)
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
+    expect(release).toHaveBeenCalledTimes(2)
+  })
+
+  it('releases the least recently read file past the cap', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('for f in a b c; do echo $f > /$f; done')
+    const [server, core, socket, client] = await serve(ws)
+    const release = vi.spyOn(core, 'release')
+    try {
+      for (const name of ['a', 'b', 'c']) {
+        expect(await client.read(await client.handle(name), 0, 10)).toBe(`${name}\n`)
+      }
+      expect(release).toHaveBeenCalledTimes(1)
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('drops a request that finishes after the server closed', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const [server, core, socket, client] = await serve(ws)
+    const root = await client.root()
+    let finish = (): void => undefined
+    const asked = new Promise<void>((resolve) => {
+      vi.spyOn(core, 'getattr').mockImplementation(async () => {
+        resolve()
+        await new Promise<void>((done) => {
+          finish = done
+        })
+        throw new Error('gone')
+      })
+    })
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    void client.call(NFS, 1, opaque(root))
+    await asked
+    socket.destroy()
+    await server.close()
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(debug.mock.calls.flat().join('\n')).not.toContain('failed')
   })
 })
 

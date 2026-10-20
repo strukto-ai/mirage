@@ -526,7 +526,7 @@ pub async fn nfsproc3_access(
     };
     // TODO better checks here
     if !matches!(context.vfs.capabilities(), VFSCapabilities::ReadWrite) {
-        access &= ACCESS3_READ | ACCESS3_LOOKUP;
+        access &= ACCESS3_READ | ACCESS3_LOOKUP | ACCESS3_EXECUTE;
     }
     debug!(" {:?} ---> {:?}", xid, access);
     make_success_reply(xid).serialize(output)?;
@@ -897,8 +897,10 @@ pub async fn nfsproc3_readdirplus(
         dir_attr.serialize(output)?;
         return Ok(());
     }*/
-    // subtract off the final entryplus* field (which must be false) and the eof
-    let max_bytes_allowed = args.maxcount as usize - 128;
+    let mut fixed = Vec::new();
+    dir_attr.serialize(&mut fixed)?;
+    dirversion.serialize(&mut fixed)?;
+    let max_bytes_allowed = (args.maxcount as usize).saturating_sub(fixed.len() + 8);
     // args.dircount is bytes of just fileid, name, cookie.
     // This is hard to ballpark, so we just divide it by 16
     let estimated_max_results = args.dircount / 16;
@@ -913,15 +915,7 @@ pub async fn nfsproc3_readdirplus(
             // we count dir_count seperately as it is just a subset of fields
             let mut accumulated_dircount: usize = 0;
             let mut all_entries_written = true;
-
-            // this is a wrapper around a writer that also just counts the number of bytes
-            // written
-            let mut counting_output = super::write_counter::WriteCounter::new(output);
-
-            make_success_reply(xid).serialize(&mut counting_output)?;
-            nfs::nfsstat3::NFS3_OK.serialize(&mut counting_output)?;
-            dir_attr.serialize(&mut counting_output)?;
-            dirversion.serialize(&mut counting_output)?;
+            let mut body: Vec<u8> = Vec::new();
             for entry in result.entries {
                 let obj_attr = entry.attr;
                 let handle = nfs::post_op_fh3::handle(context.vfs.id_to_fh(entry.fileid));
@@ -945,19 +939,19 @@ pub async fn nfsproc3_readdirplus(
                                     + std::mem::size_of::<nfs::cookie3>(); // cookie
                 let added_output_bytes = write_buf.len();
                 // check if we can write without hitting the limits
-                if added_output_bytes + counting_output.bytes_written() < max_bytes_allowed
-                    && added_dircount + accumulated_dircount < max_dircount_bytes
+                if body.len() + added_output_bytes <= max_bytes_allowed
+                    && accumulated_dircount + added_dircount <= max_dircount_bytes
                 {
                     trace!("  -- dirent {:?}", entry);
                     // commit the entry
                     ctr += 1;
-                    counting_output.write_all(&write_buf)?;
+                    body.extend_from_slice(&write_buf);
                     accumulated_dircount += added_dircount;
                     trace!(
                         "  -- lengths: {:?} / {:?} {:?} / {:?}",
                         accumulated_dircount,
                         max_dircount_bytes,
-                        counting_output.bytes_written(),
+                        body.len(),
                         max_bytes_allowed
                     );
                 } else {
@@ -966,16 +960,25 @@ pub async fn nfsproc3_readdirplus(
                     break;
                 }
             }
-            // false flag for the final entryplus* linked list
-            false.serialize(&mut counting_output)?;
-            // eof flag is only valid here if we wrote everything
-            if all_entries_written {
-                debug!("  -- readdir eof {:?}", result.end);
-                result.end.serialize(&mut counting_output)?;
-            } else {
-                debug!("  -- readdir eof {:?}", false);
-                false.serialize(&mut counting_output)?;
+            // eof is only valid here if we wrote everything
+            let eof = all_entries_written && result.end;
+            if eof {
+                context.vfs.listed(dirid);
             }
+            if ctr == 0 && !eof {
+                make_success_reply(xid).serialize(output)?;
+                nfs::nfsstat3::NFS3ERR_TOOSMALL.serialize(output)?;
+                dir_attr.serialize(output)?;
+                return Ok(());
+            }
+            make_success_reply(xid).serialize(output)?;
+            nfs::nfsstat3::NFS3_OK.serialize(output)?;
+            output.write_all(&fixed)?;
+            output.write_all(&body)?;
+            // false flag for the final entryplus* linked list
+            false.serialize(output)?;
+            debug!("  -- readdir eof {:?}", eof);
+            eof.serialize(output)?;
             debug!(
                 "readir {}, has_version {},  start at {}, flushing {} entries, complete {}",
                 dirid, has_version, args.cookie, ctr, all_entries_written
@@ -1026,8 +1029,10 @@ pub async fn nfsproc3_readdir(
     debug!(" -- Dir attr {:?}", dir_attr);
     debug!(" -- Dir version {:?}", dirversion);
     let has_version = args.cookieverf != nfs::cookieverf3::default();
-    // subtract off the final entryplus* field (which must be false) and the eof
-    let max_bytes_allowed = args.dircount as usize - 128;
+    let mut fixed = Vec::new();
+    dir_attr.serialize(&mut fixed)?;
+    dirversion.serialize(&mut fixed)?;
+    let max_bytes_allowed = (args.dircount as usize).saturating_sub(fixed.len() + 8);
     // args.dircount is bytes of just fileid, name, cookie.
     // This is hard to ballpark, so we just divide it by 16
     let estimated_max_results = args.dircount / 16;
@@ -1038,18 +1043,8 @@ pub async fn nfsproc3_readdir(
         .await
     {
         Ok(result) => {
-            // we count dir_count seperately as it is just a subset of fields
-            let mut accumulated_dircount: usize = 0;
             let mut all_entries_written = true;
-
-            // this is a wrapper around a writer that also just counts the number of bytes
-            // written
-            let mut counting_output = super::write_counter::WriteCounter::new(output);
-
-            make_success_reply(xid).serialize(&mut counting_output)?;
-            nfs::nfsstat3::NFS3_OK.serialize(&mut counting_output)?;
-            dir_attr.serialize(&mut counting_output)?;
-            dirversion.serialize(&mut counting_output)?;
+            let mut body: Vec<u8> = Vec::new();
             for entry in result.entries {
                 let entry = entry3 {
                     fileid: entry.fileid,
@@ -1063,39 +1058,38 @@ pub async fn nfsproc3_readdir(
                 true.serialize(&mut write_cursor)?;
                 entry.serialize(&mut write_cursor)?;
                 write_cursor.flush()?;
-                let added_dircount = std::mem::size_of::<nfs::fileid3>()                   // fileid
-                                    + std::mem::size_of::<u32>() + entry.name.len()  // name
-                                    + std::mem::size_of::<nfs::cookie3>(); // cookie
-                let added_output_bytes = write_buf.len();
                 // check if we can write without hitting the limits
-                if added_output_bytes + counting_output.bytes_written() < max_bytes_allowed {
+                if body.len() + write_buf.len() <= max_bytes_allowed {
                     trace!("  -- dirent {:?}", entry);
                     // commit the entry
                     ctr += 1;
-                    counting_output.write_all(&write_buf)?;
-                    accumulated_dircount += added_dircount;
-                    trace!(
-                        "  -- lengths: {:?} / {:?} / {:?}",
-                        accumulated_dircount,
-                        counting_output.bytes_written(),
-                        max_bytes_allowed
-                    );
+                    body.extend_from_slice(&write_buf);
+                    trace!("  -- lengths: {:?} / {:?}", body.len(), max_bytes_allowed);
                 } else {
                     trace!(" -- insufficient space. truncating");
                     all_entries_written = false;
                     break;
                 }
             }
-            // false flag for the final entryplus* linked list
-            false.serialize(&mut counting_output)?;
-            // eof flag is only valid here if we wrote everything
-            if all_entries_written {
-                debug!("  -- readdir eof {:?}", result.end);
-                result.end.serialize(&mut counting_output)?;
-            } else {
-                debug!("  -- readdir eof {:?}", false);
-                false.serialize(&mut counting_output)?;
+            // eof is only valid here if we wrote everything
+            let eof = all_entries_written && result.end;
+            if eof {
+                context.vfs.listed(dirid);
             }
+            if ctr == 0 && !eof {
+                make_success_reply(xid).serialize(output)?;
+                nfs::nfsstat3::NFS3ERR_TOOSMALL.serialize(output)?;
+                dir_attr.serialize(output)?;
+                return Ok(());
+            }
+            make_success_reply(xid).serialize(output)?;
+            nfs::nfsstat3::NFS3_OK.serialize(output)?;
+            output.write_all(&fixed)?;
+            output.write_all(&body)?;
+            // false flag for the final entryplus* linked list
+            false.serialize(output)?;
+            debug!("  -- readdir eof {:?}", eof);
+            eof.serialize(output)?;
             debug!(
                 "readir {}, has_version {},  start at {}, flushing {} entries, complete {}",
                 dirid, has_version, args.cookie, ctr, all_entries_written

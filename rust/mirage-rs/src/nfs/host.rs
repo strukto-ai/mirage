@@ -13,6 +13,7 @@ use super::vfs::{DirEntry, ReadDirResult, VFSCapabilities};
 use crate::StreamError;
 
 pub const ROOT_ID: fileid3 = 1;
+const LISTINGS: usize = 64;
 
 /// A file operation a call asks the host to run on its mount core.
 #[derive(Serialize)]
@@ -80,12 +81,13 @@ pub struct Entry {
 }
 
 /// What the server and its calls share: the file ids handed out, the
-/// requests not yet taken, the replies not yet read, and which call
-/// waits on which request.
+/// directory listings being paged, the requests not yet taken, the
+/// replies not yet read, and which call waits on which request.
 #[derive(Default)]
 pub struct Shared {
     paths: HashMap<fileid3, String>,
     ids: HashMap<String, fileid3>,
+    listings: HashMap<fileid3, Arc<Vec<DirEntry>>>,
     requests: Vec<Request>,
     replies: HashMap<u32, Reply>,
     waiting: HashMap<u32, u64>,
@@ -328,7 +330,10 @@ impl HostFs {
     }
 
     /// The entries after `start_after` (0 for the first), at most
-    /// `max_entries` of them, each with its attributes.
+    /// `max_entries` of them, each with its attributes. A listing is
+    /// fetched once, at its first page, and later pages read it until
+    /// `listed`; a cookie resumes after its entry's name, so an entry
+    /// removed meanwhile loses nothing after it.
     pub async fn readdir(
         &self,
         dirid: fileid3,
@@ -336,30 +341,66 @@ impl HostFs {
         max_entries: usize,
     ) -> Result<ReadDirResult, nfsstat3> {
         let dir = self.path(dirid)?;
-        let reply = self.call(Op::Readdir { path: dir.clone() }).await?;
+        let after = match start_after {
+            0 => None,
+            cookie => {
+                let path = self
+                    .path(cookie)
+                    .map_err(|_| nfsstat3::NFS3ERR_BAD_COOKIE)?;
+                let name = path.rsplit_once('/').map_or("", |(_, name)| name);
+                Some(name.as_bytes().to_vec())
+            }
+        };
+        let held = match after {
+            None => None,
+            Some(_) => lock(&self.shared).listings.get(&dirid).cloned(),
+        };
+        let entries = match held {
+            Some(entries) => entries,
+            None => {
+                let entries = Arc::new(self.list(&dir).await?);
+                let mut shared = lock(&self.shared);
+                if shared.listings.len() >= LISTINGS {
+                    shared.listings.clear();
+                }
+                shared.listings.insert(dirid, entries.clone());
+                entries
+            }
+        };
+        let start = after.map_or(0, |name| {
+            entries.partition_point(|entry| entry.name.0 <= name)
+        });
+        let end = entries.len() - start <= max_entries;
+        let entries = entries[start..].iter().take(max_entries).cloned().collect();
+        Ok(ReadDirResult { entries, end })
+    }
+
+    /// Drop the listing of `dirid` once a reply has reached its end.
+    pub fn listed(&self, dirid: fileid3) {
+        lock(&self.shared).listings.remove(&dirid);
+    }
+
+    async fn list(&self, dir: &str) -> Result<Vec<DirEntry>, nfsstat3> {
+        let reply = self
+            .call(Op::Readdir {
+                path: dir.to_string(),
+            })
+            .await?;
         let mut entries = Vec::new();
         for entry in reply.entries {
             if entry.name == "." || entry.name == ".." {
                 continue;
             }
             let Some(attrs) = entry.attrs else { continue };
-            let fileid = self.intern(&child(&dir, &entry.name));
+            let fileid = self.intern(&child(dir, &entry.name));
             entries.push(DirEntry {
                 fileid,
                 name: entry.name.into_bytes().into(),
                 attr: fattr(fileid, &attrs),
             });
         }
-        let start = match start_after {
-            0 => 0,
-            after => match entries.iter().position(|e| e.fileid == after) {
-                Some(at) => at + 1,
-                None => entries.len(),
-            },
-        };
-        let end = entries.len() - start <= max_entries;
-        let entries = entries.into_iter().skip(start).take(max_entries).collect();
-        Ok(ReadDirResult { entries, end })
+        entries.sort_by(|a, b| a.name.0.cmp(&b.name.0));
+        Ok(entries)
     }
 
     pub async fn readlink(&self, id: fileid3) -> Result<nfspath3, nfsstat3> {

@@ -14,12 +14,14 @@
 
 import asyncio
 import struct
+import subprocess
 from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 
 from mirage import MountMode, Workspace
+from mirage.mount import nfs
 from mirage.mount.core import MountCore
 from mirage.mount.nfs import MirageNFSServer, mount_args, unmount_args
 from mirage.vfs.ram import RAMVFS
@@ -98,12 +100,43 @@ class Client:
         status = reply.u32()
         return status, reply.opaque() if status == 0 else b""
 
+    async def handle(self, *names: str) -> bytes:
+        handle = await self.root()
+        for name in names:
+            _, handle = await self.lookup(handle, name)
+        return handle
+
+    async def read(self, handle: bytes, offset: int, count: int) -> bytes:
+        reply = await self.call(
+            NFS, 6, opaque(handle) + struct.pack(">QI", offset, count)
+        )
+        assert reply.u32() == 0
+        reply.post_op_attr()
+        reply.u32()
+        reply.u32()
+        return reply.opaque()
+
+
+class Counting(MountCore):
+    def __init__(self, ws: Workspace) -> None:
+        super().__init__(ws.vfs)
+        self.opened: list[str] = []
+        self.released: list[int] = []
+
+    async def open(self, path: str, flags: int = 0) -> int:
+        self.opened.append(path)
+        return await super().open(path, flags)
+
+    async def release(self, fh: int) -> None:
+        self.released.append(fh)
+        await super().release(fh)
+
 
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[Client]:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
-    server = MirageNFSServer(MountCore(ws.vfs))
+    server = MirageNFSServer(MountCore(ws.vfs), secure=False)
     port = await server.start()
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     try:
@@ -215,3 +248,81 @@ def test_unmount_falls_back_to_a_forced_unmount() -> None:
         "force",
         "/mnt/x",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_secure_server_refuses_a_client_on_an_unreserved_port() -> (
+    None
+):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    server = MirageNFSServer(MountCore(ws.vfs), secure=True)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        assert await asyncio.wait_for(reader.read(), 5) == b""
+    finally:
+        writer.close()
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_reads_share_one_open_until_the_file_changes() -> None:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf 'hello world\\n' > /a.txt")
+    core = Counting(ws)
+    server = MirageNFSServer(core, secure=False)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    client = Client(reader, writer)
+    try:
+        handle = await client.handle("a.txt")
+        assert await client.read(handle, 0, 5) == b"hello"
+        assert await client.read(handle, 6, 100) == b"world\n"
+        assert core.opened == ["/a.txt"]
+        await ws.shell("printf 'bye\\n' > /a.txt")
+        await client.call(NFS, 1, opaque(handle))
+        assert await client.read(handle, 0, 100) == b"bye\n"
+        assert core.opened == ["/a.txt", "/a.txt"]
+        assert len(core.released) == 1
+    finally:
+        writer.close()
+        await server.close()
+    assert len(core.released) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_least_recently_read_file_is_released_past_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(nfs, "OPEN_HANDLES", 2)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("for f in a b c; do echo $f > /$f; done")
+    core = Counting(ws)
+    server = MirageNFSServer(core, secure=False)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    client = Client(reader, writer)
+    try:
+        for name in ("a", "b", "c"):
+            handle = await client.handle(name)
+            assert await client.read(handle, 0, 10) == f"{name}\n".encode()
+        assert len(core.released) == 1
+    finally:
+        writer.close()
+        await server.close()
+
+
+def test_a_timed_out_unmount_falls_through_to_the_forced_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran: list[list[str]] = []
+
+    def run(args: list[str], **_: int) -> subprocess.CompletedProcess[str]:
+        ran.append(args)
+        if len(ran) == 1:
+            raise subprocess.TimeoutExpired(args, 30)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    nfs.unmount_nfs("/mnt/x")
+    assert ran == nfs.unmount_args("/mnt/x")

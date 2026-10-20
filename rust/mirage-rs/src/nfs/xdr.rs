@@ -123,8 +123,11 @@ impl XDR for Vec<u8> {
     fn deserialize<R: Read>(&mut self, src: &mut R) -> std::io::Result<()> {
         let mut length: u32 = 0;
         length.deserialize(src)?;
-        self.resize(length as usize, 0);
-        src.read_exact(self)?;
+        self.clear();
+        src.by_ref().take(u64::from(length)).read_to_end(self)?;
+        if self.len() != length as usize {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
         // read padding
         let pad = ((4 - length % 4) % 4) as usize;
         let mut zeros: [u8; 4] = [0, 0, 0, 0];
@@ -155,9 +158,11 @@ impl XDR for Vec<u32> {
     fn deserialize<R: Read>(&mut self, src: &mut R) -> std::io::Result<()> {
         let mut length: u32 = 0;
         length.deserialize(src)?;
-        self.resize(length as usize, 0);
-        for i in self {
-            i.deserialize(src)?;
+        self.clear();
+        for _ in 0..length {
+            let mut value: u32 = 0;
+            value.deserialize(src)?;
+            self.push(value);
         }
         Ok(())
     }

@@ -37,3 +37,20 @@ export const PIPE_PACKET_SIZE = 64 * 1024
 
 /** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
 export const LISTING_CONCURRENCY = 16
+
+/**
+ * The files an NFS server keeps open between reads: NFS has no open or
+ * close, so a read opens its file and later reads reuse that handle. The
+ * least recently read is released past this many. Mirrors Python's
+ * OPEN_HANDLES.
+ */
+export const OPEN_HANDLES = 64
+
+/**
+ * A client port below this one is bound by root. Linux's own NFS server
+ * takes only those by default (its `secure` export option), so on Linux,
+ * where mounting needs root, an unprivileged local user cannot reach the
+ * served tree by speaking NFS to it directly. Mirrors Python's
+ * RESERVED_PORTS.
+ */
+export const RESERVED_PORTS = 1024

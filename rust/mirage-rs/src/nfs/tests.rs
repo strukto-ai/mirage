@@ -411,7 +411,7 @@ fn readdir_pages_a_large_directory_from_each_cookie() {
         tree.0.insert(path, (0o100644, Ok(Vec::new())));
     }
     let mut server = server();
-    let (mut cookie, mut seen, mut pages) = (0_u64, Vec::new(), 0);
+    let (mut cookie, mut seen, mut pages, mut asked) = (0_u64, Vec::new(), 0, 0);
     loop {
         pages += 1;
         assert!(pages < 50, "readdir never reached eof");
@@ -426,32 +426,191 @@ fn readdir_pages_a_large_directory_from_each_cookie() {
                 &|o| 512_u32.serialize(o).unwrap(),
             ]),
         );
-        let (out, _) = tree.run(&mut server, 1, &input);
-        let mut found = replies(&out);
-        let cursor = &mut found[0].1;
-        assert!(matches!(status(cursor), nfsstat3::NFS3_OK));
-        let mut dir_attr = post_op_attr::Void;
-        dir_attr.deserialize(cursor).unwrap();
-        let mut verifier = [0_u8; 8];
-        verifier.deserialize(cursor).unwrap();
-        loop {
-            let mut more = false;
-            more.deserialize(cursor).unwrap();
-            if !more {
-                break;
-            }
-            let (mut fileid, mut name) = (0_u64, Vec::<u8>::new());
-            fileid.deserialize(cursor).unwrap();
-            name.deserialize(cursor).unwrap();
-            cookie.deserialize(cursor).unwrap();
-            seen.push(String::from_utf8(name).unwrap());
+        let (out, ran) = tree.run(&mut server, 1, &input);
+        asked += ran;
+        let (stat, page, eof) = page(&out);
+        assert!(matches!(stat, nfsstat3::NFS3_OK));
+        for (name, at) in page {
+            seen.push(name);
+            cookie = at;
         }
-        let mut eof = false;
-        eof.deserialize(cursor).unwrap();
         if eof {
             break;
         }
     }
     assert!(pages > 1);
     assert_eq!(seen, names);
+    assert_eq!(asked, pages as usize + 1);
+}
+
+/// A plain READDIR reply: its status, its (name, cookie) entries, and
+/// whether it reached the end.
+fn page(out: &[u8]) -> (nfsstat3, Vec<(String, u64)>, bool) {
+    let mut found = replies(out);
+    let cursor = &mut found[0].1;
+    let stat = status(cursor);
+    let mut dir_attr = post_op_attr::Void;
+    dir_attr.deserialize(cursor).unwrap();
+    if !matches!(stat, nfsstat3::NFS3_OK) {
+        return (stat, Vec::new(), false);
+    }
+    let mut verifier = [0_u8; 8];
+    verifier.deserialize(cursor).unwrap();
+    let mut entries = Vec::new();
+    loop {
+        let mut more = false;
+        more.deserialize(cursor).unwrap();
+        if !more {
+            break;
+        }
+        let (mut fileid, mut name, mut cookie) = (0_u64, Vec::<u8>::new(), 0_u64);
+        fileid.deserialize(cursor).unwrap();
+        name.deserialize(cursor).unwrap();
+        cookie.deserialize(cursor).unwrap();
+        entries.push((String::from_utf8(name).unwrap(), cookie));
+    }
+    let mut eof = false;
+    eof.deserialize(cursor).unwrap();
+    (stat, entries, eof)
+}
+
+fn readdir(xid: u32, dir: u64, cookie: u64, count: u32) -> Vec<u8> {
+    record(
+        xid,
+        nfs::PROGRAM,
+        16,
+        &args(&[
+            &|o| fh(dir).serialize(o).unwrap(),
+            &|o| cookie.serialize(o).unwrap(),
+            &|o| [0_u8; 8].serialize(o).unwrap(),
+            &|o| count.serialize(o).unwrap(),
+        ]),
+    )
+}
+
+fn leak(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+#[test]
+fn a_length_past_the_message_is_refused_before_it_is_allocated() {
+    let claimed: u32 = 1 << 24;
+    let mut input = Cursor::new([claimed.to_be_bytes(), *b"abcd"].concat());
+    let mut opaque = Vec::<u8>::new();
+    assert!(opaque.deserialize(&mut input).is_err());
+    assert!(opaque.capacity() < claimed as usize);
+    let mut input = Cursor::new([claimed.to_be_bytes(), *b"abcd"].concat());
+    let mut words = Vec::<u32>::new();
+    assert!(words.deserialize(&mut input).is_err());
+    assert!(words.capacity() < claimed as usize);
+}
+
+#[test]
+fn access_keeps_execute_and_drops_the_write_bits() {
+    let tree = Tree::sample();
+    let mut server = server();
+    let (_, handle) = lookup(&tree, &mut server, 1, "a.txt");
+    let handle = handle.unwrap();
+    let input = record(
+        17,
+        nfs::PROGRAM,
+        4,
+        &args(&[&|o| handle.serialize(o).unwrap(), &|o| {
+            0x3f_u32.serialize(o).unwrap()
+        }]),
+    );
+    let (out, _) = tree.run(&mut server, 1, &input);
+    let mut found = replies(&out);
+    let cursor = &mut found[0].1;
+    assert!(matches!(status(cursor), nfsstat3::NFS3_OK));
+    let mut attr = post_op_attr::Void;
+    attr.deserialize(cursor).unwrap();
+    let mut access = 0_u32;
+    access.deserialize(cursor).unwrap();
+    assert_eq!(access, 0x01 | 0x02 | 0x20);
+}
+
+#[test]
+fn readdir_fits_a_long_name_the_count_holds_and_refuses_a_count_too_small() {
+    let long = leak("n".repeat(255));
+    let mut tree = Tree::sample();
+    tree.0.insert("/", (0o040755, Err(vec![long])));
+    tree.0
+        .insert(leak(format!("/{long}")), (0o100644, Ok(Vec::new())));
+    let mut server = server();
+    let (out, _) = tree.run(&mut server, 1, &readdir(18, 1, 0, 512));
+    let (stat, entries, eof) = page(&out);
+    assert!(matches!(stat, nfsstat3::NFS3_OK));
+    assert_eq!(entries.len(), 1);
+    assert!(eof);
+    for (xid, count) in [(19, 100), (20, 300)] {
+        let (out, _) = tree.run(&mut server, 1, &readdir(xid, 1, 0, count));
+        let (stat, _, _) = page(&out);
+        assert!(matches!(stat, nfsstat3::NFS3ERR_TOOSMALL));
+    }
+}
+
+#[test]
+fn a_cookie_whose_entry_was_removed_resumes_after_its_name() {
+    let names: Vec<&'static str> = (0..40).map(|i| leak(format!("f{i:02}"))).collect();
+    let mut tree = Tree::sample();
+    tree.0.insert("/", (0o040755, Err(names.clone())));
+    for name in &names {
+        tree.0
+            .insert(leak(format!("/{name}")), (0o100644, Ok(Vec::new())));
+    }
+    let mut server = server();
+    let (out, _) = tree.run(&mut server, 1, &readdir(30, 1, 0, 512));
+    let (_, first, eof) = page(&out);
+    assert!(!eof);
+    let (last, cookie) = first.last().cloned().unwrap();
+    let (mut other, mut xid) = (0_u64, 31);
+    loop {
+        let (out, _) = tree.run(&mut server, 1, &readdir(xid, 1, other, 4096));
+        let (_, entries, eof) = page(&out);
+        other = entries.last().map_or(other, |(_, at)| *at);
+        xid += 1;
+        if eof {
+            break;
+        }
+    }
+    let gone = names.iter().position(|name| *name == last).unwrap();
+    let mut left = names.clone();
+    left.remove(gone);
+    tree.0.insert("/", (0o040755, Err(left)));
+    tree.0.remove(leak(format!("/{last}")));
+    let (out, _) = tree.run(&mut server, 1, &readdir(xid, 1, cookie, 4096));
+    let (stat, rest, _) = page(&out);
+    assert!(matches!(stat, nfsstat3::NFS3_OK));
+    let rest: Vec<String> = rest.into_iter().map(|(name, _)| name).collect();
+    assert_eq!(rest, names[gone + 1..]);
+}
+
+#[test]
+fn a_cookie_never_handed_out_is_bad() {
+    let tree = Tree::sample();
+    let mut server = server();
+    let (out, _) = tree.run(&mut server, 1, &readdir(40, 1, 999, 4096));
+    let (stat, _, _) = page(&out);
+    assert!(matches!(stat, nfsstat3::NFS3ERR_BAD_COOKIE));
+}
+
+#[test]
+fn a_call_cut_off_by_a_close_runs_again_on_a_new_connection() {
+    let tree = Tree::sample();
+    let mut server = server();
+    let input = record(
+        50,
+        nfs::PROGRAM,
+        1,
+        &args(&[&|o| fh(1).serialize(o).unwrap()]),
+    );
+    let mut out = Vec::new();
+    server.feed(3, &input, &mut out).unwrap();
+    server.close(3);
+    let mut raw = Vec::new();
+    server.requests(&mut raw);
+    let (out, ran) = tree.run(&mut server, 3, &input);
+    assert_eq!(ran, 1);
+    assert_eq!(replies(&out)[0].0, 50);
 }

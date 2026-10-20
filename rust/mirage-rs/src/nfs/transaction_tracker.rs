@@ -39,6 +39,17 @@ impl TransactionTracker {
         false
     }
 
+    /// Forgets the calls a closed connection still had in progress.
+    pub fn forget(&self, client_addr: &str) {
+        let mut transactions = self
+            .transactions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        transactions
+            .in_progress
+            .retain(|(_, addr)| addr != client_addr);
+    }
+
     /// Marks the transaction as processed.
     pub fn mark_processed(&self, xid: u32, client_addr: &str) {
         let key = (xid, client_addr.to_string());
