@@ -9,8 +9,15 @@ function line(text: string, cls?: string): void {
   logEl.appendChild(div)
 }
 
-// Set by any command that exits non-zero, so the page ends in `failed.`
-// and the smoke test that waits for its last line fails with it.
+// Shows the result and records it on #log as data-status, which is what
+// the smoke test reads: the log text carries backend data and can say
+// anything, done. and failed. included.
+function finish(ok: boolean): void {
+  line(ok ? 'done.' : 'failed.', ok ? 'ok' : 'err')
+  logEl.dataset.status = ok ? 'done' : 'failed'
+}
+
+// Set by any command that exits non-zero, so the page finishes failed.
 let failed = false
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
@@ -30,7 +37,7 @@ async function main(): Promise<void> {
   line('=== Redis via the Upstash REST API, straight from the page ===', 'ok')
   if (__UPSTASH_REDIS_URL__ === '') {
     line('set UPSTASH_REDIS_URL in .env.development', 'err')
-    line('failed.', 'err')
+    finish(false)
     return
   }
   // __UPSTASH_REDIS_URL__ is a Vite define, so the password lands in the served
@@ -52,10 +59,10 @@ async function main(): Promise<void> {
     await run(ws, 'du -a /redis/notes')
     await run(ws, 'rm -r /redis/notes')
     await run(ws, 'ls /redis')
-    line(failed ? 'failed.' : 'done.', failed ? 'err' : 'ok')
+    finish(!failed)
   } catch (err) {
     line(`error: ${err instanceof Error ? err.message : String(err)}`, 'err')
-    line('failed.', 'err')
+    finish(false)
   } finally {
     await ws.close()
   }

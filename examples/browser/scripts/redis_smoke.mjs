@@ -67,10 +67,7 @@ try {
     await page.goto(`${base}/vfs/redis/redis.html`)
     try {
       await page.waitForFunction(
-        () => {
-          const text = document.querySelector('#log')?.textContent ?? ''
-          return text.includes('done.') || text.includes('failed.')
-        },
+        () => document.querySelector('#log')?.hasAttribute('data-status') ?? false,
         { timeout: 120_000 },
       )
     } catch (err) {
@@ -81,7 +78,8 @@ try {
     const text = await page.locator('#log').innerText()
     console.log('\n─── log content ───')
     console.log(text)
-    if (!text.includes('done.') || text.includes('failed.')) exit = 1
+    // The page records its result on #log; the log text is backend data.
+    if ((await page.locator('#log').getAttribute('data-status')) !== 'done') exit = 1
   } finally {
     await browser.close()
   }

@@ -30,8 +30,15 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
-// Set by any command that exits non-zero, so the page ends in `failed.`
-// and the smoke test that waits for its last line fails with it.
+// Shows the result and records it on #log as data-status, which is what
+// the smoke test reads: the log text carries backend data and can say
+// anything, done. and failed. included.
+function finish(ok: boolean): void {
+  line(ok ? 'done.' : 'failed.', ok ? 'ok' : 'err')
+  logEl.dataset.status = ok ? 'done' : 'failed'
+}
+
+// Set by any command that exits non-zero, so the page finishes failed.
 let failed = false
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
@@ -64,7 +71,7 @@ async function main(): Promise<void> {
     const dbs = dbsRes.stdoutText.split('\n').filter((s) => s.length > 0)
     if (dbs.length === 0) {
       line('no databases visible — set MONGODB_URI in .env.development', 'err')
-      line('failed.', 'err')
+      finish(false)
       return
     }
     const target = dbs[0]!
@@ -74,7 +81,7 @@ async function main(): Promise<void> {
     const cols = colsRes.stdoutText.split('\n').filter((s) => s.endsWith('.jsonl'))
     if (cols.length === 0) {
       line(`no collections in ${target}`, 'err')
-      line('failed.', 'err')
+      finish(false)
       return
     }
     const path = `/mongodb/${target}/${cols[0]!}`
@@ -85,7 +92,7 @@ async function main(): Promise<void> {
     await run(ws, `grep _id ${shellQuote(path)} | head -n 2`)
 
     line('')
-    line(failed ? 'failed.' : 'done.', failed ? 'err' : 'ok')
+    finish(!failed)
   } finally {
     await ws.close()
   }
@@ -93,5 +100,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
-  line('failed.', 'err')
+  finish(false)
 })
