@@ -139,7 +139,7 @@ export class MirageNFSServer {
   private readonly sockets = new Map<number, Socket>()
   private nextConn = 0
   private readonly handles = new Map<string, Promise<number>>()
-  private readonly versions = new Map<string, string>()
+  private versions = new Map<string, string>()
   private generation: number | null = null
 
   constructor(
@@ -302,37 +302,39 @@ export class MirageNFSServer {
   private async read(path: string, offset: number, size: number): Promise<Uint8Array> {
     const generation = this.core.session?.generation ?? null
     if (generation !== this.generation) {
-      await this.releaseAll()
       this.generation = generation
+      await this.releaseAll()
     }
-    let opened = this.handles.get(path)
-    if (opened === undefined) {
-      opened = this.open(path)
-      opened.catch((err: unknown) => {
-        console.debug(`nfs: opening ${path} failed: ${String(err)}`)
-      })
+    for (;;) {
+      let opened = this.handles.get(path)
+      if (opened === undefined) {
+        opened = this.open(path, this.versions)
+        opened.catch((err: unknown) => {
+          console.debug(`nfs: opening ${path} failed: ${String(err)}`)
+        })
+      }
+      this.handles.delete(path)
+      this.handles.set(path, opened)
+      while (this.handles.size > OPEN_HANDLES) {
+        const oldest = this.handles.keys().next()
+        if (oldest.done === true) break
+        await this.release(oldest.value)
+      }
+      let fd: number
+      try {
+        fd = await opened
+      } catch (err) {
+        if (this.handles.get(path) === opened) this.handles.delete(path)
+        throw err
+      }
+      if (this.handles.get(path) === opened) return this.core.read(path, fd, offset, size)
     }
-    this.handles.delete(path)
-    this.handles.set(path, opened)
-    while (this.handles.size > OPEN_HANDLES) {
-      const oldest = this.handles.keys().next()
-      if (oldest.done === true) break
-      await this.release(oldest.value)
-    }
-    let fd: number
-    try {
-      fd = await opened
-    } catch (err) {
-      if (this.handles.get(path) === opened) this.handles.delete(path)
-      throw err
-    }
-    return this.core.read(path, fd, offset, size)
   }
 
-  private async open(path: string): Promise<number> {
+  private async open(path: string, versions: Map<string, string>): Promise<number> {
     const attrs = await this.core.getattr(path)
     const fd = await this.core.open(path)
-    this.versions.set(path, `${String(attrs.mtime.getTime())}:${String(attrs.size)}`)
+    versions.set(path, `${String(attrs.mtime.getTime())}:${String(attrs.size)}`)
     return fd
   }
 
@@ -353,6 +355,18 @@ export class MirageNFSServer {
   }
 
   private async releaseAll(): Promise<void> {
-    for (const path of [...this.handles.keys()]) await this.release(path)
+    const held = [...this.handles]
+    this.handles.clear()
+    this.versions = new Map()
+    for (const [path, opened] of held) {
+      let fd: number
+      try {
+        fd = await opened
+      } catch (err) {
+        console.debug(`nfs: ${path} never opened: ${String(err)}`)
+        continue
+      }
+      await this.core.release(fd)
+    }
   }
 }

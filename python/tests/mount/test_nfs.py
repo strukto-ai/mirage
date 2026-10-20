@@ -15,7 +15,7 @@
 import asyncio
 import struct
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import pytest
 import pytest_asyncio
@@ -25,6 +25,7 @@ from mirage.mount import nfs
 from mirage.mount.core import MountCore
 from mirage.mount.nfs import MirageNFSServer, mount_args, unmount_args
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.session.session import SessionState
 
 NFS = 100003
 MOUNT = 100005
@@ -136,8 +137,10 @@ class Client:
 
 
 class Counting(MountCore):
-    def __init__(self, ws: Workspace) -> None:
-        super().__init__(ws.vfs)
+    def __init__(
+        self, ws: Workspace, session: SessionState | None = None
+    ) -> None:
+        super().__init__(ws.vfs, session=session)
         self.opened: list[str] = []
         self.released: list[int] = []
 
@@ -392,4 +395,77 @@ async def test_a_listing_pages_by_name_and_a_later_page_sees_a_new_hide() -> (
         assert [name for name, _ in listed] == [f"f{i}" for i in range(10, 39)]
     finally:
         writer.close()
+        await server.close()
+
+
+class Gated(Counting):
+    def __init__(self, ws: Workspace, session: SessionState) -> None:
+        super().__init__(ws, session)
+        self.fhs: list[int] = []
+        self.opening: list[str] = []
+        self.releasing: list[int] = []
+        self.hold_open: asyncio.Future[None] | None = None
+        self.hold_release: asyncio.Future[None] | None = None
+
+    async def open(self, path: str, flags: int = 0) -> int:
+        self.opening.append(path)
+        if self.hold_open is not None:
+            await self.hold_open
+        fh = await super().open(path, flags)
+        self.fhs.append(fh)
+        return fh
+
+    async def release(self, fh: int) -> None:
+        self.releasing.append(fh)
+        hold, self.hold_release = self.hold_release, None
+        if hold is not None:
+            await hold
+        await super().release(fh)
+
+
+async def until(check: Callable[[], bool]) -> None:
+    async def wait() -> None:
+        while not check():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), 5)
+
+
+@pytest.mark.asyncio
+async def test_a_reset_after_a_session_change_keeps_handles_opened_since() -> (
+    None
+):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo x > /x; echo y > /y")
+    core = Gated(ws, ws.create_session("reader"))
+    server = MirageNFSServer(core, secure=False)
+    port = await server.start()
+    a = Client(*await asyncio.open_connection("127.0.0.1", port))
+    b = Client(*await asyncio.open_connection("127.0.0.1", port))
+    try:
+        x, y = await a.handle("x"), await b.handle("y")
+        assert await a.read(x, 0, 10) == b"x\n"
+        assert await b.read(y, 0, 10) == b"y\n"
+        before = len(core.fhs)
+        await ws.set_session_profile("reader", {})
+        loop = asyncio.get_running_loop()
+        release_gate: asyncio.Future[None] = loop.create_future()
+        open_gate: asyncio.Future[None] = loop.create_future()
+        core.hold_release = release_gate
+        first = asyncio.create_task(a.read(x, 0, 10))
+        await until(lambda: len(core.releasing) == 1)
+        core.hold_open = open_gate
+        opened = len(core.opening)
+        second = asyncio.create_task(b.read(y, 0, 10))
+        await until(lambda: len(core.opening) > opened)
+        release_gate.set_result(None)
+        for _ in range(50):
+            await asyncio.sleep(0)
+        open_gate.set_result(None)
+        assert await first == b"x\n"
+        assert await second == b"y\n"
+        assert not set(core.fhs[before:]) & set(core.releasing)
+    finally:
+        a.writer.close()
+        b.writer.close()
         await server.close()

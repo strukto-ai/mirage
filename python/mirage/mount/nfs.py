@@ -346,26 +346,32 @@ class MirageNFSServer:
         session = self._core.session
         generation = None if session is None else session.generation
         if generation != self._generation:
-            await self._release_all()
             self._generation = generation
-        opened = self._handles.pop(path, None)
-        if opened is None:
-            opened = asyncio.ensure_future(self._open(path))
-        self._handles[path] = opened
-        while len(self._handles) > OPEN_HANDLES:
-            await self._release(next(iter(self._handles)))
-        try:
-            fh = await asyncio.shield(opened)
-        except Exception:
+            await self._release_all()
+        while True:
+            opened = self._handles.pop(path, None)
+            if opened is None:
+                opened = asyncio.ensure_future(
+                    self._open(path, self._versions)
+                )
+            self._handles[path] = opened
+            while len(self._handles) > OPEN_HANDLES:
+                await self._release(next(iter(self._handles)))
+            try:
+                fh = await asyncio.shield(opened)
+            except Exception:
+                if self._handles.get(path) is opened:
+                    del self._handles[path]
+                raise
             if self._handles.get(path) is opened:
-                del self._handles[path]
-            raise
-        return await self._core.read(path, size, offset, fh)
+                return await self._core.read(path, size, offset, fh)
 
-    async def _open(self, path: str) -> int:
+    async def _open(
+        self, path: str, versions: dict[str, tuple[int, int]]
+    ) -> int:
         attrs = await self._core.getattr(path)
         fh = await self._core.open(path)
-        self._versions[path] = (attrs.mtime, attrs.size)
+        versions[path] = (attrs.mtime, attrs.size)
         return fh
 
     async def _release(self, path: str) -> None:
@@ -383,5 +389,12 @@ class MirageNFSServer:
         await self._core.release(fh)
 
     async def _release_all(self) -> None:
-        for path in list(self._handles):
-            await self._release(path)
+        held = self._handles
+        self._handles, self._versions = {}, {}
+        for path, opened in held.items():
+            try:
+                fh = await opened
+            except Exception as exc:
+                logger.debug("nfs: %s never opened: %r", path, exc)
+                continue
+            await self._core.release(fh)

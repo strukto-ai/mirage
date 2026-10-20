@@ -57,6 +57,14 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out
 }
 
+async function until(check: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5000
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting')
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+}
+
 class Reply {
   private at = 0
   private readonly view: DataView
@@ -389,6 +397,73 @@ describe('MirageNFSServer and session changes', () => {
     await new Promise<void>((resolve) => socket.once('connect', resolve))
     return [server, socket, new Client(socket)]
   }
+
+  it('keeps handles opened after a session change out of the older reset', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('echo x > /x; echo y > /y')
+    const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
+    const server = new MirageNFSServer(core, '/', false)
+    const port = await server.start()
+    const first = connect(port, '127.0.0.1')
+    const second = connect(port, '127.0.0.1')
+    for (const socket of [first, second]) {
+      await new Promise<void>((resolve) => socket.once('connect', resolve))
+    }
+    const a = new Client(first)
+    const b = new Client(second)
+    try {
+      const x = await a.handle('x')
+      const y = await b.handle('y')
+      expect(await a.read(x, 0, 10)).toBe('x\n')
+      expect(await b.read(y, 0, 10)).toBe('y\n')
+      const fds: number[] = []
+      const opening: string[] = []
+      const releasing: number[] = []
+      let holdOpen: Promise<void> | null = null
+      let holdRelease: Promise<void> | null = null
+      let openGate = (): void => undefined
+      let releaseGate = (): void => undefined
+      const realOpen = core.open.bind(core)
+      const realRelease = core.release.bind(core)
+      vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+        opening.push(path)
+        if (holdOpen !== null) await holdOpen
+        const fd = await realOpen(path, flags)
+        fds.push(fd)
+        return fd
+      })
+      vi.spyOn(core, 'release').mockImplementation(async (fd: number) => {
+        releasing.push(fd)
+        const hold = holdRelease
+        holdRelease = null
+        if (hold !== null) await hold
+        await realRelease(fd)
+      })
+      await ws.setSessionProfile('reader', {})
+      holdRelease = new Promise<void>((resolve) => {
+        releaseGate = resolve
+      })
+      const readX = a.read(x, 0, 10)
+      await until(() => releasing.length === 1)
+      holdOpen = new Promise<void>((resolve) => {
+        openGate = resolve
+      })
+      const opened = opening.length
+      const readY = b.read(y, 0, 10)
+      await until(() => opening.length > opened)
+      releaseGate()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      openGate()
+      expect(await readX).toBe('x\n')
+      expect(await readY).toBe('y\n')
+      expect(fds.filter((fd) => releasing.includes(fd))).toEqual([])
+    } finally {
+      vi.restoreAllMocks()
+      first.destroy()
+      second.destroy()
+      await server.close()
+    }
+  })
 
   it('stops later reads once a hide covers the file', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
