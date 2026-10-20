@@ -96,6 +96,7 @@ import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
   mergeScopes,
+  operandPaths,
   pathFlagScopes,
   routableScopes,
   optionLoopExits,
@@ -431,7 +432,20 @@ export async function handleCommand(
     )
   }
 
-  if (cmdName in CWD_DEFAULT_RAW) {
+  // A mount may register its own command under a builtin's name. The steps
+  // below that read the line with the builtin's grammar then skip a line
+  // whose operands (or cwd) pick such a mount, as resolveMount picks it, and
+  // the line routes by those operands alone. Only a word classified as a path
+  // in a path operand slot picks one: not a file an option reads (`grep -f`),
+  // a pattern, or a word the cwd's spec left as text.
+  const operands = operandPaths(cmdName, parts.slice(1), session.cwd).filter(
+    (s) => s.walkError !== 'ENOENT',
+  )
+  const ownMount = registry.commandMount(cmdName, operands, session.cwd)
+  const ownSpec = ownMount?.specFor(cmdName) ?? null
+  const borrowed =
+    SPECS[cmdName] !== undefined && ownSpec !== null && !isBuiltinGrammar(cmdName, ownSpec)
+  if (!borrowed && cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
     if (operand !== null) {
       // Where GNU's implied `.` sits: after the pattern for grep/rg
@@ -460,7 +474,7 @@ export async function handleCommand(
   // `mv --help /ram/a /disk/b` reaches the cross-mount relay, which bypasses
   // the registered wrapper that answers help and MOVED THE FILE instead of
   // printing the page.
-  const cmdMount = registry.mountForCommand(cmdName)
+  const cmdMount = ownMount ?? registry.mountForCommand(cmdName)
   const cmdSpec = cmdMount?.specFor(cmdName) ?? null
   const standardOut = standardRequest(cmdName, cmdSpec, rawArgv)
   const builtinSpec = SPECS[cmdName]
@@ -492,7 +506,7 @@ export async function handleCommand(
   }
 
   let prepared: ParsedCommand | null = null
-  if (PROGRAM_FILE_COMMANDS.has(cmdName)) {
+  if (!borrowed && PROGRAM_FILE_COMMANDS.has(cmdName)) {
     const programSpec = SPECS[cmdName]
     if (programSpec !== undefined) {
       const candidate = parseFlags(
@@ -546,9 +560,12 @@ export async function handleCommand(
   // operands (or the cwd) put it, and that run's op guards refuse it. A line
   // is not cross-mount because one of its words is empty.
   // A prepared program line already holds its positional operands.
-  let routingScopes: PathSpec[] = []
+  let routingScopes: PathSpec[] = borrowed ? operands : []
   let flagScopes: PathSpec[] = []
-  if (!optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)) {
+  if (
+    !borrowed &&
+    !optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)
+  ) {
     const routed = routableScopes(
       cmdName,
       prepared !== null
@@ -560,7 +577,7 @@ export async function handleCommand(
   }
 
   let findExprTokens: string[] | null = null
-  if (cmdName === 'find') {
+  if (!borrowed && cmdName === 'find') {
     findExprTokens = findExprTail(rawArgv)
     let findExpr: FindExpr
     try {
@@ -601,7 +618,10 @@ export async function handleCommand(
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
   // exactly like a positional destination would.
-  if (isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)) {
+  if (
+    !borrowed &&
+    isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)
+  ) {
     // Parse against the shared spec so flags and text operands do not
     // depend on the source mount: raw argv would hand flag tokens ("-c")
     // to the generic as the search pattern. The bound single-mount runner
@@ -636,7 +656,7 @@ export async function handleCommand(
     // mount but is not an input. Parsed operands preserve aliases, order, and
     // repeated path values. find's expression is not the spec's grammar, so
     // its start points are the words classified as paths.
-    let csScopes = cmdName === 'find' ? pathScopes : csParsed.paths
+    let csScopes = findExprTokens !== null ? pathScopes : csParsed.paths
     if (RELAY_COMMANDS.has(cmdName)) {
       // STREAM and FANOUT (and a custom command's reducer) run each operand
       // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
@@ -701,7 +721,7 @@ export async function handleCommand(
       exitCode: csIo.exitCode,
     })
     let csStdout = csStdout0
-    if (cmdName === 'find') {
+    if (findExprTokens !== null) {
       csStdout = await finishFind(
         csStdout,
         csIo,
@@ -752,25 +772,36 @@ export async function handleCommand(
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
-  // output through another.
-  if (routingScopes.length >= 2) {
-    const mountPrefixes = new Set<string>()
-    for (const s of routingScopes) {
-      // a scope outside any mount contributes nothing here
-      const m = registry.tryMountFor(s.virtual)
-      if (m !== null) mountPrefixes.add(m.prefix)
-    }
-    if (mountPrefixes.size > 1) {
-      const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
-      const err = encodeText(
-        `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
-      )
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: cmdStr, exitCode: 1 }),
-      ]
-    }
+  // output through another. A borrowed line runs on its predicted mount, so
+  // every path its own spec reads, operand or option value, must lie there
+  // too, or its handler reads another mount's path through its own.
+  let spanScopes = routingScopes
+  const mountPrefixes = new Set<string>()
+  if (borrowed && ownMount !== null) {
+    const own = parseFlags(parts.slice(1), ownSpec, cmdName, session.cwd)
+    spanScopes = [
+      ...own.paths,
+      ...Object.values(own.flagKwargs)
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter((item): item is PathSpec => item instanceof PathSpec),
+    ]
+    mountPrefixes.add(ownMount.prefix)
+  }
+  for (const s of spanScopes) {
+    // a scope outside any mount contributes nothing here
+    const m = registry.tryMountFor(s.virtual)
+    if (m !== null) mountPrefixes.add(m.prefix)
+  }
+  if (mountPrefixes.size > 1) {
+    const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
+    const err = encodeText(
+      `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: cmdStr, exitCode: 1 }),
+    ]
   }
 
   let mount: MountEntry | null
@@ -832,7 +863,7 @@ export async function handleCommand(
       : null
 
   const singleStat: StatPath = (path) => pathStat(dispatch, path)
-  if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+  if (!borrowed && shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -852,7 +883,7 @@ export async function handleCommand(
       follow,
     )
     let fanOut = fanOut0
-    if (cmdName === 'find') {
+    if (findExprTokens !== null) {
       fanOut = await finishFind(
         fanOut,
         fanIo,
@@ -885,7 +916,7 @@ export async function handleCommand(
     argv: spelledWords(parts.slice(1)),
   })
   let stdout = rawStdout
-  if (cmdName === 'find') {
+  if (findExprTokens !== null) {
     stdout = await finishFind(
       stdout,
       io,

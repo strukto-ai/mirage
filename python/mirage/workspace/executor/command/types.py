@@ -75,3 +75,4 @@ class ParsedCommand(NamedTuple):
     # and not list because a NamedTuple default is one shared object.
     missing_required_operands: Sequence[str] = ()
     typed_dests: Sequence[str] = ()
+    builtin: bool = False

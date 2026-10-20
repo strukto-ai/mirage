@@ -526,6 +526,142 @@ it('runs a command registered for one filetype only on that filetype', async () 
   }
 })
 
+// The per-program refusal voices and codes (grep's 2, diff's prefixed hint,
+// CPython's and curl's wording, tar's old-option 2) describe the real
+// program, so a command a mount registers under its name is refused like the
+// control `mycmd`.
+it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
+  'refuses a borrowed %s like a custom command',
+  async (name) => {
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+    )
+    try {
+      const spec = new CommandSpec({
+        arguments: [
+          new Argument('-k'),
+          new Argument('--quiet', { action: 'store_true' }),
+          new Argument('--max', { type: 'float' }),
+          new Argument('rest', { nargs: '*' }),
+        ],
+        oldOptionStyle: true,
+      })
+      ws.mount('/data/').register(new Command({ name, spec, vfs: null, fn: OK_CMD_STDOUT }))
+      const ok = await ws.shell(`cd /data && ${name} -k a x`)
+      expect([ok.exitCode, ok.stdoutText]).toEqual([0, 'ok'])
+      for (const [words, line] of [
+        ['--bogus x', "unrecognized option '--bogus'"],
+        ['-k', "option requires an argument -- 'k'"],
+        ['--quiet=x', "option '--quiet' doesn't allow an argument"],
+        ['--max=z', "invalid float value: 'z' for '--max'"],
+        ['k', "Old option 'k' requires an argument."],
+      ] as const) {
+        const refused = await ws.shell(`cd /data && ${name} ${words}`)
+        expect([words, refused.exitCode, refused.stderrText]).toEqual([
+          words,
+          1,
+          `${name}: ${line}\nTry '${name} --help' for more information.\n`,
+        ])
+      }
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+const ECHO_CMD: CommandFn = (_accessor, paths, texts) => [
+  new TextEncoder().encode(JSON.stringify([paths.map((p) => p.virtual), texts])),
+  new IOResult(),
+]
+
+// The steps that read a line with the builtin's grammar before routing
+// (find's expression, the implied `.`, the program file, a path flag's mount,
+// the help page) belong to the builtin, so a command a mount registers under
+// its name runs as the control `mycmd` does.
+it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --help'])(
+  'routes a borrowed `%s` like a custom command',
+  async (line) => {
+    const ws = new Workspace(
+      { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+    )
+    try {
+      const [name = '', ...words] = line.split(' ')
+      const spec = new CommandSpec({
+        arguments: [
+          new Argument('--mode'),
+          new Argument('-f'),
+          new Argument('-o'),
+          new Argument('rest', { nargs: '*' }),
+        ],
+      })
+      for (const registered of [name, 'mycmd']) {
+        ws.mount('/a/').register(new Command({ name: registered, spec, vfs: null, fn: ECHO_CMD }))
+      }
+      const borrowed = await ws.shell(`cd /a && ${line}`)
+      const control = await ws.shell(`cd /a && mycmd ${words.join(' ')}`)
+      expect([borrowed.exitCode, borrowed.stdoutText, borrowed.stderrText]).toEqual([
+        control.exitCode,
+        control.stdoutText,
+        control.stderrText.replaceAll('mycmd', name),
+      ])
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+// The mount a line runs on is picked by the words in operand slots that were
+// classified as paths, read by position: never a file an option reads, even
+// one an operand repeats, nor a word the cwd's spec left as text. /a borrows
+// grep (text operands), find and rg (path operands); the builtin rg reads
+// `/a/patterns` and a lone `/b/input` as its pattern, a text slot, so those
+// lines run on /a, where a path on /b is refused rather than handed to /a's rg.
+// Only the paths the borrowed spec reads count, its option values included:
+// grep's `-f` takes text, so `/b/input` there is no path, and rg's takes a
+// path.
+const SPAN = 'rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n'
+it.each([
+  ['cd /b && grep -f /a/patterns /b/input', 0, 'hi\n', ''],
+  ['cd /b && grep -f /a/patterns /b/input /a/patterns', 0, '/b/input:hi\n[["/a/patterns"],[]]', ''],
+  ['cd /a && grep hi /b/input', 0, '[[],["hi","/b/input"]]', ''],
+  ['cd /b && grep -f /b/input /a/x', 0, '[[],["/a/x"]]', ''],
+  ['cd /a && rg /a/patterns /b/input', 0, '/a/patterns\n', ''],
+  ['cd /a && rg /b/input', 1, '', SPAN],
+  ['cd /a && rg /b/input /a/patterns', 1, '', SPAN],
+  ['cd /a && rg -f /b/input /a/patterns', 1, '', SPAN],
+  ['cd /a && find //b/input -print0', 0, '//b/input\0', ''],
+])('keeps `%s` on its own command', async (line, code, stdout, stderr) => {
+  const ws = new Workspace(
+    { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    for (const [name, type] of [
+      ['grep', 'str'],
+      ['find', 'path'],
+      ['rg', 'path'],
+    ] as const) {
+      ws.mount('/a/').register(
+        new Command({
+          name,
+          spec: new CommandSpec({
+            arguments: [new Argument('-f', { type }), new Argument('rest', { nargs: '*', type })],
+          }),
+          vfs: null,
+          fn: ECHO_CMD,
+        }),
+      )
+    }
+    await ws.shell("echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input")
+    const result = await ws.shell(line)
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([code, stdout, stderr])
+  } finally {
+    await ws.close()
+  }
+})
+
 it.each([false, true])(
   'closes native output and releases mount admission (started=%s)',
   async (started) => {

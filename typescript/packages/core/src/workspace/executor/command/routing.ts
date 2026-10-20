@@ -341,6 +341,29 @@ function parsedKinds(
 }
 
 /**
+ * The classified path words a builtin's grammar reads as path operands. Read
+ * by position, so neither an option's value nor a text operand (grep's
+ * pattern) counts even where its spelling repeats a path operand's, and a
+ * word the classifier left as text never counts.
+ */
+export function operandPaths(
+  cmdName: string,
+  words: readonly (string | PathSpec)[],
+  cwd: string,
+): PathSpec[] {
+  const spec = SPECS[cmdName]
+  if (spec === undefined) return words.filter((p): p is PathSpec => p instanceof PathSpec)
+  const argv = words.map((p) => (typeof p === 'string' ? p : p.virtual))
+  const parsed = parseCommand(spec, argv, cwd, cmdName)
+  return words.filter(
+    (p, i): p is PathSpec =>
+      p instanceof PathSpec &&
+      parsed.wordRoles[i] === WordKind.OPERAND &&
+      parsed.wordKinds[i] === 'path',
+  )
+}
+
+/**
  * The command line word by word, each with its kind and the path it names.
  * The name comes first and the redirect targets last. A command tree's verbs
  * (an installed CLI's, or a mount's) are read off the tree and its leaf's

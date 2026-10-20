@@ -75,6 +75,7 @@ from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     default_cwd_operand,
     merge_scopes,
+    operand_paths,
     option_loop_exits,
     path_flag_scopes,
     routable_scopes,
@@ -479,7 +480,26 @@ async def handle_command(
             follow,
         )
 
-    if cmd_name in CWD_DEFAULT_RAW:
+    # A mount may register its own command under a builtin's name. The
+    # steps below that read the line with the builtin's grammar then skip
+    # a line whose operands (or cwd) pick such a mount, as resolve_mount
+    # picks it, and the line routes by those operands alone. Only a word
+    # classified as a path in a path operand slot picks one: not a file an
+    # option reads (`grep -f`), a pattern, or a word the cwd's spec left
+    # as text.
+    operands = [
+        s
+        for s in operand_paths(cmd_name, parts[1:], session.cwd)
+        if s.walk_error != "ENOENT"
+    ]
+    own_mount = registry.command_mount(cmd_name, operands, session.cwd)
+    own_spec = own_mount.spec_for(cmd_name) if own_mount is not None else None
+    borrowed = (
+        cmd_name in SPECS
+        and own_spec is not None
+        and not is_builtin_grammar(cmd_name, own_spec)
+    )
+    if not borrowed and cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
             parts, cmd_name, registry, session.cwd, stdin
         )
@@ -505,7 +525,7 @@ async def handle_command(
     # option, and `mv --help /ram/a /disk/b` reaches the cross-mount
     # relay, which bypasses the registered wrapper that answers help and
     # MOVED THE FILE instead of printing the page.
-    cmd_mount = registry.mount_for_command(cmd_name)
+    cmd_mount = own_mount or registry.mount_for_command(cmd_name)
     cmd_spec = cmd_mount.spec_for(cmd_name) if cmd_mount else None
     standard_out = standard_request(cmd_name, cmd_spec, raw_argv)
     if (
@@ -532,7 +552,11 @@ async def handle_command(
         )
 
     prepared: ParsedCommand | None = None
-    if cmd_name in PROGRAM_FILE_COMMANDS and dispatch is not None:
+    if (
+        not borrowed
+        and cmd_name in PROGRAM_FILE_COMMANDS
+        and dispatch is not None
+    ):
         candidate = parse_flags(
             parts[1:],
             registered_spec(cmd_name, SPECS[cmd_name]),
@@ -579,9 +603,9 @@ async def handle_command(
     # other operands (or the cwd) put it, and that run's op guards refuse
     # it. A line is not cross-mount because one of its words is empty.
     # A prepared program line already holds its positional operands.
-    routing_scopes: list[PathSpec] = []
+    routing_scopes: list[PathSpec] = operands if borrowed else []
     flag_scopes: list[PathSpec] = []
-    if not option_loop_exits(
+    if not borrowed and not option_loop_exits(
         cmd_name,
         cmd_mount.spec_for(cmd_name) if cmd_mount else None,
         raw_argv,
@@ -603,7 +627,7 @@ async def handle_command(
         ]
 
     find_expr_tokens: list[str] | None = None
-    if cmd_name == "find":
+    if not borrowed and cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
             find_expr = parse_find_expression(find_expr_tokens)
@@ -639,7 +663,7 @@ async def handle_command(
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would.
-    if is_cross_mount(
+    if not borrowed and is_cross_mount(
         cmd_name,
         _operand_mounts(registry, cmd_name, routing_scopes),
         flag_scopes,
@@ -686,7 +710,7 @@ async def handle_command(
         # is not the spec's grammar, so its start points are the words
         # classified as paths.
         cross_scopes = (
-            path_scopes if cmd_name == "find" else cross_parsed.paths
+            path_scopes if find_expr_tokens is not None else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
         if cmd_name in RELAY_COMMANDS:
@@ -767,7 +791,7 @@ async def handle_command(
             diff=registry.diff,
             follow=follow,
         )
-        if cmd_name == "find":
+        if find_expr_tokens is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
@@ -814,27 +838,37 @@ async def handle_command(
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
     # command bound to one mount cannot write its output through another.
-    if len(routing_scopes) >= 2:
-        mount_prefixes = set()
-        for s in routing_scopes:
-            m = registry.try_mount_for(s.virtual)
-            # a scope outside any mount contributes nothing here
-            if m is not None:
-                mount_prefixes.add(m.prefix)
-        if len(mount_prefixes) > 1:
-            prefixes_str = ", ".join(sorted(mount_prefixes))
-            span_err = (
-                f"{cmd_name}: paths span multiple mounts "
-                f"({prefixes_str}), cross-mount not supported\n"
-            )
-            return (
-                None,
-                IOResult(
-                    exit_code=1,
-                    stderr=encode_text(span_err),
-                ),
-                ExecutionNode(command=cmd_str, exit_code=1),
-            )
+    # A borrowed line runs on its predicted mount, so every path its own
+    # spec reads, operand or option value, must lie there too, or its
+    # handler reads another mount's path through its own.
+    span_scopes = routing_scopes
+    mount_prefixes = set()
+    if borrowed and own_mount is not None:
+        own = parse_flags(parts[1:], own_spec, cmd_name, session.cwd)
+        span_scopes = list(own.paths)
+        for value in own.flag_kwargs.values():
+            items = value if isinstance(value, list) else [value]
+            span_scopes += [i for i in items if isinstance(i, PathSpec)]
+        mount_prefixes.add(own_mount.prefix)
+    for s in span_scopes:
+        m = registry.try_mount_for(s.virtual)
+        # a scope outside any mount contributes nothing here
+        if m is not None:
+            mount_prefixes.add(m.prefix)
+    if len(mount_prefixes) > 1:
+        prefixes_str = ", ".join(sorted(mount_prefixes))
+        span_err = (
+            f"{cmd_name}: paths span multiple mounts "
+            f"({prefixes_str}), cross-mount not supported\n"
+        )
+        return (
+            None,
+            IOResult(
+                exit_code=1,
+                stderr=encode_text(span_err),
+            ),
+            ExecutionNode(command=cmd_str, exit_code=1),
+        )
 
     try:
         mount = await registry.resolve_mount(
@@ -896,7 +930,9 @@ async def handle_command(
         if dispatch is not None
         else None
     )
-    if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
+    if not borrowed and _should_fan_out(
+        cmd_name, paths, flag_kwargs, registry
+    ):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the
@@ -930,7 +966,7 @@ async def handle_command(
             ),
             follow=follow,
         )
-        if cmd_name == "find":
+        if find_expr_tokens is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
@@ -968,7 +1004,7 @@ async def handle_command(
         execute_fn=execute_fn,
         follow=follow,
     )
-    if cmd_name == "find":
+    if find_expr_tokens is not None:
         stdout = await _finish_find(
             stdout,
             io,

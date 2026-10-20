@@ -17,6 +17,7 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Command, command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.vfs.ram import RAMVFS
 
@@ -142,3 +143,155 @@ def test_register_commands_multi_vfs_filters_to_matching(ws):
     m = ws.mount("/data/")
     m.register_commands([multi])
     assert "multi" in m.commands()
+
+
+async def custom_command(accessor, paths, *texts, **kw):
+    return b"custom\n", IOResult()
+
+
+# The per-program refusal voices and codes (grep's 2, diff's prefixed
+# hint, CPython's and curl's wording, tar's old-option 2) describe the
+# real program, so a command a mount registers under its name is refused
+# like the control `mycmd`.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name", ["grep", "diff", "python3", "curl", "tar", "mycmd"]
+)
+async def test_a_borrowed_builtin_name_is_refused_like_a_custom_command(
+    ws, name
+):
+    spec = CommandSpec(
+        arguments=(
+            Argument("-k"),
+            Argument("--quiet", action="store_true"),
+            Argument("--max", type="float"),
+            Argument("rest", nargs="*"),
+        ),
+        old_option_style=True,
+    )
+    ws.mount("/data/").register(
+        Command(name, spec=spec, vfs=None, filetype=None, fn=custom_command)
+    )
+    ok = await ws.shell(f"cd /data && {name} -k a x")
+    assert (ok.exit_code, ok.stdout) == (0, b"custom\n")
+    for words, line in (
+        ("--bogus x", "unrecognized option '--bogus'"),
+        ("-k", "option requires an argument -- 'k'"),
+        ("--quiet=x", "option '--quiet' doesn't allow an argument"),
+        ("--max=z", "invalid float value: 'z' for '--max'"),
+        ("k", "Old option 'k' requires an argument."),
+    ):
+        refused = await ws.shell(f"cd /data && {name} {words}")
+        assert (refused.exit_code, refused.stderr) == (
+            1,
+            f"{name}: {line}\nTry '{name} --help' for more information.\n".encode(),
+        ), words
+
+
+async def echo_command(accessor, paths, texts, ctx):
+    return f"{[p.virtual for p in paths]} {texts}\n".encode(), IOResult()
+
+
+# The steps that read a line with the builtin's grammar before routing
+# (find's expression, the implied `.`, the program file, a path flag's
+# mount, the help page) belong to the builtin, so a command a mount
+# registers under its name runs as the control `mycmd` does.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "find --mode=a x",
+        "rg x",
+        "grep -f a x",
+        "sort -o /b/out x",
+        "grep --help",
+    ],
+)
+async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
+    ws_two_mounts, line
+):
+    name, words = line.split(" ", 1)
+    spec = CommandSpec(
+        arguments=(
+            Argument("--mode"),
+            Argument("-f"),
+            Argument("-o"),
+            Argument("rest", nargs="*"),
+        )
+    )
+    for registered in (name, "mycmd"):
+        ws_two_mounts.mount("/a/").register(
+            Command(
+                registered, spec=spec, vfs=None, filetype=None, fn=echo_command
+            )
+        )
+    borrowed = await ws_two_mounts.shell(f"cd /a && {line}")
+    control = await ws_two_mounts.shell(f"cd /a && mycmd {words}")
+    assert (borrowed.exit_code, borrowed.stdout, borrowed.stderr or b"") == (
+        control.exit_code,
+        control.stdout,
+        (control.stderr or b"").replace(b"mycmd", name.encode()),
+    )
+
+
+# The mount a line runs on is picked by the words in operand slots that
+# were classified as paths, read by position: never a file an option
+# reads, even one an operand repeats, nor a word the cwd's spec left as
+# text. /a borrows grep (text operands), find and rg (path operands);
+# the builtin rg reads `/a/patterns` and a lone `/b/input` as its pattern,
+# a text slot, so those lines run on /a, where a path on /b is refused
+# rather than handed to /a's rg. Only the paths the borrowed spec reads
+# count, its option values included: grep's `-f` takes text, so
+# `/b/input` there is no path, and rg's takes a path.
+SPAN = (
+    b"rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, code, stdout, stderr",
+    [
+        ("cd /b && grep -f /a/patterns /b/input", 0, b"hi\n", b""),
+        (
+            "cd /b && grep -f /a/patterns /b/input /a/patterns",
+            0,
+            b"/b/input:hi\n['/a/patterns'] []\n",
+            b"",
+        ),
+        ("cd /a && grep hi /b/input", 0, b"[] ['hi', '/b/input']\n", b""),
+        ("cd /b && grep -f /b/input /a/x", 0, b"[] ['/a/x']\n", b""),
+        ("cd /a && rg /a/patterns /b/input", 0, b"/a/patterns\n", b""),
+        ("cd /a && rg /b/input", 1, b"", SPAN),
+        ("cd /a && rg /b/input /a/patterns", 1, b"", SPAN),
+        ("cd /a && rg -f /b/input /a/patterns", 1, b"", SPAN),
+        ("cd /a && find //b/input -print0", 0, b"//b/input\x00", b""),
+    ],
+)
+async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
+    ws_two_mounts, line, code, stdout, stderr
+):
+    for name, kind in (("grep", "str"), ("find", "path"), ("rg", "path")):
+        ws_two_mounts.mount("/a/").register(
+            Command(
+                name,
+                spec=CommandSpec(
+                    arguments=(
+                        Argument("-f", type=kind),
+                        Argument("rest", nargs="*", type=kind),
+                    )
+                ),
+                vfs=None,
+                filetype=None,
+                fn=echo_command,
+            )
+        )
+    await ws_two_mounts.shell(
+        "echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input"
+    )
+    result = await ws_two_mounts.shell(line)
+    assert (
+        result.exit_code,
+        result.stdout or b"",
+        result.stderr or b"",
+    ) == (code, stdout, stderr)
