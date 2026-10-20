@@ -107,6 +107,7 @@ def make_install(name: str = "prog") -> CLIInstall:
                             name="send",
                             arguments=(
                                 Argument("-t", "--to", required=True),
+                                Argument("--style", choices=("top", "bottom")),
                                 Argument("texts", nargs="*", metavar=""),
                             ),
                         ),
@@ -277,6 +278,17 @@ async def test_leaf_usage_error_exits_2_with_prog_attribution():
     assert io.exit_code == 2
     assert io.stderr.startswith(
         b"prog message send: option '--to' is required"
+    )
+    _, io, _ = await handle_cli(
+        install,
+        ["prog", "message", "send", "-t", "a", "--style=x"],
+        SessionState("t"),
+    )
+    assert io.exit_code == 2
+    assert io.stderr == (
+        b"prog message send: invalid argument 'x' for '--style'\n"
+        b"Valid arguments are:\n  - 'top'\n  - 'bottom'\n"
+        b"Try 'prog message send --help' for more information.\n"
     )
 
 

@@ -34,6 +34,12 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, encode_text, text_view
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
+# gzip 1.13's zgrep with no pattern, exit 2; zegrep and zfgrep exec
+# zgrep, so they say the same. The host line also carries the
+# script's line number and its $0 path, which name a file mirage
+# does not have.
+ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
+
 
 async def _read_plain(
     read_bytes: PolymorphicReadFn,
@@ -112,7 +118,7 @@ async def zgrep_generic(
         texts,
         fl,
         partial(_read_plain, read_bytes),
-        "zgrep: usage: zgrep [flags] pattern [path]",
+        ZGREP_NO_PATTERN,
     )
     f = parse_flags(fl, never_match)
     # GNU grep 3.11 skips regex validation and selection under -m0.
