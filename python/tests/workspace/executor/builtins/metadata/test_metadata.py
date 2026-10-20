@@ -4,6 +4,7 @@ import pytest
 
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.metadata import (
     parse_group,
@@ -93,6 +94,96 @@ async def test_metadata_commands_respect_read_only_mount():
             err == f"{cmd.split()[0]}: {action} '/data/f.txt': "
             "Read-only file system\n"
         )
+
+
+async def _sealed_ws() -> Workspace:
+    # The rule lives on a profile so the tree is seeded under the
+    # unrestricted default session; every probe runs as "g". A deny
+    # rule lets a stat through and refuses the attribute write and the
+    # listing.
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "guarded": {
+                "commands": {
+                    "deny": [
+                        {
+                            "reason": "sealed",
+                            "paths": [
+                                "/data/t/secret.txt",
+                                "/data/t/sealed",
+                                "/data/t/sealed/*",
+                            ],
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    ws.create_session("g", profile="guarded")
+    await ws.shell(
+        "mkdir -p /data/t/box /data/t/sealed && echo s > /data/t/secret.txt"
+        " && echo o > /data/t/ok.txt && echo p > /data/t/box/pub.txt"
+        " && echo i > /data/t/sealed/in.txt"
+        " && ln -s /data/t/secret.txt /data/lnk"
+        " && ln -s /data/t/ok.txt /data/t/sealed/il"
+    )
+    return ws
+
+
+async def _guarded(ws: Workspace, line: str) -> tuple[int, str, str]:
+    r = await ws.shell(line, session_id="g")
+    return r.exit_code, await r.stdout_str(), await r.stderr_str()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cmd, refused, fmt, changed",
+    [
+        ("chmod 600", "chmod: /data/lnk: Permission denied\n", "%a", "600"),
+        ("chown 7", "chown: /data/lnk: Permission denied\n", "%u", "7"),
+        ("chgrp 7", "chgrp: /data/lnk: Permission denied\n", "%g", "7"),
+        (
+            "touch -d 2001-01-01T00:00:00",
+            "touch: cannot touch '/data/lnk': Permission denied\n",
+            "%Y",
+            "978307200",
+        ),
+    ],
+)
+async def test_a_denied_write_through_a_link_names_the_operand(
+    cmd, refused, fmt, changed
+):
+    # The rule refuses the link's target; the line names the link as
+    # typed, and the command goes on to the next operand.
+    ws = await _sealed_ws()
+    code, out, err = await _guarded(
+        ws, f"{cmd} /data/lnk /data/t/ok.txt; echo rc=$?"
+    )
+    assert (code, out, err) == (0, "rc=1\n", refused)
+    _, out, _ = await _guarded(ws, f"stat -c {fmt} /data/t/ok.txt")
+    assert out == f"{changed}\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cmd", ["chmod -R 600", "chown -R 7", "chgrp -R 7"])
+async def test_a_denied_listing_is_reported_and_not_descended(cmd):
+    # fts's unreadable directory: its own change is still tried (and
+    # refused here), its line follows, its subtree (the link in it
+    # included) is left alone, and the walk goes on with its siblings.
+    ws = await _sealed_ws()
+    name = cmd.split()[0]
+    code, out, err = await _guarded(ws, f"cd /data && {cmd} t; echo rc=$?")
+    assert (code, out) == (0, "rc=1\n")
+    assert err == (
+        f"{name}: t/sealed: Permission denied\n"
+        f"{name}: cannot read directory 't/sealed': Permission denied\n"
+        f"{name}: t/secret.txt: Permission denied\n"
+    )
+    fmt = {"chmod": "%a", "chown": "%u", "chgrp": "%g"}[name]
+    _, out, _ = await _guarded(ws, f"stat -c {fmt} /data/t/box/pub.txt")
+    assert out == f"{cmd.split()[-1]}\n"
 
 
 @pytest.mark.asyncio

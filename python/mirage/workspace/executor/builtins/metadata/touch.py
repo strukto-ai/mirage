@@ -125,7 +125,7 @@ async def handle_touch(
     for target in await expand_operands(namespace, dispatch, operands):
         if fl.as_bool("no_dereference") and links.is_link(target.virtual):
             await apply_link_attrs(
-                dispatch, "touch", target, errors, mtime=stamp
+                dispatch, "touch", target, target.raw_path, errors, mtime=stamp
             )
             continue
         if target.walk_error is not None:
@@ -223,7 +223,9 @@ async def handle_touch(
             await setattr_via(dispatch, resolved, atime=atime, mtime=mtime)
         except PermissionError as exc:
             action = "setting times of" if no_create else "cannot touch"
-            errors.append(permission_error("touch", action, target, exc))
+            errors.append(
+                permission_error("touch", action, target.raw_path, exc)
+            )
         except FS_ERRORS as exc:
             # A destination whose parent chain is not all directories is one
             # failed operand, not an aborted command: GNU reports it and

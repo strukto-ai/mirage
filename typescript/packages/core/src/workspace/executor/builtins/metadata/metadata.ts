@@ -22,8 +22,16 @@ import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
-import { fsStrerror, isEnoent, isEnotdir, walkRefusal } from '../../../../errors/fs.ts'
-import { CycleError } from '../../../../utils/path.ts'
+import {
+  fsStrerror,
+  isEacces,
+  isEnoent,
+  isEnotdir,
+  isErofs,
+  walkRefusal,
+} from '../../../../errors/fs.ts'
+import { fsErrorLine } from '../../../../errors/render.ts'
+import { CycleError, ancestors } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { expandOperands, result } from '../shared.ts'
@@ -117,20 +125,33 @@ export function nowIso(): string {
   return isoformat(new Date())
 }
 
-export function isReadOnlyError(err: unknown): boolean {
-  // A policy deny is EACCES too but must render GNU's "Permission
-  // denied", not the mount read-only wording, even when its reason
-  // text happens to contain "read-only".
-  if (err instanceof PolicyDenied) return false
-  return err instanceof Error && err.message.includes('read-only')
+// A refusal, not an absence: a rule's or a policy's deny (EACCES) or a
+// read-only mount (EROFS), which chmod, chown, chgrp and touch report for
+// the one file and go on past. Python's twin is `except PermissionError`.
+export function isRefusal(err: unknown): boolean {
+  return isEacces(err) || isErofs(err)
 }
 
-// A refused attribute write in GNU's per-operand voice, `<cmd>: <action>
-// '<path>': Read-only file system`, the voice every other write refusal
-// uses. `action` is GNU's phrase for the write (`cannot touch`, `changing
-// permissions of`). Mirrors Python's `permission_error`.
-export function permissionError(cmd: string, action: string, path: PathSpec, err: unknown): string {
-  return `${cmd}: ${action} '${path.rawPath}': ${fsStrerror(err) ?? posixPhrase('EROFS')}\n`
+// A refused attribute write. A read-only mount is GNU's per-operand line,
+// `<cmd>: <action> '<name>': Read-only file system`, the voice every other
+// write refusal uses; a policy's deny at the dispatcher is the line a
+// refused operand gets, `<cmd>: <name>: Permission denied` (touch's
+// `cannot touch '<name>'`). Either names the file the way the line does,
+// never the target a link resolved to: the dispatcher's error carries the
+// resolved path. `action` is GNU's phrase for the write (`cannot touch`,
+// `changing permissions of`). Mirrors Python's `permission_error`.
+export function permissionError(cmd: string, action: string, name: string, err: unknown): string {
+  if (err instanceof PolicyDenied) return fsErrorLine(cmd, name, err)
+  return `${cmd}: ${action} '${name}': ${fsStrerror(err) ?? posixPhrase('EROFS')}\n`
+}
+
+// The line for a walked directory whose listing was refused: fts's
+// unreadable directory, which chmod, chown and chgrp report after the
+// directory's own change and do not descend. Mirrors Python's
+// `unread_error`.
+export function unreadError(cmd: string, name: string, err: unknown): string {
+  const strerror = fsStrerror(err) ?? posixPhrase('EACCES')
+  return `${cmd}: cannot read directory ${shellQuoteAlways(name)}: ${strerror}\n`
 }
 
 // Route one attribute write through the dispatcher. The dispatcher applies what
@@ -212,24 +233,41 @@ export async function resolveOperand(
   }
 }
 
-// A subtree as [path, stat] pairs, in fts's pre-order. `links` is the
-// session's link table (`Namespace.sessionLinks`). Mirrors Python's
-// walk_stats.
+// One entry of a walked subtree: its path, its stat, and the refusal its
+// listing met (null for a file, or a directory that listed).
+export type WalkEntry = [PathSpec, FileStat, unknown]
+
+// A subtree as [path, stat, unread] triples, in fts's pre-order. `links`
+// is the session's link table (`Namespace.sessionLinks`). `unread` is the
+// refusal a directory's listing met (a rule that denies the directory lets
+// its stat through): fts's unreadable directory, which the caller reports
+// after the directory's own change, and whose subtree is not walked.
+// Mirrors Python's walk_stats.
 export async function walkStats(
   links: NamespaceLinks,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
-): Promise<[PathSpec, FileStat][]> {
-  const entries: [PathSpec, FileStat][] = []
+): Promise<WalkEntry[]> {
+  const entries: WalkEntry[] = []
   // An explicit stack, so a deep tree costs no recursion: a directory's
   // children go on in reverse and come off in listing order.
   const stack: [PathSpec, FileStat][] = [[root, rootStat]]
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
-    entries.push(top)
     const [path, stat] = top
-    if (stat.type !== FileType.DIRECTORY) continue
-    const [children] = await dispatch('readdir', path)
+    if (stat.type !== FileType.DIRECTORY) {
+      entries.push([path, stat, null])
+      continue
+    }
+    let children: unknown
+    try {
+      ;[children] = await dispatch('readdir', path)
+    } catch (err) {
+      if (!isRefusal(err)) throw err
+      entries.push([path, stat, err])
+      continue
+    }
+    entries.push([path, stat, null])
     const found: [PathSpec, FileStat][] = []
     for (const listed of children as string[]) {
       // A folder-backed readdir spells a directory child with its slash.
@@ -248,17 +286,21 @@ export async function walkStats(
 // chgrp change a traversed symlink itself rather than its referent (POSIX
 // gives -R an implicit -P), and a link is namespace state that no readdir
 // can report, so the link nodes are folded back in from the session's link
-// table (`Namespace.sessionLinks`).
+// table (`Namespace.sessionLinks`), but for those under a directory whose
+// listing was refused, which the walk does not descend.
 export async function walkOwned(
   links: NamespaceLinks,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
-): Promise<{ walked: [PathSpec, FileStat][]; owned: string[] }> {
-  return {
-    walked: await walkStats(links, dispatch, root, rootStat),
-    owned: links.linkStatsBelow(root.virtual).map(([path]) => path),
-  }
+): Promise<{ walked: WalkEntry[]; owned: string[] }> {
+  const walked = await walkStats(links, dispatch, root, rootStat)
+  const unread = new Set(walked.filter(([, , err]) => err !== null).map(([p]) => p.virtual))
+  const owned = links
+    .linkStatsBelow(root.virtual)
+    .map(([path]) => path)
+    .filter((path) => !ancestors(path).some((dir) => unread.has(dir)))
+  return { walked, owned }
 }
 
 // Which files chmod, chown and chgrp report: 'verbose' (every one),
@@ -355,14 +397,14 @@ export async function changeOwner(
       out.push(ownerLine(name, status, old, user, group))
     }
   }
-  const own = async (path: PathSpec, link: boolean): Promise<boolean> => {
+  const own = async (path: PathSpec, name: string, link: boolean): Promise<boolean> => {
     try {
       if (link) await setattrLink(dispatch, path, fields)
       else await setattrVia(dispatch, path, fields)
       return true
     } catch (err) {
-      if (!isReadOnlyError(err)) throw err
-      errors.push(permissionError(cmd, action, path, err))
+      if (!isRefusal(err)) throw err
+      errors.push(permissionError(cmd, action, name, err))
       return false
     }
   }
@@ -373,7 +415,7 @@ export async function changeOwner(
     } catch (err) {
       if (!isEnoent(err) && !isEnotdir(err)) throw err
     }
-    describe(name, stat, !(await own(link, true)))
+    describe(name, stat, !(await own(link, name, true)))
   }
   const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, operands)) {
@@ -390,9 +432,11 @@ export async function changeOwner(
     const [resolved, stat] = found
     const { walked, owned } = fl.asBool('recursive')
       ? await walkOwned(links, dispatch, resolved, stat)
-      : { walked: [[resolved, stat]] as [PathSpec, FileStat][], owned: [] as string[] }
-    for (const [path, pathStat] of walked) {
-      describe(walkedName(typed, resolved, path), pathStat, !(await own(path, false)))
+      : { walked: [[resolved, stat, null]] as WalkEntry[], owned: [] as string[] }
+    for (const [path, pathStat, unread] of walked) {
+      const name = walkedName(typed, resolved, path)
+      describe(name, pathStat, !(await own(path, name, false)))
+      if (unread !== null) errors.push(unreadError(cmd, name, unread))
     }
     for (const link of owned) {
       const linkSpec = PathSpec.fromStrPath(link)

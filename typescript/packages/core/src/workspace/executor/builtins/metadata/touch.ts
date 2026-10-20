@@ -33,7 +33,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, parseLine } from '../shared.ts'
 import {
-  isReadOnlyError,
+  isRefusal,
   nowIso,
   permissionError,
   parseTouchStamp,
@@ -129,7 +129,12 @@ export async function handleTouch(
   const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, operands)) {
     if (fl.asBool('no_dereference') && links.isLink(target.virtual)) {
-      await setattrLink(dispatch, target, { mtime: stamp })
+      try {
+        await setattrLink(dispatch, target, { mtime: stamp })
+      } catch (err) {
+        if (!isRefusal(err)) throw err
+        errors.push(permissionError('touch', 'setting times of', target.rawPath, err))
+      }
       continue
     }
     if (target.walkError !== null) {
@@ -218,9 +223,9 @@ export async function handleTouch(
       if (setMtime) fields.mtime = stamp
       await setattrVia(dispatch, resolved, fields)
     } catch (err) {
-      if (isReadOnlyError(err)) {
+      if (isRefusal(err)) {
         const action = noCreate ? 'setting times of' : 'cannot touch'
-        errors.push(permissionError('touch', action, target, err))
+        errors.push(permissionError('touch', action, target.rawPath, err))
         continue
       }
       // A destination whose parent chain is not all directories is one
