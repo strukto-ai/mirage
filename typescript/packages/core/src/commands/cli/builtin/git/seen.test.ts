@@ -247,6 +247,33 @@ describe('what a session is shown of history', () => {
     expect(DEC.decode(data ?? new Uint8Array())).toBe('S3CR3T two\n')
   })
 
+  it.each([false, true])(
+    'switches without naming or writing a hidden file (public edit: %s)',
+    async (publicEdit) => {
+      // A hidden file is no part of the move: an edit to it neither blocks the
+      // switch nor is named when another edit does, and it survives.
+      const ws = await history()
+      await ws.dispatch('write', '/repo/secret.txt', [ENC.encode('S3CR3T edited\n')])
+      if (publicEdit) await ws.dispatch('write', '/repo/copy.txt', [ENC.encode('edited\n')])
+      const [, out, err] = await shell(
+        ws,
+        'git checkout -q HEAD~2; echo $?; git log -1 --format=%s',
+        'veiled',
+      )
+      if (publicEdit) {
+        expect([out, err]).toEqual([
+          '1\nsixth\n',
+          'error: Your local changes to the following files would be overwritten by checkout:\n' +
+            '\tcopy.txt\nPlease commit your changes or stash them before you switch branches.\nAborting\n',
+        ])
+      } else {
+        expect([out, err]).toEqual(['0\nfourth\n', ''])
+      }
+      const data = await readOptional(ws.vfs, PathSpec.fromStrPath('/repo/secret.txt'))
+      expect(DEC.decode(data ?? new Uint8Array())).toBe('S3CR3T edited\n')
+    },
+  )
+
   it('stands a path in a tree named by id where the tree does', async () => {
     const ws = await history()
     const [, box] = await shell(ws, 'git rev-parse HEAD:box')

@@ -79,6 +79,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     matched,
     repo_relative,
     under,
+    visible_entries,
 )
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
@@ -654,8 +655,14 @@ async def _carry_across(
         location (RepoLocation): the discovered repository.
         commit (Commit): the commit to move to.
     """
-    before = await asyncio.to_thread(head_entries, repo) or {}
-    after = await asyncio.to_thread(commit_entries, repo, commit.id)
+    # A path the session cannot see is no part of the move: neither
+    # tree names it, so it is never reported, rewritten or dropped, and
+    # its index entry and working copy stay as they are.
+    head = await asyncio.to_thread(head_entries, repo)
+    before = visible_entries(location, head or {})
+    after = visible_entries(
+        location, await asyncio.to_thread(commit_entries, repo, commit.id)
+    )
     state = await read_index(vfs, location.gitdir)
     # First, before either tree is compared and before the working tree
     # is walked, which is where git refuses it too. Every check below
@@ -669,8 +676,9 @@ async def _carry_across(
     # collision has to be decided per file. git names the file
     # inside such a directory, so the list has to hold it.
     found = await scan(vfs, location, tracked, UNTRACKED_ALL)
-    unstaged = await work_changes(vfs, location.worktree, state.entries, found)
-    staged = _stage_letters(before, state.entries)
+    seen = visible_entries(location, state.entries)
+    unstaged = await work_changes(vfs, location.worktree, seen, found)
+    staged = _stage_letters(before, seen)
     # Both kinds of uncommitted change count: an edit in the working
     # tree, and one already staged. Leaving the staged ones out is
     # what silently threw them away. The index column wins where a path

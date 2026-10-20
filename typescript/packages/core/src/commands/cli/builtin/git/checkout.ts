@@ -72,7 +72,7 @@ import {
   validBranchName,
   writeRef,
 } from './refs.ts'
-import { matched, repoRelative, under as inside } from './pathspec.ts'
+import { matched, repoRelative, under as inside, visibleEntries } from './pathspec.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
@@ -541,8 +541,14 @@ async function carryAcross(
   repo: Repo,
   oid: string,
 ): Promise<[ReadonlyMap<string, string>, string[]]> {
-  const before = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-  const after = await commitEntries(repo, oid)
+  // A path the session cannot see is no part of the move: neither tree names
+  // it, so it is never reported, rewritten or dropped, and its index entry and
+  // working copy stay as they are.
+  const before = visibleEntries(
+    repo.location,
+    (await headEntries(repo)) ?? new Map<string, TreeEntry>(),
+  )
+  const after = visibleEntries(repo.location, await commitEntries(repo, oid))
   const state = await readIndex(repo, vfs)
   // First, before either tree is compared and before the working tree is
   // walked, which is where git refuses it too. Every check below reads stage 0,
@@ -556,12 +562,13 @@ async function carryAcross(
   // decided per file. git names the file inside such a directory, so the
   // list has to hold it.
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
-  const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
+  const seen = visibleEntries(repo.location, state.entries)
+  const unstaged = await workChanges(repo, vfs, repo.location.worktree, seen, found)
   // Both kinds of uncommitted change count: an edit in the working tree, and
   // one already staged. Leaving the staged ones out is what silently threw
   // them away. The index column wins where a path has both, which is how git's
   // own short status reads a row and how it letters this list.
-  const carried = new Map([...unstaged, ...stageLetters(before, state.entries)])
+  const carried = new Map([...unstaged, ...stageLetters(before, seen)])
   const dirty = new Set(carried.keys())
   const writing = written(before, after)
   const blocked = [

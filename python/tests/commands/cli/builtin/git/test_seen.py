@@ -237,6 +237,33 @@ async def test_a_refused_checkout_leaves_the_index_as_it_was(history: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("public_edit", [False, True])
+async def test_a_switch_neither_names_nor_writes_a_hidden_file(
+    history: Path, public_edit: bool
+):
+    # A hidden file is no part of the move: an edit to it neither blocks
+    # the switch nor is named when another edit does, and it survives.
+    (history / "secret.txt").write_text("S3CR3T edited\n")
+    if public_edit:
+        (history / "copy.txt").write_text("edited\n")
+    _, out, err = await shell(
+        history,
+        "git checkout -q HEAD~2; echo $?; git log -1 --format=%s",
+        "veiled",
+    )
+    if public_edit:
+        assert (out, err) == (
+            "1\nsixth\n",
+            "error: Your local changes to the following files would be "
+            "overwritten by checkout:\n\tcopy.txt\nPlease commit your "
+            "changes or stash them before you switch branches.\nAborting\n",
+        )
+    else:
+        assert (out, err) == ("0\nfourth\n", "")
+    assert (history / "secret.txt").read_text() == "S3CR3T edited\n"
+
+
+@pytest.mark.asyncio
 async def test_a_path_in_a_tree_named_by_id_stands_where_the_tree_does(
     history: Path,
 ):
