@@ -2971,7 +2971,8 @@
         {
           "path": "/scratch",
           "vfs": "ram",
-          "backend": "memory"
+          "backend": "memory",
+          "mode": "exec"
         },
         {
           "path": "/vault",
