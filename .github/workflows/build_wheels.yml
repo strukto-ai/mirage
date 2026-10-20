@@ -1,4 +1,4 @@
-name: Build (mirage-rs wheels)
+name: Build (mirage-ai wheels)
 
 permissions:
   contents: read
@@ -10,8 +10,9 @@ permissions:
 
 jobs:
   # abi3 wheels (CPython 3.11 and later), one per platform mirage-ai installs
-  # on. Linux builds in maturin's manylinux and musllinux containers, aarch64
-  # cross-compiled there; macOS x86_64 cross-compiles on the arm64 runner.
+  # on, each carrying the Python package and its native module. Linux builds
+  # in maturin's manylinux and musllinux containers, aarch64 cross-compiled
+  # there; macOS x86_64 cross-compiles on the arm64 runner.
   build:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -35,14 +36,14 @@ jobs:
           python-version: "3.11"
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          working-directory: rust/python
+          working-directory: python
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           args: --release --locked --out dist
       - uses: actions/upload-artifact@v7
         with:
-          name: mirage-rs-wheel-${{ matrix.target }}
-          path: rust/python/dist/*.whl
+          name: mirage-ai-wheel-${{ matrix.target }}
+          path: python/dist/*.whl
 
   # Anything without a wheel above builds from this with Rust 1.85 or later.
   sdist:
@@ -51,26 +52,30 @@ jobs:
       - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          working-directory: rust/python
+          working-directory: python
           command: sdist
           args: --out dist
       - name: The sdist carries the license
-        run: python3 scripts/check_release_artifacts.py rust/python/dist/*.tar.gz
+        run: python3 scripts/check_release_artifacts.py python/dist/*.tar.gz
       # Built as an installer without a wheel would: pip, maturin from PyPI
       # and the runner's own Rust, since the sdist carries no toolchain pin.
       - name: Install the sdist and run every stream
         run: |
           python3 -m venv .venv-sdist
-          .venv-sdist/bin/pip install rust/python/dist/*.tar.gz
+          .venv-sdist/bin/pip install python/dist/*.tar.gz
           .venv-sdist/bin/python scripts/check_mirage_rs_wheel.py
       - uses: actions/upload-artifact@v7
         with:
-          name: mirage-rs-sdist
-          path: rust/python/dist/*.tar.gz
+          name: mirage-ai-sdist
+          path: python/dist/*.tar.gz
 
-  # Each wheel installs and runs on a machine of its own platform, on the
-  # oldest Python its abi3 tag admits: arm64 wheels on arm64 runners, the
-  # x86_64 macOS wheel on an Intel one, the musl wheels in Alpine.
+  # Each wheel installs with its dependencies from PyPI and runs on a
+  # machine of its own platform, on the oldest Python its abi3 tag admits:
+  # arm64 wheels on arm64 runners, the x86_64 macOS wheel on an Intel one,
+  # the musl wheels in Alpine. --prefer-binary takes an older dependency
+  # with a wheel over a newer sdist, as cryptography's latest has none for
+  # Windows arm64; tree-sitter has none for musl arm64, so Alpine gets a
+  # compiler.
   check:
     needs: build
     runs-on: ${{ matrix.os }}
@@ -90,7 +95,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: mirage-rs-wheel-${{ matrix.target }}
+          name: mirage-ai-wheel-${{ matrix.target }}
           path: dist
       - if: ${{ !matrix.alpine }}
         uses: actions/setup-python@v7
@@ -100,13 +105,14 @@ jobs:
         if: ${{ !matrix.alpine }}
         shell: bash
         run: |
-          python -m pip install --no-index --find-links dist mirage-rs
+          python -m pip install --prefer-binary dist/*.whl
           python scripts/check_mirage_rs_wheel.py
           python scripts/check_release_artifacts.py dist/*.whl
       - name: Install the wheel in Alpine and run every stream
         if: ${{ matrix.alpine }}
         run: >-
           docker run --rm -v "$PWD:/w" -w /w python:3.11-alpine
-          sh -c "pip install --no-index --find-links dist mirage-rs
+          sh -c "apk add --no-cache build-base
+          && pip install --prefer-binary dist/*.whl
           && python scripts/check_mirage_rs_wheel.py
           && python scripts/check_release_artifacts.py dist/*.whl"

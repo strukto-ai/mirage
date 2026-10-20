@@ -1,17 +1,15 @@
+import asyncio
 import json
 import sys
-from typing import TypeAlias
 
-import mirage_rs
+from mirage import MountMode, Workspace, _rs
+from mirage.types import JsonValue
+from mirage.vfs.ram import RAMVFS
 
-# mirage.types.JsonValue: only mirage-rs is installed where this runs.
-JsonValue: TypeAlias = (
-    "None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]"
-)
-
-# Each stream runs once through an installed mirage-rs wheel, on the
-# platform it was built for, with an answer no platform changes, so a wheel
-# that imports but computes wrong fails before it is published.
+# Each stream runs once through the native module of an installed mirage-ai
+# wheel, on the platform it was built for, with an answer no platform
+# changes, so a wheel that imports but computes wrong fails before it is
+# published.
 WHOLE_KEY: dict[str, JsonValue] = {
     "start_field": 1,
     "start_char": 1,
@@ -44,11 +42,11 @@ COMPARE: dict[str, JsonValue] = {
 }
 
 
-def stream(kind: str, config: dict[str, JsonValue]) -> mirage_rs.Stream:
-    return mirage_rs.Stream(kind, json.dumps(config).encode())
+def stream(kind: str, config: dict[str, JsonValue]) -> _rs.Stream:
+    return _rs.Stream(kind, json.dumps(config).encode())
 
 
-def settle(s: mirage_rs.Stream, produced: bytes) -> bytes:
+def settle(s: _rs.Stream, produced: bytes) -> bytes:
     while s.busy():
         produced += s.drain()
     return produced
@@ -58,6 +56,16 @@ def run(kind: str, config: dict[str, JsonValue], *chunks: bytes) -> bytes:
     s = stream(kind, config)
     out = b"".join(settle(s, s.feed(chunk)) for chunk in chunks)
     return settle(s, out + s.finish())
+
+
+async def pipeline() -> tuple[int, bytes]:
+    """A shell pipeline through the installed package, its sort, base64 and
+    wc each a native stream."""
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    out = await ws.shell(
+        "printf 'b\\na\\n' | sort | base64 | base64 -d | wc -l"
+    )
+    return out.exit_code, await out.materialize_stdout()
 
 
 def main() -> None:
@@ -196,6 +204,7 @@ def main() -> None:
             (printf.status(), printf.done()),
             (0, True),
         )
+    checks["pipeline"] = (asyncio.run(pipeline()), (0, b"2\n"))
 
     failed = [name for name, (got, want) in checks.items() if got != want]
     for name, (got, want) in checks.items():

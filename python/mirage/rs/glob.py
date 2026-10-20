@@ -17,8 +17,7 @@ import struct
 from collections.abc import Iterator
 from typing import Literal, TypeAlias, TypedDict, cast
 
-from mirage_rs import Stream
-
+from mirage._rs import Stream
 from mirage.io.yield_budget import YieldBudget
 
 

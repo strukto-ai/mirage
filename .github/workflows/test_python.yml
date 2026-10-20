@@ -312,8 +312,13 @@ jobs:
           fi
           echo "OK: pydantic_monty is absent"
 
+      # PYTHONSAFEPATH keeps python/ off sys.path, so the installed package
+      # is imported and not the source tree, whose mirage/ has no native
+      # module built in it.
       - name: python3 degrades with an install hint; local runtime still works
         working-directory: python
+        env:
+          PYTHONSAFEPATH: "1"
         run: |
           .venv-nomonty/bin/python - <<'PY'
           import asyncio
@@ -352,6 +357,8 @@ jobs:
       # may pull in deepagents, directly or through its imports.
       - name: Agent extras install and import without deepagents
         working-directory: python
+        env:
+          PYTHONSAFEPATH: "1"
         run: |
           for pair in pydantic-ai:mirage.agents.pydantic_ai openai:mirage.agents.openai_agents; do
             extra=${pair%%:*} module=${pair#*:}

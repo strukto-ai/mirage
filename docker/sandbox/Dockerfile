@@ -26,6 +26,24 @@
 # Or extend this image as a base: FROM mirage-python-fuse, then
 # pip install any additional extra.
 
+# mirage-ai's native module compiles from rust/ in this stage, on the
+# toolchain rust/rust-toolchain.toml pins, so the image carries the wheel
+# and not the compiler.
+FROM python:3.12-slim AS wheel
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY rust /src/rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+      --profile minimal \
+      --default-toolchain "$(sed -n 's/^channel = "\(.*\)"$/\1/p' /src/rust/rust-toolchain.toml)"
+ENV PATH=/root/.cargo/bin:$PATH
+
+COPY python /src/python
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /src/python
+
 FROM python:3.12-slim AS fuse
 
 ARG MIRAGE_EXTRAS=sandbox
@@ -35,5 +53,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && echo user_allow_other >> /etc/fuse.conf
 
-COPY python /src/python
-RUN pip install --no-cache-dir "/src/python[${MIRAGE_EXTRAS},fuse]" && rm -rf /src
+COPY --from=wheel /wheels /wheels
+RUN pip install --no-cache-dir "$(ls /wheels/mirage_ai-*.whl)[${MIRAGE_EXTRAS},fuse]" \
+    && rm -rf /wheels

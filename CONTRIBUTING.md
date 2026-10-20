@@ -146,28 +146,28 @@ Useful PR title prefixes:
 
 ## Releasing
 
-A release publishes `mirage-rs` and `mirage-ai` to PyPI and the
-`@struktoai/mirage-*` packages to npm, all at one version, from
-`.github/workflows/release.yml`.
+A release publishes `mirage-ai` to PyPI and the `@struktoai/mirage-*`
+packages to npm, all at one version, from `.github/workflows/release.yml`.
+Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
+(`mirage._rs`), `@struktoai/mirage-core` its WebAssembly build.
 
-1. Set the new version in `python/pyproject.toml` (and its `mirage-rs==` pin),
-   `rust/Cargo.toml` and each published `typescript/packages/*/package.json`,
-   then refresh the locks (`uv lock` in `python/`, `cargo update --workspace`
-   in `rust/`).
+1. Set the new version in `python/pyproject.toml`, `rust/Cargo.toml` and
+   each published `typescript/packages/*/package.json`, then refresh the
+   locks (`uv lock` in `python/`, `cargo update --workspace` in `rust/`).
    `python3 scripts/check_release_versions.py` says whether they agree.
 1. Run the Release workflow by hand to build and check everything without
-   publishing: the `mirage-rs` wheels for Linux (glibc and musl), macOS and
-   Windows on x86_64 and arm64, each installed and run on its own platform,
-   the sdist, built and run the same way, `mirage-ai` installed beside its
-   wheel, and the npm tarballs.
+   publishing: the `mirage-ai` wheels for Linux (glibc and musl), macOS and
+   Windows on x86_64 and arm64, each installed with its dependencies and
+   run on its own platform, the sdist, built and run the same way, and the
+   npm tarballs.
 1. Push a tag named for the npm spelling of the version (`v0.0.7`,
    `v0.0.7-alpha.3`) on that commit. The workflow checks the tag against
-   the versions, builds again, then publishes `mirage-rs`, `mirage-ai` and the
-   npm packages in that order. A pre-release goes out under npm's `alpha`,
+   the versions, builds again, then publishes `mirage-ai` and the npm
+   packages in that order. A pre-release goes out under npm's `alpha`,
    `beta` or `rc` dist-tag, a release under `latest`.
 
 Publishing uses trusted publishing, so no token is stored: PyPI needs a
-trusted publisher for `mirage-rs` and `mirage-ai` naming this repository,
+trusted publisher for `mirage-ai` naming this repository,
 `release.yml` and the `pypi` environment, and npm one per package naming
 `release.yml` and the `npm` environment. To make a publish wait for
 approval, add required reviewers to those two environments and limit them to

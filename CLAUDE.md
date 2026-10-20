@@ -21,8 +21,9 @@ semantics.
   `pnpm build`, `pnpm typecheck`, `pnpm test`. Rebuild the dists after a
   merge; integ and the examples import them.
 - Rust lives in `rust/`, one Cargo workspace: `mirage-rs` holds the command
-  streams both hosts run, `rust/python` is its PyO3 module (`mirage_rs`,
-  built by `uv sync`, which rebuilds it after a Rust change) and `rust/wasm`
+  streams both hosts run, `rust/python` is its PyO3 module (`mirage._rs`,
+  which maturin builds into mirage-ai: `uv sync` builds it and rebuilds it
+  after a Rust change) and `rust/wasm`
   the module the TypeScript core embeds
   (`typescript/packages/core/scripts/embed-rs.mjs`, run by `prepare`,
   `build`, `test` and `typecheck`). Both need cargo on `PATH`;
