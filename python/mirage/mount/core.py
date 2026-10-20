@@ -1184,9 +1184,21 @@ class MountCore:
         """
         virtual = self.resolve(path)
         reader = reader_of(self._files)
-        if follow:
-            return reader.resolve(virtual)
-        return reader.resolve_parent(virtual)
+        # Judged as the bound session judges every op (``_op``): outside
+        # it the facade's session is the default one, whose profile may
+        # hide a link this session's handles were opened through.
+        token = (
+            None
+            if self._session is None
+            else set_current_session(self._session)
+        )
+        try:
+            if follow:
+                return reader.resolve(virtual)
+            return reader.resolve_parent(virtual)
+        finally:
+            if token is not None:
+                reset_current_session(token)
 
     async def truncate(self, path: str, length: int) -> None:
         """Resize a file, settling every open handle on the same file.

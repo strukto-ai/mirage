@@ -395,6 +395,29 @@ describe('MountCore', () => {
     expect(new TextDecoder().decode(body)).toBe('BB\n')
   })
 
+  it('meets a session handle through a link the default profile hides', async () => {
+    // Handle keys are resolved outside the op, where the facade would judge
+    // links by the default profile: one hiding the link must not split a
+    // handle opened through it from one on its target, under a session
+    // that sees both.
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("echo 'hello world' | tee /data/greeting.txt")
+    await ws.shell('ln -s greeting.txt /data/lk')
+    await ws.setSessionProfile(ws.defaultSessionId, { paths: { hide: ['/data/lk'] } })
+    const core = new MountCore(ws.vfs, { session: ws.createSession('agent', { profile: {} }) })
+    expect(core.identity('/data/lk')).toBe(core.identity('/data/greeting.txt'))
+    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
+    const second = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    await core.write('/data/lk', second, new TextEncoder().encode('BB\n'), 0)
+    await core.release(second)
+    await core.release(first)
+    const after = await core.open('/data/greeting.txt')
+    const body = await core.read('/data/greeting.txt', after, 0, 100)
+    await core.release(after)
+    expect(new TextDecoder().decode(body)).toBe('BB\n')
+  })
+
   it('a prefetch in flight across a truncate re-reads rather than installing stale bytes', async () => {
     // The first open's read was out when the O_TRUNC open landed; what it
     // fetched is the old body, and installing it would let that handle
