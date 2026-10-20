@@ -145,6 +145,10 @@ def test_register_commands_multi_vfs_filters_to_matching(ws):
     assert "multi" in m.commands()
 
 
+async def custom_command(accessor, paths, *texts, **kw):
+    return b"custom\n", IOResult()
+
+
 # The per-program refusal voices and codes (grep's 2, diff's prefixed
 # hint, CPython's and curl's wording, tar's old-option 2) describe the
 # real program, so a command a mount registers under its name is refused
@@ -156,26 +160,29 @@ def test_register_commands_multi_vfs_filters_to_matching(ws):
 async def test_a_borrowed_builtin_name_is_refused_like_a_custom_command(
     ws, name
 ):
-    async def custom(accessor, paths, *texts, **kw):
-        return b"custom\n", IOResult()
-
     spec = CommandSpec(
-        arguments=(Argument("-k"), Argument("rest", nargs="*")),
+        arguments=(
+            Argument("-k"),
+            Argument("--quiet", action="store_true"),
+            Argument("--max", type="float"),
+            Argument("rest", nargs="*"),
+        ),
         old_option_style=True,
     )
     ws.mount("/data/").register(
-        Command(name, spec=spec, vfs=None, filetype=None, fn=custom)
+        Command(name, spec=spec, vfs=None, filetype=None, fn=custom_command)
     )
-    hint = f"Try '{name} --help' for more information.\n"
     ok = await ws.shell(f"cd /data && {name} -k a x")
-    bad = await ws.shell(f"cd /data && {name} --bogus x")
-    old = await ws.shell(f"cd /data && {name} k")
     assert (ok.exit_code, ok.stdout) == (0, b"custom\n")
-    assert (bad.exit_code, bad.stderr) == (
-        1,
-        f"{name}: unrecognized option '--bogus'\n{hint}".encode(),
-    )
-    assert (old.exit_code, old.stderr) == (
-        1,
-        f"{name}: Old option 'k' requires an argument.\n{hint}".encode(),
-    )
+    for words, line in (
+        ("--bogus x", "unrecognized option '--bogus'"),
+        ("-k", "option requires an argument -- 'k'"),
+        ("--quiet=x", "option '--quiet' doesn't allow an argument"),
+        ("--max=z", "invalid float value: 'z' for '--max'"),
+        ("k", "Old option 'k' requires an argument."),
+    ):
+        refused = await ws.shell(f"cd /data && {name} {words}")
+        assert (refused.exit_code, refused.stderr) == (
+            1,
+            f"{name}: {line}\nTry '{name} --help' for more information.\n".encode(),
+        ), words

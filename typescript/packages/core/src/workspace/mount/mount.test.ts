@@ -539,23 +539,31 @@ it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
     )
     try {
       const spec = new CommandSpec({
-        arguments: [new Argument('-k'), new Argument('rest', { nargs: '*' })],
+        arguments: [
+          new Argument('-k'),
+          new Argument('--quiet', { action: 'store_true' }),
+          new Argument('--max', { type: 'float' }),
+          new Argument('rest', { nargs: '*' }),
+        ],
         oldOptionStyle: true,
       })
       ws.mount('/data/').register(new Command({ name, spec, vfs: null, fn: OK_CMD_STDOUT }))
-      const hint = `Try '${name} --help' for more information.\n`
       const ok = await ws.shell(`cd /data && ${name} -k a x`)
-      const bad = await ws.shell(`cd /data && ${name} --bogus x`)
-      const old = await ws.shell(`cd /data && ${name} k`)
       expect([ok.exitCode, ok.stdoutText]).toEqual([0, 'ok'])
-      expect([bad.exitCode, bad.stderrText]).toEqual([
-        1,
-        `${name}: unrecognized option '--bogus'\n${hint}`,
-      ])
-      expect([old.exitCode, old.stderrText]).toEqual([
-        1,
-        `${name}: Old option 'k' requires an argument.\n${hint}`,
-      ])
+      for (const [words, line] of [
+        ['--bogus x', "unrecognized option '--bogus'"],
+        ['-k', "option requires an argument -- 'k'"],
+        ['--quiet=x', "option '--quiet' doesn't allow an argument"],
+        ['--max=z', "invalid float value: 'z' for '--max'"],
+        ['k', "Old option 'k' requires an argument."],
+      ] as const) {
+        const refused = await ws.shell(`cd /data && ${name} ${words}`)
+        expect([words, refused.exitCode, refused.stderrText]).toEqual([
+          words,
+          1,
+          `${name}: ${line}\nTry '${name} --help' for more information.\n`,
+        ])
+      }
     } finally {
       await ws.close()
     }
