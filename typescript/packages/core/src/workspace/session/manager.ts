@@ -422,6 +422,10 @@ export class SessionManager extends SessionOwner {
     return s
   }
 
+  has(sessionId: string): boolean {
+    return this.sessions.has(sessionId)
+  }
+
   list(): SessionState[] {
     return [...this.sessions.values()]
   }

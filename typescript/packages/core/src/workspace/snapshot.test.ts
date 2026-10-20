@@ -200,6 +200,32 @@ describe('toStateDict / applyStateDict', () => {
     await restored.close()
   })
 
+  // A mount saved with a redacted config comes back through an override,
+  // and its content still loads into it, as Python's loop always has: a
+  // redis mount's bytes were dropped here and kept there.
+  it('loads the content of a mount handed back for a redacted config', async () => {
+    const ws = buildWorkspace()
+    await ws.shell('echo "kept" | tee /data/x.txt > /dev/null')
+    const state = await toStateDict(ws)
+    await ws.close()
+    const overrides: Record<string, RAMVFS> = {}
+    for (const m of state.mounts) {
+      Object.assign(m.vfs_state, { config: { url: REDACTED_SECRET } })
+      overrides[m.prefix] = new RAMVFS()
+    }
+    const restored = await Workspace.fromState(
+      state,
+      { mode: MountMode.WRITE, shellParser: parser },
+      overrides,
+    )
+    try {
+      const r = await restored.shell('cat /data/x.txt')
+      expect(new TextDecoder().decode(r.stdout)).toBe('kept\n')
+    } finally {
+      await restored.close()
+    }
+  })
+
   it('loads a disk state into RAM without following a link', async () => {
     // A disk state names each file by host path and the load reads it
     // later: a link put in its place since must not carry a host file in,
@@ -981,6 +1007,64 @@ describe('applyStateDict and the deployment', () => {
     await target.close()
   })
 
+  // A checkout landed each table's mount caps over the live session's, so
+  // a snapshot taken under no profile lifted the target's read-only mount.
+  // The caps are narrowing: the live ones stay and the table's add to
+  // them. Mirrors the Python test of the same name.
+  it('a checkout keeps the live mount caps and adds the tables', async () => {
+    const capped = (prefix: string): Workspace =>
+      new Workspace(
+        { '/a': new RAMVFS(), '/b': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          shellParser: parser,
+          sessionId: 's',
+          profiles: { default: { mounts: new Map([[prefix, { mode: MountMode.READ }]]) } },
+        },
+      )
+    const source = capped('/b')
+    const state = await toStateDict(source)
+    await source.close()
+    const target = capped('/a')
+    try {
+      await applyStateDict(target, state)
+      expect(target.getSession('s').mountModes).toEqual(
+        new Map([
+          ['/a', MountMode.READ],
+          ['/b', MountMode.READ],
+        ]),
+      )
+      expect((await target.shell('echo x > /a/f')).exitCode).toBe(1)
+      expect((await target.shell('echo x > /b/f')).exitCode).toBe(1)
+    } finally {
+      await target.close()
+    }
+  })
+
+  // The ask ledger was written into the snapshot and dropped by the load,
+  // so a host answering a pending ask by id after a reload found nothing.
+  it('a load keeps the ask decisions its tables recorded', async () => {
+    const source = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: { default: { commands: { ask: [{ reason: 'ask', commands: ['rm'] }] } } },
+      },
+    )
+    expect((await source.shell('rm /data/f.txt')).exitCode).toBe(126)
+    const recorded = source.decisions.list()
+    const state = await toStateDict(source)
+    await source.close()
+    const loaded = await Workspace.fromState(state, { shellParser: parser })
+    try {
+      expect(recorded).toHaveLength(1)
+      expect(loaded.decisions.list().map((d) => d.id)).toEqual(recorded.map((d) => d.id))
+    } finally {
+      await loaded.close()
+    }
+  })
+
   // A snapshot prefix the workspace does not mount was skipped in silence
   // (#1019); the state is still not restored (never into an ancestor
   // mount), but the load now says so.
@@ -1008,8 +1092,8 @@ describe('applyStateDict and the deployment', () => {
   // A mount that asks to be handed back live (`needs_override`, a
   // redacted credential) skipped the prefix check along with its
   // loadState, so a renamed remote mount, the case the report exists
-  // for, stayed silent while Python reported it. The skip itself stays:
-  // a live mount at the prefix is not loaded from the saved state.
+  // for, stayed silent while Python reported it. The mount at the prefix
+  // takes the saved state, as Python's loop has always given it.
   it('a live-only snapshot mount with no matching prefix is reported too', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
@@ -1033,7 +1117,7 @@ describe('applyStateDict and the deployment', () => {
       const messages = warn.mock.calls.map((c) => String(c[0]))
       expect(messages.some((m) => m.includes('/data') && m.includes('not restored'))).toBe(true)
       expect(messages.some((m) => m.includes('/keep'))).toBe(false)
-      expect(loadState).not.toHaveBeenCalled()
+      expect(loadState).toHaveBeenCalledOnce()
     } finally {
       warn.mockRestore()
     }

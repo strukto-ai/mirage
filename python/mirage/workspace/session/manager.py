@@ -486,6 +486,9 @@ class SessionManager(SessionOwner):
     def get(self, session_id: str) -> SessionState:
         return self._sessions[session_id]
 
+    def has(self, session_id: str) -> bool:
+        return session_id in self._sessions
+
     async def set_profile(
         self, session_id: str, compiled: CompiledProfile
     ) -> SessionState:

@@ -680,6 +680,104 @@ async def test_a_session_the_restore_creates_runs_under_the_default_profile():
         await target.close()
 
 
+# A checkout landed each table's mount caps over the live session's, so a
+# snapshot taken under no profile lifted the target's read-only mount.
+# The caps are narrowing: the live ones stay and the table's add to them.
+@pytest.mark.asyncio
+async def test_a_checkout_keeps_the_live_mount_caps_and_adds_the_tables():
+    mounts = {"/a": RAMVFS(), "/b": RAMVFS()}
+    source = Workspace(
+        mounts,
+        mode=MountMode.WRITE,
+        session_id="s",
+        profiles={"default": {"mounts": {"/b": "read"}}},
+    )
+    try:
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace(
+        {"/a": RAMVFS(), "/b": RAMVFS()},
+        mode=MountMode.WRITE,
+        session_id="s",
+        profiles={"default": {"mounts": {"/a": "read"}}},
+    )
+    try:
+        await apply_state_dict(target, state)
+        assert target.get_session("s").mount_modes == {
+            "/a": MountMode.READ,
+            "/b": MountMode.READ,
+        }
+        assert (await target.shell("echo x > /a/f")).exit_code == 1
+        assert (await target.shell("echo x > /b/f")).exit_code == 1
+    finally:
+        await target.close()
+
+
+# The ask ledger was written into the snapshot and dropped by the load, so
+# a host answering a pending ask by id after a reload found nothing.
+@pytest.mark.asyncio
+async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():
+    source = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"ask": ["rm"]}}},
+    )
+    try:
+        assert (await source.shell("rm /f.txt")).exit_code == 126
+        recorded = source.decisions.list()
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    loaded = await Workspace.from_state(state)
+    try:
+        assert len(recorded) == 1
+        assert loaded.decisions.list() == recorded
+    finally:
+        await loaded.close()
+
+
+# The loader took no policies, so a host's coded `pre_session` rule was
+# registered only after the gate had vetted every restored table.
+@pytest.mark.asyncio
+async def test_a_load_vets_the_tables_under_the_callers_policies():
+    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (await source.shell("export GATE_X=1")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    with pytest.raises(PolicyDenied):
+        await Workspace.from_state(state, policies=[DenyGate()])
+
+
+# A caller's own profile table governs a load as it does a constructor,
+# and the restored sessions keep the narrowing it gives them.
+@pytest.mark.asyncio
+async def test_a_load_takes_the_callers_profiles_and_runtimes():
+    source = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"deny": ["rm"]}}},
+    )
+    try:
+        assert (await source.shell("echo kept > /f.txt")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    loaded = await Workspace.from_state(
+        state,
+        profiles={"default": {"commands": {"deny": ["cat"]}}},
+        runtimes=[],
+    )
+    try:
+        assert [r.name for r in loaded.runtimes()] == ["workspace"]
+        assert (await loaded.shell("cat /f.txt")).exit_code == 126
+        assert (await loaded.shell("rm /f.txt")).exit_code == 0
+    finally:
+        await loaded.close()
+
+
 # A snapshot prefix the workspace does not mount was skipped in silence
 # (#1019); the state is still not restored (never into an ancestor
 # mount), but the load now says so.

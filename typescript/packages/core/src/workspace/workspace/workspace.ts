@@ -45,7 +45,6 @@ import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
-import { parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
@@ -137,7 +136,6 @@ import { varsFromEnv, varsFromEntries, type SessionState } from '../session/sess
 import {
   parseProfileMounts,
   parseProfilePolicy,
-  profileFromDict,
   type SessionProfile,
 } from '../../policy/profile.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
@@ -437,7 +435,7 @@ export class Workspace {
         (asyncContextIsolatesTasks ? getCurrentSessionUnlessForeign(this.sessionManager) : null)
       if (session === null || (sessionId !== '' && session.sessionId !== sessionId)) {
         const wanted = sessionId === '' ? this.sessionManager.defaultId : sessionId
-        session = this.sessionManager.list().find((s) => s.sessionId === wanted) ?? null
+        session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
       }
       if (session === null) return null
       const view = sessionView(session, this.policies)
@@ -1045,7 +1043,7 @@ export class Workspace {
     options: Parameters<Workspace['createSession']>[1] = {},
   ): Promise<Session> {
     await this.ensureSessionsLoaded()
-    if (this.sessionManager.list().some((s) => s.sessionId === sessionId)) {
+    if (this.sessionManager.has(sessionId)) {
       if (options.mounts != null || options.profile != null || options.permissions != null) {
         throw new Error(`session '${sessionId}' exists; its profile was set when it was created`)
       }
@@ -1514,8 +1512,7 @@ export class Workspace {
     const wanted = sessionId ?? this.sessionManager.defaultId
     return (
       this.ambientFor(sessionId) ??
-      this.sessionManager.list().find((s) => s.sessionId === wanted) ??
-      null
+      (this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null)
     )
   }
 
@@ -2022,29 +2019,16 @@ export class Workspace {
       )
     }
     const mergedOptions: WorkspaceOptions = {
-      io:
-        state.io === undefined
-          ? new IOConfig()
-          : new IOConfig({ bufferBytes: state.io.buffer_bytes }),
+      io: args.io,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       // Each restored Mount carries its own mode, so this reaches only the
       // scratch root the workspace adds again.
       ...(args.anchorMode !== undefined ? { mode: args.anchorMode } : {}),
-      commandLimits: parseCommandLimits(state.command_limits),
+      commandLimits: args.commandLimits,
       // The state's profile table and its default; a caller's own table
       // brings its own default.
-      ...(options.profiles === undefined
-        ? {
-            profiles: Object.fromEntries(
-              Object.entries(state.profiles ?? {}).map(([name, doc]) => [
-                name,
-                profileFromDict(doc),
-              ]),
-            ),
-            profile: state.profile ?? null,
-          }
-        : {}),
+      ...(options.profiles === undefined ? { profiles: args.profiles, profile: args.profile } : {}),
       ...options,
       write: args.writeDefault,
     }

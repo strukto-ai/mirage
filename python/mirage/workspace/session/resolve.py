@@ -607,6 +607,27 @@ def narrowing_of(session: SessionState) -> CompiledProfile:
     )
 
 
+def stricter_modes(
+    a: Mapping[str, MountMode] | None, b: Mapping[str, MountMode] | None
+) -> dict[str, MountMode] | None:
+    """Two sets of per-mount caps held at once: every prefix either one
+    caps, at the weaker mode, so the result is never wider than either.
+
+    Args:
+        a (Mapping[str, MountMode] | None): one session's caps, None
+            for none.
+        b (Mapping[str, MountMode] | None): the other session's caps.
+    """
+    if a is None or b is None:
+        caps = a if b is None else b
+        return None if caps is None else dict(caps)
+    out = dict(a)
+    for prefix, mode in b.items():
+        held = out.get(prefix)
+        out[prefix] = mode if held is None else weaker_mode(held, mode)
+    return out
+
+
 def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
     """Narrow a fresh session and seed its scratch state from the profile.
 

@@ -101,7 +101,11 @@ run_direction() {
   freeport
 
   $reader_cli workspace delete cross_r >/dev/null 2>&1 || true
-  $reader_cli workspace load "$tar" "$YAML" --id cross_r >/dev/null
+  # The reader's redis mount is a fresh key prefix, so its bytes can only
+  # come from the snapshot: sharing the writer's prefix read what the
+  # writer left there, and passed with nothing restored.
+  CROSS_REDIS_PREFIX="${CROSS_REDIS_PREFIX}load-${reader_name}-$$/" \
+    $reader_cli workspace load "$tar" "$YAML" --id cross_r >/dev/null
   for i in "${!FINGERPRINTS[@]}"; do
     local got
     got="$($reader_cli shell --json -w cross_r -c "${FINGERPRINTS[$i]}" | stdout_of)"

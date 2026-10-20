@@ -28,10 +28,15 @@ from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
+from mirage.io.config import IOConfig
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
 from mirage.policy.policies import Policies
-from mirage.policy.profile import SessionProfile, profile_to_dict
+from mirage.policy.profile import (
+    SessionProfile,
+    profile_from_dict,
+    profile_to_dict,
+)
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     KILLED_OUTCOME,
@@ -44,7 +49,14 @@ from mirage.shell.console import (
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
-from mirage.types import JsonValue, MountMode, ReadSpec, VFSName, WritePolicy
+from mirage.types import (
+    JsonValue,
+    Limit,
+    MountMode,
+    ReadSpec,
+    VFSName,
+    WritePolicy,
+)
 from mirage.utils.loader import SCRIPT_MODULE_NAME
 from mirage.utils.path import norm_dir
 from mirage.version import __version__
@@ -71,7 +83,11 @@ from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.resolve import narrow, narrowing_of
+from mirage.workspace.session.resolve import (
+    narrow,
+    narrowing_of,
+    stricter_modes,
+)
 from mirage.workspace.session.session import (
     SessionState,
     vars_from_fields,
@@ -559,6 +575,16 @@ def build_mount_args(
         clis=cli_args or None,
         write_default=coerce_write_policy(str(saved_default)),
         anchor_mode=anchor_mode,
+        io=IOConfig.model_validate(state.get(StateKey.IO, {})),
+        command_limits={
+            name: Limit.model_validate(limit)
+            for name, limit in state.get(StateKey.COMMAND_LIMITS, {}).items()
+        },
+        profiles={
+            name: profile_from_dict(doc)
+            for name, doc in state.get(StateKey.PROFILES, {}).items()
+        },
+        profile=state.get(StateKey.PROFILE),
     )
 
 
@@ -597,9 +623,10 @@ async def apply_state_dict(
             origin that may have moved.
         built_for_state (bool): the workspace was just built from this
             state, under its profile table, and has run nothing: each
-            session then lands the narrowing its table recorded, as a
-            stored record hydrates. A checkout onto a running workspace
-            keeps its own sessions' narrowing.
+            session then lands the narrowing and ask decisions its table
+            recorded, as a stored record hydrates. A checkout onto a
+            running workspace keeps its own sessions' narrowing and
+            decisions, and a table's mount caps only narrow them.
     """
     check_format_version(state)
     sessions, seed_vars = await _gate_restored_state(
@@ -718,8 +745,8 @@ async def _gate_restored_state(
     ``script_of`` answers for an id the manager does not know and the
     profile ``_restore_sessions`` then puts the created session under.
     A workspace built for the state seats every table first, its
-    narrowing, cwd and variables, so each is judged as the session it
-    records, under the policy it then runs under.
+    narrowing, ask decisions, cwd and variables, so each is judged as
+    the session it records, under the policy it then runs under.
 
     Args:
         ws (WorkspaceLike): the target workspace.
@@ -735,12 +762,12 @@ async def _gate_restored_state(
         for s_data in state.get(StateKey.SESSIONS, [])
     ]
     if built_for_state:
+        mgr = ws._session_mgr
         for fields in sessions:
-            try:
-                session = ws._session_mgr.create(fields.session_id)
-            except ValueError:
-                session = ws._session_mgr.get(fields.session_id)
+            sid = fields.session_id
+            session = mgr.get(sid) if mgr.has(sid) else mgr.create(sid)
             narrow(session, narrowing_of(fields))
+            session.decisions = fields.decisions
             set_cwd(session, fields.cwd)
             session.vars = fields.vars
     for fields in sessions:
@@ -772,27 +799,21 @@ async def _restore_sessions(
     restored: list[Any] = []
     for fields in tables:
         sid = fields.session_id
-        if sid == default_sid:
+        if ws._session_mgr.has(sid):
+            # The session already exists, live on a running workspace,
+            # seated by the gate on one built for the state, or the
+            # default adopted above: the restored state wins, matching
+            # the replace_from_snapshot contract below.
             session = ws._session_mgr.get(sid)
         else:
-            try:
-                session = ws._session_mgr.create(sid)
-            except ValueError:
-                # The session already exists, live on a running
-                # workspace or seated by the gate on one built for the
-                # state: the restored state wins, matching the
-                # replace_from_snapshot contract below.
-                session = ws._session_mgr.get(sid)
-            else:
-                # A session the restore creates is one created without
-                # a profile name, so it runs under the document's
-                # default: the policy `_gate_restored_state` judged its
-                # table under, where a bare session ran under none.
-                # Stamped ahead of the table so the grants below stay
-                # the snapshot's, as they do for a session that exists.
-                compiled = ws._session_mgr.default_profile
-                if compiled is not None:
-                    narrow(session, compiled)
+            session = ws._session_mgr.create(sid)
+            # A session the restore creates is one created without a
+            # profile name, so it runs under the document's default:
+            # the policy `_gate_restored_state` judged its table under,
+            # where a bare session ran under none.
+            compiled = ws._session_mgr.default_profile
+            if compiled is not None:
+                narrow(session, compiled)
         set_cwd(session, fields.cwd)
         session.vars = fields.vars
         session.functions = fields.functions
@@ -801,7 +822,11 @@ async def _restore_sessions(
         session._function_sites.clear()
         session.readonly_functions = fields.readonly_functions
         session.exported_functions = fields.exported_functions
-        session.mount_modes = fields.mount_modes
+        # The caps are narrowing, which a checkout keeps: the table's
+        # narrow the session's further and never lift one it holds.
+        session.mount_modes = stricter_modes(
+            session.mount_modes, fields.mount_modes
+        )
         restored.append(session)
     # The snapshot's session table wins over prior store contents,
     # mirroring Namespace.replace_nodes.

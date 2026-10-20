@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
 from mirage.cache.index.config import IndexConfig, IndexType, RedisIndexConfig
 from mirage.commands.cli.types import CLI
-from mirage.types import MountMode, WritePolicy
+from mirage.io.config import IOConfig
+from mirage.policy.profile import SessionProfile
+from mirage.types import Limit, MountMode, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 
 
@@ -36,6 +38,11 @@ class MountArgs:
     write_default: WritePolicy = WritePolicy.UNCONDITIONAL
     # The saved scratch root's mode, for the one the new workspace adds.
     anchor_mode: MountMode | None = None
+    io: IOConfig = field(default_factory=IOConfig)
+    command_limits: dict[str, Limit] = field(default_factory=dict)
+    # The profile table every session ran under, and its default.
+    profiles: dict[str, SessionProfile] = field(default_factory=dict)
+    profile: str | None = None
 
 
 def index_config_dump(

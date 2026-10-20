@@ -16,7 +16,9 @@ import { IndexType, type IndexConfig, type RedisIndexConfig } from '../../cache/
 import { REDACTED_SECRET, hasRedactedSecret } from '../../vfs/secrets.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { Mount } from '../mount/spec.ts'
-import type { MountMode, WritePolicy } from '../../types.ts'
+import type { IOConfig } from '../../io/config.ts'
+import type { SessionProfile } from '../../policy/profile.ts'
+import type { Limit, MountMode, WritePolicy } from '../../types.ts'
 
 export interface MountArgs {
   clis?: Record<string, [string | CLI, Record<string, unknown> | null]>
@@ -25,6 +27,11 @@ export interface MountArgs {
   writeDefault: WritePolicy
   // The saved scratch root's mode, for the one the new workspace adds.
   anchorMode?: MountMode
+  io: IOConfig
+  commandLimits: Record<string, Limit>
+  // The profile table every session ran under, and its default.
+  profiles: Record<string, SessionProfile>
+  profile: string | null
 }
 
 export interface IndexConfigSnapshot {
