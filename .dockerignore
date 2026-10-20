@@ -2,5 +2,8 @@
 !python
 python/.venv
 python/**/__pycache__
+python/**/*.so
 python/.mypy_cache
 python/.pytest_cache
+!rust
+rust/target

@@ -44,6 +44,11 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    # Each check runs from python/, whose mirage/ would shadow the installed
+    # package, native module and all, were the current directory on
+    # sys.path; PYTHONSAFEPATH (3.11 and later) keeps it off.
+    env:
+      PYTHONSAFEPATH: "1"
     steps:
       - uses: actions/checkout@v7
 

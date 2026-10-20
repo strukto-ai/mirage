@@ -2,19 +2,11 @@
 set -euo pipefail
 
 # Provision only a dedicated, running test guest; this does not create or remove it.
-sandbox="${1:?usage: setup-test-guest.sh SANDBOX MIRAGE_WHEEL [NATIVE_WHEEL]}"
-wheel="${2:?usage: setup-test-guest.sh SANDBOX MIRAGE_WHEEL [NATIVE_WHEEL]}"
-native_wheel="${3:-}"
+sandbox="${1:?usage: setup-test-guest.sh SANDBOX MIRAGE_WHEEL}"
+wheel="${2:?usage: setup-test-guest.sh SANDBOX MIRAGE_WHEEL}"
 test -f "$wheel"
 test_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 wheel_name="$(basename "$wheel")"
-
-if [[ -n "$native_wheel" ]]; then
-  test -f "$native_wheel"
-  native_name="$(basename "$native_wheel")"
-  msb copy --quiet "$native_wheel" "$sandbox:/tmp/$native_name"
-  msb exec "$sandbox" --quiet --no-tty -w / -- python3 -m pip install -q "/tmp/$native_name"
-fi
 
 msb copy --quiet "$wheel" "$sandbox:/tmp/$wheel_name"
 msb copy --quiet "$test_dir/guest_ops.py" "$sandbox:/tmp/mirage_e2e_ops.py"

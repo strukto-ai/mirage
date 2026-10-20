@@ -15,8 +15,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # The tag, mirage-ai, its mirage-rs pin, the crate and every published npm
-  # package carry one version, bumped by hand, so a drift stops here.
+  # The tag, mirage-ai, the crate and every published npm package carry one
+  # version, bumped by hand, so a drift stops here.
   versions:
     runs-on: ubuntu-latest
     outputs:
@@ -32,53 +32,6 @@ jobs:
   wheels:
     needs: versions
     uses: ./.github/workflows/build_wheels.yml
-
-  # mirage-ai is pure Python. It is built without uv's path source, as PyPI
-  # will resolve it, and installed beside the mirage-rs wheel built above.
-  python:
-    needs: wheels
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      # Pinned by commit, as this job builds what publish-pypi uploads; the
-      # uv version is setup-uv's.
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: "0.12.9"
-      - name: Build mirage-ai
-        working-directory: python
-        run: uv build --no-sources --out-dir dist
-      - name: Each distribution carries the license
-        run: python3 scripts/check_release_artifacts.py python/dist/*
-      - uses: actions/download-artifact@v8
-        with:
-          name: mirage-rs-wheel-x86_64-unknown-linux-gnu
-          path: wheels
-      - name: Install mirage-ai and its pinned mirage-rs, and run a pipeline
-        run: |
-          uv venv --python 3.11 .venv-release
-          uv pip install --python .venv-release --find-links wheels python/dist/*.whl
-          .venv-release/bin/python scripts/check_mirage_rs_wheel.py
-          .venv-release/bin/python - <<'EOF'
-          import asyncio
-
-          from mirage import MountMode, Workspace
-          from mirage.vfs.ram import RAMVFS
-
-
-          async def main() -> None:
-              ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-              run = await ws.shell("printf 'b\\na\\n' | sort | base64 | base64 -d | wc -l")
-              out = await run.materialize_stdout()
-              assert (run.exit_code, out) == (0, b"2\n"), (run.exit_code, out)
-
-
-          asyncio.run(main())
-          EOF
-      - uses: actions/upload-artifact@v7
-        with:
-          name: mirage-ai-dist
-          path: python/dist/*
 
   # The core build embeds the mirage-rs wasm, so it needs cargo; the tarballs
   # it packs need nothing but Node.
@@ -114,11 +67,10 @@ jobs:
           path: ${{ runner.temp }}/npm/*.tgz
 
   # PyPI trusted publishing: no token, the pypi environment's OIDC identity.
-  # mirage-ai pins mirage-rs at its own version, so mirage-rs goes first, and
-  # a rerun skips what an earlier attempt already uploaded.
+  # A rerun skips what an earlier attempt already uploaded.
   publish-pypi:
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [python, npm]
+    needs: [wheels, npm]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -126,20 +78,12 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: mirage-rs-*
-          path: dist/mirage-rs
+          pattern: mirage-ai-*
+          path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: mirage-ai-dist
-          path: dist/mirage-ai
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/mirage-rs/
-          skip-existing: true
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          packages-dir: dist/mirage-ai/
+          packages-dir: dist/
           skip-existing: true
 
   # npm trusted publishing (npm 11.5.1 or later), with provenance, under the

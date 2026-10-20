@@ -4,7 +4,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RUST = ROOT / "rust"
-WHEEL = RUST / "python/THIRD_PARTY_NOTICES"
+WHEEL = ROOT / "python/THIRD_PARTY_NOTICES"
 CORE = ROOT / "typescript/packages/core/THIRD_PARTY_NOTICES"
 RULE = "-" * 72
 # Source adapted into rust/ from permissively licensed projects, which
@@ -23,10 +23,10 @@ CORE_LEAD = (
     "is compiled from the\nRust crates below, each listed under the license "
     "it came with:"
 )
-WHEEL_HEAD = (
-    "Third-party notices for mirage-rs, the Python package.\n\n"
-    "The package's native module is compiled from the Rust crates below, "
-    "PyO3\nincluded, each listed under the license it came with."
+WHEEL_LEAD = (
+    "The native module in this package (mirage._rs, built from rust/ in\n"
+    "https://github.com/strukto-ai/mirage) is compiled from the Rust crates "
+    "below,\nPyO3 included, each listed under the license it came with:"
 )
 
 
@@ -62,15 +62,25 @@ def notices(manifest: str) -> str:
     return "\n".join(line.rstrip() for line in joined.splitlines()) + "\n"
 
 
-def main() -> int:
-    wheel = notices("python/Cargo.toml")
-    WHEEL.write_text(f"{WHEEL_HEAD}\n\n{RULE}\n\n{wheel}")
-    core = CORE.read_text()
-    at = core.find(CORE_LEAD)
+def append(path: pathlib.Path, lead: str, manifest: str) -> None:
+    """Rewrite a package's notices after its hand-kept sections: `lead`,
+    then the crates its binding compiles in.
+
+    Args:
+        path (pathlib.Path): the package's THIRD_PARTY_NOTICES.
+        lead (str): the paragraph the generated sections follow.
+        manifest (str): the binding's Cargo.toml, relative to rust/.
+    """
+    text = path.read_text()
+    at = text.find(lead)
     if at >= 0:
-        core = core[: core.rfind(RULE, 0, at)].rstrip("\n") + "\n"
-    wasm = notices("wasm/Cargo.toml")
-    CORE.write_text(f"{core}\n{RULE}\n\n{CORE_LEAD}\n\n{wasm}")
+        text = text[: text.rfind(RULE, 0, at)].rstrip("\n") + "\n"
+    path.write_text(f"{text}\n{RULE}\n\n{lead}\n\n{notices(manifest)}")
+
+
+def main() -> int:
+    append(WHEEL, WHEEL_LEAD, "python/Cargo.toml")
+    append(CORE, CORE_LEAD, "wasm/Cargo.toml")
     print(f"wrote {WHEEL.relative_to(ROOT)}, {CORE.relative_to(ROOT)}")
     return 0
 

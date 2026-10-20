@@ -3,12 +3,12 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
-create_exception!(mirage_rs, StreamError, PyException);
+create_exception!(mirage._rs, StreamError, PyException);
 
 /// One open stream: `feed` takes a chunk and returns the bytes it produced;
 /// a refusal raises `StreamError(message, output)` with the output written
 /// before it.
-#[pyclass(module = "mirage_rs")]
+#[pyclass(module = "mirage._rs")]
 struct Stream {
     inner: Box<dyn streams::Stream>,
     out: Vec<u8>,
@@ -122,7 +122,7 @@ impl Stream {
 /// An NFSv3 server with no I/O of its own: the host feeds it each
 /// connection's bytes, runs the file operations `requests` names, and
 /// hands each result back through `complete`.
-#[pyclass(module = "mirage_rs")]
+#[pyclass(module = "mirage._rs")]
 struct NFSServer {
     inner: streams::nfs::Server,
 }
@@ -182,6 +182,7 @@ impl NFSServer {
 }
 
 #[pymodule]
+#[pyo3(name = "_rs")]
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stream>()?;
     m.add_class::<NFSServer>()?;
