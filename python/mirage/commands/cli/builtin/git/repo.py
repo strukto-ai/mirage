@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Iterator
 from io import BytesIO
 
 from dulwich.config import ConfigFile
@@ -46,6 +47,21 @@ class Repo(BaseRepo):
             answer to puts git's ``refname is ambiguous`` warning, for
             the verb to print ahead of its own stderr; None when
             ``core.warnAmbiguousRefs`` is off or nothing collects them.
+
+    Attributes:
+        places (dict[bytes, str]): where this command found each tree
+            and blob it was shown, repository-relative (``seen``).
+        guarded (bool | None): whether a hide or a rule could cover
+            anything in the working tree for the running command, once
+            asked (``seen.guarded``).
+        named (dict[str, str]): the place each operand's own path gave
+            the object it names (``seen.place_named``).
+        sealed (dict[bytes, str]): blobs this command listed only at
+            places a rule keeps from it, each with the first such place.
+        free (set[bytes]): blobs it listed where it may read them.
+        seen (dict[bytes, list[str]]): every place the shared history
+            walk has sighted each object at so far (``seen._find``).
+        sightings (Iterator | None): that walk, resumed by each lookup.
     """
 
     def __init__(
@@ -62,6 +78,13 @@ class Repo(BaseRepo):
         self.location = location
         self.loop = loop
         self.ambiguous = ambiguous
+        self.places: dict[bytes, str] = {}
+        self.guarded: bool | None = None
+        self.named: dict[str, str] = {}
+        self.sealed: dict[bytes, str] = {}
+        self.free: set[bytes] = set()
+        self.seen: dict[bytes, list[str]] = {}
+        self.sightings: Iterator[tuple[bytes, str]] | None = None
 
 
 async def open_repo(

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import posixpath
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -39,6 +40,7 @@ from mirage.commands.cli.builtin.git.io import (
     drop_gitlink,
     is_link,
     keep_gitlink,
+    read_names,
     read_optional,
     refuse_replaced_mounts,
     remove_empty_parents,
@@ -61,6 +63,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_object,
     unwrapped,
 )
+from mirage.commands.cli.builtin.git.seen import check_rules, ruled_under
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
@@ -78,6 +81,8 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.remnants import entry_name
+from mirage.workspace.files import Files
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +235,81 @@ async def restore(
     return None, IOResult(stderr=told) if told else IOResult()
 
 
+async def refuse_ruled(
+    vfs: Files,
+    location: RepoLocation,
+    replacing: Sequence[str],
+    dropped: Sequence[str],
+) -> None:
+    """Ask the running command's rules about everything the working-tree
+    pass writes or removes, before anything is: each entry restored or
+    dropped, a non-directory standing in a restored entry's way, and
+    every name under a directory a restored file replaces.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        replacing (Sequence[str]): the entries written.
+        dropped (Sequence[str]): the entries removed.
+
+    Raises:
+        PolicyDenied: a rule refuses one of them.
+    """
+    if not ruled_under(location):
+        return
+    for name in (*replacing, *dropped):
+        check_rules(location, name)
+    for name in replacing:
+        above = await blocking_ancestor(vfs, location.worktree, name)
+        if above is not None:
+            check_rules(location, _relative(location, above))
+            continue
+        # Only a directory the file replaces is removed whole, and only
+        # one a rule could reach inside is walked.
+        where = location.worktree.join(name)
+        if not ruled_under(location, name) or await is_link(vfs, where):
+            continue
+        info = await stat_of(vfs, where)
+        if info is not None and info.type is FileType.DIRECTORY:
+            await _refuse_ruled_under(vfs, location, where)
+
+
+async def _refuse_ruled_under(
+    vfs: Files, location: RepoLocation, path: PathSpec
+) -> None:
+    """Ask the rules about every name under a directory the restore
+    removes whole, walked as ``remove_tree`` walks it: a link is not
+    descended into, a file lists as nothing below it, and a name no
+    rule could reach at or under is passed over.
+
+    Args:
+        vfs (Files): the session's files.
+        location (RepoLocation): the discovered repository.
+        path (PathSpec): the directory, or whatever stands there.
+    """
+    for entry in await read_names(vfs, path):
+        name = entry_name(entry)
+        if not name:
+            continue
+        child = path.join(name)
+        relative = _relative(location, child)
+        if not ruled_under(location, relative):
+            continue
+        check_rules(location, relative)
+        if not await is_link(vfs, child):
+            await _refuse_ruled_under(vfs, location, child)
+
+
+def _relative(location: RepoLocation, path: PathSpec) -> str:
+    """A working-tree path, repository-relative.
+
+    Args:
+        location (RepoLocation): the discovered repository.
+        path (PathSpec): an absolute virtual path inside the work tree.
+    """
+    return posixpath.relpath(path.virtual, location.worktree.virtual)
+
+
 async def restore_paths(
     ctx: Context,
     repo: BaseRepo,
@@ -329,6 +409,10 @@ async def restore_paths(
     )
     if worktree:
         await refuse_replaced_mounts(vfs, location.worktree, replacing)
+        # A rule refusing anything the working-tree pass writes or
+        # removes is asked here too, so its refusal leaves the index as
+        # it was.
+        await refuse_ruled(vfs, location, replacing, dropped)
     if staged:
         for name in present:
             mode, sha = tree[name.encode()]

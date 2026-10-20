@@ -2985,6 +2985,25 @@
         }
       ],
       "sessions": {
+        "histhide": {
+          "paths": {
+            "hide": [
+              "/scratch/hist/secret.txt"
+            ]
+          }
+        },
+        "histrule": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "history kept",
+                "paths": [
+                  "/scratch/hist/secret.txt"
+                ]
+              }
+            ]
+          }
+        },
         "reviewer": "reviewer",
         "asker": {},
         "asker2": {},

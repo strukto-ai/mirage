@@ -37,6 +37,7 @@ import {
   dropGitlink,
   isLink,
   keepGitlink,
+  readNames,
   readOptional,
   refuseReplacedMounts,
   removeEmptyParents,
@@ -51,10 +52,14 @@ import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
 import { restored } from './reset.ts'
 import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
+import { checkRules, ruledUnder } from './seen.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
-import type { GitObject, IndexEntry } from './types.ts'
+import type { GitObject, IndexEntry, RepoLocation } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
+import { entryName } from '../../../../utils/remnants.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 /** The parsed shape of a `git restore` invocation. */
 interface RestoreFlags {
@@ -191,6 +196,74 @@ export async function restore(
 }
 
 /**
+ * Ask the running command's rules about everything the working-tree pass writes
+ * or removes, before anything is: each entry restored or dropped, a
+ * non-directory standing in a restored entry's way, and every name under a
+ * directory a restored file replaces.
+ *
+ * @param vfs the session's files
+ * @param location the discovered repository
+ * @param replacing the entries written
+ * @param dropped the entries removed
+ * @throws PolicyDenied a rule refuses one of them
+ */
+export async function refuseRuled(
+  vfs: Files,
+  location: RepoLocation,
+  replacing: readonly string[],
+  dropped: readonly string[],
+): Promise<void> {
+  if (!ruledUnder(location)) return
+  for (const name of [...replacing, ...dropped]) checkRules(location, name)
+  for (const name of replacing) {
+    const above = await blockingAncestor(vfs, location.worktree, name)
+    if (above !== null) {
+      checkRules(location, relative(location, above))
+      continue
+    }
+    // Only a directory the file replaces is removed whole, and only one a rule
+    // could reach inside is walked.
+    const where = location.worktree.join(name)
+    if (!ruledUnder(location, name) || (await isLink(vfs, where))) continue
+    const info = await statOf(vfs, where)
+    if (info !== null && info.type === FileType.DIRECTORY)
+      await refuseRuledUnder(vfs, location, where)
+  }
+}
+
+/**
+ * Ask the rules about every name under a directory the restore removes whole,
+ * walked as `removeTree` walks it: a link is not descended into, a file lists
+ * as nothing below it, and a name no rule could reach at or under is passed
+ * over.
+ *
+ * @param vfs the session's files
+ * @param location the discovered repository
+ * @param path the directory, or whatever stands there
+ */
+async function refuseRuledUnder(vfs: Files, location: RepoLocation, path: PathSpec): Promise<void> {
+  for (const entry of await readNames(vfs, path)) {
+    const name = entryName(entry)
+    if (name === '') continue
+    const child = path.join(name)
+    const place = relative(location, child)
+    if (!ruledUnder(location, place)) continue
+    checkRules(location, place)
+    if (!(await isLink(vfs, child))) await refuseRuledUnder(vfs, location, child)
+  }
+}
+
+/**
+ * A working-tree path, repository-relative.
+ *
+ * @param location the discovered repository
+ * @param path an absolute virtual path inside the work tree
+ */
+function relative(location: RepoLocation, path: PathSpec): string {
+  return path.virtual.slice(rstripSlash(location.worktree.virtual).length + 1)
+}
+
+/**
  * Put selected paths back to what a source records: the work `restore` and
  * `checkout`'s path form share.
  *
@@ -272,6 +345,9 @@ export async function restorePaths(
   const dropped = absent.filter((name) => !linked.some((root) => inside(name, root)))
   if (worktree) {
     await refuseReplacedMounts(vfs, repo.location.worktree, replacing)
+    // A rule refusing anything the working-tree pass writes or removes is
+    // asked here too, so its refusal leaves the index as it was.
+    await refuseRuled(vfs, repo.location, replacing, dropped)
   }
   if (staged) {
     const staged = new Map<string, StagedEntry>()

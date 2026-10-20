@@ -16,7 +16,7 @@ import posixpath
 from collections.abc import Callable
 
 from mirage.types import FileStat, PathSpec, Visibility
-from mirage.utils.hidden import leads_hidden, path_visible
+from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.utils.path import norm, norm_dir, owner_prefix
 from mirage.view.namespace_view import namespace_names
 from mirage.view.types import MountView, NamespaceLinks
@@ -92,6 +92,30 @@ class NamespaceReader:
         """
         virtual = PathSpec.from_str_path(path, cwd="/").virtual
         return sees(self._visibility(), self._links, virtual)
+
+    def hides_under(self, path: str | PathSpec) -> bool:
+        """Whether the session could hide anything at or under ``path``,
+        so a reader of a store of its own (a repository's history, say)
+        has to ask ``visible`` of what it finds there.
+
+        Args:
+            path (str | PathSpec): virtual path.
+        """
+        virtual = PathSpec.from_str_path(path, cwd="/").virtual
+        vis = self._visibility()
+        if hidden_under(vis, virtual):
+            return True
+        if self._links is None or not hidden_under(vis, "/"):
+            return False
+        # ``visible`` follows links, so a link at, under or above the
+        # path can lead where the session hides even when nothing named
+        # under the path is hidden.
+        return any(
+            link == virtual
+            or link.startswith(virtual.rstrip("/") + "/")
+            or virtual.startswith(link.rstrip("/") + "/")
+            for link in self._links.symlink_targets()
+        )
 
     def rows(self) -> list[MountRow]:
         """Every registered mount, hides and sessions aside: what the

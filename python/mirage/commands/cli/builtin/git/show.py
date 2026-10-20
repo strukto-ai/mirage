@@ -67,6 +67,11 @@ from mirage.commands.cli.builtin.git.rows import (
     deltas,
     shown_sides,
 )
+from mirage.commands.cli.builtin.git.seen import (
+    located,
+    place_named,
+    shown_items,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
@@ -258,10 +263,15 @@ def _render(
     shown_one = False
     for name, obj in objects:
         target = obj
+        tagged = isinstance(target, Tag)
         while isinstance(target, Tag):
             block, target = _tag_block(repo, target, flags)
             parts.append(encode_text(("\n" if shown_one else "") + block))
             shown_one = True
+        # A tag can point past every commit at a tree or a blob, which
+        # is shown only where the session sees it.
+        if tagged and located(repo, target) is None:
+            continue
         if isinstance(target, Blob):
             parts.append(target.data)
         elif isinstance(target, Tree):
@@ -270,7 +280,9 @@ def _render(
                 + f"tree {name}\n\n".encode()
                 + b"".join(
                     entry + (b"/" if mode == TREE else b"") + b"\n"
-                    for entry, mode, _ in target.iteritems()
+                    for entry, mode, _ in shown_items(
+                        repo, target, place_named(repo, name, target.id)
+                    )
                 )
             )
             shown_one = True

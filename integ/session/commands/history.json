@@ -1,0 +1,111 @@
+{
+  "cases": [
+    {
+      "id": "history_prep",
+      "seq": 1730001,
+      "targets": ["ram-commands"],
+      "command": "git init -q /scratch/hist && cd /scratch/hist && echo 'S3CR3T one' > secret.txt && echo pub > ok.txt && git add . && git commit -qm one && echo 'S3CR3T two' > secret.txt && git commit -qam two && echo 'S3CR3T one' > copy.txt && git add copy.txt && git commit -qm three && git log --format=%s",
+      "expect": {
+        "exit": 0,
+        "stdout": "three\ntwo\none\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_hidden_path_was_never_committed",
+      "seq": 1730002,
+      "targets": ["ram-commands"],
+      "session": "histhide",
+      "command": "cd /scratch/hist && git show HEAD:secret.txt",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: path 'secret.txt' does not exist in 'HEAD'\n"
+      }
+    },
+    {
+      "id": "history_hidden_path_matches_no_pickaxe",
+      "seq": 1730003,
+      "targets": ["ram-commands"],
+      "session": "histhide",
+      "command": "cd /scratch/hist && git log -S S3CR3T --format=%s",
+      "expect": {
+        "exit": 0,
+        "stdout": "three\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_hidden_blob_id_names_nothing",
+      "seq": 1730004,
+      "targets": ["ram-commands"],
+      "session": "histhide",
+      "command": "git -C /scratch/hist cat-file -p 84a6a0ffe888346a38b8dfaff64d703b2dcb7a3d",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: Not a valid object name 84a6a0ffe888346a38b8dfaff64d703b2dcb7a3d\n"
+      }
+    },
+    {
+      "id": "history_tree_lists_only_what_is_seen",
+      "seq": 1730005,
+      "targets": ["ram-commands"],
+      "session": "histhide",
+      "command": "git -C /scratch/hist cat-file -p 'HEAD^{tree}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "100644 blob 41a938e4da9e99584646be0b01c0818fe4987a3f\tcopy.txt\n100644 blob 79f9a6025483bfe32a68f9a153bad858519bb4e2\tok.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_rule_refuses_a_revision_read",
+      "seq": 1730006,
+      "targets": ["ram-commands"],
+      "session": "histrule",
+      "command": "cd /scratch/hist && git show HEAD:secret.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "git show: /scratch/hist/secret.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "history_rule_refuses_a_patch",
+      "seq": 1730007,
+      "targets": ["ram-commands"],
+      "session": "histrule",
+      "command": "git -C /scratch/hist log -p --format=%s",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "git log: /scratch/hist/secret.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "history_rule_refused_checkout_leaves_the_index",
+      "seq": 1730008,
+      "targets": ["ram-commands"],
+      "session": "histrule",
+      "command": "cd /scratch/hist && git checkout HEAD~2 -- secret.txt; git ls-files -s secret.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "100644 84a6a0ffe888346a38b8dfaff64d703b2dcb7a3d 0\tsecret.txt\n",
+        "stderr": "git checkout: /scratch/hist/secret.txt: Permission denied\n"
+      }
+    },
+    {
+      "id": "history_rule_names_stay_listed",
+      "seq": 1730009,
+      "targets": ["ram-commands"],
+      "session": "histrule",
+      "command": "git -C /scratch/hist ls-tree --name-only HEAD",
+      "expect": {
+        "exit": 0,
+        "stdout": "copy.txt\nok.txt\nsecret.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

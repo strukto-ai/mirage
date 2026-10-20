@@ -19,9 +19,14 @@ from dulwich.index import Index, IndexEntry
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
-from mirage.commands.cli.builtin.git.restore import index_tree, parse_flags
+from mirage.commands.cli.builtin.git.restore import (
+    index_tree,
+    parse_flags,
+    refuse_ruled,
+)
+from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
@@ -733,3 +738,23 @@ async def test_a_removed_gitlink_keeps_a_directory_that_is_not_empty(
     assert (repo_path / "sub" / "keep.txt").read_text(
         encoding="utf-8"
     ) == "keep\n"
+
+
+class NoCalls:
+    """Files that fail on any call, for code that must make none."""
+
+    def __getattr__(self, name: str):
+        raise AssertionError(f"made a file call: {name}")
+
+
+@pytest.mark.asyncio
+async def test_refuse_ruled_makes_no_file_call_without_a_rule():
+    repo = PathSpec.from_str_path("/repo")
+    location = RepoLocation(
+        PathSpec.from_str_path("/repo/.git"),
+        PathSpec.from_str_path("/repo/.git"),
+        repo,
+        repo,
+        vfs=NoCalls(),  # type: ignore[arg-type]
+    )
+    await refuse_ruled(NoCalls(), location, ["a.txt", "box"], ["b.txt"])  # type: ignore[arg-type]

@@ -19,6 +19,7 @@ import { toHex } from '../../../../utils/hex.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { rawObject, repoArgs, type Repo } from './repo.ts'
+import { rooted } from './seen.ts'
 import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
@@ -108,8 +109,11 @@ export async function commitEntries(
 /** Resolve a tree-ish through tags and commits. */
 export async function resolveTree(repo: Repo, name: string, resolved?: GitObject): Promise<string> {
   const obj = await unwrapped(repo, resolved ?? (await resolveObject(repo, name)), name)
-  if (obj.type === 'commit')
-    return (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
+  if (obj.type === 'commit') {
+    const tree = (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
+    rooted(repo, tree, name)
+    return tree
+  }
   if (obj.type === 'tree') return obj.oid
   throw new GitError('not a tree object')
 }

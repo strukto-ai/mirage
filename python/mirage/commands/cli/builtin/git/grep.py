@@ -29,11 +29,11 @@ from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_patterns,
     pathspec_selects,
     repo_relative,
-    visible_path,
 )
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
+from mirage.commands.cli.builtin.git.seen import place_named, shown_entries
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.commands.cli.builtin.git.tree import (
@@ -219,7 +219,8 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
 
 
 def search_entries(repo: BaseRepo, name: str) -> Tree:
-    """The searchable leaves of a tree-ish, or a directly named blob.
+    """The searchable leaves of a tree-ish the session sees, keyed
+    relative to it, or a directly named blob.
 
     Args:
         repo (BaseRepo): opened object database.
@@ -228,7 +229,10 @@ def search_entries(repo: BaseRepo, name: str) -> Tree:
     obj = unwrapped(repo, resolve_object(repo, name), name)
     if isinstance(obj, Blob):
         return {b"": (REGULAR, obj.id)}
-    return tree_entries(repo, resolve_tree(repo, name, obj))
+    tree = resolve_tree(repo, name, obj)
+    return shown_entries(
+        repo, tree_entries(repo, tree), place_named(repo, name, tree)
+    )
 
 
 async def grep(
@@ -327,18 +331,16 @@ async def grep(
                         ):
                             entries[path] = (entry.mode, entry.sha)
                             break
-            sources.append(("", entries))
+            sources.append(("", shown_entries(repo, entries)))
         out: list[bytes] = []
         found = False
         for revision, entries in sources:
             for path, (mode, oid) in sorted(entries.items()):
                 relative = path.decode("utf-8", "surrogateescape")
+                # Every source is what the session sees already, at the
+                # place its tree stands.
                 if mode not in (REGULAR, EXECUTABLE) or (
-                    relative
-                    and (
-                        not visible_path(location, relative)
-                        or not pathspec_selects(relative, specs)
-                    )
+                    relative and not pathspec_selects(relative, specs)
                 ):
                     continue
                 data: bytes | None

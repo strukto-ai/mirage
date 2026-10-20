@@ -311,6 +311,7 @@ describe('the admission gate on the fallback storage', () => {
       check(virtual: string): void {
         if (virtual === refuse) throw new Error(`refused: ${virtual}`)
       },
+      refusal: (virtual: string): string | null => (virtual === refuse ? 'refused' : null),
     }
   }
 
@@ -339,6 +340,8 @@ describe('the admission gate on the fallback storage', () => {
       live.check('/b/secret')
     }).toThrow('refused: /b/secret')
     live.check('/fine')
+    expect(live.refusal('/b/secret')).toBe('refused')
+    expect(live.refusal('/fine')).toBeNull()
     expect(live.scoped).toBe(true)
     expect(live.granted).toEqual([ruleShared])
     expect(getAdmission()).toBeNull()

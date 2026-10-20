@@ -45,6 +45,7 @@ import {
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
 import { refsNamed } from './revparse.ts'
 import { commitFacts, idsUnder, objectType, rawObject, repoArgs, type Repo } from './repo.ts'
+import { guarded, shownRaw, visibleObject } from './seen.ts'
 import {
   RefKind,
   type DateMode,
@@ -194,9 +195,13 @@ async function peeledObject(repo: Repo, obj: RefObject): Promise<RefObject | nul
     if (!head.startsWith(OBJECT_HEADER)) return null
     const target = head.slice(OBJECT_HEADER.length).trim()
     // Only a store that does not hash what it holds can loop.
-    if (seen.has(target) || (await objectType(repo, target)) === null) return null
+    if (seen.has(target) || !(await visibleObject(repo, target))) return null
     seen.add(target)
     shown = await rawObject(repo, target)
+    // A tree's bytes name its entries, so one a tag points at lists only those
+    // the session sees there.
+    if (shown.type === 'tree' && guarded(repo))
+      shown = { ...shown, raw: await shownRaw(repo, shown) }
   }
   return shown
 }
@@ -224,7 +229,9 @@ export async function listedRefs(
     if (!wanted(name)) continue
     const [oid, symref] = resolveRef(table, name)
     if (oid === null) continue
-    if ((await objectType(repo, oid)) === null) {
+    // An object the session is not shown is one the store lacks: a ref can be
+    // written to name any id, a hidden blob's included.
+    if (!(await visibleObject(repo, oid))) {
       errors.push(`error: ${name} does not point to a valid object!\n`)
       continue
     }
@@ -239,7 +246,10 @@ export async function listedRefs(
       worktree: '',
     }
     if (objects) {
-      const obj = await rawObject(repo, oid)
+      let obj = await rawObject(repo, oid)
+      // A tree's bytes name its entries, so a ref to one lists only those the
+      // session sees there.
+      if (obj.type === 'tree' && guarded(repo)) obj = { ...obj, raw: await shownRaw(repo, obj) }
       item = {
         ...item,
         obj,

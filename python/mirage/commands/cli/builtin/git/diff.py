@@ -54,6 +54,7 @@ from mirage.commands.cli.builtin.git.rows import (
     deltas,
     shown_sides,
 )
+from mirage.commands.cli.builtin.git.seen import shown_entries
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.util import (
@@ -115,7 +116,11 @@ def _sides(
             return None, None, warning
         old = resolve_commit(repo, texts[0])
         if len(texts) == 1:
-            return tree_entries(repo, old.tree), None, warning
+            return (
+                shown_entries(repo, tree_entries(repo, old.tree)),
+                None,
+                warning,
+            )
         new = resolve_commit(repo, texts[1])
     else:
         old, new, symmetric = ends
@@ -130,8 +135,8 @@ def _sides(
                     f"using {old.id.decode()}\n"
                 ).encode()
     return (
-        tree_entries(repo, old.tree),
-        tree_entries(repo, new.tree),
+        shown_entries(repo, tree_entries(repo, old.tree)),
+        shown_entries(repo, tree_entries(repo, new.tree)),
         warning,
     )
 
@@ -149,8 +154,10 @@ def _base(repo: BaseRepo, texts: tuple[str, ...]) -> Tree:
     if len(texts) > 1:
         raise GitError("--cached accepts at most one revision")
     if texts:
-        return tree_entries(repo, resolve_commit(repo, texts[0]).tree)
-    return head_entries(repo) or {}
+        return shown_entries(
+            repo, tree_entries(repo, resolve_commit(repo, texts[0]).tree)
+        )
+    return shown_entries(repo, head_entries(repo) or {})
 
 
 def _output(
@@ -216,7 +223,7 @@ async def diff(
             state = await read_index(vfs, location.gitdir)
             refuse_unresolved(state)
             before = await asyncio.to_thread(_base, repo, revisions)
-            after = staged_entries(state)
+            after = shown_entries(repo, staged_entries(state))
         else:
             old, new, warning = await asyncio.to_thread(
                 _sides, repo, revisions
@@ -227,7 +234,11 @@ async def diff(
                 if old is None:
                     for path in state.conflicts:
                         after.pop(path, None)
-                before = staged_entries(state) if old is None else old
+                before = (
+                    shown_entries(repo, staged_entries(state))
+                    if old is None
+                    else old
+                )
             else:
                 before, after = old or {}, new
         patterns = pathspec_patterns(
