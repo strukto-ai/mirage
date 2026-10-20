@@ -24,8 +24,8 @@ export const INERT_CLOSE = '\u0001'
 
 // GNU sequence-expression grammar for `{x..y[..step]}`: numeric
 // endpoints (optionally signed), or single alphabetic characters.
-export const NUM_SEQ = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/
-export const CHAR_SEQ = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?$/
+export const NUM_SEQ = /^([+-]?[0-9]+)\.\.([+-]?[0-9]+)(?:\.\.([+-]?[0-9]+))?$/
+export const CHAR_SEQ = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.([+-]?[0-9]+))?$/
 
 // Node types that may carry a brace-expandable word.
 export const BRACE_WORD_TYPES: ReadonlySet<string> = new Set([

@@ -66,10 +66,23 @@ def _is_padded(text: str) -> bool:
     return len(digits) > 1 and digits.startswith("0")
 
 
-def _parse_step(step_text: str | None) -> int:
+def _parse_integer(text: str) -> int | None:
+    negative = text.startswith("-")
+    digits = text[1:] if text.startswith(("-", "+")) else text
+    digits = digits.lstrip("0") or "0"
+    if len(digits) > 19:
+        return None
+    value = int(digits) * (-1 if negative else 1)
+    return value if -(1 << 63) <= value < (1 << 63) else None
+
+
+def _parse_step(step_text: str | None, descending: bool) -> int | None:
     if step_text is None:
         return 1
-    step = abs(int(step_text))
+    value = _parse_integer(step_text)
+    if value is None or (value == -(1 << 63) and not descending):
+        return None
+    step = abs(value)
     return step if step else 1
 
 
@@ -94,21 +107,26 @@ def _gen_sequence(body: str) -> list[str] | None:
     """
     if INERT_OPEN in body or "\\" in body:
         return None
-    m = NUM_SEQ.match(body)
+    m = NUM_SEQ.fullmatch(body)
     if m:
         lo_text, hi_text, step_text = m.group(1), m.group(2), m.group(3)
-        values = _seq_values(
-            int(lo_text), int(hi_text), _parse_step(step_text)
-        )
+        lo, hi = _parse_integer(lo_text), _parse_integer(hi_text)
+        if lo is None or hi is None:
+            return None
+        step = _parse_step(step_text, lo >= hi)
+        if step is None:
+            return None
+        values = _seq_values(lo, hi, step)
         if _is_padded(lo_text) or _is_padded(hi_text):
             width = max(len(lo_text), len(hi_text))
             return [f"{v:0{width}d}" for v in values]
         return [str(v) for v in values]
-    m = CHAR_SEQ.match(body)
+    m = CHAR_SEQ.fullmatch(body)
     if m:
-        values = _seq_values(
-            ord(m.group(1)), ord(m.group(2)), _parse_step(m.group(3))
-        )
+        step = _parse_step(m.group(3), m.group(1) >= m.group(2))
+        if step is None:
+            return None
+        values = _seq_values(ord(m.group(1)), ord(m.group(2)), step)
         return [chr(v) for v in values]
     return None
 

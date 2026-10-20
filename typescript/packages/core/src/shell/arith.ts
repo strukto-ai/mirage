@@ -486,7 +486,7 @@ function splitTarget(target: string): [string, string | null] {
  * there (`ReadonlyError`). Mirrors Python's _Record.
  */
 class ArithRecord {
-  readonly updates: Record<string, string> = {}
+  readonly updates = new Map<string, string>()
   readonly elemUpdates = new Map<string, string>()
   readonly writes: ArithWrite[] = []
 
@@ -519,7 +519,7 @@ class ArithRecord {
   }
 
   private mergedEnv(): Record<string, string> {
-    return { ...this.env, ...this.updates }
+    return { ...this.env, ...Object.fromEntries(this.updates) }
   }
 
   /**
@@ -562,7 +562,8 @@ class ArithRecord {
     }
     const dynamic = this.readVar?.(name) ?? null
     if (dynamic !== null) return this.coerce(dynamic, depth, subscript)
-    const pending = this.updates[name] ?? this.env[name]
+    const pending =
+      this.updates.get(name) ?? (Object.hasOwn(this.env, name) ? this.env[name] : undefined)
     if (pending !== undefined) return this.coerce(pending, depth, subscript)
     const element = this.elements === null ? null : this.elements.read(name, '0')
     if (element === null && this.nounset && this.elements?.holdsArray?.(name) !== true) {
@@ -582,7 +583,7 @@ class ArithRecord {
       this.elemUpdates.set(`${name} ${key}`, text)
       return
     }
-    this.updates[name] = text
+    this.updates.set(name, text)
     this.wroteVar?.(name, text)
   }
 }

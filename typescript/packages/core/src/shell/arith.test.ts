@@ -464,7 +464,7 @@ describe('prototype-named arithmetic variables', () => {
 
 it('exposes a prototype-named pending write during element resolution', () => {
   const elements: ElementOps = {
-    resolve: (_name, _key, env) => env['__proto__'] ?? '',
+    resolve: (_name, _key, env) => env.__proto__ ?? '',
     read: (_name, key) => (key === '2' ? '9' : null),
     isAssoc: () => true,
   }
