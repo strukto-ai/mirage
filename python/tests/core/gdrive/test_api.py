@@ -14,6 +14,7 @@
 
 import ast
 import importlib
+import importlib.util
 import inspect
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -44,11 +45,11 @@ def _resolve(node: ast.ImportFrom, package: str) -> str:
 
 
 def _is_module(name: str) -> bool:
-    try:
-        importlib.import_module(name)
-    except ImportError:
-        return False
-    return True
+    parent = importlib.import_module(name.rpartition(".")[0])
+    return (
+        hasattr(parent, "__path__")
+        and importlib.util.find_spec(name) is not None
+    )
 
 
 def _reaches_google(module: str, name: str) -> bool:
