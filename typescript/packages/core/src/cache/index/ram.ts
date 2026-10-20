@@ -15,6 +15,7 @@
 import type { FileStat } from '../../types.ts'
 import { FileType } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import type { Clock } from '../../utils/clock.ts'
 import { underPath } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../lock.ts'
 import {
@@ -38,8 +39,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly versions = new Map<string, string>()
   private readonly lock = new KeyLock()
 
-  constructor(options: { ttl?: number } = {}) {
-    super()
+  constructor(options: { ttl?: number; clock?: Clock } = {}) {
+    super(options.clock)
     this.ttl = options.ttl ?? 600
   }
 
@@ -104,7 +105,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   override addEntry(vfsPath: string, entry: FileStat, expiredAt?: Date | null): Promise<void> {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     return this.lock.withLock(folder, () => {
-      const now = Date.now()
+      const now = this.clock.now() * 1000
       const children = this.children.get(folder) ?? []
       const exp = this.expiry.get(folder)
       const wasFolder =
@@ -156,7 +157,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   listDir(vfsPath: string): Promise<ListResult> {
     const exp = this.expiry.get(vfsPath)
     if (exp === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
-    if (Date.now() >= exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
+    if (this.clock.now() * 1000 >= exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
     const children = this.children.get(vfsPath) ?? []
     const version = this.versions.get(vfsPath) ?? null
     if (this.partial.has(vfsPath)) return Promise.resolve({ partialEntries: children, version })
@@ -198,7 +199,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     version: string | null = null,
   ): Promise<Evicted[]> {
     return this.lock.withLock(vfsPath, () => {
-      const now = Date.now()
+      const now = this.clock.now() * 1000
       const exp = expiredAt ? expiredAt.getTime() : now + this.ttl * 1000
       const prefix = vfsPath === '/' ? '/' : `${vfsPath}/`
       const rows = new Map<string, FileStat>()
@@ -387,7 +388,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   }
 
   invalidate(): Promise<void> {
-    const past = Date.now() - 1000
+    const past = this.clock.now() * 1000 - 1000
     for (const key of this.expiry.keys()) this.expiry.set(key, past)
     return Promise.resolve()
   }
@@ -423,7 +424,7 @@ export class ListingCheckStore extends RAMIndexCacheStore {
   private readonly hints: IndexCacheStore | null
 
   constructor(options: { hints?: IndexCacheStore } = {}) {
-    super()
+    super(options.hints === undefined ? {} : { clock: options.hints.clock })
     this.hints = options.hints ?? null
   }
 

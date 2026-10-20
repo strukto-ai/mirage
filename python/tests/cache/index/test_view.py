@@ -35,6 +35,7 @@ from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
 from mirage.types import DirListing, FileStat, FileType
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.vfs_io import override
@@ -136,30 +137,17 @@ EPOCH = datetime.fromtimestamp(0, timezone.utc)
 YEAR = timedelta(days=365)
 
 
-class _Clock(datetime):
-    at: datetime = T0
-
-    @classmethod
-    def now(cls, tz=None):
-        return cls.at
-
-    @classmethod
-    def advance(cls, seconds: float) -> None:
-        cls.at += timedelta(seconds=seconds)
-
-
 @pytest.fixture
-def clock(monkeypatch):
-    _Clock.at = T0
-    for module in ("view", "ram", "redis"):
-        monkeypatch.setattr(f"mirage.cache.index.{module}.datetime", _Clock)
-    return _Clock
+def clock() -> ManualClock:
+    return ManualClock(start=T0.timestamp())
 
 
 @asynccontextmanager
-async def _store(kind: str, ttl: float) -> AsyncIterator[IndexCacheStore]:
+async def _store(
+    kind: str, ttl: float, clock: ManualClock | None = None
+) -> AsyncIterator[IndexCacheStore]:
     if kind == "ram":
-        yield RAMIndexCacheStore(ttl=ttl)
+        yield RAMIndexCacheStore(ttl=ttl, clock=clock)
         return
     url = os.environ.get("REDIS_URL")
     if kind == "redis" and not url:
@@ -170,6 +158,7 @@ async def _store(kind: str, ttl: float) -> AsyncIterator[IndexCacheStore]:
         client=client,
         url=url or "redis://localhost:6379/0",
         key_prefix=f"view:[{uuid4()}]:",
+        clock=clock,
     )
     try:
         yield store
@@ -181,8 +170,8 @@ async def _store(kind: str, ttl: float) -> AsyncIterator[IndexCacheStore]:
 
 
 class _SpyStore(RAMIndexCacheStore):
-    def __init__(self, ttl: float) -> None:
-        super().__init__(ttl=ttl)
+    def __init__(self, ttl: float, clock: ManualClock) -> None:
+        super().__init__(ttl=ttl, clock=clock)
         self.asked: list[datetime | None] = []
 
     async def set_dir(
@@ -383,7 +372,7 @@ def _expiry(explicit: str | None) -> datetime | None:
 async def test_the_view_caps_a_listing_only_when_it_must(
     clock, kind, method, store_ttl, read_ttl, explicit, after, status
 ):
-    async with _store(kind, store_ttl) as store:
+    async with _store(kind, store_ttl, clock) as store:
         view = IndexView(
             store, RAMFileCacheStore(), "/data", _owns_all, read_ttl=read_ttl
         )
@@ -402,7 +391,7 @@ async def test_the_view_caps_a_listing_only_when_it_must(
 async def test_the_cap_counts_from_the_write_not_the_view(
     clock, kind, after, status
 ):
-    async with _store(kind, 86400) as store:
+    async with _store(kind, 86400, clock) as store:
         view = IndexView(
             store, RAMFileCacheStore(), "/data", _owns_all, read_ttl=2
         )
@@ -424,7 +413,7 @@ async def test_the_cap_counts_from_the_write_not_the_view(
 async def test_the_view_passes_the_writer_expiry_through_unless_it_caps(
     clock, method, store_ttl, read_ttl, asked
 ):
-    store = _SpyStore(store_ttl)
+    store = _SpyStore(store_ttl, clock)
     view = IndexView(
         store, RAMFileCacheStore(), "/data", _owns_all, read_ttl=read_ttl
     )
@@ -436,7 +425,7 @@ async def test_the_view_passes_the_writer_expiry_through_unless_it_caps(
 @pytest.mark.parametrize("kind", ["ram", "fake-redis", "redis"])
 @pytest.mark.parametrize("explicit,after", [("year", 3), ("epoch", 0)])
 async def test_a_seed_is_capped_for_every_folder(clock, kind, explicit, after):
-    async with _store(kind, 86400) as store:
+    async with _store(kind, 86400, clock) as store:
         view = IndexView(
             store, RAMFileCacheStore(), "/data", _owns_all, read_ttl=2
         )
@@ -455,7 +444,7 @@ async def test_a_seed_is_capped_for_every_folder(clock, kind, explicit, after):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["ram", "fake-redis", "redis"])
 async def test_the_cap_is_taken_after_the_fence_is_entered(clock, kind):
-    async with _store(kind, 86400) as store:
+    async with _store(kind, 86400, clock) as store:
         cache = RAMFileCacheStore()
         view = IndexView(store, cache, "/data", _owns_all, read_ttl=2)
         lock = mutation_lock(cache)

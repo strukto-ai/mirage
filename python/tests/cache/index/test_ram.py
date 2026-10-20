@@ -20,6 +20,7 @@ from mirage.cache.index import RAMIndexCacheStore
 from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.types import FileStat, FileType
+from mirage.utils.clock import ManualClock
 
 
 @pytest.fixture
@@ -198,3 +199,12 @@ async def test_narrow_invalidation_preserves_exact_deadline():
     )
     await store.invalidate_entry("/repo/a")
     assert store._expiry["/repo"] == deadline
+
+
+@pytest.mark.asyncio
+async def test_a_check_store_ages_on_its_hints_clock():
+    clock = ManualClock(start=1000.0)
+    scratch = ListingCheckStore(hints=RAMIndexCacheStore(clock=clock))
+    await scratch.set_dir("/d", [])
+    clock.advance(scratch.ttl)
+    assert (await scratch.list_dir("/d")).status == LookupStatus.EXPIRED

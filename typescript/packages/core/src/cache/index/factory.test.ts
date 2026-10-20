@@ -18,6 +18,7 @@ import { IndexType, LookupStatus, type RedisIndexConfig } from './config.ts'
 import { buildIndex } from './factory.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
+import { ManualClock } from '../../utils/clock.ts'
 
 describe('buildIndex', () => {
   it('builds a RAM store at the driver TTL when no config names one', async () => {
@@ -42,4 +43,17 @@ describe('buildIndex', () => {
     }
     expect(buildIndex(config, -1)).toBeInstanceOf(RedisIndexCacheStore)
   })
+
+  it.each([undefined, { ttl: 60 }])(
+    'expires a RAM store on the given clock (%o)',
+    async (config) => {
+      const clock = new ManualClock(1000)
+      const store = buildIndex(config, 60, clock)
+      await store.setDir('/listing', [])
+      clock.advance(59)
+      expect((await store.listDir('/listing')).status).toBeUndefined()
+      clock.advance(1)
+      expect((await store.listDir('/listing')).status).toBe(LookupStatus.EXPIRED)
+    },
+  )
 })

@@ -32,6 +32,7 @@ from mirage.types import (
     ReadPolicy,
     ReadSpec,
 )
+from mirage.utils.clock import ManualClock
 from mirage.vfs.github import GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -64,7 +65,12 @@ def _vfs(hub: FakeGitHub, ref: str = "main"):
     )
 
 
-def _ws(vfs, policy: ReadPolicy = ReadPolicy.FRESH, index=None) -> Workspace:
+def _ws(
+    vfs,
+    policy: ReadPolicy = ReadPolicy.FRESH,
+    index=None,
+    clock: ManualClock | None = None,
+) -> Workspace:
     ws = Workspace(
         {
             "/gh": Mount(
@@ -73,7 +79,8 @@ def _ws(vfs, policy: ReadPolicy = ReadPolicy.FRESH, index=None) -> Workspace:
                 read=ReadSpec(policy=policy, ttl=600),
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        clock=clock,
     )
     if index is not None:
         ws.mount("/gh").index_store = index
@@ -121,13 +128,12 @@ def _count_list_dirs(monkeypatch, store) -> list[str]:
 async def test_a_root_stat_through_the_mount_index_names_no_version(
     monkeypatch, scoped
 ):
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
+    clock = ManualClock(start=100.0)
     with serve(_three()) as hub:
-        async with _open(_ws(_vfs(hub))) as ws:
+        async with _open(_ws(_vfs(hub), clock=clock)) as ws:
             await _out(ws, "ls /gh")
             stored = await _stored(ws)
-            now[0] += LISTING_TRUST_WINDOW * 2
+            clock.advance(LISTING_TRUST_WINDOW * 2)
             hub.log.clear()
             mount = ws.mount("/gh")
             reads = _count_list_dirs(monkeypatch, mount.index_store)

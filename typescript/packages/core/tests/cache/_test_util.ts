@@ -12,30 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type MockInstance, vi } from 'vitest'
 import { RAMFileCacheStore } from '../../src/cache/file/ram.ts'
-
-/**
- * Move performance.now() forward for the listing window without freezing it.
- *
- * The rate limiter and the yield budget read the same clock, so a frozen one
- * stalls them; this keeps it running and adds an offset. Restore with
- * vi.restoreAllMocks() or the returned spy.
- */
-export function shiftPerformanceNow(): {
-  advance: (ms: number) => void
-  spy: MockInstance<() => number>
-} {
-  const real = performance.now.bind(performance)
-  let offset = 0
-  const spy = vi.spyOn(performance, 'now').mockImplementation(() => real() + offset)
-  return {
-    advance: (ms) => {
-      offset += ms
-    },
-    spy,
-  }
-}
 
 /** A store whose server refuses every fill, and every drop when down. */
 export class RefusingStore extends RAMFileCacheStore {

@@ -16,6 +16,7 @@ import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
+import { type Clock, SystemClock } from '../utils/clock.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { drainBudget, type FileCache } from './file/mixin.ts'
@@ -41,6 +42,7 @@ import { mutationLock, latestFingerprint } from './file/io.ts'
 export class CacheManager {
   private readonly fileCache: FileCache | null
   private readonly index: IndexCacheStore | null
+  private readonly clock: Clock
   private readonly prefix: string
   private readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
@@ -84,9 +86,14 @@ export class CacheManager {
   ) {
     this.fileCache = fileCache
     this.index = index
+    this.clock = index?.clock ?? new SystemClock()
     this.prefix = rstripSlash(prefix)
     this.cachesReads = cachesReads
     this.ownsPath = ownsPath
+  }
+
+  private millis(): number {
+    return this.clock.monotonic() * 1000
   }
 
   /** Drain raw backend index access before mount cache eviction. */
@@ -198,7 +205,7 @@ export class CacheManager {
   }
 
   private noteWritten(folder: string): void {
-    this.written.set(folder, [tick(), performance.now(), soleCommandStarted()])
+    this.written.set(folder, [tick(), this.millis(), soleCommandStarted()])
   }
 
   /**
@@ -237,7 +244,7 @@ export class CacheManager {
     const [stamp, at] = written
     const started = commandStarted()
     if (started !== null) return stamp > started
-    return performance.now() - at < LISTING_TRUST_WINDOW * 1000
+    return this.millis() - at < LISTING_TRUST_WINDOW * 1000
   }
 
   // A check answers only a caller inside its window, so the rest are dead
@@ -273,7 +280,7 @@ export class CacheManager {
   private sentRecently(sentTick: number, sentAt: number): boolean {
     const started = commandStarted()
     if (started !== null) return sentTick > started
-    return performance.now() - sentAt < LISTING_TRUST_WINDOW * 1000
+    return this.millis() - sentAt < LISTING_TRUST_WINDOW * 1000
   }
 
   /**
@@ -314,7 +321,7 @@ export class CacheManager {
 
   private sendCheck(key: string, check: () => Promise<string | null>): Promise<string | null> {
     const sentTick = tick()
-    const sentAt = performance.now()
+    const sentAt = this.millis()
     const epoch = this.checkEpoch
     const answer = check().then((version) => {
       const checked = this.checked.get(key)
@@ -681,7 +688,7 @@ export class CacheManager {
       return
     }
     if (this.index !== null) {
-      await this.index.addEntry(key, row, new Date(Date.now() + this.readTtl * 1000))
+      await this.index.addEntry(key, row, new Date(this.clock.now() * 1000 + this.readTtl * 1000))
     }
   }
 

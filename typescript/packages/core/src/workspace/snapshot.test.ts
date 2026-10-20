@@ -53,6 +53,7 @@ import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { ManualClock } from '../utils/clock.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
 
 const require = createRequire(import.meta.url)
@@ -1351,4 +1352,52 @@ it('copy preserves live Box mount policy and provenance', async () => {
     await clone.close()
     await ws.close()
   }
+})
+
+describe('the workspace clock across a snapshot', () => {
+  it('ages a restored cache entry on the clock the restoring workspace was given', async () => {
+    const src = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser, clock: new ManualClock(1000) },
+    )
+    const clock = new ManualClock(1000)
+    try {
+      await src.cache.set('/data/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })
+      const state = await toStateDict(src)
+      const restored = await Workspace.fromState(state, {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        clock,
+      })
+      try {
+        clock.advance(9)
+        expect(await restored.cache.exists('/data/c.txt')).toBe(true)
+        clock.advance(1)
+        expect(await restored.cache.exists('/data/c.txt')).toBe(false)
+      } finally {
+        await restored.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
+  it('a copy keeps the workspace clock', async () => {
+    const clock = new ManualClock(1000)
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: parser, clock },
+    )
+    const copied = await ws.copy()
+    try {
+      await copied.cache.set('/data/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })
+      clock.advance(9)
+      expect(await copied.cache.exists('/data/c.txt')).toBe(true)
+      clock.advance(1)
+      expect(await copied.cache.exists('/data/c.txt')).toBe(false)
+    } finally {
+      await copied.close()
+      await ws.close()
+    }
+  })
 })

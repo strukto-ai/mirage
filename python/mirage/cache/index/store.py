@@ -22,6 +22,7 @@ from mirage.cache.index.config import (
     LookupResult,
 )
 from mirage.types import FileStat
+from mirage.utils.clock import Clock, SystemClock
 
 
 class IndexCacheStore:
@@ -29,11 +30,21 @@ class IndexCacheStore:
 
     Abstract base. Maps VFS paths to index rows.
     Subclasses implement storage and concurrency.
+
+    Args:
+        clock (Clock | None): the clock every expiry in this index is
+            stamped and compared on; None means the system clock.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Clock | None = None) -> None:
         super().__init__()
         self._closed = False
+        self._clock: Clock = clock if clock is not None else SystemClock()
+
+    @property
+    def clock(self) -> Clock:
+        """The clock this index reads time through."""
+        return self._clock
 
     @property
     def ttl(self) -> float:

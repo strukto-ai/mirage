@@ -54,6 +54,7 @@ import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { normDir, ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 
 // What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -309,6 +310,7 @@ export class MountRegistry {
     readOverrides: Record<string, ReadSpec> = {},
     placements: RegistryPlacements = {},
     readonly io: IOConfig = new IOConfig(),
+    private readonly clock: Clock = new SystemClock(),
   ) {
     this.indexConfig = placements.index
     const list: MountEntry[] = []
@@ -423,7 +425,7 @@ export class MountRegistry {
     ) {
       return new DevIndex()
     }
-    return buildIndex(config ?? this.indexConfig, vfs.indexTtl)
+    return buildIndex(config ?? this.indexConfig, vfs.indexTtl, this.clock)
   }
 
   /** A removed VFS instance cannot start a second lifecycle. */

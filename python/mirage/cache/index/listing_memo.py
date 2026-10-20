@@ -16,12 +16,13 @@ import threading
 from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from time import monotonic, time
+from time import monotonic
 
 from mirage.cache.index.config import ListResult
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW, ROW_READ_BATCH
 from mirage.cache.index.scope import sole_command_started
 from mirage.types import FileStat
+from mirage.utils.clock import Clock
 
 _WRITES_BY_PREFIX: Counter[str] = Counter()
 _ROW_WRITES_BY_PREFIX: Counter[str] = Counter()
@@ -69,10 +70,13 @@ class ListingMemo:
 
     Args:
         key_prefix (str): the store's key prefix, whose writes count.
+        clock (Clock): the store's clock, whose wall time a listing's
+            expiry is compared with.
     """
 
-    def __init__(self, key_prefix: str) -> None:
+    def __init__(self, key_prefix: str, clock: Clock) -> None:
         self._key_prefix = key_prefix
+        self._clock = clock
         self._reads: OrderedDict[tuple[int, str], _Read] = OrderedDict()
         self._closed = False
         with _PREFIX_LOCK:
@@ -82,7 +86,7 @@ class ListingMemo:
         return (
             kept.writes_before == _WRITES_BY_PREFIX[self._key_prefix]
             and monotonic() - kept.read_at < LISTING_TRUST_WINDOW
-            and time() < kept.expires_at
+            and self._clock.now() < kept.expires_at
         )
 
     async def read(

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   type Evicted,
   type SetDirOptions,
@@ -25,6 +25,7 @@ import { mutationLock } from '../file/io.ts'
 import { RAMFileCacheStore } from '../file/ram.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { IndexCacheStore } from './store.ts'
 import { IndexView } from './view.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -425,13 +426,13 @@ it('never forwards an empty or retired batch to the store', async () => {
   expect(getMany).not.toHaveBeenCalled()
 })
 
-const T0 = new Date('2026-01-01T00:00:00Z')
-const YEAR = 365 * 24 * 60 * 60 * 1000
+const T0 = Date.parse('2026-01-01T00:00:00Z') / 1000
+const YEAR = 365 * 24 * 60 * 60
 
 type Explicit = 'none' | 'year' | 'epoch'
 
-function expiryOf(explicit: Explicit): Date | undefined {
-  if (explicit === 'year') return new Date(Date.now() + YEAR)
+function expiryOf(explicit: Explicit, clock: ManualClock): Date | undefined {
+  if (explicit === 'year') return new Date((clock.now() + YEAR) * 1000)
   if (explicit === 'epoch') return new Date(0)
   return undefined
 }
@@ -458,12 +459,9 @@ class ExpirySpy extends RAMIndexCacheStore {
 }
 
 describe('the view caps listing expiry at the mount ttl', () => {
+  let clock: ManualClock
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(T0)
-  })
-  afterEach(() => {
-    vi.useRealTimers()
+    clock = new ManualClock(T0)
   })
 
   // [row, store ttl, read ttl, explicit expiry, seconds after the write, live]
@@ -484,7 +482,7 @@ describe('the view caps listing expiry at the mount ttl', () => {
       `${method} row %i: store ttl %d, read ttl %s, expiry %s, +%ds -> live=%s`,
       async (_row, storeTtl, readTtl, explicit, after, live) => {
         const cache = new RAMFileCacheStore()
-        const store = new RAMIndexCacheStore({ ttl: storeTtl })
+        const store = new RAMIndexCacheStore({ ttl: storeTtl, clock })
         const view = new IndexView(
           store,
           cache,
@@ -493,8 +491,8 @@ describe('the view caps listing expiry at the mount ttl', () => {
           readTtl === undefined ? {} : { readTtl },
         )
         try {
-          await view[method]('/data', [['a', ROW]], expiryOf(explicit))
-          vi.setSystemTime(Date.now() + after * 1000)
+          await view[method]('/data', [['a', ROW]], expiryOf(explicit, clock))
+          clock.advance(after)
           const listing = await store.listDir('/data')
           if (live) expect(listing.status ?? 'live').toBe('live')
           else expect(listing.status).toBe(LookupStatus.EXPIRED)
@@ -506,15 +504,14 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
     it(`${method} row 11: takes now at the write, not at construction`, async () => {
       const cache = new RAMFileCacheStore()
-      const store = new RAMIndexCacheStore({ ttl: 86400 })
+      const store = new RAMIndexCacheStore({ ttl: 86400, clock })
       const view = new IndexView(store, cache, '/data', () => true, { readTtl: 2 })
       try {
-        vi.setSystemTime(Date.now() + 5000)
+        clock.advance(5)
         await view[method]('/data', [['a', ROW]])
-        const written = Date.now()
-        vi.setSystemTime(written + 1000)
+        clock.advance(1)
         expect((await store.listDir('/data')).status ?? 'live').toBe('live')
-        vi.setSystemTime(written + 3000)
+        clock.advance(2)
         expect((await store.listDir('/data')).status).toBe(LookupStatus.EXPIRED)
       } finally {
         await cache.close()
@@ -523,7 +520,7 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
     it(`${method} passes the writer's expiry through when the cap does not bite`, async () => {
       const cache = new RAMFileCacheStore()
-      const store = new ExpirySpy({ ttl: 60 })
+      const store = new ExpirySpy({ ttl: 60, clock })
       const view = new IndexView(store, cache, '/data', () => true, { readTtl: 600 })
       try {
         await view[method]('/data', [['a', ROW]])
@@ -536,7 +533,7 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
     it(`${method} hands the store a deadline when the cap bites`, async () => {
       const cache = new RAMFileCacheStore()
-      const store = new ExpirySpy({ ttl: 86400 })
+      const store = new ExpirySpy({ ttl: 86400, clock })
       const view = new IndexView(store, cache, '/data', () => true, { readTtl: 2 })
       try {
         await view[method]('/data', [['a', ROW]])
@@ -550,7 +547,7 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
   it('clamps a seed for every folder', async () => {
     const cache = new RAMFileCacheStore()
-    const store = new RAMIndexCacheStore({ ttl: 86400 })
+    const store = new RAMIndexCacheStore({ ttl: 86400, clock })
     const view = new IndexView(store, cache, '/data', () => true, { readTtl: 2 })
     try {
       view.seed(
@@ -563,9 +560,9 @@ describe('the view caps listing expiry at the mount ttl', () => {
           ['/data/b', ['/data/b/a']],
           ['/data/c', []],
         ]),
-        new Date(Date.now() + YEAR),
+        new Date((clock.now() + YEAR) * 1000),
       )
-      vi.setSystemTime(Date.now() + 3000)
+      clock.advance(3)
       for (const dir of ['/data', '/data/b', '/data/c'])
         expect((await store.listDir(dir)).status, dir).toBe(LookupStatus.EXPIRED)
     } finally {
@@ -575,7 +572,7 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
   it('keeps an epoch-zero seed expired', async () => {
     const cache = new RAMFileCacheStore()
-    const store = new RAMIndexCacheStore({ ttl: 86400 })
+    const store = new RAMIndexCacheStore({ ttl: 86400, clock })
     const view = new IndexView(store, cache, '/data', () => true, { readTtl: 2 })
     try {
       view.seed(new Map([['/data/a', ROW]]), new Map([['/data', ['/data/a']]]), new Date(0))
@@ -587,19 +584,18 @@ describe('the view caps listing expiry at the mount ttl', () => {
 
   it('takes the deadline after waiting for the mutation lock', async () => {
     const cache = new RAMFileCacheStore()
-    const store = new RAMIndexCacheStore({ ttl: 86400 })
+    const store = new RAMIndexCacheStore({ ttl: 86400, clock })
     const view = new IndexView(store, cache, '/data', () => true, { readTtl: 2 })
     const held = holdMutation(cache)
     try {
       await held.entered
       const writing = view.setDir('/data', [['a', ROW]])
-      vi.setSystemTime(Date.now() + 1500)
+      clock.advance(1.5)
       held.release()
       await writing
-      const released = Date.now()
-      vi.setSystemTime(released + 1000)
+      clock.advance(1)
       expect((await store.listDir('/data')).status ?? 'live').toBe('live')
-      vi.setSystemTime(released + 2100)
+      clock.advance(1.1)
       expect((await store.listDir('/data')).status).toBe(LookupStatus.EXPIRED)
     } finally {
       held.release()

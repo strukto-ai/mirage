@@ -17,7 +17,7 @@ import { OpRecord } from '../observe/record.ts'
 import type * as RecordModule from '../observe/record.ts'
 import { publishRead } from './context.ts'
 import { mountKey } from '../utils/key_prefix.ts'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_READ_TTL, FileStat, FileType, PathSpec } from '../types.ts'
 import { mutationLock } from './file/io.ts'
@@ -29,7 +29,8 @@ import { RedisIndexCacheStore } from './index/redis.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
-import { RefusingStore, shiftPerformanceNow } from '../../tests/cache/_test_util.ts'
+import { RefusingStore } from '../../tests/cache/_test_util.ts'
+import { ManualClock } from '../utils/clock.ts'
 
 const built = vi.hoisted((): number[] => [])
 vi.mock('../observe/record.ts', async (importOriginal) => {
@@ -602,51 +603,43 @@ describe('what a mount has listed since a command started', () => {
 })
 
 describe('which listings a mount trusts', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it('trusts a listing for the window outside any command', async () => {
-    const clock = shiftPerformanceNow()
-    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const clock = new ManualClock()
+    const index = new RAMIndexCacheStore({ ttl: 600, clock })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     await manager.scopeIndex(index).setDir('/data', [])
     expect(manager.listingTrusted('/data')).toBe(true)
     expect(manager.listingTrusted('/data/other')).toBe(false)
-    clock.advance(LISTING_TRUST_WINDOW * 1000)
+    clock.advance(LISTING_TRUST_WINDOW)
     expect(manager.listingTrusted('/data')).toBe(false)
   })
 
   // A listing the previous command fetched a moment ago is still re-listed by
   // the next one: the window is only for reads that belong to no command.
   it('does not apply the window inside a command', async () => {
-    const clock = shiftPerformanceNow()
-    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const clock = new ManualClock()
+    const index = new RAMIndexCacheStore({ ttl: 600, clock })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     await manager.scopeIndex(index).setDir('/data', [])
     await runInCommandScope(async () => {
       expect(manager.listingTrusted('/data')).toBe(false)
       await manager.scopeIndex(index).setDir('/data', [])
-      clock.advance(LISTING_TRUST_WINDOW * 10_000)
+      clock.advance(LISTING_TRUST_WINDOW * 10)
       expect(manager.listingTrusted('/data')).toBe(true)
     })
   })
 })
 
 describe('which version check a mount remembers', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   // Check A is sent and stalls; once it is out of the window a caller sends
   // check B, which answers V2 first. A then lands with V1, the head it saw
   // before the move. Recording A would put the memo back to V1: a listing
   // stored at V2 would be re-checked, and one stored at V1 served as current.
   it('never lets a late, older check replace a newer memo', async () => {
-    const clock = shiftPerformanceNow()
+    const clock = new ManualClock()
     const manager = new CacheManager(
       new RAMFileCacheStore(),
-      new RAMIndexCacheStore({ ttl: 600 }),
+      new RAMIndexCacheStore({ ttl: 600, clock }),
       '/data/',
       true,
     )
@@ -660,7 +653,7 @@ describe('which version check a mount remembers', () => {
       return Promise.resolve(version)
     }
     const first = manager.checkedVersion('/data', 'V0', () => stalled)
-    clock.advance(LISTING_TRUST_WINDOW * 1000 + 10)
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     expect(await manager.checkedVersion('/data', 'V0', answer('V2'))).toBe('V2')
     release('V1')
     expect(await first).toBe('V1')
@@ -676,10 +669,10 @@ describe('which version check a mount remembers', () => {
   // would only repeat the answer. Another stored version, or the same one
   // past the window, is asked.
   it('refuses a listing a recent answer refused without asking', async () => {
-    const clock = shiftPerformanceNow()
+    const clock = new ManualClock()
     const manager = new CacheManager(
       new RAMFileCacheStore(),
-      new RAMIndexCacheStore({ ttl: 600 }),
+      new RAMIndexCacheStore({ ttl: 600, clock }),
       '/data/',
       true,
     )
@@ -693,7 +686,7 @@ describe('which version check a mount remembers', () => {
     expect(asked).toEqual(['V2'])
     expect(await manager.checkedVersion('/data', 'V0', answer('V4'))).toBe('V4')
     expect(asked).toEqual(['V2', 'V4'])
-    clock.advance(LISTING_TRUST_WINDOW * 1000 + 10)
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     expect(await manager.checkedVersion('/data', 'V0', answer('V5'))).toBe('V5')
     expect(asked).toEqual(['V2', 'V4', 'V5'])
   })
@@ -702,10 +695,10 @@ describe('which version check a mount remembers', () => {
   // the stale entries are dead weight; dropping one costs at most another
   // check, never a stale listing.
   it('drops checks out of their window once the map is full', async () => {
-    const clock = shiftPerformanceNow()
+    const clock = new ManualClock()
     const manager = new CacheManager(
       new RAMFileCacheStore(),
-      new RAMIndexCacheStore({ ttl: 600 }),
+      new RAMIndexCacheStore({ ttl: 600, clock }),
       '/data/',
       true,
     )
@@ -715,7 +708,7 @@ describe('which version check a mount remembers', () => {
     for (let n = 0; n < limit; n++) {
       expect(await manager.checkedVersion(`/data/old${String(n)}`, 'V', check)).toBe('V')
     }
-    clock.advance(LISTING_TRUST_WINDOW * 1000 + 10)
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     expect(await manager.checkedVersion('/data/new', 'V', check)).toBe('V')
     const checked = (manager as unknown as { checked: Map<string, unknown> }).checked
     expect([...checked.keys()]).toEqual(['/data/new'])

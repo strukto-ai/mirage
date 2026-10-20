@@ -20,6 +20,7 @@ import { ENTRY_PREFIX, REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 import { runInCommandScope } from './scope.ts'
 import { storedStat } from '../../workspace/mount/listing.ts'
+import { ManualClock } from '../../utils/clock.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -1440,6 +1441,7 @@ const NOT_COUNTING = {
 
 type StoreRead =
   | 'ttl'
+  | 'clock'
   | 'scopeSnapshot'
   | 'get'
   | 'getMany'
@@ -1587,6 +1589,27 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       await other.close()
     }
     expect(sent.mock.calls).toHaveLength(1)
+  })
+
+  it('ends a listing read in a command at its expiry on the store clock', async () => {
+    const clock = new ManualClock(4_000_000_000)
+    const timed = new RedisIndexCacheStore({
+      url: REDIS_URL ?? '',
+      keyPrefix: prefix,
+      ttl: 60,
+      clock,
+    })
+    try {
+      await timed.setDir('/d', LISTED)
+      const after = await runInCommandScope(async () => {
+        expect((await timed.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
+        clock.advance(60)
+        return timed.listDir('/d')
+      })
+      expect(after.status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      await timed.close()
+    }
   })
 
   it('sees a write by a peer store on the same keyspace', async () => {

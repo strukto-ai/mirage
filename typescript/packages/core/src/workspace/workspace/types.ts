@@ -29,6 +29,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
+import type { Clock } from '../../utils/clock.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
@@ -92,6 +93,11 @@ export interface WorkspaceOptions {
    */
   cache?: CacheConfig | RedisCacheConfig
   index?: IndexConfig | RedisIndexConfig
+  /**
+   * The clock the RAM file cache and every mount's index store read
+   * time from; omitted means the real one. A copy keeps its origin's.
+   */
+  clock?: Clock
   /**
    * Builds each background job's console from its job id, so job
    * output can live somewhere a reader in another process reaches

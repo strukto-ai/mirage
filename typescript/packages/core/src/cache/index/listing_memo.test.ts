@@ -14,6 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType } from '../../types.ts'
+import type { Clock } from '../../utils/clock.ts'
 import { LookupStatus, type ListResult } from './config.ts'
 import { LISTING_TRUST_WINDOW } from './constants.ts'
 import { ListingMemo } from './listing_memo.ts'
@@ -69,13 +70,13 @@ describe('ListingMemo', () => {
   let elapsed: number
   let memo: ListingMemo
   let prefix: string
+  const clock: Clock = { now: () => WALL + elapsed, monotonic: () => 1_000 + elapsed }
 
   beforeEach(() => {
     elapsed = 0
     vi.spyOn(performance, 'now').mockImplementation(() => 1_000_000 + elapsed * 1000)
-    vi.spyOn(Date, 'now').mockImplementation(() => (WALL + elapsed) * 1000)
     prefix = `test:${Math.random().toString(36).slice(2)}:`
-    memo = new ListingMemo(prefix)
+    memo = new ListingMemo(prefix, clock)
   })
 
   afterEach(() => {
@@ -196,13 +197,13 @@ describe('ListingMemo', () => {
 
   it('drops the listing read once a write on the prefix finishes', async () => {
     const folder = new Folder()
-    const other = new ListingMemo(`${prefix}other:`)
+    const other = new ListingMemo(`${prefix}other:`, clock)
     await runInCommandScope(async () => {
       await memo.read('/d', folder.fetch)
       other.wrote()
       await memo.read('/d', folder.fetch)
       expect(folder.reads).toBe(1)
-      new ListingMemo(prefix).wrote()
+      new ListingMemo(prefix, clock).wrote()
       await memo.read('/d', folder.fetch)
     })
     expect(folder.reads).toBe(2)
@@ -210,7 +211,7 @@ describe('ListingMemo', () => {
 
   it('keeps a live memo its count when a peer on the prefix closes', async () => {
     const folder = new Folder()
-    const peer = new ListingMemo(prefix)
+    const peer = new ListingMemo(prefix, clock)
     peer.wrote()
     await runInCommandScope(async () => {
       await memo.read('/d', folder.fetch)
@@ -218,7 +219,7 @@ describe('ListingMemo', () => {
       peer.close()
       await memo.read('/d', folder.fetch)
       expect(folder.reads).toBe(1)
-      new ListingMemo(prefix).wrote()
+      new ListingMemo(prefix, clock).wrote()
       await memo.read('/d', folder.fetch)
     })
     expect(folder.reads).toBe(2)
@@ -226,9 +227,9 @@ describe('ListingMemo', () => {
 
   it('counts a write that finishes after its memo closed', async () => {
     const shared = `${prefix}shared:`
-    const closed = new ListingMemo(shared)
+    const closed = new ListingMemo(shared, clock)
     closed.close()
-    const fresh = new ListingMemo(shared)
+    const fresh = new ListingMemo(shared, clock)
     const folder = new Folder()
     await runInCommandScope(async () => {
       await fresh.read('/d', folder.fetch)
