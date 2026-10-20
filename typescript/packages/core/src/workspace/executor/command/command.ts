@@ -771,12 +771,21 @@ export async function handleCommand(
 
   // Path-flag targets count: a command bound to one mount cannot write its
   // output through another. A borrowed line runs on its predicted mount, so
-  // every path its own spec reads must lie there too, or its handler reads
-  // another mount's path through its own.
-  const mountPrefixes = new Set<string>(borrowed && ownMount !== null ? [ownMount.prefix] : [])
-  for (const s of borrowed
-    ? parseFlags(parts.slice(1), ownSpec, cmdName, session.cwd).paths
-    : routingScopes) {
+  // every path its own spec reads, operand or option value, must lie there
+  // too, or its handler reads another mount's path through its own.
+  let spanScopes = routingScopes
+  const mountPrefixes = new Set<string>()
+  if (borrowed && ownMount !== null) {
+    const own = parseFlags(parts.slice(1), ownSpec, cmdName, session.cwd)
+    spanScopes = [
+      ...own.paths,
+      ...Object.values(own.flagKwargs)
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter((item): item is PathSpec => item instanceof PathSpec),
+    ]
+    mountPrefixes.add(ownMount.prefix)
+  }
+  for (const s of spanScopes) {
     // a scope outside any mount contributes nothing here
     const m = registry.tryMountFor(s.virtual)
     if (m !== null) mountPrefixes.add(m.prefix)

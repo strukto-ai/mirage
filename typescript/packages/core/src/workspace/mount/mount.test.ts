@@ -618,8 +618,9 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
 // grep (text operands), find and rg (path operands); the builtin rg reads
 // `/a/patterns` and a lone `/b/input` as its pattern, a text slot, so those
 // lines run on /a, where a path on /b is refused rather than handed to /a's rg.
-// Only the paths the borrowed spec reads count: its `-f` takes text, so
-// `/b/input` there is no path.
+// Only the paths the borrowed spec reads count, its option values included:
+// grep's `-f` takes text, so `/b/input` there is no path, and rg's takes a
+// path.
 const SPAN = 'rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n'
 it.each([
   ['cd /b && grep -f /a/patterns /b/input', 0, 'hi\n', ''],
@@ -629,6 +630,7 @@ it.each([
   ['cd /a && rg /a/patterns /b/input', 0, '/a/patterns\n', ''],
   ['cd /a && rg /b/input', 1, '', SPAN],
   ['cd /a && rg /b/input /a/patterns', 1, '', SPAN],
+  ['cd /a && rg -f /b/input /a/patterns', 1, '', SPAN],
   ['cd /a && find //b/input -print0', 0, '//b/input\0', ''],
 ])('keeps `%s` on its own command', async (line, code, stdout, stderr) => {
   const ws = new Workspace(
@@ -645,7 +647,7 @@ it.each([
         new Command({
           name,
           spec: new CommandSpec({
-            arguments: [new Argument('-f'), new Argument('rest', { nargs: '*', type })],
+            arguments: [new Argument('-f', { type }), new Argument('rest', { nargs: '*', type })],
           }),
           vfs: null,
           fn: ECHO_CMD,

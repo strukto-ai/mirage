@@ -241,7 +241,8 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
 # the builtin rg reads `/a/patterns` and a lone `/b/input` as its pattern,
 # a text slot, so those lines run on /a, where a path on /b is refused
 # rather than handed to /a's rg. Only the paths the borrowed spec reads
-# count: its `-f` takes text, so `/b/input` there is no path.
+# count, its option values included: grep's `-f` takes text, so
+# `/b/input` there is no path, and rg's takes a path.
 SPAN = (
     b"rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n"
 )
@@ -263,6 +264,7 @@ SPAN = (
         ("cd /a && rg /a/patterns /b/input", 0, b"/a/patterns\n", b""),
         ("cd /a && rg /b/input", 1, b"", SPAN),
         ("cd /a && rg /b/input /a/patterns", 1, b"", SPAN),
+        ("cd /a && rg -f /b/input /a/patterns", 1, b"", SPAN),
         ("cd /a && find //b/input -print0", 0, b"//b/input\x00", b""),
     ],
 )
@@ -275,7 +277,7 @@ async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
                 name,
                 spec=CommandSpec(
                     arguments=(
-                        Argument("-f"),
+                        Argument("-f", type=kind),
                         Argument("rest", nargs="*", type=kind),
                     )
                 ),
