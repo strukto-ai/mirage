@@ -1980,3 +1980,23 @@ async def test_l_walks_the_links_above_the_name(name, where, status):
     r = await ws.shell(f"cd /data && {name} -L {where}{close}; echo $?")
     assert r.stdout == f"{status}\n".encode()
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "[", "[["])
+async def test_ef_compares_where_the_names_lead(name):
+    # -ef asks whether two names lead to one file, so each operand's
+    # links are followed however it is spelled, relative or absolute.
+    ws = _ws()
+    await ws.shell(
+        "mkdir -p /data/real; echo f > /data/f; echo x > /data/real/x;"
+        " ln -s f /data/l; ln -s real /data/d"
+    )
+    close = {"test": "", "[": " ]", "[[": " ]]"}[name]
+    pairs = ("l -ef f", "/data/l -ef /data/f", "d/x -ef real/x", "f -ef l")
+    line = "cd /data && " + "; ".join(
+        f"{name} {p}{close}; echo $?" for p in pairs
+    )
+    r = await ws.shell(line)
+    assert r.stdout == b"0\n0\n0\n0\n"
+    await ws.close()

@@ -31,10 +31,17 @@ import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from
 import { CondError, type CondContext } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
-/** Resolve a file operand to an addressable scope. */
+/**
+ * Resolve a file operand to an addressable scope, its links followed. A
+ * builtin's operand never passes the router's pathname walk, so it is walked
+ * here, typed or classified alike (a classified one by the spelling its dots
+ * need): `-ef` compares where two names lead.
+ */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
-  if (val instanceof PathSpec) return val
-  const spelled = dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd)
+  const spelled =
+    val instanceof PathSpec
+      ? (val.dotted ?? val.virtual)
+      : (dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd))
   return toScope(ctx.links !== undefined ? ctx.links.resolve(spelled) : spelled)
 }
 

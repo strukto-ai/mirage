@@ -42,17 +42,23 @@ from mirage.workspace.session.elements import element_is_set
 
 
 def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
-    """Resolve a file operand to an addressable scope.
+    """Resolve a file operand to an addressable scope, its links
+    followed.
+
+    A builtin's operand never passes the router's pathname walk, so it
+    is walked here, typed or classified alike (a classified one by the
+    spelling its dots need): ``-ef`` compares where two names lead.
 
     Args:
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
     if isinstance(val, PathSpec):
-        return val
-    spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(
-        val, ctx.session.cwd
-    )
+        spelled = val.dotted or val.virtual
+    else:
+        spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(
+            val, ctx.session.cwd
+        )
     return _to_scope(
         ctx.links.resolve(spelled) if ctx.links is not None else spelled
     )

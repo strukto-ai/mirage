@@ -1621,3 +1621,18 @@ describe.each(['test', '[', '[['])('%s -L', (name) => {
     await ws.close()
   })
 })
+
+it.each(['test', '[', '[['])('-ef compares where the names lead: %s', async (name) => {
+  // -ef asks whether two names lead to one file, so each operand's links are
+  // followed however it is spelled, relative or absolute.
+  const ws = buildWorkspace()
+  await ws.shell(
+    'mkdir -p /data/real; echo f > /data/f; echo x > /data/real/x; ln -s f /data/l; ln -s real /data/d',
+  )
+  const close = name === 'test' ? '' : name === '[' ? ' ]' : ' ]]'
+  const pairs = ['l -ef f', '/data/l -ef /data/f', 'd/x -ef real/x', 'f -ef l']
+  const line = 'cd /data && ' + pairs.map((p) => `${name} ${p}${close}; echo $?`).join('; ')
+  const r = await ws.shell(line)
+  expect(dec(r.stdout)).toBe('0\n0\n0\n0\n')
+  await ws.close()
+})
