@@ -100,6 +100,11 @@ def drive_bypasses(source: str, package: str) -> list[str]:
                 for a in node.names
                 if _reaches_google(module, a.name)
             ]
+        elif isinstance(node, ast.Call) and "__import__" in (
+            getattr(node.func, "id", None),
+            getattr(node.func, "attr", None),
+        ):
+            found.append("__import__")
     return found
 
 
@@ -119,6 +124,8 @@ def drive_bypasses(source: str, package: str) -> list[str]:
         "from . import api",
         "from mirage.core.gdrive.api import DriveClient",
         "import importlib",
+        "wire = __import__('mirage.core.google.drive', fromlist=['get_file'])",
+        "import builtins\nbuiltins.__import__('mirage.core.google.drive')",
     ],
 )
 def test_the_detector_catches_a_planted_bypass(planted):
