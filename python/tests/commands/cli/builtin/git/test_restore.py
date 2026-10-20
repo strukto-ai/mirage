@@ -24,8 +24,9 @@ from mirage.commands.cli.builtin.git.restore import (
     parse_flags,
     refuse_ruled,
 )
+from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.spec.flag_view import FlagView
-from mirage.types import MountMode
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
@@ -748,9 +749,6 @@ class NoCalls:
 
 @pytest.mark.asyncio
 async def test_refuse_ruled_makes_no_file_call_without_a_rule():
-    from mirage.commands.cli.builtin.git.types import RepoLocation
-    from mirage.types import PathSpec
-
     repo = PathSpec.from_str_path("/repo")
     location = RepoLocation(
         PathSpec.from_str_path("/repo/.git"),
