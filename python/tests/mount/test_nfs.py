@@ -521,14 +521,15 @@ async def test_a_name_that_is_not_utf8_is_left_out_of_a_listing(
     assert eof
 
 
+async def unencodable_readlink(self: MountCore, path: str) -> str:
+    return "bad\udcff"
+
+
 @pytest.mark.asyncio
 async def test_a_reply_the_engine_refuses_is_answered_with_eio(
     client: Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def readlink(self: MountCore, path: str) -> str:
-        return "bad\udcff"
-
-    monkeypatch.setattr(MountCore, "readlink", readlink)
+    monkeypatch.setattr(MountCore, "readlink", unencodable_readlink)
     handle = await client.handle("docs", "a.txt")
     reply = await asyncio.wait_for(client.call(NFS, 5, opaque(handle)), 5)
     assert reply.u32() == 5

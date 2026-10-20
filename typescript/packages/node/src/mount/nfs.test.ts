@@ -198,6 +198,27 @@ class Client {
   }
 }
 
+async function serve(
+  ws: Workspace,
+  secure = false,
+): Promise<[MirageNFSServer, MountCore, Socket, Client]> {
+  const core = new MountCore(ws.vfs)
+  const server = new MirageNFSServer(core, '/', secure)
+  const port = await server.start()
+  const socket = connect(port, '127.0.0.1')
+  await new Promise<void>((resolve) => socket.once('connect', resolve))
+  return [server, core, socket, new Client(socket)]
+}
+
+async function serveAs(ws: Workspace): Promise<[MirageNFSServer, Socket, Client]> {
+  const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
+  const server = new MirageNFSServer(core, '/', false)
+  const port = await server.start()
+  const socket = connect(port, '127.0.0.1')
+  await new Promise<void>((resolve) => socket.once('connect', resolve))
+  return [server, socket, new Client(socket)]
+}
+
 describe('MirageNFSServer', () => {
   let server: MirageNFSServer
   let socket: Socket
@@ -275,18 +296,6 @@ describe('MirageNFSServer', () => {
 })
 
 describe('MirageNFSServer handles and shutdown', () => {
-  async function serve(
-    ws: Workspace,
-    secure = false,
-  ): Promise<[MirageNFSServer, MountCore, Socket, Client]> {
-    const core = new MountCore(ws.vfs)
-    const server = new MirageNFSServer(core, '/', secure)
-    const port = await server.start()
-    const socket = connect(port, '127.0.0.1')
-    await new Promise<void>((resolve) => socket.once('connect', resolve))
-    return [server, core, socket, new Client(socket)]
-  }
-
   it('refuses a client on an unreserved port when secure', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const [server, , socket] = await serve(ws, true)
@@ -479,15 +488,6 @@ describe('MirageNFSServer handles and shutdown', () => {
 })
 
 describe('MirageNFSServer and session changes', () => {
-  async function serveAs(ws: Workspace): Promise<[MirageNFSServer, Socket, Client]> {
-    const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
-    const server = new MirageNFSServer(core, '/', false)
-    const port = await server.start()
-    const socket = connect(port, '127.0.0.1')
-    await new Promise<void>((resolve) => socket.once('connect', resolve))
-    return [server, socket, new Client(socket)]
-  }
-
   it('keeps handles opened after a session change out of the older reset', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('echo x > /x; echo y > /y')
