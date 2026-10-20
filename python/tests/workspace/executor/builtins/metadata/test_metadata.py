@@ -359,18 +359,20 @@ class _LinkUnderRoot:
         return [("/a/lnk", FileStat(name="lnk", type=FileType.SYMLINK))]
 
 
+async def _refused_readdir(op: str, path: PathSpec, *args, **kwargs):
+    """A dispatch whose mount refuses every listing."""
+    assert op == "readdir"
+    raise PermissionError(13, "Permission denied", path.virtual)
+
+
 @pytest.mark.asyncio
 async def test_a_refused_root_listing_keeps_every_link_below_it():
     # A mount that stats `/` but refuses to list it: the walk never goes
     # below the root, so no link there is changed either.
-    async def dispatch(op: str, path: PathSpec, *args, **kwargs):
-        assert op == "readdir"
-        raise PermissionError(13, "Permission denied", path.virtual)
-
     root = PathSpec.from_str_path("/")
     walked, owned = await walk_owned(
         _LinkUnderRoot(),
-        dispatch,
+        _refused_readdir,
         root,
         FileStat(name="/", type=FileType.DIRECTORY),
     )

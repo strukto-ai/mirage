@@ -609,6 +609,12 @@ describe("a rule's refusal is one file's error", () => {
   })
 })
 
+/** A dispatch whose mount refuses every listing. */
+function refusedReaddir(op: string): Promise<never> {
+  expect(op).toBe('readdir')
+  return Promise.reject(Object.assign(new Error('Permission denied'), { code: 'EACCES' }))
+}
+
 it('keeps every link below a root it was refused to list', async () => {
   // A mount that stats `/` but refuses to list it: the walk never goes below
   // the root, so no link there is changed either.
@@ -616,13 +622,9 @@ it('keeps every link below a root it was refused to list', async () => {
     isLink: () => false,
     linkStatsBelow: () => [['/a/lnk', new FileStat({ name: 'lnk', type: FileType.SYMLINK })]],
   } as unknown as Parameters<typeof walkOwned>[0]
-  const dispatch = ((op: string) => {
-    expect(op).toBe('readdir')
-    return Promise.reject(Object.assign(new Error('Permission denied'), { code: 'EACCES' }))
-  }) as unknown as Parameters<typeof walkOwned>[1]
   const { walked, owned } = await walkOwned(
     links,
-    dispatch,
+    refusedReaddir as unknown as Parameters<typeof walkOwned>[1],
     PathSpec.fromStrPath('/'),
     new FileStat({ name: '/', type: FileType.DIRECTORY }),
   )
