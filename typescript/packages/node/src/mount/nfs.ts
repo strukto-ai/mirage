@@ -19,6 +19,7 @@ import { posix } from 'node:path'
 import { promisify } from 'node:util'
 import { NFSEngine, type NFSRequest } from '@struktoai/mirage-core/rs/nfs'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { LISTING_CONCURRENCY, OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
 import type { MountCore } from './core.ts'
 import { classifyErrno } from './errors.ts'
@@ -127,7 +128,8 @@ export function wireAttrs(attrs: MountAttrs): Record<string, JsonValue> {
  * operation the engine asks for on the core, so a kernel NFS client mounts
  * the core's tree with no driver installed. NFS has no open or close: a read
  * opens its file on the core and later reads reuse that handle until the
- * file's size or mtime moves. `secure` takes only clients on a reserved
+ * file's size or mtime moves or the bound session changes, so a new hide or
+ * grant holds. `secure` takes only clients on a reserved
  * port, as a kernel client mounted by root is; it is on by default on Linux.
  * Mirrors Python's MirageNFSServer.
  */
@@ -138,6 +140,7 @@ export class MirageNFSServer {
   private nextConn = 0
   private readonly handles = new Map<string, Promise<number>>()
   private readonly versions = new Map<string, string>()
+  private generation: number | null = null
 
   constructor(
     private readonly core: MountCore,
@@ -236,8 +239,14 @@ export class MirageNFSServer {
       switch (request.op) {
         case 'getattr':
           return [{ attrs: wireAttrs(await this.getattr(request.path)) }, new Uint8Array()]
-        case 'readdir':
-          return [{ entries: await this.listing(request.path) }, new Uint8Array()]
+        case 'readdir': {
+          const [entries, end] = await this.listing(
+            request.path,
+            request.after ?? null,
+            request.limit ?? 0,
+          )
+          return [{ entries, end }, new Uint8Array()]
+        }
         case 'read':
           return [{}, await this.read(request.path, request.offset ?? 0, request.size ?? 0)]
         case 'readlink':
@@ -251,10 +260,19 @@ export class MirageNFSServer {
     }
   }
 
-  private async listing(path: string): Promise<JsonValue[]> {
-    const names = (await this.core.readdir(path)).filter((name) => name !== '.' && name !== '..')
-    const rows: JsonValue[] = new Array<JsonValue>(names.length).fill(null)
-    const todo = names.entries()
+  private async listing(
+    path: string,
+    after: string | null,
+    limit: number,
+  ): Promise<[JsonValue[], boolean]> {
+    const names = (await this.core.readdir(path))
+      .filter((name) => name !== '.' && name !== '..')
+      .sort(compareCodePoints)
+    const found = after === null ? 0 : names.findIndex((name) => compareCodePoints(name, after) > 0)
+    const start = found === -1 ? names.length : found
+    const page = names.slice(start, start + limit)
+    const rows: JsonValue[] = new Array<JsonValue>(page.length).fill(null)
+    const todo = page.entries()
     const worker = async (): Promise<void> => {
       for (const [index, name] of todo) {
         try {
@@ -268,8 +286,8 @@ export class MirageNFSServer {
         }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, names.length) }, worker))
-    return rows
+    await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, page.length) }, worker))
+    return [rows, start + limit >= names.length]
   }
 
   private async getattr(path: string): Promise<MountAttrs> {
@@ -282,7 +300,18 @@ export class MirageNFSServer {
   }
 
   private async read(path: string, offset: number, size: number): Promise<Uint8Array> {
-    const opened = this.handles.get(path) ?? this.open(path)
+    const generation = this.core.session?.generation ?? null
+    if (generation !== this.generation) {
+      await this.releaseAll()
+      this.generation = generation
+    }
+    let opened = this.handles.get(path)
+    if (opened === undefined) {
+      opened = this.open(path)
+      opened.catch((err: unknown) => {
+        console.debug(`nfs: opening ${path} failed: ${String(err)}`)
+      })
+    }
     this.handles.delete(path)
     this.handles.set(path, opened)
     while (this.handles.size > OPEN_HANDLES) {

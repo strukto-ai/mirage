@@ -116,6 +116,24 @@ class Client:
         reply.u32()
         return reply.opaque()
 
+    async def readdir(
+        self, handle: bytes, cookie: int, count: int
+    ) -> tuple[list[tuple[str, int]], bool]:
+        reply = await self.call(
+            NFS,
+            16,
+            opaque(handle) + struct.pack(">Q8sI", cookie, b"\0" * 8, count),
+        )
+        assert reply.u32() == 0
+        reply.post_op_attr()
+        reply.u64()
+        entries = []
+        while reply.u32():
+            reply.u64()
+            name = reply.opaque().decode()
+            entries.append((name, reply.u64()))
+        return entries, bool(reply.u32())
+
 
 class Counting(MountCore):
     def __init__(self, ws: Workspace) -> None:
@@ -326,3 +344,52 @@ def test_a_timed_out_unmount_falls_through_to_the_forced_one(
     monkeypatch.setattr(subprocess, "run", run)
     nfs.unmount_nfs("/mnt/x")
     assert ran == nfs.unmount_args("/mnt/x")
+
+
+@pytest.mark.asyncio
+async def test_a_hide_after_a_read_stops_later_reads() -> None:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("printf 'secret\\n' > /a.txt")
+    session = ws.create_session("reader")
+    server = MirageNFSServer(MountCore(ws.vfs, session=session), secure=False)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    client = Client(reader, writer)
+    try:
+        handle = await client.handle("a.txt")
+        assert await client.read(handle, 0, 100) == b"secret\n"
+        await ws.set_session_profile("reader", {"paths": {"hide": ["/a.txt"]}})
+        reply = await client.call(
+            NFS, 6, opaque(handle) + struct.pack(">QI", 0, 100)
+        )
+        assert reply.u32() == 2
+    finally:
+        writer.close()
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_a_listing_pages_by_name_and_a_later_page_sees_a_new_hide() -> (
+    None
+):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /d && for i in $(seq 10 39); do echo > /d/f$i; done")
+    session = ws.create_session("reader")
+    server = MirageNFSServer(MountCore(ws.vfs, session=session), secure=False)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    client = Client(reader, writer)
+    try:
+        directory = await client.handle("d")
+        listed, eof = await client.readdir(directory, 0, 512)
+        assert not eof
+        await ws.set_session_profile("reader", {"paths": {"hide": ["/d/f39"]}})
+        cookie = listed[-1][1]
+        while not eof:
+            page, eof = await client.readdir(directory, cookie, 512)
+            listed += page
+            cookie = page[-1][1] if page else cookie
+        assert [name for name, _ in listed] == [f"f{i}" for i in range(10, 39)]
+    finally:
+        writer.close()
+        await server.close()

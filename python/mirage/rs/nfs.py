@@ -31,6 +31,8 @@ class NFSRequest(TypedDict):
     path: str
     offset: NotRequired[int]
     size: NotRequired[int]
+    after: NotRequired[str]
+    limit: NotRequired[int]
 
 
 class NFSEngine:

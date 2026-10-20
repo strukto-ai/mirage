@@ -962,9 +962,6 @@ pub async fn nfsproc3_readdirplus(
             }
             // eof is only valid here if we wrote everything
             let eof = all_entries_written && result.end;
-            if eof {
-                context.vfs.listed(dirid);
-            }
             if ctr == 0 && !eof {
                 make_success_reply(xid).serialize(output)?;
                 nfs::nfsstat3::NFS3ERR_TOOSMALL.serialize(output)?;
@@ -1073,9 +1070,6 @@ pub async fn nfsproc3_readdir(
             }
             // eof is only valid here if we wrote everything
             let eof = all_entries_written && result.end;
-            if eof {
-                context.vfs.listed(dirid);
-            }
             if ctr == 0 && !eof {
                 make_success_reply(xid).serialize(output)?;
                 nfs::nfsstat3::NFS3ERR_TOOSMALL.serialize(output)?;

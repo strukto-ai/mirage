@@ -16,7 +16,7 @@ pub struct ReadDirSimpleResult {
     pub end: bool,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct DirEntry {
     pub fileid: fileid3,
     pub name: filename3,

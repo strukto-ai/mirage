@@ -20,6 +20,7 @@ import { MountBackend, MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ConstantsModule from '../mount/constants.ts'
 import type * as NFSModule from '../mount/nfs.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -27,6 +28,11 @@ const calls = vi.hoisted(() => ({
   mounted: [] as [number, string][],
   unmounted: [] as string[],
   refuse: false,
+}))
+
+vi.mock('../mount/constants.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof ConstantsModule>()),
+  RESERVED_PORTS: 1 << 16,
 }))
 
 vi.mock('../mount/nfs.ts', async (importOriginal) => {

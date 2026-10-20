@@ -39,6 +39,7 @@ class FakeMount:
         self.mounted: list[tuple[int, str]] = []
         self.unmounted: list[str] = []
         self.refuse = refuse
+        monkeypatch.setattr("mirage.mount.nfs.RESERVED_PORTS", 1 << 16)
         monkeypatch.setattr("mirage.workspace.nfs.mount_nfs", self.mount)
         monkeypatch.setattr(
             "mirage.workspace.nfs.unmount_nfs", self.unmounted.append

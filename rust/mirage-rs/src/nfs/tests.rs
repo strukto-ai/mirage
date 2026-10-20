@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -54,8 +55,9 @@ fn fh(id: u64) -> nfs_fh3 {
 /// A file's bytes, or a directory's children.
 type Body = Result<Vec<u8>, Vec<&'static str>>;
 
-/// A mount the fake host serves: path to mode and body.
-struct Tree(HashMap<&'static str, (u32, Body)>);
+/// A mount the fake host serves: path to mode and body, and how many
+/// listing entries it has served.
+struct Tree(HashMap<&'static str, (u32, Body)>, Cell<usize>);
 
 impl Tree {
     fn sample() -> Self {
@@ -63,7 +65,7 @@ impl Tree {
         tree.insert("/", (0o040755, Err(vec!["a.txt", "sub"])));
         tree.insert("/a.txt", (0o100644, Ok(b"hello\n".to_vec())));
         tree.insert("/sub", (0o040755, Err(vec![])));
-        Tree(tree)
+        Tree(tree, Cell::new(0))
     }
 
     fn attrs(&self, path: &str) -> Option<Value> {
@@ -94,14 +96,22 @@ impl Tree {
             },
             "readdir" => match self.0.get(path) {
                 Some((_, Err(children))) => {
-                    let entries: Vec<Value> = children
+                    let mut names = children.clone();
+                    names.sort_unstable();
+                    let after = request["after"].as_str().unwrap_or("");
+                    let start = names.partition_point(|name| *name <= after);
+                    let limit = request["limit"].as_u64().unwrap() as usize;
+                    let page = &names[start..(start + limit).min(names.len())];
+                    self.1.set(self.1.get() + page.len());
+                    let entries: Vec<Value> = page
                         .iter()
                         .map(|name| {
                             let child = format!("{}/{name}", path.trim_end_matches('/'));
                             json!({"name": name, "attrs": self.attrs(&child)})
                         })
                         .collect();
-                    (json!({ "entries": entries }), Vec::new())
+                    let end = start + limit >= names.len();
+                    (json!({ "entries": entries, "end": end }), Vec::new())
                 }
                 Some(_) => (json!({"error": "ENOTDIR"}), Vec::new()),
                 None => missing,
@@ -440,7 +450,8 @@ fn readdir_pages_a_large_directory_from_each_cookie() {
     }
     assert!(pages > 1);
     assert_eq!(seen, names);
-    assert_eq!(asked, pages as usize + 1);
+    assert_eq!(asked, 2 * pages as usize);
+    assert!(tree.1.get() < 3 * names.len());
 }
 
 /// A plain READDIR reply: its status, its (name, cookie) entries, and
@@ -550,8 +561,8 @@ fn readdir_fits_a_long_name_the_count_holds_and_refuses_a_count_too_small() {
     }
 }
 
-#[test]
-fn a_cookie_whose_entry_was_removed_resumes_after_its_name() {
+/// A root of 40 files and the first page of its listing.
+fn listed_forty() -> (Tree, Server, Vec<&'static str>, Vec<(String, u64)>) {
     let names: Vec<&'static str> = (0..40).map(|i| leak(format!("f{i:02}"))).collect();
     let mut tree = Tree::sample();
     tree.0.insert("/", (0o040755, Err(names.clone())));
@@ -563,27 +574,38 @@ fn a_cookie_whose_entry_was_removed_resumes_after_its_name() {
     let (out, _) = tree.run(&mut server, 1, &readdir(30, 1, 0, 512));
     let (_, first, eof) = page(&out);
     assert!(!eof);
+    (tree, server, names, first)
+}
+
+#[test]
+fn a_cookie_whose_entry_was_removed_resumes_after_its_name() {
+    let (mut tree, mut server, names, first) = listed_forty();
     let (last, cookie) = first.last().cloned().unwrap();
-    let (mut other, mut xid) = (0_u64, 31);
-    loop {
-        let (out, _) = tree.run(&mut server, 1, &readdir(xid, 1, other, 4096));
-        let (_, entries, eof) = page(&out);
-        other = entries.last().map_or(other, |(_, at)| *at);
-        xid += 1;
-        if eof {
-            break;
-        }
-    }
     let gone = names.iter().position(|name| *name == last).unwrap();
     let mut left = names.clone();
     left.remove(gone);
     tree.0.insert("/", (0o040755, Err(left)));
     tree.0.remove(leak(format!("/{last}")));
-    let (out, _) = tree.run(&mut server, 1, &readdir(xid, 1, cookie, 4096));
+    let (out, _) = tree.run(&mut server, 1, &readdir(31, 1, cookie, 4096));
     let (stat, rest, _) = page(&out);
     assert!(matches!(stat, nfsstat3::NFS3_OK));
     let rest: Vec<String> = rest.into_iter().map(|(name, _)| name).collect();
     assert_eq!(rest, names[gone + 1..]);
+}
+
+#[test]
+fn a_later_page_lists_only_what_the_host_shows_then() {
+    let (mut tree, mut server, names, first) = listed_forty();
+    let (_, cookie) = first.last().cloned().unwrap();
+    let hidden = names[names.len() - 1];
+    tree.0
+        .insert("/", (0o040755, Err(names[..names.len() - 1].to_vec())));
+    let (out, _) = tree.run(&mut server, 1, &readdir(32, 1, cookie, 4096));
+    let (stat, rest, eof) = page(&out);
+    assert!(matches!(stat, nfsstat3::NFS3_OK));
+    assert!(eof);
+    assert!(!rest.is_empty());
+    assert!(rest.iter().all(|(name, _)| name != hidden));
 }
 
 #[test]

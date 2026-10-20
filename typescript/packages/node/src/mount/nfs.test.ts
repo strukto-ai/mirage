@@ -148,6 +148,28 @@ class Client {
     return new TextDecoder().decode(reply.opaque())
   }
 
+  async readdir(
+    handle: Uint8Array,
+    cookie: number,
+    count: number,
+  ): Promise<[[string, number][], boolean]> {
+    const reply = await this.call(
+      NFS,
+      16,
+      concat([opaque(handle), u64(cookie), new Uint8Array(8), u32(count)]),
+    )
+    expect(reply.u32()).toBe(0)
+    reply.postOpAttr()
+    reply.u64()
+    const entries: [string, number][] = []
+    while (reply.u32() === 1) {
+      reply.u64()
+      const name = new TextDecoder().decode(reply.opaque())
+      entries.push([name, reply.u64()])
+    }
+    return [entries, reply.u32() === 1]
+  }
+
   private async record(): Promise<Uint8Array> {
     for (;;) {
       if (this.buffer.length >= 4) {
@@ -305,6 +327,34 @@ describe('MirageNFSServer handles and shutdown', () => {
     }
   })
 
+  it('answers a failed open while an older file is still being released', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('for f in a b c; do echo $f > /$f; done')
+    const [server, core, socket, client] = await serve(ws)
+    try {
+      for (const name of ['a', 'b']) await client.read(await client.handle(name), 0, 10)
+      const handle = await client.handle('c')
+      let finish = (): void => undefined
+      const real = core.release.bind(core)
+      vi.spyOn(core, 'release').mockImplementation(async (fd: number) => {
+        await new Promise<void>((done) => {
+          finish = done
+        })
+        await real(fd)
+      })
+      vi.spyOn(core, 'open').mockRejectedValue(new Error('gone'))
+      vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+      const reply = client.call(NFS, 6, concat([opaque(handle), u64(0), u32(10)]))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      finish()
+      expect((await reply).u32()).not.toBe(0)
+    } finally {
+      vi.restoreAllMocks()
+      socket.destroy()
+      await server.close()
+    }
+  })
+
   it('drops a request that finishes after the server closed', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const [server, core, socket, client] = await serve(ws)
@@ -327,6 +377,58 @@ describe('MirageNFSServer handles and shutdown', () => {
     finish()
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(debug.mock.calls.flat().join('\n')).not.toContain('failed')
+  })
+})
+
+describe('MirageNFSServer and session changes', () => {
+  async function serveAs(ws: Workspace): Promise<[MirageNFSServer, Socket, Client]> {
+    const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
+    const server = new MirageNFSServer(core, '/', false)
+    const port = await server.start()
+    const socket = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => socket.once('connect', resolve))
+    return [server, socket, new Client(socket)]
+  }
+
+  it('stops later reads once a hide covers the file', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("printf 'secret\\n' > /a.txt")
+    const [server, socket, client] = await serveAs(ws)
+    try {
+      const handle = await client.handle('a.txt')
+      expect(await client.read(handle, 0, 100)).toBe('secret\n')
+      await ws.setSessionProfile('reader', { paths: { hide: ['/a.txt'] } })
+      const reply = await client.call(NFS, 6, concat([opaque(handle), u64(0), u32(100)]))
+      expect(reply.u32()).toBe(2)
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('pages a listing by name and a later page sees a new hide', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir /d && for i in $(seq 10 39); do echo > /d/f$i; done')
+    const [server, socket, client] = await serveAs(ws)
+    try {
+      const dir = await client.handle('d')
+      let [listed, eof] = await client.readdir(dir, 0, 512)
+      expect(eof).toBe(false)
+      await ws.setSessionProfile('reader', { paths: { hide: ['/d/f39'] } })
+      let cookie = listed.at(-1)?.[1] ?? 0
+      while (!eof) {
+        const [page, end] = await client.readdir(dir, cookie, 512)
+        listed = [...listed, ...page]
+        cookie = page.at(-1)?.[1] ?? cookie
+        eof = end
+      }
+      expect(listed.map(([name]) => name)).toEqual(
+        Array.from({ length: 29 }, (_, i) => `f${String(i + 10)}`),
+      )
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
   })
 })
 

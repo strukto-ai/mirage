@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import bisect
 import errno
 import logging
 import os
@@ -174,7 +175,8 @@ class MirageNFSServer:
     and runs each file operation the engine asks for on the core, so a
     kernel NFS client mounts the core's tree with no driver installed.
     NFS has no open or close: a read opens its file on the core and
-    later reads reuse that handle until the file's size or mtime moves.
+    later reads reuse that handle until the file's size or mtime moves
+    or the bound session changes, so a new hide or grant holds.
 
     Args:
         core (MountCore): the mount core to serve.
@@ -200,6 +202,7 @@ class MirageNFSServer:
         self._stats = asyncio.Semaphore(LISTING_CONCURRENCY)
         self._handles: dict[str, asyncio.Future[int]] = {}
         self._versions: dict[str, tuple[int, int]] = {}
+        self._generation: int | None = None
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
         """Listen on ``host``, and return the port a client mounts.
@@ -289,7 +292,10 @@ class MirageNFSServer:
                         "attrs": wire_attrs(await self._getattr(path))
                     }, b""
                 case "readdir":
-                    return {"entries": await self._listing(path)}, b""
+                    entries, end = await self._listing(
+                        path, request.get("after"), request.get("limit", 0)
+                    )
+                    return {"entries": entries, "end": end}, b""
                 case "read":
                     offset, size = (
                         request.get("offset", 0),
@@ -305,7 +311,9 @@ class MirageNFSServer:
             logger.debug("nfs: %s %s: %r", request["op"], path, exc)
             return {"error": errno.errorcode.get(code, "EIO")}, b""
 
-    async def _listing(self, path: str) -> list[JsonValue]:
+    async def _listing(
+        self, path: str, after: str | None, limit: int
+    ) -> tuple[list[JsonValue], bool]:
         async def entry(name: str) -> JsonValue:
             async with self._stats:
                 try:
@@ -319,10 +327,13 @@ class MirageNFSServer:
                     return {"name": name, "attrs": None}
             return {"name": name, "attrs": wire_attrs(attrs)}
 
-        names = [
+        names = sorted(
             n for n in await self._core.readdir(path) if n not in (".", "..")
-        ]
-        return list(await asyncio.gather(*(entry(name) for name in names)))
+        )
+        start = 0 if after is None else bisect.bisect_right(names, after)
+        page = names[start : start + limit]
+        rows = list(await asyncio.gather(*(entry(name) for name in page)))
+        return rows, start + limit >= len(names)
 
     async def _getattr(self, path: str) -> MountAttrs:
         attrs = await self._core.getattr(path)
@@ -332,6 +343,11 @@ class MirageNFSServer:
         return attrs
 
     async def _read(self, path: str, offset: int, size: int) -> bytes:
+        session = self._core.session
+        generation = None if session is None else session.generation
+        if generation != self._generation:
+            await self._release_all()
+            self._generation = generation
         opened = self._handles.pop(path, None)
         if opened is None:
             opened = asyncio.ensure_future(self._open(path))

@@ -42,6 +42,8 @@ export interface NFSRequest {
   readonly path: string
   readonly offset?: number
   readonly size?: number
+  readonly after?: string
+  readonly limit?: number
 }
 
 const encoder = new TextEncoder()
