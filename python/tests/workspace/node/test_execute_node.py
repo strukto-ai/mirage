@@ -97,6 +97,7 @@ def _mock_registry():
     reg.io = IOConfig()
     reg.mount_for = MagicMock(return_value=mount)
     reg.try_mount_for = MagicMock(return_value=mount)
+    reg.command_mount = MagicMock(return_value=mount)
     reg.resolve_mount = AsyncMock(return_value=mount)
     # A bare MagicMock policies answers wants() truthy and then fails the
     # await inside the gates; an empty Policies is what production carries.

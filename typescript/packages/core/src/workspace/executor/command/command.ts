@@ -442,10 +442,9 @@ export async function handleCommand(
     (s) => s.walkError !== 'ENOENT',
   )
   const ownMount = registry.commandMount(cmdName, operands, session.cwd)
+  const ownSpec = ownMount?.specFor(cmdName) ?? null
   const borrowed =
-    SPECS[cmdName] !== undefined &&
-    ownMount !== null &&
-    !isBuiltinGrammar(cmdName, ownMount.specFor(cmdName))
+    SPECS[cmdName] !== undefined && ownSpec !== null && !isBuiltinGrammar(cmdName, ownSpec)
   if (!borrowed && cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
     if (operand !== null) {
@@ -771,25 +770,25 @@ export async function handleCommand(
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
-  // output through another.
-  if (routingScopes.length >= 2) {
-    const mountPrefixes = new Set<string>()
-    for (const s of routingScopes) {
-      // a scope outside any mount contributes nothing here
-      const m = registry.tryMountFor(s.virtual)
-      if (m !== null) mountPrefixes.add(m.prefix)
-    }
-    if (mountPrefixes.size > 1) {
-      const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
-      const err = encodeText(
-        `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
-      )
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: err }),
-        new ExecutionNode({ command: cmdStr, exitCode: 1 }),
-      ]
-    }
+  // output through another. A borrowed line runs on its predicted mount, so
+  // every word classified as a path must lie there too, or its handler reads
+  // another mount's path through its own.
+  const mountPrefixes = new Set<string>(borrowed && ownMount !== null ? [ownMount.prefix] : [])
+  for (const s of borrowed ? pathScopes : routingScopes) {
+    // a scope outside any mount contributes nothing here
+    const m = registry.tryMountFor(s.virtual)
+    if (m !== null) mountPrefixes.add(m.prefix)
+  }
+  if (mountPrefixes.size > 1) {
+    const prefixesStr = [...mountPrefixes].sort(compareCodePoints).join(', ')
+    const err = encodeText(
+      `${cmdName}: paths span multiple mounts (${prefixesStr}), cross-mount not supported\n`,
+    )
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: err }),
+      new ExecutionNode({ command: cmdStr, exitCode: 1 }),
+    ]
   }
 
   let mount: MountEntry | null

@@ -493,10 +493,11 @@ async def handle_command(
         if s.walk_error != "ENOENT"
     ]
     own_mount = registry.command_mount(cmd_name, operands, session.cwd)
+    own_spec = own_mount.spec_for(cmd_name) if own_mount is not None else None
     borrowed = (
         cmd_name in SPECS
-        and own_mount is not None
-        and not is_builtin_grammar(cmd_name, own_mount.spec_for(cmd_name))
+        and own_spec is not None
+        and not is_builtin_grammar(cmd_name, own_spec)
     )
     if not borrowed and cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
@@ -836,27 +837,31 @@ async def handle_command(
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
     # command bound to one mount cannot write its output through another.
-    if len(routing_scopes) >= 2:
-        mount_prefixes = set()
-        for s in routing_scopes:
-            m = registry.try_mount_for(s.virtual)
-            # a scope outside any mount contributes nothing here
-            if m is not None:
-                mount_prefixes.add(m.prefix)
-        if len(mount_prefixes) > 1:
-            prefixes_str = ", ".join(sorted(mount_prefixes))
-            span_err = (
-                f"{cmd_name}: paths span multiple mounts "
-                f"({prefixes_str}), cross-mount not supported\n"
-            )
-            return (
-                None,
-                IOResult(
-                    exit_code=1,
-                    stderr=encode_text(span_err),
-                ),
-                ExecutionNode(command=cmd_str, exit_code=1),
-            )
+    # A borrowed line runs on its predicted mount, so every word classified
+    # as a path must lie there too, or its handler reads another mount's
+    # path through its own.
+    mount_prefixes = (
+        {own_mount.prefix} if borrowed and own_mount is not None else set()
+    )
+    for s in path_scopes if borrowed else routing_scopes:
+        m = registry.try_mount_for(s.virtual)
+        # a scope outside any mount contributes nothing here
+        if m is not None:
+            mount_prefixes.add(m.prefix)
+    if len(mount_prefixes) > 1:
+        prefixes_str = ", ".join(sorted(mount_prefixes))
+        span_err = (
+            f"{cmd_name}: paths span multiple mounts "
+            f"({prefixes_str}), cross-mount not supported\n"
+        )
+        return (
+            None,
+            IOResult(
+                exit_code=1,
+                stderr=encode_text(span_err),
+            ),
+            ExecutionNode(command=cmd_str, exit_code=1),
+        )
 
     try:
         mount = await registry.resolve_mount(

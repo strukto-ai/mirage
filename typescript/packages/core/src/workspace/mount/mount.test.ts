@@ -616,16 +616,18 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
 // classified as paths, read by position: never a file an option reads, even
 // one an operand repeats, nor a word the cwd's spec left as text. /a borrows
 // grep (text operands), find and rg (path operands); the builtin rg reads
-// `/a/patterns` and a lone `/b/input` as its pattern, a text slot, so that
-// line stays on /a with the borrowed rg.
+// `/a/patterns` and a lone `/b/input` as its pattern, a text slot, so those
+// lines run on /a, where a path on /b is refused rather than handed to /a's rg.
+const SPAN = 'rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n'
 it.each([
-  ['cd /b && grep -f /a/patterns /b/input', 'hi\n'],
-  ['cd /b && grep -f /a/patterns /b/input /a/patterns', '/b/input:hi\n[["/a/patterns"],[]]'],
-  ['cd /a && grep hi /b/input', '[[],["hi","/b/input"]]'],
-  ['cd /a && rg /a/patterns /b/input', '/a/patterns\n'],
-  ['cd /a && rg /b/input', '[["/b/input"],[]]'],
-  ['cd /a && find //b/input -print0', '//b/input\0'],
-])('keeps `%s` on its own command', async (line, stdout) => {
+  ['cd /b && grep -f /a/patterns /b/input', 0, 'hi\n', ''],
+  ['cd /b && grep -f /a/patterns /b/input /a/patterns', 0, '/b/input:hi\n[["/a/patterns"],[]]', ''],
+  ['cd /a && grep hi /b/input', 0, '[[],["hi","/b/input"]]', ''],
+  ['cd /a && rg /a/patterns /b/input', 0, '/a/patterns\n', ''],
+  ['cd /a && rg /b/input', 1, '', SPAN],
+  ['cd /a && rg /b/input /a/patterns', 1, '', SPAN],
+  ['cd /a && find //b/input -print0', 0, '//b/input\0', ''],
+])('keeps `%s` on its own command', async (line, code, stdout, stderr) => {
   const ws = new Workspace(
     { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
@@ -647,7 +649,7 @@ it.each([
     }
     await ws.shell("echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input")
     const result = await ws.shell(line)
-    expect([result.exitCode, result.stdoutText]).toEqual([0, stdout])
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([code, stdout, stderr])
   } finally {
     await ws.close()
   }

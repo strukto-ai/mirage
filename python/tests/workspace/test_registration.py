@@ -239,24 +239,33 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
 # reads, even one an operand repeats, nor a word the cwd's spec left as
 # text. /a borrows grep (text operands), find and rg (path operands);
 # the builtin rg reads `/a/patterns` and a lone `/b/input` as its pattern,
-# a text slot, so that line stays on /a with the borrowed rg.
+# a text slot, so those lines run on /a, where a path on /b is refused
+# rather than handed to /a's rg.
+SPAN = (
+    b"rg: paths span multiple mounts (/a/, /b/), cross-mount not supported\n"
+)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, stdout",
+    "line, code, stdout, stderr",
     [
-        ("cd /b && grep -f /a/patterns /b/input", b"hi\n"),
+        ("cd /b && grep -f /a/patterns /b/input", 0, b"hi\n", b""),
         (
             "cd /b && grep -f /a/patterns /b/input /a/patterns",
+            0,
             b"/b/input:hi\n['/a/patterns'] []\n",
+            b"",
         ),
-        ("cd /a && grep hi /b/input", b"[] ['hi', '/b/input']\n"),
-        ("cd /a && rg /a/patterns /b/input", b"/a/patterns\n"),
-        ("cd /a && rg /b/input", b"['/b/input'] []\n"),
-        ("cd /a && find //b/input -print0", b"//b/input\x00"),
+        ("cd /a && grep hi /b/input", 0, b"[] ['hi', '/b/input']\n", b""),
+        ("cd /a && rg /a/patterns /b/input", 0, b"/a/patterns\n", b""),
+        ("cd /a && rg /b/input", 1, b"", SPAN),
+        ("cd /a && rg /b/input /a/patterns", 1, b"", SPAN),
+        ("cd /a && find //b/input -print0", 0, b"//b/input\x00", b""),
     ],
 )
 async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
-    ws_two_mounts, line, stdout
+    ws_two_mounts, line, code, stdout, stderr
 ):
     for name, kind in (("grep", "str"), ("find", "path"), ("rg", "path")):
         ws_two_mounts.mount("/a/").register(
@@ -274,4 +283,8 @@ async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
         "echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input"
     )
     result = await ws_two_mounts.shell(line)
-    assert (result.exit_code, result.stdout) == (0, stdout)
+    assert (
+        result.exit_code,
+        result.stdout or b"",
+        result.stderr or b"",
+    ) == (code, stdout, stderr)
