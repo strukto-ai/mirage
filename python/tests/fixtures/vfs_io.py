@@ -14,6 +14,7 @@
 
 import inspect
 from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
 from typing import Any
 
 from mirage.accessor.base import Accessor
@@ -31,6 +32,11 @@ from mirage.vfs.ram import RAMVFS
 from mirage.view.types import LinkView, MountView
 from mirage.workspace import Workspace
 from mirage.workspace.mount import MountEntry
+
+
+class StubAccessor(SimpleNamespace, Accessor):
+    """An accessor carrying whatever fields a test hands it, which a mount
+    takes as it takes any other."""
 
 
 def vfs_over(cls: type[BaseVFS], accessor: Accessor) -> BaseVFS:

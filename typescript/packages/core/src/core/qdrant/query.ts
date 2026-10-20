@@ -282,32 +282,29 @@ export async function searchRows(
   query: string,
   limit: number,
 ): Promise<QdrantRow[]> {
-  const key = JSON.stringify([table, query, limit])
-  const hit = accessor.searchCache.get(key)
-  if (hit !== undefined) return hit
-  const config = accessor.config
-  const client = await accessor.client()
-  // A caller-supplied `embed` vectorizes the query here, and cloud inference
-  // sends the text to a cluster that embeds it. Python embeds in process when
-  // neither is set, which no JS client can.
-  let vector: number[] | { text: string; model: string }
-  if (config.embed !== null) vector = await config.embed(query)
-  else if (config.cloudInference) vector = { text: query, model: config.embeddingModel }
-  else {
-    throw new Error(
-      'search: the query needs a vector: pass embed, or set cloud_inference for a cluster with inference',
-    )
-  }
-  const res = (await client.query(table, {
-    query: vector,
-    limit,
-    with_payload: true,
-  })) as { points: QdrantPoint[] }
-  const rows = res.points.map((point) => {
-    const row = pointToRow(point, config.idField)
-    row._score = point.score
-    return row
+  return accessor.searches.get(JSON.stringify([table, query, limit]), async () => {
+    const config = accessor.config
+    const client = await accessor.client()
+    // A caller-supplied `embed` vectorizes the query here, and cloud inference
+    // sends the text to a cluster that embeds it. Python embeds in process
+    // when neither is set, which no JS client can.
+    let vector: number[] | { text: string; model: string }
+    if (config.embed !== null) vector = await config.embed(query)
+    else if (config.cloudInference) vector = { text: query, model: config.embeddingModel }
+    else {
+      throw new Error(
+        'search: the query needs a vector: pass embed, or set cloud_inference for a cluster with inference',
+      )
+    }
+    const res = (await client.query(table, {
+      query: vector,
+      limit,
+      with_payload: true,
+    })) as { points: QdrantPoint[] }
+    return res.points.map((point) => {
+      const row = pointToRow(point, config.idField)
+      row._score = point.score
+      return row
+    })
   })
-  accessor.searchCache.set(key, rows)
-  return rows
 }

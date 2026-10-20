@@ -33,22 +33,38 @@ export class GitHubAccount extends Accessor {
   }
 
   /**
+   * The account behind a peer (a gh install's, or a github mount's) on this
+   * API base; null for any other.
+   */
+  private peer(peer: Accessor): GitHubAccount | null {
+    const account = peer instanceof GitHubAccessor ? peer.account : peer
+    return account instanceof GitHubAccount && account.config.baseUrl === this.config.baseUrl
+      ? account
+      : null
+  }
+
+  /**
    * Ride the transport (and its write limiter) of a peer account, a gh
    * install's or a github mount's, on the same token and API base.
    */
   override join(peers: readonly Accessor[]): void {
     for (const peer of peers) {
-      const account = peer instanceof GitHubAccessor ? peer.account : peer
-      if (
-        account instanceof GitHubAccount &&
-        account !== this &&
-        account.config.token === this.config.token &&
-        account.config.baseUrl === this.config.baseUrl
-      ) {
+      const account = this.peer(peer)
+      if (account !== null && account !== this && account.config.token === this.config.token) {
         this.transport = account.transport
         return
       }
     }
+  }
+
+  /**
+   * Whether a write through this account may change what `peer` reads: only a
+   * GitHub account or repository on the same API base, whatever token it reads
+   * with, since two tokens can reach one repository. Mirrors Python's
+   * `GitHubAccount.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return this.peer(peer) !== null
   }
 }
 

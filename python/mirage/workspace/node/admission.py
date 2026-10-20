@@ -67,7 +67,7 @@ from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
-from mirage.workspace.executor.command.cli import drops_mount_caches
+from mirage.workspace.executor.command.cli import reaches_service
 from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     command_tree,
@@ -380,7 +380,7 @@ def unlisted_service(
     if (
         not ctx.tool
         or install is None
-        or not drops_mount_caches(install.cli)
+        or not reaches_service(install.cli)
         or session.visibility.paths is None
     ):
         return False

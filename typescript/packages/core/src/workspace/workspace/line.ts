@@ -23,13 +23,12 @@ import type { RunResult } from '../../runtime/types.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import {
   type Claimant,
-  type Policies,
   postExecuteGate,
   refusalOf,
   renderDeny,
   resolveLimit,
 } from '../../policy/index.ts'
-import type { MountEntry } from '../mount/mount.ts'
+import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
@@ -53,20 +52,18 @@ export interface LineResult extends RunResult {
  *
  * A whole line is a command like any other: the same limit
  * resolution and boundary rule as the tree, so `timeoutSeconds` answers
- * 124 and `maxBytes`/`maxLines` cap the output. `invalidate` drops
- * local read caches once the line has run: it may have written
- * anywhere in the runtime's view of the workspace.
+ * 124 and `maxBytes`/`maxLines` cap the output. `registry` holds the
+ * workspace's mounts, every one of which the line may span (a whole-line
+ * runtime sees the full workspace), its policies and its command
+ * defaults; it settles the line when it ends (`MountRegistry.settle`).
  */
 export async function runWholeLine(
   runtime: Runtime & LineExecutor,
   command: string,
   stdin: ByteSource | null,
   session: SessionState,
-  mounts: readonly MountEntry[],
-  policies: Policies,
-  invalidate: () => Promise<void>,
+  registry: MountRegistry,
   signal?: AbortSignal,
-  commandLimits: Readonly<Record<string, Limit>> = {},
   claimant: Claimant | null = null,
   // What `preExecute` saw of the line, which `postExecute` sees with what
   // came back; null when no policy reads `postExecute`.
@@ -74,7 +71,15 @@ export async function runWholeLine(
 ): Promise<LineResult> {
   const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
-  const guard = resolveLimit(name, mounts, null, null, commandLimits, session.commandLimits)
+  const mounts = registry.allMounts()
+  const guard = resolveLimit(
+    name,
+    mounts,
+    null,
+    null,
+    registry.commandLimits,
+    session.commandLimits,
+  )
   const timeout = guard?.timeoutSeconds ?? null
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
@@ -106,14 +111,13 @@ export async function runWholeLine(
       }
     }
   } finally {
-    await runtime.settle()
-    if (!runtime.fileEffectsDispatched) await invalidate()
+    await registry.settle(runtime)
   }
   const [refused, bound] =
     route === null
       ? [null, null]
       : await postExecuteGate(
-          policies,
+          registry.policies,
           {
             ...route,
             producer: { command: name, prefixes: mounts.map((m) => m.prefix), declared: null },

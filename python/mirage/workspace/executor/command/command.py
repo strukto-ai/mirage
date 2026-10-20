@@ -65,9 +65,9 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.links.links import operand_follow
 from mirage.workspace.executor.command.cli import (
     CLIContext,
-    drops_mount_caches,
     handle_cli,
     handle_mount_cli,
+    reaches_service,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
@@ -81,7 +81,6 @@ from mirage.workspace.executor.command.routing import (
     routed_operands,
 )
 from mirage.workspace.executor.command.run import (
-    drop_mount_caches,
     exec_node,
     find_start_points,
     run_nested_line,
@@ -418,8 +417,8 @@ async def handle_command(
                 routing=routing_decision,
             ),
             drop_caches=(
-                functools.partial(drop_mount_caches, registry)
-                if drops_mount_caches(cli_install.cli)
+                functools.partial(registry.drop_caches, cli_install.accessor)
+                if reaches_service(cli_install.cli)
                 else None
             ),
         )

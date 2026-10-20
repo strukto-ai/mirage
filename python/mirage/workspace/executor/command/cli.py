@@ -269,17 +269,17 @@ class CLIContext:
     routing: RouteDecision[Runtime[Any]] | None = None
 
 
-def drops_mount_caches(spec: CLI) -> bool:
-    """Whether a write verb of this CLI leaves every mount's caches stale.
+def reaches_service(spec: CLI) -> bool:
+    """Whether this CLI reaches a service past the dispatcher.
 
-    A CLI that reaches a service writes past the dispatcher's per-path
-    invalidation, so no mount can see the write. Two roots do that: one
-    with a ``config_model`` (an account CLI, initialized from it) and a
-    script root, whose config is opaque by construction and whose
-    program may reach anything. A root with neither (``git``) has no
-    service to reach; its writes go through the dispatcher, which
-    invalidates as it goes, so a blanket drop would only cost every
-    other mount a reload.
+    Its write verbs then go past the dispatcher's per-path invalidation,
+    so the mounts its client may reach drop their caches after one
+    (``MountRegistry.drop_caches``). Two roots do that: one with a
+    ``config_model`` (an account CLI, initialized from it) and a script
+    root, whose config is opaque by construction and whose program may
+    reach anything. A root with neither (``git``) has no service to
+    reach; its writes go through the dispatcher, which invalidates as it
+    goes, so a blanket drop would only cost every other mount a reload.
 
     Args:
         spec (CLI): the installed root.
@@ -322,11 +322,11 @@ async def handle_cli(
             Its files, session and processes ride the leaf's ``ctx``; a
             verb that never reads ``ctx.vfs`` cannot touch a mount, and
             outside a workspace it is None.
-        drop_caches (Callable | None): drop cached listings and bodies
-            for the mounts this CLI's service serves. Called after a
-            write verb succeeds, because an account CLI mutates its
-            service by id and no vfs path can be derived from that, so
-            per-path invalidation has nothing to aim at.
+        drop_caches (Callable | None): drop what the mounts this CLI's
+            client may reach keep. Called after a write verb, because an
+            account CLI mutates its service by id and no vfs path can be
+            derived from that, so per-path invalidation has nothing to
+            aim at.
     """
     # Taken before the first await, so a removal racing this line waits
     # for the leaf and its output rather than closing the accessor under

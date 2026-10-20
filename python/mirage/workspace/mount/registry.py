@@ -18,6 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
+from mirage.accessor.base import Accessor
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
 from mirage.cache.index.config import Evicted
@@ -178,16 +179,54 @@ class MountRegistry:
             store=NULL_INDEX,
         )
 
-    async def invalidate_after_external(self) -> None:
-        """Refetch cached data after native code may have changed files."""
-        if self._file_cache is not None:
+    async def drop_caches(self, by: Accessor | None = None) -> None:
+        """Drop what a write past the dispatcher may have made stale.
+
+        Native code (an external program, a remote runtime line) or an
+        account CLI changed its service with no path the dispatcher saw,
+        so per-path invalidation has nothing to aim at: after `gws sheets
+        spreadsheets create` the new file has no cache entry to expire,
+        which is exactly the case that matters. Every mount the write may
+        have reached drops what it keeps (``MountEntry.drop_caches``). A
+        write verb is rare next to reads, and the cost is one cold listing
+        on a mount's next read, never a wrong answer.
+
+        Args:
+            by (Accessor | None): the client that wrote, whose ``reaches``
+                names the mounts it may have changed; None for every mount.
+        """
+        mounts = self.mounts()
+        reached = [
+            m for m in mounts if by is None or by.reaches(m.vfs.accessor)
+        ]
+        # Every mount: one clear of the file cache, not a scan per mount.
+        every = self._file_cache is not None and len(reached) == len(mounts)
+        if every and self._file_cache is not None:
             await self._file_cache.clear()
-        for mount in self.mounts():
-            if mount.cache_manager is not None:
-                await mount.cache_manager.clear_index(mount.index_store)
-            else:
-                async with mount.use():
-                    await mount.index_store.clear()
+        for mount in reached:
+            await mount.drop_caches(bodies=not every)
+
+    async def settle(self, runtime: Runtime[Any]) -> None:
+        """Land a runtime's writes when its line ends, however it ended,
+        and drop the caches when they went past the dispatcher.
+
+        A runtime serving the workspace over SFTP sent each write through
+        the dispatcher, which invalidated that path as it went
+        (``file_effects_dispatched``). Any other may have written anywhere
+        in its view of the workspace, so every mount drops its caches and
+        the next command refetches instead of serving pre-line state.
+
+        Example: `cat /data/x` caches "old"; `python3 job.py` runs in a
+        sandbox and writes "new" straight to S3 through its own FUSE
+        mount, which the dispatcher never saw; without the drop the next
+        `cat /data/x` would serve the stale "old".
+
+        Args:
+            runtime (Runtime): the runtime the line ran on.
+        """
+        await runtime.settle()
+        if not runtime.file_effects_dispatched:
+            await self.drop_caches()
 
     def set_default_read(self, read: ReadSpec) -> None:
         """Install the workspace-level read policy a mount overrides.

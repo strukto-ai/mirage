@@ -18,7 +18,7 @@ import { EntityKind, SYSTEM_DATABASES } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 export async function listDatabases(accessor: MongoDBAccessor): Promise<string[]> {
-  return accessor.cachedList('listDatabases', async () => {
+  return accessor.listings.get('listDatabases', async () => {
     const all = await accessor.driver.listDatabases()
     let dbs = all.filter((d) => !SYSTEM_DATABASES.has(d))
     const allow = accessor.config.databases
@@ -36,7 +36,7 @@ export async function listCollections(
   kind: EntityKind | null = null,
 ): Promise<string[]> {
   const key = `listCollections:${database}:${kind ?? ''}`
-  return accessor.cachedList(key, async () => {
+  return accessor.listings.get(key, async () => {
     const cols = await accessor.driver.listCollections(database, kind)
     return [...cols].sort(compareCodePoints)
   })

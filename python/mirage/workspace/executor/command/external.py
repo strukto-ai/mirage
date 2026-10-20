@@ -102,9 +102,7 @@ async def run_external(
             argv.name,
         )
     finally:
-        await runtime.settle()
-        if not runtime.file_effects_dispatched:
-            await registry.invalidate_after_external()
+        await registry.settle(runtime)
     io = IOResult(
         exit_code=result.exit_code,
         stderr=result.stderr or b"",
@@ -170,9 +168,7 @@ def _stream_external(
             pipe.end(exc)
             raise
         finally:
-            await runtime.settle()
-            if not runtime.file_effects_dispatched:
-                await registry.invalidate_after_external()
+            await registry.settle(runtime)
 
     async def finalize() -> None:
         pipe.close_reader()

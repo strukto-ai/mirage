@@ -95,16 +95,37 @@ export class CacheManager {
   }
 
   /**
-   * Clear the whole backend index while this mount still owns it.
+   * Drop this mount's listings and bodies, path unspecified.
    *
-   * The clear that follows native code (an external program, a remote runtime
-   * line) that may have changed the mount, so it also retires what the
-   * running command's probes saw.
+   * For a write that went past the dispatcher, so nothing here can say which
+   * file changed, only that this mount may no longer match its backend:
+   * native code (an external program, a remote runtime line), an account CLI
+   * writing to its service by id, or a mount command writing through its own
+   * client. Both caches go, because the two hide different writes: a stale
+   * listing hides a create or a delete, a stale body an edit. It also retires
+   * what the running command's probes saw.
+   *
+   * The index is expired rather than cleared, while this mount still owns it:
+   * a cleared index reads exactly like one that was never filled, so a
+   * backend whose index *is* its listing (github seeds the whole tree once)
+   * could not tell the drop from an empty repository. A VFS mounted at
+   * several prefixes holds each file under each of them, so the bodies under
+   * every alias go too. Over-evicts when this mount is the root and another
+   * mount sits beneath it, since keys are compared by prefix; a refetch is
+   * the safe direction to be wrong in. Mirrors Python's `CacheManager.drop`.
+   *
+   * @param index the VFS's own index.
+   * @param bodies drop the bodies too; false when the caller clears the whole
+   *   file cache itself.
    */
-  clearIndex(index: IndexCacheStore | undefined): Promise<void> {
+  drop(index: IndexCacheStore | undefined, bodies = true): Promise<void> {
     return this.mutation(async () => {
       this.retire()
-      if (this.ownsPath(this.prefix || '/')) await index?.clear()
+      if (this.ownsPath(this.prefix || '/')) await index?.invalidate()
+      if (!bodies || !this.cachesReads || this.fileCache === null) return
+      for (const prefix of [this.prefix, ...this.aliases()]) {
+        await this.fileCache.evictPrefix(prefix + '/')
+      }
     })
   }
 
@@ -747,29 +768,6 @@ export class CacheManager {
     while (parent !== '' && parent !== this.prefix) {
       await this.index.invalidateEntry(parent)
       parent = parent.slice(0, Math.max(parent.lastIndexOf('/'), 0))
-    }
-  }
-
-  /**
-   * Drop every cached body under this mount, path unspecified.
-   *
-   * For a mutation that names no path: an account CLI writes to its service by
-   * id, so nothing here can say which file changed, only that this mount's
-   * bytes may no longer match the service. Clearing the listing alone is not
-   * enough, because an already-read body is served warm and would keep
-   * answering with the pre-write content. A VFS mounted at several prefixes
-   * holds each file under each of them, so the bodies under every alias go
-   * too.
-   *
-   * Over-evicts when this mount is the root and another mount sits beneath it,
-   * since keys are compared by prefix. That costs a refetch, which is the safe
-   * direction to be wrong in.
-   */
-  async dropPrefix(): Promise<void> {
-    this.retire()
-    if (!this.cachesReads || this.fileCache === null) return
-    for (const prefix of [this.prefix, ...this.aliases()]) {
-      await this.fileCache.evictPrefix(prefix + '/')
     }
   }
 

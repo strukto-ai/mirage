@@ -153,28 +153,6 @@ function scalarFindFlags(flagKwargs: Flags): Flags {
   return out
 }
 
-/**
- * Drop every mount's cached listings and bodies after an account CLI write.
- *
- * An account CLI mutates its service by id, so no vfs path can be derived from
- * the call and per-path invalidation has nothing to aim at: after
- * `gws sheets spreadsheets create` the new file has no cache entry to expire,
- * which is exactly the case that matters. Which mounts that service backs is
- * not the CLI's business either (a CLI and a VFS are separate tiers, and
- * a user's own CLI knows nothing about a user's own VFS), so the executor
- * says the one thing it knows: a write happened, and every mount may be stale.
- * A write verb is rare next to reads, and the cost is one cold listing on a
- * mount's next read, never a wrong answer.
- *
- * Both caches go, because the two hide different writes. A stale listing hides
- * a create or a delete; a stale body hides an edit, and these mounts cache
- * reads, so a `cat` after `gws docs documents batchUpdate` would otherwise keep
- * serving the pre-edit content without ever reaching Google.
- */
-export async function dropMountCaches(registry: MountRegistry): Promise<void> {
-  for (const mount of registry.allMounts()) await mount.dropCaches()
-}
-
 // Run one already-parsed command on the mount that owns its paths. The shared
 // single-mount execution tail: mount resolution, session-mode checks, runCommand,
 // filesystem-error formatting, ls/find post-processing, and read/write key

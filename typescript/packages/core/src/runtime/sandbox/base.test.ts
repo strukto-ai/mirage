@@ -15,7 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Limit, MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { LookupStatus } from '../../cache/index/config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RemoteSandbox } from './base.ts'
 import { LanguageRuntime } from '../language.ts'
@@ -207,6 +208,25 @@ describe('RemoteSandbox', () => {
       expect(io.exitCode).toBe(0)
       expect(DEC.decode(io.stdout)).toBe('a\nb\n')
       expect(DEC.decode(io.stderr)).toContain('truncated at limit')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a remote line expires the local listings', async () => {
+    // The line may have written anywhere in its view of the workspace, so the
+    // next stat or listing asks the backend again. Mirrors Python's
+    // `test_remote_line_invalidates_local_read_caches`.
+    const box = new RecordingSandbox({ captures: ['python3'] })
+    const ws = await sandboxWorkspace(box)
+    try {
+      const mount = ws.registry.allMounts().find((m) => m.prefix === '/data/')
+      if (mount === undefined) throw new Error('no /data mount')
+      const stale = new FileStat({ name: 'stale.txt', type: FileType.FILE, fingerprint: 'stale' })
+      await mount.indexStore.setDir('/', [['stale.txt', stale]], new Date(Date.now() + 3_600_000))
+      expect((await mount.indexStore.listDir('/')).entries).toBeDefined()
+      await ws.shell('python3 anything')
+      expect((await mount.indexStore.listDir('/')).status).toBe(LookupStatus.EXPIRED)
     } finally {
       await ws.close()
     }

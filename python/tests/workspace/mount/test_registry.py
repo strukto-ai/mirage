@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+from typing import Any
+
 import pytest
 
+from mirage.accessor.base import Accessor
+from mirage.accessor.responses import ResponseCache
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
@@ -21,7 +26,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
@@ -514,3 +519,54 @@ async def test_listing_gate_propagates_any_other_oserror():
     registry, mount = _gated_registry(rec)
     with pytest.raises(OSError, match="backend down"):
         await registry._may_serve_listing(mount, "/data/d", None)
+
+
+# ── drop_caches ───────────────────────────────
+
+
+class _Answering(BaseVFS):
+    """A backend whose client keeps answers of its own."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.accessor = _AnsweringAccessor()
+
+
+class _AnsweringAccessor(Accessor):
+    def __init__(self) -> None:
+        self.answers = ResponseCache[str, int]()
+        self.asked = 0
+
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.answers,)
+
+    async def ask(self) -> int:
+        async def fetch() -> int:
+            self.asked += 1
+            return self.asked
+
+        return await self.answers.get("q", fetch)
+
+
+@pytest.mark.asyncio
+async def test_a_mounts_drop_drops_the_answers_its_client_keeps():
+    # A store's search results never pass the cache stage, so the drop
+    # after a write past the dispatcher must reach the client itself.
+    vfs = _Answering()
+    registry = MountRegistry()
+    registry.mount("/s/", vfs, MountMode.READ)
+    assert (await vfs.accessor.ask(), await vfs.accessor.ask()) == (1, 1)
+    await registry.drop_caches()
+    assert await vfs.accessor.ask() == 2
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_mount_never_serves_its_clients_kept_answers():
+    # An answer carries no token to check, so a mount that checks before
+    # serving keeps none.
+    vfs = _Answering()
+    registry = MountRegistry()
+    registry.mount(
+        "/s/", vfs, MountMode.READ, ReadSpec(policy=ReadPolicy.FRESH)
+    )
+    assert (await vfs.accessor.ask(), await vfs.accessor.ask()) == (1, 2)

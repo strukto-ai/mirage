@@ -13,19 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import { ResponseCache } from './responses.ts'
 import type { MongoDriver } from '../core/mongodb/_driver.ts'
 import type { MongoDBConfigResolved } from '../vfs/mongodb/config.ts'
-
-interface CacheEntry<T> {
-  value: T
-  expires: number
-}
 
 export class MongoDBAccessor extends Accessor {
   readonly driver: MongoDriver
   readonly config: MongoDBConfigResolved
-  readonly listingCacheTtlMs: number
-  private readonly cache = new Map<string, CacheEntry<unknown>>()
+  /** The database and collection names a listing or an existence check reads. */
+  readonly listings: ResponseCache<string, string[]>
 
   constructor(
     driver: MongoDriver,
@@ -35,16 +31,10 @@ export class MongoDBAccessor extends Accessor {
     super()
     this.driver = driver
     this.config = config
-    this.listingCacheTtlMs = options.listingCacheTtlMs ?? 5000
+    this.listings = new ResponseCache((options.listingCacheTtlMs ?? 5000) / 1000)
   }
 
-  async cachedList<T>(key: string, fetch: () => Promise<T>): Promise<T> {
-    if (this.listingCacheTtlMs <= 0) return fetch()
-    const now = Date.now()
-    const hit = this.cache.get(key)
-    if (hit !== undefined && hit.expires > now) return hit.value as T
-    const value = await fetch()
-    this.cache.set(key, { value, expires: now + this.listingCacheTtlMs })
-    return value
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.listings]
   }
 }

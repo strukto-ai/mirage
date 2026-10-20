@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ReadSpec } from '../types.ts'
+import type { ResponseCache } from './responses.ts'
+
 export class Accessor {
   [key: string]: unknown
 
@@ -20,6 +23,25 @@ export class Accessor {
 
   /** Share what a peer on the same account holds (the workspace's other accessors). */
   join?(peers: readonly Accessor[]): void
+
+  /**
+   * Whether a write through this accessor may change what `peer` reads. One
+   * that does not say may reach anything.
+   */
+  reaches?(peer: Accessor): boolean
+
+  /** The answers this accessor keeps of its own service. */
+  caches?(): readonly ResponseCache<unknown, unknown>[]
+
+  /** Keep this accessor's own answers under a mount's read policy. */
+  govern?(read: ReadSpec): void {
+    for (const cache of this.caches?.() ?? []) cache.govern(read)
+  }
+
+  /** Drop this accessor's own answers, as its mount drops its caches. */
+  forget?(): void {
+    for (const cache of this.caches?.() ?? []) cache.clear()
+  }
 }
 
 /** The accessor of a mount or CLI with no client of its own. */

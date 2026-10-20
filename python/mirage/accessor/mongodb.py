@@ -13,14 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import SecretStr
 from pymongo import AsyncMongoClient
 
 from mirage.accessor.base import Accessor
+from mirage.accessor.responses import ResponseCache
 from mirage.vfs.mongodb.config import MongoDBConfig
 from mirage.vfs.secrets import reveal_secret
 
@@ -71,22 +71,12 @@ class MongoDBAccessor(MongoClientAccessor):
     ) -> None:
         super().__init__(config.uri)
         self.config = config
-        self.listing_cache_ttl = listing_cache_ttl
-        self._cache: dict[str, tuple[float, Any]] = {}
+        # The database and collection names an existence check reads.
+        self.listings = ResponseCache[str, list[str]](listing_cache_ttl)
 
-    async def cached_list(
-        self, key: str, fetch: Callable[[], Awaitable[Any]]
-    ) -> Any:
-        if self.listing_cache_ttl <= 0:
-            return await fetch()
-        now = time.monotonic()
-        hit = self._cache.get(key)
-        if hit is not None and hit[0] > now:
-            return hit[1]
-        value = await fetch()
-        self._cache[key] = (now + self.listing_cache_ttl, value)
-        return value
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.listings,)
 
     async def close(self) -> None:
-        self._cache.clear()
+        self.forget()
         await super().close()

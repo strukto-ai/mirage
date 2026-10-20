@@ -28,8 +28,15 @@ def test_each_loop_opens_its_own_client_and_close_releases_it(monkeypatch):
     second = asyncio.run(twice())
     assert second is not first and first.closed
     assert second.kwargs["url"] == "http://qdrant:6333"
-    accessor.search_cache[("c", "q", 1)] = []
+    asked: list[str] = []
+
+    async def search() -> list:
+        asked.append("q")
+        return []
+
+    asyncio.run(accessor.searches.get(("c", "q", 1), search))
     accessor.indexes_ensured.add("c")
     asyncio.run(accessor.close())
+    asyncio.run(accessor.searches.get(("c", "q", 1), search))
     assert second.closed
-    assert accessor.search_cache == {} and accessor.indexes_ensured == set()
+    assert asked == ["q", "q"] and accessor.indexes_ensured == set()

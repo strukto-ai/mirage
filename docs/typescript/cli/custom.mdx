@@ -268,7 +268,9 @@ strings before filesystem access. Direct handler callers may leave
 Account CLI writes, including failed writes that may have reached the service,
 expire mounted caches. Config-free filesystem CLIs rely on the dispatcher's
 per-path invalidation. A script marked as a write also expires caches because
-its config and service access are opaque.
+its config and service access are opaque. An install's accessor decides which
+mounts that is: implement `reaches(peer)` to answer false for a mount's
+accessor its writes cannot change. An accessor without it reaches every mount.
 
 ## Snapshots and credentials
 

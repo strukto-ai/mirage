@@ -34,26 +34,48 @@ class GitHubAccount(SessionAccessor):
         super().__init__()
         self.config = config
 
+    def _peer(self, peer: Accessor) -> "GitHubAccount | None":
+        """The account behind a peer (a gh install's, or a github
+        mount's) on this API base; None for any other.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        account = peer.account if isinstance(peer, GitHubAccessor) else peer
+        if (
+            isinstance(account, GitHubAccount)
+            and account.config.base_url == self.config.base_url
+        ):
+            return account
+        return None
+
     def join(self, peers: Iterable[Accessor]) -> None:
-        """Ride the pool of a peer account (a gh install's, or a github
-        mount's) on the same token and API base.
+        """Ride the pool of a peer account on the same token and API base.
 
         Args:
             peers (Iterable[Accessor]): the workspace's other accessors.
         """
         token = self.config.token.get_secret_value()
         for peer in peers:
-            account = (
-                peer.account if isinstance(peer, GitHubAccessor) else peer
-            )
+            account = self._peer(peer)
             if (
-                isinstance(account, GitHubAccount)
+                account is not None
                 and account is not self
                 and account.config.token.get_secret_value() == token
-                and account.config.base_url == self.config.base_url
             ):
                 self.share(account)
                 return
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this account may change what ``peer``
+        reads: only a GitHub account or repository on the same API base,
+        whatever token it reads with, since two tokens can reach one
+        repository.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return self._peer(peer) is not None
 
 
 class GitHubAccessor(Accessor):

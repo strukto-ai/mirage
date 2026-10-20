@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any
@@ -21,6 +21,7 @@ from qdrant_client import AsyncQdrantClient
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import LoopClientCache
+from mirage.accessor.responses import ResponseCache
 from mirage.core.qdrant.types import QdrantRow
 from mirage.vfs.qdrant.config import QdrantConfig
 from mirage.vfs.secrets import reveal_secret
@@ -51,15 +52,18 @@ class QdrantAccessor(Accessor):
     def __init__(self, config: QdrantConfig) -> None:
         self.config = config
         self._clients = LoopClientCache[AsyncQdrantClient]("qdrant")
-        self.search_cache: dict[tuple[str, str, int], list[QdrantRow]] = {}
+        self.searches = ResponseCache[tuple[str, str, int], list[QdrantRow]]()
         self.indexes_ensured: set[str] = set()
 
     async def client(self) -> AsyncQdrantClient:
         """Return this loop's client, opening one when there is none."""
         return await self._clients.get(partial(_open, self.config))
 
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.searches,)
+
     async def close(self) -> None:
         """Close every client this accessor opened, and drop its caches."""
-        self.search_cache.clear()
+        self.forget()
         self.indexes_ensured.clear()
         await self._clients.close()

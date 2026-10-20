@@ -1580,17 +1580,6 @@ export class Workspace {
     return result
   }
 
-  /**
-   * Drop the file cache and every mount index wholesale. A whole-line
-   * runtime may have written anywhere in its view of the workspace,
-   * so per-path invalidation cannot apply: clear the read caches so
-   * the next local command refetches from the backends instead of
-   * serving pre-line state.
-   */
-  private async invalidateAllAfterRemote(): Promise<void> {
-    await this.registry.invalidateAfterExternal()
-  }
-
   async invalidateAfterWriteByPath(path: string): Promise<void> {
     await this.dispatcher.invalidateAfterWriteByPath(path)
   }
@@ -1673,7 +1662,6 @@ export class Workspace {
       registerCloser: (fn) => {
         this.closers.push(fn)
       },
-      invalidateAllAfterRemote: () => this.invalidateAllAfterRemote(),
       execute: (cmd, opts) => this.executeInternal(cmd, opts),
     }
   }

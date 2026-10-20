@@ -15,6 +15,7 @@ import { CommandSpec } from '../../../commands/spec/types.ts'
 import { CLIHandler } from '../../../commands/cli/types.ts'
 
 import { readFileSync } from 'node:fs'
+import { Accessor } from '../../../accessor/base.ts'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { CLI } from '../../../commands/cli/types.ts'
@@ -24,7 +25,6 @@ import { createShellParser } from '../../../shell/parse/index.ts'
 import { ops } from '../../../test-utils.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { dropMountCaches } from './run.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -74,23 +74,50 @@ async function readBack(ws: Workspace): Promise<[string, string, string]> {
   ]
 }
 
-describe('dropMountCaches', () => {
+/** A client whose writes reach only the accessor it targets. */
+class ReachesOne extends Accessor {
+  constructor(private readonly target: Accessor) {
+    super()
+  }
+
+  override reaches(peer: Accessor): boolean {
+    return peer === this.target
+  }
+}
+
+describe('MountRegistry.dropCaches', () => {
   it('drops bodies as well as listings, on every mount', async () => {
     // A stale listing hides a create; a stale body hides an edit. The cached
     // body is the one that answers without reaching the service, so clearing
-    // the index alone leaves `cat` serving pre-write content. Which mounts the
-    // CLI's service backs is not the CLI's business, so every mount drops.
+    // the index alone leaves `cat` serving pre-write content. A write by no
+    // named client may have reached any mount, so every mount drops.
     const [ws, ram, other] = warmWorkspace()
     try {
       await seed(ram, other)
       await warm(ws)
       expect(DEC.decode((await ws.shell('cat /r/a.txt')).stdout)).toContain('v1')
       await mutateOutOfBand(ram, other)
-      await dropMountCaches(ws.registry)
+      await ws.registry.dropCaches()
       const [body, listing, otherBody] = await readBack(ws)
       expect(body).toContain('v2')
       expect(listing).toContain('new.txt')
       expect(otherBody).toContain('v2')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('drops only the mounts the writing client reaches', async () => {
+    const [ws, ram, other] = warmWorkspace()
+    try {
+      await seed(ram, other)
+      await warm(ws)
+      await mutateOutOfBand(ram, other)
+      await ws.registry.dropCaches(new ReachesOne(ram.accessor))
+      const [body, listing, otherBody] = await readBack(ws)
+      expect(body).toContain('v2')
+      expect(listing).toContain('new.txt')
+      expect(otherBody).toContain('v1')
     } finally {
       await ws.close()
     }
@@ -132,6 +159,37 @@ describe('a CLI write and the mount caches', () => {
       expect(body).toContain('v2')
       expect(listing).toContain('made.txt')
       expect(otherBody).toContain('v2')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('an account CLI write refreshes only the mounts its client reaches', async () => {
+    // A client that says which mounts its writes can reach (a gh install
+    // reaches only github mounts) costs the others no reload.
+    const [ws, ram, other] = warmWorkspace()
+    try {
+      ws.registerCli(
+        'acme',
+        new CLI({
+          spec: new CommandSpec({
+            name: 'acme',
+            subcommands: [new CommandSpec({ name: 'close' })],
+          }),
+          handlers: { close: new CLIHandler({ fn: outOfBandWriter(ram), write: true }) },
+          configModel: (input) => input,
+          accessor: () => new ReachesOne(ram.accessor),
+        }),
+        { token: 't' },
+      )
+      await seed(ram, other)
+      await warm(ws)
+      await mutateOutOfBand(ram, other)
+      expect((await ws.shell('acme close')).exitCode).toBe(0)
+      const [body, listing, otherBody] = await readBack(ws)
+      expect(body).toContain('v2')
+      expect(listing).toContain('made.txt')
+      expect(otherBody).toContain('v1')
     } finally {
       await ws.close()
     }

@@ -14,13 +14,14 @@
 
 from collections.abc import Iterable
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 import aiohttp
 from pydantic import BaseModel
 
+from mirage.accessor.responses import ResponseCache
 from mirage.core.api.client import SessionPool
-from mirage.types import JsonValue
+from mirage.types import JsonValue, ReadSpec
 
 
 class Accessor:
@@ -35,6 +36,35 @@ class Accessor:
             peers (Iterable[Accessor]): the workspace's other accessors.
         """
         return None
+
+    def reaches(self, peer: "Accessor") -> bool:
+        """Whether a write through this accessor may change what ``peer``
+        reads. True by default: a client may reach anything.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return True
+
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        """The answers this accessor keeps of its own service; none by
+        default."""
+        return ()
+
+    def govern(self, read: ReadSpec) -> None:
+        """Keep this accessor's own answers under a mount's read policy.
+
+        Args:
+            read (ReadSpec): the read policy of a mount it serves.
+        """
+        for cache in self.caches():
+            cache.govern(read)
+
+    def forget(self) -> None:
+        """Drop this accessor's own answers, as its mount drops its
+        caches."""
+        for cache in self.caches():
+            cache.clear()
 
 
 class SessionAccessor(Accessor):

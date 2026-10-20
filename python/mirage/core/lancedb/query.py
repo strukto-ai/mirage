@@ -207,15 +207,12 @@ async def row_record(
 async def search_rows(
     accessor: LanceDBAccessor, table: str, query_text: str, limit: int
 ) -> list[LanceRow]:
-    key = (table, query_text, limit)
-    cached = accessor.search_cache.get(key)
-    if cached is not None:
-        return cached
-    tbl = await accessor.table(table)
-    builder = await tbl.search(query_text)
-    rows = await builder.limit(limit).to_list()
-    accessor.search_cache[key] = rows
-    return rows
+    async def fetch() -> list[LanceRow]:
+        tbl = await accessor.table(table)
+        builder = await tbl.search(query_text)
+        return await builder.limit(limit).to_list()
+
+    return await accessor.searches.get((table, query_text, limit), fetch)
 
 
 async def text_columns(

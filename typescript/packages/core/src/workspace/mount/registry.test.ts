@@ -20,12 +20,14 @@ import { command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { MountMode, PathSpec, ReadPolicy } from '../../types.ts'
 import { isNoMount } from '../../errors/fs.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { MountEntry } from './mount.ts'
 import { MountCommandUnsupported, MountRegistry } from './registry.ts'
+import { Accessor } from '../../accessor/base.ts'
+import { ResponseCache } from '../../accessor/responses.ts'
 
 class StubVFS extends BaseVFS {
   override readonly name = 'stub'
@@ -494,5 +496,44 @@ describe('MountRegistry listing gate', () => {
     await expect(gateOf(registry).mayServeListing(mount, '/data/d', null)).rejects.toThrow(
       'backend down',
     )
+  })
+})
+
+/** A client that keeps answers of its own. */
+class AnsweringAccessor extends Accessor {
+  readonly answers = new ResponseCache<string, number>()
+  asked = 0
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.answers]
+  }
+
+  ask(): Promise<number> {
+    return this.answers.get('q', () => Promise.resolve(++this.asked))
+  }
+}
+
+describe("a client's own answers", () => {
+  it("go with its mount's caches", async () => {
+    // A store's search results never pass the cache stage, so the drop after
+    // a write past the dispatcher must reach the client itself.
+    const accessor = new AnsweringAccessor()
+    const registry = new MountRegistry({}, MountMode.READ)
+    registry.mount('/s/', new BaseVFS({ name: 'answering', accessor }))
+    expect([await accessor.ask(), await accessor.ask()]).toEqual([1, 1])
+    await registry.dropCaches()
+    expect(await accessor.ask()).toBe(2)
+  })
+
+  it('are never served on a fresh mount', async () => {
+    // An answer carries no token to check, so a mount that checks before
+    // serving keeps none.
+    const accessor = new AnsweringAccessor()
+    const registry = new MountRegistry({}, MountMode.READ)
+    registry.mount('/s/', new BaseVFS({ name: 'answering', accessor }), MountMode.READ, {
+      policy: ReadPolicy.FRESH,
+      ttl: 600,
+    })
+    expect([await accessor.ask(), await accessor.ask()]).toEqual([1, 2])
   })
 })

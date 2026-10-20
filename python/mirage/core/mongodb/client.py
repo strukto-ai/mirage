@@ -64,7 +64,7 @@ async def database_exists(
     accessor: "MongoDBAccessor | None" = None,
 ) -> bool:
     if accessor is not None:
-        dbs = await accessor.cached_list(
+        dbs = await accessor.listings.get(
             "list_databases",
             lambda: list_databases(client, config),
         )
@@ -86,7 +86,7 @@ async def entity_exists(
     if accessor is not None:
         suffix = kind.value if kind is not None else ""
         key = f"list_collections:{database}:{suffix}"
-        names = await accessor.cached_list(
+        names = await accessor.listings.get(
             key,
             lambda: list_collections(client, database, kind),
         )
