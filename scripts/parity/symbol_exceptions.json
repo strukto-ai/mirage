@@ -1,6 +1,44 @@
 {
   "baseline": 3207,
  "modules": {
+  "commands/builtin/generic/diff": {
+   "python_only": {
+    "_side": "Python read callbacks are awaitable and partial binds an absent-or-read input factory; TypeScript closures provide a lazy ByteSource.",
+    "_output": "Python exposes stored output chunks as an async iterator; TypeScript outputChunks provides the same ByteSource."
+   },
+   "typescript_only": {
+    "outputChunks": "TypeScript exposes stored output chunks as an async iterator; Python _output provides the same ByteSource."
+   }
+  },
+  "rs/diff_worker": {
+   "python_only": {
+    "_STREAM": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "drain": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "drop_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "end": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "feed": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "inspect_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
+    "open_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch."
+   },
+   "typescript_only": {
+    "Bytes": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "DiffOutcome": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "DiffReply": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "DiffRequest": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "Options": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "diffDispatch": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "refusalReply": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
+    "stream": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport."
+   }
+  },
+  "rs/diff_pool": {
+   "python_only": {
+    "_Lease": "Python records the owning asyncio task and pending call for task cancellation; TypeScript combines AbortSignals on its leased entry."
+   },
+   "typescript_only": {
+    "Pending": "TypeScript stores resolve/reject callbacks and abort-listener cleanup for FIFO admission; Python queues asyncio futures."
+   }
+  },
   "runtime/sandbox/microsandbox/config": {
    "typescript_only": {
     "MICROSANDBOX_CONFIG_KEYS": "TypeScript validates interface fields at runtime with an explicit key list; Python's dataclass fields provide that list."

@@ -28,6 +28,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
+from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import CommandRuntime, ShellFn
 from mirage.types import Limit, PathSpec
 from mirage.view.types import SessionView
@@ -67,6 +68,7 @@ class Context:
         processes (ProcessView | None): The session's processes.
         shell (ShellFn | None): Run a nested line in the calling
             session, as ``sh -c`` would (awk's pipes and ``system()``).
+        diff (DiffComputer | None): The workspace's shared diff computation service.
         runtime (CommandRuntime | None): Where an interpreter command
             runs its code, and what policy lets that code start and load.
     """
@@ -82,6 +84,7 @@ class Context:
     processes: ProcessView | None = None
     shell: ShellFn | None = None
     runtime: CommandRuntime | None = None
+    diff: DiffComputer | None = None
 
 
 CommandFnResult = CommandOutput | None

@@ -2,6 +2,7 @@ mod base64;
 mod bc;
 mod compress;
 mod cut;
+mod diff;
 mod digest;
 mod generated;
 mod glob;
@@ -290,6 +291,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "compress" => compress::open(config),
         "cut" => cut::open(config),
         "digest" => digest::open(config),
+        "diff" => diff::open(config),
         "glob" => glob::open(config),
         "grep" => grep::open(config),
         "jq_scan" => jq::open_scan(config),

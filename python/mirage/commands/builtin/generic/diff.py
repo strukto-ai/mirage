@@ -1,14 +1,17 @@
-import difflib
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from functools import partial
 
 from mirage.commands.builtin.constants import INTMAX
-from mirage.commands.builtin.diff_format import ed_script, normal_diff
 from mirage.commands.builtin.utils.formatting import full_iso_time
-from mirage.commands.builtin.utils.lines import split_lines_keepends
 from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.stream import (
@@ -33,10 +36,15 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import FsCondition
+from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.diff_pool import DiffPool
+from mirage.rs.diff_types import DiffComputer, DiffOptions, PairResult
+from mirage.rs.errors import StreamRefusal
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import fnmatch
+from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
 from mirage.utils.quote import shell_quote
 from mirage.utils.timezone import zone_from_env
@@ -63,7 +71,7 @@ class DiffFlags:
     exclude_from: tuple[PathSpec, ...] = ()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _Walk:
     read_bytes: Callable[..., Awaitable[bytes]]
     readdir_fn: Callable[..., Awaitable[list[str]]]
@@ -71,10 +79,12 @@ class _Walk:
     flags: DiffFlags
     excluded: tuple[str, ...]
     switches: str
+    computer: DiffComputer
     stat_path: StatPath | None = None
     zone: tzinfo | None = None
     # An entry diff could not compare, reported as it goes on (exit 2).
     trouble: list[bytes] = field(default_factory=list)
+    status: int = 0
     # The directory a path resolves to, where diff follows links.
     real: Callable[[str], str] | None = None
 
@@ -103,7 +113,7 @@ def _child_spec(parent: PathSpec, name: str) -> PathSpec:
     return PathSpec(
         virtual=child,
         directory=child,
-        vfs_path=child.strip("/"),
+        vfs_path=rekey(parent.virtual, parent.vfs_path, child),
         raw_path=_name(parent).rstrip("/") + "/" + name,
     )
 
@@ -232,10 +242,8 @@ def switch_words(argv: Sequence[str]) -> list[str]:
     return words
 
 
-async def _side(walk: _Walk, path: PathSpec, absent: bool) -> str:
-    if absent:
-        return ""
-    return (await walk.read_bytes(path)).decode(errors="replace")
+async def _side(walk: _Walk, path: PathSpec, absent: bool) -> bytes:
+    return b"" if absent else await walk.read_bytes(path)
 
 
 async def _diff_pair(
@@ -243,62 +251,53 @@ async def _diff_pair(
     path2: PathSpec,
     walk: _Walk,
     absent: Absent = PRESENT,
-) -> bytes:
-    """Diff two files' text in the format the flags choose.
-
-    The line diff runs on the loop at any size, with no yield inside it,
-    where TypeScript sends one past ``LOOP_BUDGET`` to a worker
-    (strukto-ai/mirage#1590).
-
-    Args:
-        path1 (PathSpec): the first file.
-        path2 (PathSpec): the second file.
-        walk (_Walk): the comparison's flags and readers.
-        absent (Absent): which sides read as an absent, empty file.
-    """
+) -> PairResult:
     flags = walk.flags
-    name1 = _name(path1)
-    name2 = _name(path2)
-    text_a = await _side(walk, path1, absent[0])
-    text_b = await _side(walk, path2, absent[1])
-    if flags.ignore_case:
-        text_a = text_a.lower()
-        text_b = text_b.lower()
-    if flags.ignore_all_space:
-        text_a = re.sub(r"\s+", "", text_a)
-        text_b = re.sub(r"\s+", "", text_b)
-    if flags.ignore_space_change:
-        text_a = re.sub(r"[ \t]+", " ", text_a)
-        text_b = re.sub(r"[ \t]+", " ", text_b)
-    if text_a == text_b:
-        if flags.identical:
-            return f"Files {name1} and {name2} are identical\n".encode()
-        return b""
-    if flags.brief:
-        return f"Files {name1} and {name2} differ\n".encode()
-    a_lines = split_lines_keepends(text_a)
-    b_lines = split_lines_keepends(text_b)
-    if flags.ed:
-        result = ed_script(a_lines, b_lines)
-    elif flags.unified:
-        result = list(
-            difflib.unified_diff(
-                a_lines,
-                b_lines,
-                fromfile=quote_header_name(name1),
-                tofile=quote_header_name(name2),
-                fromfiledate=await _header_time(walk, path1, absent[0]),
-                tofiledate=await _header_time(walk, path2, absent[1]),
-                n=flags.context,
-            )
+    name1, name2 = _name(path1), _name(path2)
+    options = DiffOptions(
+        mode="ed" if flags.ed else "unified" if flags.unified else "normal",
+        context=flags.context,
+        ignore_case=flags.ignore_case,
+        ignore_all_space=flags.ignore_all_space,
+        ignore_space_change=flags.ignore_space_change,
+        brief=flags.brief,
+        old_label=name1,
+        new_label=name2,
+        old_header=(
+            quote_header_name(name1)
+            + "\t"
+            + await _header_time(walk, path1, absent[0])
         )
-    else:
-        result = normal_diff(a_lines, b_lines)
-    return "".join(result).encode()
-
-
-def _is_identical(body: bytes) -> bool:
-    return body.endswith(b" are identical\n")
+        if flags.unified
+        else "",
+        new_header=(
+            quote_header_name(name2)
+            + "\t"
+            + await _header_time(walk, path2, absent[1])
+        )
+        if flags.unified
+        else "",
+    )
+    result = await walk.computer.compare(
+        options,
+        partial(_side, walk, path1, absent[0]),
+        partial(_side, walk, path2, absent[1]),
+    )
+    if result.outcome == "different" and flags.brief and result.status == 1:
+        return PairResult(
+            result.outcome,
+            (f"Files {name1} and {name2} differ\n".encode(),),
+            result.status,
+            result.stderr,
+        )
+    if result.outcome == "equal" and flags.identical and result.status == 0:
+        return PairResult(
+            result.outcome,
+            (f"Files {name1} and {name2} are identical\n".encode(),),
+            result.status,
+            result.stderr,
+        )
+    return result
 
 
 async def _entries(walk: _Walk, path: PathSpec, absent: bool) -> set[str]:
@@ -345,7 +344,7 @@ async def _diff_dirs(
     walk: _Walk,
     absent: Absent = PRESENT,
     above: tuple[tuple[str, ...], tuple[str, ...]] = ((), ()),
-) -> tuple[bytes, bool]:
+) -> tuple[list[bytes], bool]:
     """Compare two directories, one of which -N may read as empty.
 
     Where diff follows links, a pair whose every side is a directory
@@ -362,7 +361,7 @@ async def _diff_dirs(
             to.
 
     Returns:
-        tuple[bytes, bool]: the report and whether any pair differed.
+        tuple[list[bytes], bool]: output chunks and whether any pair differed.
     """
     flags = walk.flags
     real = walk.real
@@ -412,25 +411,30 @@ async def _diff_dirs(
                     f"diff: {named}: recursive directory loop\n".encode()
                 )
                 continue
-            body, changed = await _diff_dirs(
+            children, changed = await _diff_dirs(
                 child_a, child_b, walk, gone, opened
             )
-            parts.append(body)
+            parts.extend(children)
             differ = differ or changed
         elif not a_dir and not b_dir:
-            body = await _diff_pair(child_a, child_b, walk, gone)
-            if not body or _is_identical(body):
-                parts.append(body)
+            result = await _diff_pair(child_a, child_b, walk, gone)
+            body = result.output
+            walk.status = max(walk.status, result.status)
+            if result.stderr:
+                walk.trouble.extend(result.stderr)
+            if result.outcome == "equal":
+                parts.extend(body)
                 continue
             differ = True
             if flags.brief:
-                parts.append(body)
+                parts.extend(body)
             else:
                 header = (
                     f"diff{walk.switches} {quote_header_name(_name(child_a))} "
                     f"{quote_header_name(_name(child_b))}\n"
                 )
-                parts.append(header.encode() + body)
+                parts.append(header.encode())
+                parts.extend(body)
         elif a_dir:
             differ = True
             parts.append(
@@ -447,7 +451,7 @@ async def _diff_dirs(
                     f"{_name(child_b)} is a directory\n"
                 ).encode()
             )
-    return b"".join(parts), differ
+    return parts, differ
 
 
 async def _missing(
@@ -485,6 +489,7 @@ async def diff(
     zone: tzinfo | None = None,
     dispatch: DispatchFn | None = None,
     links: LinkView | None = None,
+    computer: DiffComputer | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 2:
         raise extra_operand_error(CommandName.DIFF, paths[2].raw_path)
@@ -498,8 +503,13 @@ async def diff(
     read_bytes = stdin_bytes(read_bytes, stdin)
     stat_fn = stdin_stat(stat_fn)
     dashes = [p.raw_path == "-" for p in paths]
+    walk: _Walk | None = None
+    owned = DiffPool() if computer is None else None
+    service = owned if owned is not None else computer
+    assert service is not None
     try:
         walk = _Walk(
+            computer=service,
             read_bytes=read_bytes,
             readdir_fn=readdir_fn,
             # diff compares what each link leads to (its default
@@ -545,8 +555,17 @@ async def diff(
                 await before_full_scan(dispatch, path, "diff")
             output, differ = await _diff_dirs(paths[0], paths[1], walk)
         else:
-            output = await _diff_pair(paths[0], paths[1], walk, absent)
-            differ = bool(output) and not _is_identical(output)
+            result = await _diff_pair(paths[0], paths[1], walk, absent)
+            output, differ = list(result.output), result.outcome == "different"
+            walk.status = max(walk.status, result.status)
+            if result.stderr:
+                walk.trouble.extend(result.stderr)
+    except RuntimeError as exc:
+        return None, IOResult(exit_code=2, stderr=f"diff: {exc}\n".encode())
+    except StreamRefusal as exc:
+        return exc.output, IOResult(
+            exit_code=2, stderr=(f"diff: {exc.message}\n").encode()
+        )
     except FS_ERRORS as exc:
         # GNU diff reserves exit 1 for "files differ"; trouble (a missing
         # or unreadable operand) is exit 2.
@@ -554,9 +573,21 @@ async def diff(
             exit_code=2,
             stderr=format_fs_error("diff", exc, [*paths, *flags.exclude_from]),
         )
-    if walk.trouble:
-        return output, IOResult(exit_code=2, stderr=b"".join(walk.trouble))
-    return output, IOResult(exit_code=1 if differ else 0)
+    finally:
+        if owned is not None:
+            await owned.close()
+    assert walk is not None
+    if walk.status == 2 or walk.trouble:
+        return _output(output), IOResult(
+            exit_code=2, stderr=b"".join(walk.trouble)
+        )
+    return _output(output), IOResult(exit_code=1 if differ else 0)
+
+
+async def _output(parts: list[bytes]) -> AsyncIterator[bytes]:
+    for part in parts:
+        async for chunk in chunks(part):
+            yield chunk
 
 
 __all__ = ["diff"]
@@ -622,4 +653,5 @@ async def diff_generic(
         zone=zone_from_env(ctx.env),
         dispatch=dispatch_of(ctx),
         links=links_of(ctx),
+        computer=ctx.diff,
     )

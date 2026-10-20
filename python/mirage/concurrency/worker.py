@@ -20,6 +20,9 @@ class Worker:
         self._process: asyncio.subprocess.Process | None = None
         self._unread = 0
         self._lock = asyncio.Lock()
+        self._starting: asyncio.Task[asyncio.subprocess.Process] | None = None
+        self._closing: asyncio.Task[None] | None = None
+        self._failure: BaseException | None = None
 
     async def call(self, fn: Callable[..., T], *args: Any) -> T:
         """Call an importable function away from the event loop and the GIL.
@@ -44,7 +47,18 @@ class Worker:
             args (Any): serializable computation inputs.
         """
         try:
+            if self._failure is not None:
+                raise RuntimeError(
+                    "computation worker transport failed"
+                ) from self._failure
+            if self._closing is not None and (
+                not self._closing.done()
+                or self._closing.cancelled()
+                or self._closing.exception() is not None
+            ):
+                raise RuntimeError("computation worker is stopping")
             if self._process is None:
+                self._closing = None
                 starting = asyncio.create_task(
                     asyncio.create_subprocess_exec(
                         sys.executable,
@@ -54,16 +68,23 @@ class Worker:
                         stdout=asyncio.subprocess.PIPE,
                     )
                 )
+                self._starting = starting
                 try:
                     self._process = await asyncio.shield(starting)
                 except asyncio.CancelledError:
                     self._process = await settle(starting)
                     raise
+                finally:
+                    self._starting = None
             process = self._process
+            if process.returncode is not None:
+                raise RuntimeError("computation worker exited")
             assert process.stdin is not None
             data = pickle.dumps((fn.__module__, fn.__name__, args))
             process.stdin.write(HEADER.pack(len(data)) + data)
-        except BaseException:
+        except BaseException as exc:
+            if not isinstance(exc, asyncio.CancelledError):
+                self._failure = exc
             await self.close()
             raise
 
@@ -89,26 +110,47 @@ class Worker:
                     break
                 self._unread -= 1
             ok, result = pickle.loads(data)
-            if not ok:
-                raise result
-            return result
-        except BaseException:
+        except BaseException as exc:
+            if not isinstance(exc, asyncio.CancelledError):
+                self._failure = exc
             await self.close()
             raise
+        if not ok:
+            raise result
+        return result
 
-    async def close(self) -> None:
-        """Terminate and join this invocation's worker."""
-        process, self._process = self._process, None
-        self._unread = 0
-        if process is not None:
-            if process.returncode is None:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    logger.debug("computation worker already exited")
-            # A canceled read can leave stdout paused at its buffer limit. Drain
-            # the killed child's pipes as well as waiting for its exit.
-            await settle(asyncio.create_task(process.communicate()))
+    async def _stop(self) -> None:
+        if self._starting is not None:
+            self._process = await settle(self._starting)
+        process = self._process
+        if process is None:
+            return
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                logger.debug("computation worker already exited")
+        await process.communicate()
+        if self._process is process:
+            self._process = None
+            self._unread = 0
+
+    async def close(self, *, retry: bool = False) -> None:
+        """Terminate and join, retaining a failed stop until explicitly retried.
+
+        Args:
+            retry (bool): retry a completed failed stop owned by this caller.
+        """
+        if self._closing is None or (
+            retry
+            and self._closing.done()
+            and (
+                self._closing.cancelled()
+                or self._closing.exception() is not None
+            )
+        ):
+            self._closing = asyncio.create_task(self._stop())
+        await settle(self._closing)
 
 
 async def run_isolated(fn: Callable[..., T], *args: Any) -> T:

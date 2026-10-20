@@ -1,3 +1,4 @@
+import type { DiffComputer } from '../../rs/diff_types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,6 +107,7 @@ export interface RegistryPlacements {
 }
 
 export class MountRegistry {
+  diff?: DiffComputer
   private readonly indexConfig: IndexConfig | undefined
   processView?: (session: SessionState) => ProcessView
   // Fetches the managed names a tree a mount serves reads, once the executor

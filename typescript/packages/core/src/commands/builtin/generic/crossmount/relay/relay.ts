@@ -1,3 +1,4 @@
+import type { DiffComputer } from '../../../../../rs/diff_types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,6 +64,8 @@ export async function runRelay(
   cwd = '/',
   argv: readonly string[] = [],
   checkUnlink?: (path: PathSpec) => void,
+  diff?: DiffComputer,
+  signal?: AbortSignal,
 ): Promise<CrossResult> {
   if (!RELAY_COMMANDS.has(cmdName))
     throw new Error(`Unsupported cross-mount relay command: ${cmdName}`)
@@ -96,8 +99,10 @@ export async function runRelay(
       cwd,
       vfs,
       stdin,
-      undefined,
+      signal,
       argv,
+      undefined,
+      diff,
     )
   }
   throw new Error(`No cross-mount composition for ${cmdName}`)

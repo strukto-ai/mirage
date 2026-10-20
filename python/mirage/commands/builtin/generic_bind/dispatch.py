@@ -33,6 +33,7 @@ from mirage.context.session_context import (
 from mirage.errors.fs import eisdir
 from mirage.io.stream import close_quietly, ensure_stream, materialize
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
 from mirage.view.types import FollowOperands
@@ -87,6 +88,7 @@ async def run_dispatch(
     stdin: ByteSource | None = None,
     argv: tuple[str, ...] = (),
     follow: FollowOperands | None = None,
+    diff: DiffComputer | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the same builder once across every operand's owning mount.
 
@@ -121,6 +123,7 @@ async def run_dispatch(
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
         vfs=vfs or Files(dispatch, follow=follow, ledger=False),
         argv=argv,
+        diff=diff,
     )
     # No mount is bound to the run, a line that spans mounts walking
     # through the dispatcher, even inside a command a mount runs (a

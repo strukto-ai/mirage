@@ -5,6 +5,7 @@ import threading
 
 import pytest
 
+from mirage.concurrency.worker import Worker
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.glob import Glob
 from mirage.rs.stream import open_stream, run_stream
@@ -134,3 +135,23 @@ async def test_foreground_parameter_cancellation_closes_matcher_before_returning
             pending.cancel()
         task.cancel()
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_native_refusal_keeps_message_and_partial_output_through_worker():
+    worker = Worker()
+    try:
+        with pytest.raises(StreamRefusal) as refused:
+            await worker.call(
+                exec,
+                "from mirage.rs.stream import open_stream\n"
+                "stream = open_stream('base64', "
+                "{'mode': 'decode', 'ignore_garbage': False})\n"
+                "stream.feed(b'YQ==*')",
+            )
+        assert refused.value.message == "base64: invalid input"
+        assert str(refused.value) == "base64: invalid input"
+        assert refused.value.output == b"a"
+        assert await worker.call(len, b"healthy") == 7
+    finally:
+        await worker.close()

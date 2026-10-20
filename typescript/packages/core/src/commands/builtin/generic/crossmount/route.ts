@@ -1,3 +1,4 @@
+import type { DiffComputer } from '../../../../rs/diff_types.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,6 +68,8 @@ export async function handleCrossMount(
   // The line's operand resolution, which a walk through the dispatcher's
   // globs take.
   follow?: FollowOperands,
+  diff?: DiffComputer,
+  signal?: AbortSignal,
 ): Promise<CrossResult> {
   const native = runSingle
   const input = resolveSource(stdin)
@@ -130,6 +133,8 @@ export async function handleCrossMount(
         cwd,
         argv,
         checkUnlink,
+        diff,
+        signal,
       )
     }
     if (strategy === Strategy.STREAM) {
