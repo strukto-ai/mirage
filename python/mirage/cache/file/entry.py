@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from enum import Enum
 
 from pydantic import BaseModel
@@ -38,8 +37,13 @@ class CacheEntry(BaseModel):
         """Whether the entry holds the file's bytes, not only its version."""
         return self.holds is not Holds.VERSION
 
-    @property
-    def expired(self) -> bool:
+    def is_expired(self, now: int) -> bool:
+        """Whether the entry has outlived its ttl at ``now``.
+
+        Args:
+            now (int): whole seconds since the unix epoch, read from the
+                store's clock.
+        """
         if self.ttl is None:
             return False
-        return (int(time.time()) - self.cached_at) >= self.ttl
+        return (now - self.cached_at) >= self.ttl

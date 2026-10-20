@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from collections import OrderedDict
 from collections.abc import Iterable
 
@@ -23,6 +22,7 @@ from mirage.cache.file.utils import parse_limit
 from mirage.cache.invalidation import Invalidation
 from mirage.cache.lock import KeyLockMixin
 from mirage.types import PathSpec
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
 from mirage.vfs.ram import RAMVFS
 
@@ -33,12 +33,20 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     Data lives in inherited _store.files (RAMStore).
     _entries tracks LRU metadata only.
     All RAM commands (cat, grep, head, ...) inherited.
+
+    Args:
+        cache_limit (str | int): capacity, as bytes or a size string.
+        max_drain_bytes (int | None): cap on a background drain's buffer;
+            None derives it from ``cache_limit``.
+        clock (Clock | None): the clock every entry's age is measured
+            against; None means the system clock.
     """
 
     def __init__(
         self,
         cache_limit: str | int = "512MB",
         max_drain_bytes: int | None = None,
+        clock: Clock | None = None,
     ) -> None:
         parsed_limit = parse_limit(cache_limit)
         validate_max_drain_bytes(parsed_limit, max_drain_bytes)
@@ -48,14 +56,19 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         self._invalidation = Invalidation()
         self._entries: OrderedDict[str, CacheEntry] = OrderedDict()
         self._clear_lock: asyncio.Lock = asyncio.Lock()
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self.max_drain_bytes: int | None = max_drain_bytes
+
+    def _seconds(self) -> int:
+        """The current whole second on the store's clock."""
+        return int(self._clock.now())
 
     async def get(self, key: str) -> bytes | None:
         async with self._lock_for(key):
             entry = self._entries.get(key)
             if entry is None or not entry.has_bytes:
                 return None
-            if not entry.expired:
+            if not entry.is_expired(self._seconds()):
                 self._entries.move_to_end(key)
                 return self._store.files.get(key)
             self._drop_entry(key)
@@ -88,7 +101,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 self._drop_entry(key)
                 entry = CacheEntry(
                     size=len(data),
-                    cached_at=int(time.time()),
+                    cached_at=self._seconds(),
                     fingerprint=fingerprint or None,
                     ttl=ttl,
                 )
@@ -121,7 +134,11 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
         entry = self._entries.get(
             key if isinstance(key, str) else key.mount_path
         )
-        return entry is not None and entry.has_bytes and not entry.expired
+        return (
+            entry is not None
+            and entry.has_bytes
+            and not entry.is_expired(self._seconds())
+        )
 
     async def fingerprint(self, key: str) -> str | None:
         entry = self._entries.get(key)
@@ -138,7 +155,11 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 if self._invalidation.stale(key, stamp):
                     return
                 entry = self._entries.get(key)
-                if entry is not None and entry.has_bytes and not entry.expired:
+                if (
+                    entry is not None
+                    and entry.has_bytes
+                    and not entry.is_expired(self._seconds())
+                ):
                     if entry.fingerprint == fingerprint:
                         entry.holds = Holds.BYTES_AND_VERSION
                     return
@@ -151,7 +172,7 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     def _put_version(self, key: str, fingerprint: str) -> None:
         version = CacheEntry(
             size=len(key) + len(fingerprint),
-            cached_at=int(time.time()),
+            cached_at=self._seconds(),
             fingerprint=fingerprint,
             holds=Holds.VERSION,
         )
