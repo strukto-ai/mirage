@@ -77,6 +77,7 @@ from mirage.workspace.executor.command.routing import (
     merge_scopes,
     option_loop_exits,
     path_flag_scopes,
+    positional_scopes,
     routable_scopes,
     routed_operands,
 )
@@ -480,17 +481,25 @@ async def handle_command(
         )
 
     # A mount may register its own command under a builtin's name. The
-    # steps below that read the line with the builtin's grammar then run
-    # only when the mount resolve_mount will pick holds that grammar.
+    # steps below that read the line with the builtin's grammar then skip
+    # a line whose operands (or cwd) pick such a mount, as resolve_mount
+    # picks it; a file an option reads (`grep -f`) picks nothing.
     own_mount = registry.command_mount(
         cmd_name,
-        [p for p in parts[1:] if isinstance(p, PathSpec)],
+        positional_scopes(
+            cmd_name,
+            [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]],
+            session.cwd,
+            parts[1:],
+        ),
         session.cwd,
     )
-    builtin = own_mount is None or is_builtin_grammar(
-        cmd_name, own_mount.spec_for(cmd_name)
+    borrowed = (
+        cmd_name in SPECS
+        and own_mount is not None
+        and not is_builtin_grammar(cmd_name, own_mount.spec_for(cmd_name))
     )
-    if builtin and cmd_name in CWD_DEFAULT_RAW:
+    if not borrowed and cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
             parts, cmd_name, registry, session.cwd, stdin
         )
@@ -543,7 +552,11 @@ async def handle_command(
         )
 
     prepared: ParsedCommand | None = None
-    if builtin and cmd_name in PROGRAM_FILE_COMMANDS and dispatch is not None:
+    if (
+        not borrowed
+        and cmd_name in PROGRAM_FILE_COMMANDS
+        and dispatch is not None
+    ):
         candidate = parse_flags(
             parts[1:],
             registered_spec(cmd_name, SPECS[cmd_name]),
@@ -598,8 +611,9 @@ async def handle_command(
         raw_argv,
         session.cwd,
     ):
-        routed = (
-            routable_scopes(
+        routed = path_scopes
+        if not borrowed:
+            routed = routable_scopes(
                 cmd_name,
                 path_scopes
                 if prepared is not None
@@ -607,10 +621,6 @@ async def handle_command(
                     cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
                 ),
             )
-            if builtin
-            else path_scopes
-        )
-        if builtin:
             flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
         routing_scopes = [
             s
@@ -619,7 +629,7 @@ async def handle_command(
         ]
 
     find_expr_tokens: list[str] | None = None
-    if builtin and cmd_name == "find":
+    if not borrowed and cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
             find_expr = parse_find_expression(find_expr_tokens)
@@ -655,7 +665,7 @@ async def handle_command(
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would.
-    if builtin and is_cross_mount(
+    if not borrowed and is_cross_mount(
         cmd_name,
         _operand_mounts(registry, cmd_name, routing_scopes),
         flag_scopes,
@@ -911,7 +921,9 @@ async def handle_command(
         if dispatch is not None
         else None
     )
-    if builtin and _should_fan_out(cmd_name, paths, flag_kwargs, registry):
+    if not borrowed and _should_fan_out(
+        cmd_name, paths, flag_kwargs, registry
+    ):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the

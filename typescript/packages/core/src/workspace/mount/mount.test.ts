@@ -570,8 +570,8 @@ it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
   },
 )
 
-const ECHO_CMD: CommandFn = (_accessor, paths, texts, ctx) => [
-  new TextEncoder().encode(JSON.stringify([paths.map((p) => p.virtual), texts, ctx.flags.f])),
+const ECHO_CMD: CommandFn = (_accessor, paths, texts) => [
+  new TextEncoder().encode(JSON.stringify([paths.map((p) => p.virtual), texts])),
   new IOResult(),
 ]
 
@@ -611,6 +611,31 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
     }
   },
 )
+
+// The mount a line runs on is picked by its operands, never by a file an
+// option reads, so a builtin grep on /b still reads its pattern file from the
+// mount whose own grep is borrowed.
+it('leaves the builtin on another mount alone when a name is borrowed', async () => {
+  const ws = new Workspace(
+    { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+  )
+  try {
+    ws.mount('/a/').register(
+      new Command({
+        name: 'grep',
+        spec: new CommandSpec({ arguments: [new Argument('rest', { nargs: '*' })] }),
+        vfs: null,
+        fn: ECHO_CMD,
+      }),
+    )
+    await ws.shell("echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input")
+    const result = await ws.shell('cd /b && grep -f /a/patterns /b/input')
+    expect([result.exitCode, result.stdoutText]).toEqual([0, 'hi\n'])
+  } finally {
+    await ws.close()
+  }
+})
 
 it.each([false, true])(
   'closes native output and releases mount admission (started=%s)',

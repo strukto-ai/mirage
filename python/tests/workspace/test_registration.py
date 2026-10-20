@@ -189,8 +189,7 @@ async def test_a_borrowed_builtin_name_is_refused_like_a_custom_command(
 
 
 async def echo_command(accessor, paths, texts, ctx):
-    shown = [p.virtual for p in paths], list(texts), ctx.flags.get("f")
-    return f"{shown}\n".encode(), IOResult()
+    return f"{[p.virtual for p in paths]} {texts}\n".encode(), IOResult()
 
 
 # The steps that read a line with the builtin's grammar before routing
@@ -233,3 +232,26 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
         control.stdout,
         (control.stderr or b"").replace(b"mycmd", name.encode()),
     )
+
+
+# The mount a line runs on is picked by its operands, never by a file an
+# option reads, so a builtin grep on /b still reads its pattern file from
+# the mount whose own grep is borrowed.
+@pytest.mark.asyncio
+async def test_a_borrowed_name_leaves_the_builtin_on_another_mount(
+    ws_two_mounts,
+):
+    ws_two_mounts.mount("/a/").register(
+        Command(
+            "grep",
+            spec=CommandSpec(arguments=(Argument("rest", nargs="*"),)),
+            vfs=None,
+            filetype=None,
+            fn=echo_command,
+        )
+    )
+    await ws_two_mounts.shell(
+        "echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input"
+    )
+    result = await ws_two_mounts.shell("cd /b && grep -f /a/patterns /b/input")
+    assert (result.exit_code, result.stdout) == (0, b"hi\n")
