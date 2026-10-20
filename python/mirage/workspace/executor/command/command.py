@@ -837,13 +837,17 @@ async def handle_command(
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
     # command bound to one mount cannot write its output through another.
-    # A borrowed line runs on its predicted mount, so every word classified
-    # as a path must lie there too, or its handler reads another mount's
+    # A borrowed line runs on its predicted mount, so every path its own
+    # spec reads must lie there too, or its handler reads another mount's
     # path through its own.
     mount_prefixes = (
         {own_mount.prefix} if borrowed and own_mount is not None else set()
     )
-    for s in path_scopes if borrowed else routing_scopes:
+    for s in (
+        parse_flags(parts[1:], own_spec, cmd_name, session.cwd).paths
+        if borrowed
+        else routing_scopes
+    ):
         m = registry.try_mount_for(s.virtual)
         # a scope outside any mount contributes nothing here
         if m is not None:
