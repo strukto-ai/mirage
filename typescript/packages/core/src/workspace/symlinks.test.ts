@@ -1636,3 +1636,16 @@ it.each(['test', '[', '[['])('-ef compares where the names lead: %s', async (nam
   expect(dec(r.stdout)).toBe('0\n0\n0\n0\n')
   await ws.close()
 })
+
+it.each(['test', '[', '[['])('an operand the walk refused names no file: %s', async (name) => {
+  // The empty name and a link loop name nothing, so every file test answers
+  // false rather than testing the working directory.
+  const ws = buildWorkspace()
+  await ws.shell('mkdir -p /data/d; ln -s loop /data/loop')
+  const close = name === 'test' ? '' : name === '[' ? ' ]' : ' ]]'
+  const tests = ["-e ''", "-d ''", "-s ''", "'' -ef .", '-e loop', 'loop -ef loop']
+  const line = 'cd /data && ' + tests.map((x) => `${name} ${x}${close}; echo $?`).join('; ')
+  const r = await ws.shell(line)
+  expect(dec(r.stdout)).toBe('1\n'.repeat(tests.length))
+  await ws.close()
+})

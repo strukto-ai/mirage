@@ -54,6 +54,10 @@ def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
         val (str | PathSpec): operand as typed or classified.
     """
     if isinstance(val, PathSpec):
+        if val.walk_error is not None:
+            # The walk already refused it (the empty name, a link loop):
+            # it names nothing, which the dispatcher answers.
+            return val
         spelled = val.dotted or val.virtual
     else:
         spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(

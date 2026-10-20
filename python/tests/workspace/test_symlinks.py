@@ -2000,3 +2000,20 @@ async def test_ef_compares_where_the_names_lead(name):
     r = await ws.shell(line)
     assert r.stdout == b"0\n0\n0\n0\n"
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "[", "[["])
+async def test_an_operand_the_walk_refused_names_no_file(name):
+    # The empty name and a link loop name nothing, so every file test
+    # answers false rather than testing the working directory.
+    ws = _ws()
+    await ws.shell("mkdir -p /data/d; ln -s loop /data/loop")
+    close = {"test": "", "[": " ]", "[[": " ]]"}[name]
+    tests = ("-e ''", "-d ''", "-s ''", "'' -ef .", "-e loop", "loop -ef loop")
+    line = "cd /data && " + "; ".join(
+        f"{name} {x}{close}; echo $?" for x in tests
+    )
+    r = await ws.shell(line)
+    assert r.stdout == b"1\n" * len(tests)
+    await ws.close()

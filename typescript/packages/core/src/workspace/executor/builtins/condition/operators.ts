@@ -38,6 +38,9 @@ import { rstripSlash } from '../../../../utils/slash.ts'
  * need): `-ef` compares where two names lead.
  */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
+  // The walk already refused it (the empty name, a link loop): it names
+  // nothing, which the dispatcher answers.
+  if (val instanceof PathSpec && val.walkError != null) return val
   const spelled =
     val instanceof PathSpec
       ? (val.dotted ?? val.virtual)
