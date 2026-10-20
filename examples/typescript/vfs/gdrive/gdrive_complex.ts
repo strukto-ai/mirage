@@ -44,6 +44,13 @@ function lines(text: string): string[] {
   return trimmed === '' ? [] : trimmed.split('\n')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function out(cmd: string): Promise<string> {
   return (await ws.shell(cmd)).stdoutText
 }
@@ -95,7 +102,9 @@ async function main(): Promise<void> {
   console.log(`  Stats: ${opsSummary()}`)
 
   // ── pipe: grep | cut (extract field) ──
-  console.log('\n--- rg queue-operation /gdrive/mirage/example.jsonl | head -n 5 | cut -d , -f 2 ---')
+  console.log(
+    '\n--- rg queue-operation /gdrive/mirage/example.jsonl | head -n 5 | cut -d , -f 2 ---',
+  )
   r = await ws.shell('rg queue-operation /gdrive/mirage/example.jsonl | head -n 5 | cut -d , -f 2')
   console.log(`  Fields:\n    ${r.stdoutText.trim()}`)
   console.log(`  Stats: ${opsSummary()}`)
@@ -121,7 +130,9 @@ async function main(): Promise<void> {
   console.log(`  Stats: ${opsSummary()}`)
 
   // ── semicolon: multiple independent reads ──
-  console.log('\n--- head -n 1 /gdrive/mirage/example.jsonl ; wc -l /gdrive/mirage/example.jsonl ---')
+  console.log(
+    '\n--- head -n 1 /gdrive/mirage/example.jsonl ; wc -l /gdrive/mirage/example.jsonl ---',
+  )
   r = await ws.shell('head -n 1 /gdrive/mirage/example.jsonl ; wc -l /gdrive/mirage/example.jsonl')
   console.log(`  Output: ${r.stdoutText.trim()}`)
   console.log(`  Stats: ${opsSummary()}`)
@@ -156,7 +167,7 @@ async function main(): Promise<void> {
   const gdoc = listing.find((f) => f.includes('.gdoc.json'))
   if (gdoc !== undefined) {
     console.log(`  Found doc: ${gdoc}`)
-    const grepped = (await out(`grep -i "title" "/gdrive/${gdoc}"`)).trim()
+    const grepped = (await out(`grep -i "title" ${shellQuote(`/gdrive/${gdoc}`)}`)).trim()
     if (grepped !== '') console.log(`  grep title: ${grepped.slice(0, 120)}...`)
     console.log(`  Stats: ${opsSummary()}`)
   } else {
@@ -167,7 +178,9 @@ async function main(): Promise<void> {
   if (gsheet !== undefined) {
     console.log('\n--- grep in Google Sheets (.gsheet.json) ---')
     console.log(`  Found sheet: ${gsheet}`)
-    const grepped = (await out(`grep -i "properties" "/gdrive/${gsheet}" | head -n 3`)).trim()
+    const grepped = (
+      await out(`grep -i "properties" ${shellQuote(`/gdrive/${gsheet}`)} | head -n 3`)
+    ).trim()
     if (grepped !== '') console.log(`  grep properties: ${grepped.slice(0, 120)}...`)
     console.log(`  Stats: ${opsSummary()}`)
   }
@@ -176,7 +189,9 @@ async function main(): Promise<void> {
   if (gslide !== undefined) {
     console.log('\n--- grep in Google Slides (.gslide.json) ---')
     console.log(`  Found slide: ${gslide}`)
-    const grepped = (await out(`grep -i "slide" "/gdrive/${gslide}" | head -n 3`)).trim()
+    const grepped = (
+      await out(`grep -i "slide" ${shellQuote(`/gdrive/${gslide}`)} | head -n 3`)
+    ).trim()
     if (grepped !== '') console.log(`  grep slide: ${grepped.slice(0, 120)}...`)
     console.log(`  Stats: ${opsSummary()}`)
   }
@@ -186,7 +201,7 @@ async function main(): Promise<void> {
 
   console.log('--- grep -c title in Google Doc (eager read) ---')
   if (gdoc !== undefined) {
-    r = await ws.shell(`grep -c title "/gdrive/${gdoc}"`)
+    r = await ws.shell(`grep -c title ${shellQuote(`/gdrive/${gdoc}`)}`)
     console.log(`  ${gdoc}: ${r.stdoutText.trim()} matches`)
   }
 
@@ -239,7 +254,10 @@ async function main(): Promise<void> {
   }
 
   for (const [header, cmd] of [
-    ['\n--- jq: vendor costs ---', 'jq ".vendor_contracts | map(.annual_cost)" /gdrive/mirage/example.json'],
+    [
+      '\n--- jq: vendor costs ---',
+      'jq ".vendor_contracts | map(.annual_cost)" /gdrive/mirage/example.json',
+    ],
     ['\n--- jq: office locations ---', 'jq ".locations | map(.city)" /gdrive/mirage/example.json'],
     [
       '\n--- jq: all incident titles ---',
@@ -286,7 +304,8 @@ async function main(): Promise<void> {
   for (const line of lines(await out('history 5'))) console.log(`  ${line.slice(0, 100)}`)
 
   console.log('\n  --- tail -n 6 /.bash_history (all sessions, GNU file) ---')
-  for (const line of lines(await out('tail -n 6 /.bash_history'))) console.log(`  ${line.slice(0, 100)}`)
+  for (const line of lines(await out('tail -n 6 /.bash_history')))
+    console.log(`  ${line.slice(0, 100)}`)
 
   console.log('\n  --- history as JSONL ---')
   for (const e of events.slice(-3)) console.log(JSON.stringify(e))

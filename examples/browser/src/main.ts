@@ -54,6 +54,13 @@ async function run(ws: Workspace, cmd: string): Promise<void> {
   if (res.exitCode !== 0) line(`exit=${String(res.exitCode)}`, 'err')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function makePresigner(backend: BackendName) {
   return async (
     path: string,
@@ -128,15 +135,15 @@ async function demoTrello(ws: Workspace): Promise<void> {
   const ws0 = wsRes.stdoutText.trim()
   if (ws0 === '') return
   const wsBase = `/trello/workspaces/${ws0}`
-  await run(ws, `cat ${wsBase}/workspace.json`)
-  await run(ws, `tree -L 3 ${wsBase}`)
-  const bRes = await ws.shell(`ls ${wsBase}/boards/ | head -n 1`)
+  await run(ws, `cat ${shellQuote(`${wsBase}/workspace.json`)}`)
+  await run(ws, `tree -L 3 ${shellQuote(wsBase)}`)
+  const bRes = await ws.shell(`ls ${shellQuote(`${wsBase}/boards/`)} | head -n 1`)
   const b0 = bRes.stdoutText.trim()
   if (b0 === '') return
   const boardBase = `${wsBase}/boards/${b0}`
-  await run(ws, `cat ${boardBase}/board.json`)
-  await run(ws, `jq -r ".board_name" ${boardBase}/board.json`)
-  await run(ws, `find ${boardBase} -name "card.json" | head -n 3`)
+  await run(ws, `cat ${shellQuote(`${boardBase}/board.json`)}`)
+  await run(ws, `jq -r ".board_name" ${shellQuote(`${boardBase}/board.json`)}`)
+  await run(ws, `find ${shellQuote(boardBase)} -name "card.json" | head -n 3`)
 }
 
 /**
@@ -151,14 +158,14 @@ async function demoLinear(ws: Workspace): Promise<void> {
   const t0 = tRes.stdoutText.trim()
   if (t0 === '') return
   const teamBase = `/linear/teams/${t0}`
-  await run(ws, `cat ${teamBase}/team.json`)
-  await run(ws, `tree -L 2 ${teamBase}`)
-  const iRes = await ws.shell(`ls ${teamBase}/issues/ | head -n 1`)
+  await run(ws, `cat ${shellQuote(`${teamBase}/team.json`)}`)
+  await run(ws, `tree -L 2 ${shellQuote(teamBase)}`)
+  const iRes = await ws.shell(`ls ${shellQuote(`${teamBase}/issues/`)} | head -n 1`)
   const i0 = iRes.stdoutText.trim()
   if (i0 === '') return
-  await run(ws, `cat ${teamBase}/issues/${i0}/issue.json`)
-  await run(ws, `jq -r ".title" ${teamBase}/issues/${i0}/issue.json`)
-  await run(ws, `find ${teamBase} -name "issue.json" | head -n 3`)
+  await run(ws, `cat ${shellQuote(`${teamBase}/issues/${i0}/issue.json`)}`)
+  await run(ws, `jq -r ".title" ${shellQuote(`${teamBase}/issues/${i0}/issue.json`)}`)
+  await run(ws, `find ${shellQuote(teamBase)} -name "issue.json" | head -n 3`)
 }
 
 async function demoLangfuse(ws: Workspace): Promise<void> {
@@ -170,13 +177,13 @@ async function demoLangfuse(ws: Workspace): Promise<void> {
   const d0 = dRes.stdoutText.trim()
   if (d0 === '') return
   const dPath = `/langfuse/datasets/${d0}`
-  await run(ws, `ls ${dPath}`)
-  await run(ws, `wc -l ${dPath}/items.jsonl`)
-  await run(ws, `head -n 2 ${dPath}/items.jsonl`)
+  await run(ws, `ls ${shellQuote(dPath)}`)
+  await run(ws, `wc -l ${shellQuote(`${dPath}/items.jsonl`)}`)
+  await run(ws, `head -n 2 ${shellQuote(`${dPath}/items.jsonl`)}`)
   await run(ws, 'ls /langfuse/prompts/')
   const pRes = await ws.shell('ls /langfuse/prompts/ | head -n 1')
   const p0 = pRes.stdoutText.trim()
-  if (p0 !== '') await run(ws, `tree /langfuse/prompts/${p0}`)
+  if (p0 !== '') await run(ws, `tree ${shellQuote(`/langfuse/prompts/${p0}`)}`)
 }
 
 /**
@@ -215,9 +222,9 @@ async function demoGdocs(ws: Workspace): Promise<void> {
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gdocs/owned/${first.split('/').pop() ?? first}`
-  await run(ws, `stat "${path}"`)
-  await run(ws, `jq -r ".title" "${path}"`)
-  await run(ws, `head -n 5 "${path}"`)
+  await run(ws, `stat ${shellQuote(path)}`)
+  await run(ws, `jq -r ".title" ${shellQuote(path)}`)
+  await run(ws, `head -n 5 ${shellQuote(path)}`)
 }
 
 async function demoGsheets(ws: Workspace): Promise<void> {
@@ -228,8 +235,8 @@ async function demoGsheets(ws: Workspace): Promise<void> {
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gsheets/owned/${first.split('/').pop() ?? first}`
-  await run(ws, `stat "${path}"`)
-  await run(ws, `jq -r ".properties.title" "${path}"`)
+  await run(ws, `stat ${shellQuote(path)}`)
+  await run(ws, `jq -r ".properties.title" ${shellQuote(path)}`)
 }
 
 async function demoGslides(ws: Workspace): Promise<void> {
@@ -240,8 +247,8 @@ async function demoGslides(ws: Workspace): Promise<void> {
   const first = ownedRes.stdoutText.trim().split('\n')[0]
   if (first === undefined || first === '') return
   const path = `/gslides/owned/${first.split('/').pop() ?? first}`
-  await run(ws, `stat "${path}"`)
-  await run(ws, `jq -r ".title" "${path}"`)
+  await run(ws, `stat ${shellQuote(path)}`)
+  await run(ws, `jq -r ".title" ${shellQuote(path)}`)
 }
 
 async function demoGdrive(ws: Workspace): Promise<void> {

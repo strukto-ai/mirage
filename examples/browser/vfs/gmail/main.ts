@@ -30,6 +30,13 @@ function buildConfig(): { clientId: string; clientSecret: string; refreshToken: 
   return { clientId, clientSecret, refreshToken }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -51,9 +58,7 @@ async function main(): Promise<void> {
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...cfg })
   try {
-    console.log(
-      '=== BROWSER MODE: GmailVFS → gmail.googleapis.com (CORS) ===\n',
-    )
+    console.log('=== BROWSER MODE: GmailVFS → gmail.googleapis.com (CORS) ===\n')
 
     await run(ws, 'ls /gmail/')
 
@@ -63,19 +68,17 @@ async function main(): Promise<void> {
 
     if (firstDate !== '') {
       console.log('')
-      const msgs = await run(ws, `ls /gmail/INBOX/${firstDate}/`)
-      const firstMsg = msgs
-        .split('\n')
-        .find((s) => s.endsWith('.gmail.json'))
+      const msgs = await run(ws, `ls ${shellQuote(`/gmail/INBOX/${firstDate}/`)}`)
+      const firstMsg = msgs.split('\n').find((s) => s.endsWith('.gmail.json'))
 
       if (firstMsg !== undefined) {
         const msgPath = `/gmail/INBOX/${firstDate}/${firstMsg}`
         console.log('')
-        await run(ws, `jq ".subject" "${msgPath}"`)
+        await run(ws, `jq ".subject" ${shellQuote(msgPath)}`)
         console.log('')
-        await run(ws, `jq ".from" "${msgPath}"`)
+        await run(ws, `jq ".from" ${shellQuote(msgPath)}`)
         console.log('')
-        await run(ws, `wc "${msgPath}"`)
+        await run(ws, `wc ${shellQuote(msgPath)}`)
       }
     }
 

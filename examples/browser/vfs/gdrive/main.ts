@@ -30,6 +30,13 @@ function buildConfig(): { clientId: string; clientSecret: string; refreshToken: 
   return { clientId, clientSecret, refreshToken }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -69,9 +76,9 @@ async function main(): Promise<void> {
     const firstDoc = docFinds.split('\n')[0]
     if (firstDoc !== undefined && firstDoc !== '') {
       console.log('')
-      await run(ws, `jq ".title" "${firstDoc}"`)
+      await run(ws, `jq ".title" ${shellQuote(firstDoc)}`)
       console.log('')
-      await run(ws, `wc "${firstDoc}"`)
+      await run(ws, `wc ${shellQuote(firstDoc)}`)
     }
   } finally {
     await ws.close()

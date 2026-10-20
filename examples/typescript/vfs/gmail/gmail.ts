@@ -15,7 +15,14 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GWS, GmailVFS, MountMode, Workspace, type FileStat, type GmailConfig } from '@struktoai/mirage-node'
+import {
+  GWS,
+  GmailVFS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type GmailConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -35,6 +42,13 @@ function lines(text: string): string[] {
     .trim()
     .split('\n')
     .filter((s) => s !== '')
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 async function main(): Promise<void> {
@@ -72,7 +86,7 @@ async function main(): Promise<void> {
 
     // ls label (date directories)
     console.log(`=== ls /gmail/${label}/ ===`)
-    r = await ws.shell(`ls /gmail/${label}/`)
+    r = await ws.shell(`ls ${shellQuote(`/gmail/${label}/`)}`)
     console.log(r.stdoutText)
 
     const dates = lines(r.stdoutText)
@@ -84,7 +98,7 @@ async function main(): Promise<void> {
 
     // ls date dir (messages)
     console.log(`=== ls /gmail/${label}/${firstDate}/ ===`)
-    r = await ws.shell(`ls /gmail/${label}/${firstDate}/`)
+    r = await ws.shell(`ls ${shellQuote(`/gmail/${label}/${firstDate}/`)}`)
     console.log(r.stdoutText)
 
     const messages = lines(r.stdoutText).filter((m) => m.endsWith('.gmail.json'))
@@ -97,27 +111,27 @@ async function main(): Promise<void> {
 
     // cat message
     console.log(`=== cat ${msgPath} ===`)
-    r = await ws.shell(`cat ${msgPath}`)
+    r = await ws.shell(`cat ${shellQuote(msgPath)}`)
     console.log(r.stdoutText.slice(0, 500))
 
     // head
     console.log('=== head -n 5 ===')
-    r = await ws.shell(`head -n 5 ${msgPath}`)
+    r = await ws.shell(`head -n 5 ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // tail
     console.log('=== tail -n 3 ===')
-    r = await ws.shell(`tail -n 3 ${msgPath}`)
+    r = await ws.shell(`tail -n 3 ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // wc
     console.log('=== wc -l ===')
-    r = await ws.shell(`wc -l ${msgPath}`)
+    r = await ws.shell(`wc -l ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // stat
     console.log('=== stat ===')
-    r = await ws.shell(`stat ${msgPath}`)
+    r = await ws.shell(`stat ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Gmail API: attrs land in the
@@ -125,7 +139,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${msgPath} ===`)
     r = await ws.shell(
-      `chmod 640 "${msgPath}" && chown 500:dev "${msgPath}" && touch -t 202601021530 "${msgPath}"`,
+      `chmod 640 ${shellQuote(msgPath)} && chown 500:dev ${shellQuote(msgPath)} && touch -t 202601021530 ${shellQuote(msgPath)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await ws.dispatch('stat', msgPath)) as FileStat
@@ -136,16 +150,16 @@ async function main(): Promise<void> {
 
     // jq
     console.log('=== jq .subject ===')
-    r = await ws.shell(`jq ".subject" ${msgPath}`)
+    r = await ws.shell(`jq ".subject" ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     console.log('=== jq .from ===')
-    r = await ws.shell(`jq ".from" ${msgPath}`)
+    r = await ws.shell(`jq ".from" ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // nl
     console.log('=== nl ===')
-    r = await ws.shell(`nl ${msgPath}`)
+    r = await ws.shell(`nl ${shellQuote(msgPath)}`)
     console.log(r.stdoutText.slice(0, 300))
 
     // tree
@@ -154,31 +168,36 @@ async function main(): Promise<void> {
     console.log(r.stdoutText)
 
     console.log(`=== tree -L 1 /gmail/${label}/ ===`)
-    r = await ws.shell(`tree -L 1 /gmail/${label}/`)
+    r = await ws.shell(`tree -L 1 ${shellQuote(`/gmail/${label}/`)}`)
     console.log(r.stdoutText)
 
     // find
     console.log("=== find -name '*.gmail.json' ===")
-    r = await ws.shell(`find /gmail/${label}/${firstDate}/ -name "*.gmail.json" | head -n 5`)
+    r = await ws.shell(
+      `find ${shellQuote(`/gmail/${label}/${firstDate}/`)} -name "*.gmail.json" | head -n 5`,
+    )
     console.log(r.stdoutText)
 
     // grep
     console.log('=== grep subject ===')
-    r = await ws.shell(`grep subject ${msgPath}`)
+    r = await ws.shell(`grep subject ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // rg
     console.log('=== rg subject ===')
-    r = await ws.shell(`rg subject ${msgPath}`)
+    r = await ws.shell(`rg subject ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // ── native search dispatch (Gmail q= API) ────────
     for (const [header, cmd] of [
       [
         `grep harbor /gmail/${label}/${firstDate}/*.gmail.json (date scope)`,
-        `grep harbor /gmail/${label}/${firstDate}/*.gmail.json`,
+        `grep harbor ${shellQuote(`/gmail/${label}/${firstDate}/`)}*.gmail.json`,
       ],
-      [`grep harbor /gmail/${label}/ (label scope)`, `grep harbor /gmail/${label}/`],
+      [
+        `grep harbor /gmail/${label}/ (label scope)`,
+        `grep harbor ${shellQuote(`/gmail/${label}/`)}`,
+      ],
       ['grep harbor /gmail/ (mailbox scope)', 'grep harbor /gmail/'],
       ['rg harbor /gmail/', 'rg harbor /gmail/'],
     ] as const) {
@@ -191,17 +210,17 @@ async function main(): Promise<void> {
 
     // basename
     console.log('=== basename ===')
-    r = await ws.shell(`basename ${msgPath}`)
+    r = await ws.shell(`basename ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // dirname
     console.log('=== dirname ===')
-    r = await ws.shell(`dirname ${msgPath}`)
+    r = await ws.shell(`dirname ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // realpath
     console.log('=== realpath ===')
-    r = await ws.shell(`realpath ${msgPath}`)
+    r = await ws.shell(`realpath ${shellQuote(msgPath)}`)
     console.log(r.stdoutText)
 
     // VFS-specific commands
@@ -213,21 +232,21 @@ async function main(): Promise<void> {
 
     // ── glob expansion (exercises resolve_glob → readdir)
     console.log('=== echo glob: *.gmail.json ===')
-    r = await ws.shell(`echo /gmail/${label}/${firstDate}/*.gmail.json`)
+    r = await ws.shell(`echo ${shellQuote(`/gmail/${label}/${firstDate}/`)}*.gmail.json`)
     const globbed = r.stdoutText.trim()
     console.log(`  ${globbed.slice(0, 200)}`)
     if (globbed === '') throw new Error('glob should match at least one file')
 
     console.log('=== for f in *.gmail.json (glob loop) ===')
     r = await ws.shell(
-      `for f in /gmail/${label}/${firstDate}/*.gmail.json; do echo found:$f; done | head -n 3`,
+      `for f in ${shellQuote(`/gmail/${label}/${firstDate}/`)}*.gmail.json; do echo found:$f; done | head -n 3`,
     )
     for (const line of lines(r.stdoutText)) console.log(`  ${line.slice(0, 120)}`)
 
     // gws gmail read (use message_id from filename)
     const msgId = (firstMsg.split('__').pop() ?? '').replace('.gmail.json', '')
     console.log(`=== gws gmail read --id ${msgId} ===`)
-    r = await ws.shell(`gws gmail read --id ${msgId}`)
+    r = await ws.shell(`gws gmail read --id ${shellQuote(msgId)}`)
     console.log(r.stdoutText.slice(0, 500))
 
     // gws gmail send
@@ -246,21 +265,27 @@ async function main(): Promise<void> {
     // gws gmail reply
     if (sentId !== '') {
       console.log('=== gws gmail reply ===')
-      r = await ws.shell(`gws gmail reply --message-id ${sentId} --body "Reply from MIRAGE TS"`)
+      r = await ws.shell(
+        `gws gmail reply --message-id ${shellQuote(sentId)} --body "Reply from MIRAGE TS"`,
+      )
       console.log(r.stdoutText.slice(0, 200))
     }
 
     // gws gmail reply-all
     if (sentId !== '') {
       console.log('=== gws gmail reply-all ===')
-      r = await ws.shell(`gws gmail reply-all --message-id ${sentId} --body "Reply-all from MIRAGE TS"`)
+      r = await ws.shell(
+        `gws gmail reply-all --message-id ${shellQuote(sentId)} --body "Reply-all from MIRAGE TS"`,
+      )
       console.log(r.stdoutText.slice(0, 200))
     }
 
     // gws gmail forward
     if (sentId !== '') {
       console.log('=== gws gmail forward ===')
-      r = await ws.shell(`gws gmail forward --message-id ${sentId} --to "zechengzhang97@gmail.com"`)
+      r = await ws.shell(
+        `gws gmail forward --message-id ${shellQuote(sentId)} --to "zechengzhang97@gmail.com"`,
+      )
       console.log(r.stdoutText.slice(0, 200))
     }
   } finally {

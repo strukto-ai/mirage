@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -66,7 +67,7 @@ async def main() -> None:
 
     # ls label (date directories)
     print(f"=== ls /gmail/{label}/ ===")
-    result = await ws.shell(f"ls /gmail/{label}/")
+    result = await ws.shell(f"ls {shlex.quote(f'/gmail/{label}/')}")
     print(await result.stdout_str())
 
     dates = (await result.stdout_str()).strip().splitlines()
@@ -77,7 +78,9 @@ async def main() -> None:
 
     # ls date dir (messages)
     print(f"=== ls /gmail/{label}/{first_date}/ ===")
-    result = await ws.shell(f"ls /gmail/{label}/{first_date}/")
+    result = await ws.shell(
+        f"ls {shlex.quote(f'/gmail/{label}/{first_date}/')}"
+    )
     print(await result.stdout_str())
 
     messages = [
@@ -93,27 +96,27 @@ async def main() -> None:
 
     # cat message
     print(f"=== cat {msg_path} ===")
-    result = await ws.shell(f"cat {msg_path}")
+    result = await ws.shell(f"cat {shlex.quote(msg_path)}")
     print((await result.stdout_str())[:500])
 
     # head
     print("=== head -n 5 ===")
-    result = await ws.shell(f"head -n 5 {msg_path}")
+    result = await ws.shell(f"head -n 5 {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # tail
     print("=== tail -n 3 ===")
-    result = await ws.shell(f"tail -n 3 {msg_path}")
+    result = await ws.shell(f"tail -n 3 {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # wc
     print("=== wc -l ===")
-    result = await ws.shell(f"wc -l {msg_path}")
+    result = await ws.shell(f"wc -l {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # stat
     print("=== stat ===")
-    result = await ws.shell(f"stat {msg_path}")
+    result = await ws.shell(f"stat {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # chmod/chown/touch never hit the Gmail API: attrs land in the
@@ -121,9 +124,9 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on {msg_path} ===")
     result = await ws.shell(
-        f'chmod 640 "{msg_path}" && chown 500:dev'
-        f' "{msg_path}"'
-        f' && touch -t 202601021530 "{msg_path}"'
+        f"chmod 640 {shlex.quote(msg_path)} && chown 500:dev"
+        f" {shlex.quote(msg_path)}"
+        f" && touch -t 202601021530 {shlex.quote(msg_path)}"
     )
     print(f"  chmod/chown/touch exit={result.exit_code}")
     st, _ = await ws.dispatch("stat", PathSpec.from_str_path(msg_path))
@@ -135,16 +138,16 @@ async def main() -> None:
 
     # jq
     print("=== jq .subject ===")
-    result = await ws.shell(f'jq ".subject" {msg_path}')
+    result = await ws.shell(f'jq ".subject" {shlex.quote(msg_path)}')
     print(await result.stdout_str())
 
     print("=== jq .from ===")
-    result = await ws.shell(f'jq ".from" {msg_path}')
+    result = await ws.shell(f'jq ".from" {shlex.quote(msg_path)}')
     print(await result.stdout_str())
 
     # nl
     print("=== nl ===")
-    result = await ws.shell(f"nl {msg_path}")
+    result = await ws.shell(f"nl {shlex.quote(msg_path)}")
     print((await result.stdout_str())[:300])
 
     # tree
@@ -153,24 +156,25 @@ async def main() -> None:
     print(await result.stdout_str())
 
     print(f"=== tree -L 1 /gmail/{label}/ ===")
-    result = await ws.shell(f"tree -L 1 /gmail/{label}/")
+    result = await ws.shell(f"tree -L 1 {shlex.quote(f'/gmail/{label}/')}")
     print(await result.stdout_str())
 
     # find
     print("=== find -name '*.gmail.json' ===")
     result = await ws.shell(
-        f'find /gmail/{label}/{first_date}/ -name "*.gmail.json" | head -n 5'
+        f"find {shlex.quote(f'/gmail/{label}/{first_date}/')}"
+        ' -name "*.gmail.json" | head -n 5'
     )
     print(await result.stdout_str())
 
     # grep
     print("=== grep subject ===")
-    result = await ws.shell(f"grep subject {msg_path}")
+    result = await ws.shell(f"grep subject {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # rg
     print("=== rg subject ===")
-    result = await ws.shell(f"rg subject {msg_path}")
+    result = await ws.shell(f"rg subject {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # ── native search dispatch (Gmail q= API) ────────
@@ -179,7 +183,8 @@ async def main() -> None:
         " (date scope) ==="
     )
     result = await ws.shell(
-        f"grep harbor /gmail/{label}/{first_date}/*.gmail.json"
+        f"grep harbor {shlex.quote(f'/gmail/{label}/{first_date}/')}"
+        "*.gmail.json"
     )
     out = (await result.stdout_str()).strip()
     lines = out.splitlines() if out else []
@@ -188,7 +193,7 @@ async def main() -> None:
         print(f"  {line[:150]}")
 
     print(f"\n=== grep harbor /gmail/{label}/ (label scope) ===")
-    result = await ws.shell(f"grep harbor /gmail/{label}/")
+    result = await ws.shell(f"grep harbor {shlex.quote(f'/gmail/{label}/')}")
     out = (await result.stdout_str()).strip()
     lines = out.splitlines() if out else []
     print(f"  exit={result.exit_code} matches: {len(lines)}")
@@ -213,17 +218,17 @@ async def main() -> None:
 
     # basename
     print("=== basename ===")
-    result = await ws.shell(f"basename {msg_path}")
+    result = await ws.shell(f"basename {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # dirname
     print("=== dirname ===")
-    result = await ws.shell(f"dirname {msg_path}")
+    result = await ws.shell(f"dirname {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # realpath
     print("=== realpath ===")
-    result = await ws.shell(f"realpath {msg_path}")
+    result = await ws.shell(f"realpath {shlex.quote(msg_path)}")
     print(await result.stdout_str())
 
     # VFS-specific commands
@@ -235,14 +240,17 @@ async def main() -> None:
 
     # ── glob expansion (exercises resolve_glob → readdir)
     print("=== echo glob: *.gmail.json ===")
-    result = await ws.shell(f"echo /gmail/{label}/{first_date}/*.gmail.json")
+    result = await ws.shell(
+        f"echo {shlex.quote(f'/gmail/{label}/{first_date}/')}*.gmail.json"
+    )
     out = (await result.stdout_str()).strip()
     print(f"  {out[:200]}")
     assert out, "glob should match at least one file"
 
     print("=== for f in *.gmail.json (glob loop) ===")
     result = await ws.shell(
-        f"for f in /gmail/{label}/{first_date}/*.gmail.json;"
+        f"for f in {shlex.quote(f'/gmail/{label}/{first_date}/')}"
+        "*.gmail.json;"
         " do echo found:$f; done | head -n 3"
     )
     out = (await result.stdout_str()).strip()
@@ -252,7 +260,7 @@ async def main() -> None:
     # gws gmail read (use message_id from filename)
     msg_id = first_msg.rsplit("__", 1)[-1].replace(".gmail.json", "")
     print(f"=== gws gmail read --id {msg_id} ===")
-    result = await ws.shell(f"gws gmail read --id {msg_id}")
+    result = await ws.shell(f"gws gmail read --id {shlex.quote(msg_id)}")
     print((await result.stdout_str())[:500])
 
     # gws gmail send
@@ -274,7 +282,7 @@ async def main() -> None:
     if sent_id:
         print("=== gws gmail reply ===")
         result = await ws.shell(
-            f"gws gmail reply --message-id {sent_id}"
+            f"gws gmail reply --message-id {shlex.quote(sent_id)}"
             ' --body "Reply from MIRAGE"'
         )
         print((await result.stdout_str())[:200])
@@ -283,7 +291,7 @@ async def main() -> None:
     if sent_id:
         print("=== gws gmail reply-all ===")
         result = await ws.shell(
-            f"gws gmail reply-all --message-id {sent_id}"
+            f"gws gmail reply-all --message-id {shlex.quote(sent_id)}"
             ' --body "Reply-all from MIRAGE"'
         )
         print((await result.stdout_str())[:200])
@@ -292,7 +300,7 @@ async def main() -> None:
     if sent_id:
         print("=== gws gmail forward ===")
         result = await ws.shell(
-            f"gws gmail forward --message-id {sent_id}"
+            f"gws gmail forward --message-id {shlex.quote(sent_id)}"
             ' --to "zechengzhang97@gmail.com"'
         )
         print((await result.stdout_str())[:200])

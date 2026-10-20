@@ -26,6 +26,13 @@ import {
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<void> {
   console.log(`\n>>> ${cmd}`)
   const result = await ws.shell(cmd)
@@ -77,16 +84,16 @@ async function main(): Promise<void> {
 
     const target = process.env.DATABRICKS_VOLUME_SAMPLE_FILE
     if (target !== undefined && target !== '') {
-      await run(ws, `stat "${target}"`)
-      await run(ws, `head -n 20 "${target}"`)
-      await run(ws, `grep -n TODO "${target}"`)
+      await run(ws, `stat ${shellQuote(target)}`)
+      await run(ws, `head -n 20 ${shellQuote(target)}`)
+      await run(ws, `grep -n TODO ${shellQuote(target)}`)
 
       // chmod/chown/touch never hit the Databricks API: attrs land in the
       // workspace namespace (durable, snapshot-captured) and merge into
       // dispatch-level stat.
       console.log(`=== metadata overlay on ${target} ===`)
       const metaRes = await ws.shell(
-        `chmod 640 "${target}" && chown 500:dev "${target}" && touch -t 202601021530 "${target}"`,
+        `chmod 640 ${shellQuote(target)} && chown 500:dev ${shellQuote(target)} && touch -t 202601021530 ${shellQuote(target)}`,
       )
       console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
       const metaSt = (await ws.dispatch('stat', `${target}`)) as FileStat

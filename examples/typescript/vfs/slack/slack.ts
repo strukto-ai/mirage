@@ -42,6 +42,13 @@ function assertNonEmpty(out: string, msg: string): void {
   if (out.trim() === '') throw new Error(`regression: ${msg}`)
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function main(): Promise<void> {
   const vfs = new SlackVFS(buildConfig())
   const ws = new Workspace({ '/slack': vfs }, { mode: MountMode.READ })
@@ -70,11 +77,11 @@ async function main(): Promise<void> {
     const base = `/slack/channels/${firstCh}`
 
     console.log(`=== ls ${firstCh} (dates) ===`)
-    r = await ws.shell(`ls "${base}/" | tail -n 5`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 5`)
     console.log(r.stdoutText)
 
     // Pick the most recent date dir and target its chat.jsonl
-    r = await ws.shell(`ls "${base}/" | tail -n 1`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 1`)
     const dateDir = r.stdoutText.trim()
     if (dateDir === '') {
       console.log('  no dates found')
@@ -89,19 +96,19 @@ async function main(): Promise<void> {
 
     // ── ls inside date dir (chat.jsonl + files/) ──────
     console.log(`\n=== ls ${datePath}/ ===`)
-    r = await ws.shell(`ls "${datePath}/"`)
+    r = await ws.shell(`ls ${shellQuote(`${datePath}/`)}`)
     console.log(r.stdoutText.trimEnd())
 
     // ── cat ────────────────────────────────────────────
     console.log(`\n=== cat ${target} | head -n 3 ===`)
-    r = await ws.shell(`cat "${filePath}" | head -n 3`)
+    r = await ws.shell(`cat ${shellQuote(filePath)} | head -n 3`)
     console.log(r.stdoutText.slice(0, 300))
 
     // ── cat user profile ───────────────────────────────
     r = await ws.shell('ls /slack/users/ | head -n 1')
     const firstUser = r.stdoutText.trim()
     console.log(`\n=== cat /slack/users/${firstUser} ===`)
-    r = await ws.shell(`cat "/slack/users/${firstUser}"`)
+    r = await ws.shell(`cat ${shellQuote(`/slack/users/${firstUser}`)}`)
     const userOut = r.stdoutText.trim()
     if (userOut !== '') {
       console.log(`  ${userOut.slice(0, 200)}`)
@@ -111,17 +118,17 @@ async function main(): Promise<void> {
 
     // ── stat ───────────────────────────────────────────
     console.log(`\n=== stat ${target} ===`)
-    r = await ws.shell(`stat "${filePath}"`)
+    r = await ws.shell(`stat ${shellQuote(filePath)}`)
     console.log(`  ${r.stdoutText.trim()}`)
 
     // ── wc ─────────────────────────────────────────────
     console.log(`\n=== wc -l ${target} ===`)
-    r = await ws.shell(`wc -l "${filePath}"`)
+    r = await ws.shell(`wc -l ${shellQuote(filePath)}`)
     console.log(`  ${r.stdoutText.trim()}`)
 
     // ── head ───────────────────────────────────────────
     console.log(`\n=== head -n 2 ${target} ===`)
-    r = await ws.shell(`head -n 2 "${filePath}"`)
+    r = await ws.shell(`head -n 2 ${shellQuote(filePath)}`)
     const headOut = r.stdoutText.trim()
     if (headOut !== '') {
       for (const line of headOut.split('\n')) {
@@ -131,7 +138,7 @@ async function main(): Promise<void> {
 
     // ── tail ───────────────────────────────────────────
     console.log(`\n=== tail -n 1 ${target} ===`)
-    r = await ws.shell(`tail -n 1 "${filePath}"`)
+    r = await ws.shell(`tail -n 1 ${shellQuote(filePath)}`)
     const tailOut = r.stdoutText.trim()
     if (tailOut !== '') {
       console.log(`  ${tailOut.slice(0, 120)}`)
@@ -143,7 +150,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`\n=== metadata overlay on ${target} ===`)
     r = await ws.shell(
-      `chmod 640 "${filePath}" && chown 500:dev "${filePath}" && touch -t 202601021530 "${filePath}"`,
+      `chmod 640 ${shellQuote(filePath)} && chown 500:dev ${shellQuote(filePath)} && touch -t 202601021530 ${shellQuote(filePath)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', filePath)) as FileStat
@@ -154,25 +161,25 @@ async function main(): Promise<void> {
 
     // ── basename / dirname / realpath (path ops) ───────
     console.log(`\n=== basename ${filePath} ===`)
-    r = await ws.shell(`basename "${filePath}"`)
+    r = await ws.shell(`basename ${shellQuote(filePath)}`)
     const baseOut = r.stdoutText.trim()
     console.log(`  ${baseOut}`)
     if (baseOut !== target) throw new Error(`basename expected ${target}, got ${baseOut}`)
 
     console.log(`\n=== dirname ${filePath} ===`)
-    r = await ws.shell(`dirname "${filePath}"`)
+    r = await ws.shell(`dirname ${shellQuote(filePath)}`)
     const dirOut = r.stdoutText.trim()
     console.log(`  ${dirOut}`)
     if (dirOut !== datePath) throw new Error(`dirname expected ${datePath}, got ${dirOut}`)
 
     console.log(`\n=== realpath ${filePath} ===`)
-    r = await ws.shell(`realpath "${filePath}"`)
+    r = await ws.shell(`realpath ${shellQuote(filePath)}`)
     const realOut = r.stdoutText.trim()
     console.log(`  ${realOut}`)
     if (realOut !== filePath) throw new Error(`realpath expected ${filePath}, got ${realOut}`)
 
     console.log(`\n=== realpath -e ${filePath} (must exist) ===`)
-    r = await ws.shell(`realpath -e "${filePath}"`)
+    r = await ws.shell(`realpath -e ${shellQuote(filePath)}`)
     console.log(`  exit=${r.exitCode} ${r.stdoutText.trim()}`)
     if (r.exitCode !== 0) {
       throw new Error(`regression: realpath -e failed for existing file; stderr=${r.stderrText}`)
@@ -180,7 +187,7 @@ async function main(): Promise<void> {
 
     // ── grep at FILE level ─────────────────────────────
     console.log(`\n=== grep message ${target} ===`)
-    r = await ws.shell(`grep message "${filePath}"`)
+    r = await ws.shell(`grep message ${shellQuote(filePath)}`)
     const grepOut = r.stdoutText.trim()
     const grepLines = grepOut === '' ? [] : grepOut.split('\n')
     console.log(`  matches: ${String(grepLines.length)}`)
@@ -189,18 +196,18 @@ async function main(): Promise<void> {
     }
 
     console.log(`\n=== grep -c message ${target} ===`)
-    r = await ws.shell(`grep -c message "${filePath}"`)
+    r = await ws.shell(`grep -c message ${shellQuote(filePath)}`)
     console.log(`  count: ${r.stdoutText.trim()}`)
 
     // ── rg (directory scan) ────────────────────────────
     console.log(`\n=== rg message ${base}/ ===`)
-    r = await ws.shell(`rg message "${base}/"`)
+    r = await ws.shell(`rg message ${shellQuote(`${base}/`)}`)
     const rgOut = r.stdoutText.trim()
     const rgLines = rgOut === '' ? [] : rgOut.split('\n')
     console.log(`  matches across dates: ${String(rgLines.length)}`)
 
     console.log(`\n=== rg -l message ${base}/ ===`)
-    r = await ws.shell(`rg -l message "${base}/"`)
+    r = await ws.shell(`rg -l message ${shellQuote(`${base}/`)}`)
     const rglOut = r.stdoutText.trim()
     const rglFiles = rglOut === '' ? [] : rglOut.split('\n')
     console.log(`  files with matches: ${String(rglFiles.length)}`)
@@ -211,7 +218,7 @@ async function main(): Promise<void> {
     // ── attachments: ls + stat on files/ ──────────────
     const filesDir = `${datePath}/files`
     console.log(`\n=== ls ${filesDir}/ (attachments) ===`)
-    r = await ws.shell(`ls "${filesDir}/"`)
+    r = await ws.shell(`ls ${shellQuote(`${filesDir}/`)}`)
     const blobLines = r.stdoutText.trim() === '' ? [] : r.stdoutText.trim().split('\n')
     for (const line of blobLines) {
       console.log(`  ${line}`)
@@ -221,12 +228,12 @@ async function main(): Promise<void> {
       const firstBlob = blobLines[0]?.split('/').pop() ?? ''
       const blobPath = `${filesDir}/${firstBlob}`
       console.log(`\n=== stat ${firstBlob} ===`)
-      r = await ws.shell(`stat "${blobPath}"`)
+      r = await ws.shell(`stat ${shellQuote(blobPath)}`)
       console.log(`  ${r.stdoutText.trim()}`)
 
       // rg reads each blob under files/.
       console.log(`\n=== rg . ${filesDir}/ ===`)
-      r = await ws.shell(`rg . "${filesDir}/"`)
+      r = await ws.shell(`rg . ${shellQuote(`${filesDir}/`)}`)
       const rgOut = r.stdoutText.trim()
       const rgLines = rgOut === '' ? [] : rgOut.split('\n').slice(0, 5)
       for (const line of rgLines) {
@@ -240,11 +247,11 @@ async function main(): Promise<void> {
     const scopes: { label: string; cmd: string }[] = [
       {
         label: `grep hello ${datePath}/chat.jsonl (date scope)`,
-        cmd: `grep hello "${datePath}/chat.jsonl"`,
+        cmd: `grep hello ${shellQuote(`${datePath}/chat.jsonl`)}`,
       },
       {
         label: `grep -rw hello ${base}/ (channel scope)`,
-        cmd: `grep -rw hello "${base}/"`,
+        cmd: `grep -rw hello ${shellQuote(`${base}/`)}`,
       },
       {
         label: 'grep -rw hello /slack/channels/ (workspace scope)',
@@ -272,7 +279,7 @@ async function main(): Promise<void> {
 
     // ── jq ─────────────────────────────────────────────
     console.log(`\n=== jq '.user' ${target} ===`)
-    r = await ws.shell(`jq ".user" "${filePath}"`)
+    r = await ws.shell(`jq ".user" ${shellQuote(filePath)}`)
     console.log(`  exit=${String(r.exitCode)}`)
     const jqOut = r.stdoutText.trim()
     if (jqOut !== '') {
@@ -282,7 +289,7 @@ async function main(): Promise<void> {
     }
 
     console.log(`\n=== cat ${target} | jq -r '.text' | head -n 5 ===`)
-    r = await ws.shell(`cat "${filePath}" | jq -r ".text" | head -n 5`)
+    r = await ws.shell(`cat ${shellQuote(filePath)} | jq -r ".text" | head -n 5`)
     console.log(`  exit=${String(r.exitCode)}`)
     const jqTextOut = r.stdoutText.trim()
     if (jqTextOut !== '') {
@@ -304,7 +311,7 @@ async function main(): Promise<void> {
 
     // ── find ───────────────────────────────────────────
     console.log(`\n=== find ${base}/ -name 'chat.jsonl' | tail -n 5 ===`)
-    r = await ws.shell(`find "${base}/" -name "chat.jsonl" | tail -n 5`)
+    r = await ws.shell(`find ${shellQuote(`${base}/`)} -name "chat.jsonl" | tail -n 5`)
     console.log(`  exit=${String(r.exitCode)}`)
     const findOut = r.stdoutText.trim()
     if (findOut !== '') {
@@ -329,7 +336,7 @@ async function main(): Promise<void> {
     console.log(`  ${r.stdoutText.trim()}`)
 
     console.log(`\n=== cd "${base}" ===`)
-    r = await ws.shell(`cd "${base}"`)
+    r = await ws.shell(`cd ${shellQuote(base)}`)
     console.log(`  exit=${String(r.exitCode)}`)
 
     console.log('\n=== pwd (after cd) ===')
@@ -349,7 +356,7 @@ async function main(): Promise<void> {
     // relative `cat` (after cd) for a path two segments deep
     const relChat = `${dateDir}/chat.jsonl`
     console.log(`\n=== cat ${relChat} (relative) | head -n 1 ===`)
-    r = await ws.shell(`cat "${relChat}" | head -n 1`)
+    r = await ws.shell(`cat ${shellQuote(relChat)} | head -n 1`)
     const relCatOut = r.stdoutText.trim()
     assertNonEmpty(relCatOut, 'relative `cat` after cd returned empty')
     console.log(`  ${relCatOut.slice(0, 120)}`)
@@ -372,7 +379,7 @@ async function main(): Promise<void> {
     // channels/*/<date>/chat.jsonl lists channels once, then each
     // channel's dates, keeping only channels that have that day.
     console.log(`\n=== echo /slack/channels/*/${dateDir}/chat.jsonl ===`)
-    r = await ws.shell(`echo /slack/channels/*/${dateDir}/chat.jsonl`)
+    r = await ws.shell(`echo /slack/channels/*/${shellQuote(`${dateDir}/chat.jsonl`)}`)
     const globOut = r.stdoutText.trim()
     console.log(`  ${globOut.slice(0, 200)}`)
     if (!globOut.includes('/chat.jsonl')) {
@@ -380,7 +387,7 @@ async function main(): Promise<void> {
     }
 
     console.log(`\n=== for f in ${base}/* (date glob loop) ===`)
-    r = await ws.shell(`for f in "${base}/"*; do echo found:$f; done | head -n 3`)
+    r = await ws.shell(`for f in ${shellQuote(`${base}/`)}*; do echo found:$f; done | head -n 3`)
     for (const line of r.stdoutText.trim().split('\n')) {
       console.log(`  ${line.slice(0, 120)}`)
     }

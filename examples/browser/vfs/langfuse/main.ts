@@ -29,6 +29,13 @@ interface LangfuseCtorConfig {
   defaultFromTimestamp?: string
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function buildConfig(): LangfuseCtorConfig {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY
   const secretKey = process.env.LANGFUSE_SECRET_KEY
@@ -80,13 +87,13 @@ async function main(): Promise<void> {
     const dPath = `/langfuse/datasets/${d0}`
 
     console.log('')
-    await run(ws, `ls ${dPath}`)
+    await run(ws, `ls ${shellQuote(dPath)}`)
 
     console.log('')
-    await run(ws, `wc -l ${dPath}/items.jsonl`)
+    await run(ws, `wc -l ${shellQuote(`${dPath}/items.jsonl`)}`)
 
     console.log('')
-    await run(ws, `head -n 2 ${dPath}/items.jsonl`)
+    await run(ws, `head -n 2 ${shellQuote(`${dPath}/items.jsonl`)}`)
 
     console.log('')
     await run(ws, 'ls /langfuse/prompts/')
@@ -95,7 +102,7 @@ async function main(): Promise<void> {
     const p0 = (await run(ws, 'ls /langfuse/prompts/ | head -n 1')).trim()
     if (p0 !== '') {
       console.log('')
-      await run(ws, `tree /langfuse/prompts/${p0}`)
+      await run(ws, `tree ${shellQuote(`/langfuse/prompts/${p0}`)}`)
     }
 
     console.log('\n>>> Browser-style workspace at /langfuse (sandboxed — not visible to host fs)')

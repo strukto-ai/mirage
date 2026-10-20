@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  HttpMongoDriver,
-  MongoDBVFS,
-  MountMode,
-  Workspace,
-} from '@struktoai/mirage-browser'
+import { HttpMongoDriver, MongoDBVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const logEl = document.getElementById('log')!
 
@@ -26,6 +21,13 @@ function line(text: string, cls?: string): void {
   if (cls !== undefined) div.className = cls
   div.textContent = text
   logEl.appendChild(div)
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
@@ -59,9 +61,9 @@ async function main(): Promise<void> {
       return
     }
     const target = dbs[0]!
-    await run(ws, `ls /mongodb/${target}`)
+    await run(ws, `ls ${shellQuote(`/mongodb/${target}`)}`)
 
-    const colsRes = await ws.shell(`ls /mongodb/${target}`)
+    const colsRes = await ws.shell(`ls ${shellQuote(`/mongodb/${target}`)}`)
     const cols = colsRes.stdoutText.split('\n').filter((s) => s.endsWith('.jsonl'))
     if (cols.length === 0) {
       line(`no collections in ${target}`, 'err')
@@ -70,10 +72,10 @@ async function main(): Promise<void> {
     }
     const path = `/mongodb/${target}/${cols[0]!}`
 
-    await run(ws, `head -n 1 ${path}`)
-    await run(ws, `wc -l ${path}`)
-    await run(ws, `jq "._id" ${path} | head -n 3`)
-    await run(ws, `grep _id ${path} | head -n 2`)
+    await run(ws, `head -n 1 ${shellQuote(path)}`)
+    await run(ws, `wc -l ${shellQuote(path)}`)
+    await run(ws, `jq "._id" ${shellQuote(path)} | head -n 3`)
+    await run(ws, `grep _id ${shellQuote(path)} | head -n 2`)
 
     line('\ndone.', 'ok')
   } finally {
@@ -82,6 +84,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  line(String(err instanceof Error ? err.stack ?? err.message : err), 'err')
+  line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
   line('done.', 'ok')
 })

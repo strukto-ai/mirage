@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 import uuid
 from pathlib import Path
 
@@ -24,7 +25,7 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
     if not sites:
         raise RuntimeError("No SharePoint sites accessible")
     site = sites[0]
-    r = await ws.shell(f'ls "/sharepoint/{site}/"')
+    r = await ws.shell(f"ls {shlex.quote(f'/sharepoint/{site}/')}")
     drives = [
         d.strip()
         for d in (await r.stdout_str()).strip().splitlines()
@@ -110,7 +111,7 @@ def write_report(site, drive, all_sections):
 
 
 async def make_scratch_dir(ws: Workspace, path: str) -> None:
-    r = await ws.shell(f'mkdir "{path}"')
+    r = await ws.shell(f"mkdir {shlex.quote(path)}")
     if r.exit_code != 0:
         err = (await r.stderr_str()).strip()
         raise RuntimeError(f"mkdir {path} failed: {err}")
@@ -121,136 +122,143 @@ async def run_suite(ws: Workspace, d: str, f1: str, f2: str):
     setup = [
         (
             "write f1",
-            f'echo "hello world\nfoo bar\nhello again\napple\nbanana" > "{f1}"',
+            f'echo "hello world\nfoo bar\nhello again\napple\nbanana"'
+            f" > {shlex.quote(f1)}",
         ),
         (
             "write f2",
             f'echo "line1\nline2\nline3\nline4\nline5'
-            f'\nline6\nline7\nline8\nline9\nline10" > "{f2}"',
+            f'\nline6\nline7\nline8\nline9\nline10" > {shlex.quote(f2)}',
         ),
     ]
     setup_results = await run_section(ws, setup, "Setup")
 
     # --- Read commands ---
     read_cmds = [
-        ("cat", f'cat "{f1}"'),
-        ("head", f'head "{f1}"'),
-        ("head -n 2", f'head -n 2 "{f1}"'),
-        ("head -c 10", f'head -c 10 "{f1}"'),
-        ("tail", f'tail "{f1}"'),
-        ("tail -n 2", f'tail -n 2 "{f1}"'),
-        ("cat f2", f'cat "{f2}"'),
-        ("head -n 5 f2", f'head -n 5 "{f2}"'),
-        ("tail -n 3 f2", f'tail -n 3 "{f2}"'),
+        ("cat", f"cat {shlex.quote(f1)}"),
+        ("head", f"head {shlex.quote(f1)}"),
+        ("head -n 2", f"head -n 2 {shlex.quote(f1)}"),
+        ("head -c 10", f"head -c 10 {shlex.quote(f1)}"),
+        ("tail", f"tail {shlex.quote(f1)}"),
+        ("tail -n 2", f"tail -n 2 {shlex.quote(f1)}"),
+        ("cat f2", f"cat {shlex.quote(f2)}"),
+        ("head -n 5 f2", f"head -n 5 {shlex.quote(f2)}"),
+        ("tail -n 3 f2", f"tail -n 3 {shlex.quote(f2)}"),
     ]
     read_results = await run_section(ws, read_cmds, "Read Commands")
 
     # --- Metadata ---
     meta_cmds = [
-        ("ls", f'ls "{d}"'),
-        ("ls -l", f'ls -l "{d}"'),
-        ("ls -la", f'ls -la "{d}"'),
-        ("ls -lh", f'ls -lh "{d}"'),
-        ("stat f1", f'stat "{f1}"'),
-        ("stat f2", f'stat "{f2}"'),
-        ("file f1", f'file "{f1}"'),
-        ("file f2", f'file "{f2}"'),
-        ("du", f'du "{d}"'),
-        ("du f1", f'du "{f1}"'),
-        ("find", f'find "{d}"'),
-        ("find -name", f'find "{d}" -name "*.txt"'),
-        ("find -type f", f'find "{d}" -type f'),
-        ("tree", f'tree "{d}"'),
-        ("basename", f'basename "{f1}"'),
-        ("dirname", f'dirname "{f1}"'),
-        ("realpath", f'realpath "{f1}"'),
+        ("ls", f"ls {shlex.quote(d)}"),
+        ("ls -l", f"ls -l {shlex.quote(d)}"),
+        ("ls -la", f"ls -la {shlex.quote(d)}"),
+        ("ls -lh", f"ls -lh {shlex.quote(d)}"),
+        ("stat f1", f"stat {shlex.quote(f1)}"),
+        ("stat f2", f"stat {shlex.quote(f2)}"),
+        ("file f1", f"file {shlex.quote(f1)}"),
+        ("file f2", f"file {shlex.quote(f2)}"),
+        ("du", f"du {shlex.quote(d)}"),
+        ("du f1", f"du {shlex.quote(f1)}"),
+        ("find", f"find {shlex.quote(d)}"),
+        ("find -name", f'find {shlex.quote(d)} -name "*.txt"'),
+        ("find -type f", f"find {shlex.quote(d)} -type f"),
+        ("tree", f"tree {shlex.quote(d)}"),
+        ("basename", f"basename {shlex.quote(f1)}"),
+        ("dirname", f"dirname {shlex.quote(f1)}"),
+        ("realpath", f"realpath {shlex.quote(f1)}"),
     ]
     meta_results = await run_section(ws, meta_cmds, "Metadata Commands")
 
     # --- Search ---
     search_cmds = [
-        ("grep hello", f'grep hello "{f1}"'),
-        ("grep -c hello", f'grep -c hello "{f1}"'),
-        ("grep -n hello", f'grep -n hello "{f1}"'),
-        ("grep -i HELLO", f'grep -i HELLO "{f1}"'),
-        ("grep -v hello", f'grep -v hello "{f1}"'),
-        ("grep -r hello", f'grep -r hello "{d}"'),
-        ("grep -rl hello", f'grep -rl hello "{d}"'),
-        ("grep -rc hello", f'grep -rc hello "{d}"'),
-        ("rg hello", f'rg hello "{d}"'),
-        ("rg -l hello", f'rg -l hello "{d}"'),
-        ("rg -c hello", f'rg -c hello "{d}"'),
+        ("grep hello", f"grep hello {shlex.quote(f1)}"),
+        ("grep -c hello", f"grep -c hello {shlex.quote(f1)}"),
+        ("grep -n hello", f"grep -n hello {shlex.quote(f1)}"),
+        ("grep -i HELLO", f"grep -i HELLO {shlex.quote(f1)}"),
+        ("grep -v hello", f"grep -v hello {shlex.quote(f1)}"),
+        ("grep -r hello", f"grep -r hello {shlex.quote(d)}"),
+        ("grep -rl hello", f"grep -rl hello {shlex.quote(d)}"),
+        ("grep -rc hello", f"grep -rc hello {shlex.quote(d)}"),
+        ("rg hello", f"rg hello {shlex.quote(d)}"),
+        ("rg -l hello", f"rg -l hello {shlex.quote(d)}"),
+        ("rg -c hello", f"rg -c hello {shlex.quote(d)}"),
     ]
     search_results = await run_section(ws, search_cmds, "Search Commands")
 
     # --- Text Processing ---
     text_cmds = [
-        ("wc", f'wc "{f1}"'),
-        ("wc -l", f'wc -l "{f1}"'),
-        ("wc -c", f'wc -c "{f1}"'),
-        ("wc -w", f'wc -w "{f1}"'),
-        ("sort", f'sort "{f1}"'),
-        ("sort -r", f'sort -r "{f1}"'),
-        ("uniq", f'uniq "{f1}"'),
-        ("rev", f'rev "{f1}"'),
-        ("tac", f'tac "{f1}"'),
-        ("nl", f'nl "{f1}"'),
-        ("cut -c1-5", f'cut -c1-5 "{f1}"'),
-        ("cut -d' ' -f1", f"cut -d' ' -f1 \"{f1}\""),
-        ("tr a-z A-Z", f'cat "{f1}" | tr a-z A-Z'),
-        ("fold -w 10", f'fold -w 10 "{f1}"'),
-        ("fmt", f'fmt "{f1}"'),
-        ("expand", f'expand "{f1}"'),
-        ("unexpand", f'unexpand "{f1}"'),
-        ("column", f'column "{f1}"'),
-        ("paste", f'paste "{f1}" "{f2}"'),
-        ("join", f'join "{f1}" "{f1}"'),
-        ("look h", f'look h "{f1}"'),
-        ("strings", f'strings "{f1}"'),
+        ("wc", f"wc {shlex.quote(f1)}"),
+        ("wc -l", f"wc -l {shlex.quote(f1)}"),
+        ("wc -c", f"wc -c {shlex.quote(f1)}"),
+        ("wc -w", f"wc -w {shlex.quote(f1)}"),
+        ("sort", f"sort {shlex.quote(f1)}"),
+        ("sort -r", f"sort -r {shlex.quote(f1)}"),
+        ("uniq", f"uniq {shlex.quote(f1)}"),
+        ("rev", f"rev {shlex.quote(f1)}"),
+        ("tac", f"tac {shlex.quote(f1)}"),
+        ("nl", f"nl {shlex.quote(f1)}"),
+        ("cut -c1-5", f"cut -c1-5 {shlex.quote(f1)}"),
+        ("cut -d' ' -f1", f"cut -d' ' -f1 {shlex.quote(f1)}"),
+        ("tr a-z A-Z", f"cat {shlex.quote(f1)} | tr a-z A-Z"),
+        ("fold -w 10", f"fold -w 10 {shlex.quote(f1)}"),
+        ("fmt", f"fmt {shlex.quote(f1)}"),
+        ("expand", f"expand {shlex.quote(f1)}"),
+        ("unexpand", f"unexpand {shlex.quote(f1)}"),
+        ("column", f"column {shlex.quote(f1)}"),
+        ("paste", f"paste {shlex.quote(f1)} {shlex.quote(f2)}"),
+        ("join", f"join {shlex.quote(f1)} {shlex.quote(f1)}"),
+        ("look h", f"look h {shlex.quote(f1)}"),
+        ("strings", f"strings {shlex.quote(f1)}"),
     ]
     text_results = await run_section(ws, text_cmds, "Text Processing")
 
     # --- Hash/Encode ---
     encode_cmds = [
-        ("md5", f'md5 "{f1}"'),
-        ("sha256sum", f'sha256sum "{f1}"'),
-        ("base64 encode", f'base64 "{f1}"'),
-        ("base64 decode", f'base64 "{f1}" | base64 -d'),
-        ("xxd", f'xxd "{f1}"'),
-        ("xxd -l 16", f'xxd -l 16 "{f1}"'),
+        ("md5", f"md5 {shlex.quote(f1)}"),
+        ("sha256sum", f"sha256sum {shlex.quote(f1)}"),
+        ("base64 encode", f"base64 {shlex.quote(f1)}"),
+        ("base64 decode", f"base64 {shlex.quote(f1)} | base64 -d"),
+        ("xxd", f"xxd {shlex.quote(f1)}"),
+        ("xxd -l 16", f"xxd -l 16 {shlex.quote(f1)}"),
     ]
     encode_results = await run_section(ws, encode_cmds, "Hash/Encode")
 
     # --- Write/Mutate ---
     write_cmds = [
-        ("cp", f'cp "{f1}" "{d}/copy.txt"'),
-        ("cat copy", f'cat "{d}/copy.txt"'),
-        ("mv", f'mv "{d}/copy.txt" "{d}/moved.txt"'),
-        ("cat moved", f'cat "{d}/moved.txt"'),
-        ("ln", f'ln "{d}/moved.txt" "{d}/link.txt"'),
-        ("cat link", f'cat "{d}/link.txt"'),
-        ("rm link", f'rm "{d}/link.txt"'),
-        ("rm moved", f'rm "{d}/moved.txt"'),
-        ("echo append", f'echo "appended line" >> "{f1}"'),
-        ("cat after append", f'cat "{f1}"'),
-        ("touch new", f'touch "{d}/empty.txt"'),
-        ("ls after touch", f'ls "{d}"'),
+        ("cp", f"cp {shlex.quote(f1)} {shlex.quote(f'{d}/copy.txt')}"),
+        ("cat copy", f"cat {shlex.quote(f'{d}/copy.txt')}"),
+        (
+            "mv",
+            f"mv {shlex.quote(f'{d}/copy.txt')} {shlex.quote(f'{d}/moved.txt')}",
+        ),
+        ("cat moved", f"cat {shlex.quote(f'{d}/moved.txt')}"),
+        (
+            "ln",
+            f"ln {shlex.quote(f'{d}/moved.txt')} {shlex.quote(f'{d}/link.txt')}",
+        ),
+        ("cat link", f"cat {shlex.quote(f'{d}/link.txt')}"),
+        ("rm link", f"rm {shlex.quote(f'{d}/link.txt')}"),
+        ("rm moved", f"rm {shlex.quote(f'{d}/moved.txt')}"),
+        ("echo append", f'echo "appended line" >> {shlex.quote(f1)}'),
+        ("cat after append", f"cat {shlex.quote(f1)}"),
+        ("touch new", f"touch {shlex.quote(f'{d}/empty.txt')}"),
+        ("ls after touch", f"ls {shlex.quote(d)}"),
     ]
     write_results = await run_section(ws, write_cmds, "Write/Mutate Commands")
 
     # --- Pipes ---
     pipe_cmds = [
-        ("cat|wc -l", f'cat "{f1}" | wc -l'),
-        ("cat|grep|wc", f'cat "{f1}" | grep hello | wc -l'),
-        ("cat|head|wc", f'cat "{f2}" | head -n 5 | wc -l'),
-        ("cat|sort|uniq", f'cat "{f1}" | sort | uniq'),
-        ("cat|tr|sort", f'cat "{f1}" | tr a-z A-Z | sort'),
-        ("grep|sort|uniq", f'grep hello "{f1}" | sort | uniq'),
-        ("find|wc -l", f'find "{d}" -type f | wc -l'),
-        ("find|grep|head", f'find "{d}" | grep txt | head -3'),
-        ("cat|sed", f"cat \"{f1}\" | sed 's/hello/HELLO/g'"),
-        ("cat|awk", f"cat \"{f1}\" | awk '{{print NR, $0}}'"),
-        ("cat|grep -c", f'cat "{f1}" | grep -c hello'),
+        ("cat|wc -l", f"cat {shlex.quote(f1)} | wc -l"),
+        ("cat|grep|wc", f"cat {shlex.quote(f1)} | grep hello | wc -l"),
+        ("cat|head|wc", f"cat {shlex.quote(f2)} | head -n 5 | wc -l"),
+        ("cat|sort|uniq", f"cat {shlex.quote(f1)} | sort | uniq"),
+        ("cat|tr|sort", f"cat {shlex.quote(f1)} | tr a-z A-Z | sort"),
+        ("grep|sort|uniq", f"grep hello {shlex.quote(f1)} | sort | uniq"),
+        ("find|wc -l", f"find {shlex.quote(d)} -type f | wc -l"),
+        ("find|grep|head", f"find {shlex.quote(d)} | grep txt | head -3"),
+        ("cat|sed", f"cat {shlex.quote(f1)} | sed 's/hello/HELLO/g'"),
+        ("cat|awk", f"cat {shlex.quote(f1)} | awk '{{print NR, $0}}'"),
+        ("cat|grep -c", f"cat {shlex.quote(f1)} | grep -c hello"),
         ("seq|while", 'seq 5 | while read n; do echo "num=$n"; done'),
     ]
     pipe_results = await run_section(ws, pipe_cmds, "Pipes")
@@ -259,10 +267,10 @@ async def run_suite(ws: Workspace, d: str, f1: str, f2: str):
     shell_cmds = [
         ("variable", "X=sharepoint; echo $X"),
         ("arithmetic", "echo $((10 * 3 + 2))"),
-        ("cmd subst", f'echo $(wc -l < "{f1}") lines'),
+        ("cmd subst", f"echo $(wc -l < {shlex.quote(f1)}) lines"),
         (
             "if file exists",
-            f'if [ -f "{f1}" ]; then echo yes; else echo no; fi',
+            f"if [ -f {shlex.quote(f1)} ]; then echo yes; else echo no; fi",
         ),
         (
             "if file missing",
@@ -279,17 +287,17 @@ async def run_suite(ws: Workspace, d: str, f1: str, f2: str):
         ("string ops", 'S="hello world"; echo ${#S}'),
         (
             "multiline",
-            f'cat "{f1}" | while read line; do echo ">>$line"; done',
+            f'cat {shlex.quote(f1)} | while read line; do echo ">>$line"; done',
         ),
     ]
     shell_results = await run_section(ws, shell_cmds, "Shell Features")
 
     # --- Compare ---
     compare_cmds = [
-        ("diff same", f'diff "{f1}" "{f1}"'),
-        ("cmp same", f'cmp "{f1}" "{f1}"'),
-        ("diff different", f'diff "{f1}" "{f2}"'),
-        ("comm", f'comm "{f1}" "{f2}"'),
+        ("diff same", f"diff {shlex.quote(f1)} {shlex.quote(f1)}"),
+        ("cmp same", f"cmp {shlex.quote(f1)} {shlex.quote(f1)}"),
+        ("diff different", f"diff {shlex.quote(f1)} {shlex.quote(f2)}"),
+        ("comm", f"comm {shlex.quote(f1)} {shlex.quote(f2)}"),
     ]
     compare_results = await run_section(ws, compare_cmds, "Compare Commands")
 
@@ -329,7 +337,7 @@ async def main():
     finally:
         # --- Cleanup ---
         print("\n=== Cleanup ===")
-        await ws.shell(f'rm -r "{d}"')
+        await ws.shell(f"rm -r {shlex.quote(d)}")
         print("  done")
 
     write_report(site, drive, all_sections)

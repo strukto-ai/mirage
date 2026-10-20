@@ -15,6 +15,7 @@
 import asyncio
 import os
 import re
+import shlex
 
 from dotenv import load_dotenv
 
@@ -57,7 +58,7 @@ async def main():
     guilds = (await r.stdout_str()).strip().split("\n")
     guild = guilds[0].strip()
     print(f"=== ls /discord/{guild}/channels/ ===")
-    r = await ws.shell(f'ls "/discord/{guild}/channels/"')
+    r = await ws.shell(f"ls {shlex.quote(f'/discord/{guild}/channels/')}")
     print(await r.stdout_str())
     _assert_nonempty(await r.stdout_str(), "no channels in first guild")
 
@@ -65,7 +66,9 @@ async def main():
         f"=== ls -l /discord/{guild}/channels/ "
         "(mtime from last_message_id) ==="
     )
-    long_ch = await ws.shell(f'ls -l "/discord/{guild}/channels/" | head -n 5')
+    long_ch = await ws.shell(
+        f"ls -l {shlex.quote(f'/discord/{guild}/channels/')} | head -n 5"
+    )
     print(await long_ch.stdout_str())
 
     channels = (await r.stdout_str()).strip().splitlines()
@@ -74,7 +77,7 @@ async def main():
 
     # ── pick the most recent date that has messages ────
     print(f"\n=== ls {base}/ (date directories) ===")
-    r = await ws.shell(f'ls "{base}/" | tail -n 5')
+    r = await ws.shell(f"ls {shlex.quote(f'{base}/')} | tail -n 5")
     print(await r.stdout_str())
     dates = (await r.stdout_str()).strip().splitlines()
     if not dates:
@@ -84,7 +87,9 @@ async def main():
     target_date: str | None = None
     for d in reversed(dates):
         d = d.strip()
-        r = await ws.shell(f'cat "{base}/{d}/chat.jsonl" | head -c 1')
+        r = await ws.shell(
+            f"cat {shlex.quote(f'{base}/{d}/chat.jsonl')} | head -c 1"
+        )
         if (await r.stdout_str()).strip():
             target_date = d
             break
@@ -95,12 +100,12 @@ async def main():
 
     # ── cat the chat.jsonl ────────────────────────────
     print(f"\n=== cat {target_date}/chat.jsonl | head -n 3 ===")
-    r = await ws.shell(f'cat "{file_path}" | head -n 3')
+    r = await ws.shell(f"cat {shlex.quote(file_path)} | head -n 3")
     print((await r.stdout_str())[:300])
 
     # ── list date contents (chat.jsonl + files dir) ────
     print(f"\n=== ls {base}/{target_date}/ ===")
-    r = await ws.shell(f'ls "{base}/{target_date}/"')
+    r = await ws.shell(f"ls {shlex.quote(f'{base}/{target_date}/')}")
     print(await r.stdout_str())
 
     # chmod/chown/touch never hit the Discord API: attrs land in the
@@ -108,9 +113,9 @@ async def main():
     # dispatch-level stat.
     print(f"=== metadata overlay on {file_path} ===")
     meta_res = await ws.shell(
-        f'chmod 640 "{file_path}"'
-        f' && chown 500:dev "{file_path}"'
-        f' && touch -t 202601021530 "{file_path}"'
+        f"chmod 640 {shlex.quote(file_path)}"
+        f" && chown 500:dev {shlex.quote(file_path)}"
+        f" && touch -t 202601021530 {shlex.quote(file_path)}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch(
@@ -124,7 +129,7 @@ async def main():
 
     # ── list attachments for that date (may be empty) ─
     print(f"\n=== ls {base}/{target_date}/files/ (attachments) ===")
-    r = await ws.shell(f'ls "{base}/{target_date}/files/"')
+    r = await ws.shell(f"ls {shlex.quote(f'{base}/{target_date}/files/')}")
     files_out = (await r.stdout_str()).strip()
     if files_out:
         for line in files_out.splitlines()[:5]:
@@ -138,14 +143,14 @@ async def main():
         att_path = f"{base}/{target_date}/files/{first_att}"
 
         print(f"\n=== stat {first_att} ===")
-        r = await ws.shell(f'stat "{att_path}"')
+        r = await ws.shell(f"stat {shlex.quote(att_path)}")
         stat_out = (await r.stdout_str()).strip()
         print(f"  {stat_out[:200]}")
         size_match = re.search(r"size=(\d+)", stat_out)
         expected_size = int(size_match.group(1)) if size_match else None
 
         print(f"\n=== cat {first_att} (byte-exact CDN download) ===")
-        r = await ws.shell(f'cat "{att_path}"')
+        r = await ws.shell(f"cat {shlex.quote(att_path)}")
         data = await r.materialize_stdout()
         print(
             f"  bytes={len(data)} expected={expected_size} exit={r.exit_code}"
@@ -158,12 +163,12 @@ async def main():
 
     # ── grep at FILE level ────────────────────────────
     print(f"\n=== grep at FILE level: grep . {target_date}/chat.jsonl ===")
-    r = await ws.shell(f'grep -c . "{file_path}"')
+    r = await ws.shell(f"grep -c . {shlex.quote(file_path)}")
     print(f"  line count: {(await r.stdout_str()).strip()}")
 
     # ── grep at CHANNEL level ────────────────────────
     print(f"\n=== grep at CHANNEL level: grep -r . {base}/ ===")
-    r = await ws.shell(f'grep -r -m 5 . "{base}/"')
+    r = await ws.shell(f"grep -r -m 5 . {shlex.quote(f'{base}/')}")
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
     if out:
@@ -177,7 +182,7 @@ async def main():
 
     # ── grep at GUILD level ──────────────────────────
     print(f"\n=== grep at GUILD level: grep -r . /discord/{guild}/ ===")
-    r = await ws.shell(f'grep -r -m 5 . "/discord/{guild}/"')
+    r = await ws.shell(f"grep -r -m 5 . {shlex.quote(f'/discord/{guild}/')}")
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
     if out:
@@ -188,7 +193,9 @@ async def main():
 
     # ── jq pipeline ──────────────────────────────────
     print(f"\n=== jq '.author.username' {target_date}/chat.jsonl ===")
-    r = await ws.shell(f'jq -r ".author.username" "{file_path}" | head -n 5')
+    r = await ws.shell(
+        f'jq -r ".author.username" {shlex.quote(file_path)} | head -n 5'
+    )
     out = (await r.stdout_str()).strip()
     if out:
         for line in out.splitlines()[:5]:
@@ -196,24 +203,24 @@ async def main():
 
     # ── stat ─────────────────────────────────────────
     print(f"\n=== stat {file_path} ===")
-    r = await ws.shell(f'stat "{file_path}"')
+    r = await ws.shell(f"stat {shlex.quote(file_path)}")
     print(f"  {(await r.stdout_str()).strip()[:200]}")
 
     # ── wc / head / tail ─────────────────────────────
     print(f"\n=== wc -l {target_date}/chat.jsonl ===")
-    r = await ws.shell(f'wc -l "{file_path}"')
+    r = await ws.shell(f"wc -l {shlex.quote(file_path)}")
     print(f"  {(await r.stdout_str()).strip()}")
 
     # ── basename / dirname / realpath (path ops) ─────
     print(f"\n=== basename {file_path} ===")
-    r = await ws.shell(f'basename "{file_path}"')
+    r = await ws.shell(f"basename {shlex.quote(file_path)}")
     out = (await r.stdout_str()).strip()
     print(f"  {out}")
     assert out == "chat.jsonl", f"basename expected 'chat.jsonl', got {out!r}"
 
     expected_dir = f"{base}/{target_date}"
     print(f"\n=== dirname {file_path} ===")
-    r = await ws.shell(f'dirname "{file_path}"')
+    r = await ws.shell(f"dirname {shlex.quote(file_path)}")
     out = (await r.stdout_str()).strip()
     print(f"  {out}")
     assert out == expected_dir, (
@@ -221,13 +228,13 @@ async def main():
     )
 
     print(f"\n=== realpath {file_path} ===")
-    r = await ws.shell(f'realpath "{file_path}"')
+    r = await ws.shell(f"realpath {shlex.quote(file_path)}")
     out = (await r.stdout_str()).strip()
     print(f"  {out}")
     assert out == file_path, f"realpath expected {file_path!r}, got {out!r}"
 
     print(f"\n=== realpath -e {file_path} (must exist) ===")
-    r = await ws.shell(f'realpath -e "{file_path}"')
+    r = await ws.shell(f"realpath -e {shlex.quote(file_path)}")
     print(f"  exit={r.exit_code} {(await r.stdout_str()).strip()}")
     assert r.exit_code == 0, (
         "regression: realpath -e failed for existing file; "
@@ -236,7 +243,9 @@ async def main():
 
     # ── tree ─────────────────────────────────────────
     print(f"\n=== tree -L 2 /discord/{guild}/ ===")
-    r = await ws.shell(f'tree -L 2 "/discord/{guild}/" | head -n 20')
+    r = await ws.shell(
+        f"tree -L 2 {shlex.quote(f'/discord/{guild}/')} | head -n 20"
+    )
     out = (await r.stdout_str()).strip()
     for line in out.splitlines()[:20]:
         print(f"  {line}")
@@ -244,7 +253,7 @@ async def main():
     # ── find chat.jsonl everywhere ───────────────────
     print(f"\n=== find /discord/{guild}/ -name chat.jsonl | head -n 5 ===")
     r = await ws.shell(
-        f'find "/discord/{guild}/" -name "chat.jsonl" | head -n 5'
+        f'find {shlex.quote(f"/discord/{guild}/")} -name "chat.jsonl" | head -n 5'
     )
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
@@ -261,7 +270,7 @@ async def main():
     # rendered files as 0 (so +0c drops them, -1k keeps them).
     print(f"\n=== find /discord/{guild}/ -path '*channels*' | head -n 5 ===")
     r = await ws.shell(
-        f'find "/discord/{guild}/" -path "*channels*" | head -n 5'
+        f'find {shlex.quote(f"/discord/{guild}/")} -path "*channels*" | head -n 5'
     )
     print(f"  exit={r.exit_code}")
     out = (await r.stdout_str()).strip()
@@ -272,14 +281,16 @@ async def main():
         raise AssertionError("regression: find -path returned nothing")
 
     print(f"\n=== find /discord/{guild}/ -maxdepth 1 -size +0c ===")
-    r = await ws.shell(f'find "/discord/{guild}/" -maxdepth 1 -size +0c')
+    r = await ws.shell(
+        f"find {shlex.quote(f'/discord/{guild}/')} -maxdepth 1 -size +0c"
+    )
     print(f"  exit={r.exit_code} (dirs count as size 0, expect no output)")
     if (await r.stdout_str()).strip():
         raise AssertionError("regression: -size +0c matched a directory")
 
     # ── pwd / cd / relative ──────────────────────────
     print(f"\n=== cd {base} ===")
-    r = await ws.shell(f'cd "{base}"')
+    r = await ws.shell(f"cd {shlex.quote(base)}")
     print(f"  exit={r.exit_code}")
 
     print("\n=== pwd (after cd) ===")
@@ -287,21 +298,27 @@ async def main():
     print(f"  {(await r.stdout_str()).strip()}")
 
     print(f"\n=== cat {target_date}/chat.jsonl (relative) | head -n 1 ===")
-    r = await ws.shell(f'cat "{target_date}/chat.jsonl" | head -n 1')
+    r = await ws.shell(
+        f"cat {shlex.quote(f'{target_date}/chat.jsonl')} | head -n 1"
+    )
     out = (await r.stdout_str()).strip()
     if out:
         print(f"  {out[:120]}")
 
     # ── members ──────────────────────────────────────
     print(f"\n=== ls /discord/{guild}/members/ | head -n 5 ===")
-    r = await ws.shell(f'ls "/discord/{guild}/members/" | head -n 5')
+    r = await ws.shell(
+        f"ls {shlex.quote(f'/discord/{guild}/members/')} | head -n 5"
+    )
     mem_out = (await r.stdout_str()).strip()
     if mem_out:
         for line in mem_out.splitlines():
             print(f"  {line}")
         first_member = mem_out.splitlines()[0].strip()
         print(f"\n=== cat /discord/{guild}/members/{first_member} ===")
-        r = await ws.shell(f'cat "/discord/{guild}/members/{first_member}"')
+        r = await ws.shell(
+            f"cat {shlex.quote(f'/discord/{guild}/members/{first_member}')}"
+        )
         body = (await r.stdout_str()).strip()
         print(f"  {body[:200]}")
     else:

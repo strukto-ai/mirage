@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
@@ -38,8 +39,61 @@ function buildConfig(): OneDriveConfig {
 const backend = new OneDriveVFS(buildConfig())
 const ws = new Workspace({ '/onedrive/': backend }, { mode: MountMode.WRITE })
 
-const TEST_KEY = 'mirage_onedrive_example.txt'
+const TEST_KEY = `mirage_onedrive_example-${randomUUID().replaceAll('-', '').slice(0, 8)}.txt`
 const TEST_FILE = `/onedrive/${TEST_KEY}`
+
+/**
+ * Write this run's scratch file, refusing to replace one already there.
+ *
+ * The name is unique per run, so cleanup can delete it knowing nothing
+ * else was stored under it.
+ */
+async function createTestFile(): Promise<void> {
+  if ((await ws.shell(`stat ${TEST_FILE}`)).exitCode === 0) {
+    throw new Error(`${TEST_FILE} already exists, not touching it`)
+  }
+  const r = await ws.shell(`echo 'hello from mirage onedrive' > ${TEST_FILE}`)
+  if (r.exitCode !== 0) throw new Error(`write ${TEST_FILE} failed: ${r.stderrText.trim()}`)
+}
+
+async function exercise(): Promise<void> {
+  console.log('=== cat it back ===')
+  console.log((await ws.shell(`cat ${TEST_FILE}`)).stdoutText)
+
+  console.log("=== sed read-transform: cat | sed 's/hello/HELLO/' ===")
+  console.log((await ws.shell(`cat ${TEST_FILE} | sed 's/hello/HELLO/'`)).stdoutText)
+
+  console.log('=== stat (fingerprint = cTag) ===')
+  console.log((await ws.shell(`stat ${TEST_FILE}`)).stdoutText)
+
+  // chmod/chown/touch never hit the Graph API: attrs land in the
+  // workspace namespace (durable, snapshot-captured) and merge into
+  // dispatch-level stat.
+  console.log(`=== metadata overlay on ${TEST_FILE} ===`)
+  const metaRes = await ws.shell(
+    `chmod 640 "${TEST_FILE}" && chown 500:dev "${TEST_FILE}" && touch -t 202601021530 "${TEST_FILE}"`,
+  )
+  console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+  const metaSt = (await ws.dispatch('stat', TEST_FILE)) as FileStat
+  const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+  console.log(
+    `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+  )
+
+  console.log('=== overwrite (creates a new version) ===')
+  await ws.shell(`echo 'second version' > ${TEST_FILE}`)
+  console.log((await ws.shell(`cat ${TEST_FILE}`)).stdoutText)
+
+  console.log('=== version history ===')
+  const config = backend.accessor.config
+  const versions = await graphList(config, driveLoc(config, TEST_KEY).item('/versions'))
+  for (const v of versions) {
+    console.log(
+      `  version ${String(v.id)}  size=${String(v.size)}  ` +
+        `modified=${String(v.lastModifiedDateTime)}`,
+    )
+  }
+}
 
 async function main(): Promise<void> {
   try {
@@ -58,47 +112,14 @@ async function main(): Promise<void> {
     console.log((await ws.shell('ls /onedrive/')).stdoutText || '(empty)')
 
     console.log(`\n=== write ${TEST_FILE} ===`)
-    await ws.shell(`echo 'hello from mirage onedrive' > ${TEST_FILE}`)
-
-    console.log('=== cat it back ===')
-    console.log((await ws.shell(`cat ${TEST_FILE}`)).stdoutText)
-
-    console.log("=== sed read-transform: cat | sed 's/hello/HELLO/' ===")
-    console.log((await ws.shell(`cat ${TEST_FILE} | sed 's/hello/HELLO/'`)).stdoutText)
-
-    console.log('=== stat (fingerprint = cTag) ===')
-    console.log((await ws.shell(`stat ${TEST_FILE}`)).stdoutText)
-
-    // chmod/chown/touch never hit the Graph API: attrs land in the
-    // workspace namespace (durable, snapshot-captured) and merge into
-    // dispatch-level stat.
-    console.log(`=== metadata overlay on ${TEST_FILE} ===`)
-    const metaRes = await ws.shell(
-      `chmod 640 "${TEST_FILE}" && chown 500:dev "${TEST_FILE}" && touch -t 202601021530 "${TEST_FILE}"`,
-    )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', TEST_FILE)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
-    console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
-    )
-
-    console.log('=== overwrite (creates a new version) ===')
-    await ws.shell(`echo 'second version' > ${TEST_FILE}`)
-    console.log((await ws.shell(`cat ${TEST_FILE}`)).stdoutText)
-
-    console.log('=== version history ===')
-    const config = backend.accessor.config
-    const versions = await graphList(config, driveLoc(config, TEST_KEY).item('/versions'))
-    for (const v of versions) {
-      console.log(
-        `  version ${String(v.id)}  size=${String(v.size)}  ` +
-          `modified=${String(v.lastModifiedDateTime)}`,
-      )
+    await createTestFile()
+    try {
+      await exercise()
+    } finally {
+      console.log('\n=== cleanup ===')
+      const r = await ws.shell(`rm ${TEST_FILE}`)
+      if (r.exitCode !== 0) console.log(`  rm ${TEST_FILE} failed: ${r.stderrText.trim()}`)
     }
-
-    console.log('\n=== cleanup ===')
-    await ws.shell(`rm ${TEST_FILE}`)
     console.log('done')
   } finally {
     await ws.close()

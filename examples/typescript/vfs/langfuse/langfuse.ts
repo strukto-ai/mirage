@@ -15,11 +15,24 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LangfuseVFS, MountMode, Workspace, type FileStat, type LangfuseConfig } from '@struktoai/mirage-node'
+import {
+  LangfuseVFS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type LangfuseConfig,
+} from '@struktoai/mirage-node'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
 
 function buildConfig(): LangfuseConfig {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY ?? ''
@@ -67,13 +80,12 @@ async function main(): Promise<void> {
     const t0 = (await run(ws, 'ls /langfuse/traces/ | head -n 1')).trim()
     if (t0 !== '') {
       const tracePath = `/langfuse/traces/${t0}`
-      await run(ws, `cat "${tracePath}" | head -n 5`)
-      await run(ws, `jq ".name" "${tracePath}"`)
-      await run(ws, `jq -r ".id" "${tracePath}"`)
-      await run(ws, `wc "${tracePath}"`)
-      await run(ws, `stat "${tracePath}"`)
+      await run(ws, `cat ${shellQuote(tracePath)} | head -n 5`)
+      await run(ws, `jq ".name" ${shellQuote(tracePath)}`)
+      await run(ws, `jq -r ".id" ${shellQuote(tracePath)}`)
+      await run(ws, `wc ${shellQuote(tracePath)}`)
+      await run(ws, `stat ${shellQuote(tracePath)}`)
     }
-
 
     // chmod/chown/touch never hit the Langfuse API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
@@ -101,8 +113,8 @@ async function main(): Promise<void> {
     const d0 = rstripSlash((await run(ws, 'ls /langfuse/datasets/ | head -n 1')).trim())
     if (d0 !== '') {
       const itemsPath = `/langfuse/datasets/${d0}/items.jsonl`
-      await run(ws, `head -n 2 "${itemsPath}"`)
-      await run(ws, `jq ".id" "${itemsPath}" | head -n 3`)
+      await run(ws, `head -n 2 ${shellQuote(itemsPath)}`)
+      await run(ws, `jq ".id" ${shellQuote(itemsPath)} | head -n 3`)
     }
 
     console.log('\n=== tree -L 2 /langfuse/ ===')
@@ -115,12 +127,12 @@ async function main(): Promise<void> {
     const promptFiles = found === '' ? [] : found.split('\n')
     if (promptFiles.length > 0) {
       const cacheFile = (promptFiles[0] ?? '').trim()
-      const [coldMs, body] = await timed(ws, `cat "${cacheFile}"`)
-      const [warmMs] = await timed(ws, `cat "${cacheFile}"`)
-      const [grepMs] = await timed(ws, `grep . "${cacheFile}"`)
-      const [headMs] = await timed(ws, `head -n 1 "${cacheFile}"`)
-      const [tailMs] = await timed(ws, `tail -n 1 "${cacheFile}"`)
-      const [wcMs] = await timed(ws, `wc -l "${cacheFile}"`)
+      const [coldMs, body] = await timed(ws, `cat ${shellQuote(cacheFile)}`)
+      const [warmMs] = await timed(ws, `cat ${shellQuote(cacheFile)}`)
+      const [grepMs] = await timed(ws, `grep . ${shellQuote(cacheFile)}`)
+      const [headMs] = await timed(ws, `head -n 1 ${shellQuote(cacheFile)}`)
+      const [tailMs] = await timed(ws, `tail -n 1 ${shellQuote(cacheFile)}`)
+      const [wcMs] = await timed(ws, `wc -l ${shellQuote(cacheFile)}`)
       console.log(`  file=${cacheFile} size=${String(body.length)}B`)
       console.log(
         `  cold cat=${coldMs.toFixed(0)}ms  warm cat=${warmMs.toFixed(0)}ms  ` +

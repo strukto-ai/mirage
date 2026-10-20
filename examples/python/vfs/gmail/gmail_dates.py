@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -55,14 +56,16 @@ async def main():
 
     # A date dir lists message files (*.gmail.json); a message that has
     # attachments also gets a sibling folder named after the message.
-    out, _, _ = await show(ws, f"ls /gmail/INBOX/{first_date}")
+    out, _, _ = await show(
+        ws, f"ls {shlex.quote(f'/gmail/INBOX/{first_date}')}"
+    )
     entries = [e for e in out.strip().split("\n") if e]
     msg_file = next((e for e in entries if e.endswith(".gmail.json")), None)
     assert msg_file, f"date dir should contain a *.gmail.json msg: {entries}"
 
     await show(
         ws,
-        f'cat "/gmail/INBOX/{first_date}/{msg_file}" '
+        f"cat {shlex.quote(f'/gmail/INBOX/{first_date}/{msg_file}')} "
         "| jq '{subject, from: .from.email, "
         "attachments: [.attachments[].filename]}'",
     )
@@ -72,17 +75,17 @@ async def main():
     # so "<name>.gmail.json" is its message file.
     print("\n=== finding a message with attachments ===")
     for d in dates:
-        r = await ws.shell(f"ls /gmail/INBOX/{d}")
+        r = await ws.shell(f"ls {shlex.quote(f'/gmail/INBOX/{d}')}")
         items = [e for e in (await r.stdout_str()).strip().split("\n") if e]
         att_dir = next(
             (e for e in items if not e.endswith(".gmail.json")), None
         )
         if att_dir:
             print(f"FOUND: /gmail/INBOX/{d}/{att_dir}")
-            await show(ws, f'ls "/gmail/INBOX/{d}/{att_dir}"')
+            await show(ws, f"ls {shlex.quote(f'/gmail/INBOX/{d}/{att_dir}')}")
             await show(
                 ws,
-                f'cat "/gmail/INBOX/{d}/{att_dir}.gmail.json" '
+                f"cat {shlex.quote(f'/gmail/INBOX/{d}/{att_dir}.gmail.json')} "
                 "| jq '.attachments'",
             )
             return

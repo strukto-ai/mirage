@@ -23,6 +23,13 @@ function line(text: string, cls?: string): void {
   logEl.appendChild(div)
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<void> {
   line(`$ ${cmd}`, 'prompt')
   const r = await ws.shell(cmd)
@@ -60,11 +67,11 @@ async function main(): Promise<void> {
     }
     const dir = `/pg/public/tables/${tables[0]!}`
 
-    await run(ws, `ls ${dir}`)
-    await run(ws, `cat ${dir}/schema.json`)
-    await run(ws, `head -n 3 ${dir}/rows.jsonl`)
-    await run(ws, `wc -l ${dir}/rows.jsonl`)
-    await run(ws, `jq ".name" ${dir}/schema.json`)
+    await run(ws, `ls ${shellQuote(dir)}`)
+    await run(ws, `cat ${shellQuote(`${dir}/schema.json`)}`)
+    await run(ws, `head -n 3 ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run(ws, `wc -l ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run(ws, `jq ".name" ${shellQuote(`${dir}/schema.json`)}`)
 
     line('\ndone.', 'ok')
   } finally {
@@ -73,6 +80,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  line(String(err instanceof Error ? err.stack ?? err.message : err), 'err')
+  line(String(err instanceof Error ? (err.stack ?? err.message) : err), 'err')
   line('done.', 'ok')
 })

@@ -61,6 +61,34 @@ ws.attachEventRuntime(
 )
 
 const CREATED = 'OCP\\Files\\Events\\Node\\NodeCreatedEvent'
+const DAV = '/remote.php/dav/files/'
+const WEBDAV = '/remote.php/webdav'
+
+/**
+ * The instance path Nextcloud names `rel` by in a webhook payload.
+ *
+ * Nextcloud reports a node as `/<user>/files/<path>` from the user's
+ * files root, while the mount starts at the folder `NEXTCLOUD_URL`
+ * names, so that folder is part of the path.
+ */
+function serverPath(rel: string): string {
+  const path = `${decodeURIComponent(new URL(config.url).pathname).replace(/\/+$/, '')}/`
+  let user: string
+  let folder: string
+  if (path.includes(DAV)) {
+    const rest = path.split(DAV).slice(1).join(DAV)
+    const cut = rest.indexOf('/')
+    user = rest.slice(0, cut)
+    folder = rest.slice(cut + 1)
+  } else if (path.includes(WEBDAV)) {
+    user = String(config.username)
+    folder = path.split(WEBDAV).slice(1).join(WEBDAV)
+  } else {
+    throw new Error(`not a Nextcloud WebDAV URL: ${config.url}`)
+  }
+  const parts = [`/${user}/files`, folder.replace(/^\/+|\/+$/g, ''), rel]
+  return parts.filter((part) => part !== '').join('/')
+}
 
 /**
  * Stands in for the consumer's webhook route: each delivery Nextcloud
@@ -74,7 +102,7 @@ class Receiver {
     const payload = {
       event: {
         class: CREATED,
-        node: { path: `/${String(config.username)}/files/${rel}` },
+        node: { path: serverPath(rel) },
       },
     }
     for (const change of await this.hook.toEvents(this.root, CREATED, payload)) {

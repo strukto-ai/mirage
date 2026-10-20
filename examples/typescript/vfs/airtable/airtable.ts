@@ -28,6 +28,13 @@ function buildConfig(): AirtableConfig {
   return { token }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -42,7 +49,10 @@ async function run(ws: Workspace, cmd: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/airtable': new AirtableVFS(buildConfig()) }, { mode: MountMode.READ })
+  const ws = new Workspace(
+    { '/airtable': new AirtableVFS(buildConfig()) },
+    { mode: MountMode.READ },
+  )
   try {
     const bases = (await run(ws, 'ls /airtable/bases')).split('\n').filter((b) => b !== '')
     const first = bases[0]
@@ -51,17 +61,20 @@ async function main(): Promise<void> {
       return
     }
     const base = `/airtable/bases/${first}`
-    await run(ws, `cat ${base}/base.json`)
-    const tables = (await run(ws, `ls ${base}`))
+    await run(ws, `cat ${shellQuote(`${base}/base.json`)}`)
+    const tables = (await run(ws, `ls ${shellQuote(base)}`))
       .split('\n')
       .filter((name) => name !== '' && name !== 'base.json')
     const firstTable = tables[0]
     if (firstTable === undefined) return
     const table = `${base}/${firstTable}`
-    await run(ws, `jq -r '.fields[] | .field_name + ": " + .type' ${table}/table.json`)
+    await run(
+      ws,
+      `jq -r '.fields[] | .field_name + ": " + .type' ${shellQuote(`${table}/table.json`)}`,
+    )
     // head pushes its count into maxRecords: one request, not the table
-    await run(ws, `head -n 3 ${table}/records.jsonl | jq -c .fields`)
-    await run(ws, `ls ${table}/views`)
+    await run(ws, `head -n 3 ${shellQuote(`${table}/records.jsonl`)} | jq -c .fields`)
+    await run(ws, `ls ${shellQuote(`${table}/views`)}`)
     await run(ws, 'cat /airtable/bases/Missing__appMissing00000001/base.json')
   } finally {
     await ws.close()

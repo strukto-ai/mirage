@@ -38,6 +38,13 @@ function lines(text: string): string[] {
   return text.split('\n')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
   let r = await ws.shell('ls /sharepoint/')
   const sites = lines(r.stdoutText.trim())
@@ -45,7 +52,7 @@ async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
     .filter((s) => s !== '')
   if (sites.length === 0) throw new Error('No SharePoint sites accessible')
   const site = sites[0]!
-  r = await ws.shell(`ls "/sharepoint/${site}/"`)
+  r = await ws.shell(`ls ${shellQuote(`/sharepoint/${site}/`)}`)
   const drives = lines(r.stdoutText.trim())
     .map((d) => d.trim())
     .filter((d) => d !== '')
@@ -55,92 +62,98 @@ async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
 
 function buildTests(testDir: string, testFile: string): [Test[], Test[], Test[]] {
   const commands: Test[] = [
-    ['touch', `touch "${testFile}"`],
-    ['echo write', `echo "hello world\nfoo bar\nhello again\napple\nbanana" > "${testFile}"`],
-    ['ls', `ls "${testDir}"`],
-    ['ls -l', `ls -l "${testDir}"`],
-    ['ls -la', `ls -la "${testDir}"`],
-    ['find', `find "${testDir}"`],
-    ['tree', `tree "${testDir}"`],
-    ['cat', `cat "${testFile}"`],
-    ['head', `head "${testFile}"`],
-    ['head -n 2', `head -n 2 "${testFile}"`],
-    ['tail', `tail "${testFile}"`],
-    ['tail -n 2', `tail -n 2 "${testFile}"`],
-    ['wc', `wc "${testFile}"`],
-    ['wc -l', `wc -l "${testFile}"`],
-    ['wc -c', `wc -c "${testFile}"`],
-    ['grep', `grep hello "${testFile}"`],
-    ['grep -c', `grep -c hello "${testFile}"`],
-    ['grep -n', `grep -n hello "${testFile}"`],
-    ['grep -i', `grep -i HELLO "${testFile}"`],
-    ['rg', `rg hello "${testDir}"`],
-    ['rg -l', `rg -l hello "${testDir}"`],
-    ['stat', `stat "${testFile}"`],
-    ['file', `file "${testFile}"`],
-    ['du', `du "${testDir}"`],
-    ['basename', `basename "${testFile}"`],
-    ['dirname', `dirname "${testFile}"`],
-    ['realpath', `realpath "${testFile}"`],
-    ['nl', `nl "${testFile}"`],
-    ['rev', `rev "${testFile}"`],
-    ['tac', `tac "${testFile}"`],
-    ['sort', `sort "${testFile}"`],
-    ['uniq', `uniq "${testFile}"`],
-    ['cut -c1-5', `cut -c1-5 "${testFile}"`],
-    ['tr a-z A-Z', `cat "${testFile}" | tr a-z A-Z`],
-    ['fold -w 10', `fold -w 10 "${testFile}"`],
-    ['fmt', `fmt "${testFile}"`],
-    ['expand', `expand "${testFile}"`],
-    ['unexpand', `unexpand "${testFile}"`],
-    ['md5', `md5 "${testFile}"`],
-    ['sha256sum', `sha256sum "${testFile}"`],
-    ['base64', `base64 "${testFile}"`],
-    ['xxd', `xxd "${testFile}"`],
-    ['strings', `strings "${testFile}"`],
-    ['column', `column "${testFile}"`],
-    ['paste', `paste "${testFile}" "${testFile}"`],
-    ['join', `join "${testFile}" "${testFile}"`],
-    ['look', `look h "${testFile}"`],
-    ['diff (same)', `diff "${testFile}" "${testFile}"`],
-    ['cmp (same)', `cmp "${testFile}" "${testFile}"`],
-    ['cp', `cp "${testFile}" "${testDir}/copy.txt"`],
-    ['mv', `mv "${testDir}/copy.txt" "${testDir}/moved.txt"`],
-    ['ln', `ln "${testDir}/moved.txt" "${testDir}/link.txt"`],
-    ['rm link', `rm "${testDir}/link.txt"`],
-    ['rm moved', `rm "${testDir}/moved.txt"`],
-    ['cat > write2', `echo "second file" > "${testDir}/file2.txt"`],
+    ['touch', `touch ${shellQuote(testFile)}`],
+    [
+      'echo write',
+      `echo "hello world\nfoo bar\nhello again\napple\nbanana" > ${shellQuote(testFile)}`,
+    ],
+    ['ls', `ls ${shellQuote(testDir)}`],
+    ['ls -l', `ls -l ${shellQuote(testDir)}`],
+    ['ls -la', `ls -la ${shellQuote(testDir)}`],
+    ['find', `find ${shellQuote(testDir)}`],
+    ['tree', `tree ${shellQuote(testDir)}`],
+    ['cat', `cat ${shellQuote(testFile)}`],
+    ['head', `head ${shellQuote(testFile)}`],
+    ['head -n 2', `head -n 2 ${shellQuote(testFile)}`],
+    ['tail', `tail ${shellQuote(testFile)}`],
+    ['tail -n 2', `tail -n 2 ${shellQuote(testFile)}`],
+    ['wc', `wc ${shellQuote(testFile)}`],
+    ['wc -l', `wc -l ${shellQuote(testFile)}`],
+    ['wc -c', `wc -c ${shellQuote(testFile)}`],
+    ['grep', `grep hello ${shellQuote(testFile)}`],
+    ['grep -c', `grep -c hello ${shellQuote(testFile)}`],
+    ['grep -n', `grep -n hello ${shellQuote(testFile)}`],
+    ['grep -i', `grep -i HELLO ${shellQuote(testFile)}`],
+    ['rg', `rg hello ${shellQuote(testDir)}`],
+    ['rg -l', `rg -l hello ${shellQuote(testDir)}`],
+    ['stat', `stat ${shellQuote(testFile)}`],
+    ['file', `file ${shellQuote(testFile)}`],
+    ['du', `du ${shellQuote(testDir)}`],
+    ['basename', `basename ${shellQuote(testFile)}`],
+    ['dirname', `dirname ${shellQuote(testFile)}`],
+    ['realpath', `realpath ${shellQuote(testFile)}`],
+    ['nl', `nl ${shellQuote(testFile)}`],
+    ['rev', `rev ${shellQuote(testFile)}`],
+    ['tac', `tac ${shellQuote(testFile)}`],
+    ['sort', `sort ${shellQuote(testFile)}`],
+    ['uniq', `uniq ${shellQuote(testFile)}`],
+    ['cut -c1-5', `cut -c1-5 ${shellQuote(testFile)}`],
+    ['tr a-z A-Z', `cat ${shellQuote(testFile)} | tr a-z A-Z`],
+    ['fold -w 10', `fold -w 10 ${shellQuote(testFile)}`],
+    ['fmt', `fmt ${shellQuote(testFile)}`],
+    ['expand', `expand ${shellQuote(testFile)}`],
+    ['unexpand', `unexpand ${shellQuote(testFile)}`],
+    ['md5', `md5 ${shellQuote(testFile)}`],
+    ['sha256sum', `sha256sum ${shellQuote(testFile)}`],
+    ['base64', `base64 ${shellQuote(testFile)}`],
+    ['xxd', `xxd ${shellQuote(testFile)}`],
+    ['strings', `strings ${shellQuote(testFile)}`],
+    ['column', `column ${shellQuote(testFile)}`],
+    ['paste', `paste ${shellQuote(testFile)} ${shellQuote(testFile)}`],
+    ['join', `join ${shellQuote(testFile)} ${shellQuote(testFile)}`],
+    ['look', `look h ${shellQuote(testFile)}`],
+    ['diff (same)', `diff ${shellQuote(testFile)} ${shellQuote(testFile)}`],
+    ['cmp (same)', `cmp ${shellQuote(testFile)} ${shellQuote(testFile)}`],
+    ['cp', `cp ${shellQuote(testFile)} ${shellQuote(`${testDir}/copy.txt`)}`],
+    ['mv', `mv ${shellQuote(`${testDir}/copy.txt`)} ${shellQuote(`${testDir}/moved.txt`)}`],
+    ['ln', `ln ${shellQuote(`${testDir}/moved.txt`)} ${shellQuote(`${testDir}/link.txt`)}`],
+    ['rm link', `rm ${shellQuote(`${testDir}/link.txt`)}`],
+    ['rm moved', `rm ${shellQuote(`${testDir}/moved.txt`)}`],
+    ['cat > write2', `echo "second file" > ${shellQuote(`${testDir}/file2.txt`)}`],
     [
       'sed -f',
-      `echo 's/hello/HELLO/' | tee "${testDir}/prog.sed" > /dev/null` +
-        ` && sed -f "${testDir}/prog.sed" "${testFile}" && rm "${testDir}/prog.sed"`,
+      `echo 's/hello/HELLO/' | tee ${shellQuote(`${testDir}/prog.sed`)} > /dev/null` +
+        ` && sed -f ${shellQuote(`${testDir}/prog.sed`)} ${shellQuote(testFile)} && rm ${shellQuote(`${testDir}/prog.sed`)}`,
     ],
-    ['grep -r', `grep -r hello "${testDir}"`],
-    ['grep -rl', `grep -rl hello "${testDir}"`],
-    ['find -name', `find "${testDir}" -name "*.txt"`],
-    ['find -type f', `find "${testDir}" -type f`],
+    ['grep -r', `grep -r hello ${shellQuote(testDir)}`],
+    ['grep -rl', `grep -rl hello ${shellQuote(testDir)}`],
+    ['find -name', `find ${shellQuote(testDir)} -name "*.txt"`],
+    ['find -type f', `find ${shellQuote(testDir)} -type f`],
   ]
 
   const pipeTests: Test[] = [
-    ['cat|wc -l', `cat "${testFile}" | wc -l`],
-    ['cat|grep', `cat "${testFile}" | grep hello`],
-    ['cat|head', `cat "${testFile}" | head -n 2`],
-    ['grep|sort', `grep hello "${testFile}" | sort`],
-    ['grep|wc', `grep hello "${testFile}" | wc -l`],
-    ['find|wc', `find "${testDir}" | wc -l`],
-    ['find|head', `find "${testDir}" | head -2`],
-    ['cat|sort|uniq', `cat "${testFile}" | sort | uniq`],
-    ['cat|grep|wc', `cat "${testFile}" | grep hello | wc -l`],
-    ['cat|tr|sort|uniq', `cat "${testFile}" | tr a-z A-Z | sort | uniq`],
-    ['find|grep|wc', `find "${testDir}" | grep hello | wc -l`],
-    ['cat|sed', `cat "${testFile}" | sed 's/hello/HELLO/'`],
+    ['cat|wc -l', `cat ${shellQuote(testFile)} | wc -l`],
+    ['cat|grep', `cat ${shellQuote(testFile)} | grep hello`],
+    ['cat|head', `cat ${shellQuote(testFile)} | head -n 2`],
+    ['grep|sort', `grep hello ${shellQuote(testFile)} | sort`],
+    ['grep|wc', `grep hello ${shellQuote(testFile)} | wc -l`],
+    ['find|wc', `find ${shellQuote(testDir)} | wc -l`],
+    ['find|head', `find ${shellQuote(testDir)} | head -2`],
+    ['cat|sort|uniq', `cat ${shellQuote(testFile)} | sort | uniq`],
+    ['cat|grep|wc', `cat ${shellQuote(testFile)} | grep hello | wc -l`],
+    ['cat|tr|sort|uniq', `cat ${shellQuote(testFile)} | tr a-z A-Z | sort | uniq`],
+    ['find|grep|wc', `find ${shellQuote(testDir)} | grep hello | wc -l`],
+    ['cat|sed', `cat ${shellQuote(testFile)} | sed 's/hello/HELLO/'`],
   ]
 
   const shellTests: Test[] = [
     ['variable', 'X=hello; echo $X'],
     ['arithmetic', 'echo $((2 + 3))'],
-    ['cmd substitution', `echo $(cat "${testFile}" | wc -l) lines`],
-    ['if-else exists', `if [ -f "${testFile}" ]; then echo exists; else echo missing; fi`],
+    ['cmd substitution', `echo $(cat ${shellQuote(testFile)} | wc -l) lines`],
+    [
+      'if-else exists',
+      `if [ -f ${shellQuote(testFile)} ]; then echo exists; else echo missing; fi`,
+    ],
     [
       'if-else missing',
       'if [ -f "/sharepoint/no/such/file" ]; then echo exists; else echo missing; fi',
@@ -232,7 +245,7 @@ function writeReport(
 }
 
 async function makeScratchDir(ws: Workspace, path: string): Promise<void> {
-  const r = await ws.shell(`mkdir "${path}"`)
+  const r = await ws.shell(`mkdir ${shellQuote(path)}`)
   if (r.exitCode !== 0) throw new Error(`mkdir ${path} failed: ${r.stderrText.trim()}`)
 }
 
@@ -257,7 +270,7 @@ async function runSuite(
   // dispatch-level stat.
   console.log(`=== metadata overlay on ${testFile} ===`)
   const metaRes = await ws.shell(
-    `chmod 640 "${testFile}" && chown 500:dev "${testFile}" && touch -t 202601021530 "${testFile}"`,
+    `chmod 640 ${shellQuote(testFile)} && chown 500:dev ${shellQuote(testFile)} && touch -t 202601021530 ${shellQuote(testFile)}`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', testFile)) as FileStat
@@ -290,7 +303,7 @@ async function main(): Promise<void> {
       results = await runSuite(ws, testDir, testFile)
     } finally {
       console.log('\n=== Cleanup ===')
-      await ws.shell(`rm -r "${testDir}"`)
+      await ws.shell(`rm -r ${shellQuote(testDir)}`)
       console.log('  done')
     }
     const [cmdResults, pipeResults, shellResults] = results

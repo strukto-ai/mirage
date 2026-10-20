@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -75,15 +76,15 @@ async def main():
 
     target = os.environ.get("DATABRICKS_VOLUME_SAMPLE_FILE")
     if target:
-        await _run(ws, f'stat "{target}"')
+        await _run(ws, f"stat {shlex.quote(target)}")
 
         # chmod/chown/touch never hit the Databricks API: attrs land in
         # the workspace namespace and merge into dispatch-level stat.
         print(f"=== metadata overlay on {target} ===")
         meta_res = await ws.shell(
-            f'chmod 640 "{target}"'
-            f' && chown 500:dev "{target}"'
-            f' && touch -t 202601021530 "{target}"'
+            f"chmod 640 {shlex.quote(target)}"
+            f" && chown 500:dev {shlex.quote(target)}"
+            f" && touch -t 202601021530 {shlex.quote(target)}"
         )
         print(f"  chmod/chown/touch exit={meta_res.exit_code}")
         try:
@@ -100,8 +101,8 @@ async def main():
             )
         except FileNotFoundError:
             print("  dispatch stat: target missing in this environment")
-        await _run(ws, f'head -n 20 "{target}"')
-        await _run(ws, f'grep -n TODO "{target}"')
+        await _run(ws, f"head -n 20 {shlex.quote(target)}")
+        await _run(ws, f"grep -n TODO {shlex.quote(target)}")
     else:
         print("\nSet DATABRICKS_VOLUME_SAMPLE_FILE to run file reads.")
     await ws.close()

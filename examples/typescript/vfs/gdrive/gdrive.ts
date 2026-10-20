@@ -15,7 +15,14 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GoogleDriveVFS, GWS, MountMode, Workspace, type FileStat, type GDriveConfig } from '@struktoai/mirage-node'
+import {
+  GoogleDriveVFS,
+  GWS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type GDriveConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -35,6 +42,13 @@ function lines(text: string): string[] {
     .trim()
     .split('\n')
     .filter((s) => s !== '')
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 async function main(): Promise<void> {
@@ -67,7 +81,7 @@ async function main(): Promise<void> {
     const first = entries[0]!
 
     console.log(`=== stat /gdrive/${first} ===`)
-    r = await ws.shell(`stat "/gdrive/${first}"`)
+    r = await ws.shell(`stat ${shellQuote(`/gdrive/${first}`)}`)
     console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Drive API: attrs land in the
@@ -75,7 +89,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gdrive/${first} ===`)
     r = await ws.shell(
-      `chmod 640 "/gdrive/${first}" && chown 500:dev "/gdrive/${first}" && touch -t 202601021530 "/gdrive/${first}"`,
+      `chmod 640 ${shellQuote(`/gdrive/${first}`)} && chown 500:dev ${shellQuote(`/gdrive/${first}`)} && touch -t 202601021530 ${shellQuote(`/gdrive/${first}`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await ws.dispatch('stat', `/gdrive/${first}`)) as FileStat
@@ -86,12 +100,12 @@ async function main(): Promise<void> {
 
     if (first.endsWith('/')) {
       console.log(`=== ls /gdrive/${first} ===`)
-      r = await ws.shell(`ls "/gdrive/${first}"`)
+      r = await ws.shell(`ls ${shellQuote(`/gdrive/${first}`)}`)
       console.log(r.stdoutText)
       const sub = lines(r.stdoutText)[0]
       if (sub !== undefined && !sub.endsWith('/')) {
         console.log(`=== cat /gdrive/${first}${sub} ===`)
-        r = await ws.shell(`cat "/gdrive/${first}${sub}"`)
+        r = await ws.shell(`cat ${shellQuote(`/gdrive/${first}${sub}`)}`)
         console.log(r.stdoutText.slice(0, 500))
       }
     }
@@ -107,59 +121,59 @@ async function main(): Promise<void> {
     const gdoc = lines(r.stdoutText)[0]
     if (gdoc !== undefined) {
       console.log(`=== cat ${gdoc} | jq .title ===`)
-      r = await ws.shell(`cat "${gdoc}" | jq ".title"`)
+      r = await ws.shell(`cat ${shellQuote(gdoc)} | jq ".title"`)
       console.log(r.stdoutText)
 
       console.log(`=== head -n 3 ${gdoc} ===`)
-      r = await ws.shell(`head -n 3 "${gdoc}"`)
+      r = await ws.shell(`head -n 3 ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== head -c 150 ${gdoc} ===`)
-      r = await ws.shell(`head -c 150 "${gdoc}"`)
+      r = await ws.shell(`head -c 150 ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== wc ${gdoc} ===`)
-      r = await ws.shell(`wc "${gdoc}"`)
+      r = await ws.shell(`wc ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== basename ${gdoc} ===`)
-      r = await ws.shell(`basename "${gdoc}"`)
+      r = await ws.shell(`basename ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== dirname ${gdoc} ===`)
-      r = await ws.shell(`dirname "${gdoc}"`)
+      r = await ws.shell(`dirname ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== tail -n 3 ${gdoc} ===`)
-      r = await ws.shell(`tail -n 3 "${gdoc}"`)
+      r = await ws.shell(`tail -n 3 ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
 
       console.log(`=== nl ${gdoc} ===`)
-      r = await ws.shell(`nl "${gdoc}"`)
+      r = await ws.shell(`nl ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== grep title ${gdoc} ===`)
-      r = await ws.shell(`grep title "${gdoc}"`)
+      r = await ws.shell(`grep title ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== rg title ${gdoc} ===`)
-      r = await ws.shell(`rg title "${gdoc}"`)
+      r = await ws.shell(`rg title ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== cut -c 1-40 ${gdoc} ===`)
-      r = await ws.shell(`cut -c 1-40 "${gdoc}"`)
+      r = await ws.shell(`cut -c 1-40 ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== sed -n 2p ${gdoc} ===`)
-      r = await ws.shell(`sed -n 2p "${gdoc}"`)
+      r = await ws.shell(`sed -n 2p ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== sed s/title/TITLE/g ${gdoc} ===`)
-      r = await ws.shell(`sed "s/title/TITLE/g" "${gdoc}"`)
+      r = await ws.shell(`sed "s/title/TITLE/g" ${shellQuote(gdoc)}`)
       console.log(r.stdoutText.slice(0, 300))
 
       console.log(`=== realpath ${gdoc} ===`)
-      r = await ws.shell(`realpath "${gdoc}"`)
+      r = await ws.shell(`realpath ${shellQuote(gdoc)}`)
       console.log(r.stdoutText)
     }
 
@@ -167,30 +181,30 @@ async function main(): Promise<void> {
     const gslide = entries.find((e) => e.endsWith('.gslide.json'))
     if (gslide !== undefined) {
       console.log(`=== jq .title /gdrive/${gslide} ===`)
-      r = await ws.shell(`jq ".title" "/gdrive/${gslide}"`)
+      r = await ws.shell(`jq ".title" ${shellQuote(`/gdrive/${gslide}`)}`)
       console.log(r.stdoutText)
 
       console.log(`=== jq '.slides | length' /gdrive/${gslide} ===`)
-      r = await ws.shell(`jq ".slides | length" "/gdrive/${gslide}"`)
+      r = await ws.shell(`jq ".slides | length" ${shellQuote(`/gdrive/${gslide}`)}`)
       console.log(r.stdoutText)
     }
 
     const gsheet = entries.find((e) => e.endsWith('.gsheet.json'))
     if (gsheet !== undefined) {
       console.log(`=== jq .properties.title /gdrive/${gsheet} ===`)
-      r = await ws.shell(`jq ".properties.title" "/gdrive/${gsheet}"`)
+      r = await ws.shell(`jq ".properties.title" ${shellQuote(`/gdrive/${gsheet}`)}`)
       console.log(r.stdoutText)
     }
 
     console.log('=== gws docs documents create ===')
     r = await ws.shell(
-      "gws docs documents create --json '{\"title\": \"Test from MIRAGE TS gdrive\"}'",
+      'gws docs documents create --json \'{"title": "Test from MIRAGE TS gdrive"}\'',
     )
     console.log(r.stdoutText.slice(0, 300))
 
     console.log('=== gws sheets spreadsheets create ===')
     r = await ws.shell(
-      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Test Sheet from TS gdrive\"}}'",
+      'gws sheets spreadsheets create --json \'{"properties": {"title": "Test Sheet from TS gdrive"}}\'',
     )
     console.log(r.stdoutText.slice(0, 300))
   } finally {

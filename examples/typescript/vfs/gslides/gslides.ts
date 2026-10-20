@@ -15,7 +15,14 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GSlidesVFS, GWS, MountMode, Workspace, type FileStat, type GSlidesConfig } from '@struktoai/mirage-node'
+import {
+  GSlidesVFS,
+  GWS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type GSlidesConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -28,6 +35,13 @@ function buildConfig(): GSlidesConfig {
     throw new Error('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN are required')
   }
   return { clientId, clientSecret, refreshToken }
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 async function main(): Promise<void> {
@@ -64,31 +78,31 @@ async function main(): Promise<void> {
     const path = `/gslides/owned/${first}`
 
     console.log('=== cat ===')
-    r = await ws.shell(`cat "${path}"`)
+    r = await ws.shell(`cat ${shellQuote(path)}`)
     console.log(r.stdoutText.slice(0, 300))
 
     console.log('\n=== head -n 20 ===')
-    r = await ws.shell(`head -n 20 "${path}"`)
+    r = await ws.shell(`head -n 20 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== head -c 200 ===')
-    r = await ws.shell(`head -c 200 "${path}"`)
+    r = await ws.shell(`head -c 200 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== tail -n 10 ===')
-    r = await ws.shell(`tail -n 10 "${path}"`)
+    r = await ws.shell(`tail -n 10 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== tail -c 200 ===')
-    r = await ws.shell(`tail -c 200 "${path}"`)
+    r = await ws.shell(`tail -c 200 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== wc ===')
-    r = await ws.shell(`wc "${path}"`)
+    r = await ws.shell(`wc ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== stat ===')
-    r = await ws.shell(`stat "${path}"`)
+    r = await ws.shell(`stat ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Slides API: attrs land in the
@@ -96,7 +110,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${path} ===`)
     r = await ws.shell(
-      `chmod 640 "${path}" && chown 500:dev "${path}" && touch -t 202601021530 "${path}"`,
+      `chmod 640 ${shellQuote(path)} && chown 500:dev ${shellQuote(path)} && touch -t 202601021530 ${shellQuote(path)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await ws.dispatch('stat', path)) as FileStat
@@ -106,15 +120,15 @@ async function main(): Promise<void> {
     )
 
     console.log('=== jq .title ===')
-    r = await ws.shell(`jq ".title" "${path}"`)
+    r = await ws.shell(`jq ".title" ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== jq ".slides | length" ===')
-    r = await ws.shell(`jq ".slides | length" "${path}"`)
+    r = await ws.shell(`jq ".slides | length" ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== nl ===')
-    r = await ws.shell(`nl "${path}" | head -n 10`)
+    r = await ws.shell(`nl ${shellQuote(path)} | head -n 10`)
     console.log(r.stdoutText)
 
     console.log('=== tree /gslides/ ===')
@@ -126,27 +140,29 @@ async function main(): Promise<void> {
     console.log(r.stdoutText)
 
     console.log('=== grep textRun ===')
-    r = await ws.shell(`grep textRun "${path}" | head -c 200`)
+    r = await ws.shell(`grep textRun ${shellQuote(path)} | head -c 200`)
     console.log(r.stdoutText)
 
     console.log('\n=== rg textRun ===')
-    r = await ws.shell(`rg textRun "${path}" | head -c 200`)
+    r = await ws.shell(`rg textRun ${shellQuote(path)} | head -c 200`)
     console.log(r.stdoutText)
 
     console.log('\n=== basename ===')
-    r = await ws.shell(`basename "${path}"`)
+    r = await ws.shell(`basename ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== dirname ===')
-    r = await ws.shell(`dirname "${path}"`)
+    r = await ws.shell(`dirname ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== realpath ===')
-    r = await ws.shell(`realpath "${path}"`)
+    r = await ws.shell(`realpath ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== gws slides presentations create ===')
-    r = await ws.shell("gws slides presentations create --json '{\"title\": \"MIRAGE TS Slides Test\"}'")
+    r = await ws.shell(
+      'gws slides presentations create --json \'{"title": "MIRAGE TS Slides Test"}\'',
+    )
     if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
       const err = r.stderrText.trim() || 'empty response'
       console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
@@ -167,7 +183,9 @@ async function main(): Promise<void> {
       ],
     })
     const params = JSON.stringify({ presentationId: presId })
-    r = await ws.shell(`gws slides presentations batchUpdate --params '${params}' --json '${body}'`)
+    r = await ws.shell(
+      `gws slides presentations batchUpdate --params ${shellQuote(params)} --json ${shellQuote(body)}`,
+    )
     if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
       const err = r.stderrText.trim() || 'empty response'
       console.log(`  update failed (exit=${String(r.exitCode)}): ${err}`)

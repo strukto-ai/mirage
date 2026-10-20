@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -41,7 +42,7 @@ async def run(ws: Workspace, cmd: str, limit: int = 1500) -> str:
 
 
 async def first_entry(ws: Workspace, path: str) -> str:
-    result = await ws.shell(f"ls {path}")
+    result = await ws.shell(f"ls {shlex.quote(path)}")
     out = (await result.stdout_str()).strip()
     if not out:
         return ""
@@ -49,7 +50,7 @@ async def first_entry(ws: Workspace, path: str) -> str:
 
 
 async def pick_child(ws: Workspace, path: str, skip: str) -> str:
-    result = await ws.shell(f"ls {path}/")
+    result = await ws.shell(f"ls {shlex.quote(f'{path}/')}")
     for line in (await result.stdout_str()).strip().splitlines():
         name = os.path.basename(line.rstrip("/"))
         if name != skip:
@@ -66,21 +67,21 @@ async def explore_pages(ws: Workspace) -> None:
         return
     base = f"/notion/pages/{page}"
 
-    await run(ws, f"ls {base}/")
-    await run(ws, f"cat {base}/page.json", limit=1200)
-    await run(ws, f"head -n 5 {base}/page.json")
-    await run(ws, f"tail -n 5 {base}/page.json")
-    await run(ws, f"wc -l {base}/page.json")
-    await run(ws, f"stat {base}/page.json")
+    await run(ws, f"ls {shlex.quote(f'{base}/')}")
+    await run(ws, f"cat {shlex.quote(f'{base}/page.json')}", limit=1200)
+    await run(ws, f"head -n 5 {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"tail -n 5 {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"wc -l {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"stat {shlex.quote(f'{base}/page.json')}")
 
     # chmod/chown/touch never hit the Notion API: attrs land in the
     # workspace namespace (durable, snapshot-captured) and merge into
     # dispatch-level stat.
     print(f"=== metadata overlay on {base}/page.json ===")
     meta_res = await ws.shell(
-        f'chmod 640 "{base}/page.json"'
-        f' && chown 500:dev "{base}/page.json"'
-        f' && touch -t 202601021530 "{base}/page.json"'
+        f"chmod 640 {shlex.quote(f'{base}/page.json')}"
+        f" && chown 500:dev {shlex.quote(f'{base}/page.json')}"
+        f" && touch -t 202601021530 {shlex.quote(f'{base}/page.json')}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch(
@@ -91,15 +92,15 @@ async def explore_pages(ws: Workspace) -> None:
         f"  dispatch stat: mode={meta_mode} uid={meta_st.uid} "
         f"gid={meta_st.gid} mtime={meta_st.modified}"
     )
-    await run(ws, f'jq ".title" {base}/page.json')
-    await run(ws, f'jq ".page_id" {base}/page.json')
-    await run(ws, f'jq ".parent_type" {base}/page.json')
-    await run(ws, f"basename {base}/page.json")
-    await run(ws, f"dirname {base}/page.json")
-    await run(ws, f"realpath {base}/page.json")
-    await run(ws, f"tree -L 1 {base}/")
-    await run(ws, f'find {base}/ -name "*.json"')
-    await run(ws, f"echo {base}/*.json")
+    await run(ws, f'jq ".title" {shlex.quote(f"{base}/page.json")}')
+    await run(ws, f'jq ".page_id" {shlex.quote(f"{base}/page.json")}')
+    await run(ws, f'jq ".parent_type" {shlex.quote(f"{base}/page.json")}')
+    await run(ws, f"basename {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"dirname {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"realpath {shlex.quote(f'{base}/page.json')}")
+    await run(ws, f"tree -L 1 {shlex.quote(f'{base}/')}")
+    await run(ws, f'find {shlex.quote(f"{base}/")} -name "*.json"')
+    await run(ws, f"echo {shlex.quote(f'{base}/')}*.json")
 
 
 async def explore_databases(ws: Workspace) -> None:
@@ -111,23 +112,23 @@ async def explore_databases(ws: Workspace) -> None:
         return
     base = f"/notion/databases/{db}"
 
-    await run(ws, f"ls {base}/")
-    await run(ws, f"stat {base}/")
-    await run(ws, f"stat {base}/database.json")
-    await run(ws, f"cat {base}/database.json", limit=1500)
-    await run(ws, f'jq ".database_id" {base}/database.json')
-    await run(ws, f'jq ".title" {base}/database.json')
+    await run(ws, f"ls {shlex.quote(f'{base}/')}")
+    await run(ws, f"stat {shlex.quote(f'{base}/')}")
+    await run(ws, f"stat {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"cat {shlex.quote(f'{base}/database.json')}", limit=1500)
+    await run(ws, f'jq ".database_id" {shlex.quote(f"{base}/database.json")}')
+    await run(ws, f'jq ".title" {shlex.quote(f"{base}/database.json")}')
     # The container carries data source stubs, not a column schema: since
     # 2025-09-03 `properties` lives on the data source one level down.
-    await run(ws, f'jq ".data_sources" {base}/database.json')
-    await run(ws, f"wc -l {base}/database.json")
-    await run(ws, f"head -n 8 {base}/database.json")
-    await run(ws, f"tail -n 5 {base}/database.json")
-    await run(ws, f"basename {base}/database.json")
-    await run(ws, f"dirname {base}/database.json")
-    await run(ws, f"tree -L 2 {base}/")
-    await run(ws, f'find {base}/ -name "database.json"')
-    await run(ws, f"echo {base}/*")
+    await run(ws, f'jq ".data_sources" {shlex.quote(f"{base}/database.json")}')
+    await run(ws, f"wc -l {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"head -n 8 {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"tail -n 5 {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"basename {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"dirname {shlex.quote(f'{base}/database.json')}")
+    await run(ws, f"tree -L 2 {shlex.quote(f'{base}/')}")
+    await run(ws, f'find {shlex.quote(f"{base}/")} -name "database.json"')
+    await run(ws, f"echo {shlex.quote(f'{base}/')}*")
 
     source = await pick_child(ws, base, "database.json")
     if not source:
@@ -135,31 +136,47 @@ async def explore_databases(ws: Workspace) -> None:
         return
     source_base = f"{base}/{source}"
     print(f"--- data source: {source} ---\n")
-    await run(ws, f"ls {source_base}/")
-    await run(ws, f"cat {source_base}/data_source.json", limit=1500)
-    await run(ws, f'jq ".properties | keys" {source_base}/data_source.json')
+    await run(ws, f"ls {shlex.quote(f'{source_base}/')}")
+    await run(
+        ws,
+        f"cat {shlex.quote(f'{source_base}/data_source.json')}",
+        limit=1500,
+    )
+    await run(
+        ws,
+        f'jq ".properties | keys" '
+        f"{shlex.quote(f'{source_base}/data_source.json')}",
+    )
 
-    await run(ws, f"head -n 2 {source_base}/rows.jsonl", limit=1200)
-    await run(ws, f"wc -l {source_base}/rows.jsonl")
-    await run(ws, f'jq -r ".title" {source_base}/rows.jsonl')
+    await run(
+        ws, f"head -n 2 {shlex.quote(f'{source_base}/rows.jsonl')}", limit=1200
+    )
+    await run(ws, f"wc -l {shlex.quote(f'{source_base}/rows.jsonl')}")
+    await run(ws, f'jq -r ".title" {shlex.quote(f"{source_base}/rows.jsonl")}')
     # A row's cells ride on its line, as Notion's own property objects,
     # answering to the schema in the data_source.json above.
     await run(
-        ws, f'head -n 1 {source_base}/rows.jsonl | jq ".properties | keys"'
+        ws,
+        f"head -n 1 {shlex.quote(f'{source_base}/rows.jsonl')}"
+        ' | jq ".properties | keys"',
     )
 
     row = (
-        await run(ws, f'head -n 1 {source_base}/rows.jsonl | jq -r ".path"')
+        await run(
+            ws,
+            f"head -n 1 {shlex.quote(f'{source_base}/rows.jsonl')}"
+            ' | jq -r ".path"',
+        )
     ).strip()
     if not row:
         print("Data source has no rows\n")
         return
     row_json = f"{source_base}/{row}"
     print(f"--- row page: {row} ---\n")
-    await run(ws, f"stat {row_json}")
-    await run(ws, f"cat {row_json}", limit=1200)
-    await run(ws, f'jq ".parent_type" {row_json}')
-    await run(ws, f'jq ".markdown" {row_json}')
+    await run(ws, f"stat {shlex.quote(row_json)}")
+    await run(ws, f"cat {shlex.quote(row_json)}", limit=1200)
+    await run(ws, f'jq ".parent_type" {shlex.quote(row_json)}')
+    await run(ws, f'jq ".markdown" {shlex.quote(row_json)}')
 
 
 async def explore_cross_cutting(ws: Workspace) -> None:

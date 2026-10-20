@@ -1,6 +1,7 @@
 import asyncio
 import os
 from functools import partial
+from urllib.parse import unquote, urlsplit
 
 from dotenv import load_dotenv
 
@@ -37,6 +38,29 @@ ws.attach_event_runtime(
 
 
 CREATED = "OCP\\Files\\Events\\Node\\NodeCreatedEvent"
+DAV = "/remote.php/dav/files/"
+WEBDAV = "/remote.php/webdav"
+
+
+def server_path(rel: str) -> str:
+    """The instance path Nextcloud names ``rel`` by in a webhook payload.
+
+    Nextcloud reports a node as ``/<user>/files/<path>`` from the user's
+    files root, while the mount starts at the folder ``NEXTCLOUD_URL``
+    names, so that folder is part of the path.
+
+    Args:
+        rel (str): The path relative to the mount.
+    """
+    path = unquote(urlsplit(config.url).path).rstrip("/") + "/"
+    if DAV in path:
+        user, _, folder = path.split(DAV, 1)[1].partition("/")
+    elif WEBDAV in path:
+        user, folder = str(config.username), path.split(WEBDAV, 1)[1]
+    else:
+        raise ValueError(f"not a Nextcloud WebDAV URL: {config.url}")
+    parts = (f"/{user}/files", folder.strip("/"), rel)
+    return "/".join(part for part in parts if part)
 
 
 class Receiver:
@@ -52,7 +76,7 @@ class Receiver:
         payload = {
             "event": {
                 "class": CREATED,
-                "node": {"path": f"/{config.username}/files/{rel}"},
+                "node": {"path": server_path(rel)},
             }
         }
         for change in await self._hook.to_events(self._root, CREATED, payload):

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 import uuid
 from pathlib import Path
 
@@ -25,7 +26,7 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
     if not sites:
         raise RuntimeError("No SharePoint sites accessible")
     site = sites[0]
-    r = await ws.shell(f'ls "/sharepoint/{site}/"')
+    r = await ws.shell(f"ls {shlex.quote(f'/sharepoint/{site}/')}")
     drives = [
         d.strip()
         for d in (await r.stdout_str()).strip().splitlines()
@@ -38,99 +39,127 @@ async def _pick_site_and_drive(ws: Workspace) -> tuple[str, str]:
 
 def build_tests(test_dir: str, test_file: str):
     commands = [
-        ("touch", f'touch "{test_file}"'),
+        ("touch", f"touch {shlex.quote(test_file)}"),
         (
             "echo write",
             f'echo "hello world\nfoo bar\nhello again'
-            f'\napple\nbanana" > "{test_file}"',
+            f'\napple\nbanana" > {shlex.quote(test_file)}',
         ),
-        ("ls", f'ls "{test_dir}"'),
-        ("ls -l", f'ls -l "{test_dir}"'),
-        ("ls -la", f'ls -la "{test_dir}"'),
-        ("find", f'find "{test_dir}"'),
-        ("tree", f'tree "{test_dir}"'),
-        ("cat", f'cat "{test_file}"'),
-        ("head", f'head "{test_file}"'),
-        ("head -n 2", f'head -n 2 "{test_file}"'),
-        ("tail", f'tail "{test_file}"'),
-        ("tail -n 2", f'tail -n 2 "{test_file}"'),
-        ("wc", f'wc "{test_file}"'),
-        ("wc -l", f'wc -l "{test_file}"'),
-        ("wc -c", f'wc -c "{test_file}"'),
-        ("grep", f'grep hello "{test_file}"'),
-        ("grep -c", f'grep -c hello "{test_file}"'),
-        ("grep -n", f'grep -n hello "{test_file}"'),
-        ("grep -i", f'grep -i HELLO "{test_file}"'),
-        ("rg", f'rg hello "{test_dir}"'),
-        ("rg -l", f'rg -l hello "{test_dir}"'),
-        ("stat", f'stat "{test_file}"'),
-        ("file", f'file "{test_file}"'),
-        ("du", f'du "{test_dir}"'),
-        ("basename", f'basename "{test_file}"'),
-        ("dirname", f'dirname "{test_file}"'),
-        ("realpath", f'realpath "{test_file}"'),
-        ("nl", f'nl "{test_file}"'),
-        ("rev", f'rev "{test_file}"'),
-        ("tac", f'tac "{test_file}"'),
-        ("sort", f'sort "{test_file}"'),
-        ("uniq", f'uniq "{test_file}"'),
-        ("cut -c1-5", f'cut -c1-5 "{test_file}"'),
-        ("tr a-z A-Z", f'cat "{test_file}" | tr a-z A-Z'),
-        ("fold -w 10", f'fold -w 10 "{test_file}"'),
-        ("fmt", f'fmt "{test_file}"'),
-        ("expand", f'expand "{test_file}"'),
-        ("unexpand", f'unexpand "{test_file}"'),
-        ("md5", f'md5 "{test_file}"'),
-        ("sha256sum", f'sha256sum "{test_file}"'),
-        ("base64", f'base64 "{test_file}"'),
-        ("xxd", f'xxd "{test_file}"'),
-        ("strings", f'strings "{test_file}"'),
-        ("column", f'column "{test_file}"'),
-        ("paste", f'paste "{test_file}" "{test_file}"'),
-        ("join", f'join "{test_file}" "{test_file}"'),
-        ("look", f'look h "{test_file}"'),
-        ("diff (same)", f'diff "{test_file}" "{test_file}"'),
-        ("cmp (same)", f'cmp "{test_file}" "{test_file}"'),
-        ("cp", f'cp "{test_file}" "{test_dir}/copy.txt"'),
-        ("mv", f'mv "{test_dir}/copy.txt" "{test_dir}/moved.txt"'),
-        ("ln", f'ln "{test_dir}/moved.txt" "{test_dir}/link.txt"'),
-        ("rm link", f'rm "{test_dir}/link.txt"'),
-        ("rm moved", f'rm "{test_dir}/moved.txt"'),
-        ("cat > write2", f'echo "second file" > "{test_dir}/file2.txt"'),
+        ("ls", f"ls {shlex.quote(test_dir)}"),
+        ("ls -l", f"ls -l {shlex.quote(test_dir)}"),
+        ("ls -la", f"ls -la {shlex.quote(test_dir)}"),
+        ("find", f"find {shlex.quote(test_dir)}"),
+        ("tree", f"tree {shlex.quote(test_dir)}"),
+        ("cat", f"cat {shlex.quote(test_file)}"),
+        ("head", f"head {shlex.quote(test_file)}"),
+        ("head -n 2", f"head -n 2 {shlex.quote(test_file)}"),
+        ("tail", f"tail {shlex.quote(test_file)}"),
+        ("tail -n 2", f"tail -n 2 {shlex.quote(test_file)}"),
+        ("wc", f"wc {shlex.quote(test_file)}"),
+        ("wc -l", f"wc -l {shlex.quote(test_file)}"),
+        ("wc -c", f"wc -c {shlex.quote(test_file)}"),
+        ("grep", f"grep hello {shlex.quote(test_file)}"),
+        ("grep -c", f"grep -c hello {shlex.quote(test_file)}"),
+        ("grep -n", f"grep -n hello {shlex.quote(test_file)}"),
+        ("grep -i", f"grep -i HELLO {shlex.quote(test_file)}"),
+        ("rg", f"rg hello {shlex.quote(test_dir)}"),
+        ("rg -l", f"rg -l hello {shlex.quote(test_dir)}"),
+        ("stat", f"stat {shlex.quote(test_file)}"),
+        ("file", f"file {shlex.quote(test_file)}"),
+        ("du", f"du {shlex.quote(test_dir)}"),
+        ("basename", f"basename {shlex.quote(test_file)}"),
+        ("dirname", f"dirname {shlex.quote(test_file)}"),
+        ("realpath", f"realpath {shlex.quote(test_file)}"),
+        ("nl", f"nl {shlex.quote(test_file)}"),
+        ("rev", f"rev {shlex.quote(test_file)}"),
+        ("tac", f"tac {shlex.quote(test_file)}"),
+        ("sort", f"sort {shlex.quote(test_file)}"),
+        ("uniq", f"uniq {shlex.quote(test_file)}"),
+        ("cut -c1-5", f"cut -c1-5 {shlex.quote(test_file)}"),
+        ("tr a-z A-Z", f"cat {shlex.quote(test_file)} | tr a-z A-Z"),
+        ("fold -w 10", f"fold -w 10 {shlex.quote(test_file)}"),
+        ("fmt", f"fmt {shlex.quote(test_file)}"),
+        ("expand", f"expand {shlex.quote(test_file)}"),
+        ("unexpand", f"unexpand {shlex.quote(test_file)}"),
+        ("md5", f"md5 {shlex.quote(test_file)}"),
+        ("sha256sum", f"sha256sum {shlex.quote(test_file)}"),
+        ("base64", f"base64 {shlex.quote(test_file)}"),
+        ("xxd", f"xxd {shlex.quote(test_file)}"),
+        ("strings", f"strings {shlex.quote(test_file)}"),
+        ("column", f"column {shlex.quote(test_file)}"),
+        ("paste", f"paste {shlex.quote(test_file)} {shlex.quote(test_file)}"),
+        ("join", f"join {shlex.quote(test_file)} {shlex.quote(test_file)}"),
+        ("look", f"look h {shlex.quote(test_file)}"),
+        (
+            "diff (same)",
+            f"diff {shlex.quote(test_file)} {shlex.quote(test_file)}",
+        ),
+        (
+            "cmp (same)",
+            f"cmp {shlex.quote(test_file)} {shlex.quote(test_file)}",
+        ),
+        (
+            "cp",
+            f"cp {shlex.quote(test_file)} {shlex.quote(f'{test_dir}/copy.txt')}",
+        ),
+        (
+            "mv",
+            f"mv {shlex.quote(f'{test_dir}/copy.txt')}"
+            f" {shlex.quote(f'{test_dir}/moved.txt')}",
+        ),
+        (
+            "ln",
+            f"ln {shlex.quote(f'{test_dir}/moved.txt')}"
+            f" {shlex.quote(f'{test_dir}/link.txt')}",
+        ),
+        ("rm link", f"rm {shlex.quote(f'{test_dir}/link.txt')}"),
+        ("rm moved", f"rm {shlex.quote(f'{test_dir}/moved.txt')}"),
+        (
+            "cat > write2",
+            f'echo "second file" > {shlex.quote(f"{test_dir}/file2.txt")}',
+        ),
         (
             "sed -f",
-            f"echo 's/hello/HELLO/' | tee \"{test_dir}/prog.sed\""
-            f' > /dev/null && sed -f "{test_dir}/prog.sed" "{test_file}"'
-            f' && rm "{test_dir}/prog.sed"',
+            f"echo 's/hello/HELLO/' | tee {shlex.quote(f'{test_dir}/prog.sed')}"
+            f" > /dev/null && sed -f {shlex.quote(f'{test_dir}/prog.sed')}"
+            f" {shlex.quote(test_file)}"
+            f" && rm {shlex.quote(f'{test_dir}/prog.sed')}",
         ),
-        ("grep -r", f'grep -r hello "{test_dir}"'),
-        ("grep -rl", f'grep -rl hello "{test_dir}"'),
-        ("find -name", f'find "{test_dir}" -name "*.txt"'),
-        ("find -type f", f'find "{test_dir}" -type f'),
+        ("grep -r", f"grep -r hello {shlex.quote(test_dir)}"),
+        ("grep -rl", f"grep -rl hello {shlex.quote(test_dir)}"),
+        ("find -name", f'find {shlex.quote(test_dir)} -name "*.txt"'),
+        ("find -type f", f"find {shlex.quote(test_dir)} -type f"),
     ]
 
     pipe_tests = [
-        ("cat|wc -l", f'cat "{test_file}" | wc -l'),
-        ("cat|grep", f'cat "{test_file}" | grep hello'),
-        ("cat|head", f'cat "{test_file}" | head -n 2'),
-        ("grep|sort", f'grep hello "{test_file}" | sort'),
-        ("grep|wc", f'grep hello "{test_file}" | wc -l'),
-        ("find|wc", f'find "{test_dir}" | wc -l'),
-        ("find|head", f'find "{test_dir}" | head -2'),
-        ("cat|sort|uniq", f'cat "{test_file}" | sort | uniq'),
-        ("cat|grep|wc", f'cat "{test_file}" | grep hello | wc -l'),
-        ("cat|tr|sort|uniq", f'cat "{test_file}" | tr a-z A-Z | sort | uniq'),
-        ("find|grep|wc", f'find "{test_dir}" | grep hello | wc -l'),
-        ("cat|sed", f"cat \"{test_file}\" | sed 's/hello/HELLO/'"),
+        ("cat|wc -l", f"cat {shlex.quote(test_file)} | wc -l"),
+        ("cat|grep", f"cat {shlex.quote(test_file)} | grep hello"),
+        ("cat|head", f"cat {shlex.quote(test_file)} | head -n 2"),
+        ("grep|sort", f"grep hello {shlex.quote(test_file)} | sort"),
+        ("grep|wc", f"grep hello {shlex.quote(test_file)} | wc -l"),
+        ("find|wc", f"find {shlex.quote(test_dir)} | wc -l"),
+        ("find|head", f"find {shlex.quote(test_dir)} | head -2"),
+        ("cat|sort|uniq", f"cat {shlex.quote(test_file)} | sort | uniq"),
+        ("cat|grep|wc", f"cat {shlex.quote(test_file)} | grep hello | wc -l"),
+        (
+            "cat|tr|sort|uniq",
+            f"cat {shlex.quote(test_file)} | tr a-z A-Z | sort | uniq",
+        ),
+        ("find|grep|wc", f"find {shlex.quote(test_dir)} | grep hello | wc -l"),
+        ("cat|sed", f"cat {shlex.quote(test_file)} | sed 's/hello/HELLO/'"),
     ]
 
     shell_tests = [
         ("variable", "X=hello; echo $X"),
         ("arithmetic", "echo $((2 + 3))"),
-        ("cmd substitution", f'echo $(cat "{test_file}" | wc -l) lines'),
+        (
+            "cmd substitution",
+            f"echo $(cat {shlex.quote(test_file)} | wc -l) lines",
+        ),
         (
             "if-else exists",
-            f'if [ -f "{test_file}" ]; then echo exists; else echo missing; fi',
+            f"if [ -f {shlex.quote(test_file)} ];"
+            " then echo exists; else echo missing; fi",
         ),
         (
             "if-else missing",
@@ -230,7 +259,7 @@ def write_report(
 
 
 async def make_scratch_dir(ws: Workspace, path: str) -> None:
-    r = await ws.shell(f'mkdir "{path}"')
+    r = await ws.shell(f"mkdir {shlex.quote(path)}")
     if r.exit_code != 0:
         err = (await r.stderr_str()).strip()
         raise RuntimeError(f"mkdir {path} failed: {err}")
@@ -253,9 +282,9 @@ async def run_suite(ws: Workspace, test_dir: str, test_file: str):
     # dispatch-level stat.
     print(f"=== metadata overlay on {test_file} ===")
     meta_res = await ws.shell(
-        f'chmod 640 "{test_file}"'
-        f' && chown 500:dev "{test_file}"'
-        f' && touch -t 202601021530 "{test_file}"'
+        f"chmod 640 {shlex.quote(test_file)}"
+        f" && chown 500:dev {shlex.quote(test_file)}"
+        f" && touch -t 202601021530 {shlex.quote(test_file)}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch(
@@ -292,7 +321,7 @@ async def main():
         )
     finally:
         print("\n=== Cleanup ===")
-        await ws.shell(f'rm -r "{test_dir}"')
+        await ws.shell(f"rm -r {shlex.quote(test_dir)}")
         print("  done")
 
     write_report(site, drive, cmd_results, pipe_results, shell_results)

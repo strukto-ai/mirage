@@ -16,6 +16,13 @@ import { DiscordVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const PROXY_URL = process.env.DISCORD_PROXY_URL ?? 'http://127.0.0.1:8902/api/discord'
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function main(): Promise<void> {
   const discord = new DiscordVFS({ proxyUrl: PROXY_URL })
   const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
@@ -34,10 +41,10 @@ async function main(): Promise<void> {
     const guild = guilds[0]!.trim()
 
     console.log(`=== ls /discord/${guild}/channels/ | head -n 3 ===`)
-    r = await ws.shell(`ls "/discord/${guild}/channels/" | head -n 3`)
+    r = await ws.shell(`ls ${shellQuote(`/discord/${guild}/channels/`)} | head -n 3`)
     console.log(r.stdoutText)
 
-    r = await ws.shell(`ls "/discord/${guild}/channels/" | head -n 1`)
+    r = await ws.shell(`ls ${shellQuote(`/discord/${guild}/channels/`)} | head -n 1`)
     const firstCh = r.stdoutText.trim()
     if (firstCh === '') {
       console.log('no channels found')
@@ -46,15 +53,15 @@ async function main(): Promise<void> {
     const base = `/discord/${guild}/channels/${firstCh}`
 
     console.log(`=== ls ${base}/ | tail -n 3 ===`)
-    r = await ws.shell(`ls "${base}/" | tail -n 3`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 3`)
     console.log(r.stdoutText)
 
-    r = await ws.shell(`ls "${base}/" | tail -n 1`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 1`)
     const target = r.stdoutText.trim()
     if (target !== '') {
       const filePath = `${base}/${target}`
       console.log(`=== head -n 2 ${filePath} ===`)
-      r = await ws.shell(`head -n 2 "${filePath}"`)
+      r = await ws.shell(`head -n 2 ${shellQuote(filePath)}`)
       const out = r.stdoutText.trim()
       if (out !== '') {
         for (const line of out.split('\n')) {
@@ -65,12 +72,12 @@ async function main(): Promise<void> {
       }
 
       console.log(`\n=== wc -l ${filePath} ===`)
-      r = await ws.shell(`wc -l "${filePath}"`)
+      r = await ws.shell(`wc -l ${shellQuote(filePath)}`)
       console.log(`  ${r.stdoutText.trim()}`)
     }
 
     console.log(`\n=== tree -L 1 /discord/${guild}/ ===`)
-    r = await ws.shell(`tree -L 1 "/discord/${guild}/"`)
+    r = await ws.shell(`tree -L 1 ${shellQuote(`/discord/${guild}/`)}`)
     const treeOut = r.stdoutText.trim()
     if (treeOut !== '') {
       for (const line of treeOut.split('\n')) {

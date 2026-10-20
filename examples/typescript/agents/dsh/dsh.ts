@@ -67,6 +67,13 @@ const ROLE = parseSessionProfile(
   'profile agent',
 )
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function newestFirst(a: string, b: string): number {
   return a < b ? 1 : a > b ? -1 : 0
 }
@@ -148,7 +155,10 @@ async function runFromSlack(ctx: Context, channel: string): Promise<void> {
   }
   console.log('running:', script)
   const shell = ctx.shell
-  const ran = await bash(shell, `MIRAGE_RUNNER=dsh-monty python3 ${script} > /redis/report.txt`)
+  const ran = await bash(
+    shell,
+    `MIRAGE_RUNNER=dsh-monty python3 ${shellQuote(script)} > /redis/report.txt`,
+  )
   console.log('exit:', ran.exitCode, ran.stderr.text.trim())
   const report = await bash(shell, 'cat /redis/report.txt')
   console.log(report.stdout.text.trim())

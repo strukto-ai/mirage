@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -61,31 +62,31 @@ async def main() -> None:
     first = (await r.stdout_str()).strip().split("\n")[0]
 
     print("=== cat ===")
-    r = await ws.shell(f"cat /gsheets/owned/{first}")
+    r = await ws.shell(f"cat {shlex.quote(f'/gsheets/owned/{first}')}")
     print((await r.stdout_str())[:300])
 
     print("\n=== head -n 20 ===")
-    r = await ws.shell(f"head -n 20 /gsheets/owned/{first}")
+    r = await ws.shell(f"head -n 20 {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== head -c 200 ===")
-    r = await ws.shell(f"head -c 200 /gsheets/owned/{first}")
+    r = await ws.shell(f"head -c 200 {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== tail -n 10 ===")
-    r = await ws.shell(f"tail -n 10 /gsheets/owned/{first}")
+    r = await ws.shell(f"tail -n 10 {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== tail -c 200 ===")
-    r = await ws.shell(f"tail -c 200 /gsheets/owned/{first}")
+    r = await ws.shell(f"tail -c 200 {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== wc ===")
-    r = await ws.shell(f"wc /gsheets/owned/{first}")
+    r = await ws.shell(f"wc {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== stat ===")
-    r = await ws.shell(f"stat /gsheets/owned/{first}")
+    r = await ws.shell(f"stat {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     # chmod/chown/touch never hit the Sheets API: attrs land in the
@@ -93,9 +94,9 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on /gsheets/owned/{first} ===")
     r = await ws.shell(
-        f'chmod 640 "/gsheets/owned/{first}"'
-        f' && chown 500:dev "/gsheets/owned/{first}"'
-        f' && touch -t 202601021530 "/gsheets/owned/{first}"'
+        f"chmod 640 {shlex.quote(f'/gsheets/owned/{first}')}"
+        f" && chown 500:dev {shlex.quote(f'/gsheets/owned/{first}')}"
+        f" && touch -t 202601021530 {shlex.quote(f'/gsheets/owned/{first}')}"
     )
     print(f"  chmod/chown/touch exit={r.exit_code}")
     st, _ = await ws.dispatch(
@@ -108,15 +109,21 @@ async def main() -> None:
     )
 
     print("=== jq .properties.title ===")
-    r = await ws.shell(f'jq ".properties.title" /gsheets/owned/{first}')
+    r = await ws.shell(
+        f'jq ".properties.title" {shlex.quote(f"/gsheets/owned/{first}")}'
+    )
     print(await r.stdout_str())
 
     print('=== jq ".sheets | length" ===')
-    r = await ws.shell(f'jq ".sheets | length" /gsheets/owned/{first}')
+    r = await ws.shell(
+        f'jq ".sheets | length" {shlex.quote(f"/gsheets/owned/{first}")}'
+    )
     print(await r.stdout_str())
 
     print("=== nl ===")
-    r = await ws.shell(f"nl /gsheets/owned/{first} | head -n 10")
+    r = await ws.shell(
+        f"nl {shlex.quote(f'/gsheets/owned/{first}')} | head -n 10"
+    )
     print(await r.stdout_str())
 
     print("=== tree /gsheets/ ===")
@@ -130,28 +137,34 @@ async def main() -> None:
     print(await r.stdout_str())
 
     print("=== grep title ===")
-    r = await ws.shell(f"grep title /gsheets/owned/{first} | head -c 200")
+    r = await ws.shell(
+        f"grep title {shlex.quote(f'/gsheets/owned/{first}')} | head -c 200"
+    )
     print(await r.stdout_str())
 
     print("\n=== rg title ===")
-    r = await ws.shell(f"rg title /gsheets/owned/{first} | head -c 200")
+    r = await ws.shell(
+        f"rg title {shlex.quote(f'/gsheets/owned/{first}')} | head -c 200"
+    )
     print(await r.stdout_str())
 
     print("\n=== basename ===")
-    r = await ws.shell(f"basename /gsheets/owned/{first}")
+    r = await ws.shell(f"basename {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== dirname ===")
-    r = await ws.shell(f"dirname /gsheets/owned/{first}")
+    r = await ws.shell(f"dirname {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== realpath ===")
-    r = await ws.shell(f"realpath /gsheets/owned/{first}")
+    r = await ws.shell(f"realpath {shlex.quote(f'/gsheets/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== gws sheets spreadsheets create ===")
     body = json.dumps({"properties": {"title": "MIRAGE Sheets Test"}})
-    r = await ws.shell(f"gws sheets spreadsheets create --json '{body}'")
+    r = await ws.shell(
+        f"gws sheets spreadsheets create --json {shlex.quote(body)}"
+    )
     out = await r.stdout_str()
     if r.exit_code != 0 or not out.strip():
         err = (await r.stderr_str()).strip() or "empty response"
@@ -172,27 +185,29 @@ async def main() -> None:
     )
     r = await ws.shell(
         f"gws sheets write"
-        f" --spreadsheet {sheet_id}"
+        f" --spreadsheet {shlex.quote(sheet_id)}"
         f' --range "Sheet1!A1:C3"'
-        f" --json-values '{values}'"
+        f" --json-values {shlex.quote(values)}"
     )
     print(f"Written: {(await r.stdout_str())[:80]}")
 
     print("\n=== gws sheets read ===")
     r = await ws.shell(
-        f'gws sheets read --spreadsheet {sheet_id} --range "Sheet1!A1:C3"'
+        f"gws sheets read --spreadsheet {shlex.quote(sheet_id)}"
+        ' --range "Sheet1!A1:C3"'
     )
     print(f"Values: {await r.stdout_str()}")
 
     print("=== gws sheets append ===")
     r = await ws.shell(
-        f"gws sheets append --spreadsheet {sheet_id} --values Diana,28,Chicago"
+        f"gws sheets append --spreadsheet {shlex.quote(sheet_id)}"
+        " --values Diana,28,Chicago"
     )
     print(f"Appended: {(await r.stdout_str())[:80]}")
 
     print("\n=== gws sheets read (all) ===")
     r = await ws.shell(
-        f"gws sheets read --spreadsheet {sheet_id} --range Sheet1"
+        f"gws sheets read --spreadsheet {shlex.quote(sheet_id)} --range Sheet1"
     )
     print(f"All: {await r.stdout_str()}")
 
@@ -214,7 +229,7 @@ async def main() -> None:
     batch_params = json.dumps({"spreadsheetId": sheet_id})
     r = await ws.shell(
         "gws sheets spreadsheets batchUpdate"
-        f" --params '{batch_params}' --json '{batch_body}'"
+        f" --params {shlex.quote(batch_params)} --json {shlex.quote(batch_body)}"
     )
     print(f"BatchUpdate: {(await r.stdout_str())[:80]}")
 

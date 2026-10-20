@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -60,7 +61,7 @@ async def main() -> None:
     first = entries[0]
 
     print(f"=== stat /gdrive/{first} ===")
-    result = await ws.shell(f'stat "/gdrive/{first}"')
+    result = await ws.shell(f"stat {shlex.quote(f'/gdrive/{first}')}")
     print(await result.stdout_str())
 
     # chmod/chown/touch never hit the Drive API: attrs land in the
@@ -68,9 +69,9 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on /gdrive/{first} ===")
     result = await ws.shell(
-        f'chmod 640 "/gdrive/{first}" && chown 500:dev'
-        f' "/gdrive/{first}"'
-        f' && touch -t 202601021530 "/gdrive/{first}"'
+        f"chmod 640 {shlex.quote(f'/gdrive/{first}')} && chown 500:dev"
+        f" {shlex.quote(f'/gdrive/{first}')}"
+        f" && touch -t 202601021530 {shlex.quote(f'/gdrive/{first}')}"
     )
     print(f"  chmod/chown/touch exit={result.exit_code}")
     st, _ = await ws.dispatch(
@@ -84,14 +85,16 @@ async def main() -> None:
 
     if first.endswith("/"):
         print(f"=== ls /gdrive/{first} ===")
-        result = await ws.shell(f'ls "/gdrive/{first}"')
+        result = await ws.shell(f"ls {shlex.quote(f'/gdrive/{first}')}")
         print(await result.stdout_str())
         sub_entries = (await result.stdout_str()).strip().splitlines()
         if sub_entries:
             sub = sub_entries[0]
             if not sub.endswith("/"):
                 print(f"=== cat /gdrive/{first}{sub} ===")
-                result = await ws.shell(f'cat "/gdrive/{first}{sub}"')
+                result = await ws.shell(
+                    f"cat {shlex.quote(f'/gdrive/{first}{sub}')}"
+                )
                 print((await result.stdout_str())[:500])
 
     print("=== tree -L 1 /gdrive/ ===")
@@ -106,76 +109,82 @@ async def main() -> None:
     if gdoc_files:
         gdoc = gdoc_files[0]
         print(f"=== cat {gdoc} | jq .title ===")
-        result = await ws.shell(f'cat "{gdoc}" | jq ".title"')
+        result = await ws.shell(f'cat {shlex.quote(gdoc)} | jq ".title"')
         print(await result.stdout_str())
 
         print(f"=== head -n 3 {gdoc} ===")
-        result = await ws.shell(f'head -n 3 "{gdoc}"')
+        result = await ws.shell(f"head -n 3 {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== head -c 150 {gdoc} ===")
-        result = await ws.shell(f'head -c 150 "{gdoc}"')
+        result = await ws.shell(f"head -c 150 {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== wc {gdoc} ===")
-        result = await ws.shell(f'wc "{gdoc}"')
+        result = await ws.shell(f"wc {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== basename {gdoc} ===")
-        result = await ws.shell(f'basename "{gdoc}"')
+        result = await ws.shell(f"basename {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== dirname {gdoc} ===")
-        result = await ws.shell(f'dirname "{gdoc}"')
+        result = await ws.shell(f"dirname {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== tail -n 3 {gdoc} ===")
-        result = await ws.shell(f'tail -n 3 "{gdoc}"')
+        result = await ws.shell(f"tail -n 3 {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
         print(f"=== nl {gdoc} ===")
-        result = await ws.shell(f'nl "{gdoc}"')
+        result = await ws.shell(f"nl {shlex.quote(gdoc)}")
         print((await result.stdout_str())[:300])
 
         print(f"=== grep title {gdoc} ===")
-        result = await ws.shell(f'grep title "{gdoc}"')
+        result = await ws.shell(f"grep title {shlex.quote(gdoc)}")
         print((await result.stdout_str())[:300])
 
         print(f"=== rg title {gdoc} ===")
-        result = await ws.shell(f'rg title "{gdoc}"')
+        result = await ws.shell(f"rg title {shlex.quote(gdoc)}")
         print((await result.stdout_str())[:300])
 
         print(f"=== cut -c 1-40 {gdoc} ===")
-        result = await ws.shell(f'cut -c 1-40 "{gdoc}"')
+        result = await ws.shell(f"cut -c 1-40 {shlex.quote(gdoc)}")
         print((await result.stdout_str())[:300])
 
         print(f"=== sed -n 2p {gdoc} ===")
-        result = await ws.shell(f'sed -n 2p "{gdoc}"')
+        result = await ws.shell(f"sed -n 2p {shlex.quote(gdoc)}")
         print((await result.stdout_str())[:300])
 
         print(f"=== sed s/title/TITLE/g {gdoc} ===")
-        result = await ws.shell(f'sed "s/title/TITLE/g" "{gdoc}"')
+        result = await ws.shell(f'sed "s/title/TITLE/g" {shlex.quote(gdoc)}')
         print((await result.stdout_str())[:300])
 
         print(f"=== realpath {gdoc} ===")
-        result = await ws.shell(f'realpath "{gdoc}"')
+        result = await ws.shell(f"realpath {shlex.quote(gdoc)}")
         print(await result.stdout_str())
 
     # Slides and Sheets render to their own JSON shapes in the same tree.
     gslide = next((e for e in entries if e.endswith(".gslide.json")), None)
     if gslide:
         print(f"=== jq .title /gdrive/{gslide} ===")
-        result = await ws.shell(f'jq ".title" "/gdrive/{gslide}"')
+        result = await ws.shell(
+            f'jq ".title" {shlex.quote(f"/gdrive/{gslide}")}'
+        )
         print(await result.stdout_str())
 
         print(f"=== jq '.slides | length' /gdrive/{gslide} ===")
-        result = await ws.shell(f'jq ".slides | length" "/gdrive/{gslide}"')
+        result = await ws.shell(
+            f'jq ".slides | length" {shlex.quote(f"/gdrive/{gslide}")}'
+        )
         print(await result.stdout_str())
 
     gsheet = next((e for e in entries if e.endswith(".gsheet.json")), None)
     if gsheet:
         print(f"=== jq .properties.title /gdrive/{gsheet} ===")
-        result = await ws.shell(f'jq ".properties.title" "/gdrive/{gsheet}"')
+        result = await ws.shell(
+            f'jq ".properties.title" {shlex.quote(f"/gdrive/{gsheet}")}'
+        )
         print(await result.stdout_str())
 
     print("=== gws docs documents create ===")

@@ -37,6 +37,13 @@ function lines(text: string): string[] {
     .filter((s) => s !== '')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function show(ws: Workspace, cmd: string): Promise<string> {
   console.log(`\n$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -58,7 +65,7 @@ async function main(): Promise<void> {
 
     // A date dir lists message files (*.gmail.json); a message that has
     // attachments also gets a sibling folder named after the message.
-    const entries = lines(await show(ws, `ls /gmail/INBOX/${firstDate}`))
+    const entries = lines(await show(ws, `ls ${shellQuote(`/gmail/INBOX/${firstDate}`)}`))
     const msgFile = entries.find((e) => e.endsWith('.gmail.json'))
     if (msgFile === undefined) {
       throw new Error(`date dir should contain a *.gmail.json msg: ${JSON.stringify(entries)}`)
@@ -66,7 +73,7 @@ async function main(): Promise<void> {
 
     await show(
       ws,
-      `cat "/gmail/INBOX/${firstDate}/${msgFile}" ` +
+      `cat ${shellQuote(`/gmail/INBOX/${firstDate}/${msgFile}`)} ` +
         "| jq '{subject, from: .from.email, attachments: [.attachments[].filename]}'",
     )
 
@@ -75,12 +82,15 @@ async function main(): Promise<void> {
     // so "<name>.gmail.json" is its message file.
     console.log('\n=== finding a message with attachments ===')
     for (const d of dates) {
-      const r = await ws.shell(`ls /gmail/INBOX/${d}`)
+      const r = await ws.shell(`ls ${shellQuote(`/gmail/INBOX/${d}`)}`)
       const attDir = lines(r.stdoutText).find((e) => !e.endsWith('.gmail.json'))
       if (attDir !== undefined) {
         console.log(`FOUND: /gmail/INBOX/${d}/${attDir}`)
-        await show(ws, `ls "/gmail/INBOX/${d}/${attDir}"`)
-        await show(ws, `cat "/gmail/INBOX/${d}/${attDir}.gmail.json" | jq '.attachments'`)
+        await show(ws, `ls ${shellQuote(`/gmail/INBOX/${d}/${attDir}`)}`)
+        await show(
+          ws,
+          `cat ${shellQuote(`/gmail/INBOX/${d}/${attDir}.gmail.json`)} | jq '.attachments'`,
+        )
         return
       }
     }

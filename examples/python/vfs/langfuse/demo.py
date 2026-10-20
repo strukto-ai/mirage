@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 import time
 
 from dotenv import load_dotenv
@@ -91,7 +92,7 @@ async def main():
     trace_files = [f for f in traces_out.splitlines() if f.strip()]
     if trace_files:
         tp = f"/langfuse/traces/{trace_files[0].strip()}"
-        await _run(ws, f'cat "{tp}" | head -n 5')
+        await _run(ws, f"cat {shlex.quote(tp)} | head -n 5")
     else:
         print("  no traces found, skipping cat trace")
 
@@ -114,7 +115,7 @@ async def main():
 
     if trace_files:
         tp = f"/langfuse/traces/{trace_files[0].strip()}"
-        await _run(ws, f'grep "name" "{tp}"')
+        await _run(ws, f'grep "name" {shlex.quote(tp)}')
 
     print("\n" + "=" * 60)
     print("JQ across different resource types")
@@ -122,9 +123,9 @@ async def main():
 
     if trace_files:
         tp = f"/langfuse/traces/{trace_files[0].strip()}"
-        await _run(ws, f'jq ".name" "{tp}"')
-        await _run(ws, f'jq ".session_id" "{tp}"')
-        await _run(ws, f'jq ".input" "{tp}"')
+        await _run(ws, f'jq ".name" {shlex.quote(tp)}')
+        await _run(ws, f'jq ".sessionId" {shlex.quote(tp)}')
+        await _run(ws, f'jq ".input" {shlex.quote(tp)}')
 
     await _run(
         ws,
@@ -141,7 +142,7 @@ async def main():
     )
     await _run(
         ws,
-        'jq -r ".expected_output.answer" '
+        'jq -r ".expectedOutput.answer" '
         '"/langfuse/datasets/qa-eval/items.jsonl"',
     )
 
@@ -158,7 +159,7 @@ async def main():
     if session_traces:
         st = session_traces[0].strip()
         sp = f"/langfuse/sessions/chat-session-001/{st}"
-        await _run(ws, f'cat "{sp}" | head -n 3')
+        await _run(ws, f"cat {shlex.quote(sp)} | head -n 3")
 
     print("\n" + "=" * 60)
     print("PROMPTS and DATASETS detail")
@@ -216,12 +217,12 @@ async def main():
     prompt_files = (await r.stdout_str()).strip().splitlines()
     if prompt_files:
         cache_file = prompt_files[0].strip()
-        cold_ms, body = await _timed(ws, f'cat "{cache_file}"')
-        warm_ms, _ = await _timed(ws, f'cat "{cache_file}"')
-        grep_ms, _ = await _timed(ws, f'grep . "{cache_file}"')
-        head_ms, _ = await _timed(ws, f'head -n 1 "{cache_file}"')
-        tail_ms, _ = await _timed(ws, f'tail -n 1 "{cache_file}"')
-        wc_ms, _ = await _timed(ws, f'wc -l "{cache_file}"')
+        cold_ms, body = await _timed(ws, f"cat {shlex.quote(cache_file)}")
+        warm_ms, _ = await _timed(ws, f"cat {shlex.quote(cache_file)}")
+        grep_ms, _ = await _timed(ws, f"grep . {shlex.quote(cache_file)}")
+        head_ms, _ = await _timed(ws, f"head -n 1 {shlex.quote(cache_file)}")
+        tail_ms, _ = await _timed(ws, f"tail -n 1 {shlex.quote(cache_file)}")
+        wc_ms, _ = await _timed(ws, f"wc -l {shlex.quote(cache_file)}")
         print(f"  file={cache_file} size={len(body)}B")
         print(
             f"  cold cat={cold_ms:.0f}ms  warm cat={warm_ms:.0f}ms  "

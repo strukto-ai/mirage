@@ -40,6 +40,13 @@ function buildConfig(): TrelloConfig {
   return { apiKey, apiToken }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -72,10 +79,10 @@ async function main(): Promise<void> {
     const wsBase = `/trello/workspaces/${ws0}`
 
     console.log(`\n=== tree -L 3 ${wsBase} ===`)
-    await run(ws, `tree -L 3 "${wsBase}"`)
+    await run(ws, `tree -L 3 ${shellQuote(wsBase)}`)
 
     console.log(`\n=== cat ${wsBase}/workspace.json ===`)
-    await run(ws, `cat "${wsBase}/workspace.json"`)
+    await run(ws, `cat ${shellQuote(`${wsBase}/workspace.json`)}`)
 
     // ── glob expansion: the workspace segment is the pattern, the
     // literal tail keeps walking (lists workspaces once, then filters).
@@ -102,7 +109,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`\n=== metadata overlay on ${wsBase}/workspace.json ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${wsBase}/workspace.json" && chown 500:dev "${wsBase}/workspace.json" && touch -t 202601021530 "${wsBase}/workspace.json"`,
+      `chmod 640 ${shellQuote(`${wsBase}/workspace.json`)} && chown 500:dev ${shellQuote(`${wsBase}/workspace.json`)} && touch -t 202601021530 ${shellQuote(`${wsBase}/workspace.json`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `${wsBase}/workspace.json`)) as FileStat
@@ -112,7 +119,7 @@ async function main(): Promise<void> {
     )
 
     console.log(`\n=== ls ${wsBase}/boards/ ===`)
-    const b0 = (await run(ws, `ls "${wsBase}/boards/" | head -n 1`)).trim()
+    const b0 = (await run(ws, `ls ${shellQuote(`${wsBase}/boards/`)} | head -n 1`)).trim()
     if (b0 === '') return
     const boardId = b0.split('__').pop() ?? ''
     const boardBase = `${wsBase}/boards/${b0}`
@@ -121,40 +128,42 @@ async function main(): Promise<void> {
     await run(ws, 'trello board list')
 
     console.log(`\n=== trello board show ${boardId} ===`)
-    await run(ws, `trello board show ${boardId}`)
+    await run(ws, `trello board show ${shellQuote(boardId)}`)
 
     console.log(`\n=== cat ${b0}/board.json ===`)
-    await run(ws, `cat "${boardBase}/board.json"`)
+    await run(ws, `cat ${shellQuote(`${boardBase}/board.json`)}`)
 
     console.log(`\n=== jq -r '.board_name' board.json ===`)
-    await run(ws, `jq -r ".board_name" "${boardBase}/board.json"`)
+    await run(ws, `jq -r ".board_name" ${shellQuote(`${boardBase}/board.json`)}`)
 
     console.log(`\n=== ls ${b0}/labels/ ===`)
-    await run(ws, `ls "${boardBase}/labels/"`)
+    await run(ws, `ls ${shellQuote(`${boardBase}/labels/`)}`)
 
     console.log(`\n=== ls ${b0}/lists/ ===`)
-    const l0 = (await run(ws, `ls "${boardBase}/lists/" | head -n 1`)).trim()
+    const l0 = (await run(ws, `ls ${shellQuote(`${boardBase}/lists/`)} | head -n 1`)).trim()
     if (l0 === '') return
 
     console.log(`\n=== ls ${l0}/cards/ ===`)
-    await run(ws, `ls "${boardBase}/lists/${l0}/cards/"`)
+    await run(ws, `ls ${shellQuote(`${boardBase}/lists/${l0}/cards/`)}`)
 
     console.log(`\n=== find ${boardBase} -name "card.json" ===`)
-    await run(ws, `find "${boardBase}" -name "card.json"`)
+    await run(ws, `find ${shellQuote(boardBase)} -name "card.json"`)
 
     console.log(`\n=== find ${boardBase} -type d | head -n 5 ===`)
-    await run(ws, `find "${boardBase}" -type d | head -n 5`)
+    await run(ws, `find ${shellQuote(boardBase)} -type d | head -n 5`)
 
     console.log(`\n=== du -s ${boardBase} (walk fallback) ===`)
-    await run(ws, `du -s "${boardBase}"`)
+    await run(ws, `du -s ${shellQuote(boardBase)}`)
 
     console.log(`\n=== grep -l hello ${boardBase} ===`)
-    await run(ws, `grep -r -l hello "${boardBase}"`)
+    await run(ws, `grep -r -l hello ${shellQuote(boardBase)}`)
 
     console.log(`\n=== wc -l first card.json ===`)
-    const card = (await run(ws, `find "${boardBase}" -name "card.json" | head -n 1`)).trim()
+    const card = (
+      await run(ws, `find ${shellQuote(boardBase)} -name "card.json" | head -n 1`)
+    ).trim()
     if (card !== '') {
-      await run(ws, `wc -l "${card}"`)
+      await run(ws, `wc -l ${shellQuote(card)}`)
     }
 
     console.log('\n=== card write commands (sandbox card) ===')
@@ -162,7 +171,7 @@ async function main(): Promise<void> {
     if (listId !== '') {
       const created = await run(
         ws,
-        `trello card create --list_id ${listId} --name "mirage example card" --desc "created by examples/typescript/vfs/trello/trello.ts"`,
+        `trello card create --list_id ${shellQuote(listId)} --name "mirage example card" --desc "created by examples/typescript/vfs/trello/trello.ts"`,
       )
       let cardId = ''
       try {
@@ -175,12 +184,15 @@ async function main(): Promise<void> {
       if (cardId !== '') {
         await run(
           ws,
-          `trello card update --card_id ${cardId} --name "mirage example card (updated)"`,
+          `trello card update --card_id ${shellQuote(cardId)} --name "mirage example card (updated)"`,
         )
-        await run(ws, `trello card move --card_id ${cardId} --list_id ${listId}`)
+        await run(
+          ws,
+          `trello card move --card_id ${shellQuote(cardId)} --list_id ${shellQuote(listId)}`,
+        )
         const comment = await run(
           ws,
-          `trello card comment --card_id ${cardId} --text "hello from mirage"`,
+          `trello card comment --card_id ${shellQuote(cardId)} --text "hello from mirage"`,
         )
         let commentId = ''
         try {
@@ -193,7 +205,7 @@ async function main(): Promise<void> {
         if (commentId !== '') {
           await run(
             ws,
-            `trello card comment-update --comment_id ${commentId} --card_id ${cardId} --text "updated comment"`,
+            `trello card comment-update --comment_id ${shellQuote(commentId)} --card_id ${shellQuote(cardId)} --text "updated comment"`,
           )
         }
       }

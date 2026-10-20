@@ -28,6 +28,13 @@ function buildConfig(): { apiKey: string } {
   return { apiKey }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -55,24 +62,24 @@ async function main(): Promise<void> {
     const teamBase = `/linear/teams/${t0}`
 
     console.log('')
-    await run(ws, `cat "${teamBase}/team.json"`)
+    await run(ws, `cat ${shellQuote(`${teamBase}/team.json`)}`)
 
     console.log('')
-    await run(ws, `tree -L 2 "${teamBase}"`)
+    await run(ws, `tree -L 2 ${shellQuote(teamBase)}`)
 
     console.log('')
-    const i0 = (await run(ws, `ls "${teamBase}/issues/" | head -n 1`)).trim()
+    const i0 = (await run(ws, `ls ${shellQuote(`${teamBase}/issues/`)} | head -n 1`)).trim()
     if (i0 === '') return
     const issuePath = `${teamBase}/issues/${i0}`
 
     console.log('')
-    await run(ws, `cat "${issuePath}/issue.json"`)
+    await run(ws, `cat ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log('')
-    await run(ws, `jq -r ".title" "${issuePath}/issue.json"`)
+    await run(ws, `jq -r ".title" ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log('')
-    await run(ws, `find "${teamBase}" -name "issue.json" | head -n 5`)
+    await run(ws, `find ${shellQuote(teamBase)} -name "issue.json" | head -n 5`)
   } finally {
     await ws.close()
   }

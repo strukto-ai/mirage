@@ -52,6 +52,13 @@ function pickFolder(folders: string[]): string {
   return folders.find((f) => f.toLowerCase() === 'inbox') ?? folders[0] ?? ''
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(
   ws: Workspace,
   cmd: string,
@@ -96,7 +103,7 @@ async function main(): Promise<void> {
       return
     }
 
-    const lsFolder = await run(ws, `ls /email/${folder}/`)
+    const lsFolder = await run(ws, `ls ${shellQuote(`/email/${folder}/`)}`)
     printSection(`ls /email/${folder}/`, lsFolder.out, lsFolder.err)
 
     const dates = lsFolder.out
@@ -109,7 +116,7 @@ async function main(): Promise<void> {
     }
     const firstDate = dates[0] ?? ''
 
-    const lsDate = await run(ws, `ls /email/${folder}/${firstDate}/`)
+    const lsDate = await run(ws, `ls ${shellQuote(`/email/${folder}/${firstDate}/`)}`)
     printSection(`ls /email/${folder}/${firstDate}/`, lsDate.out, lsDate.err)
 
     const messages = lsDate.out
@@ -124,16 +131,24 @@ async function main(): Promise<void> {
     const firstMsg = `/email/${folder}/${firstDate}/${firstFilename}`
     const uid = (firstFilename.split('__').at(-1) ?? '').replace(/\.email\.json$/, '')
 
-    printSection(`cat ${firstMsg}`, (await run(ws, `cat ${firstMsg}`)).out, '')
-    printSection(`jq .subject ${firstMsg}`, (await run(ws, `jq ".subject" ${firstMsg}`)).out, '')
-    printSection(`jq .from ${firstMsg}`, (await run(ws, `jq ".from" ${firstMsg}`)).out, '')
+    printSection(`cat ${firstMsg}`, (await run(ws, `cat ${shellQuote(firstMsg)}`)).out, '')
+    printSection(
+      `jq .subject ${firstMsg}`,
+      (await run(ws, `jq ".subject" ${shellQuote(firstMsg)}`)).out,
+      '',
+    )
+    printSection(
+      `jq .from ${firstMsg}`,
+      (await run(ws, `jq ".from" ${shellQuote(firstMsg)}`)).out,
+      '',
+    )
 
     // chmod/chown/touch never hit the IMAP API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${firstMsg} ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${firstMsg}" && chown 500:dev "${firstMsg}" && touch -t 202601021530 "${firstMsg}"`,
+      `chmod 640 ${shellQuote(firstMsg)} && chown 500:dev ${shellQuote(firstMsg)} && touch -t 202601021530 ${shellQuote(firstMsg)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `${firstMsg}`)) as FileStat
@@ -144,25 +159,33 @@ async function main(): Promise<void> {
 
     printSection(
       'himalaya envelope list --unseen --max 5',
-      (await run(ws, `himalaya envelope list --folder "${folder}" --unseen --max 5`)).out,
+      (await run(ws, `himalaya envelope list --folder ${shellQuote(folder)} --unseen --max 5`)).out,
       '',
     )
 
     printSection(
       `himalaya message read --uid ${uid}`,
-      (await run(ws, `himalaya message read --folder "${folder}" --uid ${uid}`)).out,
+      (
+        await run(
+          ws,
+          `himalaya message read --folder ${shellQuote(folder)} --uid ${shellQuote(uid)}`,
+        )
+      ).out,
       '',
     )
 
     printSection(
       `tree -L 2 /email/${folder}/`,
-      (await run(ws, `tree -L 2 /email/${folder}/`)).out,
+      (await run(ws, `tree -L 2 ${shellQuote(`/email/${folder}/`)}`)).out,
       '',
     )
 
     for (const [label, cmd] of [
-      [`grep -r Hi /email/${folder}/ (folder scope, IMAP search)`, `grep -r Hi /email/${folder}/`],
-      [`rg Hi /email/${folder}/ (folder scope)`, `rg Hi /email/${folder}/`],
+      [
+        `grep -r Hi /email/${folder}/ (folder scope, IMAP search)`,
+        `grep -r Hi ${shellQuote(`/email/${folder}/`)}`,
+      ],
+      [`rg Hi /email/${folder}/ (folder scope)`, `rg Hi ${shellQuote(`/email/${folder}/`)}`],
     ] as const) {
       console.log(`\n=== ${label} ===`)
       const r = await run(ws, cmd)
@@ -176,7 +199,7 @@ async function main(): Promise<void> {
     // tail keeps walking (lists folders once, then each match's days).
     const globFolder = `${folder.slice(0, 2)}*`
     console.log(`\n=== echo /email/${globFolder}/2* (mid-path glob) ===`)
-    const globR = await run(ws, `echo /email/${globFolder}/2*`)
+    const globR = await run(ws, `echo ${shellQuote(`/email/${folder.slice(0, 2)}`)}*/2*`)
     console.log(`  ${globR.out.trim().slice(0, 200)}`)
     if (!globR.out.includes(`/email/${folder}/2`)) {
       throw new Error('regression: mid-path glob did not expand')

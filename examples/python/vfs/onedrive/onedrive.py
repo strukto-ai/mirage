@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import uuid
 
 from dotenv import load_dotenv
 
@@ -32,29 +33,25 @@ config = OneDriveConfig(
 backend = OneDriveVFS(config)
 ws = Workspace({"/onedrive/": backend}, mode=MountMode.WRITE)
 
-TEST_KEY = "mirage_onedrive_example.txt"
+TEST_KEY = f"mirage_onedrive_example-{uuid.uuid4().hex[:8]}.txt"
 TEST_FILE = f"/onedrive/{TEST_KEY}"
 
 
-async def main() -> None:
-    print("=== not-found errors show the full virtual path ===")
-    for cmd in (
-        "cat /onedrive/__nf_missing__.txt",
-        "head /onedrive/__nf_missing__.txt",
-        "stat /onedrive/__nf_missing__.txt",
-    ):
-        result = await ws.shell(cmd)
-        print(f"$ {cmd}")
-        print(
-            f"  exit={result.exit_code}  {(await result.stderr_str()).strip()}"
-        )
+async def create_test_file() -> None:
+    """Write this run's scratch file, refusing to replace one already there.
 
-    print("=== ls /onedrive/ (top level) ===")
-    print((await (await ws.shell("ls /onedrive/")).stdout_str()) or "(empty)")
+    The name is unique per run, so cleanup can delete it knowing nothing
+    else was stored under it.
+    """
+    if (await ws.shell(f"stat {TEST_FILE}")).exit_code == 0:
+        raise RuntimeError(f"{TEST_FILE} already exists, not touching it")
+    r = await ws.shell(f"echo 'hello from mirage onedrive' > {TEST_FILE}")
+    if r.exit_code != 0:
+        err = (await r.stderr_str()).strip()
+        raise RuntimeError(f"write {TEST_FILE} failed: {err}")
 
-    print(f"\n=== write {TEST_FILE} ===")
-    await ws.shell(f"echo 'hello from mirage onedrive' > {TEST_FILE}")
 
+async def exercise() -> None:
     print("=== cat it back ===")
     print(await (await ws.shell(f"cat {TEST_FILE}")).stdout_str())
 
@@ -102,10 +99,40 @@ async def main() -> None:
             f"modified={v.get('lastModifiedDateTime')}"
         )
 
-    print("\n=== cleanup ===")
-    await ws.shell(f"rm {TEST_FILE}")
-    print("done")
-    await ws.close()
+
+async def main() -> None:
+    try:
+        print("=== not-found errors show the full virtual path ===")
+        for cmd in (
+            "cat /onedrive/__nf_missing__.txt",
+            "head /onedrive/__nf_missing__.txt",
+            "stat /onedrive/__nf_missing__.txt",
+        ):
+            result = await ws.shell(cmd)
+            print(f"$ {cmd}")
+            print(
+                f"  exit={result.exit_code}"
+                f"  {(await result.stderr_str()).strip()}"
+            )
+
+        print("=== ls /onedrive/ (top level) ===")
+        print(
+            (await (await ws.shell("ls /onedrive/")).stdout_str()) or "(empty)"
+        )
+
+        print(f"\n=== write {TEST_FILE} ===")
+        await create_test_file()
+        try:
+            await exercise()
+        finally:
+            print("\n=== cleanup ===")
+            r = await ws.shell(f"rm {TEST_FILE}")
+            if r.exit_code != 0:
+                err = (await r.stderr_str()).strip()
+                print(f"  rm {TEST_FILE} failed: {err}")
+        print("done")
+    finally:
+        await ws.close()
 
 
 asyncio.run(main())

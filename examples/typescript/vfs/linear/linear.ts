@@ -35,6 +35,13 @@ function buildConfig(): LinearConfig {
   return { apiKey }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -71,62 +78,62 @@ async function main(): Promise<void> {
     await run(ws, 'linear team list')
 
     console.log(`\n=== linear team get ${teamKey} ===`)
-    await run(ws, `linear team get ${teamKey}`)
+    await run(ws, `linear team get ${shellQuote(teamKey)}`)
 
     console.log(`\n=== tree -L 2 ${teamBase} ===`)
-    await run(ws, `tree -L 2 "${teamBase}"`)
+    await run(ws, `tree -L 2 ${shellQuote(teamBase)}`)
 
     console.log(`\n=== cat ${teamBase}/team.json ===`)
-    await run(ws, `cat "${teamBase}/team.json"`)
+    await run(ws, `cat ${shellQuote(`${teamBase}/team.json`)}`)
 
     console.log(`\n=== ls ${teamBase}/issues/ ===`)
-    const i0 = (await run(ws, `ls "${teamBase}/issues/" | head -n 1`)).trim()
+    const i0 = (await run(ws, `ls ${shellQuote(`${teamBase}/issues/`)} | head -n 1`)).trim()
     if (i0 === '') return
     const issueKey = i0.split('__')[0] ?? ''
     const issuePath = `${teamBase}/issues/${i0}`
 
     console.log(`\n=== linear issue list --team ${teamKey} ===`)
-    await run(ws, `linear issue list --team ${teamKey}`)
+    await run(ws, `linear issue list --team ${shellQuote(teamKey)}`)
 
     console.log(`\n=== linear issue get ${issueKey} ===`)
-    await run(ws, `linear issue get ${issueKey}`)
+    await run(ws, `linear issue get ${shellQuote(issueKey)}`)
 
     console.log(`\n=== cat ${i0}/issue.json ===`)
-    await run(ws, `cat "${issuePath}/issue.json"`)
+    await run(ws, `cat ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log(`\n=== jq -r '.title' issue.json ===`)
-    await run(ws, `jq -r ".title" "${issuePath}/issue.json"`)
+    await run(ws, `jq -r ".title" ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log(`\n=== jq -r '.state_name' issue.json ===`)
-    await run(ws, `jq -r ".state_name" "${issuePath}/issue.json"`)
+    await run(ws, `jq -r ".state_name" ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log(`\n=== ls ${teamBase}/members/ ===`)
-    await run(ws, `ls "${teamBase}/members/"`)
+    await run(ws, `ls ${shellQuote(`${teamBase}/members/`)}`)
 
     console.log(`\n=== ls ${teamBase}/projects/ ===`)
-    await run(ws, `ls "${teamBase}/projects/"`)
+    await run(ws, `ls ${shellQuote(`${teamBase}/projects/`)}`)
 
     console.log(`\n=== find ${teamBase} -name "issue.json" | head -n 5 ===`)
-    await run(ws, `find "${teamBase}" -name "issue.json" | head -n 5`)
+    await run(ws, `find ${shellQuote(teamBase)} -name "issue.json" | head -n 5`)
 
     console.log(`\n=== find ${teamBase} -type d | head -n 5 ===`)
-    await run(ws, `find "${teamBase}" -type d | head -n 5`)
+    await run(ws, `find ${shellQuote(teamBase)} -type d | head -n 5`)
 
     console.log(`\n=== du -s ${teamBase} (walk fallback) ===`)
-    await run(ws, `du -s "${teamBase}"`)
+    await run(ws, `du -s ${shellQuote(teamBase)}`)
 
     console.log(`\n=== grep -r -l bug ${teamBase}/issues/ | head -n 3 ===`)
-    await run(ws, `grep -r -l bug "${teamBase}/issues/" | head -n 3`)
+    await run(ws, `grep -r -l bug ${shellQuote(`${teamBase}/issues/`)} | head -n 3`)
 
     console.log(`\n=== stat ${i0}/issue.json ===`)
-    await run(ws, `stat "${issuePath}/issue.json"`)
+    await run(ws, `stat ${shellQuote(`${issuePath}/issue.json`)}`)
 
     // chmod/chown/touch never hit the Linear API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${issuePath}/issue.json ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${issuePath}/issue.json" && chown 500:dev "${issuePath}/issue.json" && touch -t 202601021530 "${issuePath}/issue.json"`,
+      `chmod 640 ${shellQuote(`${issuePath}/issue.json`)} && chown 500:dev ${shellQuote(`${issuePath}/issue.json`)} && touch -t 202601021530 ${shellQuote(`${issuePath}/issue.json`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     const metaSt = (await ws.dispatch('stat', `${issuePath}/issue.json`)) as FileStat
@@ -136,11 +143,11 @@ async function main(): Promise<void> {
     )
 
     console.log(`\n=== wc / tail issue.json ===`)
-    await run(ws, `wc "${issuePath}/issue.json"`)
-    await run(ws, `tail -n 3 "${issuePath}/issue.json"`)
+    await run(ws, `wc ${shellQuote(`${issuePath}/issue.json`)}`)
+    await run(ws, `tail -n 3 ${shellQuote(`${issuePath}/issue.json`)}`)
 
     console.log(`\n=== rg -l title ${teamBase}/issues/ | head -n 3 ===`)
-    await run(ws, `rg -l "title" "${teamBase}/issues/" | head -n 3`)
+    await run(ws, `rg -l "title" ${shellQuote(`${teamBase}/issues/`)} | head -n 3`)
 
     // ── mid-path glob: the team segment is the pattern, the literal
     // tail keeps walking (lists teams once, then filters).

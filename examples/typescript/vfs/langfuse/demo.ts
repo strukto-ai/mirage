@@ -15,10 +15,23 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { LangfuseVFS, MountMode, Workspace, type FileStat, type LangfuseConfig } from '@struktoai/mirage-node'
+import {
+  LangfuseVFS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type LangfuseConfig,
+} from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
 
 function requireEnv(name: string): string {
   const value = process.env[name]
@@ -67,7 +80,10 @@ function banner(title: string, lead = '\n'): void {
 }
 
 async function main(): Promise<void> {
-  const ws = new Workspace({ '/langfuse': new LangfuseVFS(buildConfig()) }, { mode: MountMode.READ })
+  const ws = new Workspace(
+    { '/langfuse': new LangfuseVFS(buildConfig()) },
+    { mode: MountMode.READ },
+  )
   try {
     console.log('=== not-found errors show the full virtual path ===')
     for (const cmd of [
@@ -92,7 +108,7 @@ async function main(): Promise<void> {
 
     const traceFiles = await listing(ws, 'ls /langfuse/traces/')
     const tp = traceFiles.length > 0 ? `/langfuse/traces/${traceFiles[0].trim()}` : null
-    if (tp !== null) await run(ws, `cat "${tp}" | head -n 5`)
+    if (tp !== null) await run(ws, `cat ${shellQuote(tp)} | head -n 5`)
     else console.log('  no traces found, skipping cat trace')
 
     await run(ws, 'cat "/langfuse/prompts/summarize/1.json"')
@@ -105,19 +121,19 @@ async function main(): Promise<void> {
     await run(ws, 'grep -r "chat-session" "/langfuse/sessions/"')
     await run(ws, 'grep -r "summarize" "/langfuse/prompts/"')
     await run(ws, 'grep -r "qa" "/langfuse/datasets/"')
-    if (tp !== null) await run(ws, `grep "name" "${tp}"`)
+    if (tp !== null) await run(ws, `grep "name" ${shellQuote(tp)}`)
 
     banner('JQ across different resource types')
 
     if (tp !== null) {
-      await run(ws, `jq ".name" "${tp}"`)
-      await run(ws, `jq ".session_id" "${tp}"`)
-      await run(ws, `jq ".input" "${tp}"`)
+      await run(ws, `jq ".name" ${shellQuote(tp)}`)
+      await run(ws, `jq ".sessionId" ${shellQuote(tp)}`)
+      await run(ws, `jq ".input" ${shellQuote(tp)}`)
     }
     await run(ws, 'jq ".prompt" "/langfuse/prompts/summarize/1.json"')
     await run(ws, 'jq ".config" "/langfuse/prompts/classify/1.json"')
     await run(ws, 'jq ".input" "/langfuse/datasets/qa-eval/items.jsonl"')
-    await run(ws, 'jq -r ".expected_output.answer" "/langfuse/datasets/qa-eval/items.jsonl"')
+    await run(ws, 'jq -r ".expectedOutput.answer" "/langfuse/datasets/qa-eval/items.jsonl"')
 
     banner('SESSION browsing')
 
@@ -125,7 +141,7 @@ async function main(): Promise<void> {
     const sessionTraces = await listing(ws, 'ls /langfuse/sessions/chat-session-001/')
     if (sessionTraces.length > 0) {
       const sp = `/langfuse/sessions/chat-session-001/${sessionTraces[0].trim()}`
-      await run(ws, `cat "${sp}" | head -n 3`)
+      await run(ws, `cat ${shellQuote(sp)} | head -n 3`)
     }
 
     banner('PROMPTS and DATASETS detail')
@@ -171,12 +187,12 @@ async function main(): Promise<void> {
     const promptFiles = await listing(ws, 'find "/langfuse/prompts/" -name "*.json"')
     if (promptFiles.length > 0) {
       const cacheFile = promptFiles[0].trim()
-      const [coldMs, body] = await timed(ws, `cat "${cacheFile}"`)
-      const [warmMs] = await timed(ws, `cat "${cacheFile}"`)
-      const [grepMs] = await timed(ws, `grep . "${cacheFile}"`)
-      const [headMs] = await timed(ws, `head -n 1 "${cacheFile}"`)
-      const [tailMs] = await timed(ws, `tail -n 1 "${cacheFile}"`)
-      const [wcMs] = await timed(ws, `wc -l "${cacheFile}"`)
+      const [coldMs, body] = await timed(ws, `cat ${shellQuote(cacheFile)}`)
+      const [warmMs] = await timed(ws, `cat ${shellQuote(cacheFile)}`)
+      const [grepMs] = await timed(ws, `grep . ${shellQuote(cacheFile)}`)
+      const [headMs] = await timed(ws, `head -n 1 ${shellQuote(cacheFile)}`)
+      const [tailMs] = await timed(ws, `tail -n 1 ${shellQuote(cacheFile)}`)
+      const [wcMs] = await timed(ws, `wc -l ${shellQuote(cacheFile)}`)
       console.log(`  file=${cacheFile} size=${String(body.length)}B`)
       console.log(
         `  cold cat=${coldMs.toFixed(0)}ms  warm cat=${warmMs.toFixed(0)}ms  ` +

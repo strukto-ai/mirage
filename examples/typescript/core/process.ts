@@ -22,6 +22,13 @@ function indent(text: string): string {
   return '  ' + text.replace(/\n$/, '').replaceAll('\n', '\n  ')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function sh(ws: Workspace, line: string, sessionId?: string): Promise<string> {
   const io = await ws.shell(line, sessionId === undefined ? {} : { sessionId })
   const out = DEC.decode(io.stdout)
@@ -91,10 +98,10 @@ async function scopedByProfile(ws: Workspace): Promise<void> {
   ws.createSession('ops', { profile: 'operator' })
   const pid = (await sh(ws, 'sleep 30 & echo $!', 'agent-a')).trim()
   await sh(ws, 'ps', 'agent-b')
-  await sh(ws, `kill ${pid}`, 'agent-b')
+  await sh(ws, `kill ${shellQuote(pid)}`, 'agent-b')
   await sh(ws, 'ps', 'audit')
-  await sh(ws, `kill ${pid}`, 'audit')
-  await sh(ws, `kill ${pid}; echo "kill exit=$?"`, 'ops')
+  await sh(ws, `kill ${shellQuote(pid)}`, 'audit')
+  await sh(ws, `kill ${shellQuote(pid)}; echo "kill exit=$?"`, 'ops')
 }
 
 async function cappedByProfile(ws: Workspace): Promise<void> {

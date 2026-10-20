@@ -157,7 +157,9 @@ async function exchangeCode(code: string, state: string): Promise<StoredTokens> 
     scope?: string
   }
   if (data.refresh_token === undefined) {
-    throw new Error('Google did not return a refresh token. Revoke this client at myaccount.google.com and reconnect.')
+    throw new Error(
+      'Google did not return a refresh token. Revoke this client at myaccount.google.com and reconnect.',
+    )
   }
   const granted = (data.scope ?? scopes.join(' ')).split(/\s+/).filter((s) => s.length > 0)
   const merged = Array.from(new Set([...scopes, ...granted])).sort()
@@ -170,6 +172,13 @@ async function revoke(refresh: string): Promise<void> {
   } catch {
     /* best effort */
   }
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 async function run(ws: Workspace, cmd: string): Promise<void> {
@@ -199,21 +208,22 @@ async function runDemo(tokens: StoredTokens): Promise<void> {
   const first = await ws.shell('ls /gdocs/ | head -n 1')
   const docName = first.stdoutText.trim()
   if (docName !== '') {
-    await run(ws, `cat "/gdocs/${docName}" | head -n 20`)
-    await run(ws, `wc "/gdocs/${docName}"`)
+    await run(ws, `cat ${shellQuote(`/gdocs/${docName}`)} | head -n 20`)
+    await run(ws, `wc ${shellQuote(`/gdocs/${docName}`)}`)
   } else {
     line('(no docs in this account — create one and reload to see cat output)', 'ok')
   }
 
   line('', 'ok')
-  line('PKCE end-to-end OK — open DevTools → Network → token request and verify there is no client_secret in the body.', 'ok')
+  line(
+    'PKCE end-to-end OK — open DevTools → Network → token request and verify there is no client_secret in the body.',
+    'ok',
+  )
 }
 
 async function main(): Promise<void> {
   if (clientId() === '') {
-    status(
-      'Set <code>GOOGLE_CLIENT_ID</code> in <code>.env.development</code> first, then reload.',
-    )
+    status('Set <code>GOOGLE_CLIENT_ID</code> in <code>.env.development</code> first, then reload.')
     return
   }
 

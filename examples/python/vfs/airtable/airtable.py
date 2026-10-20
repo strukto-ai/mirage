@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -48,10 +49,10 @@ async def main() -> None:
             print("No bases visible to this token")
             return
         base = f"/airtable/bases/{bases[0]}"
-        await run(ws, f"cat {base}/base.json")
+        await run(ws, f"cat {shlex.quote(f'{base}/base.json')}")
         tables = [
             name
-            for name in (await run(ws, f"ls {base}")).splitlines()
+            for name in (await run(ws, f"ls {shlex.quote(base)}")).splitlines()
             if name != "base.json"
         ]
         if not tables:
@@ -60,11 +61,14 @@ async def main() -> None:
         await run(
             ws,
             f"jq -r '.fields[] | .field_name + \": \" + .type' "
-            f"{table}/table.json",
+            f"{shlex.quote(f'{table}/table.json')}",
         )
         # head pushes its count into maxRecords: one request, not the table
-        await run(ws, f"head -n 3 {table}/records.jsonl | jq -c .fields")
-        await run(ws, f"ls {table}/views")
+        await run(
+            ws,
+            f"head -n 3 {shlex.quote(f'{table}/records.jsonl')} | jq -c .fields",
+        )
+        await run(ws, f"ls {shlex.quote(f'{table}/views')}")
         await run(
             ws, "cat /airtable/bases/Missing__appMissing00000001/base.json"
         )

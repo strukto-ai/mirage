@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -61,31 +62,31 @@ async def main() -> None:
     first = (await r.stdout_str()).strip().split("\n")[0]
 
     print("=== cat ===")
-    r = await ws.shell(f"cat /gdocs/owned/{first}")
+    r = await ws.shell(f"cat {shlex.quote(f'/gdocs/owned/{first}')}")
     print((await r.stdout_str())[:300])
 
     print("\n=== head -n 20 ===")
-    r = await ws.shell(f"head -n 20 /gdocs/owned/{first}")
+    r = await ws.shell(f"head -n 20 {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== head -c 200 ===")
-    r = await ws.shell(f"head -c 200 /gdocs/owned/{first}")
+    r = await ws.shell(f"head -c 200 {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== tail -n 10 ===")
-    r = await ws.shell(f"tail -n 10 /gdocs/owned/{first}")
+    r = await ws.shell(f"tail -n 10 {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== tail -c 200 ===")
-    r = await ws.shell(f"tail -c 200 /gdocs/owned/{first}")
+    r = await ws.shell(f"tail -c 200 {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== wc ===")
-    r = await ws.shell(f"wc /gdocs/owned/{first}")
+    r = await ws.shell(f"wc {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== stat ===")
-    r = await ws.shell(f"stat /gdocs/owned/{first}")
+    r = await ws.shell(f"stat {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     # chmod/chown/touch never hit the Docs API: attrs land in the
@@ -93,9 +94,9 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on /gdocs/owned/{first} ===")
     r = await ws.shell(
-        f'chmod 640 "/gdocs/owned/{first}"'
-        f' && chown 500:dev "/gdocs/owned/{first}"'
-        f' && touch -t 202601021530 "/gdocs/owned/{first}"'
+        f"chmod 640 {shlex.quote(f'/gdocs/owned/{first}')}"
+        f" && chown 500:dev {shlex.quote(f'/gdocs/owned/{first}')}"
+        f" && touch -t 202601021530 {shlex.quote(f'/gdocs/owned/{first}')}"
     )
     print(f"  chmod/chown/touch exit={r.exit_code}")
     st, _ = await ws.dispatch(
@@ -108,11 +109,13 @@ async def main() -> None:
     )
 
     print("=== jq .title ===")
-    r = await ws.shell(f'jq ".title" /gdocs/owned/{first}')
+    r = await ws.shell(f'jq ".title" {shlex.quote(f"/gdocs/owned/{first}")}')
     print(await r.stdout_str())
 
     print("=== nl ===")
-    r = await ws.shell(f"nl /gdocs/owned/{first} | head -n 10")
+    r = await ws.shell(
+        f"nl {shlex.quote(f'/gdocs/owned/{first}')} | head -n 10"
+    )
     print(await r.stdout_str())
 
     print("=== tree /gdocs/ ===")
@@ -124,23 +127,27 @@ async def main() -> None:
     print(await r.stdout_str())
 
     print("=== grep textRun ===")
-    r = await ws.shell(f"grep textRun /gdocs/owned/{first} | head -c 200")
+    r = await ws.shell(
+        f"grep textRun {shlex.quote(f'/gdocs/owned/{first}')} | head -c 200"
+    )
     print(await r.stdout_str())
 
     print("\n=== rg textRun ===")
-    r = await ws.shell(f"rg textRun /gdocs/owned/{first} | head -c 200")
+    r = await ws.shell(
+        f"rg textRun {shlex.quote(f'/gdocs/owned/{first}')} | head -c 200"
+    )
     print(await r.stdout_str())
 
     print("\n=== basename ===")
-    r = await ws.shell(f"basename /gdocs/owned/{first}")
+    r = await ws.shell(f"basename {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== dirname ===")
-    r = await ws.shell(f"dirname /gdocs/owned/{first}")
+    r = await ws.shell(f"dirname {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== realpath ===")
-    r = await ws.shell(f"realpath /gdocs/owned/{first}")
+    r = await ws.shell(f"realpath {shlex.quote(f'/gdocs/owned/{first}')}")
     print(await r.stdout_str())
 
     print("=== gws docs documents create ===")
@@ -172,14 +179,15 @@ async def main() -> None:
     )
     params = json.dumps({"documentId": doc_id})
     r = await ws.shell(
-        f"gws docs documents batchUpdate --params '{params}' --json '{body}'"
+        f"gws docs documents batchUpdate --params {shlex.quote(params)}"
+        f" --json {shlex.quote(body)}"
     )
     print(f"Updated: {(await r.stdout_str())[:80]}")
 
     print("\n=== gws docs write ===")
     r = await ws.shell(
         f"gws docs write"
-        f" --document {doc_id}"
+        f" --document {shlex.quote(doc_id)}"
         f' --text "Appended via gws docs write."'
     )
     print(f"Written: {(await r.stdout_str())[:80]}")

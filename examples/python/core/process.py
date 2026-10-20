@@ -1,4 +1,5 @@
 import asyncio
+import shlex
 import time
 
 from mirage import MountMode, Workspace
@@ -106,10 +107,10 @@ async def scoped_by_profile(ws: Workspace) -> None:
     ws.create_session("ops", profile="operator")
     pid = (await sh(ws, "sleep 30 & echo $!", "agent-a")).strip()
     await sh(ws, "ps", "agent-b")
-    await sh(ws, f"kill {pid}", "agent-b")
+    await sh(ws, f"kill {shlex.quote(pid)}", "agent-b")
     await sh(ws, "ps", "audit")
-    await sh(ws, f"kill {pid}", "audit")
-    await sh(ws, f'kill {pid}; echo "kill exit=$?"', "ops")
+    await sh(ws, f"kill {shlex.quote(pid)}", "audit")
+    await sh(ws, f'kill {shlex.quote(pid)}; echo "kill exit=$?"', "ops")
 
 
 async def capped_by_profile(ws: Workspace) -> None:

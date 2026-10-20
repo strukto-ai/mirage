@@ -31,6 +31,13 @@ const fs = require('fs') as typeof import('fs')
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 function buildConfig(): HfBucketsConfig {
   const bucket = process.env.HF_BUCKET_NAME
   const token = process.env.HF_TOKEN
@@ -97,9 +104,9 @@ async function main(): Promise<void> {
     let r = await ws.shell(`ls ${dataDir}`)
     console.log(`  ls ${dataDir}: ${r.stdoutText.trim()}`)
     if (target !== null) {
-      r = await ws.shell(`head -n 3 ${target}`)
+      r = await ws.shell(`head -n 3 ${shellQuote(target)}`)
       console.log(`  head -n 3:\n${r.stdoutText.trimEnd()}`)
-      r = await ws.shell(`wc -l ${target}`)
+      r = await ws.shell(`wc -l ${shellQuote(target)}`)
       console.log(`  wc -l: ${r.stdoutText.trim()}`)
     }
   } finally {

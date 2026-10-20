@@ -39,6 +39,13 @@ function lines(text: string): string[] {
   return text.split('\n')
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
   let r = await ws.shell('ls /sharepoint/')
   const sites = lines(r.stdoutText.trim())
@@ -46,7 +53,7 @@ async function pickSiteAndDrive(ws: Workspace): Promise<[string, string]> {
     .filter((s) => s !== '')
   if (sites.length === 0) throw new Error('No SharePoint sites accessible')
   const site = sites[0]!
-  r = await ws.shell(`ls "/sharepoint/${site}/"`)
+  r = await ws.shell(`ls ${shellQuote(`/sharepoint/${site}/`)}`)
   const drives = lines(r.stdoutText.trim())
     .map((d) => d.trim())
     .filter((d) => d !== '')
@@ -126,7 +133,7 @@ function writeReport(site: string, drive: string, allSections: [string, Result[]
 }
 
 async function makeScratchDir(ws: Workspace, path: string): Promise<void> {
-  const r = await ws.shell(`mkdir "${path}"`)
+  const r = await ws.shell(`mkdir ${shellQuote(path)}`)
   if (r.exitCode !== 0) throw new Error(`mkdir ${path} failed: ${r.stderrText.trim()}`)
 }
 
@@ -138,134 +145,134 @@ async function runSuite(
 ): Promise<[string, Result[]][]> {
   // --- Setup ---
   const setup: Test[] = [
-    ['write f1', `echo "hello world\nfoo bar\nhello again\napple\nbanana" > "${f1}"`],
+    ['write f1', `echo "hello world\nfoo bar\nhello again\napple\nbanana" > ${shellQuote(f1)}`],
     [
       'write f2',
-      `echo "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10" > "${f2}"`,
+      `echo "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10" > ${shellQuote(f2)}`,
     ],
   ]
   const setupResults = await runSection(ws, setup, 'Setup')
 
   // --- Read commands ---
   const readCmds: Test[] = [
-    ['cat', `cat "${f1}"`],
-    ['head', `head "${f1}"`],
-    ['head -n 2', `head -n 2 "${f1}"`],
-    ['head -c 10', `head -c 10 "${f1}"`],
-    ['tail', `tail "${f1}"`],
-    ['tail -n 2', `tail -n 2 "${f1}"`],
-    ['cat f2', `cat "${f2}"`],
-    ['head -n 5 f2', `head -n 5 "${f2}"`],
-    ['tail -n 3 f2', `tail -n 3 "${f2}"`],
+    ['cat', `cat ${shellQuote(f1)}`],
+    ['head', `head ${shellQuote(f1)}`],
+    ['head -n 2', `head -n 2 ${shellQuote(f1)}`],
+    ['head -c 10', `head -c 10 ${shellQuote(f1)}`],
+    ['tail', `tail ${shellQuote(f1)}`],
+    ['tail -n 2', `tail -n 2 ${shellQuote(f1)}`],
+    ['cat f2', `cat ${shellQuote(f2)}`],
+    ['head -n 5 f2', `head -n 5 ${shellQuote(f2)}`],
+    ['tail -n 3 f2', `tail -n 3 ${shellQuote(f2)}`],
   ]
   const readResults = await runSection(ws, readCmds, 'Read Commands')
 
   // --- Metadata ---
   const metaCmds: Test[] = [
-    ['ls', `ls "${d}"`],
-    ['ls -l', `ls -l "${d}"`],
-    ['ls -la', `ls -la "${d}"`],
-    ['ls -lh', `ls -lh "${d}"`],
-    ['stat f1', `stat "${f1}"`],
-    ['stat f2', `stat "${f2}"`],
-    ['file f1', `file "${f1}"`],
-    ['file f2', `file "${f2}"`],
-    ['du', `du "${d}"`],
-    ['du f1', `du "${f1}"`],
-    ['find', `find "${d}"`],
-    ['find -name', `find "${d}" -name "*.txt"`],
-    ['find -type f', `find "${d}" -type f`],
-    ['tree', `tree "${d}"`],
-    ['basename', `basename "${f1}"`],
-    ['dirname', `dirname "${f1}"`],
-    ['realpath', `realpath "${f1}"`],
+    ['ls', `ls ${shellQuote(d)}`],
+    ['ls -l', `ls -l ${shellQuote(d)}`],
+    ['ls -la', `ls -la ${shellQuote(d)}`],
+    ['ls -lh', `ls -lh ${shellQuote(d)}`],
+    ['stat f1', `stat ${shellQuote(f1)}`],
+    ['stat f2', `stat ${shellQuote(f2)}`],
+    ['file f1', `file ${shellQuote(f1)}`],
+    ['file f2', `file ${shellQuote(f2)}`],
+    ['du', `du ${shellQuote(d)}`],
+    ['du f1', `du ${shellQuote(f1)}`],
+    ['find', `find ${shellQuote(d)}`],
+    ['find -name', `find ${shellQuote(d)} -name "*.txt"`],
+    ['find -type f', `find ${shellQuote(d)} -type f`],
+    ['tree', `tree ${shellQuote(d)}`],
+    ['basename', `basename ${shellQuote(f1)}`],
+    ['dirname', `dirname ${shellQuote(f1)}`],
+    ['realpath', `realpath ${shellQuote(f1)}`],
   ]
   const metaResults = await runSection(ws, metaCmds, 'Metadata Commands')
 
   // --- Search ---
   const searchCmds: Test[] = [
-    ['grep hello', `grep hello "${f1}"`],
-    ['grep -c hello', `grep -c hello "${f1}"`],
-    ['grep -n hello', `grep -n hello "${f1}"`],
-    ['grep -i HELLO', `grep -i HELLO "${f1}"`],
-    ['grep -v hello', `grep -v hello "${f1}"`],
-    ['grep -r hello', `grep -r hello "${d}"`],
-    ['grep -rl hello', `grep -rl hello "${d}"`],
-    ['grep -rc hello', `grep -rc hello "${d}"`],
-    ['rg hello', `rg hello "${d}"`],
-    ['rg -l hello', `rg -l hello "${d}"`],
-    ['rg -c hello', `rg -c hello "${d}"`],
+    ['grep hello', `grep hello ${shellQuote(f1)}`],
+    ['grep -c hello', `grep -c hello ${shellQuote(f1)}`],
+    ['grep -n hello', `grep -n hello ${shellQuote(f1)}`],
+    ['grep -i HELLO', `grep -i HELLO ${shellQuote(f1)}`],
+    ['grep -v hello', `grep -v hello ${shellQuote(f1)}`],
+    ['grep -r hello', `grep -r hello ${shellQuote(d)}`],
+    ['grep -rl hello', `grep -rl hello ${shellQuote(d)}`],
+    ['grep -rc hello', `grep -rc hello ${shellQuote(d)}`],
+    ['rg hello', `rg hello ${shellQuote(d)}`],
+    ['rg -l hello', `rg -l hello ${shellQuote(d)}`],
+    ['rg -c hello', `rg -c hello ${shellQuote(d)}`],
   ]
   const searchResults = await runSection(ws, searchCmds, 'Search Commands')
 
   // --- Text Processing ---
   const textCmds: Test[] = [
-    ['wc', `wc "${f1}"`],
-    ['wc -l', `wc -l "${f1}"`],
-    ['wc -c', `wc -c "${f1}"`],
-    ['wc -w', `wc -w "${f1}"`],
-    ['sort', `sort "${f1}"`],
-    ['sort -r', `sort -r "${f1}"`],
-    ['uniq', `uniq "${f1}"`],
-    ['rev', `rev "${f1}"`],
-    ['tac', `tac "${f1}"`],
-    ['nl', `nl "${f1}"`],
-    ['cut -c1-5', `cut -c1-5 "${f1}"`],
-    ["cut -d' ' -f1", `cut -d' ' -f1 "${f1}"`],
-    ['tr a-z A-Z', `cat "${f1}" | tr a-z A-Z`],
-    ['fold -w 10', `fold -w 10 "${f1}"`],
-    ['fmt', `fmt "${f1}"`],
-    ['expand', `expand "${f1}"`],
-    ['unexpand', `unexpand "${f1}"`],
-    ['column', `column "${f1}"`],
-    ['paste', `paste "${f1}" "${f2}"`],
-    ['join', `join "${f1}" "${f1}"`],
-    ['look h', `look h "${f1}"`],
-    ['strings', `strings "${f1}"`],
+    ['wc', `wc ${shellQuote(f1)}`],
+    ['wc -l', `wc -l ${shellQuote(f1)}`],
+    ['wc -c', `wc -c ${shellQuote(f1)}`],
+    ['wc -w', `wc -w ${shellQuote(f1)}`],
+    ['sort', `sort ${shellQuote(f1)}`],
+    ['sort -r', `sort -r ${shellQuote(f1)}`],
+    ['uniq', `uniq ${shellQuote(f1)}`],
+    ['rev', `rev ${shellQuote(f1)}`],
+    ['tac', `tac ${shellQuote(f1)}`],
+    ['nl', `nl ${shellQuote(f1)}`],
+    ['cut -c1-5', `cut -c1-5 ${shellQuote(f1)}`],
+    ["cut -d' ' -f1", `cut -d' ' -f1 ${shellQuote(f1)}`],
+    ['tr a-z A-Z', `cat ${shellQuote(f1)} | tr a-z A-Z`],
+    ['fold -w 10', `fold -w 10 ${shellQuote(f1)}`],
+    ['fmt', `fmt ${shellQuote(f1)}`],
+    ['expand', `expand ${shellQuote(f1)}`],
+    ['unexpand', `unexpand ${shellQuote(f1)}`],
+    ['column', `column ${shellQuote(f1)}`],
+    ['paste', `paste ${shellQuote(f1)} ${shellQuote(f2)}`],
+    ['join', `join ${shellQuote(f1)} ${shellQuote(f1)}`],
+    ['look h', `look h ${shellQuote(f1)}`],
+    ['strings', `strings ${shellQuote(f1)}`],
   ]
   const textResults = await runSection(ws, textCmds, 'Text Processing')
 
   // --- Hash/Encode ---
   const encodeCmds: Test[] = [
-    ['md5', `md5 "${f1}"`],
-    ['sha256sum', `sha256sum "${f1}"`],
-    ['base64 encode', `base64 "${f1}"`],
-    ['base64 decode', `base64 "${f1}" | base64 -d`],
-    ['xxd', `xxd "${f1}"`],
-    ['xxd -l 16', `xxd -l 16 "${f1}"`],
+    ['md5', `md5 ${shellQuote(f1)}`],
+    ['sha256sum', `sha256sum ${shellQuote(f1)}`],
+    ['base64 encode', `base64 ${shellQuote(f1)}`],
+    ['base64 decode', `base64 ${shellQuote(f1)} | base64 -d`],
+    ['xxd', `xxd ${shellQuote(f1)}`],
+    ['xxd -l 16', `xxd -l 16 ${shellQuote(f1)}`],
   ]
   const encodeResults = await runSection(ws, encodeCmds, 'Hash/Encode')
 
   // --- Write/Mutate ---
   const writeCmds: Test[] = [
-    ['cp', `cp "${f1}" "${d}/copy.txt"`],
-    ['cat copy', `cat "${d}/copy.txt"`],
-    ['mv', `mv "${d}/copy.txt" "${d}/moved.txt"`],
-    ['cat moved', `cat "${d}/moved.txt"`],
-    ['ln', `ln "${d}/moved.txt" "${d}/link.txt"`],
-    ['cat link', `cat "${d}/link.txt"`],
-    ['rm link', `rm "${d}/link.txt"`],
-    ['rm moved', `rm "${d}/moved.txt"`],
-    ['echo append', `echo "appended line" >> "${f1}"`],
-    ['cat after append', `cat "${f1}"`],
-    ['touch new', `touch "${d}/empty.txt"`],
-    ['ls after touch', `ls "${d}"`],
+    ['cp', `cp ${shellQuote(f1)} ${shellQuote(`${d}/copy.txt`)}`],
+    ['cat copy', `cat ${shellQuote(`${d}/copy.txt`)}`],
+    ['mv', `mv ${shellQuote(`${d}/copy.txt`)} ${shellQuote(`${d}/moved.txt`)}`],
+    ['cat moved', `cat ${shellQuote(`${d}/moved.txt`)}`],
+    ['ln', `ln ${shellQuote(`${d}/moved.txt`)} ${shellQuote(`${d}/link.txt`)}`],
+    ['cat link', `cat ${shellQuote(`${d}/link.txt`)}`],
+    ['rm link', `rm ${shellQuote(`${d}/link.txt`)}`],
+    ['rm moved', `rm ${shellQuote(`${d}/moved.txt`)}`],
+    ['echo append', `echo "appended line" >> ${shellQuote(f1)}`],
+    ['cat after append', `cat ${shellQuote(f1)}`],
+    ['touch new', `touch ${shellQuote(`${d}/empty.txt`)}`],
+    ['ls after touch', `ls ${shellQuote(d)}`],
   ]
   const writeResults = await runSection(ws, writeCmds, 'Write/Mutate Commands')
 
   // --- Pipes ---
   const pipeCmds: Test[] = [
-    ['cat|wc -l', `cat "${f1}" | wc -l`],
-    ['cat|grep|wc', `cat "${f1}" | grep hello | wc -l`],
-    ['cat|head|wc', `cat "${f2}" | head -n 5 | wc -l`],
-    ['cat|sort|uniq', `cat "${f1}" | sort | uniq`],
-    ['cat|tr|sort', `cat "${f1}" | tr a-z A-Z | sort`],
-    ['grep|sort|uniq', `grep hello "${f1}" | sort | uniq`],
-    ['find|wc -l', `find "${d}" -type f | wc -l`],
-    ['find|grep|head', `find "${d}" | grep txt | head -3`],
-    ['cat|sed', `cat "${f1}" | sed 's/hello/HELLO/g'`],
-    ['cat|awk', `cat "${f1}" | awk '{print NR, $0}'`],
-    ['cat|grep -c', `cat "${f1}" | grep -c hello`],
+    ['cat|wc -l', `cat ${shellQuote(f1)} | wc -l`],
+    ['cat|grep|wc', `cat ${shellQuote(f1)} | grep hello | wc -l`],
+    ['cat|head|wc', `cat ${shellQuote(f2)} | head -n 5 | wc -l`],
+    ['cat|sort|uniq', `cat ${shellQuote(f1)} | sort | uniq`],
+    ['cat|tr|sort', `cat ${shellQuote(f1)} | tr a-z A-Z | sort`],
+    ['grep|sort|uniq', `grep hello ${shellQuote(f1)} | sort | uniq`],
+    ['find|wc -l', `find ${shellQuote(d)} -type f | wc -l`],
+    ['find|grep|head', `find ${shellQuote(d)} | grep txt | head -3`],
+    ['cat|sed', `cat ${shellQuote(f1)} | sed 's/hello/HELLO/g'`],
+    ['cat|awk', `cat ${shellQuote(f1)} | awk '{print NR, $0}'`],
+    ['cat|grep -c', `cat ${shellQuote(f1)} | grep -c hello`],
     ['seq|while', 'seq 5 | while read n; do echo "num=$n"; done'],
   ]
   const pipeResults = await runSection(ws, pipeCmds, 'Pipes')
@@ -274,8 +281,8 @@ async function runSuite(
   const shellCmds: Test[] = [
     ['variable', 'X=sharepoint; echo $X'],
     ['arithmetic', 'echo $((10 * 3 + 2))'],
-    ['cmd subst', `echo $(wc -l < "${f1}") lines`],
-    ['if file exists', `if [ -f "${f1}" ]; then echo yes; else echo no; fi`],
+    ['cmd subst', `echo $(wc -l < ${shellQuote(f1)}) lines`],
+    ['if file exists', `if [ -f ${shellQuote(f1)} ]; then echo yes; else echo no; fi`],
     ['if file missing', 'if [ -f "/sharepoint/x/y/z" ]; then echo yes; else echo no; fi'],
     ['for loop', 'for i in a b c; do echo $i; done'],
     ['while read', 'echo "1\n2\n3" | while read x; do echo got_$x; done'],
@@ -283,16 +290,16 @@ async function runSuite(
     ['nested for', 'for i in 1 2; do for j in x y; do echo $i$j; done; done'],
     ['error suppress', 'cat /nonexistent 2>/dev/null; echo ok'],
     ['string ops', 'S="hello world"; echo ${#S}'],
-    ['multiline', `cat "${f1}" | while read line; do echo ">>$line"; done`],
+    ['multiline', `cat ${shellQuote(f1)} | while read line; do echo ">>$line"; done`],
   ]
   const shellResults = await runSection(ws, shellCmds, 'Shell Features')
 
   // --- Compare ---
   const compareCmds: Test[] = [
-    ['diff same', `diff "${f1}" "${f1}"`],
-    ['cmp same', `cmp "${f1}" "${f1}"`],
-    ['diff different', `diff "${f1}" "${f2}"`],
-    ['comm', `comm "${f1}" "${f2}"`],
+    ['diff same', `diff ${shellQuote(f1)} ${shellQuote(f1)}`],
+    ['cmp same', `cmp ${shellQuote(f1)} ${shellQuote(f1)}`],
+    ['diff different', `diff ${shellQuote(f1)} ${shellQuote(f2)}`],
+    ['comm', `comm ${shellQuote(f1)} ${shellQuote(f2)}`],
   ]
   const compareResults = await runSection(ws, compareCmds, 'Compare Commands')
 
@@ -333,7 +340,7 @@ async function main(): Promise<void> {
     } finally {
       // --- Cleanup ---
       console.log('\n=== Cleanup ===')
-      await ws.shell(`rm -r "${d}"`)
+      await ws.shell(`rm -r ${shellQuote(d)}`)
       console.log('  done')
     }
 

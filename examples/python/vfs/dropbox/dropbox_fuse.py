@@ -52,7 +52,7 @@ with Workspace(
         print(f"  size: {st.st_size}")
         if stat_mod.S_ISREG(st.st_mode) and st.st_size < 1024 * 1024:
             print(f"\n--- open() + read {top[0]} (first 200 chars) ---")
-            with open(path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 print(f.read()[:200])
 
     print(f"\n>>> FUSE mounted at: {mp}")

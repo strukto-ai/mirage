@@ -40,6 +40,13 @@ const dsn = requireDsn();
 
 const DEC = new TextDecoder();
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === "") return "''";
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 async function main(): Promise<void> {
   const vfs = new PostgresVFS({
     dsn,
@@ -81,16 +88,16 @@ async function main(): Promise<void> {
     );
 
     console.log(`\n--- ws.shell(jq .name ${dir}/schema.json) ---`);
-    const r2 = await ws.shell(`jq ".name" ${dir}/schema.json`);
+    const r2 = await ws.shell(`jq ".name" ${shellQuote(`${dir}/schema.json`)}`);
     process.stdout.write(DEC.decode(r2.stdout));
 
     console.log(`\n--- ws.shell(head -n 1 ${dir}/rows.jsonl) ---`);
-    const r3 = await ws.shell(`head -n 1 ${dir}/rows.jsonl`);
+    const r3 = await ws.shell(`head -n 1 ${shellQuote(`${dir}/rows.jsonl`)}`);
     process.stdout.write(DEC.decode(r3.stdout).slice(0, 200));
     console.log("...");
 
     console.log(`\n--- ws.shell(wc -l ${dir}/rows.jsonl) ---`);
-    const r4 = await ws.shell(`wc -l ${dir}/rows.jsonl`);
+    const r4 = await ws.shell(`wc -l ${shellQuote(`${dir}/rows.jsonl`)}`);
     process.stdout.write(DEC.decode(r4.stdout));
 
     console.log(`\n>>> FUSE mounted at: ${mp}`);

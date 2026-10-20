@@ -33,6 +33,13 @@ const dsn = requireDsn()
 
 const DEC = new TextDecoder()
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function dump(ws: Workspace, label: string, cmd: string): Promise<void> {
   console.log(`\n--- ${label} ---`)
   const r = await ws.shell(cmd)
@@ -60,7 +67,9 @@ async function main(): Promise<void> {
     await dump(ws, 'ls /pg/public/tables (first 5)', 'ls /pg/public/tables | head -n 5')
 
     const tablesOut = await ws.shell('ls /pg/public/tables')
-    const tables = DEC.decode(tablesOut.stdout).split('\n').filter((s) => s.length > 0)
+    const tables = DEC.decode(tablesOut.stdout)
+      .split('\n')
+      .filter((s) => s.length > 0)
     if (tables.length === 0) {
       console.log('\nno tables in public; stopping')
       return
@@ -69,20 +78,20 @@ async function main(): Promise<void> {
     const target = tables[0]!
     const dir = `/pg/public/tables/${target}`
 
-    await dump(ws, `ls ${dir}`, `ls ${dir}`)
+    await dump(ws, `ls ${dir}`, `ls ${shellQuote(dir)}`)
     await dump(ws, 'cat database.json | jq .schemas', 'cat /pg/database.json | jq ".schemas"')
-    await dump(ws, `jq .name ${dir}/schema.json`, `jq ".name" ${dir}/schema.json`)
-    await dump(ws, `head -n 1 ${dir}/rows.jsonl`, `head -n 1 ${dir}/rows.jsonl`)
-    await dump(ws, `wc -l ${dir}/rows.jsonl`, `wc -l ${dir}/rows.jsonl`)
+    await dump(ws, `jq .name ${dir}/schema.json`, `jq ".name" ${shellQuote(`${dir}/schema.json`)}`)
+    await dump(ws, `head -n 1 ${dir}/rows.jsonl`, `head -n 1 ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await dump(ws, `wc -l ${dir}/rows.jsonl`, `wc -l ${shellQuote(`${dir}/rows.jsonl`)}`)
     await dump(
       ws,
       `cat ${dir}/rows.jsonl (size guard fires for large tables)`,
-      `cat ${dir}/rows.jsonl | wc -l`,
+      `cat ${shellQuote(`${dir}/rows.jsonl`)} | wc -l`,
     )
     await dump(
       ws,
       `grep -c context ${dir}/rows.jsonl`,
-      `grep -c context ${dir}/rows.jsonl`,
+      `grep -c context ${shellQuote(`${dir}/rows.jsonl`)}`,
     )
   } finally {
     await ws.close()

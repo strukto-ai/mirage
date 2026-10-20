@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -203,7 +204,7 @@ async def main():
     gdoc = next((f.strip() for f in listing if ".gdoc.json" in f), None)
     if gdoc:
         print(f"  Found doc: {gdoc}")
-        r = await ws.shell(f'grep -i "title" "/gdrive/{gdoc}"')
+        r = await ws.shell(f'grep -i "title" {shlex.quote(f"/gdrive/{gdoc}")}')
         out = (await r.stdout_str()).strip()
         if out:
             print(f"  grep title: {out[:120]}...")
@@ -216,7 +217,8 @@ async def main():
         print("\n--- grep in Google Sheets (.gsheet.json) ---")
         print(f"  Found sheet: {gsheet}")
         r = await ws.shell(
-            f'grep -i "properties" "/gdrive/{gsheet}" | head -n 3'
+            f'grep -i "properties" {shlex.quote(f"/gdrive/{gsheet}")}'
+            " | head -n 3"
         )
         out = (await r.stdout_str()).strip()
         if out:
@@ -227,7 +229,9 @@ async def main():
     if gslide:
         print("\n--- grep in Google Slides (.gslide.json) ---")
         print(f"  Found slide: {gslide}")
-        r = await ws.shell(f'grep -i "slide" "/gdrive/{gslide}" | head -n 3')
+        r = await ws.shell(
+            f'grep -i "slide" {shlex.quote(f"/gdrive/{gslide}")} | head -n 3'
+        )
         out = (await r.stdout_str()).strip()
         if out:
             print(f"  grep slide: {out[:120]}...")
@@ -238,7 +242,7 @@ async def main():
 
     print("--- grep -c title in Google Doc (eager read) ---")
     if gdoc:
-        r = await ws.shell(f'grep -c title "/gdrive/{gdoc}"')
+        r = await ws.shell(f"grep -c title {shlex.quote(f'/gdrive/{gdoc}')}")
         print(f"  {gdoc}: {(await r.stdout_str()).strip()} matches")
 
     print("\n--- grep in regular file (streaming) ---")

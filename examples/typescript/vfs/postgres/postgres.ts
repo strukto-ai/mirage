@@ -31,6 +31,13 @@ const ws = new Workspace({ '/pg/': vfs }, { mode: MountMode.READ })
 
 const DEC = new TextDecoder()
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(label: string, cmd: string): Promise<void> {
   console.log(`\n=== ${label} ===`)
   const r = await ws.shell(cmd)
@@ -50,24 +57,25 @@ try {
   await run('cat /pg/database.json (head)', 'head -n 20 /pg/database.json')
 
   const dirOut = await ws.shell('ls /pg/public/tables')
-  const tables = DEC.decode(dirOut.stdout).split('\n').filter((s) => s.length > 0)
+  const tables = DEC.decode(dirOut.stdout)
+    .split('\n')
+    .filter((s) => s.length > 0)
   if (tables.length === 0) {
     console.log('\nno tables in public schema; stopping')
   } else {
     const target = tables[0]!
     const dir = `/pg/public/tables/${target}`
 
-    await run(`ls ${dir}`, `ls ${dir}`)
-    await run('stat schema.json', `stat ${dir}/schema.json`)
-    await run('stat rows.jsonl', `stat ${dir}/rows.jsonl`)
-
+    await run(`ls ${dir}`, `ls ${shellQuote(dir)}`)
+    await run('stat schema.json', `stat ${shellQuote(`${dir}/schema.json`)}`)
+    await run('stat rows.jsonl', `stat ${shellQuote(`${dir}/rows.jsonl`)}`)
 
     // chmod/chown/touch never hit Postgres: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${dir}/rows.jsonl ===`)
     const metaRes = await ws.shell(
-      `chmod 640 "${dir}/rows.jsonl" && chown 500:dev "${dir}/rows.jsonl" && touch -t 202601021530 "${dir}/rows.jsonl"`,
+      `chmod 640 ${shellQuote(`${dir}/rows.jsonl`)} && chown 500:dev ${shellQuote(`${dir}/rows.jsonl`)} && touch -t 202601021530 ${shellQuote(`${dir}/rows.jsonl`)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
     try {
@@ -80,18 +88,18 @@ try {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
       console.log('  dispatch stat: target missing in this environment')
     }
-    await run('cat schema.json', `cat ${dir}/schema.json`)
-    await run('head -n 3 rows.jsonl', `head -n 3 ${dir}/rows.jsonl`)
-    await run('tail -n 2 rows.jsonl', `tail -n 2 ${dir}/rows.jsonl`)
-    await run('wc -l rows.jsonl', `wc -l ${dir}/rows.jsonl`)
-    await run('grep -c ":" rows.jsonl', `grep -c ":" ${dir}/rows.jsonl`)
-    await run('jq .name schema.json', `jq ".name" ${dir}/schema.json`)
+    await run('cat schema.json', `cat ${shellQuote(`${dir}/schema.json`)}`)
+    await run('head -n 3 rows.jsonl', `head -n 3 ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run('tail -n 2 rows.jsonl', `tail -n 2 ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run('wc -l rows.jsonl', `wc -l ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run('grep -c ":" rows.jsonl', `grep -c ":" ${shellQuote(`${dir}/rows.jsonl`)}`)
+    await run('jq .name schema.json', `jq ".name" ${shellQuote(`${dir}/schema.json`)}`)
     await run('find /pg/public -maxdepth 2', 'find /pg/public -maxdepth 2')
     await run('tree -L 2 /pg/public', 'tree -L 2 /pg/public')
 
     await run(
       'cat rows.jsonl (size guard fires for huge tables)',
-      `cat ${dir}/rows.jsonl | wc -l`,
+      `cat ${shellQuote(`${dir}/rows.jsonl`)} | wc -l`,
     )
   }
 

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import shlex
 
 from agents import Agent, ApplyPatchTool, Runner, ShellTool
 from dotenv import load_dotenv
@@ -71,7 +72,7 @@ async def main():
         path = path.strip()
         if not path:
             continue
-        cat_result = await ws.shell(f"cat {path}")
+        cat_result = await ws.shell(f"cat {shlex.quote(path)}")
         print(f"cat {path}:\n{(cat_result.stdout or b'').decode()}")
 
     records = ws.vfs.records

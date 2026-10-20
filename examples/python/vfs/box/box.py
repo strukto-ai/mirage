@@ -15,6 +15,7 @@
 import asyncio
 import os
 import sys
+from shlex import quote
 
 from dotenv import load_dotenv
 
@@ -68,10 +69,6 @@ async def show(ws: Workspace, cmd: str, max_chars: int = 600) -> str:
     except Exception as exc:
         print(f"  ERROR: {exc}", file=sys.stderr)
         return ""
-
-
-def quote(path: str) -> str:
-    return f'"{path}"'
 
 
 async def main() -> None:

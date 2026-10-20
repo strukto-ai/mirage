@@ -73,7 +73,7 @@ async def main() -> None:
             )
 
             if stat_mod.S_ISREG(st.st_mode) and st.st_size < 1024 * 1024:
-                with open(path, encoding="utf-8") as f:
+                with open(path, encoding="utf-8", errors="replace") as f:
                     print(f"  {f.read()[:200]}...")
             elif stat_mod.S_ISDIR(st.st_mode):
                 for s in os.listdir(path)[:5]:

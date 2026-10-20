@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import shlex
 
 from dotenv import load_dotenv
 
@@ -69,11 +70,13 @@ async def main() -> None:
     print(await result.stdout_str())
 
     print(f"=== linear team get {team_key} ===")
-    result = await ws.shell(f"linear team get {team_key}")
+    result = await ws.shell(f"linear team get {shlex.quote(team_key)}")
     print(await result.stdout_str())
 
     print(f"=== cat /linear/teams/{first_team}/team.json ===")
-    result = await ws.shell(f"cat /linear/teams/{first_team}/team.json")
+    result = await ws.shell(
+        f"cat {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
+    )
     print(await result.stdout_str())
 
     # chmod/chown/touch never hit the Linear API: attrs land in the
@@ -81,9 +84,11 @@ async def main() -> None:
     # dispatch-level stat.
     print(f"=== metadata overlay on /linear/teams/{first_team}/team.json ===")
     meta_res = await ws.shell(
-        f'chmod 640 "/linear/teams/{first_team}/team.json"'
-        f' && chown 500:dev "/linear/teams/{first_team}/team.json"'
-        f' && touch -t 202601021530 "/linear/teams/{first_team}/team.json"'
+        f"chmod 640 {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
+        " && chown 500:dev"
+        f" {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
+        " && touch -t 202601021530"
+        f" {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
     )
     print(f"  chmod/chown/touch exit={meta_res.exit_code}")
     meta_st, _ = await ws.dispatch(
@@ -96,11 +101,15 @@ async def main() -> None:
     )
 
     print(f"=== ls /linear/teams/{first_team}/issues/ ===")
-    issue_result = await ws.shell(f"ls /linear/teams/{first_team}/issues/")
+    issue_result = await ws.shell(
+        f"ls {shlex.quote(f'/linear/teams/{first_team}/issues/')}"
+    )
     print(await issue_result.stdout_str())
 
     print(f"=== ls /linear/teams/{first_team}/projects/ ===")
-    project_result = await ws.shell(f"ls /linear/teams/{first_team}/projects/")
+    project_result = await ws.shell(
+        f"ls {shlex.quote(f'/linear/teams/{first_team}/projects/')}"
+    )
     print(await project_result.stdout_str())
 
     project_names = (await project_result.stdout_str()).strip().splitlines()
@@ -113,7 +122,10 @@ async def main() -> None:
             f"=== cat /linear/teams/{first_team}/projects/{mirage_project} ==="
         )
         result = await ws.shell(
-            f"cat /linear/teams/{first_team}/projects/{mirage_project}"
+            "cat "
+            + shlex.quote(
+                f"/linear/teams/{first_team}/projects/{mirage_project}"
+            )
         )
         print(await result.stdout_str())
 
@@ -141,39 +153,51 @@ async def main() -> None:
     issue_path = f"/linear/teams/{first_team}/issues/{first_issue}"
 
     print(f"=== linear issue list --team {team_key} ===")
-    result = await ws.shell(f"linear issue list --team {team_key}")
+    result = await ws.shell(
+        f"linear issue list --team {shlex.quote(team_key)}"
+    )
     print(await result.stdout_str())
 
     print(f"=== linear issue get {issue_key} ===")
-    result = await ws.shell(f"linear issue get {issue_key}")
+    result = await ws.shell(f"linear issue get {shlex.quote(issue_key)}")
     print(await result.stdout_str())
 
     print("=== cat issue.json ===")
-    result = await ws.shell(f"cat {issue_path}/issue.json")
+    result = await ws.shell(f"cat {shlex.quote(f'{issue_path}/issue.json')}")
     print(await result.stdout_str())
 
     print("=== head -n 3 comments.jsonl ===")
-    result = await ws.shell(f"head -n 3 {issue_path}/comments.jsonl")
+    result = await ws.shell(
+        f"head -n 3 {shlex.quote(f'{issue_path}/comments.jsonl')}"
+    )
     print(await result.stdout_str())
 
     print("=== tail -n 1 comments.jsonl ===")
-    result = await ws.shell(f"tail -n 1 {issue_path}/comments.jsonl")
+    result = await ws.shell(
+        f"tail -n 1 {shlex.quote(f'{issue_path}/comments.jsonl')}"
+    )
     print(await result.stdout_str())
 
     print("=== wc -l comments.jsonl ===")
-    result = await ws.shell(f"wc -l {issue_path}/comments.jsonl")
+    result = await ws.shell(
+        f"wc -l {shlex.quote(f'{issue_path}/comments.jsonl')}"
+    )
     print(await result.stdout_str())
 
     print("=== stat issue.json ===")
-    result = await ws.shell(f"stat {issue_path}/issue.json")
+    result = await ws.shell(f"stat {shlex.quote(f'{issue_path}/issue.json')}")
     print(await result.stdout_str())
 
     print("=== jq .title issue.json ===")
-    result = await ws.shell(f'jq ".title" {issue_path}/issue.json')
+    result = await ws.shell(
+        f'jq ".title" {shlex.quote(f"{issue_path}/issue.json")}'
+    )
     print(await result.stdout_str())
 
     print("=== jq .state_name issue.json ===")
-    result = await ws.shell(f'jq ".state_name" {issue_path}/issue.json')
+    result = await ws.shell(
+        f'jq ".state_name" {shlex.quote(f"{issue_path}/issue.json")}'
+    )
     print(await result.stdout_str())
 
     print("=== tree -L 1 /linear/ ===")
@@ -181,18 +205,22 @@ async def main() -> None:
     print(await result.stdout_str())
 
     print(f"=== tree -L 1 teams/{first_team} ===")
-    result = await ws.shell(f"tree -L 1 /linear/teams/{first_team}/")
+    result = await ws.shell(
+        f"tree -L 1 {shlex.quote(f'/linear/teams/{first_team}/')}"
+    )
     print(await result.stdout_str())
 
     print("=== find issues -name '*.json' ===")
     result = await ws.shell(
-        f'find /linear/teams/{first_team}/issues/ -name "*.json" | head -n 5'
+        f"find {shlex.quote(f'/linear/teams/{first_team}/issues/')}"
+        ' -name "*.json" | head -n 5'
     )
     print(await result.stdout_str())
 
     print("=== find teams -type d (directory filter) ===")
     result = await ws.shell(
-        f"find /linear/teams/{first_team}/ -type d | head -n 5"
+        f"find {shlex.quote(f'/linear/teams/{first_team}/')}"
+        " -type d | head -n 5"
     )
     print(await result.stdout_str())
 
@@ -200,47 +228,60 @@ async def main() -> None:
     # rendered files as 0 (so +0c drops them, -1k keeps them).
     print("=== find team -path '*issues*' ===")
     result = await ws.shell(
-        f'find /linear/teams/{first_team}/ -path "*issues*" | head -n 5'
+        f"find {shlex.quote(f'/linear/teams/{first_team}/')}"
+        ' -path "*issues*" | head -n 5'
     )
     print(await result.stdout_str())
 
     print("=== find team -maxdepth 1 -size +0c (dirs drop out) ===")
     result = await ws.shell(
-        f"find /linear/teams/{first_team}/ -maxdepth 1 -size +0c"
+        f"find {shlex.quote(f'/linear/teams/{first_team}/')}"
+        " -maxdepth 1 -size +0c"
     )
     print(f"  exit={result.exit_code}")
     print(await result.stdout_str())
 
     print(f"=== du -s teams/{first_team} (walk fallback) ===")
-    result = await ws.shell(f"du -s /linear/teams/{first_team}/")
+    result = await ws.shell(
+        f"du -s {shlex.quote(f'/linear/teams/{first_team}/')}"
+    )
     print(await result.stdout_str())
 
     print("=== grep Mirage issue.json ===")
-    result = await ws.shell(f"grep Mirage {issue_path}/issue.json")
+    result = await ws.shell(
+        f"grep Mirage {shlex.quote(f'{issue_path}/issue.json')}"
+    )
     print(await result.stdout_str())
 
     print("=== rg Backlog team.json ===")
-    result = await ws.shell(f"rg Backlog /linear/teams/{first_team}/team.json")
+    result = await ws.shell(
+        f"rg Backlog {shlex.quote(f'/linear/teams/{first_team}/team.json')}"
+    )
     print(await result.stdout_str())
 
     print("=== basename ===")
-    result = await ws.shell(f"basename {issue_path}/issue.json")
+    result = await ws.shell(
+        f"basename {shlex.quote(f'{issue_path}/issue.json')}"
+    )
     print(await result.stdout_str())
 
     print("=== dirname ===")
-    result = await ws.shell(f"dirname {issue_path}/issue.json")
+    result = await ws.shell(
+        f"dirname {shlex.quote(f'{issue_path}/issue.json')}"
+    )
     print(await result.stdout_str())
 
     # ── glob expansion (exercises the glob op → readdir) ──
     issues_dir = f"/linear/teams/{first_team}/issues"
     print(f"=== echo {issues_dir}/* (glob) ===")
-    r = await ws.shell(f"echo {issues_dir}/*")
+    r = await ws.shell(f"echo {shlex.quote(f'{issues_dir}/')}*")
     out = (await r.stdout_str()).strip()
     print(f"  {out[:200]}")
 
     print(f"\n=== for f in {issues_dir}/* (glob loop) ===")
     r = await ws.shell(
-        f"for f in {issues_dir}/*; do echo found:$f; done | head -n 3"
+        f"for f in {shlex.quote(f'{issues_dir}/')}*;"
+        " do echo found:$f; done | head -n 3"
     )
     out = (await r.stdout_str()).strip()
     for line in out.splitlines():

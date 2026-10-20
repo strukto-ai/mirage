@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import shlex
 
 from agents import Runner
 from agents.run import RunConfig
@@ -148,8 +149,8 @@ async def main():
     for path in sorted(orig_files):
         if not path:
             continue
-        orig = await ws.shell(f"cat {path}")
-        fresh = await fresh_ws.shell(f"cat {path}")
+        orig = await ws.shell(f"cat {shlex.quote(path)}")
+        fresh = await fresh_ws.shell(f"cat {shlex.quote(path)}")
         orig_bytes = orig.stdout or b""
         fresh_bytes = fresh.stdout or b""
         if orig_bytes == fresh_bytes:

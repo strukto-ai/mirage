@@ -29,6 +29,13 @@ function buildConfig(): NotionConfig {
   return { apiKey }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string, limit = 1500): Promise<string> {
   console.log(`=== ${cmd} ===`)
   const r = await ws.shell(cmd)
@@ -40,13 +47,13 @@ async function run(ws: Workspace, cmd: string, limit = 1500): Promise<string> {
 }
 
 async function firstEntry(ws: Workspace, path: string): Promise<string> {
-  const out = (await ws.shell(`ls ${path}`)).stdoutText.trim()
+  const out = (await ws.shell(`ls ${shellQuote(path)}`)).stdoutText.trim()
   if (out === '') return ''
   return basename(out.split('\n')[0]!.replace(/\/$/, ''))
 }
 
 async function pickChild(ws: Workspace, path: string, skip: string): Promise<string> {
-  const listing = (await ws.shell(`ls "${path}/"`)).stdoutText.trim().split('\n')
+  const listing = (await ws.shell(`ls ${shellQuote(`${path}/`)}`)).stdoutText.trim().split('\n')
   for (const line of listing) {
     const name = basename(line.replace(/\/$/, ''))
     if (name !== skip && name !== '') return name
@@ -63,12 +70,12 @@ async function explorePages(ws: Workspace): Promise<void> {
     return
   }
   const base = `/notion/pages/${page}`
-  await run(ws, `ls "${base}/"`)
-  await run(ws, `cat "${base}/page.json"`, 1200)
-  await run(ws, `head -n 5 "${base}/page.json"`)
-  await run(ws, `tail -n 5 "${base}/page.json"`)
-  await run(ws, `wc -l "${base}/page.json"`)
-  await run(ws, `stat "${base}/page.json"`)
+  await run(ws, `ls ${shellQuote(`${base}/`)}`)
+  await run(ws, `cat ${shellQuote(`${base}/page.json`)}`, 1200)
+  await run(ws, `head -n 5 ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `tail -n 5 ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `wc -l ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `stat ${shellQuote(`${base}/page.json`)}`)
 
 
   // chmod/chown/touch never hit the Notion API: attrs land in the
@@ -76,7 +83,7 @@ async function explorePages(ws: Workspace): Promise<void> {
   // dispatch-level stat.
   console.log(`=== metadata overlay on ${base}/page.json ===`)
   const metaRes = await ws.shell(
-    `chmod 640 "${base}/page.json" && chown 500:dev "${base}/page.json" && touch -t 202601021530 "${base}/page.json"`,
+    `chmod 640 ${shellQuote(`${base}/page.json`)} && chown 500:dev ${shellQuote(`${base}/page.json`)} && touch -t 202601021530 ${shellQuote(`${base}/page.json`)}`,
   )
   console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
   const metaSt = (await ws.dispatch('stat', `${base}/page.json`)) as FileStat
@@ -84,15 +91,15 @@ async function explorePages(ws: Workspace): Promise<void> {
   console.log(
     `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
   )
-  await run(ws, `jq ".title" "${base}/page.json"`)
-  await run(ws, `jq ".page_id" "${base}/page.json"`)
-  await run(ws, `jq ".parent_type" "${base}/page.json"`)
-  await run(ws, `basename "${base}/page.json"`)
-  await run(ws, `dirname "${base}/page.json"`)
-  await run(ws, `realpath "${base}/page.json"`)
-  await run(ws, `tree -L 1 "${base}/"`)
-  await run(ws, `find "${base}/" -name "*.json"`)
-  await run(ws, `echo "${base}/"*.json`)
+  await run(ws, `jq ".title" ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `jq ".page_id" ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `jq ".parent_type" ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `basename ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `dirname ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `realpath ${shellQuote(`${base}/page.json`)}`)
+  await run(ws, `tree -L 1 ${shellQuote(`${base}/`)}`)
+  await run(ws, `find ${shellQuote(`${base}/`)} -name "*.json"`)
+  await run(ws, `echo ${shellQuote(`${base}/`)}*.json`)
 }
 
 async function exploreDatabases(ws: Workspace): Promise<void> {
@@ -104,23 +111,23 @@ async function exploreDatabases(ws: Workspace): Promise<void> {
     return
   }
   const base = `/notion/databases/${db}`
-  await run(ws, `ls "${base}/"`)
-  await run(ws, `stat "${base}/"`)
-  await run(ws, `stat "${base}/database.json"`)
-  await run(ws, `cat "${base}/database.json"`)
-  await run(ws, `jq ".database_id" "${base}/database.json"`)
-  await run(ws, `jq ".title" "${base}/database.json"`)
+  await run(ws, `ls ${shellQuote(`${base}/`)}`)
+  await run(ws, `stat ${shellQuote(`${base}/`)}`)
+  await run(ws, `stat ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `cat ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `jq ".database_id" ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `jq ".title" ${shellQuote(`${base}/database.json`)}`)
   // The container carries data source stubs, not a column schema: since
   // 2025-09-03 `properties` lives on the data source one level down.
-  await run(ws, `jq ".data_sources" "${base}/database.json"`)
-  await run(ws, `wc -l "${base}/database.json"`)
-  await run(ws, `head -n 8 "${base}/database.json"`)
-  await run(ws, `tail -n 5 "${base}/database.json"`)
-  await run(ws, `basename "${base}/database.json"`)
-  await run(ws, `dirname "${base}/database.json"`)
-  await run(ws, `tree -L 2 "${base}/"`)
-  await run(ws, `find "${base}/" -name "database.json"`)
-  await run(ws, `echo "${base}/"*`)
+  await run(ws, `jq ".data_sources" ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `wc -l ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `head -n 8 ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `tail -n 5 ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `basename ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `dirname ${shellQuote(`${base}/database.json`)}`)
+  await run(ws, `tree -L 2 ${shellQuote(`${base}/`)}`)
+  await run(ws, `find ${shellQuote(`${base}/`)} -name "database.json"`)
+  await run(ws, `echo ${shellQuote(`${base}/`)}*`)
 
   const source = await pickChild(ws, base, 'database.json')
   if (source === '') {
@@ -129,28 +136,30 @@ async function exploreDatabases(ws: Workspace): Promise<void> {
   }
   const sourceBase = `${base}/${source}`
   console.log(`--- data source: ${source} ---\n`)
-  await run(ws, `ls "${sourceBase}/"`)
-  await run(ws, `cat "${sourceBase}/data_source.json"`)
-  await run(ws, `jq ".properties | keys" "${sourceBase}/data_source.json"`)
+  await run(ws, `ls ${shellQuote(`${sourceBase}/`)}`)
+  await run(ws, `cat ${shellQuote(`${sourceBase}/data_source.json`)}`)
+  await run(ws, `jq ".properties | keys" ${shellQuote(`${sourceBase}/data_source.json`)}`)
 
-  await run(ws, `head -n 2 "${sourceBase}/rows.jsonl"`, 1200)
-  await run(ws, `wc -l "${sourceBase}/rows.jsonl"`)
-  await run(ws, `jq -r ".title" "${sourceBase}/rows.jsonl"`)
+  await run(ws, `head -n 2 ${shellQuote(`${sourceBase}/rows.jsonl`)}`, 1200)
+  await run(ws, `wc -l ${shellQuote(`${sourceBase}/rows.jsonl`)}`)
+  await run(ws, `jq -r ".title" ${shellQuote(`${sourceBase}/rows.jsonl`)}`)
   // A row's cells ride on its line, as Notion's own property objects,
   // answering to the schema in the data_source.json above.
-  await run(ws, `head -n 1 "${sourceBase}/rows.jsonl" | jq ".properties | keys"`)
+  await run(ws, `head -n 1 ${shellQuote(`${sourceBase}/rows.jsonl`)} | jq ".properties | keys"`)
 
-  const row = (await run(ws, `head -n 1 "${sourceBase}/rows.jsonl" | jq -r ".path"`)).trim()
+  const row = (
+    await run(ws, `head -n 1 ${shellQuote(`${sourceBase}/rows.jsonl`)} | jq -r ".path"`)
+  ).trim()
   if (row === '') {
     console.log('Data source has no rows\n')
     return
   }
   const rowJson = `${sourceBase}/${row}`
   console.log(`--- row page: ${row} ---\n`)
-  await run(ws, `stat "${rowJson}"`)
-  await run(ws, `cat "${rowJson}"`, 1200)
-  await run(ws, `jq ".parent_type" "${rowJson}"`)
-  await run(ws, `jq ".markdown" "${rowJson}"`)
+  await run(ws, `stat ${shellQuote(rowJson)}`)
+  await run(ws, `cat ${shellQuote(rowJson)}`, 1200)
+  await run(ws, `jq ".parent_type" ${shellQuote(rowJson)}`)
+  await run(ws, `jq ".markdown" ${shellQuote(rowJson)}`)
 }
 
 async function exploreCrossCutting(ws: Workspace): Promise<void> {

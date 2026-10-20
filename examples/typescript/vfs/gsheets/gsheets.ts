@@ -40,6 +40,13 @@ function buildConfig(): GSheetsConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function main(): Promise<void> {
   const config = buildConfig()
   const vfs = new GSheetsVFS(config)
@@ -74,31 +81,31 @@ async function main(): Promise<void> {
     const path = `/gsheets/owned/${first}`
 
     console.log('=== cat ===')
-    r = await ws.shell(`cat "${path}"`)
+    r = await ws.shell(`cat ${shellQuote(path)}`)
     console.log(r.stdoutText.slice(0, 300))
 
     console.log('\n=== head -n 20 ===')
-    r = await ws.shell(`head -n 20 "${path}"`)
+    r = await ws.shell(`head -n 20 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== head -c 200 ===')
-    r = await ws.shell(`head -c 200 "${path}"`)
+    r = await ws.shell(`head -c 200 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== tail -n 10 ===')
-    r = await ws.shell(`tail -n 10 "${path}"`)
+    r = await ws.shell(`tail -n 10 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== tail -c 200 ===')
-    r = await ws.shell(`tail -c 200 "${path}"`)
+    r = await ws.shell(`tail -c 200 ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== wc ===')
-    r = await ws.shell(`wc "${path}"`)
+    r = await ws.shell(`wc ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== stat ===')
-    r = await ws.shell(`stat "${path}"`)
+    r = await ws.shell(`stat ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Sheets API: attrs land in the
@@ -106,7 +113,7 @@ async function main(): Promise<void> {
     // dispatch-level stat.
     console.log(`=== metadata overlay on ${path} ===`)
     r = await ws.shell(
-      `chmod 640 "${path}" && chown 500:dev "${path}" && touch -t 202601021530 "${path}"`,
+      `chmod 640 ${shellQuote(path)} && chown 500:dev ${shellQuote(path)} && touch -t 202601021530 ${shellQuote(path)}`,
     )
     console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
     const st = (await ws.dispatch('stat', path)) as FileStat
@@ -116,15 +123,15 @@ async function main(): Promise<void> {
     )
 
     console.log('=== jq .properties.title ===')
-    r = await ws.shell(`jq ".properties.title" "${path}"`)
+    r = await ws.shell(`jq ".properties.title" ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== jq ".sheets | length" ===')
-    r = await ws.shell(`jq ".sheets | length" "${path}"`)
+    r = await ws.shell(`jq ".sheets | length" ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== nl ===')
-    r = await ws.shell(`nl "${path}" | head -n 10`)
+    r = await ws.shell(`nl ${shellQuote(path)} | head -n 10`)
     console.log(r.stdoutText)
 
     console.log('=== tree /gsheets/ ===')
@@ -136,28 +143,28 @@ async function main(): Promise<void> {
     console.log(r.stdoutText)
 
     console.log('=== grep title ===')
-    r = await ws.shell(`grep title "${path}" | head -c 200`)
+    r = await ws.shell(`grep title ${shellQuote(path)} | head -c 200`)
     console.log(r.stdoutText)
 
     console.log('\n=== rg title ===')
-    r = await ws.shell(`rg title "${path}" | head -c 200`)
+    r = await ws.shell(`rg title ${shellQuote(path)} | head -c 200`)
     console.log(r.stdoutText)
 
     console.log('\n=== basename ===')
-    r = await ws.shell(`basename "${path}"`)
+    r = await ws.shell(`basename ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== dirname ===')
-    r = await ws.shell(`dirname "${path}"`)
+    r = await ws.shell(`dirname ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== realpath ===')
-    r = await ws.shell(`realpath "${path}"`)
+    r = await ws.shell(`realpath ${shellQuote(path)}`)
     console.log(r.stdoutText)
 
     console.log('=== gws sheets spreadsheets create ===')
     const body = JSON.stringify({ properties: { title: 'MIRAGE TS Sheets Test' } })
-    r = await ws.shell(`gws sheets spreadsheets create --json '${body}'`)
+    r = await ws.shell(`gws sheets spreadsheets create --json ${shellQuote(body)}`)
     if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
       const err = r.stderrText.trim() || 'empty response'
       console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
@@ -173,20 +180,24 @@ async function main(): Promise<void> {
       ['Bob', '25', 'SF'],
     ])
     r = await ws.shell(
-      `gws sheets write --spreadsheet ${sheetId} --range "Sheet1!A1:C3" --json-values '${values}'`,
+      `gws sheets write --spreadsheet ${shellQuote(sheetId)} --range "Sheet1!A1:C3" --json-values ${shellQuote(values)}`,
     )
     console.log(`Written: ${r.stdoutText.slice(0, 80)}`)
 
     console.log('\n=== gws sheets read ===')
-    r = await ws.shell(`gws sheets read --spreadsheet ${sheetId} --range "Sheet1!A1:C3"`)
+    r = await ws.shell(
+      `gws sheets read --spreadsheet ${shellQuote(sheetId)} --range "Sheet1!A1:C3"`,
+    )
     console.log(`Values: ${r.stdoutText}`)
 
     console.log('=== gws sheets append ===')
-    r = await ws.shell(`gws sheets append --spreadsheet ${sheetId} --values Diana,28,Chicago`)
+    r = await ws.shell(
+      `gws sheets append --spreadsheet ${shellQuote(sheetId)} --values Diana,28,Chicago`,
+    )
     console.log(`Appended: ${r.stdoutText.slice(0, 80)}`)
 
     console.log('\n=== gws sheets read (all) ===')
-    r = await ws.shell(`gws sheets read --spreadsheet ${sheetId} --range Sheet1`)
+    r = await ws.shell(`gws sheets read --spreadsheet ${shellQuote(sheetId)} --range Sheet1`)
     console.log(`All: ${r.stdoutText}`)
 
     console.log('\n=== gws sheets spreadsheets batchUpdate ===')
@@ -202,7 +213,7 @@ async function main(): Promise<void> {
     })
     const batchParams = JSON.stringify({ spreadsheetId: sheetId })
     r = await ws.shell(
-      `gws sheets spreadsheets batchUpdate --params '${batchParams}' --json '${batchBody}'`,
+      `gws sheets spreadsheets batchUpdate --params ${shellQuote(batchParams)} --json ${shellQuote(batchBody)}`,
     )
     console.log(`BatchUpdate: ${r.stdoutText.slice(0, 80)}`)
 

@@ -16,6 +16,13 @@ import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-browser'
 
 const PROXY_URL = process.env.SLACK_PROXY_URL ?? 'http://127.0.0.1:8901/api/slack'
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function main(): Promise<void> {
   const slack = new SlackVFS({ proxyUrl: PROXY_URL })
   const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
@@ -43,15 +50,15 @@ async function main(): Promise<void> {
     const base = `/slack/channels/${firstCh}`
 
     console.log(`=== ls ${base}/ | tail -n 3 ===`)
-    r = await ws.shell(`ls "${base}/" | tail -n 3`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 3`)
     console.log(r.stdoutText)
 
-    r = await ws.shell(`ls "${base}/" | tail -n 1`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 1`)
     const target = r.stdoutText.trim()
     if (target !== '') {
       const filePath = `${base}/${target}`
       console.log(`=== head -n 2 ${filePath} ===`)
-      r = await ws.shell(`head -n 2 "${filePath}"`)
+      r = await ws.shell(`head -n 2 ${shellQuote(filePath)}`)
       const out = r.stdoutText.trim()
       if (out !== '') {
         for (const line of out.split('\n')) {
@@ -62,7 +69,7 @@ async function main(): Promise<void> {
       }
 
       console.log(`\n=== wc -l ${filePath} ===`)
-      r = await ws.shell(`wc -l "${filePath}"`)
+      r = await ws.shell(`wc -l ${shellQuote(filePath)}`)
       console.log(`  ${r.stdoutText.trim()}`)
     }
 

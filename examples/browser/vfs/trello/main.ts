@@ -32,6 +32,13 @@ function buildConfig(): { apiKey: string; apiToken: string } {
   return { apiKey, apiToken }
 }
 
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
 async function run(ws: Workspace, cmd: string): Promise<string> {
   console.log(`$ ${cmd}`)
   const r = await ws.shell(cmd)
@@ -62,27 +69,27 @@ async function main(): Promise<void> {
     const wsBase = `/trello/workspaces/${ws0}`
 
     console.log('')
-    await run(ws, `cat "${wsBase}/workspace.json"`)
+    await run(ws, `cat ${shellQuote(`${wsBase}/workspace.json`)}`)
 
     console.log('')
-    await run(ws, `tree -L 3 "${wsBase}"`)
+    await run(ws, `tree -L 3 ${shellQuote(wsBase)}`)
 
     console.log('')
-    const b0 = (await run(ws, `ls "${wsBase}/boards/" | head -n 1`)).trim()
+    const b0 = (await run(ws, `ls ${shellQuote(`${wsBase}/boards/`)} | head -n 1`)).trim()
     if (b0 === '') return
     const boardBase = `${wsBase}/boards/${b0}`
 
     console.log('')
-    await run(ws, `cat "${boardBase}/board.json"`)
+    await run(ws, `cat ${shellQuote(`${boardBase}/board.json`)}`)
 
     console.log('')
-    await run(ws, `jq -r ".board_name" "${boardBase}/board.json"`)
+    await run(ws, `jq -r ".board_name" ${shellQuote(`${boardBase}/board.json`)}`)
 
     console.log('')
-    await run(ws, `ls "${boardBase}/labels/"`)
+    await run(ws, `ls ${shellQuote(`${boardBase}/labels/`)}`)
 
     console.log('')
-    await run(ws, `find "${boardBase}" -name "card.json" | head -n 5`)
+    await run(ws, `find ${shellQuote(boardBase)} -name "card.json" | head -n 5`)
   } finally {
     await ws.close()
   }
