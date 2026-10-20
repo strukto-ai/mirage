@@ -26,7 +26,7 @@ import type {
 import { type Language, ScriptSource } from '../runtime/types.ts'
 import { EnvVarSchema, type EnvEntries } from '../secrets/config.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
-import { type MountMode, parseMountMode } from '../types.ts'
+import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
 import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
@@ -823,9 +823,17 @@ function mountDoc(entry: ProfileMount): Record<string, unknown> {
 }
 
 function pathsDoc(block: PathsBlock): Record<string, unknown> {
+  // A path shown twice answers with the weaker of its modes, and an
+  // entry without one states visibility only (`shownMode`), so the
+  // mapping keeps that answer for each path.
+  const show = new Map<string, MountMode | null>()
+  for (const e of block.show ?? []) {
+    const held = show.get(e.path) ?? null
+    show.set(e.path, held === null ? e.mode : e.mode === null ? held : weakerMode(held, e.mode))
+  }
   return {
     hide: [...block.hide],
-    show: Object.fromEntries((block.show ?? []).map((e) => [e.path, e.mode])),
+    show: Object.fromEntries(show),
     reasons: (block.reasons ?? []).map((g) => ({ patterns: [...g.patterns], reason: g.reason })),
   }
 }

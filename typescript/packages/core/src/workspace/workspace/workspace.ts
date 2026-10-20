@@ -2080,7 +2080,12 @@ export class Workspace {
     for (const override of Object.values(overrides)) {
       ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }
-    await applyStateDict(ws, state, { builtForState: true })
+    // A caller's own profile table or default is a document the state did
+    // not record, so the restored sessions keep the narrowing it gave
+    // them, as a checkout's do, rather than the recorded one.
+    await applyStateDict(ws, state, {
+      builtForState: options.profiles === undefined && options.profile === undefined,
+    })
     return ws
   }
 

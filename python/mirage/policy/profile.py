@@ -42,6 +42,7 @@ from mirage.types import (
     ShowEntry,
     Visibility,
     parse_mount_mode,
+    weaker_mode,
 )
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import norm
@@ -855,11 +856,24 @@ def _mount_doc(entry: ProfileMount) -> dict[str, Any]:
 
 
 def _paths_doc(block: PathsBlock) -> dict[str, Any]:
+    # A path shown twice answers with the weaker of its modes, and an
+    # entry without one states visibility only (``shown_mode``), so the
+    # mapping keeps that answer for each path.
+    show: dict[str, MountMode | None] = {}
+    for e in block.show:
+        held = show.get(e.path)
+        show[e.path] = (
+            e.mode
+            if held is None
+            else held
+            if e.mode is None
+            else weaker_mode(held, e.mode)
+        )
     return {
         "hide": list(block.hide),
         "show": {
-            e.path: e.mode.value if e.mode is not None else None
-            for e in block.show
+            path: mode.value if mode is not None else None
+            for path, mode in show.items()
         },
         "reasons": [
             {"patterns": list(g.patterns), "reason": g.reason}

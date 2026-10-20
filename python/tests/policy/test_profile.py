@@ -169,6 +169,22 @@ def test_profile_to_dict_writes_the_document_it_parses_from():
             )
         )
     )
+    # A path shown twice answers with its weaker mode, which the mapping
+    # keeps rather than the last entry's.
+    shown = SessionProfile(
+        paths=PathsBlock(
+            show=(
+                ShowEntry("/data", MountMode.READ),
+                ShowEntry("/data", MountMode.WRITE),
+                ShowEntry("/docs"),
+                ShowEntry("/docs", MountMode.WRITE),
+            )
+        )
+    )
+    assert profile_to_dict(shown)["paths"]["show"] == {
+        "/data": "read",
+        "/docs": "write",
+    }
 
 
 def test_profile_unsaid_fields_are_none_so_a_reader_can_tell():

@@ -475,5 +475,22 @@ describe('profileToDict', () => {
       { reason: 'r', commands: ['rm'], paths: ['/a'] },
       { reason: 'r', commands: ['mv'], paths: ['/a'] },
     ])
+    // A path shown twice answers with its weaker mode, which the mapping
+    // keeps rather than the last entry's.
+    const shown = {
+      paths: {
+        hide: [],
+        show: [
+          { path: '/data', mode: MountMode.READ },
+          { path: '/data', mode: MountMode.WRITE },
+          { path: '/docs', mode: null },
+          { path: '/docs', mode: MountMode.WRITE },
+        ],
+      },
+    }
+    expect((profileToDict(shown).paths as { show: unknown }).show).toEqual({
+      '/data': 'read',
+      '/docs': 'write',
+    })
   })
 })

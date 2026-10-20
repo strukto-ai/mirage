@@ -801,6 +801,16 @@ class DenyGate implements Policy {
   }
 }
 
+/** Allow TASK only in /data, read off the session's own view. */
+class CwdGate implements Policy {
+  preSession(ctx: SessionContext): Action | null {
+    if (ctx.key === 'TASK' && ctx.session?.cwd() !== '/data') {
+      return { kind: 'deny', reason: 'TASK is set in /data' }
+    }
+    return null
+  }
+}
+
 function gatedWorkspace(prefix = '/data', sessionId?: string): Workspace {
   const ram = new RAMVFS()
   return new Workspace(
@@ -827,6 +837,52 @@ describe('applyStateDict and the deployment', () => {
     await expect(applyStateDict(target, state)).rejects.toBeInstanceOf(PolicyDenied)
     expect(Object.hasOwn(target.env, 'GATE_X')).toBe(false)
     await target.close()
+  })
+
+  // A workspace built for the state seats each table before the gate
+  // judges it, its cwd and variables included, so a program reading the
+  // session sees the session the snapshot recorded rather than a fresh one
+  // at /. Mirrors the Python test of the same name.
+  it('a built target judges each table as the session it records', async () => {
+    const source = buildWorkspace()
+    expect((await source.shell('cd /data && TASK=1')).exitCode).toBe(0)
+    const state = await toStateDict(source)
+    await source.close()
+    const target = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        ...(state.default_session_id !== undefined ? { sessionId: state.default_session_id } : {}),
+        policies: [new CwdGate()],
+      },
+    )
+    try {
+      await applyStateDict(target, state, { builtForState: true })
+      expect(target.getSession(target.defaultSessionId).cwd).toBe('/data')
+    } finally {
+      await target.close()
+    }
+  })
+
+  // A caller's own profile table is a document the state did not record,
+  // so the sessions a load restores keep the narrowing it gives them.
+  it('a caller profile table governs the restored sessions', async () => {
+    const source = buildWorkspace()
+    source.createSession('agent')
+    const state = await toStateDict(source)
+    await source.close()
+    const loaded = await Workspace.fromState(state, {
+      shellParser: parser,
+      profiles: { default: { commands: { deny: [{ reason: 'no rm', commands: ['rm'] }] } } },
+    })
+    try {
+      for (const sessionId of [loaded.defaultSessionId, 'agent']) {
+        expect((await loaded.shell('rm /data/x', { sessionId })).exitCode).toBe(126)
+      }
+    } finally {
+      await loaded.close()
+    }
   })
 
   it('a restore the gate allows lands every variable', async () => {

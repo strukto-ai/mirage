@@ -717,8 +717,9 @@ async def _gate_restored_state(
     profile's for one the restore will create, which is what
     ``script_of`` answers for an id the manager does not know and the
     profile ``_restore_sessions`` then puts the created session under.
-    A workspace built for the state seats every table's own narrowing
-    first, so each is judged under the policy it then runs under.
+    A workspace built for the state seats every table first, its
+    narrowing, cwd and variables, so each is judged as the session it
+    records, under the policy it then runs under.
 
     Args:
         ws (WorkspaceLike): the target workspace.
@@ -740,6 +741,8 @@ async def _gate_restored_state(
             except ValueError:
                 session = ws._session_mgr.get(fields.session_id)
             narrow(session, narrowing_of(fields))
+            set_cwd(session, fields.cwd)
+            session.vars = fields.vars
     for fields in sessions:
         await gate_restored_vars(ws.policies, fields.session_id, fields.vars)
     seed = state.get(StateKey.ENV)

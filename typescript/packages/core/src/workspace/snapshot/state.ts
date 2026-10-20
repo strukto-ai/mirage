@@ -661,8 +661,9 @@ async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promi
  * has, and the default profile's for one the restore will create, which
  * is what `scriptsOf` answers for an id the manager does not know and
  * the profile `restoreSessions` then puts the created session under. A
- * workspace built for the state seats every table's own narrowing
- * first, so each is judged under the policy it then runs under.
+ * workspace built for the state seats every table first, its narrowing,
+ * cwd and variables, so each is judged as the session it records, under
+ * the policy it then runs under.
  * Returns the parsed session tables and the template, null when the
  * snapshot carries none. Mirrors Python `_gate_restored_state`.
  */
@@ -679,6 +680,8 @@ async function gateRestoredState(
         ? ws.sessionManager.get(fields.sessionId)
         : ws.sessionManager.create(fields.sessionId)
       narrow(session, narrowingOf(fields))
+      setCwd(session, fields.cwd)
+      session.vars = fields.vars
     }
   }
   for (const fields of sessions) {
