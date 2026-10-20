@@ -121,8 +121,9 @@ async def handle_touch(
     no_create = fl.as_bool("no_create")
 
     errors: list[str] = []
+    links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, operands):
-        if fl.as_bool("no_dereference") and namespace.is_link(target.virtual):
+        if fl.as_bool("no_dereference") and links.is_link(target.virtual):
             await apply_link_attrs(
                 dispatch, "touch", target, errors, mtime=stamp
             )
@@ -152,7 +153,7 @@ async def handle_touch(
         # its create-path one ("cannot touch").
         slashed = target.raw_path.endswith("/")
         refusal = await dot_refusal(
-            partial(dispatch_stat, dispatch), target, namespace.follow
+            partial(dispatch_stat, dispatch), target, links.follow
         )
         if refusal is not None:
             action = "setting times of" if slashed else "cannot touch"
@@ -162,7 +163,7 @@ async def handle_touch(
             )
             continue
         resolved = follow_operand(
-            namespace,
+            links,
             "touch",
             "setting times of" if no_create else "cannot touch",
             target,

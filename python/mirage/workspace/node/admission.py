@@ -65,6 +65,12 @@ from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import is_glob, path_visible
 from mirage.utils.path import resolve_path
+from mirage.view.types import NamespaceLinks
+from mirage.workspace.executor.builtins.condition.operands import (
+    TEST_NAMES,
+    file_operands,
+)
+from mirage.workspace.executor.builtins.condition.types import CondRefused
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.command.cli import reaches_service
@@ -105,7 +111,12 @@ from mirage.workspace.lookup.constants import (
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
-from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
+from mirage.workspace.node.inner_lines import (
+    Word,
+    inner_lines,
+    read_word,
+    words_of_test,
+)
 from mirage.workspace.node.occurrence import (
     Frame,
     argv_frame,
@@ -221,7 +232,7 @@ def policy_scopes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
-    namespace: Namespace | None,
+    links: NamespaceLinks | None,
     cwd: str,
     implied: PathSpec | None = None,
     redirects: Sequence[PathSpec] = (),
@@ -255,8 +266,8 @@ def policy_scopes(
         name (str): command name.
         args (list[str]): the words after it, as typed.
         operands (Sequence[str | PathSpec]): the same words, classified.
-        namespace (Namespace | None): the link table; None outside a
-            workspace.
+        links (NamespaceLinks | None): the session's link table
+            (``Namespace.session_links``); None where no link stands.
         cwd (str): session working directory.
         implied (PathSpec | None): the working-directory operand the
             command reads when typed bare, None when it names a path.
@@ -275,9 +286,9 @@ def policy_scopes(
         # lives in argv[0], not the operands, so a path-pattern guard
         # would never see it without this row.
         scopes.insert(0, _to_scope(resolve_path(name, cwd)))
-    if namespace is not None and namespace.nodes and operands:
+    if links is not None and operands:
         followed = follow_paths(
-            namespace,
+            links,
             list(operands),
             follows_last_component(name, [name, *args]),
             slash_follows=name not in SLASH_KEEPS_LAST,
@@ -293,8 +304,8 @@ def policy_scopes(
         scopes.append(implied)
     if redirects:
         targets: list[str | PathSpec] = list(redirects)
-        if namespace is not None and namespace.nodes:
-            followed = follow_paths(namespace, list(redirects), True)
+        if links is not None:
+            followed = follow_paths(links, list(redirects), True)
             targets.extend(p for p in followed if isinstance(p, PathSpec))
         seen = {p.virtual for p in scopes}
         for item in targets:
@@ -473,7 +484,7 @@ def _writes(
         named += [
             p
             for p in follow_paths(
-                namespace,
+                namespace.session_links(session),
                 list(named),
                 follows_last_component(name, [name, *args]),
                 slash_follows=name not in SLASH_KEEPS_LAST,
@@ -582,7 +593,11 @@ async def gate(
                 name,
                 args,
                 operands,
-                namespace,
+                (
+                    namespace.session_links(session)
+                    if namespace is not None and namespace.nodes
+                    else None
+                ),
                 session.cwd,
                 implied,
                 redirects,
@@ -741,6 +756,51 @@ async def admit(
     return Refused(err, code, refusal_of(action))
 
 
+async def admit_test(
+    name: str,
+    words: list[str],
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    cancel: asyncio.Event | None = None,
+    claimant: Claimant | None = None,
+) -> Admitted:
+    """Admit a ``[ ]`` test, or one ``[[ ]]`` leaf, as the command it
+    is: the shell evaluates it itself, so no command gate saw its words,
+    and a rule, an allow list or a policy answers it by its own name as
+    it answers ``test`` on the same words.
+
+    Args:
+        name (str): ``[`` or ``[[``.
+        words (list[str]): what it tests, expanded, operators included.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the policies, the
+            decision ledger and the CLI installs.
+        namespace (Namespace | None): the link table.
+        cancel (asyncio.Event | None): the run's kill channel.
+        claimant (Claimant | None): the test and its line, None outside
+            a line.
+
+    Raises:
+        CondRefused: the gate refused it.
+    """
+    classified = classified_words(name, words, session, registry)
+    verdict = await admit(
+        name,
+        words,
+        classified[1:],
+        session,
+        registry,
+        namespace,
+        cancel=cancel,
+        claimant=claimant,
+        intrinsic=True,
+    )
+    if isinstance(verdict, Refused):
+        raise CondRefused(verdict.stderr, verdict.exit_code, verdict.refusal)
+    return verdict
+
+
 def is_pending_refusal(refusal: Refusal | None) -> bool:
     """Whether a record is a question the host has not answered yet,
     which holds the line for its retry rather than ending it.
@@ -803,6 +863,8 @@ def _word_hints(
     """
     consumed = registry.match_command_prefix(line)
     joined = " ".join(line[:consumed])
+    if joined in TEST_NAMES:
+        return file_operands(line[1:]), None
     consumer = lookup(joined, session, registry)
     if joined in session.functions or not (
         word_policy(consumer) is WordPolicy.MOUNT
@@ -1065,8 +1127,11 @@ async def admit_line(
     if frame is None:
         frame = root_frame(ast, handed.origin if handed is not None else None)
     for node in command_nodes(ast):
-        _, parts = split_env_prefix(get_parts(node))
-        words = [read_word(part, home) for part in parts]
+        if node.type == NT.TEST_COMMAND:
+            words = words_of_test(node, home)
+        else:
+            _, parts = split_env_prefix(get_parts(node))
+            words = [read_word(part, home) for part in parts]
         if not words:
             continue
         if await registry.policies.wants_for(

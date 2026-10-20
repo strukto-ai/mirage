@@ -31,6 +31,8 @@ import type { NamespaceStore, NodeFields } from './store.ts'
 import type { MountRegistry } from '../registry.ts'
 import { NamespaceReader } from '../../dispatcher/reader.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { getCurrentSession } from '../../../context/session_context.ts'
+import type { SessionState } from '../../session/session.ts'
 
 export type ResolveFn = (path: string) => Promise<[BaseVFS, PathSpec, MountMode]>
 
@@ -359,11 +361,11 @@ export class Namespace {
   // Drop node entries matching an unexpanded glob operand. `rm` receives
   // the pattern verbatim (backend wrappers expand globs themselves), so
   // the node table must match it here. Drops matched entries and
-  // everything under a matched directory.
-  async unlinkGlob(pattern: string): Promise<number> {
+  // everything under a matched directory, save the entries in `keep`.
+  async unlinkGlob(pattern: string, keep: ReadonlySet<string> = new Set()): Promise<number> {
     const doomed: string[] = []
     for (const path of this.nodeTable.keys()) {
-      if (globPrefixMatch(path, pattern)) doomed.push(path)
+      if (globPrefixMatch(path, pattern) && !keep.has(path)) doomed.push(path)
     }
     for (const path of doomed) this.nodeTable.delete(path)
     if (doomed.length > 0) {
@@ -556,5 +558,21 @@ export class Namespace {
         sessionId,
         () => visibility(sessionId),
       )
+  }
+
+  /**
+   * The link table as one session sees it (`NamespaceReader`), the one every
+   * reader above the dispatcher follows a link through: a link the session
+   * cannot see is no link to any command, so none resolves, copies or reports
+   * a hidden one. Mirrors Python's `Namespace.session_links`.
+   *
+   * @param session the session; omitted for the one the current context
+   *   runs as.
+   */
+  sessionLinks(session?: SessionState | null): NamespaceReader {
+    const bound = session ?? getCurrentSession()
+    return this.readers(() => (bound === null ? null : bound.visibility))(
+      bound === null ? null : bound.sessionId,
+    )
   }
 }

@@ -74,7 +74,8 @@ async def reference_stat(
     """
     if namespace is None:
         return await stat_path(virtual)
-    own = namespace.link_stat_at(virtual)
+    links = namespace.session_links()
+    own = links.link_stat_at(virtual)
     if own is None:
         stat = await stat_path(virtual)
         if stat is None:
@@ -82,7 +83,7 @@ async def reference_stat(
         return merge_overlay_stat(namespace.meta_for(virtual), stat)
     if not follow:
         return own
-    target = namespace.follow(virtual)
+    target = links.follow(virtual)
     stat = await stat_path(target)
     if stat is None:
         return own

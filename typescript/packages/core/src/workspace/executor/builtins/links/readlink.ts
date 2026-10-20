@@ -94,13 +94,13 @@ export async function handleReadlink(
     errors.push('readlink: ignoring --no-newline with multiple arguments\n')
     newline = true
   }
-  const follow = (v: string): string => namespace.follow(v)
-  const reader = namespace.readers(() => session.visibility)(session.sessionId)
-  const readlink = (v: string): string | null => reader.readlink(v)
+  const links = namespace.sessionLinks(session)
+  const follow = (v: string): string => links.follow(v)
+  const readlink = (v: string): string | null => links.readlink(v)
   const lines: string[] = []
   let exitCode = 0
   for (const op of operands) {
-    const absOp = operandAbs(namespace, op, session.cwd, session.visibility)
+    const absOp = operandAbs(links, op, session.cwd)
     const spec = PathSpec.fromStrPath(op, undefined, session.cwd)
     // The link entry is namespace state behind the dispatcher: session grants
     // and admission policies decide whether this session may read the
@@ -109,7 +109,7 @@ export async function handleReadlink(
     // readlink's exit 1, said only under -v.
     try {
       if (mode !== null) {
-        if (namespace.isLink(absOp)) await dispatch('readlink', PathSpec.fromStrPath(absOp))
+        if (links.isLink(absOp)) await dispatch('readlink', PathSpec.fromStrPath(absOp))
         lines.push(
           await canonicalize(
             spec.rawPath,

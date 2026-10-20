@@ -31,6 +31,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError
 from mirage.utils.quote import shell_quote_always
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
@@ -233,7 +234,7 @@ async def apply_link_attrs(
 
 
 def follow_operand(
-    namespace: Namespace,
+    links: NamespaceLinks,
     cmd: str,
     action: str,
     target: PathSpec,
@@ -242,7 +243,8 @@ def follow_operand(
     """Follow symlinks for one operand, collecting the ELOOP error.
 
     Args:
-        namespace (Namespace): addressing authority.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         cmd (str): command name for the error message.
         action (str): GNU's words for the step that failed ("cannot
             access", "cannot touch", "setting times of").
@@ -250,7 +252,7 @@ def follow_operand(
         errors (list[str]): per-operand error accumulator.
     """
     try:
-        virtual = namespace.follow(target.virtual)
+        virtual = links.follow(target.virtual)
     except CycleError:
         errors.append(
             f"{cmd}: {action} '{target.raw_path}': "
@@ -261,7 +263,7 @@ def follow_operand(
 
 
 async def resolve_operand(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     cmd: str,
     target: PathSpec,
@@ -270,7 +272,8 @@ async def resolve_operand(
     """Follow symlinks and stat one operand, collecting GNU errors.
 
     Args:
-        namespace (Namespace): addressing authority.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error messages.
         target (PathSpec): the operand as typed.
@@ -280,7 +283,7 @@ async def resolve_operand(
         walk_refusal(target)
         if target.walk_error is not None
         else await dot_refusal(
-            partial(dispatch_stat, dispatch), target, namespace.follow
+            partial(dispatch_stat, dispatch), target, links.follow
         )
     )
     if refusal is not None:
@@ -289,7 +292,7 @@ async def resolve_operand(
             f"{fs_strerror(refusal)}\n"
         )
         return None
-    resolved = follow_operand(namespace, cmd, "cannot access", target, errors)
+    resolved = follow_operand(links, cmd, "cannot access", target, errors)
     if resolved is None:
         return None
     try:
@@ -330,7 +333,7 @@ async def apply_attrs(
 
 
 async def walk_stats(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
@@ -346,7 +349,8 @@ async def walk_stats(
     link.
 
     Args:
-        namespace (Namespace): addressing authority (link table).
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
@@ -366,7 +370,7 @@ async def walk_stats(
             # A folder-backed readdir spells a directory child with its
             # slash.
             child_virtual = listed.rstrip("/")
-            if namespace.is_link(child_virtual):
+            if links.is_link(child_virtual):
                 continue
             child = PathSpec.from_str_path(child_virtual)
             child_stat, _ = await dispatch("stat", child)
@@ -376,7 +380,7 @@ async def walk_stats(
 
 
 async def walk_owned(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
@@ -389,14 +393,15 @@ async def walk_owned(
     folded back in from the node table.
 
     Args:
-        namespace (Namespace): addressing authority (link table).
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root.
         root_stat (FileStat): the root's stat, already read.
     """
-    walked = await walk_stats(namespace, dispatch, root, root_stat)
-    links = [path for path, _stat in namespace.link_stats_below(root.virtual)]
-    return walked, links
+    walked = await walk_stats(links, dispatch, root, root_stat)
+    owned = [path for path, _stat in links.link_stats_below(root.virtual)]
+    return walked, owned
 
 
 def verbosity(fl: FlagView) -> str | None:
@@ -555,28 +560,27 @@ async def change_owner(
         await apply_link_attrs(dispatch, cmd, link, errors, uid=uid, gid=gid)
         describe(name, stat, len(errors) > before)
 
+    links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, operands):
         typed = target.raw_path or target.virtual
-        if not follow and namespace.is_link(target.virtual):
+        if not follow and links.is_link(target.virtual):
             await own_link(target, typed)
             continue
-        found = await resolve_operand(namespace, dispatch, cmd, target, errors)
+        found = await resolve_operand(links, dispatch, cmd, target, errors)
         if found is None:
             describe(typed, None, True)
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            walked, links = await walk_owned(
-                namespace, dispatch, resolved, stat
-            )
+            walked, owned = await walk_owned(links, dispatch, resolved, stat)
         else:
-            walked, links = [(resolved, stat)], []
+            walked, owned = [(resolved, stat)], []
         for path, path_stat in walked:
             before = len(errors)
             await apply_attrs(dispatch, cmd, path, errors, uid=uid, gid=gid)
             name = walked_name(typed, resolved, path)
             describe(name, path_stat, len(errors) > before)
-        for link in links:
+        for link in owned:
             link_spec = PathSpec.from_str_path(link)
             await own_link(link_spec, walked_name(typed, resolved, link_spec))
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")

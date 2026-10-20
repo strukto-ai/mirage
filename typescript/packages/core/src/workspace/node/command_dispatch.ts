@@ -16,7 +16,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import { sessionEntry, setSessionEntry } from '../session/session.ts'
+import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { seedVar, setAttr } from '../session/state.ts'
 import { type ShellVar, TempEnv, VarAttr } from '../../shell/variable.ts'
 import {
@@ -90,7 +90,8 @@ import {
 } from '../executor/builtins/index.ts'
 import { BUILTINS } from '../executor/builtins/table.ts'
 import { globPattern } from '../../utils/glob_walk.ts'
-import { CycleError } from '../../utils/path.ts'
+import { CycleError, globPrefixMatch } from '../../utils/path.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
@@ -396,6 +397,23 @@ export async function executeCommand(
   }
 }
 
+/**
+ * The node entries a glob `rm` never removed: those whose name the pattern
+ * matched is one the session cannot see, which the backend's expansion met as
+ * absent. Empty for a session that hides nothing. Mirrors Python's _unmet.
+ */
+function unmet(namespace: Namespace, session: SessionState, pattern: string): Set<string> {
+  const links = namespace.sessionLinks(session)
+  if (!links.hidesUnder('/')) return new Set()
+  const depth = stripSlash(pattern).split('/').length
+  const kept = new Set<string>()
+  for (const path of namespace.nodes.keys()) {
+    if (!globPrefixMatch(path, pattern)) continue
+    if (!links.visible(`/${stripSlash(path).split('/').slice(0, depth).join('/')}`)) kept.add(path)
+  }
+  return kept
+}
+
 /** A prefix assignment a session policy refused: bash's line, exit 1. */
 function writeRefused(err: PolicyDenied, command: string): Result {
   const stderr = encodeText(`bash: ${err.message}\n`)
@@ -454,7 +472,7 @@ async function runCommandBody(
       executeFn,
       callStack,
       registry,
-      namespace,
+      namespace.sessionLinks(session),
       sessionView(session, registry.policies, context.frame.diagnostics),
       routingDecision,
     ),
@@ -596,7 +614,12 @@ async function runArgv(
   const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
   const boundary = refusedExternal
     ? [...argv.operands]
-    : await expandBoundaryGlobs(argv.operands, registry, namespace, sessionAccess(session))
+    : await expandBoundaryGlobs(
+        argv.operands,
+        registry,
+        namespace.sessionLinks(session),
+        sessionAccess(session),
+      )
   const expandedWords = boundary.map(wordText)
   // Compared as words, not as a count: a glob that matches exactly one
   // name (`du /base/i*` where only the mount root matches) is still an
@@ -934,11 +957,10 @@ async function routeArgv(
   // words it per operand.
   if (namespace.nodes.size > 0 && operands.length > 0) {
     operands = await operandFollow(
-      namespace,
+      namespace.sessionLinks(session),
       dispatch,
       name,
       argv.words,
-      session.visibility,
     )(operands)
     argv = argv.withOperands(operands)
   }
@@ -1005,7 +1027,7 @@ async function routeArgv(
         const [rest, handled, stripErrors] = await stripLinkOperands(
           name,
           dispatch,
-          namespace,
+          namespace.sessionLinks(session),
           operands,
           argv.args,
           session.cwd,
@@ -1025,12 +1047,11 @@ async function routeArgv(
         }
       } else if (name === 'mv') {
         const prepared = await prepareMv(
-          namespace,
+          namespace.sessionLinks(session),
           dispatch,
           operands,
           argv.args,
           session.cwd,
-          session.visibility,
         )
         operands = prepared.items
         if (prepared.early !== null) return prepared.early
@@ -1077,7 +1098,10 @@ async function routeArgv(
       // A removed path takes its node meta (overlay attrs) with it; a
       // removed dir purges everything underneath. Glob operands reach
       // here unexpanded (backend wrappers expand them), so the node
-      // table matches the pattern itself.
+      // table matches the pattern itself. A name the session cannot see
+      // was never removed: rm met it as absent (-f silenced that), so its
+      // node stays.
+      const links = namespace.sessionLinks(session)
       for (const item of operands) {
         if (!(item instanceof PathSpec)) continue
         // The walk refused it, so rm removed nothing there (-f only
@@ -1094,8 +1118,9 @@ async function routeArgv(
           // A quoted metacharacter is a literal here too, so the node
           // table is matched with the same pattern the backend resolved
           // with.
-          await namespace.unlinkGlob(globPattern(item.virtual))
-        } else {
+          const pattern = globPattern(item.virtual)
+          await namespace.unlinkGlob(pattern, unmet(namespace, session, pattern))
+        } else if (links.visible(item.virtual)) {
           await namespace.unlink(item.virtual)
           await namespace.purgeUnder(item.virtual)
         }

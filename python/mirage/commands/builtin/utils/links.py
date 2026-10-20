@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+import posixpath
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
@@ -294,15 +295,15 @@ def link_view(files: Files | None) -> LinkView | None:
         if not reader.visible(path):
             return None
         try:
-            return await files.stat(reader.resolve(path))
+            return await files.stat(posixpath.normpath(reader.follow(path)))
         except (CycleError, *_MISSES) as exc:
             logger.debug("link target of %s has no row: %s", path, exc)
             return None
 
     return LinkView(
-        stat_at=reader.link_at,
-        subtree=reader.links_below,
-        resolve=reader.resolve,
+        stat_at=reader.link_stat_at,
+        subtree=reader.link_stats_below,
+        resolve=lambda path: posixpath.normpath(reader.follow(path)),
         exists=exists,
         target_stat=target_stat,
     )

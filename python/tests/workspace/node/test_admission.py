@@ -851,3 +851,89 @@ async def test_a_command_reads_as_writing_when_its_handler_says_so():
         "/other",
         "/other/note",
     ]
+
+
+# `[ ]` and `[[ ]]` are the shell's own tests, which no command gate
+# sees, so each is admitted by its own name on what it tests, as `test`
+# is: a path rule reads a file operand however it is spelled, and an
+# allow list answers each name for itself.
+DENY_SECRET = {
+    "commands": {"deny": [{"reason": "secret", "paths": ["/data/secret.txt"]}]}
+}
+
+
+def _spell(name: str, expr: str) -> str:
+    if name == "test":
+        return f"test {expr}"
+    return f"{name} {expr} {']' if name == '[' else ']]'}"
+
+
+async def _tested(profile: dict, line: str) -> tuple[int, str, str]:
+    ws = _ws()
+    await ws.shell("echo a > /data/a.txt; echo s > /data/secret.txt")
+    ws.create_session("s", profile=profile)
+    r = await ws.shell(f"{line}; echo $?", session_id="s")
+    return r.exit_code, r.stdout.decode(), (r.stderr or b"").decode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "[", "[["])
+async def test_a_shell_test_reads_a_file_operand_as_a_path_rule_does(name):
+    for prefix, expr, path in (
+        ("cd /data && ", "-e secret.txt", "secret.txt"),
+        ("", "-e /data/secret.txt", "/data/secret.txt"),
+        ("cd /data && ", "a.txt -nt secret.txt", "secret.txt"),
+    ):
+        assert await _tested(DENY_SECRET, prefix + _spell(name, expr)) == (
+            1,
+            "",
+            f"{name}: {path}: Permission denied\n",
+        )
+    line = "cd /data && " + _spell(name, "-e a.txt")
+    assert await _tested(DENY_SECRET, line) == (0, "0\n", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "["])
+async def test_a_file_operator_on_the_left_compares_as_a_string(name):
+    line = "cd /data && " + _spell(name, "-e = secret.txt")
+    assert await _tested(DENY_SECRET, line) == (0, "1\n", "")
+
+
+@pytest.mark.asyncio
+async def test_double_brackets_admit_each_leaf():
+    # The line's reader sees every literal leaf, so a ruled one holds
+    # the line as `test -e a -o -e b` would.
+    for expr in ("-e a.txt || -e secret.txt", "-e nope || -e secret.txt"):
+        line = "cd /data && " + _spell("[[", expr)
+        assert await _tested(DENY_SECRET, line) == (
+            1,
+            "",
+            "[[: secret.txt: Permission denied\n",
+        )
+    # A leaf only the run can expand is admitted where it is reached,
+    # and a branch never reached is never admitted.
+    reached = "cd /data && x=secret.txt && [[ -e nope || -e $x ]]"
+    assert await _tested(DENY_SECRET, reached) == (
+        0,
+        "1\n",
+        "[[: secret.txt: Permission denied\n",
+    )
+    skipped = "cd /data && x=secret.txt && [[ -e a.txt || -e $x ]]"
+    assert await _tested(DENY_SECRET, skipped) == (0, "0\n", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["test", "[", "[["])
+async def test_a_shell_test_is_answered_by_its_own_name_in_an_allow_list(
+    name,
+):
+    line = "cd /data && " + _spell(name, "-e a.txt")
+    without = {"commands": {"allow": ["echo", "cd"]}}
+    assert await _tested(without, line) == (
+        0,
+        "126\n",
+        f"{name}: Permission denied\n",
+    )
+    listed = {"commands": {"allow": ["echo", "cd", name]}}
+    assert await _tested(listed, line) == (0, "0\n", "")

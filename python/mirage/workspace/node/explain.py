@@ -68,7 +68,12 @@ from mirage.workspace.node.admission import (
     unlisted_service,
     unreadable,
 )
-from mirage.workspace.node.inner_lines import Word, inner_lines, read_word
+from mirage.workspace.node.inner_lines import (
+    Word,
+    inner_lines,
+    read_word,
+    words_of_test,
+)
 from mirage.workspace.node.occurrence import (
     Frame,
     argv_frame,
@@ -689,6 +694,20 @@ def _walk_node(
     """
     if node.type == NodeType.FUNCTION_DEFINITION:
         frame = definition_frame(node, frame)
+    if node.type == NodeType.TEST_COMMAND:
+        # The shell's own test, judged as a command of its own name.
+        yield Walked(
+            words_of_test(node, home),
+            statement_redirects(node, home),
+            session,
+            occurrence_in(node, frame),
+            True,
+            lost,
+            stdin=statement_stdin(node),
+        )
+        for child in node.children:
+            yield from _walk_node(child, session, home, frame, lost)
+        return session, lost
     if node.type == NodeType.COMMAND:
         walked = session, lost
         words = _words_of(node, home)
@@ -1453,11 +1472,17 @@ def explained_line(
         scopes.setdefault((at.parent, at.source), []).append(one)
     root = next((key for key in scopes if key[0] is None), (None, line))
     node = _scope_node("line", root, scopes, runtime_of)
+    # The run holds a line only on a verdict the pass may give on the
+    # gate's behalf (``prejudge_line``): a question about words the
+    # runtime completes (``find -exec``, ``xargs``) is the gate's, asked
+    # where it runs, so it holds nothing here either.
     held = next(
         (
             one
             for one in verdicts
-            if one.judgment.exit_code and _is_verdict(one.judgment)
+            if one.judgment.exit_code
+            and _is_verdict(one.judgment)
+            and _asks_for(one)
         ),
         None,
     )
@@ -1577,7 +1602,7 @@ def _scope_node(
 
     def convert(node: Any) -> list[ShellNode | CommandExplanation]:
         start, end = node.start_byte, node.end_byte
-        if node.type == NodeType.COMMAND:
+        if node.type in (NodeType.COMMAND, NodeType.TEST_COMMAND):
             kids = tuple(take(start, end))
             ones = mine.pop((start, end), [])
             if not ones:

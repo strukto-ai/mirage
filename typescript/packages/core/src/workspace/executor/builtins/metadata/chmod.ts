@@ -75,8 +75,9 @@ export async function handleChmod(
   const report = verbosity(fl)
   const errors: string[] = []
   const out: string[] = []
+  const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, parsed.paths)) {
-    const found = await resolveOperand(namespace, dispatch, 'chmod', target, errors)
+    const found = await resolveOperand(links, dispatch, 'chmod', target, errors)
     if (found === null) {
       if (report === 'verbose')
         out.push(`${shellQuoteAlways(target.rawPath)} could not be accessed\n`)
@@ -84,7 +85,7 @@ export async function handleChmod(
     }
     const [resolved, stat] = found
     const entries: [PathSpec, FileStat][] = fl.asBool('recursive')
-      ? await walkStats(namespace, dispatch, resolved, stat)
+      ? await walkStats(links, dispatch, resolved, stat)
       : [[resolved, stat]]
     for (const [path, entryStat] of entries) {
       // Backends without a mode default to what ls renders: 755 for

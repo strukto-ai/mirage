@@ -411,7 +411,9 @@ class Workspace:
         # namespace is built after this and read only at run time.
         self._sandbox_resolver = PrefixResolver(
             self._sandbox_visible_mounts,
-            lambda directory: self._namespace.link_names_under(directory),
+            lambda directory: self._namespace.session_links().link_names_under(
+                directory
+            ),
         )
         self._script_policy = ScriptPolicy(
             self._session_mgr,
@@ -561,7 +563,7 @@ class Workspace:
             lambda name: compile_profile(self._base_profile(name), name),
             lambda: self.ensure_sessions_loaded(),
             lambda path: self.unmount(path),
-            lambda path: self._namespace.follow_parent(path),
+            lambda path: self._namespace.session_links().follow_parent(path),
         )
         # Held only while the workspace is a context manager: what
         # lifecycle.patch_process replaced and the block's one loop.
@@ -2502,7 +2504,7 @@ class Workspace:
         matches = await resolve_globs(
             [spec],
             self._registry,
-            links=self._namespace,
+            links=self._namespace.readers(self._facade_visibility)(None),
             options=GlobOptions(nullglob=True, globstar=True),
         )
         return [m.virtual for m in matches if isinstance(m, PathSpec)]

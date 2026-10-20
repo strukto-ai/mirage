@@ -362,7 +362,7 @@ export class Workspace {
     this.eventManager = new EventManager(this.registry)
     const sandboxResolver = new PrefixResolver(
       () => this.sandboxVisibleMounts(),
-      (directory) => this.namespace.linkNamesUnder(directory),
+      (directory) => this.namespace.sessionLinks().linkNamesUnder(directory),
     )
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
@@ -571,7 +571,7 @@ export class Workspace {
       (name) => compileProfile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
-      (path) => this.namespace.followParent(path),
+      (path) => this.namespace.sessionLinks().followParent(path),
     )
     this.runtimeBinding = new WorkspaceBinding(
       this.programDispatch(),
@@ -1467,7 +1467,8 @@ export class Workspace {
       const spec = classifyBarePath(pattern, this.registry, session?.cwd ?? '/', access)
       if (typeof spec === 'string') return []
       if (spec.pattern === null) return (await this.vfs.exists(spec.virtual)) ? [spec.virtual] : []
-      const matches = await resolveGlobs([spec], this.registry, false, this.namespace, {
+      const links = this.namespace.sessionLinks(session)
+      const matches = await resolveGlobs([spec], this.registry, false, links, {
         nullglob: true,
         failglob: false,
         globstar: true,

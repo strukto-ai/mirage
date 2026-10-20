@@ -63,7 +63,14 @@ import {
   unlistedService,
   unreadable,
 } from './admission.ts'
-import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
+import {
+  innerLines,
+  innerReadable,
+  readWord,
+  wordValue,
+  wordsOfTest,
+  type Word,
+} from './inner_lines.ts'
 import {
   type Frame,
   bodyFrame,
@@ -515,6 +522,20 @@ function* walkNode(
   lost = false,
 ): Walk {
   if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
+  if (node.type === NodeType.TEST_COMMAND) {
+    // The shell's own test, judged as a command of its own name.
+    yield {
+      words: wordsOfTest(node, home),
+      redirects: statementRedirects(node, home),
+      stdin: statementStdin(node),
+      session,
+      occurrence: occurrenceIn(node, frame),
+      intrinsic: true,
+      lost,
+    }
+    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse, lost)
+    return [session, lost]
+  }
   if (node.type === NodeType.COMMAND) {
     let walked: [SessionState, boolean] = [session, lost]
     const words = wordsOf(node, home)
@@ -1189,7 +1210,13 @@ export function explainedLine(
   }
   const root = scopes.find((s) => s.parent === null) ?? { parent: null, source: line, judged: [] }
   const node = scopeNode('line', root, scopes, runtimeOf, reparse)
-  const held = verdicts.find((one) => one.judgment.exitCode !== 0 && isVerdict(one.judgment))
+  // The run holds a line only on a verdict the pass may give on the gate's
+  // behalf (`prejudgeLine`): a question about words the runtime completes
+  // (`find -exec`, `xargs`) is the gate's, asked where it runs, so it holds
+  // nothing here either.
+  const held = verdicts.find(
+    (one) => one.judgment.exitCode !== 0 && isVerdict(one.judgment) && asksFor(one),
+  )
   if (held !== undefined) {
     const judgment = held.judgment
     const [outcome, reason, source] = verdictOf(judgment)
@@ -1306,7 +1333,7 @@ function scopeNode(
   const convert = (node: TSNodeLike): (ShellNode | CommandExplanation)[] => {
     const start = node.startIndex ?? 0
     const end = node.endIndex ?? 0
-    if (node.type === NodeType.COMMAND) {
+    if (node.type === NodeType.COMMAND || node.type === NodeType.TEST_COMMAND) {
       const kids = take(start, end)
       const span = `${String(start)}:${String(end)}`
       const ones = mine.get(span) ?? []

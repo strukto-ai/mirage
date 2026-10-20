@@ -126,8 +126,9 @@ export async function handleTouch(
   const noCreate = fl.asBool('no_create')
 
   const errors: string[] = []
+  const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, operands)) {
-    if (fl.asBool('no_dereference') && namespace.isLink(target.virtual)) {
+    if (fl.asBool('no_dereference') && links.isLink(target.virtual)) {
       await setattrLink(dispatch, target, { mtime: stamp })
       continue
     }
@@ -153,7 +154,7 @@ export async function handleTouch(
     // words that refusal ("setting times of") differently from its
     // create-path one ("cannot touch").
     const slashed = target.rawPath.endsWith('/')
-    const unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => namespace.follow(v))
+    const unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => links.follow(v))
     if (unwalked !== null) {
       const action = slashed ? 'setting times of' : 'cannot touch'
       errors.push(`touch: ${action} '${target.rawPath}': ${String(fsStrerror(unwalked))}\n`)
@@ -161,7 +162,7 @@ export async function handleTouch(
     }
     let virtual: string
     try {
-      virtual = namespace.follow(target.virtual)
+      virtual = links.follow(target.virtual)
     } catch (err) {
       if (err instanceof CycleError) {
         const action = noCreate ? 'setting times of' : 'cannot touch'

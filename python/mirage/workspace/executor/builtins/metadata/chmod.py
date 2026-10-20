@@ -95,10 +95,9 @@ async def handle_chmod(
     report = verbosity(fl)
     errors: list[str] = []
     out: list[str] = []
+    links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, parsed.paths):
-        found = await resolve_operand(
-            namespace, dispatch, "chmod", target, errors
-        )
+        found = await resolve_operand(links, dispatch, "chmod", target, errors)
         if found is None:
             if report == "verbose":
                 out.append(
@@ -108,7 +107,7 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            entries = await walk_stats(namespace, dispatch, resolved, stat)
+            entries = await walk_stats(links, dispatch, resolved, stat)
         else:
             entries = [(resolved, stat)]
         for path, path_stat in entries:

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isProgramInvocation } from '../../../../context/session_context.ts'
+import { isProgramInvocation, runWithAdmission } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -22,8 +22,8 @@ import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { evalFlat } from './flat.ts'
 import { evalCond } from './tree.ts'
-import { CondError } from './types.ts'
-import type { CondContext, CondNode } from './types.ts'
+import { CondError, CondRefused } from './types.ts'
+import type { AdmitTest, CondContext, CondNode } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import { wordText } from '../../../../types.ts'
@@ -36,6 +36,12 @@ import { encodeText } from '../../../../shell/bytes.ts'
 /**
  * Evaluate test/[ (flat argv) or [[ (condition tree). `name` is the
  * invocation spelling used in diagnostics: "test", "[", or "[[".
+ *
+ * `[ ]` and `[[ ]]` are the shell's own tests, which no command gate
+ * admitted, so each is admitted here by its own name on what it tests
+ * (`admit`): `[`'s whole argv before it runs, each `[[` leaf as it is
+ * reached. A refusal is the test's answer, as it is `test`'s. `admit` is
+ * absent where the command was admitted already.
  */
 export async function handleTest(
   dispatch: DispatchFn,
@@ -44,6 +50,7 @@ export async function handleTest(
   session: SessionState,
   name = 'test',
   view?: SessionView,
+  admit?: AdmitTest,
 ): Promise<Result> {
   const links = linkView(
     new Files(
@@ -58,15 +65,28 @@ export async function handleTest(
     name,
     ...(view !== undefined ? { view } : {}),
     ...(links !== undefined ? { links } : {}),
+    ...(admit !== undefined ? { admit } : {}),
   }
   let code: number
   try {
     if (Array.isArray(args)) {
-      code = (await evalFlat(ctx, args)) ? 0 : 1
+      code = await flatStatus(ctx, args, admit)
     } else {
       code = await evalCond(ctx, args)
     }
   } catch (exc) {
+    if (exc instanceof CondRefused) {
+      return [
+        null,
+        new IOResult({ exitCode: exc.exitCode, stderr: exc.stderr, refusal: exc.refusal }),
+        new ExecutionNode({
+          command: name,
+          exitCode: exc.exitCode,
+          stderr: exc.stderr,
+          refused: true,
+        }),
+      ]
+    }
     if (!(exc instanceof CondError)) throw exc
     // The builtin's own diagnostic is in bash's voice; the program
     // (`find -exec test`) keeps its bare one.
@@ -88,6 +108,20 @@ export async function handleTest(
     new IOResult({ exitCode: code }),
     new ExecutionNode({ command: 'test', exitCode: code }),
   ]
+}
+
+/**
+ * The status of a flat test, admitted whole first where it has to be
+ * (`admit`, absent where the command was admitted already).
+ */
+async function flatStatus(
+  ctx: CondContext,
+  args: (string | PathSpec)[],
+  admit: AdmitTest | undefined,
+): Promise<number> {
+  if (admit === undefined) return (await evalFlat(ctx, args)) ? 0 : 1
+  const gate = await admit(args.map((a) => wordText(a)))
+  return runWithAdmission(gate, async () => ((await evalFlat(ctx, args)) ? 0 : 1))
 }
 
 /** The `test` / `[` / `[[` arm; `[` must close with `]`. */

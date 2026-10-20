@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.context import reset_admission, set_admission
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_escape, posix_regex
 from mirage.shell.array import make_array
@@ -37,6 +38,7 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondNot,
     CondOr,
     CondUnary,
+    CondWord,
 )
 from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
@@ -69,6 +71,39 @@ async def eval_cond(ctx: CondContext, node: CondNode) -> int:
         return 0 if left == 0 else await eval_cond(ctx, node.right)
     if isinstance(node, CondNot):
         return 0 if await eval_cond(ctx, node.inner) else 1
+    if ctx.admit is None:
+        return await _eval_leaf(ctx, node)
+    # A leaf is a test of its own, admitted on its words once they are
+    # expanded, which for a branch is only as it is reached.
+    token = set_admission(await ctx.admit(_leaf_words(node)))
+    try:
+        return await _eval_leaf(ctx, node)
+    finally:
+        reset_admission(token)
+
+
+def _leaf_words(node: CondUnary | CondBinary | CondWord) -> list[str]:
+    """A ``[[ ]]`` leaf as the words ``test`` would be given for it.
+
+    Args:
+        node (CondUnary | CondBinary | CondWord): the leaf.
+    """
+    if isinstance(node, CondUnary):
+        return [node.op, node.operand]
+    if isinstance(node, CondBinary):
+        return [node.left, node.op, node.right]
+    return [node.value]
+
+
+async def _eval_leaf(
+    ctx: CondContext, node: CondUnary | CondBinary | CondWord
+) -> int:
+    """Evaluate one test of a ``[[ ]]`` expression to its status.
+
+    Args:
+        ctx (CondContext): evaluation context.
+        node (CondUnary | CondBinary | CondWord): the test.
+    """
     if isinstance(node, CondUnary):
         if node.op not in UNARY_OPS:
             raise CondError("mirage: conditional unary operator expected")

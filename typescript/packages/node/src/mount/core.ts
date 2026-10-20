@@ -25,6 +25,7 @@ import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { classify } from '@struktoai/mirage-core/errors/index'
 import { FileStat, FileType, LIVE_KEY } from '@struktoai/mirage-core/types'
 import type { SetAttrFields } from '@struktoai/mirage-core/types'
+import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import {
@@ -660,7 +661,7 @@ export class MountCore {
     // An op on the entry itself (unlink, rename, lsetattr) names the link,
     // which may loop: only the links above it are followed.
     const resolved = (): string =>
-      follow ? reader.resolve(virtual) : reader.resolveParent(virtual)
+      follow ? posixNormpath(reader.follow(virtual)) : reader.followParent(virtual)
     // Judged as the bound session judges every op (`op`): outside it the
     // facade's session is the default one, whose profile may hide a link
     // this session's handles were opened through.

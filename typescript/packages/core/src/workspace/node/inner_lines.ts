@@ -47,6 +47,41 @@ export function readWord(node: TSNodeLike, home: string | null = null): Word {
   return { raw: getText(node), text: literalWord(node, home), glob: wordGlobs(node) }
 }
 
+// What a test's expression nests its words in, and the tokens that are no
+// word of it: its brackets.
+const TEST_NESTS: ReadonlySet<string> = new Set([
+  NT.BINARY_EXPRESSION,
+  NT.UNARY_EXPRESSION,
+  NT.NEGATION_EXPRESSION,
+  NT.PARENTHESIZED_EXPRESSION,
+  NT.ERROR,
+])
+const TEST_SKIPS: ReadonlySet<string> = new Set(['[', ']', '[[', ']]'])
+
+/**
+ * A `[ ]` or `[[ ]]` test as the command a reader of the line judges it as:
+ * its opener, then its operators and operands in source order, as the
+ * evaluator admits it. `home` is the home directory a leading tilde names.
+ * Mirrors Python's words_of_test.
+ */
+export function wordsOfTest(node: TSNodeLike, home: string | null = null): Word[] {
+  const opener = node.children[0]?.type === '[[' ? '[[' : '['
+  const words: Word[] = [{ raw: opener, text: opener }]
+  const stack = [...node.children].reverse()
+  for (let child = stack.pop(); child !== undefined; child = stack.pop()) {
+    if (TEST_SKIPS.has(child.type)) continue
+    if (TEST_NESTS.has(child.type)) {
+      stack.push(...[...child.children].reverse())
+    } else if (child.isNamed !== true || child.type === NT.TEST_OPERATOR) {
+      const text = getText(child)
+      words.push({ raw: text, text })
+    } else {
+      words.push(readWord(child, home))
+    }
+  }
+  return words
+}
+
 /** The text the gate works with: the literal when it has one, the word as typed otherwise. */
 export function wordValue(word: Word): string {
   return word.text ?? word.raw

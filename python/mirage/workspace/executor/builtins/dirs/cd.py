@@ -140,7 +140,7 @@ def _session_follow(
         dispatch (DispatchFn): op dispatcher.
         session (SessionState): the session changing directory.
     """
-    if not namespace.symlink_targets():
+    if not namespace.session_links(session).symlink_targets():
         return None
     links = link_view(
         Files(

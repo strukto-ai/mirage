@@ -77,7 +77,9 @@ async def path_kind(
     walk = PathSpec.from_str_path(val, cwd=ctx.session.cwd)
     if (
         await dot_refusal(
-            partial(dispatch_stat, ctx.dispatch), walk, ctx.namespace.follow
+            partial(dispatch_stat, ctx.dispatch),
+            walk,
+            ctx.namespace.session_links(ctx.session).follow,
         )
         is not None
     ):
@@ -125,7 +127,9 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # other thing that ends it.
             raise exc.signal(fatal=True) from exc
     if op in ("-L", "-h"):
-        where = operand_abs(ctx.namespace, val, ctx.session.cwd)
+        where = operand_abs(
+            ctx.namespace.session_links(ctx.session), val, ctx.session.cwd
+        )
         return ctx.links is not None and ctx.links.stat_at(where) is not None
     if op in FILE_UNARY:
         if not isinstance(val, PathSpec) and not text:

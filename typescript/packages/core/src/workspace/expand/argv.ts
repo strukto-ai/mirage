@@ -22,6 +22,7 @@ import { PathSpec, wordText } from '../../types.ts'
 import { hasGlob, literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
+import { TEST_NAMES, fileOperands } from '../executor/builtins/condition/operands.ts'
 import { commandTree } from '../executor/command/routing.ts'
 import { envSnapshot } from '../session/state.ts'
 import {
@@ -112,7 +113,7 @@ export async function expandArgv(
   executeFn: ExecuteFn,
   callStack: CallStack | null,
   registry: MountRegistry,
-  namespace: NamespaceLinks | null = null,
+  links: NamespaceLinks | null = null,
   view?: SessionView,
   routing?: RouteDecision<Runtime>,
 ): Promise<Argv> {
@@ -184,6 +185,11 @@ export async function expandArgv(
         wordBases = [...new Array<string | null>(consumed - 1).fill(null), ...bases]
       }
     }
+  } else if (TEST_NAMES.has(name)) {
+    // test reads its own words: the operand of a file operator is a file
+    // however it is spelled, as the gate reads it.
+    const leading: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
+    wordKinds = [...leading, ...fileOperands(lineWords.slice(consumed))]
   }
   const globOpts = globOptions(session)
   if (program) {
@@ -238,7 +244,7 @@ export async function expandArgv(
       globNeedsShell(globOpts) ||
       scopesPaths(session.commands, name) ||
       classified.some((w) => w instanceof PathSpec && w.pattern !== null && w.dotted !== null))
-      ? await resolveGlobs(classified, registry, false, namespace, globOpts)
+      ? await resolveGlobs(classified, registry, false, links, globOpts)
       : // A pattern still owes its backend a resolution, so it travels
         // marked and the marks come off there; every other word is done
         // with its quoting and reads literally from here on.

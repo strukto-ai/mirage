@@ -17,7 +17,9 @@ import base64
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
+from mirage.context.session_context import get_current_session
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     LINK_TARGET_KEY,
@@ -34,6 +36,9 @@ from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
 from mirage.workspace.mount.registry import MountRegistry
+
+if TYPE_CHECKING:
+    from mirage.workspace.session.session import SessionState
 
 
 class NodeMetaKey(StrEnum):
@@ -214,6 +219,23 @@ class Namespace:
             )
 
         return reader
+
+    def session_links(
+        self, session: "SessionState | None" = None
+    ) -> NamespaceReader:
+        """The link table as one session sees it (``NamespaceReader``),
+        the one every reader above the dispatcher follows a link through:
+        a link the session cannot see is no link to any command, so none
+        resolves, copies or reports a hidden one.
+
+        Args:
+            session (SessionState | None): the session; None for the
+                one the current context runs as.
+        """
+        bound = session if session is not None else get_current_session()
+        return self.readers(
+            lambda _session: None if bound is None else bound.visibility
+        )(None if bound is None else bound.session_id)
 
     @property
     def nodes(self) -> dict[str, NodeMeta]:
@@ -466,7 +488,9 @@ class Namespace:
             return True
         return False
 
-    async def unlink_glob(self, pattern: str) -> int:
+    async def unlink_glob(
+        self, pattern: str, keep: frozenset[str] = frozenset()
+    ) -> int:
         """Drop node entries matching an unexpanded glob operand.
 
         ``rm`` receives the pattern verbatim (backend wrappers expand
@@ -475,12 +499,15 @@ class Namespace:
 
         Args:
             pattern (str): absolute virtual glob pattern.
+            keep (frozenset[str]): matching entries that survive.
 
         Returns:
             int: number of entries dropped.
         """
         doomed = [
-            path for path in self._nodes if glob_prefix_match(path, pattern)
+            path
+            for path in self._nodes
+            if glob_prefix_match(path, pattern) and path not in keep
         ]
         for path in doomed:
             del self._nodes[path]

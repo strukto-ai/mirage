@@ -12,20 +12,50 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.builtins.condition.condition import handle_test
-from mirage.workspace.executor.builtins.condition.flat import eval_flat
-from mirage.workspace.executor.builtins.condition.tree import eval_cond
-from mirage.workspace.executor.builtins.condition.types import (
-    CondAnd,
-    CondBinary,
-    CondContext,
-    CondError,
-    CondNode,
-    CondNot,
-    CondOr,
-    CondUnary,
-    CondWord,
-)
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.builtins.condition.condition import (
+        handle_test,
+    )
+    from mirage.workspace.executor.builtins.condition.flat import eval_flat
+    from mirage.workspace.executor.builtins.condition.tree import eval_cond
+    from mirage.workspace.executor.builtins.condition.types import (
+        CondAnd,
+        CondBinary,
+        CondContext,
+        CondError,
+        CondNode,
+        CondNot,
+        CondOr,
+        CondUnary,
+        CondWord,
+    )
+
+# Loaded on first use, as the builtins package loads its own: the gate
+# reads test's operands (``operands``) from below the evaluator, which
+# reaches back into the expansion that reads them.
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.builtins.condition.condition": ("handle_test",),
+    "mirage.workspace.executor.builtins.condition.flat": ("eval_flat",),
+    "mirage.workspace.executor.builtins.condition.tree": ("eval_cond",),
+    "mirage.workspace.executor.builtins.condition.types": (
+        "CondAnd",
+        "CondBinary",
+        "CondContext",
+        "CondError",
+        "CondNode",
+        "CondNot",
+        "CondOr",
+        "CondUnary",
+        "CondWord",
+    ),
+}
+
+_MODULE_OF = {
+    name: module for module, names in _EXPORTS.items() for name in names
+}
 
 __all__ = [
     "CondAnd",
@@ -41,3 +71,12 @@ __all__ = [
     "eval_flat",
     "handle_test",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _MODULE_OF.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

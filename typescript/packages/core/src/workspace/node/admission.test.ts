@@ -679,3 +679,80 @@ describe('what the handler a command resolves to declares', () => {
     expect(paths['scan /other/s']).toEqual(['/other/s'])
   })
 })
+
+// `[ ]` and `[[ ]]` are the shell's own tests, which no command gate sees,
+// so each is admitted by its own name on what it tests, as `test` is: a path
+// rule reads a file operand however it is spelled, and an allow list answers
+// each name for itself.
+describe("the shell's own tests", () => {
+  const spell = (name: string, expr: string): string =>
+    name === 'test' ? `test ${expr}` : `${name} ${expr} ${name === '[' ? ']' : ']]'}`
+
+  async function run(profile: object, name: string, prefix: string, expr: string) {
+    const w = await ws(null)
+    await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
+    w.createSession('s', { profile: profile as SessionProfile })
+    const r = await w.shell(`${prefix}${spell(name, expr)}; echo $?`, { sessionId: 's' })
+    return [r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr)]
+  }
+
+  const DENY = { commands: { deny: [{ reason: 'secret', paths: ['/data/secret.txt'] }] } }
+
+  it.each(['test', '[', '[['])('%s reads a file operand as a path rule does', async (name) => {
+    expect(await run(DENY, name, 'cd /data && ', '-e secret.txt')).toEqual([
+      1,
+      '',
+      `${name}: secret.txt: Permission denied\n`,
+    ])
+    expect(await run(DENY, name, '', '-e /data/secret.txt')).toEqual([
+      1,
+      '',
+      `${name}: /data/secret.txt: Permission denied\n`,
+    ])
+    expect(await run(DENY, name, 'cd /data && ', 'a.txt -nt secret.txt')).toEqual([
+      1,
+      '',
+      `${name}: secret.txt: Permission denied\n`,
+    ])
+    expect(await run(DENY, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
+  })
+
+  it.each(['test', '['])('%s compares a file operator on the left as a string', async (name) => {
+    expect(await run(DENY, name, 'cd /data && ', '-e = secret.txt')).toEqual([0, '1\n', ''])
+  })
+
+  it('[[ admits each leaf', async () => {
+    // The line's reader sees every literal leaf, so a ruled one holds the line
+    // as `test -e a -o -e b` would.
+    for (const expr of ['-e a.txt || -e secret.txt', '-e nope || -e secret.txt']) {
+      expect(await run(DENY, '[[', 'cd /data && ', expr)).toEqual([
+        1,
+        '',
+        '[[: secret.txt: Permission denied\n',
+      ])
+    }
+    // A leaf only the run can expand is admitted where it is reached, and a
+    // branch never reached is never admitted.
+    expect(await run(DENY, '[[', 'cd /data && x=secret.txt && ', '-e nope || -e $x')).toEqual([
+      0,
+      '1\n',
+      '[[: secret.txt: Permission denied\n',
+    ])
+    expect(await run(DENY, '[[', 'cd /data && x=secret.txt && ', '-e a.txt || -e $x')).toEqual([
+      0,
+      '0\n',
+      '',
+    ])
+  })
+
+  it.each(['test', '[', '[['])('%s is answered by its own name in an allow list', async (name) => {
+    const without = { commands: { allow: ['echo', 'cd'] } }
+    expect(await run(without, name, 'cd /data && ', '-e a.txt')).toEqual([
+      0,
+      '126\n',
+      `${name}: Permission denied\n`,
+    ])
+    const listed = { commands: { allow: ['echo', 'cd', name] } }
+    expect(await run(listed, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
+  })
+})

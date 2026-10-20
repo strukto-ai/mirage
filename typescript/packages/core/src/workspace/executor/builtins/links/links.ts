@@ -15,22 +15,19 @@
 import { destKind } from '../../../../commands/builtin/generic/cp.ts'
 import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
-import type { Visibility, FileStat } from '../../../../types.ts'
+import type { FileStat } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { fsStrerror, isDotWalkError, isEnoent, isFsError } from '../../../../errors/fs.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { sessionVisibility } from '../../../../context/session_context.ts'
-import { pathVisible } from '../../../../utils/hidden.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { fail } from '../shared.ts'
 import { dispatchStat, walkSpelling } from '../../../../commands/builtin/utils/paths.ts'
 import { statOrNull } from '../../../mount/namespace/probe.ts'
 import type { Result } from '../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
-import type { FollowOperands } from '../../../../view/types.ts'
+import type { FollowOperands, NamespaceLinks } from '../../../../view/types.ts'
 import { SLASH_KEEPS_LAST, followsLastComponent, lsLinkMode } from '../../../lookup/constants.ts'
 
 export function posixRelative(target: string, startDir: string): string {
@@ -48,12 +45,13 @@ export function posixRelative(target: string, startDir: string): string {
 // resolved on the way to it, while `stat dlink` reports the link. A
 // no-follow command therefore still needs its operand's prefix
 // resolved. The walk is the namespace's (`Namespace.followParent`, which
-// the dispatcher runs for every surface); the operand comes back without a
+// the dispatcher runs for every surface), read through the session's link
+// table (`Namespace.sessionLinks`); the operand comes back without a
 // trailing slash, which the slash-keeping commands read off `rawPath`
 // instead. Throws CycleError on ELOOP.
-function followParent(namespace: Namespace, virtual: string): string {
+function followParent(links: NamespaceLinks, virtual: string): string {
   const trimmed = rstripSlash(virtual)
-  return trimmed === '' ? virtual : namespace.followParent(trimmed)
+  return trimmed === '' ? virtual : links.followParent(trimmed)
 }
 
 // Rewrite path operands through the symlink table (open(2) semantics).
@@ -69,27 +67,26 @@ function followParent(namespace: Namespace, virtual: string): string {
 // dispatch. A path a link loop stands in resolves to nothing, so it stays
 // as typed with `walkError` set, and the op that reaches it answers ELOOP:
 // GNU reports the one operand in the command's own words and goes on to
-// the next.
+// the next. A path the line's session cannot see stays as typed too, so the
+// op that reaches it answers ENOENT rather than reading through a hidden
+// link: `links` is the session's link table (`Namespace.sessionLinks`).
 export function followPaths(
-  namespace: Namespace,
+  links: NamespaceLinks,
   items: (string | PathSpec)[],
   followLast = true,
   slashFollows = true,
-  vis: Visibility | null = sessionVisibility(),
 ): (string | PathSpec)[] {
   const out: (string | PathSpec)[] = []
   for (const item of items) {
-    // A path the line's session cannot see stays as typed, so the op that
-    // reaches it answers ENOENT rather than reading through a hidden link.
-    if (!(item instanceof PathSpec) || !pathVisible(vis, item.virtual)) {
+    if (!(item instanceof PathSpec)) {
       out.push(item)
       continue
     }
     const last = followLast || (slashFollows && item.rawPath.endsWith('/'))
     let followed: string
     try {
-      const spelled = walkSpelling(item, (path) => namespace.follow(path))
-      followed = last ? namespace.follow(spelled) : followParent(namespace, spelled)
+      const spelled = walkSpelling(item, (path) => links.follow(path))
+      followed = last ? links.follow(spelled) : followParent(links, spelled)
     } catch (err) {
       if (!(err instanceof CycleError)) throw err
       out.push(
@@ -188,7 +185,7 @@ export function acceptsLine(
 export async function stripLinkOperands(
   name: string,
   dispatch: DispatchFn,
-  namespace: Namespace,
+  links: NamespaceLinks,
   items: (string | PathSpec)[],
   args: readonly string[],
   cwd: string,
@@ -206,7 +203,7 @@ export async function stripLinkOperands(
   const errors: string[] = []
   const kept: (string | PathSpec)[] = []
   for (const item of items) {
-    if (item instanceof PathSpec && !item.rawPath.endsWith('/') && namespace.isLink(item.virtual)) {
+    if (item instanceof PathSpec && !item.rawPath.endsWith('/') && links.isLink(item.virtual)) {
       handled += 1
       try {
         await dispatch('unlink', item)
@@ -232,7 +229,7 @@ export async function stripLinkOperands(
 // follows mv's own order, source stat before destination type before the
 // rename itself, and all four are pinned against GNU coreutils 9.7.
 async function slashedLinkRefusal(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   src: PathSpec,
   dst: PathSpec,
@@ -240,7 +237,7 @@ async function slashedLinkRefusal(
 ): Promise<Result> {
   let followed: string
   try {
-    followed = namespace.follow(src.virtual)
+    followed = links.follow(src.virtual)
   } catch (err) {
     if (!(err instanceof CycleError)) throw err
     return fail('mv', `mv: cannot stat '${src.rawPath}': ${posixPhrase('ELOOP')}\n`)
@@ -275,18 +272,17 @@ async function slashedLinkRefusal(
  * operand's prefix. Mirrors Python's follow_directory_links.
  */
 export async function followDirectoryLinks(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   items: readonly (string | PathSpec)[],
-  vis: Visibility | null,
 ): Promise<(string | PathSpec)[]> {
   const out: (string | PathSpec)[] = []
   for (const item of items) {
-    if (!(item instanceof PathSpec) || item.walkError !== null || !namespace.isLink(item.virtual)) {
+    if (!(item instanceof PathSpec) || item.walkError !== null || !links.isLink(item.virtual)) {
       out.push(item)
       continue
     }
-    const followed = followPaths(namespace, [item], true, true, vis)[0]
+    const followed = followPaths(links, [item])[0]
     let target: FileStat | null = null
     if (followed instanceof PathSpec && followed.walkError === null) {
       try {
@@ -325,19 +321,18 @@ export async function followDirectoryLinks(
  * Mirrors Python's operand_follow.
  */
 export function operandFollow(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   name: string,
   words: readonly (string | PathSpec)[],
-  vis: Visibility | null,
 ): FollowOperands {
   const lsMode = name === 'ls' ? lsLinkMode(words) : null
   const followLast = lsMode !== null ? lsMode === 'all' : followsLastComponent(name, words)
   const slashFollows = !SLASH_KEEPS_LAST.has(name)
   return async (items) => {
-    if (namespace.symlinkTargets().size === 0) return [...items]
-    const out = followPaths(namespace, [...items], followLast, slashFollows, vis)
-    return lsMode === 'directory' ? followDirectoryLinks(namespace, dispatch, out, vis) : out
+    if (links.symlinkTargets().size === 0) return [...items]
+    const out = followPaths(links, [...items], followLast, slashFollows)
+    return lsMode === 'directory' ? followDirectoryLinks(links, dispatch, out) : out
   }
 }
 
@@ -348,12 +343,11 @@ export interface PreparedMv {
 
 /** Resolve the destination directory without transferring any source. */
 export async function prepareMv(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   items: (string | PathSpec)[],
   args: readonly string[],
   cwd: string,
-  vis: Visibility | null,
 ): Promise<PreparedMv> {
   const paths = items.filter((p): p is PathSpec => p instanceof PathSpec)
   const spec = SPECS.mv
@@ -361,14 +355,14 @@ export async function prepareMv(
   const fl = new FlagView(parseToKwargs(parseCommand(spec, [...args], cwd, 'mv')), spec)
   const target = fl.raw('target_directory')
   if (target !== undefined || paths.length > 2) {
-    return prepareMany(namespace, items, paths, target, vis)
+    return prepareMany(links, items, paths, target)
   }
   const src = paths[0]
   const dst = paths[1]
   if (paths.length !== 2 || src === undefined || dst === undefined) {
     return { items, early: null }
   }
-  return preparePair(namespace, dispatch, items, src, dst, fl, vis)
+  return preparePair(links, dispatch, items, src, dst, fl)
 }
 
 function landingKey(path: string): string {
@@ -387,11 +381,10 @@ function landingKey(path: string): string {
  * Mirrors Python's _prepare_many.
  */
 function prepareMany(
-  namespace: Namespace,
+  links: NamespaceLinks,
   items: (string | PathSpec)[],
   paths: readonly PathSpec[],
   target: FlagValue | undefined,
-  vis: Visibility | null,
 ): PreparedMv {
   let dst: PathSpec | undefined
   if (target !== undefined) {
@@ -407,7 +400,7 @@ function prepareMany(
   if (dst?.walkError !== null) {
     return { items, early: null }
   }
-  const followed = followPaths(namespace, [dst], true, true, vis)[0]
+  const followed = followPaths(links, [dst])[0]
   if (!(followed instanceof PathSpec)) return { items, early: null }
   const rewritten = items.map((item) => (item === dst ? followed : item))
   return { items: rewritten, early: null }
@@ -416,27 +409,26 @@ function prepareMany(
 // A two-operand `mv`: one source and the destination it replaces or lands
 // inside. Mirrors Python's _prepare_pair.
 async function preparePair(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   items: (string | PathSpec)[],
   src: PathSpec,
   dst: PathSpec,
   fl: FlagView,
-  vis: Visibility | null,
 ): Promise<PreparedMv> {
   if (src.walkError !== null || dst.walkError !== null) {
     // The walk refused the operand, so there is no entry to move or land
     // on; the generic mv reports it through its own stat, which cannot see
     // a link source. A link is a non-directory, and GNU stats an empty
     // destination as a directory (see mvGeneric).
-    if (dst.rawPath === '' && src.walkError === null && namespace.isLink(src.virtual)) {
+    if (dst.rawPath === '' && src.walkError === null && links.isLink(src.virtual)) {
       const early = fail(
         'mv',
         `mv: cannot overwrite directory '' with non-directory '${src.rawPath}'\n`,
       )
       return { items, early }
     }
-    if (dst.walkError === 'ELOOP' && src.walkError === null && namespace.isLink(src.virtual)) {
+    if (dst.walkError === 'ELOOP' && src.walkError === null && links.isLink(src.virtual)) {
       const early = fail('mv', `mv: cannot stat '${dst.rawPath}': ${posixPhrase('ELOOP')}\n`)
       return { items, early }
     }
@@ -450,7 +442,7 @@ async function preparePair(
   // rename replaces the link itself (GNU 9.7).
   let followed: string | null
   try {
-    followed = namespace.follow(dst.virtual)
+    followed = links.follow(dst.virtual)
   } catch (err) {
     if (!(err instanceof CycleError)) throw err
     followed = null
@@ -458,9 +450,9 @@ async function preparePair(
   const stat = followed === null ? null : await statOrNull(dispatch, PathSpec.fromStrPath(followed))
   const intoDir =
     !fl.asBool('no_target_directory') && stat !== null && stat.type === FileType.DIRECTORY
-  if (namespace.isLink(src.virtual)) {
+  if (links.isLink(src.virtual)) {
     if (src.rawPath.endsWith('/')) {
-      const early = await slashedLinkRefusal(namespace, dispatch, src, dst, stat)
+      const early = await slashedLinkRefusal(links, dispatch, src, dst, stat)
       return { items, early }
     }
     if (!intoDir && dst.rawPath.endsWith('/')) {
@@ -483,10 +475,8 @@ async function preparePair(
   }
 
   const rewritten =
-    intoDir && namespace.isLink(dst.virtual)
-      ? items.map((item) =>
-          item === dst ? (followPaths(namespace, [dst], true, true, vis)[0] ?? dst) : item,
-        )
+    intoDir && links.isLink(dst.virtual)
+      ? items.map((item) => (item === dst ? (followPaths(links, [dst])[0] ?? dst) : item))
       : items
   return { items: rewritten, early: null }
 }

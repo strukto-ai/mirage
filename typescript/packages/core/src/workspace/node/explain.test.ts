@@ -341,6 +341,27 @@ describe('explain', () => {
     expect(w.decisions.pending()).toEqual([])
   })
 
+  it('holds no line on a question the gate asks where it runs', async () => {
+    // find -exec hands cat words the runtime completes, so the run leaves
+    // cat's question to the gate where it runs and holds nothing; explain
+    // says the same rather than a hold the run never makes.
+    const w = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(w)
+    await w.shell('echo a > /data/a.txt; echo s > /data/secret.txt')
+    w.createSession('s', {
+      profile: { commands: { ask: [{ reason: 'nod', paths: ['/data/secret.txt'] }] } },
+    })
+    const line = 'find /data -name a.txt -exec cat /data/secret.txt \\;'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.exitCode, said.outcome]).toEqual([0, Outcome.ALLOW])
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([0, 'cat: Permission denied\n'])
+    expect(w.decisions.pending()).toHaveLength(1)
+  })
+
   it('moves what later rules read when the line begins with a cd', async () => {
     // The line is judged before it runs, so the pass has to walk a
     // literal `cd` itself or a rule about /data/prod would answer about

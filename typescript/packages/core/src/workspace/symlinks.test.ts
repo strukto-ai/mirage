@@ -1504,3 +1504,80 @@ it('ls -RL lists a link to an empty directory', async () => {
   expect(dec(r.stdout)).toBe('t:\ne\nl\n\nt/e:\n\nt/l:\n')
   await ws.close()
 })
+
+// A link that leads where a session cannot see is no link to it, for every
+// command that reads links: each line answers as it does with the link truly
+// gone. The lines name the link by its own visible name, so only the
+// session's link table (`Namespace.sessionLinks`) tells them apart.
+const INTO_A_HIDE: [string, string, string][] = [
+  [
+    'readlink -f /data/box/lnk; echo $?; readlink -m /data/box/lnk; echo $?',
+    '/data/box/lnk\n0\n/data/box/lnk\n0\n',
+    '',
+  ],
+  [
+    'ln /data/box/lnk /data/hard; echo $?',
+    '1\n',
+    "ln: failed to access '/data/box/lnk': No such file or directory\n",
+  ],
+  ['chown -R 1000 /data/box; echo $?; chgrp -R 1000 /data/box; echo $?', '0\n0\n', ''],
+  [
+    'find /data/box -newer /data/box/lnk; echo $?',
+    '1\n',
+    "find: '/data/box/lnk': No such file or directory\n",
+  ],
+]
+
+async function box(hidden: boolean): Promise<Workspace> {
+  const ws = buildWorkspace()
+  await ws.shell('mkdir -p /data/box /data/vault; echo pub > /data/box/f')
+  if (hidden) {
+    await ws.shell('echo s > /data/vault/s.txt; ln -s /data/vault/s.txt /data/box/lnk')
+  }
+  ws.createSession('agent', { profile: { paths: { hide: ['/data/vault'] } } })
+  return ws
+}
+
+it.each(INTO_A_HIDE)(
+  'a link into a hide answers as an absent name: %s',
+  async (line, stdout, stderr) => {
+    const hidden = await box(true)
+    const absent = await box(false)
+    const got = await hidden.shell(line, { sessionId: 'agent' })
+    const want = await absent.shell(line, { sessionId: 'agent' })
+    const seen = [dec(got.stdout), dec(got.stderr)]
+    expect(seen).toEqual([dec(want.stdout), dec(want.stderr)])
+    expect(seen).toEqual([stdout, stderr])
+    expect(hidden.namespace.readlink('/data/box/lnk')).toBe('/data/vault/s.txt')
+    expect(hidden.namespace.isLink('/data/hard')).toBe(false)
+    await hidden.close()
+    await absent.close()
+  },
+)
+
+it('touch -h meets a link into a hide as a name it cannot write', async () => {
+  // A write to a name the session cannot see is refused the way any hidden
+  // name is, the link keeps its row, and the line goes on.
+  const ws = await box(true)
+  const before = ws.namespace.linkStatAt('/data/box/lnk')
+  const r = await ws.shell('touch -h /data/box/lnk; echo $?', { sessionId: 'agent' })
+  expect(dec(r.stdout)).toBe('1\n')
+  expect(dec(r.stderr)).toBe("touch: cannot touch '/data/box/lnk': No such file or directory\n")
+  expect(ws.namespace.linkStatAt('/data/box/lnk')).toEqual(before)
+  await ws.close()
+})
+
+it.each(['rm -f /data/lk.sec', 'rm -f /data/*.sec', 'rm -rf /data/*'])(
+  'rm leaves a hidden link it never met: %s',
+  async (line) => {
+    // rm met the hidden name as absent, so it removed nothing there, and the
+    // node table keeps the link the session cannot see.
+    const ws = buildWorkspace()
+    await ws.shell('echo b > /data/f.txt; ln -s f.txt /data/lk.sec')
+    ws.createSession('agent', { profile: { paths: { hide: ['/data/lk.sec'] } } })
+    const r = await ws.shell(line, { sessionId: 'agent' })
+    expect(r.exitCode).toBe(0)
+    expect(ws.namespace.readlink('/data/lk.sec')).toBe('f.txt')
+    await ws.close()
+  },
+)

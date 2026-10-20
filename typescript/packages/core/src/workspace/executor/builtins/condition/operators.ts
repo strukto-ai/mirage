@@ -53,7 +53,9 @@ async function pathKind(
   // every file test reads as false.
   const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
   if (
-    (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) => ctx.namespace.follow(v))) !== null
+    (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) =>
+      ctx.namespace.sessionLinks(ctx.session).follow(v),
+    )) !== null
   ) {
     return [null, null]
   }
@@ -94,7 +96,7 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    const where = operandAbs(ctx.namespace, val, ctx.session.cwd, ctx.session.visibility)
+    const where = operandAbs(ctx.namespace.sessionLinks(ctx.session), val, ctx.session.cwd)
     return ctx.links !== undefined && ctx.links.statAt(where) !== null
   }
   if (FILE_UNARY.has(op)) {

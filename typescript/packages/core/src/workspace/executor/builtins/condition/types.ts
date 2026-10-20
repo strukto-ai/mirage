@@ -16,6 +16,9 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import type { LinkView, SessionView } from '../../../../view/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { EntryGate } from '../../../../policy/types.ts'
+import type { Refusal } from '../../../../types.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 
 interface CondLazy {
   kind: 'lazy'
@@ -49,6 +52,28 @@ export class CondError extends Error {
   }
 }
 
+/**
+ * The gate refused a `[ ]` or a `[[ ]]` leaf: it answers that refusal, as
+ * `test` refused whole does. `stderr` is the refusal's message,
+ * newline-terminated; `exitCode` the status it answers with; `refusal` the
+ * record the result carries.
+ */
+export class CondRefused extends Error {
+  constructor(
+    readonly stderr: Uint8Array,
+    readonly exitCode: number,
+    readonly refusal: Refusal | null,
+  ) {
+    super(decodeText(stderr))
+  }
+}
+
+/**
+ * Admits the words of a test as its own command, returning the gate its own
+ * I/O runs under; throws `CondRefused`.
+ */
+export type AdmitTest = (words: string[]) => Promise<EntryGate>
+
 export interface CondContext {
   dispatch: DispatchFn
   namespace: Namespace
@@ -59,4 +84,8 @@ export interface CondContext {
   view?: SessionView
   // The links as this session sees them: a hidden link is no link.
   links?: LinkView
+  // Admits each `[[ ]]` leaf as it is evaluated, its branches expanding only
+  // then; absent where the words were admitted whole before the test ran
+  // (`test`, `[`).
+  admit?: AdmitTest
 }

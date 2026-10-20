@@ -333,6 +333,31 @@ async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
 
 
 @pytest.mark.asyncio
+async def test_a_question_the_gate_asks_where_it_runs_holds_no_line():
+    # find -exec hands cat words the runtime completes, so the run
+    # leaves cat's question to the gate where it runs and holds nothing;
+    # explain says the same rather than a hold the run never makes.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/data/a.txt", b"a\n")
+    await ws.vfs.write("/data/secret.txt", b"s\n")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {
+                "ask": [{"reason": "nod", "paths": ["/data/secret.txt"]}]
+            }
+        },
+    )
+    line = "find /data -name a.txt -exec cat /data/secret.txt \\;"
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (said.exit_code, said.outcome) == (0, Outcome.ALLOW)
+    assert (ran.exit_code, ran.stderr) == (0, b"cat: Permission denied\n")
+    assert len(ws.decisions.pending()) == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_cd_earlier_in_the_line_moves_what_later_rules_read(ws):
     # The line is judged before it runs, so the pass has to walk a
     # literal `cd` itself or a rule about /data/prod would answer about

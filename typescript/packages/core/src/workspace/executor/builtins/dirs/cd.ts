@@ -82,7 +82,7 @@ function sessionFollow(
   dispatch: DispatchFn,
   session: SessionState,
 ): ((path: string) => string) | null {
-  if (namespace.symlinkTargets().size === 0) return null
+  if (namespace.sessionLinks(session).symlinkTargets().size === 0) return null
   const links = linkView(
     new Files(
       dispatch,

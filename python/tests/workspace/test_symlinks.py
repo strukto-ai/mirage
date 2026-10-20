@@ -1853,3 +1853,86 @@ async def test_ls_rl_lists_a_link_to_an_empty_directory():
     r = await ws.shell("cd /data && ls -RL t")
     assert r.stdout == b"t:\ne\nl\n\nt/e:\n\nt/l:\n"
     await ws.close()
+
+
+# A link that leads where a session cannot see is no link to it, for every
+# command that reads links: each line answers as it does with the link
+# truly gone. The lines name the link by its own visible name, so only
+# the session's link table (`Namespace.session_links`) tells them apart.
+INTO_A_HIDE = [
+    (
+        "readlink -f /data/box/lnk; echo $?; readlink -m /data/box/lnk; echo $?",
+        b"/data/box/lnk\n0\n/data/box/lnk\n0\n",
+        b"",
+    ),
+    (
+        "ln /data/box/lnk /data/hard; echo $?",
+        b"1\n",
+        b"ln: failed to access '/data/box/lnk': No such file or directory\n",
+    ),
+    (
+        "chown -R 1000 /data/box; echo $?; chgrp -R 1000 /data/box; echo $?",
+        b"0\n0\n",
+        b"",
+    ),
+    (
+        "find /data/box -newer /data/box/lnk; echo $?",
+        b"1\n",
+        b"find: '/data/box/lnk': No such file or directory\n",
+    ),
+]
+
+
+async def _box(hidden: bool) -> Workspace:
+    ws = _ws()
+    await ws.shell("mkdir -p /data/box /data/vault; echo pub > /data/box/f")
+    if hidden:
+        await ws.shell(
+            "echo s > /data/vault/s.txt; ln -s /data/vault/s.txt /data/box/lnk"
+        )
+    ws.create_session("agent", profile={"paths": {"hide": ["/data/vault"]}})
+    return ws
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("line", "stdout", "stderr"), INTO_A_HIDE)
+async def test_a_link_into_a_hide_answers_as_an_absent_name(
+    line, stdout, stderr
+):
+    hidden, absent = await _box(True), await _box(False)
+    got = await hidden.shell(line, session_id="agent")
+    want = await absent.shell(line, session_id="agent")
+    seen = (got.stdout, got.stderr or b"")
+    assert seen == (want.stdout, want.stderr or b"")
+    assert seen == (stdout, stderr)
+    assert hidden.namespace.readlink("/data/box/lnk") == "/data/vault/s.txt"
+    assert not hidden.namespace.is_link("/data/hard")
+
+
+@pytest.mark.asyncio
+async def test_touch_h_meets_a_link_into_a_hide_as_a_name_it_cannot_write():
+    # A write to a name the session cannot see is refused the way any
+    # hidden name is, the link keeps its row, and the line goes on.
+    ws = await _box(True)
+    before = ws.namespace.link_stat_at("/data/box/lnk")
+    r = await ws.shell("touch -h /data/box/lnk; echo $?", session_id="agent")
+    assert r.stdout == b"1\n"
+    assert r.stderr == (
+        b"touch: cannot touch '/data/box/lnk': No such file or directory\n"
+    )
+    assert ws.namespace.link_stat_at("/data/box/lnk") == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["rm -f /data/lk.sec", "rm -f /data/*.sec", "rm -rf /data/*"]
+)
+async def test_rm_leaves_a_hidden_link_it_never_met(line):
+    # rm met the hidden name as absent, so it removed nothing there, and
+    # the node table keeps the link the session cannot see.
+    ws = _ws()
+    await ws.shell("echo b > /data/f.txt; ln -s f.txt /data/lk.sec")
+    ws.create_session("agent", profile={"paths": {"hide": ["/data/lk.sec"]}})
+    r = await ws.shell(line, session_id="agent")
+    assert r.exit_code == 0
+    assert ws.namespace.readlink("/data/lk.sec") == "f.txt"

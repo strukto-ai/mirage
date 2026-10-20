@@ -67,6 +67,46 @@ def read_word(node: TSNodeLike, home: str | None = None) -> Word:
     return Word(get_text(node), literal_word(node, home), _word_globs(node))
 
 
+# What a test's expression nests its words in, and the tokens that are
+# no word of it: its brackets.
+_TEST_NESTS = frozenset(
+    {
+        NT.BINARY_EXPRESSION,
+        NT.UNARY_EXPRESSION,
+        NT.NEGATION_EXPRESSION,
+        NT.PARENTHESIZED_EXPRESSION,
+        NT.ERROR,
+    }
+)
+_TEST_SKIPS = frozenset({"[", "]", "[[", "]]"})
+
+
+def words_of_test(node: TSNodeLike, home: str | None = None) -> list[Word]:
+    """A ``[ ]`` or ``[[ ]]`` test as the command a reader of the line
+    judges it as: its opener, then its operators and operands in source
+    order, as the evaluator admits it.
+
+    Args:
+        node (TSNodeLike): the test_command node.
+        home (str | None): the home directory a leading tilde names.
+    """
+    opener = "[[" if node.children and node.children[0].type == "[[" else "["
+    words = [Word(opener, opener)]
+    stack = list(reversed(node.children))
+    while stack:
+        child = stack.pop()
+        if child.type in _TEST_SKIPS:
+            continue
+        if child.type in _TEST_NESTS:
+            stack.extend(reversed(child.children))
+        elif not child.is_named or child.type == NT.TEST_OPERATOR:
+            text = get_text(child)
+            words.append(Word(text, text))
+        else:
+            words.append(read_word(child, home))
+    return words
+
+
 @dataclass(frozen=True, slots=True)
 class InnerLine:
     """A line a command runs on the words it was given.

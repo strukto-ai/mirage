@@ -471,7 +471,6 @@ describe('mv re-anchors what the node table holds', () => {
         items,
         ['a', 'b', 'dlink'],
         '/data',
-        null,
       )
       expect(prepared.early).toBeNull()
       const dst = prepared.items[prepared.items.length - 1]
@@ -499,7 +498,6 @@ describe('mv re-anchors what the node table holds', () => {
         [link, PathSpec.fromStrPath('/data/a'), PathSpec.fromStrPath('/data/dst')],
         ['/data/l', '/data/a', '/data/dst'],
         '/',
-        null,
       )
       expect(prepared.early).toBeNull()
       expect(prepared.items).toContain(link)

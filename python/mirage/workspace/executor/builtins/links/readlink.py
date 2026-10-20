@@ -103,11 +103,9 @@ async def handle_readlink(
         newline = True
     lines: list[str] = []
     exit_code = 0
-    reader = namespace.readers(lambda _session: session.visibility)(
-        session.session_id
-    )
+    links = namespace.session_links(session)
     for op in operands:
-        abs_op = operand_abs(namespace, op, session.cwd)
+        abs_op = operand_abs(links, op, session.cwd)
         spec = PathSpec.from_str_path(op, cwd=session.cwd)
         # The link entry is namespace state behind the dispatcher: session
         # grants and admission policies decide whether this session may
@@ -116,7 +114,7 @@ async def handle_readlink(
         # all land on GNU readlink's exit 1, said only under -v.
         try:
             if mode is not None:
-                if namespace.is_link(abs_op):
+                if links.is_link(abs_op):
                     await dispatch("readlink", PathSpec.from_str_path(abs_op))
                 lines.append(
                     await canonicalize(
@@ -124,7 +122,7 @@ async def handle_readlink(
                         session.cwd,
                         mode,
                         False,
-                        reader.readlink,
+                        links.readlink,
                         partial(dispatch_stat, dispatch),
                     )
                 )
@@ -133,7 +131,7 @@ async def handle_readlink(
                 walk_refusal(spec)
                 if spec.walk_error is not None
                 else await dot_refusal(
-                    partial(dispatch_stat, dispatch), spec, namespace.follow
+                    partial(dispatch_stat, dispatch), spec, links.follow
                 )
             )
             if refusal is not None:

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Files, readerOf } from '../files.ts'
-import { resolvePath } from '../../utils/path.ts'
+import { posixNormpath, resolvePath } from '../../utils/path.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 
 export class StaleMirageFileError extends Error {
@@ -80,7 +80,8 @@ export class FileVersionTracker {
   private key(path: string): string {
     const reader = readerOf(this.vfs)
     if (!reader.linked) return resolvePath(path, '/')
-    return reader.resolve(resolvePath(reader.resolve(path), '/'))
+    const inner = posixNormpath(reader.follow(path))
+    return posixNormpath(reader.follow(resolvePath(inner, '/')))
   }
 
   private async currentVersion(path: string): Promise<string | null> {

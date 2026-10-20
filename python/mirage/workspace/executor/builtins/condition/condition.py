@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.utils.links import link_view
-from mirage.context import program_invocation
+from mirage.context import program_invocation, reset_admission, set_admission
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -25,9 +25,11 @@ from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.condition.flat import eval_flat
 from mirage.workspace.executor.builtins.condition.tree import eval_cond
 from mirage.workspace.executor.builtins.condition.types import (
+    AdmitTest,
     CondContext,
     CondError,
     CondNode,
+    CondRefused,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.files import Files
@@ -44,8 +46,14 @@ async def handle_test(
     session: SessionState,
     name: str = "test",
     view: SessionView | None = None,
+    admit: AdmitTest | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Evaluate test/[ (flat argv) or [[ (condition tree).
+
+    ``[ ]`` and ``[[ ]]`` are the shell's own tests, which no command
+    gate admitted, so each is admitted here by its own name on what it
+    tests: ``[``'s whole argv before it runs, each ``[[`` leaf as it is
+    reached. A refusal is the test's answer, as it is ``test``'s.
 
     Args:
         dispatch (DispatchFn): op dispatcher for file probes.
@@ -56,6 +64,8 @@ async def handle_test(
         name (str): invocation name for diagnostics: "test", "[", "[[".
         view (SessionView | None): the gated session view, for
             an assignment inside a numeric operand.
+        admit (AdmitTest | None): admits the words of a test by its
+            own name; None where the command was admitted already.
     """
     ctx = CondContext(
         dispatch=dispatch,
@@ -63,6 +73,7 @@ async def handle_test(
         session=session,
         name=name,
         view=view,
+        admit=admit,
         links=link_view(
             Files(
                 dispatch,
@@ -72,9 +83,24 @@ async def handle_test(
     )
     try:
         if isinstance(args, list):
-            code = 0 if await eval_flat(ctx, args) else 1
+            code = await _flat_status(ctx, args, admit)
         else:
             code = await eval_cond(ctx, args)
+    except CondRefused as refused:
+        return (
+            None,
+            IOResult(
+                exit_code=refused.exit_code,
+                stderr=refused.stderr,
+                refusal=refused.refusal,
+            ),
+            ExecutionNode(
+                command=name,
+                exit_code=refused.exit_code,
+                stderr=refused.stderr,
+                refused=True,
+            ),
+        )
     except CondError as err:
         # The builtin's own diagnostic is in bash's voice; the program
         # (`find -exec test`) keeps its bare one.
@@ -98,6 +124,27 @@ async def handle_test(
         IOResult(exit_code=code),
         ExecutionNode(command="test", exit_code=code),
     )
+
+
+async def _flat_status(
+    ctx: CondContext, args: list[str | PathSpec], admit: AdmitTest | None
+) -> int:
+    """The status of a flat test, admitted whole first where it has
+    to be.
+
+    Args:
+        ctx (CondContext): evaluation context.
+        args (list[str | PathSpec]): the test's operands.
+        admit (AdmitTest | None): admits them, None where the command
+            was admitted already.
+    """
+    if admit is None:
+        return 0 if await eval_flat(ctx, args) else 1
+    token = set_admission(await admit([word_text(a) for a in args]))
+    try:
+        return 0 if await eval_flat(ctx, args) else 1
+    finally:
+        reset_admission(token)
 
 
 async def test_builtin(call: BuiltinCall) -> Result:

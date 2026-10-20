@@ -72,7 +72,7 @@ from mirage.shell.variable import TempEnv, VarAttr
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
-from mirage.utils.path import CycleError
+from mirage.utils.path import CycleError, glob_prefix_match
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
@@ -112,6 +112,7 @@ from mirage.workspace.lookup import (
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
     Admitted,
     Refused,
@@ -120,6 +121,7 @@ from mirage.workspace.node.admission import (
 )
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.node.types import ExpandedWords
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     ensure_var_visible,
     gate_rendering,
@@ -430,6 +432,33 @@ async def execute_command(
         restore(saved_env_overrides)
 
 
+def _unmet(
+    namespace: Namespace, session: SessionState, pattern: str
+) -> frozenset[str]:
+    """The node entries a glob ``rm`` never removed: those whose name
+    the pattern matched is one the session cannot see, which the
+    backend's expansion met as absent. Empty for a session that hides
+    nothing.
+
+    Args:
+        namespace (Namespace): the name plane.
+        session (SessionState): the session ``rm`` ran in.
+        pattern (str): the operand's absolute glob pattern.
+    """
+    links = namespace.session_links(session)
+    if not links.hides_under("/"):
+        return frozenset()
+    depth = len(pattern.strip("/").split("/"))
+    return frozenset(
+        path
+        for path in namespace.nodes
+        if glob_prefix_match(path, pattern)
+        and not links.visible(
+            "/" + "/".join(path.strip("/").split("/")[:depth])
+        )
+    )
+
+
 def _write_refused(
     exc: PolicyDenied, command: str
 ) -> tuple[None, IOResult, ExecutionNode]:
@@ -625,7 +654,7 @@ async def _run_argv(
         list(argv.operands)
         if refused_external
         else await expand_boundary_globs(
-            list(argv.operands), registry, namespace
+            list(argv.operands), registry, namespace.session_links(session)
         )
     )
     expanded = [word_text(w) for w in boundary]
@@ -963,9 +992,9 @@ async def _route_argv(
     #    back refused (`walk_error`) rather than failing the line: the
     #    command meets ELOOP at its op and words it per operand.
     if namespace.nodes and operands:
-        operands = await operand_follow(namespace, dispatch, name, argv.words)(
-            operands
-        )
+        operands = await operand_follow(
+            namespace.session_links(session), dispatch, name, argv.words
+        )(operands)
         argv = argv.with_operands(operands)
 
     # ── symlinks (namespace-backed; not bash builtins, not mount
@@ -1016,7 +1045,12 @@ async def _route_argv(
                 name, argv.args, operands, session.cwd
             ):
                 operands, handled, link_errors = await strip_link_operands(
-                    name, dispatch, namespace, operands, argv.args, session.cwd
+                    name,
+                    dispatch,
+                    namespace.session_links(session),
+                    operands,
+                    argv.args,
+                    session.cwd,
                 )
                 if handled and not any(
                     isinstance(a, PathSpec) for a in operands
@@ -1035,7 +1069,11 @@ async def _route_argv(
                     )
             elif name == "mv":
                 operands, early = await prepare_mv(
-                    namespace, dispatch, operands, argv.args, session.cwd
+                    namespace.session_links(session),
+                    dispatch,
+                    operands,
+                    argv.args,
+                    session.cwd,
                 )
                 if early is not None:
                     return early
@@ -1073,7 +1111,10 @@ async def _route_argv(
             # A removed path takes its node meta (overlay attrs) with it;
             # a removed dir purges everything underneath. Glob operands
             # reach here unexpanded (backend wrappers expand them), so
-            # the node table matches the pattern itself.
+            # the node table matches the pattern itself. A name the
+            # session cannot see was never removed: rm met it as absent
+            # (-f silenced that), so its node stays.
+            links = namespace.session_links(session)
             for item in operands:
                 if not isinstance(item, PathSpec):
                     continue
@@ -1094,8 +1135,11 @@ async def _route_argv(
                     # A quoted metacharacter is a literal here too,
                     # so the node table is matched with the same
                     # pattern the backend resolved with.
-                    await namespace.unlink_glob(glob_pattern(item.virtual))
-                else:
+                    pattern = glob_pattern(item.virtual)
+                    await namespace.unlink_glob(
+                        pattern, keep=_unmet(namespace, session, pattern)
+                    )
+                elif links.visible(item.virtual):
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)
     if link_errors:

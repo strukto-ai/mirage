@@ -231,20 +231,24 @@ def test_scoped_shell_readlink_on_hidden_turf_is_refused():
     assert b"y.txt" not in (io.stdout or b"")
 
 
-def test_scoped_shell_readlink_f_on_hidden_turf_is_refused():
+def test_scoped_shell_readlink_f_on_hidden_turf_names_no_target():
     # -m/-f canonicalize without any existence probe, so without the
-    # gate they printed the resolved target of a hidden link.
+    # gate they printed the resolved target of a hidden link. A hidden
+    # link is no link to the session: -m prints the name as it would a
+    # missing one, and -f, whose parent is hidden too, finds nothing.
     ws = _two_mounts()
     ws.create_session("agent", profile={"paths": {"hide": ["/b"]}})
 
     async def run():
         made = await ws.shell("ln -s /b/y.txt /b/lk")
         assert made.exit_code == 0
-        return await ws.shell("readlink -m /b/lk", session_id="agent")
+        return await ws.shell(
+            "readlink -m /b/lk; readlink -f /b/lk; echo $?",
+            session_id="agent",
+        )
 
     io = asyncio.run(run())
-    assert io.exit_code != 0
-    assert b"y.txt" not in (io.stdout or b"")
+    assert io.stdout == b"/b/lk\n1\n"
 
 
 def test_shell_readlink_goes_through_the_dispatcher():

@@ -127,11 +127,12 @@ from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.node.admission import admit_test
 from mirage.workspace.node.assignment import execute_assignment
 from mirage.workspace.node.command_dispatch import execute_command
 from mirage.workspace.node.declaration import execute_declaration
 from mirage.workspace.node.diagnostics import diagnostic_stderr
-from mirage.workspace.node.occurrence import defined_at
+from mirage.workspace.node.occurrence import claimant_for, defined_at
 from mirage.workspace.node.process_sub import ProcessSubScope
 from mirage.workspace.node.program import execute_program
 from mirage.workspace.node.test_expr import (
@@ -762,7 +763,7 @@ async def _run_redirected(
         call_stack=call_stack,
         view=view,
         forked=forked,
-        links=namespace,
+        links=namespace.session_links(context.session),
     )
     if _is_bare_exec(command):
         if any(
@@ -1520,7 +1521,7 @@ async def _execute_node(
                 classified,
                 registry,
                 noglob=bool(session.shell_options.get("noglob")),
-                links=namespace,
+                links=namespace.session_links(session),
                 options=glob_options(session),
             )
         policies = namespace.registry.policies
@@ -1603,18 +1604,41 @@ async def _execute_node(
 
     if kind == NodeKind.TEST:
         opener = node.children[0].type if node.children else "["
+        # The shell's own test, which no command gate admits: it is
+        # admitted by its own name on what it tests.
+        admitted = partial(
+            admit_test,
+            "[[" if opener == "[[" else "[",
+            session=session,
+            registry=registry,
+            namespace=namespace,
+            cancel=cancel,
+            claimant=claimant_for(node, handed),
+        )
         if opener == "[[":
             tree = await expand_double_bracket(
                 node, context, execute_fn, cs, view=view
             )
             return await handle_test(
-                dispatch, namespace, tree, session, name="[[", view=view
+                dispatch,
+                namespace,
+                tree,
+                session,
+                name="[[",
+                view=view,
+                admit=admitted,
             )
         test_argv = await expand_test_expr(
             node, context, execute_fn, cs, view=view
         )
         return await handle_test(
-            dispatch, namespace, test_argv, session, name="[", view=view
+            dispatch,
+            namespace,
+            test_argv,
+            session,
+            name="[",
+            view=view,
+            admit=admitted,
         )
 
     if kind == NodeKind.NEGATED:

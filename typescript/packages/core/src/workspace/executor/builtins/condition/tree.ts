@@ -23,6 +23,7 @@ import { makeArray } from '../../../../shell/array.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS, UNARY_OPS } from './constants.ts'
 import { applyFilePair, applyUnary } from './operators.ts'
+import { runWithAdmission } from '../../../../context/session_context.ts'
 import { CondError } from './types.ts'
 import type { CondContext, CondNode } from './types.ts'
 
@@ -45,6 +46,25 @@ export async function evalCond(ctx: CondContext, node: CondNode): Promise<number
     return left === 0 ? 0 : evalCond(ctx, node.right)
   }
   if (node.kind === 'not') return (await evalCond(ctx, node.inner)) !== 0 ? 0 : 1
+  if (ctx.admit === undefined) return evalLeaf(ctx, node)
+  // A leaf is a test of its own, admitted on its words once they are
+  // expanded, which for a branch is only as it is reached.
+  const gate = await ctx.admit(leafWords(node))
+  return runWithAdmission(gate, () => evalLeaf(ctx, node))
+}
+
+/** A `[[ ]]` leaf as the words `test` would be given for it. */
+function leafWords(node: Extract<CondNode, { kind: 'word' | 'unary' | 'binary' }>): string[] {
+  if (node.kind === 'unary') return [node.op, node.operand]
+  if (node.kind === 'binary') return [node.left, node.op, node.right]
+  return [node.value]
+}
+
+/** Evaluate one test of a `[[ ]]` expression to its status. */
+async function evalLeaf(
+  ctx: CondContext,
+  node: Extract<CondNode, { kind: 'word' | 'unary' | 'binary' }>,
+): Promise<number> {
   if (node.kind === 'unary') {
     if (!UNARY_OPS.has(node.op)) {
       throw new CondError('mirage: conditional unary operator expected')

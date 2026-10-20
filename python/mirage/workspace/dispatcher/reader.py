@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from mirage.types import FileStat, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
@@ -53,9 +53,12 @@ class NamespaceReader:
     is filtered by the rule the dispatcher refuses a call by (``sees``):
     a hidden link, or one that leads where the session cannot see, has
     no row, no listing entry and no target, and a hidden mount is a
-    boundary a walk stops at but is never named. Live, so a link made or
-    removed mid-command is seen by the next question, and synchronous,
-    so a walk asks per entry at no dispatch cost.
+    boundary a walk stops at but is never named. It is a link table
+    itself (``NamespaceLinks``), the namespace's as the session sees it,
+    so whatever takes a link table above the dispatcher is handed this
+    one. Live, so a link made or removed mid-command is seen by the next
+    question, and synchronous, so a walk asks per entry at no dispatch
+    cost.
 
     Args:
         links (NamespaceLinks | None): the namespace's link table, None
@@ -197,18 +200,42 @@ class NamespaceReader:
             found.add(root)
         return sorted(found)
 
-    def link_at(self, virtual: str) -> FileStat | None:
+    def is_link(self, path: str) -> bool:
+        """Whether a link the session sees stands at ``path``.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        return (
+            self._links is not None
+            and self.visible(path)
+            and self._links.is_link(path)
+        )
+
+    def link_stat_at(self, path: str) -> FileStat | None:
         """The link standing at a path, its own row; None where none
         stands or the session cannot see it.
 
         Args:
-            virtual (str): absolute virtual path.
+            path (str): absolute virtual path.
         """
-        if self._links is None or not self.visible(virtual):
+        if self._links is None or not self.visible(path):
             return None
-        return self._links.link_stat_at(virtual)
+        return self._links.link_stat_at(path)
 
-    def links_below(self, directory: str) -> list[tuple[str, FileStat]]:
+    def symlink_targets(self) -> Mapping[str, str]:
+        """Every link the session sees, to its stored target."""
+        if self._links is None:
+            return {}
+        targets = self._links.symlink_targets()
+        vis = self._visibility()
+        # A session that hides nothing sees every link; asking each one
+        # walks its whole chain, on every command that checks for links.
+        if not hidden_under(vis, "/"):
+            return targets
+        return {p: t for p, t in targets.items() if self.visible(p)}
+
+    def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
         """The links at any depth under a directory the session sees,
         each with its own row.
 
@@ -223,7 +250,7 @@ class NamespaceReader:
             if self.visible(path)
         ]
 
-    def link_names(self, directory: str) -> set[str]:
+    def link_names_under(self, directory: str) -> set[str]:
         """The names of the links directly under a directory that the
         session sees, which a listing's link marks need.
 
@@ -238,49 +265,45 @@ class NamespaceReader:
             if self.visible(posixpath.join(directory, name))
         }
 
-    def readlink(self, virtual: str) -> str | None:
+    def readlink(self, path: str) -> str | None:
         """A link's stored target, as typed; None where no link stands
         or the session cannot see it.
 
         Args:
-            virtual (str): absolute virtual path.
+            path (str): absolute virtual path.
         """
-        if self._links is None or not self.visible(virtual):
+        if self._links is None or not self.visible(path):
             return None
-        return self._links.readlink(virtual)
+        return self._links.readlink(path)
 
-    def resolve(self, virtual: str) -> str:
+    def follow(self, path: str) -> str:
         """Where a path the session sees leads, every link followed; a
         hidden one is left as typed, for the dispatcher to refuse.
 
         Args:
-            virtual (str): absolute virtual path.
+            path (str): absolute virtual path.
 
         Raises:
             CycleError: a link loop stands in the walk.
         """
-        if self._links is None or not path_visible(
-            self._visibility(), virtual
-        ):
-            return virtual
-        return posixpath.normpath(self._links.follow(virtual))
+        if self._links is None or not path_visible(self._visibility(), path):
+            return path
+        return self._links.follow(path)
 
-    def resolve_parent(self, virtual: str) -> str:
+    def follow_parent(self, path: str) -> str:
         """A path with every link above its final name followed, the
         walk a call that acts on the name itself is given; a hidden path
         is left as typed.
 
         Args:
-            virtual (str): absolute virtual path.
+            path (str): absolute virtual path.
 
         Raises:
             CycleError: a link loop stands in the walk.
         """
-        if self._links is None or not path_visible(
-            self._visibility(), virtual
-        ):
-            return virtual
-        return self._links.follow_parent(virtual)
+        if self._links is None or not path_visible(self._visibility(), path):
+            return path
+        return self._links.follow_parent(path)
 
     def owed(self, directory: str) -> list[str]:
         """The names a directory holds only as namespace structure: the

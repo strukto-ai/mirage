@@ -100,7 +100,7 @@ async def path_exists(dispatch: DispatchFn, virtual: str | PathSpec) -> bool:
         return False
 
 
-def resolve_link(namespace: NamespaceLinks, virtual: str) -> str:
+def resolve_link(links: NamespaceLinks, virtual: str) -> str:
     """Where a path really points, as the dispatcher can address it.
 
     The namespace's walk, with a relative target's walk up from the
@@ -110,17 +110,18 @@ def resolve_link(namespace: NamespaceLinks, virtual: str) -> str:
     ``..`` it names is that directory's parent.
 
     Args:
-        namespace (Namespace): addressing authority holding the links.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         virtual (str): absolute virtual path.
 
     Raises:
         CycleError: when the chain loops past the hop limit (ELOOP).
     """
-    return posixpath.normpath(namespace.follow(virtual))
+    return posixpath.normpath(links.follow(virtual))
 
 
 async def link_target_stat(
-    namespace: NamespaceLinks, dispatch: DispatchFn, virtual: str
+    links: NamespaceLinks, dispatch: DispatchFn, virtual: str
 ) -> FileStat | None:
     """The stat of what a link points at, or None when it dangles.
 
@@ -136,12 +137,13 @@ async def link_target_stat(
     it as one would print the link as ``-type l`` and exit 0.
 
     Args:
-        namespace (Namespace): addressing authority holding the links.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         virtual (str): absolute virtual path of the link.
     """
     try:
-        target = resolve_link(namespace, virtual)
+        target = resolve_link(links, virtual)
     except CycleError:
         return None
     spec = PathSpec(
