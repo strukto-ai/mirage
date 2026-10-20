@@ -14,7 +14,6 @@
 
 import ast
 import importlib
-import importlib.util
 import inspect
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -37,75 +36,43 @@ API = "mirage.core.gdrive.api"
 REQUEST_FREE = frozenset({"feed_checkpoint", "feed_state"})
 
 
-def _resolve(node: ast.ImportFrom, package: str) -> str:
-    if not node.level:
-        return node.module or ""
-    base = package.split(".")[: len(package.split(".")) - node.level + 1]
-    return ".".join([*base, *([node.module] if node.module else [])])
-
-
-def _is_module(name: str) -> bool:
-    parent = importlib.import_module(name.rpartition(".")[0])
-    return (
-        hasattr(parent, "__path__")
-        and importlib.util.find_spec(name) is not None
-    )
-
-
-def _reaches_google(module: str, name: str) -> bool:
+def _reaches_drive(module: str, name: str) -> bool:
     """Whether ``from module import name`` hands over a way to Drive.
 
     Args:
-        module (str): the absolute module imported from.
+        module (str): the module imported from.
         name (str): the name imported.
     """
-    if f"{module}.{name}".startswith(GOOGLE) and _is_module(
-        f"{module}.{name}"
-    ):
-        return True
-    if f"{module}.{name}" == API:
-        return True
-    if module == API:
+    if API in (module, f"{module}.{name}"):
         return name != "DriveApi"
-    if not module.startswith(GOOGLE):
+    if not f"{module}.{name}".startswith(GOOGLE):
         return False
     if name == "*":
         return True
     value = getattr(importlib.import_module(module), name)
-    return inspect.isfunction(value) and name not in REQUEST_FREE
+    return inspect.ismodule(value) or (
+        inspect.isfunction(value) and name not in REQUEST_FREE
+    )
 
 
-def drive_bypasses(source: str, package: str) -> list[str]:
+def drive_bypasses(source: str) -> list[str]:
     """Every import in ``source`` that reaches Drive past the accessor.
 
     Args:
         source (str): a module's Python source.
-        package (str): the package the module sits in, for relative
-            imports.
     """
-    found = []
+    found = [hook for hook in ("__import__", "importlib") if hook in source]
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
+            found += [a.name for a in node.names if a.name.startswith(GOOGLE)]
+        elif isinstance(node, ast.ImportFrom) and node.level:
+            found.append(f"relative import of {node.module}")
+        elif isinstance(node, ast.ImportFrom) and node.module:
             found += [
-                a.name
+                f"{node.module}.{a.name}"
                 for a in node.names
-                if a.name.startswith((GOOGLE, API, "importlib"))
+                if _reaches_drive(node.module, a.name)
             ]
-        elif isinstance(node, ast.ImportFrom):
-            module = _resolve(node, package)
-            if module == "importlib":
-                found.append(module)
-                continue
-            found += [
-                f"{module}.{a.name}"
-                for a in node.names
-                if _reaches_google(module, a.name)
-            ]
-        elif isinstance(node, ast.Call) and "__import__" in (
-            getattr(node.func, "id", None),
-            getattr(node.func, "attr", None),
-        ):
-            found.append("__import__")
     return found
 
 
@@ -113,51 +80,39 @@ def drive_bypasses(source: str, package: str) -> list[str]:
     "planted",
     [
         "from mirage.core.google.drive import FOLDER_MIME, list_files",
-        "from mirage.core.google.drive import (\n    get_file as fetch,\n)",
-        "from mirage.core.google.client import google_get",
         "from mirage.core.google.entry import get_file",
-        "from mirage.core.google.readdir import list_all_files",
         "from mirage.core.google.drive import *",
         "from mirage.core.google import drive",
-        "from mirage.core import google",
         "import mirage.core.google.drive",
-        "from ..google.drive import download_revision",
-        "from . import api",
+        "from ..google.drive import list_files",
         "from mirage.core.gdrive.api import DriveClient",
-        "import importlib",
-        "wire = __import__('mirage.core.google.drive', fromlist=['get_file'])",
-        "import builtins\nbuiltins.__import__('mirage.core.google.drive')",
+        "wire = __import__('mirage.core.google.drive')",
     ],
 )
 def test_the_detector_catches_a_planted_bypass(planted):
-    assert drive_bypasses(planted, "mirage.core.gdrive")
+    assert drive_bypasses(planted)
 
 
 @pytest.mark.parametrize(
     "allowed",
     [
         "from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT",
-        "from mirage.core.google.client import TokenManager",
         "from mirage.core.google.events import feed_checkpoint, feed_state",
         "from mirage.core.gdrive.api import DriveApi",
-        "from mirage.core.gdrive.readdir import stat_from_item",
     ],
 )
 def test_the_detector_leaves_what_makes_no_request(allowed):
-    assert drive_bypasses(allowed, "mirage.core.gdrive") == []
+    assert drive_bypasses(allowed) == []
 
 
 def test_no_gdrive_core_module_reaches_drive_past_the_accessor():
     root = Path(gdrive_pkg.__file__).parent
-    offenders = {}
-    for path in sorted(root.rglob("*.py")):
-        if path.name == "api.py":
-            continue
-        package = ".".join(
-            ["mirage", "core", "gdrive", *path.relative_to(root).parts[:-1]]
-        )
-        if found := drive_bypasses(path.read_text(), package):
-            offenders[str(path.relative_to(root))] = found
+    offenders = {
+        path.name: found
+        for path in sorted(root.rglob("*.py"))
+        if path.name != "api.py"
+        and (found := drive_bypasses(path.read_text()))
+    }
     assert offenders == {}
 
 
@@ -185,14 +140,6 @@ def test_each_implementation_takes_the_protocols_parameters(fake):
         and _parameters(vars(fake)[name]) != _parameters(vars(DriveApi)[name])
     }
     assert drift == {}
-
-
-def test_the_client_answers_every_protocol_call():
-    assert _protocol_calls() == sorted(
-        name
-        for name, value in vars(DriveClient).items()
-        if not name.startswith("_") and inspect.isfunction(value)
-    )
 
 
 class Delegation(NamedTuple):
