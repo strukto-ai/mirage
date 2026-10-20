@@ -37,7 +37,7 @@ const MOUNT = '/nc'
 // container can reach.
 const HOST = process.env.WEBHOOK_HOST ?? '127.0.0.1'
 const PORT = Number.parseInt(process.env.WEBHOOK_PORT ?? '8990', 10)
-const SECRET_HEADER = 'X-Webhook-Secret'
+const AUTH_HEADER = 'X-Webhook-Secret'
 
 // The webhook_listeners event classes to register a webhook for.
 const EVENT_CLASSES = [
@@ -106,7 +106,7 @@ class WebhookReceiver {
   constructor(private readonly workspace: Workspace) {}
 
   async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (!sameBytes(header(request, SECRET_HEADER), SECRET)) {
+    if (!sameBytes(header(request, AUTH_HEADER), SECRET)) {
       response.writeHead(401, { 'Content-Type': 'application/json' })
       response.end(JSON.stringify({ ok: false }))
       return
@@ -146,12 +146,12 @@ function printRegistrationHelp(): void {
         '/api/v1/webhooks' +
         ` -d '{"httpMethod": "POST", "uri": "${callback}",` +
         ` "event": "${escaped}", "authMethod": "header",` +
-        ` "authData": {"${SECRET_HEADER}": "***"}}'`,
+        ` "authData": {"${AUTH_HEADER}": "***"}}'`,
     )
   }
   console.log(
     '     (*** in authData is NEXTCLOUD_WEBHOOK_SECRET: Nextcloud sends' +
-      ` it as ${SECRET_HEADER}, and the receiver refuses a delivery` +
+      ` it as ${AUTH_HEADER}, and the receiver refuses a delivery` +
       ' without it.)',
   )
   console.log(

@@ -19,7 +19,7 @@ MOUNT = "/nc"
 # container can reach.
 HOST = os.environ.get("WEBHOOK_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WEBHOOK_PORT", "8990"))
-SECRET_HEADER = "X-Webhook-Secret"
+AUTH_HEADER = "X-Webhook-Secret"
 
 # The webhook_listeners event classes to register a webhook for.
 EVENT_CLASSES = (
@@ -82,7 +82,7 @@ class WebhookReceiver:
         self._root = PathSpec.from_str_path(MOUNT, vfs_path="")
 
     async def handle(self, request: web.Request) -> web.Response:
-        if not hmac.compare_digest(header(request, SECRET_HEADER), SECRET):
+        if not hmac.compare_digest(header(request, AUTH_HEADER), SECRET):
             return web.json_response({"ok": False}, status=401)
         payload = await request.json()
         event_class = payload.get("event", {}).get("class", "")
@@ -113,11 +113,11 @@ def print_registration_help() -> None:
             f"/api/v1/webhooks"
             f' -d \'{{"httpMethod": "POST", "uri": "{callback}",'
             f' "event": "{escaped}", "authMethod": "header",'
-            f' "authData": {{"{SECRET_HEADER}": "***"}}}}\''
+            f' "authData": {{"{AUTH_HEADER}": "***"}}}}\''
         )
     print(
         "     (*** in authData is NEXTCLOUD_WEBHOOK_SECRET: Nextcloud sends"
-        f" it as {SECRET_HEADER}, and the receiver refuses a delivery"
+        f" it as {AUTH_HEADER}, and the receiver refuses a delivery"
         " without it.)"
     )
     print(
