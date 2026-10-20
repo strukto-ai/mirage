@@ -1198,8 +1198,8 @@ class MountCore:
         )
         try:
             if follow:
-                return reader.resolve(virtual)
-            return reader.resolve_parent(virtual)
+                return posixpath.normpath(reader.follow(virtual))
+            return reader.follow_parent(virtual)
         finally:
             if token is not None:
                 reset_current_session(token)

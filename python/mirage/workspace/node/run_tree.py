@@ -134,7 +134,7 @@ async def run_command_tree(
             context,
             execute_fn,
             registry,
-            links=namespace,
+            links=namespace.session_links(session),
             view=session_view(
                 session,
                 registry.policies,

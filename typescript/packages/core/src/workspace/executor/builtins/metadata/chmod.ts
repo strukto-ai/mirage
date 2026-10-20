@@ -23,10 +23,12 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, parseLine, result } from '../shared.ts'
 import {
-  isReadOnlyError,
+  type WalkEntry,
+  isRefusal,
   permissionError,
   resolveOperand,
   setattrVia,
+  unreadError,
   verbosity,
   walkStats,
   walkedName,
@@ -75,18 +77,19 @@ export async function handleChmod(
   const report = verbosity(fl)
   const errors: string[] = []
   const out: string[] = []
+  const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, parsed.paths)) {
-    const found = await resolveOperand(namespace, dispatch, 'chmod', target, errors)
+    const found = await resolveOperand(links, dispatch, 'chmod', target, errors)
     if (found === null) {
       if (report === 'verbose')
         out.push(`${shellQuoteAlways(target.rawPath)} could not be accessed\n`)
       continue
     }
     const [resolved, stat] = found
-    const entries: [PathSpec, FileStat][] = fl.asBool('recursive')
-      ? await walkStats(namespace, dispatch, resolved, stat)
-      : [[resolved, stat]]
-    for (const [path, entryStat] of entries) {
+    const entries: WalkEntry[] = fl.asBool('recursive')
+      ? await walkStats(links, dispatch, resolved, stat)
+      : [[resolved, stat, null]]
+    for (const [path, entryStat, unread] of entries) {
       // Backends without a mode default to what ls renders: 755 for
       // directories, 644 for files (symbolic clauses build on this).
       const pathStat =
@@ -100,17 +103,19 @@ export async function handleChmod(
       if (newMode === null) {
         return fail('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
       }
+      const name = walkedName(target.rawPath, resolved, path)
       let failed = false
       try {
         await setattrVia(dispatch, path, { mode: newMode })
       } catch (err) {
-        if (!isReadOnlyError(err)) throw err
-        errors.push(permissionError('chmod', 'changing permissions of', path, err))
+        if (!isRefusal(err)) throw err
+        errors.push(permissionError('chmod', 'changing permissions of', name, err))
         failed = true
       }
       if (report === 'verbose' || (report === 'changes' && !failed && newMode !== current)) {
-        out.push(modeLine(walkedName(target.rawPath, resolved, path), pathStat, newMode, failed))
+        out.push(modeLine(name, pathStat, newMode, failed))
       }
+      if (unread !== null) errors.push(unreadError('chmod', name, unread))
     }
   }
   const quiet = fl.asBool('silent') || fl.asBool('quiet')

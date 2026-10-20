@@ -357,6 +357,132 @@
     {"id": "waits_for_the_cancel", "input": {"step": "wait"}, "expect": {"text": "canceled", "stdout": ""}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
+  },
+  {
+   "id": "audit_hides",
+   "op": "session",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"paths": {"hide": ["/data/secret.txt", "/data/hdir"]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "names_the_file_as_missing", "input": {"command": "cat /data/secret.txt"}, "expect": {"text": "cat: /data/secret.txt: No such file or directory\n", "is_error": true}},
+    {"id": "lists_what_it_sees", "input": {"command": "ls /data"}, "expect": {"text": "ok.txt\n", "is_error": false}},
+    {"id": "walks_what_it_sees", "input": {"command": "find /data | sort"}, "expect": {"text": "/data\n/data/ok.txt\n", "is_error": false}},
+    {"id": "searches_what_it_sees", "input": {"command": "grep -r S3CR3T /data; echo $?"}, "expect": {"text": "1\n", "is_error": false}},
+    {"id": "resolves_no_link_into_it", "input": {"command": "readlink -f /data/lnk; readlink -m /data/dl/x; echo $?"}, "expect": {"text": "/data/lnk\n/data/dl/x\n0\n", "is_error": false}},
+    {"id": "tests_it_alike_in_every_spelling", "input": {"command": "test -e /data/secret.txt; echo $?; [ -e /data/hdir ]; echo $?; [[ -e /data/secret.txt ]]; echo $?"}, "expect": {"text": "1\n1\n1\n", "is_error": false}},
+    {"id": "reads_nothing_through_a_link", "input": {"command": "cat /data/lnk /data/dl/inner.txt"}, "expect": {"text": "cat: /data/lnk: No such file or directory\ncat: /data/dl/inner.txt: No such file or directory\n", "is_error": true}},
+    {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "expect": {"text": "1\n\n/data/secret.txt: Permission denied\n", "is_error": false}},
+    {"id": "leaves_it_to_a_glob_removal", "input": {"command": "rm -f /data/*; ls -A /data"}, "expect": {"text": "", "is_error": false}}
+   ]
+  },
+  {
+   "id": "audit_hides_bytes",
+   "op": "bytes",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"paths": {"hide": ["/data/secret.txt", "/data/hdir"]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "reads_the_file", "input": {"call": "read", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}},
+    {"id": "reads_through_a_link", "input": {"call": "read", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}},
+    {"id": "stats_the_file", "input": {"call": "stat", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}},
+    {"id": "lists_the_parent", "input": {"call": "readdir", "path": "/data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"entries": ["/data/ok.txt"]}},
+    {"id": "reads_the_link", "input": {"call": "readlink", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"error": "ENOENT"}},
+    {"id": "writes_the_file", "input": {"call": "write", "path": "/data/secret.txt", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "writes_into_the_directory", "input": {"call": "write", "path": "/data/hdir/new", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}},
+    {"id": "renames_into_the_directory", "input": {"call": "rename", "src": "/data/ok.txt", "dst": "/data/hdir/moved"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}},
+    {"id": "removes_the_file", "input": {"call": "unlink", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "ENOENT"}}
+   ]
+  },
+  {
+   "id": "audit_rules",
+   "op": "session",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "names_the_file_as_missing", "input": {"command": "cat /data/secret.txt"}, "expect": {"text": "cat: /data/secret.txt: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "cat: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "mcp_stdio": {"text": "cat: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "ssh": {"text": "cat: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}}},
+    {"id": "lists_what_it_sees", "input": {"command": "ls /data"}, "expect": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n", "is_error": false}},
+    {"id": "walks_what_it_sees", "input": {"command": "find /data | sort"}, "expect": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "mcp_stdio": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "ssh": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}}},
+    {"id": "searches_what_it_sees", "input": {"command": "grep -r S3CR3T /data; echo $?"}, "expect": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "mcp_stdio": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "ssh": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": false}}},
+    {"id": "resolves_no_link_into_it", "input": {"command": "readlink -f /data/lnk; readlink -m /data/dl/x; echo $?"}, "expect": {"text": "readlink: /data/dl/x: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "readlink: /data/dl/x: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "mcp_stdio": {"text": "readlink: /data/dl/x: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "ssh": {"text": "readlink: /data/dl/x: Permission denied\npolicy denied: audit sealed\n", "is_error": true}}},
+    {"id": "tests_it_alike_in_every_spelling", "input": {"command": "test -e /data/secret.txt; echo $?; [ -e /data/hdir ]; echo $?; [[ -e /data/secret.txt ]]; echo $?"}, "expect": {"text": "test: /data/secret.txt: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "test: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "mcp_stdio": {"text": "test: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "ssh": {"text": "test: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}}},
+    {"id": "reads_nothing_through_a_link", "input": {"command": "cat /data/lnk /data/dl/inner.txt"}, "expect": {"text": "cat: /data/lnk: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "cat: /data/lnk: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "mcp_stdio": {"text": "cat: /data/lnk: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "ssh": {"text": "cat: /data/lnk: Permission denied\npolicy denied: audit sealed\n", "is_error": true}}},
+    {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "expect": {"text": "echo: /data/secret.txt: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "echo: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "mcp_stdio": {"text": "echo: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}, "ssh": {"text": "echo: /data/secret.txt: Permission denied\npolicy denied: audit sealed\n", "is_error": true}}},
+    {"id": "leaves_it_to_a_glob_removal", "input": {"command": "rm -f /data/*; ls -A /data"}, "expect": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: cannot remove '/data/hdir': Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: cannot remove '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "mcp_stdio": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: cannot remove '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}, "ssh": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: cannot remove '/data/hdir': Permission denied\npolicy denied: audit sealed\n", "is_error": false}}}
+   ]
+  },
+  {
+   "id": "audit_rules_bytes",
+   "op": "bytes",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"deny": [{"reason": "audit sealed", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "reads_the_file", "input": {"call": "read", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "reads_through_a_link", "input": {"call": "read", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "stats_the_file", "input": {"call": "stat", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"type": "file", "size": 9}},
+    {"id": "lists_the_parent", "input": {"call": "readdir", "path": "/data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"entries": ["/data/dl", "/data/hdir", "/data/lnk", "/data/ok.txt", "/data/secret.txt"]}},
+    {"id": "reads_the_link", "input": {"call": "readlink", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"target": "/data/secret.txt"}},
+    {"id": "writes_the_file", "input": {"call": "write", "path": "/data/secret.txt", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "writes_into_the_directory", "input": {"call": "write", "path": "/data/hdir/new", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "renames_into_the_directory", "input": {"call": "rename", "src": "/data/ok.txt", "dst": "/data/hdir/moved"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "removes_the_file", "input": {"call": "unlink", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}}
+   ]
+  },
+  {
+   "id": "audit_asks",
+   "op": "session",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "names_the_file_as_missing", "input": {"command": "cat /data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "cat: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 1a1ab32acd5c)\n", "is_error": true}, "mcp_stdio": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 1a1ab32acd5c)\n", "is_error": true}}},
+    {"id": "lists_what_it_sees", "input": {"command": "ls /data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n", "is_error": false}},
+    {"id": "walks_what_it_sees", "input": {"command": "find /data | sort"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\npolicy denied: audit nod\n", "is_error": false}, "mcp_stdio": {"text": "/data\n/data/dl\n/data/hdir\n/data/lnk\n/data/ok.txt\n/data/secret.txt\n\nfind: '/data/hdir': Permission denied\npolicy denied: audit nod\n", "is_error": false}}},
+    {"id": "searches_what_it_sees", "input": {"command": "grep -r S3CR3T /data; echo $?"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\npolicy denied: audit nod\n", "is_error": false}, "mcp_stdio": {"text": "2\n\ngrep: /data/hdir: Permission denied\ngrep: /data/secret.txt: Permission denied\npolicy denied: audit nod\n", "is_error": false}}},
+    {"id": "resolves_no_link_into_it", "input": {"command": "readlink -f /data/lnk; readlink -m /data/dl/x; echo $?"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "readlink: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "readlink: Permission denied\nrequires approval: audit nod (ask 34344e1f2028)\n", "is_error": true}, "mcp_stdio": {"text": "readlink: Permission denied\nrequires approval: audit nod (ask 34344e1f2028)\n", "is_error": true}}},
+    {"id": "tests_it_alike_in_every_spelling", "input": {"command": "test -e /data/secret.txt; echo $?; [ -e /data/hdir ]; echo $?; [[ -e /data/secret.txt ]]; echo $?"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "test: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "test: Permission denied\nrequires approval: audit nod (ask 3aecd712d672)\n", "is_error": true}, "mcp_stdio": {"text": "test: Permission denied\nrequires approval: audit nod (ask 3aecd712d672)\n", "is_error": true}}},
+    {"id": "reads_nothing_through_a_link", "input": {"command": "cat /data/lnk /data/dl/inner.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "cat: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 0aca88dcbe9c)\n", "is_error": true}, "mcp_stdio": {"text": "cat: Permission denied\nrequires approval: audit nod (ask 0aca88dcbe9c)\n", "is_error": true}}},
+    {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "echo: Permission denied\n", "is_error": true}, "expect_by_access": {"mcp": {"text": "echo: Permission denied\nrequires approval: audit nod (ask 09fe09cfb66b)\n", "is_error": true}, "mcp_stdio": {"text": "echo: Permission denied\nrequires approval: audit nod (ask 09fe09cfb66b)\n", "is_error": true}}},
+    {"id": "leaves_it_to_a_glob_removal", "input": {"command": "rm -f /data/*; ls -A /data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\n", "is_error": false}, "expect_by_access": {"mcp": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\nrequires approval: audit nod (ask d667660425e3)\n", "is_error": false}, "mcp_stdio": {"text": "dl\nhdir\nlnk\nok.txt\nsecret.txt\n\nrm: Permission denied\nrequires approval: audit nod (ask d667660425e3)\n", "is_error": false}}}
+   ]
+  },
+  {
+   "id": "audit_asks_bytes",
+   "op": "bytes",
+   "workspace": {"mounts": {"/": {"vfs": "ram", "mode": "write"}, "/data": {"vfs": "ram", "mode": "write"}}, "profiles": {"guarded": {"commands": {"ask": [{"reason": "audit nod", "paths": ["/data/secret.txt", "/data/hdir", "/data/hdir/*"]}]}}}},
+   "session": {
+    "id": "agent",
+    "profile": "guarded"
+   },
+   "setup": ["mkdir -p /data/hdir", "echo S3CR3T-A > /data/secret.txt", "echo S3CR3T-B > /data/hdir/inner.txt", "echo public > /data/ok.txt", "ln -s /data/secret.txt /data/lnk", "ln -s /data/hdir /data/dl"],
+   "cases": [
+    {"id": "reads_the_file", "input": {"call": "read", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "reads_through_a_link", "input": {"call": "read", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "stats_the_file", "input": {"call": "stat", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"type": "file", "size": 9}},
+    {"id": "lists_the_parent", "input": {"call": "readdir", "path": "/data"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"entries": ["/data/dl", "/data/hdir", "/data/lnk", "/data/ok.txt", "/data/secret.txt"]}},
+    {"id": "reads_the_link", "input": {"call": "readlink", "path": "/data/lnk"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {"target": "/data/secret.txt"}},
+    {"id": "writes_the_file", "input": {"call": "write", "path": "/data/secret.txt", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "writes_into_the_directory", "input": {"call": "write", "path": "/data/hdir/new", "data_base64": "eA=="}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "renames_into_the_directory", "input": {"call": "rename", "src": "/data/ok.txt", "dst": "/data/hdir/moved"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}},
+    {"id": "removes_the_file", "input": {"call": "unlink", "path": "/data/secret.txt"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"], "expect": {"error": "EACCES"}}
+   ]
   }
  ],
  "auth": {

@@ -56,7 +56,11 @@ Spelling and order matter: `rm -rf` does not match `rm -r -f` or
 
 Omitting `commands.allow` adds no tool allowlist restriction; `allow: []`
 admits no installed tools. This list does not govern shell functions,
-executed paths or direct VFS calls.
+executed paths or direct VFS calls. The shell's own tests count as commands
+under their own names: an allow list admits `[ ]` only if it names `[`,
+`[[ ]]` only if it names `[[`, and a path rule judges the file operand of
+`-e`, `-f` or `-nt` in all three spellings as it does for `test`, however the
+operand is spelled.
 
 Ask and deny rules can name commands, paths, or map a command to its paths:
 
@@ -81,18 +85,26 @@ glob patterns use `*`, `?` and `[`, and `*` can cross `/`. A rule naming only
 `paths` also applies to direct VFS operations.
 
 `paths.hide` makes a path appear absent; `paths.show` reopens a more specific
-path. Ask and deny rules control operations while leaving paths visible.
+path. A hide stays where it is written, so moving a directory that holds a
+hidden path, or one the session reaches only through a `paths.show` below it,
+is refused with `Permission denied`: the hidden content would land in view.
+Ask and deny rules control operations while leaving paths visible.
 A hidden path is also left out of what commands and CLIs print from their own
 data, and out of their counts and totals: `git status`, `git ls-files`,
 `git diff --stat` and `git log --name-only` neither name nor count a file
-another session staged under it.
+another session staged under it. A link that leads into a hidden path is
+hidden as well, for every command: `readlink -f`, `test -L`, `ln`, `touch -h`,
+`chown -R` and `find -newer` meet it as a name that is not there.
 
 A repository's history counts as the path too. Under a hide, no revision ever
 held it: `git show HEAD:secret.txt` answers as it would for a path never
 committed, `git log -S` finds nothing in it, and an object id stored only
-there names nothing. Under a deny rule, git refuses to print the path's content
-from any revision (`git log -p`, `git show HEAD:secret.txt`) as it refuses the
-file, and still lists the name.
+there names nothing. A checkout or a branch switch leaves a hidden file as it
+is: an edit to it neither blocks the switch nor is named in git's refusal. A
+switch that would remove it, by writing a file where its directory stands, is
+refused, naming only the visible path. Under a deny rule, git refuses to print
+the path's content from any revision (`git log -p`, `git show HEAD:secret.txt`)
+as it refuses the file, and still lists the name.
 
 Use [Explain](/home/policy/explain) to check a rule before running a line.
 For conditions beyond these patterns, attach a [policy script](/home/policy/scripts).

@@ -20,7 +20,10 @@ import { runWithCacheManager } from '../../../cache/context.ts'
 import { BatchedRAM } from '../../../test-utils.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { FindOptions } from '../../../core/generic/find.ts'
-import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
+import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { parseSessionProfile } from '../../../policy/profile.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { Context } from '../../config.ts'
 import { findGeneric as streamFind } from './find.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
@@ -291,4 +294,46 @@ it('streams the start point before calling a native backend', async () => {
   if (first.done) throw new Error('find returned no start point')
   expect(DEC.decode(first.value)).toBe('/remote\n')
   await out.return(undefined)
+})
+
+describe('a link onto a directory a rule refuses to list', () => {
+  const SEALED_DOC = parseSessionProfile({
+    commands: {
+      deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
+    },
+  })
+  const SEALED_SEED =
+    'mkdir -p /s/d/hdir /v/ax/empty && echo i > /s/d/hdir/inner && ' +
+    'echo o > /s/d/ok && echo k > /v/ax/empty/k && echo p > /v/ax/p && ' +
+    'echo h > /v/ax/hl && ln -s /s/d/ok /s/d/hdir/il && ' +
+    'ln -s /s/d/hdir /v/ax/dl'
+
+  // -L opens what a link leads to, so a link onto a directory a rule refuses
+  // to list is named as that directory would be, keeps its row, and the walk
+  // goes on with the rest (exit 1). The rule on /v/ax/hl makes the dispatcher
+  // decline /v/ax's subtree read, so each directory is opened on its own and
+  // dl is reached through the link rather than from an answer that covers
+  // it. Mirrors test_find.py.
+  it('find -L names it and walks on', async () => {
+    const ws = new Workspace(
+      { '/s': new RAMVFS(), '/v': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        profiles: { sealed: SEALED_DOC },
+      },
+    )
+    try {
+      ws.createSession('g', { profile: 'sealed' })
+      await ws.shell(SEALED_SEED)
+      const r = await ws.shell('find -L /v/ax', { sessionId: 'g' })
+      expect([r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr)]).toEqual([
+        1,
+        '/v/ax\n/v/ax/dl\n/v/ax/empty\n/v/ax/empty/k\n/v/ax/hl\n/v/ax/p\n',
+        "find: '/v/ax/dl': Permission denied\n",
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
 })

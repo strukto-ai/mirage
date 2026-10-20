@@ -18,7 +18,7 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX
 from mirage.commands.builtin.utils.tree import tree_walk
-from mirage.errors.fs import enotsup, walk_declined
+from mirage.errors.fs import enotdir, enotsup, walk_declined
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -104,8 +104,14 @@ async def test_the_root_and_paths_the_answer_lacks_go_to_the_mount():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "mount",
-    [_Mount(None), _Mount(refuse=walk_declined)],
-    ids=["none", "declined"],
+    [
+        _Mount(None),
+        _Mount(refuse=walk_declined),
+        # A subtree read stops at a link at the final name; readdir
+        # opens what it leads to.
+        _Mount(refuse=lambda _vfs, _op, path: enotdir(path)),
+    ],
+    ids=["none", "declined", "link"],
 )
 async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
     readdir, _ = _walk(mount)

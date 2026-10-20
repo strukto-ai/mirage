@@ -401,7 +401,10 @@ def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
     The reveal half of the subtree law: a session's mutation may destroy
     what it cannot see (``rm -r``, a remnant ``rmdir``), but may never
     reveal it, and a rename or a native directory copy is the relocation
-    that would. Three arms, one per entry kind. A component pattern
+    that would. A source the session reaches only through a show below
+    it is hidden itself, so whatever the show does not reopen reveals
+    wherever the session sees ``dst``. Beyond that, three arms, one per
+    entry kind. A component pattern
     follows the name wherever the content goes, so it never reveals. An
     exact entry anchored strictly below ``src`` re-anchors to ``dst``
     plus its suffix, and reveals when the session would see that mapped
@@ -428,6 +431,19 @@ def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
     s = _norm_abs(src)
     d = _norm_abs(dst)
     if s == "/":
+        return True
+    # A source hidden itself, which the session reaches only through a
+    # show below it: what no show reopens stays covered by a hide that
+    # does not move with it, so it lands in view wherever the session
+    # sees the destination.
+    deepest_hide = hide_depth(hidden, s)
+    if (
+        vis is not None
+        and deepest_hide is not None
+        and path_visible(vis, s)
+        and (show_depth(vis.shown, s) or 0) <= deepest_hide
+        and path_visible(vis, d)
+    ):
         return True
     for entry in hidden.paths:
         e = _norm_abs(entry)

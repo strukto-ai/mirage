@@ -544,8 +544,15 @@ async function listDir(
     entries = await readdir(dir)
   } catch (err) {
     // A directory whose own `.` and `..` did not resolve is not one the
-    // namespace can owe children to.
-    if (!isWalkError(err) || isDotWalkError(err) || (childMounts?.(dir.virtual) ?? []).length === 0)
+    // namespace can owe children to, and one the session may not open is
+    // refused whole: the names the namespace owes it (a link in it, a mount
+    // below it) are as much its listing as the backend's are.
+    if (
+      !isWalkError(err) ||
+      isDotWalkError(err) ||
+      isEacces(err) ||
+      (childMounts?.(dir.virtual) ?? []).length === 0
+    )
       throw err
     // No backend serves it, but the namespace owes it children (a
     // nested mount, a link's ancestors), so the dispatcher lists it as a

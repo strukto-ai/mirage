@@ -16,7 +16,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Union
 
+from mirage.policy.types import EntryGate
 from mirage.runtime.types import DispatchFn
+from mirage.types import Refusal
 from mirage.view.types import LinkView, SessionView
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
@@ -75,6 +77,62 @@ class CondOr:
     right: CondNode
 
 
+# test's own reading of a flat argv (``flat_shape``): which words each
+# operator takes, each named by its place in the argv, and where a
+# grammar error stands, so it is raised where test's own parse meets it.
+@dataclass(frozen=True, slots=True)
+class FlatString:
+    """The word at ``at``, true when it is not empty."""
+
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatUnary:
+    op: str
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatBinary:
+    left: int
+    op: str
+    right: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlatNot:
+    inner: "FlatNode"
+
+
+@dataclass(frozen=True, slots=True)
+class FlatAnd:
+    """Terms joined by ``-a``, a chain held flat so its length costs no
+    depth."""
+
+    terms: tuple["FlatNode", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FlatOr:
+    """Terms joined by ``-o``, held flat as ``FlatAnd``'s are."""
+
+    terms: tuple["FlatNode", ...]
+
+
+@dataclass(frozen=True, slots=True)
+class FlatFail:
+    """A grammar error, the test's whole answer once it is reached."""
+
+    message: str
+
+
+# None is the empty test, which is false.
+FlatNode = Union[
+    FlatString, FlatUnary, FlatBinary, FlatNot, FlatAnd, FlatOr, FlatFail, None
+]
+
+
 class CondError(Exception):
     """A test/[/[[ usage error: bash prints the message and returns 2.
 
@@ -99,6 +157,30 @@ class CondError(Exception):
         self.fatal = fatal
 
 
+class CondRefused(Exception):
+    """The gate refused a ``[ ]`` or a ``[[ ]]`` leaf: it answers that
+    refusal, as ``test`` refused whole does.
+
+    Args:
+        stderr (bytes): the refusal's message, newline-terminated.
+        exit_code (int): the status it answers with.
+        refusal (Refusal | None): the record the result carries.
+    """
+
+    def __init__(
+        self, stderr: bytes, exit_code: int, refusal: Refusal | None
+    ) -> None:
+        super().__init__(stderr)
+        self.stderr = stderr
+        self.exit_code = exit_code
+        self.refusal = refusal
+
+
+# Admits the words of a test as its own command, returning the gate its
+# own I/O runs under; raises ``CondRefused``.
+AdmitTest = Callable[[list[str]], Awaitable[EntryGate]]
+
+
 @dataclass(frozen=True, slots=True)
 class CondContext:
     dispatch: DispatchFn
@@ -110,3 +192,7 @@ class CondContext:
     view: SessionView | None = None
     # The links as this session sees them: a hidden link is no link.
     links: LinkView | None = None
+    # Admits each ``[[ ]]`` leaf as it is evaluated, its
+    # branches expanding only then; None where the words were admitted
+    # whole before the test ran (``test``, ``[``).
+    admit: AdmitTest | None = None

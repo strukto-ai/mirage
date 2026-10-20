@@ -21,7 +21,7 @@ import { type Caller, currentCaller } from '../../../context/session_context.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
-import { CycleError, resolvePath } from '../../../utils/path.ts'
+import { CycleError, posixNormpath, resolvePath } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { type Files, operandsOf, readerOf } from '../../../workspace/files.ts'
 import { resolvePathStat } from './paths.ts'
@@ -194,9 +194,9 @@ export function linkView(files: Files | undefined): LinkView | undefined {
   const seen = readerOf(files)
   if (!seen.linked) return undefined
   return {
-    statAt: (path: string) => seen.linkAt(path),
-    subtree: (directory: string) => seen.linksBelow(directory),
-    resolve: (path: string) => seen.resolve(path),
+    statAt: (path: string) => seen.linkStatAt(path),
+    subtree: (directory: string) => seen.linkStatsBelow(directory),
+    resolve: (path: string) => posixNormpath(seen.follow(path)),
     exists: async (path: string) => {
       try {
         return (
@@ -211,7 +211,7 @@ export function linkView(files: Files | undefined): LinkView | undefined {
     targetStat: async (path: string) => {
       if (!seen.visible(path)) return null
       try {
-        return await files.stat(seen.resolve(path))
+        return await files.stat(posixNormpath(seen.follow(path)))
       } catch (err) {
         if (!(err instanceof CycleError) && !isEnoent(err) && !isEnotdir(err)) throw err
         console.debug(`link target of ${path} has no row: ${String(err)}`)

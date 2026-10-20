@@ -320,7 +320,9 @@ async def handle_command(
         p.virtual if isinstance(p, PathSpec) else p for p in parts
     )
     follow = (
-        operand_follow(namespace, dispatch, cmd_name, parts)
+        operand_follow(
+            namespace.session_links(session), dispatch, cmd_name, parts
+        )
         if namespace is not None
         else None
     )
@@ -726,7 +728,11 @@ async def handle_command(
                 expanded = await resolve_globs(
                     [scope],
                     registry,
-                    links=namespace,
+                    links=(
+                        None
+                        if namespace is None
+                        else namespace.session_links(session)
+                    ),
                     options=glob_options(session),
                 )
                 groups.append([p for p in expanded if isinstance(p, PathSpec)])

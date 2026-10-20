@@ -411,6 +411,20 @@ def test_a_show_below_the_mapped_path_counts_as_a_reveal():
     assert not move_reveals(Visibility(paths=vis.paths), "/m/d", "/m/moved")
 
 
+def test_a_source_reached_through_a_show_reveals_what_it_leaves_hidden():
+    # /m/box is hidden and reached only through its shown pub.txt, so the
+    # rest of it sits under a hide that does not move with it.
+    shown = (ShowEntry("/m/box/pub.txt"),)
+    assert move_reveals(_vis(["/m/box"], shown), "/m/box", "/v/mb")
+    assert move_reveals(_vis(["/m"], shown), "/m/box", "/v/mb")
+    # Into a place the session does not see, nothing comes into view.
+    assert not move_reveals(_vis(["/m/box", "/v"], shown), "/m/box", "/v/mb")
+    # A show at the source reopens all of it.
+    assert not move_reveals(
+        _vis(["/m"], (ShowEntry("/m/box"),)), "/m/box", "/v/mb"
+    )
+
+
 LINKS = {
     "/data/shared/to_secret": "/data/secret/f",
     "/data/shared/rel_secret": "../secret/f",

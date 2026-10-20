@@ -146,7 +146,7 @@ export async function expandArrayItems(
       classified,
       registry,
       session.shellOptions.noglob === true,
-      namespace,
+      namespace.sessionLinks(session),
       globOptions(session),
     )
   })

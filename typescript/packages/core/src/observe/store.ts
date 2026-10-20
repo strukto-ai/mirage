@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../utils/bytes.ts'
-
 /**
  * Storage seam for the hidden recorder.
  *
@@ -63,15 +61,32 @@ export abstract class ObserverStoreBase implements ObserverStore {
 /** In-memory ObserverStore backed by a Map (the default). */
 export class RAMObserverStore extends ObserverStoreBase {
   readonly files = new Map<string, Uint8Array>()
+  // Each file's buffer with room to grow: `files` holds the written prefix
+  // of it, so an append copies only its own bytes, as Python's bytearray
+  // does. Copying the whole log on every append made a long session's
+  // ops quadratic.
+  private readonly room = new Map<string, Uint8Array>()
 
   append(path: string, data: Uint8Array): Promise<void> {
-    const existing = this.files.get(path)
-    this.files.set(path, existing === undefined ? data : concat([existing, data]))
+    const existing = this.files.get(path) ?? new Uint8Array(0)
+    const size = existing.byteLength + data.byteLength
+    let room = this.room.get(path)
+    // A file set through `write` or `files` is not the prefix of its room.
+    const prefix = room?.buffer === existing.buffer && existing.byteOffset === 0
+    if (room === undefined || !prefix || room.byteLength < size) {
+      const grown = new Uint8Array(Math.max(size, 2 * existing.byteLength))
+      grown.set(existing)
+      room = grown
+      this.room.set(path, room)
+    }
+    room.set(data, existing.byteLength)
+    this.files.set(path, room.subarray(0, size))
     return Promise.resolve()
   }
 
   write(path: string, data: Uint8Array): Promise<void> {
     this.files.set(path, data)
+    this.room.delete(path)
     return Promise.resolve()
   }
 
@@ -85,6 +100,7 @@ export class RAMObserverStore extends ObserverStoreBase {
 
   clear(): Promise<void> {
     this.files.clear()
+    this.room.clear()
     return Promise.resolve()
   }
 }

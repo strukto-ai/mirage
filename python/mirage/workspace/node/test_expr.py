@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
@@ -38,19 +37,17 @@ from mirage.workspace.expand.fields import split_fields
 from mirage.workspace.expand.node import expand_chunks
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.variable import ifs_value
+from mirage.workspace.node.test_tokens import (
+    CondParser,
+    CondSyntax,
+    CondTree,
+    ExprToken,
+    cond_tokens,
+    flat_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
-_CONTAINER_TYPES = (
-    NT.BINARY_EXPRESSION,
-    NT.UNARY_EXPRESSION,
-    NT.NEGATION_EXPRESSION,
-    NT.PARENTHESIZED_EXPRESSION,
-)
-# `[` is a command, so every operator the grammar folds into the test
-# reaches it as an operand word for test to judge (`=~` and `+` are
-# refused there, not dropped); `&&` and `||` end the command in bash.
-_FLAT_SKIP_TOKENS = frozenset({"&&", "||"})
 _COND_OP_TOKENS = frozenset({"=", "==", "!=", "=~", "<", ">", "&&", "||"})
 
 
@@ -75,94 +72,25 @@ async def expand_test_expr(
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
     """
-    result: list[str | PathSpec] = []
-    await _flatten(node, result, context, execute_fn, cs, view=view)
-    return result
-
-
-async def _flatten(
-    node,
-    out: list[str | PathSpec],
-    context: EvaluationContext,
-    execute_fn,
-    cs,
-    view: SessionView | None = None,
-) -> bool:
-    """Append the flat tokens of one test-expression node to ``out``.
-
-    Returns False when a statement separator surfaced inside an ERROR
-    recovery node — tree-sitter swallowed the rest of the line into the
-    test, so everything after the break point is discarded.
-
-    Args:
-        node: tree-sitter node to serialize.
-        out (list[str]): accumulator.
-        context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
-    """
     session = context.session
-    for child in node.children:
-        ctype = child.type
-        if ctype in ("[", "]", "[[", "]]"):
-            continue
-        if ctype == NT.ERROR:
-            if any(not g.is_named and g.type == ";" for g in child.children):
-                return False
-            if not await _flatten(
-                child, out, context, execute_fn, cs, view=view
-            ):
-                return False
-            continue
-        if not child.is_named:
-            if ctype not in _FLAT_SKIP_TOKENS:
-                out.append(decode_text(child.text))
-            continue
-        if ctype in _CONTAINER_TYPES:
-            negative = _negative_number_child(child)
-            if negative is not None:
-                expanded = await expand_node(
-                    negative, context, execute_fn, cs, view=view
-                )
-                out.append("-" + expanded)
-                continue
-            if not await _flatten(
-                child, out, context, execute_fn, cs, view=view
-            ):
-                return False
-            continue
-        if ctype == NT.TEST_OPERATOR:
-            out.append(decode_text(child.text))
-            continue
-        chunks = await expand_chunks(child, context, execute_fn, cs, view=view)
-        out.extend(
-            unmark_globs(word)
-            for word in split_fields(chunks, ifs_value(session, cs))
-        )
-    return True
-
-
-def _negative_number_child(node):
-    """Detect a unary_expression that is really a negative number word.
-
-    tree-sitter parses ``-1`` inside a test as unary_expression with a
-    bare ``-`` token; the flat argv needs it back as one operand.
-
-    Args:
-        node: tree-sitter container node.
-    """
-    if node.type != NT.UNARY_EXPRESSION:
-        return None
-    children = list(node.children)
-    if (
-        len(children) == 2
-        and not children[0].is_named
-        and children[0].type == "-"
-        and children[1].is_named
-        and children[1].type != NT.TEST_OPERATOR
-    ):
-        return children[1]
-    return None
+    result: list[str | PathSpec] = []
+    for token in flat_tokens(node):
+        if token.op is not None:
+            result.append(token.op)
+        elif token.negative:
+            expanded = await expand_node(
+                token.operand, context, execute_fn, cs, view=view
+            )
+            result.append("-" + expanded)
+        else:
+            chunks = await expand_chunks(
+                token.operand, context, execute_fn, cs, view=view
+            )
+            result.extend(
+                unmark_globs(word)
+                for word in split_fields(chunks, ifs_value(session, cs))
+            )
+    return result
 
 
 async def expand_double_bracket(
@@ -188,140 +116,16 @@ async def expand_double_bracket(
     exprs = [c for c in node.named_children]
     if not exprs:
         return CondWord("")
-    tokens: list[_CondToken] = []
     try:
-        _cond_tokens(node, tokens)
-        tree = _CondParser(tokens).parse()
-    except _CondSyntax as exc:
+        tree = CondParser(cond_tokens(node)).parse()
+    except CondSyntax as exc:
         logger.debug("[[ ]] keeps tree-sitter's reading: %s", exc)
         return await _build_cond(exprs[0], context, execute_fn, cs, view=view)
     return await _cond_node(tree, context, execute_fn, cs, view)
 
 
-# One token of a ``[[ ]]`` expression: an operator's text, or an operand
-# node (``negative`` for a ``-N`` tree-sitter split into ``-`` and N).
-@dataclass(frozen=True, slots=True)
-class _CondToken:
-    op: str | None = None
-    operand: Any = None
-    negative: bool = False
-
-
-# A parsed ``[[ ]]`` expression: its kind, then its parts.
-_CondTree = tuple[Any, ...]
-
-
-class _CondSyntax(Exception):
-    """The tokens are no expression the ``[[ ]]`` grammar reads."""
-
-
-def _cond_tokens(node, out: list[_CondToken]) -> None:
-    """Append the tokens of a ``[[ ]]`` node to ``out`` in source order.
-
-    Args:
-        node: tree-sitter node to flatten.
-        out (list[_CondToken]): accumulator.
-    """
-    for child in node.children:
-        ctype = child.type
-        if ctype in ("[[", "]]"):
-            continue
-        if ctype == NT.ERROR:
-            raise _CondSyntax
-        if not child.is_named:
-            out.append(_CondToken(op=ctype))
-        elif ctype == NT.TEST_OPERATOR:
-            out.append(_CondToken(op=decode_text(child.text)))
-        elif ctype in _CONTAINER_TYPES:
-            negative = _negative_number_child(child)
-            if negative is not None:
-                out.append(_CondToken(operand=negative, negative=True))
-            else:
-                _cond_tokens(child, out)
-        else:
-            out.append(_CondToken(operand=child))
-
-
-class _CondParser:
-    """bash's ``[[ ]]`` grammar over the flat tokens, loosest first:
-    ``||``, ``&&``, then a term. A term is any run of ``!`` (each one
-    toggles a single inversion, so ``! !`` inverts nothing) before a
-    parenthesized expression, a unary test, a binary test or a word.
-    The tree is tuples, expanded later by ``_cond_node``.
-    """
-
-    def __init__(self, tokens: list[_CondToken]) -> None:
-        self.tokens = tokens
-        self.at = 0
-
-    def _op(self, ahead: int = 0) -> str | None:
-        at = self.at + ahead
-        return self.tokens[at].op if at < len(self.tokens) else None
-
-    def _operand(self, ahead: int = 0) -> bool:
-        at = self.at + ahead
-        return at < len(self.tokens) and self.tokens[at].op is None
-
-    def parse(self) -> _CondTree:
-        tree = self._either()
-        if self.at != len(self.tokens):
-            raise _CondSyntax
-        return tree
-
-    def _either(self) -> _CondTree:
-        tree = self._both()
-        while self._op() == "||":
-            self.at += 1
-            tree = ("or", tree, self._both())
-        return tree
-
-    def _both(self) -> _CondTree:
-        tree = self._term()
-        while self._op() == "&&":
-            self.at += 1
-            tree = ("and", tree, self._term())
-        return tree
-
-    def _term(self) -> _CondTree:
-        inverted = False
-        while self._op() == "!":
-            self.at += 1
-            inverted = not inverted
-        if self._op() == "(":
-            self.at += 1
-            tree: _CondTree = ("group", self._either())
-            if self._op() != ")":
-                raise _CondSyntax
-            self.at += 1
-        else:
-            tree = self._test()
-        return ("not", tree) if inverted else tree
-
-    def _test(self) -> _CondTree:
-        op = self._op()
-        if op is not None and op.startswith("-") and self._operand(1):
-            self.at += 2
-            return ("unary", op, self.tokens[self.at - 1])
-        if not self._operand():
-            raise _CondSyntax
-        left = self.tokens[self.at]
-        op = self._op(1)
-        if (
-            op is not None
-            and (op in _COND_BINARY_TOKENS or op.startswith("-"))
-            and self._operand(2)
-        ):
-            self.at += 3
-            return ("binary", op, left, self.tokens[self.at - 1])
-        self.at += 1
-        return ("word", left)
-
-
-_COND_BINARY_TOKENS = frozenset({"=", "==", "!=", "=~", "<", ">"})
-
-
 async def _cond_node(
-    tree: _CondTree,
+    tree: CondTree,
     context: EvaluationContext,
     execute_fn,
     cs,
@@ -330,7 +134,7 @@ async def _cond_node(
     """Expand one parsed ``[[ ]]`` tree into a CondNode.
 
     Args:
-        tree (_CondTree): from ``_CondParser``.
+        tree (CondTree): from ``CondParser``.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn: workspace execute for command substitutions.
         cs: call stack for positional parameters.
@@ -359,7 +163,7 @@ async def _cond_node(
         return CondUnary(op=tree[1], operand=operand)
     if kind == "binary":
         left_text = await _token_text(tree[2], context, execute_fn, cs, view)
-        right: _CondToken = tree[3]
+        right: ExprToken = tree[3]
         if right.negative:
             right_text = await _token_text(
                 right, context, execute_fn, cs, view
@@ -372,7 +176,7 @@ async def _cond_node(
 
 
 async def _token_text(
-    token: _CondToken,
+    token: ExprToken,
     context: EvaluationContext,
     execute_fn,
     cs,

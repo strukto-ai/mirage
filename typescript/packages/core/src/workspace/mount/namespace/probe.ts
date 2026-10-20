@@ -16,7 +16,7 @@ import { FileStat, PathSpec } from '../../../types.ts'
 import { isEnotdir, isMissError, isEnoent } from '../../../errors/fs.ts'
 import { posixNormpath } from '../../../utils/path.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { Namespace } from './namespace.ts'
+import type { NamespaceLinks } from '../../../view/types.ts'
 import type { FsCondition } from '../../../errors/types.ts'
 import { resolvePathStat } from '../../../commands/builtin/utils/paths.ts'
 
@@ -106,10 +106,11 @@ export async function pathExists(
  * (`../a.txt`) collapsed, which the dispatcher does not do for a path it is handed
  * whole. The link's directory is a real one, since the table keys every link
  * by its resolved parent, so the `..` it names is that directory's parent.
- * Throws CycleError when the chain loops. Mirrors Python's resolve_link.
+ * `links` is the session's link table (`Namespace.sessionLinks`). Throws
+ * CycleError when the chain loops. Mirrors Python's resolve_link.
  */
-export function resolveLink(namespace: Namespace, virtual: string): string {
-  return posixNormpath(namespace.follow(virtual))
+export function resolveLink(links: NamespaceLinks, virtual: string): string {
+  return posixNormpath(links.follow(virtual))
 }
 
 // The stat of what a link points at, or null when it dangles.
@@ -117,15 +118,16 @@ export function resolveLink(namespace: Namespace, virtual: string): string {
 // Under -L the reported entity is the target, so its type drives -type
 // and its size and mtime drive -size and -mtime. The stat goes through
 // dispatch rather than one backend because a link may point into
-// another mount. Mirrors Python's link_target_stat.
+// another mount. `links` is the session's link table
+// (`Namespace.sessionLinks`). Mirrors Python's link_target_stat.
 export async function linkTargetStat(
-  namespace: Namespace,
+  links: NamespaceLinks,
   dispatch: DispatchFn,
   virtual: string,
 ): Promise<FileStat | null> {
   let target: string
   try {
-    target = resolveLink(namespace, virtual)
+    target = resolveLink(links, virtual)
   } catch {
     // A loop (ELOOP) is one of the two ways a link legitimately has no
     // target; statOrNull maps the other (missing). Every other backend

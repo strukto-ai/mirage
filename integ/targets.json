@@ -2971,7 +2971,8 @@
         {
           "path": "/scratch",
           "vfs": "ram",
-          "backend": "memory"
+          "backend": "memory",
+          "mode": "exec"
         },
         {
           "path": "/vault",
@@ -3205,7 +3206,14 @@
         "opener": "opener",
         "pruner": "pruner",
         "speaker": "speaker",
-        "linkwalled": "linkwalled"
+        "linkwalled": "linkwalled",
+        "auditprep": "auditprep",
+        "audithide": "audithide",
+        "auditpat": "auditpat",
+        "auditshow": "auditshow",
+        "auditrule": "auditrule",
+        "auditrulepat": "auditrulepat",
+        "auditask": "auditask"
       },
       "profile": "default",
       "profiles": {
@@ -3492,6 +3500,103 @@
                     "/scratch/lw/secret"
                   ]
                 }
+              }
+            ]
+          }
+        },
+        "auditprep": {},
+        "audithide": {
+          "paths": {
+            "hide": [
+              "/scratch/audit/secret.txt",
+              "/scratch/audit/hdir",
+              "/scratch/audit/box/secret.txt",
+              "/scratch/agit/secret.txt",
+              "/scratch/agit/hdir",
+              "/vault/ax/hl"
+            ]
+          }
+        },
+        "auditpat": {
+          "paths": {
+            "hide": [
+              "/vault/a?/hl"
+            ]
+          },
+          "mounts": {
+            "/scratch": {
+              "paths": {
+                "hide": [
+                  "*secret.txt",
+                  "/scratch/a*/hdir"
+                ]
+              }
+            }
+          }
+        },
+        "auditshow": {
+          "paths": {
+            "hide": [
+              "/scratch/audit/secret.txt",
+              "/scratch/audit/hdir",
+              "/scratch/audit/box",
+              "/scratch/agit/secret.txt",
+              "/scratch/agit/hdir",
+              "/vault/ax/hl"
+            ],
+            "show": {
+              "/scratch/audit/box/pub.txt": "rw"
+            }
+          }
+        },
+        "auditrule": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "audit sealed",
+                "paths": [
+                  "/scratch/audit/secret.txt",
+                  "/scratch/audit/hdir",
+                  "/scratch/audit/box/secret.txt",
+                  "/scratch/agit/secret.txt",
+                  "/scratch/agit/hdir",
+                  "/vault/ax/hl",
+                  "/scratch/audit/hdir/*",
+                  "/scratch/agit/hdir/*"
+                ]
+              }
+            ]
+          }
+        },
+        "auditrulepat": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "audit sealed",
+                "paths": [
+                  "*secret.txt",
+                  "/scratch/a*/hdir",
+                  "/vault/a?/hl"
+                ]
+              }
+            ]
+          }
+        },
+        "auditask": {
+          "commands": {
+            "ask": [
+              {
+                "reason": "audit nod",
+                "paths": [
+                  "/scratch/audit/secret.txt",
+                  "/scratch/audit/hdir",
+                  "/scratch/audit/box/secret.txt",
+                  "/scratch/agit/secret.txt",
+                  "/scratch/agit/hdir",
+                  "/vault/ax/hl",
+                  "/scratch/audit/hdir/*",
+                  "/scratch/agit/hdir/*"
+                ]
               }
             ]
           }

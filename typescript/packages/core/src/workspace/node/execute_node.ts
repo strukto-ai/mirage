@@ -107,7 +107,8 @@ import { executeAssignment } from './assignment.ts'
 import { executeDeclaration } from './declaration.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { HandOff } from '../../policy/types.ts'
-import { definedAt } from './occurrence.ts'
+import { claimantFor, definedAt } from './occurrence.ts'
+import { type Admitted, admitTest } from './admission.ts'
 import type { SessionView } from '../../view/types.ts'
 import { sessionView } from '../session/state.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
@@ -617,7 +618,7 @@ async function runRedirected(
         callStack,
         sessionView(session, registry.policies, context.frame.diagnostics),
         forkedNow,
-        namespace,
+        namespace.sessionLinks(context.session),
       )
   const expand = expandAs(forked)
   if (isBareExec(command)) {
@@ -1439,7 +1440,7 @@ async function executeNodeBody(
         classified,
         registry,
         session.shellOptions.noglob === true,
-        deps.namespace,
+        deps.namespace.sessionLinks(session),
         globOptions(session),
       )
     })
@@ -1515,12 +1516,26 @@ async function executeNodeBody(
 
   if (kind === NodeKind.TEST) {
     const opener = node.children[0]?.type ?? '['
+    // The shell's own test, which no command gate admits: it is admitted by
+    // its own name on what it tests.
+    const signal = mergeSignals(deps.signal, context.frame.abortSignal)
+    const claimant = claimantFor(node, deps.handed)
+    const admitted = (words: string[]): Promise<Admitted> =>
+      admitTest(
+        opener === '[[' ? '[[' : '[',
+        words,
+        session,
+        registry,
+        deps.namespace,
+        signal,
+        claimant,
+      )
     if (opener === '[[') {
       const tree = await expandDoubleBracket(node, context, executeFn, callStack, view)
-      return handleTest(dispatch, deps.namespace, tree, session, '[[', view)
+      return handleTest(dispatch, deps.namespace, tree, session, '[[', view, admitted)
     }
     const expanded = await expandTestExpr(node, context, executeFn, callStack, view)
-    return handleTest(dispatch, deps.namespace, expanded, session, '[', view)
+    return handleTest(dispatch, deps.namespace, expanded, session, '[', view, admitted)
   }
 
   if (kind === NodeKind.NEGATED) {

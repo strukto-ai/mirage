@@ -35,23 +35,34 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondContext,
     CondError,
 )
-from mirage.workspace.executor.builtins.links import operand_abs
+from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
+from mirage.workspace.executor.builtins.shared import abs_path
 from mirage.workspace.session.elements import element_is_set
 
 
 def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
-    """Resolve a file operand to an addressable scope.
+    """Resolve a file operand to an addressable scope, its links
+    followed.
+
+    A builtin's operand never passes the router's pathname walk, so it
+    is walked here, typed or classified alike (a classified one by the
+    spelling its dots need): ``-ef`` compares where two names lead.
 
     Args:
         ctx (CondContext): evaluation context.
         val (str | PathSpec): operand as typed or classified.
     """
     if isinstance(val, PathSpec):
-        return val
-    spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(
-        val, ctx.session.cwd
-    )
+        if val.walk_error is not None:
+            # The walk already refused it (the empty name, a link loop):
+            # it names nothing, which the dispatcher answers.
+            return val
+        spelled = val.dotted or val.virtual
+    else:
+        spelled = dotted_spelling(val, ctx.session.cwd) or resolve_path(
+            val, ctx.session.cwd
+        )
     return _to_scope(
         ctx.links.resolve(spelled) if ctx.links is not None else spelled
     )
@@ -77,7 +88,9 @@ async def path_kind(
     walk = PathSpec.from_str_path(val, cwd=ctx.session.cwd)
     if (
         await dot_refusal(
-            partial(dispatch_stat, ctx.dispatch), walk, ctx.namespace.follow
+            partial(dispatch_stat, ctx.dispatch),
+            walk,
+            ctx.namespace.session_links(ctx.session).follow,
         )
         is not None
     ):
@@ -125,7 +138,22 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
             # other thing that ends it.
             raise exc.signal(fatal=True) from exc
     if op in ("-L", "-h"):
-        where = operand_abs(ctx.namespace, val, ctx.session.cwd)
+        if not isinstance(val, PathSpec) and not text:
+            return False
+        # A builtin's operand never passes the router's pathname walk, so
+        # it is walked here as the router walks one whose last name
+        # lstat(2) keeps: a link above it resolves, and so does the last
+        # name of one typed with a trailing slash.
+        spec = (
+            val
+            if isinstance(val, PathSpec)
+            else PathSpec.from_str_path(val, cwd=ctx.session.cwd)
+        )
+        links = ctx.namespace.session_links(ctx.session)
+        (walked,) = follow_paths(links, [spec], follow_last=False)
+        if isinstance(walked, PathSpec) and walked.walk_error is not None:
+            return False
+        where = abs_path(walked, ctx.session.cwd)
         return ctx.links is not None and ctx.links.stat_at(where) is not None
     if op in FILE_UNARY:
         if not isinstance(val, PathSpec) and not text:

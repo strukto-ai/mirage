@@ -260,6 +260,9 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
         },
     )
     asyncio.run(ws.shell("ln -s pub.txt /data/hl"))
+    # A link whose own name the session sees but which leads into the
+    # hide is as hidden as its target.
+    asyncio.run(ws.shell("ln -s vault/secret.txt /data/lv"))
     # The shell entry point first, before the mount goes live, on the same
     # loop discipline the link probe keeps.
     hidden = asyncio.run(
@@ -268,6 +271,10 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
     result["session_shell_hidden_exit"] = hidden.exit_code
     listing = asyncio.run(ws.shell("ls /data", session_id="agent"))
     result["session_shell_listing"] = (listing.stdout or b"").decode().strip()
+    into = asyncio.run(
+        ws.shell("readlink -f /data/lv; echo $?", session_id="agent")
+    )
+    result["session_shell_link_into_hide"] = (into.stdout or b"").decode()
     capped = asyncio.run(
         ws.shell("echo x > /data/pub.txt", session_id="agent")
     )
@@ -296,6 +303,11 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
             result["session_kernel_hidden_link_absent"] = False
         except FileNotFoundError:
             result["session_kernel_hidden_link_absent"] = True
+        try:
+            os.lstat(f"{data}/lv")
+            result["session_kernel_link_into_hide_absent"] = False
+        except FileNotFoundError:
+            result["session_kernel_link_into_hide_absent"] = True
         # The cap's refusal is an errno the adapter picks; what is
         # pinned is that the write fails and the body survives.
         try:

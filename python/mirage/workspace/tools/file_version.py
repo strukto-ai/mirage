@@ -14,6 +14,7 @@
 
 import base64
 import hashlib
+import posixpath
 
 from mirage.utils.path import resolve_path
 from mirage.workspace.files import Files, reader_of
@@ -89,7 +90,8 @@ class FileVersionTracker:
         reader = reader_of(self.vfs)
         if not reader.linked:
             return resolve_path(path, "/")
-        return reader.resolve(resolve_path(reader.resolve(path), "/"))
+        inner = posixpath.normpath(reader.follow(path))
+        return posixpath.normpath(reader.follow(resolve_path(inner, "/")))
 
     async def _current_version(self, path: str) -> str | None:
         if not await self.vfs.exists(path):

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/classify.ts'
-import { isFsError } from '../../../errors/fs.ts'
+import { isEnotdir, isFsError } from '../../../errors/fs.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
@@ -95,8 +95,11 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * `readTree`, or a dispatcher that declines it (a path rule below the
  * directory) leaves the walk to `readdir` and `stat`, each judged on its own,
  * as does a path the answer does not hold; under a hide the dispatcher
- * answers without the hidden entries. Both take the path first and pass
- * the rest through. `answered` collects each directory listed
+ * answers without the hidden entries. A subtree read stops at a link
+ * (ENOTDIR), so a directory a walk reached through one is opened by
+ * `readdir`, which follows it as opendir(3) does and meets whatever refuses
+ * the directory it leads to. Both take the path first and pass the rest
+ * through. `answered` collects each directory listed
  * from an answer, for a walk that charges a budget per request. Mirrors
  * Python's `tree_walk`.
  */
@@ -135,7 +138,7 @@ export function treeWalk<D, S>(
       try {
         found = await readTree(path)
       } catch (err) {
-        if ((err as Partial<WalkDeclinedError>).declined !== true) throw err
+        if ((err as Partial<WalkDeclinedError>).declined !== true && !isEnotdir(err)) throw err
         found = null
       }
       if (found !== null) {

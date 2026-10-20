@@ -126,7 +126,7 @@ export async function handleExecPath(
   }
   if (isBinary(data)) return scriptError(path, 'cannot execute binary file: Exec format error', 126)
   const script = decodeText(data)
-  const target = namespace.follow(resolvePath(path, session.cwd))
+  const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
   const [vfs, spec] = registry.resolve(target)
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes

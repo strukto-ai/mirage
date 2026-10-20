@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { CycleError } from '../../../utils/path.ts'
+import { MountMode } from '../../../types.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { metaFromFields, metaToFields } from './namespace.ts'
 import { RAMNamespaceStore } from './ram.ts'
@@ -416,5 +418,33 @@ describe('Namespace extended attributes', () => {
     )
     await first.close()
     await second.close()
+  })
+})
+
+describe('Namespace session links', () => {
+  it('answer as the session sees', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    await ws.shell(
+      'mkdir /data/vault /data/pub; ln -s /data/vault/s.txt /data/lnk; ln -s /data/pub /data/pl',
+    )
+    ws.createSession('agent', { profile: { paths: { hide: ['/data/vault'] } } })
+    const links = ws.namespace.sessionLinks(ws.getSession('agent'))
+    expect(links.isLink('/data/pl')).toBe(true)
+    expect(links.isLink('/data/lnk')).toBe(false)
+    expect(links.readlink('/data/lnk')).toBeNull()
+    expect(links.linkStatAt('/data/lnk')).toBeNull()
+    expect(links.symlinkTargets()).toEqual(new Map([['/data/pl', '/data/pub']]))
+    expect(links.linkStatsBelow('/data').map(([path]) => path)).toEqual(['/data/pl'])
+    expect(links.linkNamesUnder('/data')).toEqual(new Set(['pl']))
+    expect(links.follow('/data/pl/x')).toBe('/data/pub/x')
+    expect(links.follow('/data/vault/x')).toBe('/data/vault/x')
+    expect(links.followParent('/data/pl/x')).toBe('/data/pub/x')
+    const whole = ws.namespace.sessionLinks(ws.getSession(ws.defaultSessionId))
+    expect(whole.symlinkTargets()).toEqual(ws.namespace.symlinkTargets())
+    expect(whole.isLink('/data/lnk')).toBe(true)
+    await ws.close()
   })
 })

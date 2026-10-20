@@ -33,7 +33,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, parseLine } from '../shared.ts'
 import {
-  isReadOnlyError,
+  isRefusal,
   nowIso,
   permissionError,
   parseTouchStamp,
@@ -126,9 +126,15 @@ export async function handleTouch(
   const noCreate = fl.asBool('no_create')
 
   const errors: string[] = []
+  const links = namespace.sessionLinks(session)
   for (const target of await expandOperands(namespace, dispatch, operands)) {
-    if (fl.asBool('no_dereference') && namespace.isLink(target.virtual)) {
-      await setattrLink(dispatch, target, { mtime: stamp })
+    if (fl.asBool('no_dereference') && links.isLink(target.virtual)) {
+      try {
+        await setattrLink(dispatch, target, { mtime: stamp })
+      } catch (err) {
+        if (!isRefusal(err)) throw err
+        errors.push(permissionError('touch', 'setting times of', target.rawPath, err))
+      }
       continue
     }
     if (target.walkError !== null) {
@@ -153,7 +159,7 @@ export async function handleTouch(
     // words that refusal ("setting times of") differently from its
     // create-path one ("cannot touch").
     const slashed = target.rawPath.endsWith('/')
-    const unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => namespace.follow(v))
+    const unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => links.follow(v))
     if (unwalked !== null) {
       const action = slashed ? 'setting times of' : 'cannot touch'
       errors.push(`touch: ${action} '${target.rawPath}': ${String(fsStrerror(unwalked))}\n`)
@@ -161,7 +167,7 @@ export async function handleTouch(
     }
     let virtual: string
     try {
-      virtual = namespace.follow(target.virtual)
+      virtual = links.follow(target.virtual)
     } catch (err) {
       if (err instanceof CycleError) {
         const action = noCreate ? 'setting times of' : 'cannot touch'
@@ -217,9 +223,9 @@ export async function handleTouch(
       if (setMtime) fields.mtime = stamp
       await setattrVia(dispatch, resolved, fields)
     } catch (err) {
-      if (isReadOnlyError(err)) {
+      if (isRefusal(err)) {
         const action = noCreate ? 'setting times of' : 'cannot touch'
-        errors.push(permissionError('touch', action, target, err))
+        errors.push(permissionError('touch', action, target.rawPath, err))
         continue
       }
       // A destination whose parent chain is not all directories is one

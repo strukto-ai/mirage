@@ -63,6 +63,18 @@ async def test_flat_and_or_and_parentheses():
 
 
 @pytest.mark.asyncio
+async def test_flat_reads_a_long_chain_in_a_loop():
+    # test reads -a and -o chains in a loop, so a chain's length costs
+    # no stack: 3000 terms read and evaluate as 3 do.
+    assert await eval_flat(_ctx(), ["x"] + ["-a", "x"] * 2999) is True
+    assert await eval_flat(_ctx(), ["x"] + ["-o", ""] * 2999) is True
+    assert (
+        await eval_flat(_ctx(), ["x"] + ["-a", "x"] * 2998 + ["-a", ""])
+        is False
+    )
+
+
+@pytest.mark.asyncio
 async def test_flat_reports_a_bad_integer_as_an_error():
     with pytest.raises(CondError):
         await eval_flat(_ctx(), ["x", "-eq", "1"])
@@ -117,3 +129,9 @@ async def test_equal_mtimes_are_neither_newer_nor_older():
     await ws.shell("mkdir -p /w; touch -d '2020-01-01 00:00:00' /w/a /w/b")
     assert (await ws.shell("[ /w/a -nt /w/b ]")).exit_code == 1
     assert (await ws.shell("[ /w/a -ot /w/b ]")).exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_flat_reaches_a_term_before_a_grammar_error_after_it():
+    with pytest.raises(CondError, match="x: integer expression expected"):
+        await eval_flat(_ctx(), ["1", "-eq", "x", "-a"])

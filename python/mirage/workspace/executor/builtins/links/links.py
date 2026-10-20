@@ -23,16 +23,14 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, walk_spelling
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context import session_visibility
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, LsLinkMode, PathSpec
-from mirage.utils.hidden import path_visible
 from mirage.utils.path import CycleError
-from mirage.view.types import FollowOperands
+from mirage.view.types import FollowOperands, NamespaceLinks
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.lookup.constants import (
@@ -40,13 +38,12 @@ from mirage.workspace.lookup.constants import (
     follows_last_component,
     ls_link_mode,
 )
-from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import stat_or_none
 
 logger = logging.getLogger(__name__)
 
 
-def follow_parent(namespace: Namespace, virtual: str) -> str:
+def follow_parent(links: NamespaceLinks, virtual: str) -> str:
     """Resolve every component of a path but the last one.
 
     POSIX resolves a path one component at a time, and only the last one
@@ -59,18 +56,19 @@ def follow_parent(namespace: Namespace, virtual: str) -> str:
     which the slash-keeping commands read off ``raw_path`` instead.
 
     Args:
-        namespace (Namespace): addressing authority holding the links.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         virtual (str): absolute virtual path.
 
     Raises:
         CycleError: when a prefix loops past the hop limit (ELOOP).
     """
     trimmed = virtual.rstrip("/")
-    return namespace.follow_parent(trimmed) if trimmed else virtual
+    return links.follow_parent(trimmed) if trimmed else virtual
 
 
 def follow_paths(
-    namespace: Namespace,
+    links: NamespaceLinks,
     items: list[str | PathSpec],
     follow_last: bool = True,
     slash_follows: bool = True,
@@ -95,7 +93,8 @@ def follow_paths(
     rather than reading through a hidden link.
 
     Args:
-        namespace (Namespace): addressing authority holding the link table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         items (list[str | PathSpec]): classified command parts.
         follow_last (bool): whether the command resolves the final
             component of its own accord (open(2) rather than lstat(2)).
@@ -103,21 +102,18 @@ def follow_paths(
             ``follow_last``; False only for ``tar``, which strips the
             slash before it stats.
     """
-    vis = session_visibility()
     out: list[str | PathSpec] = []
     for item in items:
-        if not isinstance(item, PathSpec) or not path_visible(
-            vis, item.virtual
-        ):
+        if not isinstance(item, PathSpec):
             out.append(item)
             continue
         last = follow_last or (slash_follows and item.raw_path.endswith("/"))
-        spelled = walk_spelling(item, namespace.follow)
+        spelled = walk_spelling(item, links.follow)
         try:
             followed = (
-                namespace.follow(spelled)
+                links.follow(spelled)
                 if last
-                else follow_parent(namespace, spelled)
+                else follow_parent(links, spelled)
             )
         except CycleError:
             out.append(dataclasses.replace(item, walk_error="ELOOP"))
@@ -145,7 +141,7 @@ def follow_paths(
 
 
 async def follow_directory_links(
-    namespace: Namespace, dispatch: DispatchFn, items: list[str | PathSpec]
+    links: NamespaceLinks, dispatch: DispatchFn, items: list[str | PathSpec]
 ) -> list[str | PathSpec]:
     """Resolve each command-line link that leads to a directory.
 
@@ -157,7 +153,8 @@ async def follow_directory_links(
     this runs after ``follow_paths`` has resolved every operand's prefix.
 
     Args:
-        namespace (Namespace): addressing authority holding the links.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher used to stat each target.
         items (list[str | PathSpec]): classified command parts, their
             last components not yet resolved.
@@ -167,11 +164,11 @@ async def follow_directory_links(
         if (
             not isinstance(item, PathSpec)
             or item.walk_error is not None
-            or not namespace.is_link(item.virtual)
+            or not links.is_link(item.virtual)
         ):
             out.append(item)
             continue
-        followed = follow_paths(namespace, [item])[0]
+        followed = follow_paths(links, [item])[0]
         leads_to_dir = False
         if isinstance(followed, PathSpec) and followed.walk_error is None:
             try:
@@ -194,7 +191,7 @@ async def follow_directory_links(
 
 
 def operand_follow(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     name: str,
     words: Sequence[str | PathSpec],
@@ -211,7 +208,8 @@ def operand_follow(
     resolves as the same name typed would.
 
     Args:
-        namespace (Namespace): addressing authority holding the links.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher, which stats where an ls
             operand's link leads.
         name (str): command name.
@@ -227,11 +225,11 @@ def operand_follow(
     slash_follows = name not in SLASH_KEEPS_LAST
 
     async def follow(items: list[str | PathSpec]) -> list[str | PathSpec]:
-        if not namespace.symlink_targets():
+        if not links.symlink_targets():
             return items
-        out = follow_paths(namespace, items, follow_last, slash_follows)
+        out = follow_paths(links, items, follow_last, slash_follows)
         if ls_mode is LsLinkMode.DIRECTORY:
-            out = await follow_directory_links(namespace, dispatch, out)
+            out = await follow_directory_links(links, dispatch, out)
         return out
 
     return follow
@@ -274,7 +272,7 @@ def accepts_line(
 async def strip_link_operands(
     name: str,
     dispatch: DispatchFn,
-    namespace: Namespace,
+    links: NamespaceLinks,
     items: list[str | PathSpec],
     args: tuple[str, ...],
     cwd: str,
@@ -307,7 +305,8 @@ async def strip_link_operands(
         name (str): the command, ``rm`` or ``unlink`` (picks the
             refusal verb, and only rm has ``-f``).
         dispatch (DispatchFn): the op dispatcher.
-        namespace (Namespace): addressing authority holding the link table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         items (list[str | PathSpec]): classified command parts.
         args (tuple[str, ...]): the line's words after the name, parsed
             for rm's ``-f``.
@@ -331,7 +330,7 @@ async def strip_link_operands(
         if (
             isinstance(item, PathSpec)
             and not item.raw_path.endswith("/")
-            and namespace.is_link(item.virtual)
+            and links.is_link(item.virtual)
         ):
             handled += 1
             try:
@@ -353,7 +352,7 @@ async def strip_link_operands(
 
 
 async def _slashed_link_refusal(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     src: PathSpec,
     dst: PathSpec,
@@ -370,7 +369,8 @@ async def _slashed_link_refusal(
     against GNU coreutils 9.7.
 
     Args:
-        namespace (Namespace): addressing authority holding the link table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher used to stat the target.
         src (PathSpec): the slashed link source.
         dst (PathSpec): destination as typed.
@@ -378,7 +378,7 @@ async def _slashed_link_refusal(
             does not exist.
     """
     try:
-        followed = namespace.follow(src.virtual)
+        followed = links.follow(src.virtual)
     except CycleError:
         return fail(
             "mv",
@@ -410,7 +410,7 @@ async def _slashed_link_refusal(
 
 
 async def prepare_mv(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     items: list[str | PathSpec],
     args: tuple[str, ...],
@@ -419,7 +419,8 @@ async def prepare_mv(
     """Resolve the destination directory without transferring any source.
 
     Args:
-        namespace (Namespace): Namespace holding the link table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): The dispatcher, used to probe the destination.
         items (list[str | PathSpec]): Classified command parts.
         args (tuple[str, ...]): Original arguments, including target flags.
@@ -432,10 +433,10 @@ async def prepare_mv(
     )
     target = fl.raw("target_directory")
     if target is not None or len(paths) > 2:
-        return _prepare_many(namespace, items, paths, target)
+        return _prepare_many(links, items, paths, target)
     if len(paths) != 2:
         return items, None
-    return await _prepare_pair(namespace, dispatch, items, paths, fl)
+    return await _prepare_pair(links, dispatch, items, paths, fl)
 
 
 def _landing_key(path: str) -> str:
@@ -443,7 +444,7 @@ def _landing_key(path: str) -> str:
 
 
 def _prepare_many(
-    namespace: Namespace,
+    links: NamespaceLinks,
     items: list[str | PathSpec],
     paths: list[PathSpec],
     target: FlagValue | None,
@@ -460,7 +461,8 @@ def _prepare_many(
     node entries re-anchored once the backend confirms the move.
 
     Args:
-        namespace (Namespace): addressing authority holding the node table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         items (list[str | PathSpec]): classified command parts.
         paths (list[PathSpec]): the PathSpecs among them, in line order.
         target (FlagValue | None): ``-t``'s resolved value, if given.
@@ -483,14 +485,14 @@ def _prepare_many(
         dst = paths[-1]
     if dst.walk_error is not None:
         return items, None
-    followed = follow_paths(namespace, [dst])[0]
+    followed = follow_paths(links, [dst])[0]
     assert isinstance(followed, PathSpec)
     rewritten = [followed if item is dst else item for item in items]
     return rewritten, None
 
 
 async def _prepare_pair(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     items: list[str | PathSpec],
     paths: list[PathSpec],
@@ -500,7 +502,8 @@ async def _prepare_pair(
     or lands inside.
 
     Args:
-        namespace (Namespace): addressing authority holding the node table.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher used to stat the destination.
         items (list[str | PathSpec]): classified command parts.
         paths (list[PathSpec]): the two PathSpecs, source first.
@@ -515,7 +518,7 @@ async def _prepare_pair(
         if (
             dst.raw_path == ""
             and src.walk_error is None
-            and namespace.is_link(src.virtual)
+            and links.is_link(src.virtual)
         ):
             return items, fail(
                 "mv",
@@ -525,7 +528,7 @@ async def _prepare_pair(
         if (
             dst.walk_error == "ELOOP"
             and src.walk_error is None
-            and namespace.is_link(src.virtual)
+            and links.is_link(src.virtual)
         ):
             return items, fail(
                 "mv",
@@ -540,7 +543,7 @@ async def _prepare_pair(
     # link loop stands in stats ELOOP, which mv reads as not a directory:
     # the rename replaces the link itself (GNU 9.7).
     try:
-        followed: str | None = namespace.follow(dst.virtual)
+        followed: str | None = links.follow(dst.virtual)
     except CycleError:
         followed = None
     stat = (
@@ -553,10 +556,10 @@ async def _prepare_pair(
         and stat is not None
         and stat.type == FileType.DIRECTORY
     )
-    if namespace.is_link(src.virtual):
+    if links.is_link(src.virtual):
         if src.raw_path.endswith("/"):
             return items, await _slashed_link_refusal(
-                namespace, dispatch, src, dst, stat
+                links, dispatch, src, dst, stat
             )
         if not into_dir and dst.raw_path.endswith("/"):
             # rename(2) never follows the source, so a link is not a
@@ -581,9 +584,9 @@ async def _prepare_pair(
                 f"{posix_phrase(verdict or FsCondition.ENOTDIR)}\n",
             )
     rewritten = items
-    if into_dir and namespace.is_link(dst.virtual):
+    if into_dir and links.is_link(dst.virtual):
         rewritten = [
-            follow_paths(namespace, [item])[0] if item is dst else item
+            follow_paths(links, [item])[0] if item is dst else item
             for item in items
         ]
     return rewritten, None

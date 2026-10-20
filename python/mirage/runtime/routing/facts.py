@@ -20,7 +20,7 @@ from mirage.shell.types import TSNodeLike
 def command_nodes(ast: TSNodeLike) -> Iterator[TSNodeLike]:
     """Every command node of a parsed line, in source order, nested
     ones included (a substitution's command follows the word holding
-    it).
+    it), and every ``[ ]`` or ``[[ ]]`` test, the shell's own command.
 
     Args:
         ast (TSNodeLike): the parsed tree-sitter root node.
@@ -28,6 +28,6 @@ def command_nodes(ast: TSNodeLike) -> Iterator[TSNodeLike]:
     stack = [ast]
     while stack:
         node = stack.pop()
-        if node.type == "command":
+        if node.type in ("command", "test_command"):
             yield node
         stack.extend(reversed(node.children))

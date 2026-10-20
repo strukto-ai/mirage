@@ -59,7 +59,7 @@ def host_files(
     # only a listing's link marks are asked of the namespace.
     reader = reader_of(files)
     resolver = PrefixResolver(
-        list, reader.link_names if reader.linked else None
+        list, reader.link_names_under if reader.linked else None
     )
     return RuntimeFiles(dispatch, loop, resolver)
 

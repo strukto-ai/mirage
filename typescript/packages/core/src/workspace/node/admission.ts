@@ -41,7 +41,8 @@ import { commandNodes } from '../../runtime/routing/index.ts'
 import { getParts, getRedirects, literalWord, splitEnvPrefix } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
-import { PathSpec, type Refusal, type Visibility } from '../../types.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -49,6 +50,8 @@ import { getExtension } from '../../utils/filetype.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
+import { TEST_NAMES, fileOperands } from '../executor/builtins/condition/operands.ts'
+import { CondRefused } from '../executor/builtins/condition/types.ts'
 import {
   CWD_DEFAULT_RAW,
   commandTree,
@@ -84,7 +87,14 @@ import {
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { envSnapshot } from '../session/state.ts'
-import { innerLines, innerReadable, readWord, wordValue, type Word } from './inner_lines.ts'
+import {
+  innerLines,
+  innerReadable,
+  readWord,
+  readsOfTest,
+  wordValue,
+  type Word,
+} from './inner_lines.ts'
 import {
   argvFrame,
   type Frame,
@@ -214,9 +224,10 @@ export class Admitted implements EntryGate {
  * `/data/secret`, so a rule protecting the target has to see it, and a
  * command-scoped rule never runs at the dispatcher where the resolved path
  * would otherwise be checked. The links are followed as the command's own
- * session sees them (`vis`), as the router follows them: on the browser
- * fallback the ambient view folds every live session's hides, and a peer
- * hiding the link must not keep its target from the rule. The follow policy is the command's own
+ * session sees them (`links`, `Namespace.sessionLinks`), as the router
+ * follows them: on the browser fallback the ambient view folds every live
+ * session's hides, and a peer hiding the link must not keep its target from
+ * the rule; null where no link stands. The follow policy is the command's own
  * (`followsLastComponent`: rm, mv, ln, stat, tar ... act on the link
  * itself, `-L` turns following back on), the same one the router
  * applies to the operands before the handler runs, so a rule sees
@@ -236,9 +247,8 @@ export function policyScopes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
-  namespace: Namespace | null,
+  links: NamespaceLinks | null,
   cwd: string,
-  vis: Visibility | null,
   implied: PathSpec | null = null,
   redirects: readonly PathSpec[] = [],
   treeFlags: readonly PathSpec[] = [],
@@ -256,13 +266,12 @@ export function policyScopes(
     // never see it without this row.
     scopes.unshift(toScope(resolvePath(name, cwd)))
   }
-  if (namespace !== null && namespace.nodes.size > 0 && operands.length > 0) {
+  if (links !== null && operands.length > 0) {
     const followed = followPaths(
-      namespace,
+      links,
       [...operands],
       followsLastComponent(name, [name, ...args]),
       !SLASH_KEEPS_LAST.has(name),
-      vis,
     )
     const seen = new Set(scopes.map((p) => p.virtual))
     for (const item of followed) {
@@ -277,8 +286,8 @@ export function policyScopes(
   }
   if (redirects.length > 0) {
     const targets: (string | PathSpec)[] = [...redirects]
-    if (namespace !== null && namespace.nodes.size > 0) {
-      const followed = followPaths(namespace, [...redirects], true, true, vis)
+    if (links !== null) {
+      const followed = followPaths(links, [...redirects], true, true)
       targets.push(...followed.filter((p) => p instanceof PathSpec))
     }
     const seen = new Set(scopes.map((p) => p.virtual))
@@ -485,11 +494,10 @@ function writes(
   if (namespace !== null && namespace.nodes.size > 0 && named.length > 0) {
     const typed = new Set(named.map((p) => p.virtual))
     const followed = followPaths(
-      namespace,
+      namespace.sessionLinks(session),
       [...named],
       followsLastComponent(name, [name, ...args]),
       !SLASH_KEEPS_LAST.has(name),
-      session.visibility,
     )
     for (const p of followed) {
       if (p instanceof PathSpec && !typed.has(p.virtual)) named.push(p)
@@ -538,9 +546,8 @@ export async function gate(
         name,
         args,
         operands,
-        namespace,
+        namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
         session.cwd,
-        session.visibility,
         implied,
         redirects,
         treePathScopes(registry, name, args, session.cwd, env),
@@ -653,6 +660,44 @@ export async function admit(
   return { stderr, exitCode, refusal: refusalOf(action) }
 }
 
+/**
+ * Admit a `[ ]` test, or one `[[ ]]` leaf, as the command it is: the shell
+ * evaluates it itself, so no command gate saw its words, and a rule, an allow
+ * list or a policy answers it by its own name as it answers `test` on the
+ * same words. `name` is `[` or `[[`; `words` what it tests, expanded,
+ * operators included; `signal` the run's abort signal; `claimant` the test
+ * and its line, null outside a line. Throws `CondRefused` where the gate
+ * refused it. Mirrors Python's admit_test.
+ */
+export async function admitTest(
+  name: string,
+  words: string[],
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  signal?: AbortSignal,
+  claimant: Claimant | null = null,
+): Promise<Admitted> {
+  const classified = classifiedWords(name, words, session, registry)
+  const verdict = await admit(
+    name,
+    words,
+    classified.slice(1),
+    session,
+    registry,
+    namespace,
+    null,
+    [],
+    signal,
+    claimant,
+    true,
+  )
+  if (!(verdict instanceof Admitted)) {
+    throw new CondRefused(verdict.stderr, verdict.exitCode, verdict.refusal)
+  }
+  return verdict
+}
+
 function refuse(name: string, reason: string): Refused {
   const deny: Deny = { kind: 'deny', reason }
   const [stderr, exitCode] = renderDeny(name, deny)
@@ -679,6 +724,7 @@ function wordHints(
 ): [(ValueType | null)[] | null, (string | null)[] | null] {
   const consumed = registry.matchCommandPrefix([...line])
   const joined = line.slice(0, consumed).join(' ')
+  if (TEST_NAMES.has(joined)) return [fileOperands(joined, line.slice(1)), null]
   const consumer = lookup(joined, session, registry)
   // A mount command's spec is read, and so is a native capture's and an
   // interpreter's: `python3 steal.py` runs on the runtime's own disk or
@@ -883,31 +929,38 @@ export async function admitLine(
   const home = homeDir(session)
   const scope = frame ?? rootFrame(root, handed?.origin ?? null)
   for (const node of commandNodes(root)) {
-    const [, parts] = splitEnvPrefix(getParts(node))
-    const words = parts.map((part) => readWord(part, home))
-    if (words.length === 0) continue
-    // The runtime runs the commands itself: no command's result comes back
-    // for a postCommand policy to judge.
-    if (await registry.policies.wantsFor('postCommand', session.sessionId)) {
-      return refuse(
-        words[0]?.raw ?? '',
-        'a post_command policy cannot judge a line a runtime runs whole',
-      )
+    let reads: Word[][]
+    if (node.type === NodeType.TEST_COMMAND) {
+      reads = readsOfTest(node, home).map((test) => test.words)
+    } else {
+      const [, parts] = splitEnvPrefix(getParts(node))
+      reads = [parts.map((part) => readWord(part, home))]
     }
-    const refusal = await admitWords(
-      words,
-      open,
-      session,
-      registry,
-      namespace,
-      rules,
-      reparse,
-      statementRedirects(node, home),
-      signal,
-      handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
-      statementStdin(node),
-    )
-    if (refusal !== null) return refusal
+    for (const words of reads) {
+      if (words.length === 0) continue
+      // The runtime runs the commands itself: no command's result comes
+      // back for a postCommand policy to judge.
+      if (await registry.policies.wantsFor('postCommand', session.sessionId)) {
+        return refuse(
+          words[0]?.raw ?? '',
+          'a post_command policy cannot judge a line a runtime runs whole',
+        )
+      }
+      const refusal = await admitWords(
+        words,
+        open,
+        session,
+        registry,
+        namespace,
+        rules,
+        reparse,
+        statementRedirects(node, home),
+        signal,
+        handed === null ? null : { line: handed, occurrence: occurrenceIn(node, scope) },
+        statementStdin(node),
+      )
+      if (refusal !== null) return refusal
+    }
   }
   return null
 }

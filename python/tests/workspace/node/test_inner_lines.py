@@ -16,11 +16,13 @@ import pytest
 
 from mirage.shell.helpers import get_parts
 from mirage.shell.parse import parse
+from mirage.shell.types import NodeType as NT
 from mirage.workspace.node.inner_lines import (
     InnerLine,
     Word,
     inner_lines,
     read_word,
+    reads_of_test,
 )
 
 
@@ -143,3 +145,28 @@ def test_shell_option_values_require_stable_words(raw, stable):
     assert (inner == []) == stable
     if not stable:
         assert len(inner) == 1 and not inner[0].readable
+
+
+@pytest.mark.parametrize(
+    ("line", "reads"),
+    [
+        ("[ -e /x ]", [(["[", "-e", "/x", "]"], True)]),
+        ("[ 1 -lt -2 ]", [(["[", "1", "-lt", "-2", "]"], True)]),
+        (
+            "[[ ! -e /x && a == b* ]]",
+            [(["[[", "-e", "/x"], True), (["[[", "a", "==", "b*"], False)],
+        ),
+    ],
+)
+def test_a_test_is_read_as_the_tests_the_gate_admits(line, reads):
+    # `[ ]` whole with its bracket, as the command `[` is; `[[ ]]` a leaf
+    # at a time, its pattern side left to the gate, which reads it in
+    # the matcher's dialect.
+    stack = [parse(line)]
+    while stack and stack[-1].type != NT.TEST_COMMAND:
+        stack.extend(reversed(stack.pop().children))
+    got = [
+        ([w.value for w in r.words], r.stated)
+        for r in reads_of_test(stack[-1])
+    ]
+    assert got == reads

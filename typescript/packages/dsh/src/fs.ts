@@ -34,6 +34,7 @@ import type { NamespaceLinks } from '@struktoai/mirage-core/view/types'
 import { FileType } from '@struktoai/mirage-core/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { assertNotAborted, mapMirageError } from './errors.ts'
 import {
@@ -293,7 +294,7 @@ export class MirageFileSystem extends FileSystem {
 
   private follow(path: string): string {
     try {
-      return this.reader.resolve(path)
+      return posixNormpath(this.reader.follow(path))
     } catch (err) {
       throw mapMirageError(err, 'resolve', path)
     }
@@ -559,7 +560,7 @@ export class MirageFileSystem extends FileSystem {
     }
     // Namespace symlinks live above every backend, so a listing merges
     // them in here exactly as mirage's own ls does.
-    for (const name of this.reader.linkNames(key)) names.add(name)
+    for (const name of this.reader.linkNamesUnder(key)) names.add(name)
     const entries: FsDirEntry[] = []
     for (const name of [...names].sort(compareCodePoints)) {
       // Per entry, not just at the entry point: a listing is one classification

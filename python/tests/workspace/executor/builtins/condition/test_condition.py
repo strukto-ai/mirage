@@ -37,6 +37,11 @@ class _StubNamespace:
     def follow(self, path: str) -> str:
         return path
 
+    def session_links(
+        self, session: SessionState | None = None
+    ) -> "_StubNamespace":
+        return self
+
 
 class _StubSession:
     """Session stand-in exposing only what the evaluator touches."""

@@ -36,6 +36,10 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { readers } from '../../../test-utils.ts'
+import { parseSessionProfile } from '../../../policy/profile.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 
@@ -198,6 +202,39 @@ describe('structure-only directories', () => {
     )
     expect(result?.[1].exitCode).toBe(LS_OK)
     expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/ghost:\ndeep\n\n/ghost/deep:\nlnk\n')
+  })
+
+  // A directory whose listing is refused is refused whole: a name the
+  // namespace owes it (here a mount below it) is as much its listing as the
+  // backend's, so -R reports it as GNU reports an unreadable directory below
+  // an operand (exit 1) and lists none of it. Mirrors test_ls.py.
+  it('-R lists nothing owed to a directory it may not open', async () => {
+    const guardedReaddir = (p: PathSpec): Promise<string[]> =>
+      p.virtual === '/base' ? Promise.resolve(['/base/sealed', '/base/x']) : eacces()
+    const guardedStat = (p: PathSpec): Promise<FileStat> =>
+      Promise.resolve(
+        new FileStat({
+          name: p.virtual.split('/').pop() ?? '',
+          type: p.virtual === '/base/x' ? FileType.FILE : FileType.DIRECTORY,
+        }),
+      )
+    const result = await runWithMountGate('/', MountMode.WRITE, () =>
+      lsGeneric(
+        [PathSpec.fromStrPath('/base')],
+        {
+          flags: { recursive: true },
+          cwd: PathSpec.fromStrPath('/'),
+          vfs: owing('/base/sealed/il/'),
+        } as never,
+        guardedReaddir,
+        guardedStat,
+      ),
+    )
+    expect(result?.[1].exitCode).toBe(LS_MINOR_PROBLEM)
+    expect(DEC.decode(result?.[0] as Uint8Array)).toBe('/base:\nsealed\nx\n')
+    expect(DEC.decode(result?.[1].stderr as Uint8Array)).toBe(
+      "ls: cannot open directory '/base/sealed': Permission denied\n",
+    )
   })
 
   // Absence of the dispatcher can only mean "nobody can answer", so the row keeps
@@ -504,5 +541,59 @@ describe('typeIndicator', () => {
 
   it('marks nothing it could not stat', () => {
     expect(typeIndicator(null, 'classify')).toBe('')
+  })
+})
+
+describe('a directory a rule refuses to list', () => {
+  const SEALED_DOC = parseSessionProfile({
+    commands: {
+      deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
+    },
+  })
+  const SEALED_SEED =
+    'mkdir -p /s/d/hdir /v/ax/empty && echo i > /s/d/hdir/inner && ' +
+    'echo o > /s/d/ok && echo k > /v/ax/empty/k && echo p > /v/ax/p && ' +
+    'echo h > /v/ax/hl && ln -s /s/d/ok /s/d/hdir/il && ' +
+    'ln -s /s/d/hdir /v/ax/dl'
+
+  // The rule refuses to list /s/d/hdir, which holds a link (il) only the
+  // namespace knows: the refusal wins over that name, and the directory is
+  // reported after its parent's group, GNU's unreadable subdirectory, with
+  // the exit 1 of a problem below an operand. Two operands on two mounts
+  // are listed by the relay, the same way; -L opens what the link leads to,
+  // which the rule refuses. Mirrors test_ls.py.
+  it.each([
+    [
+      'ls -R /s/d',
+      '/s/d:\nhdir\nok\n',
+      "ls: cannot open directory '/s/d/hdir': Permission denied\n",
+    ],
+    [
+      'ls -R /s/d /v/ax',
+      '/s/d:\nhdir\nok\n\n/v/ax:\ndl\nempty\nhl\np\n\n/v/ax/empty:\nk\n',
+      "ls: cannot open directory '/s/d/hdir': Permission denied\n",
+    ],
+    [
+      'ls -RL /v/ax',
+      '/v/ax:\ndl\nempty\nhl\np\n\n/v/ax/empty:\nk\n',
+      "ls: cannot open directory '/v/ax/dl': Permission denied\n",
+    ],
+  ])('%s reports it and lists none of it', async (line, out, err) => {
+    const ws = new Workspace(
+      { '/s': new RAMVFS(), '/v': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        profiles: { sealed: SEALED_DOC },
+      },
+    )
+    try {
+      ws.createSession('g', { profile: 'sealed' })
+      await ws.shell(SEALED_SEED)
+      const r = await ws.shell(line, { sessionId: 'g' })
+      expect([r.exitCode, DEC.decode(r.stdout), DEC.decode(r.stderr)]).toEqual([1, out, err])
+    } finally {
+      await ws.close()
+    }
   })
 })

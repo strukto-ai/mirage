@@ -181,7 +181,7 @@ async def expand_array_items(
             classified,
             registry,
             noglob=bool(session.shell_options.get("noglob")),
-            links=namespace,
+            links=namespace.session_links(session),
             options=glob_options(session),
         )
     return [word_text(w) for w in resolved]

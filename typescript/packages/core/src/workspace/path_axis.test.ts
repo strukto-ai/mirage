@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { type FileStat, MountMode, type PathSpec } from '../types.ts'
-import { parseSessionProfile } from '../policy/profile.ts'
+import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
 import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
 import { runWithSession } from '../context/session_context.ts'
 import {
@@ -456,13 +456,14 @@ describe('the path axis end to end', () => {
   })
 })
 
-async function boxed(profile: object): Promise<Workspace> {
+async function boxed(profile: SessionProfile, ...more: string[]): Promise<Workspace> {
   const parser = await getTestParser()
   const repo = new RAMVFS()
-  const ws = new Workspace(
-    { '/repo': [repo, MountMode.WRITE] as const },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const mounts: Record<string, readonly [RAMVFS, MountMode]> = {
+    '/repo': [repo, MountMode.WRITE] as const,
+  }
+  for (const m of more) mounts[m] = [new RAMVFS(), MountMode.WRITE] as const
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: parser })
   open.push(ws)
   const io = await ws.shell(
     'mkdir -p /repo/box/sec /repo/only && ' +
@@ -472,7 +473,7 @@ async function boxed(profile: object): Promise<Workspace> {
       "printf 'h\\n' > /repo/only/h",
   )
   expect(io.exitCode).toBe(0)
-  ws.createSession('rev', { profile: parseSessionProfile(profile) })
+  ws.createSession('rev', { profile })
   return ws
 }
 
@@ -481,7 +482,7 @@ describe('subtree mutations against hides', () => {
     // The hide anchors at /repo/box/sec; the move would re-anchor its
     // content to /repo/moved/sec, which nothing hides, so it refuses
     // in GNU's permission-denied voice and the source stays whole.
-    const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const refused = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toBe(
@@ -491,10 +492,30 @@ describe('subtree mutations against hides', () => {
     expect(intact.exitCode).toBe(0)
   })
 
+  it.each(['/repo/moved', '/out/moved'])(
+    'mv of a hidden source a show reaches refuses: %s',
+    async (dst) => {
+      // /repo/box is hidden and the session reaches it only through its
+      // shown a.txt: moving it, within the mount or across one, would carry
+      // sec/k out from under the hide, so it refuses and the source stays.
+      const ws = await boxed(
+        parseSessionProfile({ paths: { hide: ['/repo/box'], show: { '/repo/box/a.txt': 'rw' } } }),
+        '/out',
+      )
+      const refused = await ws.shell(`mv /repo/box ${dst}`, { sessionId: 'rev' })
+      expect(refused.exitCode).toBe(1)
+      expect(stderrStr(refused)).toBe(
+        `mv: cannot move '/repo/box' to '${dst}': Permission denied\n`,
+      )
+      const intact = await ws.shell('cat /repo/box/sec/k')
+      expect(stdoutStr(intact)).toBe('s\n')
+    },
+  )
+
   it('mv rides a component-pattern hide along', async () => {
     // *.tkn follows the name wherever the content goes, so nothing is
     // revealed and the move proceeds, the hidden file riding along.
-    const ws = await boxed({ paths: { hide: ['*.tkn'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['*.tkn'] } }))
     const ok = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(ok.exitCode).toBe(0)
     const listing = await ws.shell('ls /repo/moved', { sessionId: 'rev' })
@@ -508,7 +529,7 @@ describe('subtree mutations against hides', () => {
     // /repo/*/sec could match below any directory under /repo, so a
     // directory move refuses conservatively, but a regular file
     // carries nothing below it: renaming one reveals nothing.
-    const ws = await boxed({ paths: { hide: ['/repo/*/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
     const moved = await ws.shell('mv /repo/box/a.txt /repo/box/b.txt', { sessionId: 'rev' })
     expect(moved.exitCode).toBe(0)
     const listing = await ws.shell('ls /repo/box', { sessionId: 'rev' })
@@ -516,7 +537,7 @@ describe('subtree mutations against hides', () => {
   })
 
   it('mv of a directory under an anchored-pattern hide refuses', async () => {
-    const ws = await boxed({ paths: { hide: ['/repo/*/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
     const refused = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toContain('Permission denied')
@@ -526,7 +547,7 @@ describe('subtree mutations against hides', () => {
     // The reveal guard answers before -b renames the destination
     // aside, so a refused move mutates nothing: no backup, destination
     // intact.
-    const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const prep = await ws.shell('mkdir /repo/moved', { sessionId: 'rev' })
     expect(prep.exitCode).toBe(0)
     const refused = await ws.shell('mv -b -T /repo/box /repo/moved', { sessionId: 'rev' })
@@ -539,7 +560,7 @@ describe('subtree mutations against hides', () => {
   })
 
   it('cp -r copies the visible view silently', async () => {
-    const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const copied = await ws.shell('cp -r /repo/box /repo/copy', { sessionId: 'rev' })
     expect(copied.exitCode).toBe(0)
     expect(stderrStr(copied)).toBe('')
@@ -550,7 +571,7 @@ describe('subtree mutations against hides', () => {
   it('rmdir takes hidden remnants with the directory', async () => {
     // The session sees an empty directory; a not-empty refusal would
     // leak that something invisible exists, so the remnants go with it.
-    const ws = await boxed({ paths: { hide: ['/repo/only/h'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/only/h'] } }))
     const empty = await ws.shell('ls -A /repo/only', { sessionId: 'rev' })
     expect(stdoutStr(empty)).toBe('')
     const removed = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
@@ -564,10 +585,12 @@ describe('subtree mutations against hides', () => {
     // admitted the line judged neither the parent nor what the cascade
     // finds under it; a rule naming rmdir on the hidden file refuses its
     // deletion, so the parent's refusal stands and the file stays.
-    const ws = await boxed({
-      paths: { hide: ['/repo/only/h'] },
-      commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
-    })
+    const ws = await boxed(
+      parseSessionProfile({
+        paths: { hide: ['/repo/only/h'] },
+        commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
+      }),
+    )
     expect((await ws.shell('mkdir /repo/only/leaf')).exitCode).toBe(0)
     const refused = await ws.shell('rmdir -p /repo/only/leaf', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
@@ -577,14 +600,14 @@ describe('subtree mutations against hides', () => {
   })
 
   it('rmdir with a visible child keeps the refusal', async () => {
-    const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const refused = await ws.shell('rmdir /repo/box', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toContain('Directory not empty')
   })
 
   it('rm -r still destroys hidden content below', async () => {
-    const ws = await boxed({ paths: { hide: ['/repo/box/sec'] } })
+    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const removed = await ws.shell('rm -r /repo/box', { sessionId: 'rev' })
     expect(removed.exitCode).toBe(0)
     const gone = await ws.shell('test -e /repo/box')
@@ -597,9 +620,9 @@ describe('subtree mutations against hides', () => {
     // cannot see that its mode still protects. Every cascade deletion
     // answers for its own path's mode, so the protected remnant
     // survives and the rmdir keeps a not-empty refusal.
-    const ws = await boxed({
-      paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } },
-    })
+    const ws = await boxed(
+      parseSessionProfile({ paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } } }),
+    )
     const refused = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toBe("rmdir: failed to remove '/repo/only': Directory not empty\n")

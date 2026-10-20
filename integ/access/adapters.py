@@ -2262,6 +2262,22 @@ SSH_OPTIONS = [
 ]
 
 
+def _sftp_error(err: str) -> Answer:
+    """An sftp or scp failure as the errno the other accesses name.
+
+    OpenSSH words the server's status rather than passing its errno on,
+    so the two refusals a path can meet are read off the words.
+
+    Args:
+        err (str): the client's stderr.
+    """
+    if "not found" in err or "No such file" in err:
+        return {"error": "ENOENT"}
+    if "Permission denied" in err:
+        return {"error": "EACCES"}
+    return {"error": err.strip()}
+
+
 class Ssh:
     """SSH: exec channels, ``sftp`` and ``scp``, with OpenSSH's clients."""
 
@@ -2328,7 +2344,7 @@ class Ssh:
         if op == "stdin":
             return await self.stream(login, key, step)
         if op == "bytes":
-            return await self.bytes(login, scratch, step)
+            return await self.bytes(login, key, scratch, step)
         if op == "cancel":
             return {"text": await self.interrupt(login, step["command"])}
         raise ValueError(op)
@@ -2364,13 +2380,15 @@ class Ssh:
             out.decode(), err.decode(), process.returncode or 0
         )
 
-    async def sftp(self, login: str, batch: str) -> tuple[int, str, str]:
+    async def sftp(
+        self, login: str, batch: str, key: str = "plain"
+    ) -> tuple[int, str, str]:
         return await self.run(
-            [*self.argv("sftp"), "-b", "-", login], stdin=batch.encode()
+            [*self.argv("sftp", key), "-b", "-", login], stdin=batch.encode()
         )
 
     async def bytes(
-        self, login: str, scratch: Path, step: dict[str, Any]
+        self, login: str, key: str, scratch: Path, step: dict[str, Any]
     ) -> Answer:
         call, path = step["call"], step.get("path", "")
         local = scratch / "transfer.bin"
@@ -2378,29 +2396,32 @@ class Ssh:
             local.write_bytes(base64.b64decode(step["data_base64"]))
             if step.get("via") == "scp":
                 code, _, err = await self.run(
-                    [*self.argv("scp"), str(local), f"{login}:{path}"]
+                    [*self.argv("scp", key), str(local), f"{login}:{path}"]
                 )
             else:
-                code, _, err = await self.sftp(login, f"put {local} {path}\n")
-            return {} if code == 0 else {"error": err.strip()}
+                code, _, err = await self.sftp(
+                    login, f"put {local} {path}\n", key
+                )
+            return {} if code == 0 else _sftp_error(err)
         if call == "read":
             local.unlink(missing_ok=True)
             if step.get("via") == "scp":
                 code, _, err = await self.run(
-                    [*self.argv("scp"), f"{login}:{path}", str(local)]
+                    [*self.argv("scp", key), f"{login}:{path}", str(local)]
                 )
             else:
-                code, _, err = await self.sftp(login, f"get {path} {local}\n")
-            if code != 0:
-                missing = "not found" in err or "No such file" in err
-                return (
-                    {"error": "ENOENT"} if missing else {"error": err.strip()}
+                code, _, err = await self.sftp(
+                    login, f"get {path} {local}\n", key
                 )
+            if code != 0:
+                return _sftp_error(err)
             return {
                 "data_base64": base64.b64encode(local.read_bytes()).decode()
             }
         if call == "stat":
-            code, out, err = await self.sftp(login, f"ls -ln {path}\n")
+            code, out, err = await self.sftp(login, f"ls -ln {path}\n", key)
+            if code != 0:
+                return _sftp_error(err)
             row = [
                 line
                 for line in out.splitlines()
@@ -2411,7 +2432,9 @@ class Ssh:
                 "size": int(row[4]),
             }
         if call == "readdir":
-            code, out, err = await self.sftp(login, f"ls -1 {path}\n")
+            code, out, err = await self.sftp(login, f"ls -1 {path}\n", key)
+            if code != 0:
+                return _sftp_error(err)
             names = [
                 line.strip()
                 for line in out.splitlines()
@@ -2427,8 +2450,8 @@ class Ssh:
             "rename": f"rename {step.get('src')} {step.get('dst')}",
             "unlink": f"rm {path}",
         }[call]
-        code, out, err = await self.sftp(login, command + "\n")
-        return {} if code == 0 else {"error": err.strip()}
+        code, out, err = await self.sftp(login, command + "\n", key)
+        return {} if code == 0 else _sftp_error(err)
 
     async def interrupt(self, login: str, command: str) -> str:
         process = await asyncio.create_subprocess_exec(

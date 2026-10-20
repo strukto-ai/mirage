@@ -619,6 +619,37 @@ const CHECKS: [string, Check][] = [
       await sink.close()
     },
   ],
+  [
+    'a session sees no link into what it hides, and tests as test does',
+    async (ws) => {
+      await ws.vfs.write('/data/secret.txt', 'S3CR3T\n')
+      await ws.vfs.write('/data/ok.txt', 'ok\n')
+      await shell(ws, 'ln -s /data/secret.txt /data/lnk')
+      const veil = ws.createSession('veil', {
+        profile: parseSessionProfile({ paths: { hide: ['/data/secret.txt'] } }),
+      })
+      const seal = ws.createSession('seal', {
+        profile: parseSessionProfile({
+          commands: { deny: [{ reason: 'sealed', paths: ['/data/secret.txt'] }] },
+        }),
+      })
+      equal(
+        await shell(
+          ws,
+          'readlink -f /data/lnk; [ -e /data/secret.txt ]; echo $?; [[ -L /data/lnk ]]; echo $?; ls /data',
+          { sessionId: veil.sessionId },
+        ),
+        [0, '/data/lnk\n1\n1\nok.txt\n', ''],
+      )
+      equal(await shell(ws, 'rm -f /data/*; ls /data', { sessionId: veil.sessionId }), [0, '', ''])
+      equal(await shell(ws, 'readlink /data/lnk'), [0, '/data/secret.txt\n', ''])
+      equal(await shell(ws, '[ -e /data/secret.txt ]; echo $?', { sessionId: seal.sessionId }), [
+        1,
+        '',
+        '[: /data/secret.txt: Permission denied\n',
+      ])
+    },
+  ],
   ...battery(),
 ]
 

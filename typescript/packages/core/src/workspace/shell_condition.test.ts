@@ -191,6 +191,7 @@ const stubLinks = {
 const stubNamespace = {
   ...stubLinks,
   readers: () => readers([], stubLinks),
+  sessionLinks: () => stubLinks,
 } as unknown as Namespace
 
 const stubSession = { cwd: '/data', env: {}, arrays: {} } as unknown as SessionState

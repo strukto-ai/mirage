@@ -22,6 +22,7 @@ from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.metadata.metadata import (
     apply_attrs,
     resolve_operand,
+    unread_error,
     verbosity,
     walk_stats,
     walked_name,
@@ -72,8 +73,10 @@ async def handle_chmod(
     operand's subtree and applies the mode to every entry, skipping
     symlinks the way GNU does (a traversed link changes neither itself
     nor its referent); a command-line link to a directory is still
-    followed and its target walked. ``-v`` reports every file, ``-c``
-    the changed ones, and ``-f`` drops the per-file errors.
+    followed and its target walked. A refused file is that file's
+    error and the rest are still changed; a directory whose listing is
+    refused is changed but not descended. ``-v`` reports every file,
+    ``-c`` the changed ones, and ``-f`` drops the per-file errors.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -95,10 +98,9 @@ async def handle_chmod(
     report = verbosity(fl)
     errors: list[str] = []
     out: list[str] = []
+    links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, parsed.paths):
-        found = await resolve_operand(
-            namespace, dispatch, "chmod", target, errors
-        )
+        found = await resolve_operand(links, dispatch, "chmod", target, errors)
         if found is None:
             if report == "verbose":
                 out.append(
@@ -108,10 +110,10 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            entries = await walk_stats(namespace, dispatch, resolved, stat)
+            entries = await walk_stats(links, dispatch, resolved, stat)
         else:
-            entries = [(resolved, stat)]
-        for path, path_stat in entries:
+            entries = [(resolved, stat, None)]
+        for path, path_stat, unread in entries:
             # Backends without a mode default to what ls renders: 755 for
             # directories, 644 for files (symbolic clauses build on this).
             if path_stat.mode is None:
@@ -127,16 +129,20 @@ async def handle_chmod(
                 return fail(
                     "chmod", f"chmod: invalid mode: '{mode_text}'\n", 1
                 )
+            name = walked_name(target.raw_path, resolved, path)
             before = len(errors)
-            await apply_attrs(dispatch, "chmod", path, errors, mode=new_mode)
+            await apply_attrs(
+                dispatch, "chmod", path, name, errors, mode=new_mode
+            )
             failed = len(errors) > before
             if report == "verbose" or (
                 report == "changes"
                 and not failed
                 and new_mode != path_stat.mode
             ):
-                name = walked_name(target.raw_path, resolved, path)
                 out.append(mode_line(name, path_stat, new_mode, failed))
+            if unread is not None:
+                errors.append(unread_error("chmod", name, unread))
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")
     return result(
         "chmod",

@@ -32,6 +32,10 @@ from mirage.utils.glob_walk import (
 )
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.condition.operands import (
+    TEST_NAMES,
+    file_operands,
+)
 from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.expand.globs import glob_options, resolve_globs
@@ -215,6 +219,11 @@ async def expand_argv(
             if bases is not None:
                 head: list[str | None] = [None] * (consumed - 1)
                 word_bases = head + bases
+    elif name in TEST_NAMES:
+        # test reads its own words: the operand of a file operator is a
+        # file however it is spelled, as the gate reads it.
+        leading: list[ValueType | None] = ["str"] * (consumed - 1)
+        word_kinds = leading + file_operands(name, expanded[consumed:])
     if program:
         # bash globs every unquoted word before the program reads any of
         # them, whatever slot it fills and whatever it looks like:
@@ -276,7 +285,12 @@ async def expand_argv(
         # gate its matches fail. And so does a pattern that walks a `.`
         # or `..`, which no backend key holds.
         words = await resolve_globs(
-            classified, registry, links=namespace, options=glob_opts
+            classified,
+            registry,
+            links=(
+                None if namespace is None else namespace.session_links(session)
+            ),
+            options=glob_opts,
         )
     else:
         # A pattern still owes its backend a resolution, so it travels

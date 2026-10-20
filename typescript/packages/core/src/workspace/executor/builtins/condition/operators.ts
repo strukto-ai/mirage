@@ -23,17 +23,28 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
-import { operandAbs } from '../links/index.ts'
+import { followPaths } from '../links/links.ts'
+import { absPath } from '../shared.ts'
 import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
 import { CondError, type CondContext } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
-/** Resolve a file operand to an addressable scope. */
+/**
+ * Resolve a file operand to an addressable scope, its links followed. A
+ * builtin's operand never passes the router's pathname walk, so it is walked
+ * here, typed or classified alike (a classified one by the spelling its dots
+ * need): `-ef` compares where two names lead.
+ */
 function operandScope(ctx: CondContext, val: string | PathSpec): PathSpec {
-  if (val instanceof PathSpec) return val
-  const spelled = dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd)
+  // The walk already refused it (the empty name, a link loop): it names
+  // nothing, which the dispatcher answers.
+  if (val instanceof PathSpec && val.walkError != null) return val
+  const spelled =
+    val instanceof PathSpec
+      ? (val.dotted ?? val.virtual)
+      : (dottedSpelling(val, ctx.session.cwd) ?? resolvePath(val, ctx.session.cwd))
   return toScope(ctx.links !== undefined ? ctx.links.resolve(spelled) : spelled)
 }
 
@@ -53,7 +64,9 @@ async function pathKind(
   // every file test reads as false.
   const walk = PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
   if (
-    (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) => ctx.namespace.follow(v))) !== null
+    (await dotRefusal(dispatchStat(ctx.dispatch), walk, (v) =>
+      ctx.namespace.sessionLinks(ctx.session).follow(v),
+    )) !== null
   ) {
     return [null, null]
   }
@@ -94,7 +107,17 @@ export async function applyUnary(
     }
   }
   if (op === '-L' || op === '-h') {
-    const where = operandAbs(ctx.namespace, val, ctx.session.cwd, ctx.session.visibility)
+    if (!(val instanceof PathSpec) && text === '') return false
+    // A builtin's operand never passes the router's pathname walk, so it is
+    // walked here as the router walks one whose last name lstat(2) keeps: a
+    // link above it resolves, and so does the last name of one typed with a
+    // trailing slash.
+    const spec =
+      val instanceof PathSpec ? val : PathSpec.fromStrPath(val, undefined, ctx.session.cwd)
+    const links = ctx.namespace.sessionLinks(ctx.session)
+    const walked = followPaths(links, [spec], false)[0] ?? spec
+    if (walked instanceof PathSpec && walked.walkError !== null) return false
+    const where = absPath(walked, ctx.session.cwd)
     return ctx.links !== undefined && ctx.links.statAt(where) !== null
   }
   if (FILE_UNARY.has(op)) {

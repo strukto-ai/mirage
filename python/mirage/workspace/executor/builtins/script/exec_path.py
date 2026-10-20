@@ -150,7 +150,9 @@ async def handle_exec_path(
             path, "cannot execute binary file: Exec format error", 126
         )
     script = decode_text(data)
-    target = namespace.follow(resolve_path(path, session.cwd))
+    target = namespace.session_links(session).follow(
+        resolve_path(path, session.cwd)
+    )
     vfs, key, _ = registry.resolve(target)
     if isinstance(vfs, BinViewVFS):
         # The read above enforces visibility and path policy. Dispatch the

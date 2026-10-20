@@ -375,7 +375,7 @@ export async function handleCommand(
 
   const follow =
     namespace !== undefined
-      ? operandFollow(namespace, dispatch, cmdName, parts, session.visibility)
+      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts)
       : undefined
   const files = commandFiles(follow ?? null)
   const runCtx: RunOnMountCtx = {
@@ -669,7 +669,7 @@ export async function handleCommand(
           [scope],
           registry,
           false,
-          namespace ?? null,
+          namespace === undefined ? null : namespace.sessionLinks(session),
           globOptions(session),
         )
         groups.push(expanded.filter((p): p is PathSpec => typeof p !== 'string'))

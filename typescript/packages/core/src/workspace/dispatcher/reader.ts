@@ -14,7 +14,7 @@
 
 import { type FileStat, PathSpec, type Visibility } from '../../types.ts'
 import { hiddenUnder, leadsHidden, pathVisible } from '../../utils/hidden.ts'
-import { norm, posixNormpath } from '../../utils/path.ts'
+import { norm } from '../../utils/path.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { namespaceNames } from '../../view/namespace_view.ts'
@@ -46,12 +46,14 @@ export function sees(
  * above the dispatcher reads them. Every answer is filtered by the rule the
  * dispatcher refuses a call by (`sees`): a hidden link, or one that leads
  * where the session cannot see, has no row, no listing entry and no target,
- * and a hidden mount is a boundary a walk stops at but is never named. Live,
- * so a link made or removed mid-command is seen by the next question, and
- * synchronous, so a walk asks per entry at no dispatch cost. Mirrors Python's
- * `NamespaceReader`.
+ * and a hidden mount is a boundary a walk stops at but is never named. It is a
+ * link table itself (`NamespaceLinks`), the namespace's as the session sees
+ * it, so whatever takes a link table above the dispatcher is handed this one.
+ * Live, so a link made or removed mid-command is seen by the next question,
+ * and synchronous, so a walk asks per entry at no dispatch cost. Mirrors
+ * Python's `NamespaceReader`.
  */
-export class NamespaceReader {
+export class NamespaceReader implements NamespaceLinks {
   /**
    * @param links the namespace's link table, null where the files stand
    *   outside a workspace.
@@ -175,17 +177,34 @@ export class NamespaceReader {
     return [...found].sort(compareCodePoints)
   }
 
+  /** Whether a link the session sees stands at `path`. */
+  isLink(path: string): boolean {
+    return this.links !== null && this.visible(path) && this.links.isLink(path)
+  }
+
   /**
    * The link standing at a path, its own row; null where none stands or the
    * session cannot see it.
    */
-  linkAt(virtual: string): FileStat | null {
-    if (this.links === null || !this.visible(virtual)) return null
-    return this.links.linkStatAt(virtual)
+  linkStatAt(path: string): FileStat | null {
+    if (this.links === null || !this.visible(path)) return null
+    return this.links.linkStatAt(path)
+  }
+
+  /**
+   * Every link the session sees, to its stored target. A session that hides
+   * nothing sees the whole table, which is asked of no link.
+   */
+  symlinkTargets(): ReadonlyMap<string, string> {
+    if (this.links === null) return new Map()
+    const targets = this.links.symlinkTargets()
+    const vis = this.visibility()
+    if (vis === null || !hiddenUnder(vis, '/')) return targets
+    return new Map([...targets].filter(([path]) => this.visible(path)))
   }
 
   /** The links at any depth under a directory the session sees, each with its own row. */
-  linksBelow(directory: string): [string, FileStat][] {
+  linkStatsBelow(directory: string): [string, FileStat][] {
     if (this.links === null) return []
     return this.links.linkStatsBelow(directory).filter(([path]) => this.visible(path))
   }
@@ -194,7 +213,7 @@ export class NamespaceReader {
    * The names of the links directly under a directory that the session sees,
    * which a listing's link marks need.
    */
-  linkNames(directory: string): Set<string> {
+  linkNamesUnder(directory: string): Set<string> {
     if (this.links === null) return new Set()
     const base = directory === '/' ? '/' : `${rstripSlash(directory)}/`
     return new Set(
@@ -206,29 +225,31 @@ export class NamespaceReader {
    * A link's stored target, as typed; null where no link stands or the
    * session cannot see it.
    */
-  readlink(virtual: string): string | null {
-    if (this.links === null || !this.visible(virtual)) return null
-    return this.links.readlink(virtual)
+  readlink(path: string): string | null {
+    if (this.links === null || !this.visible(path)) return null
+    return this.links.readlink(path)
   }
 
   /**
-   * Where a path the session sees leads, every link followed; a hidden one is
-   * left as typed, for the dispatcher to refuse. Throws CycleError where a
-   * link loop stands in the walk.
+   * Where a path the session sees leads, every link followed; one it cannot
+   * see, a link on it leading through a hide included, is left as typed, for
+   * the dispatcher to refuse. Throws CycleError where a link loop stands in
+   * the walk.
    */
-  resolve(virtual: string): string {
-    if (this.links === null || !pathVisible(this.visibility(), virtual)) return virtual
-    return posixNormpath(this.links.follow(virtual))
+  follow(path: string): string {
+    if (this.links === null || !this.visible(path)) return path
+    return this.links.follow(path)
   }
 
   /**
    * A path with every link above its final name followed, the walk a call
-   * that acts on the name itself is given; a hidden path is left as typed.
+   * that acts on the name itself is given; a path the session cannot see is
+   * left as typed.
    * Throws CycleError where a link loop stands in the walk.
    */
-  resolveParent(virtual: string): string {
-    if (this.links === null || !pathVisible(this.visibility(), virtual)) return virtual
-    return this.links.followParent(virtual)
+  followParent(path: string): string {
+    if (this.links === null || !this.visible(path)) return path
+    return this.links.followParent(path)
   }
 
   /**

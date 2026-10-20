@@ -224,7 +224,7 @@ def make_rmtree(
     reader = reader_of(files)
 
     async def follow(path: str) -> str:
-        return posixpath.normpath(reader.resolve(path))
+        return posixpath.normpath(reader.follow(path))
 
     def resolve(path: str) -> str:
         return run_async_from_sync(follow(path), loop)
@@ -316,7 +316,9 @@ class HostFs:
         self._descriptors = Descriptors(
             self._adapter,
             self._host,
-            reader.resolve if reader.linked else None,
+            (lambda path: posixpath.normpath(reader.follow(path)))
+            if reader.linked
+            else None,
         )
 
     @property

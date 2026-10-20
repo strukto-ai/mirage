@@ -79,6 +79,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     matched,
     repo_relative,
     under,
+    visible_entries,
 )
 from mirage.commands.cli.builtin.git.reflog import (
     IDENTITY,
@@ -283,6 +284,28 @@ def _blocked_descendants(writing: Tree, dirty: set[str]) -> list[str]:
     names = decoded(writing)
     return sorted(
         path for path in dirty if any(under(path, name) for name in names)
+    )
+
+
+def _hidden_in_the_way(writing: Tree, unseen: set[str]) -> list[str]:
+    """Which written paths would take a hidden entry with them, named by
+    the written path, since the hidden one cannot be.
+
+    The move leaves an entry the session cannot see alone, but a target
+    recording a file where a hidden entry sits inside a directory, or a
+    directory where a hidden file stands, cannot be written without
+    removing it. Refused as the descendant and ancestor cases above
+    are, so hidden work is never destroyed, and the refusal names only
+    the path the session sees.
+
+    Args:
+        writing (Tree): the entries the switch writes, from ``_written``.
+        unseen (set[str]): the tracked paths the session cannot see.
+    """
+    return sorted(
+        name
+        for name in decoded(writing)
+        if any(under(hidden, name) or under(name, hidden) for hidden in unseen)
     )
 
 
@@ -654,8 +677,14 @@ async def _carry_across(
         location (RepoLocation): the discovered repository.
         commit (Commit): the commit to move to.
     """
-    before = await asyncio.to_thread(head_entries, repo) or {}
-    after = await asyncio.to_thread(commit_entries, repo, commit.id)
+    # A path the session cannot see is no part of the move: neither
+    # tree names it, so it is never reported, rewritten or dropped, and
+    # its index entry and working copy stay as they are.
+    head = await asyncio.to_thread(head_entries, repo)
+    before = visible_entries(location, head or {})
+    after = visible_entries(
+        location, await asyncio.to_thread(commit_entries, repo, commit.id)
+    )
     state = await read_index(vfs, location.gitdir)
     # First, before either tree is compared and before the working tree
     # is walked, which is where git refuses it too. Every check below
@@ -669,8 +698,12 @@ async def _carry_across(
     # collision has to be decided per file. git names the file
     # inside such a directory, so the list has to hold it.
     found = await scan(vfs, location, tracked, UNTRACKED_ALL)
-    unstaged = await work_changes(vfs, location.worktree, state.entries, found)
-    staged = _stage_letters(before, state.entries)
+    seen = visible_entries(location, state.entries)
+    unseen = decoded({*(head or {}), *state.entries}) - decoded(
+        {*before, *seen}
+    )
+    unstaged = await work_changes(vfs, location.worktree, seen, found)
+    staged = _stage_letters(before, seen)
     # Both kinds of uncommitted change count: an edit in the working
     # tree, and one already staged. Leaving the staged ones out is
     # what silently threw them away. The index column wins where a path
@@ -683,6 +716,7 @@ async def _carry_across(
         set(_conflicts(before, after, dirty))
         | set(_blocked_ancestors(writing, dirty))
         | set(_blocked_descendants(writing, dirty))
+        | set(_hidden_in_the_way(writing, unseen))
     )
     overwritten = _overwritten(writing, found.untracked)
     lost = _lost_directories(writing, found.untracked)

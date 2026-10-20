@@ -24,13 +24,14 @@ from mirage.commands.builtin.utils.identity import (
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
-from mirage.errors.render import format_fs_error
+from mirage.errors.render import fs_error_line
 from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import CycleError
+from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
@@ -146,25 +147,44 @@ def now_iso() -> str:
 
 
 def permission_error(
-    cmd: str, action: str, path: PathSpec, exc: PermissionError
+    cmd: str, action: str, name: str, exc: PermissionError
 ) -> str:
     """Render a metadata-write PermissionError.
 
     A read-only region renders GNU's per-operand line, ``<cmd>: <action>
-    '<path>': Read-only file system``, the voice every other write
+    '<name>': Read-only file system``, the voice every other write
     refusal uses; an admission-policy deny at the dispatcher renders
-    ``<cmd>: <path>: Permission denied``.
+    the line a refused operand gets, ``<cmd>: <name>: Permission
+    denied`` (touch's ``cannot touch '<name>'``). Either names the file
+    the way the line does, never the target a link resolved to: the
+    dispatcher's error carries the resolved path.
 
     Args:
         cmd (str): command name.
         action (str): GNU's phrase for the refused write (``cannot
             touch``, ``changing permissions of``).
-        path (PathSpec): the refused path, as the line names it.
+        name (str): the refused file, as the line names it.
         exc (PermissionError): the raised refusal.
     """
     if isinstance(exc, PolicyDenied):
-        return decode_text(format_fs_error(cmd, exc, [path]))
-    return f"{cmd}: {action} '{path.raw_path}': {fs_strerror(exc)}\n"
+        return fs_error_line(cmd, name, exc)
+    return f"{cmd}: {action} '{name}': {fs_strerror(exc)}\n"
+
+
+def unread_error(cmd: str, name: str, exc: PermissionError) -> str:
+    """The line for a walked directory whose listing was refused: fts's
+    unreadable directory, which chmod, chown and chgrp report after the
+    directory's own change and do not descend.
+
+    Args:
+        cmd (str): command name.
+        name (str): the directory, as the line names it.
+        exc (PermissionError): the refused readdir.
+    """
+    return (
+        f"{cmd}: cannot read directory {shell_quote_always(name)}: "
+        f"{fs_strerror(exc)}\n"
+    )
 
 
 async def setattr_via(
@@ -203,6 +223,7 @@ async def apply_link_attrs(
     dispatch: DispatchFn,
     cmd: str,
     path: PathSpec,
+    name: str,
     errors: list[str],
     *,
     uid: int | str | None = None,
@@ -219,6 +240,7 @@ async def apply_link_attrs(
         dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error message.
         path (PathSpec): the link's own path.
+        name (str): the link, as the line names it.
         errors (list[str]): per-operand error accumulator.
         uid (int | str | None): owner id or name.
         gid (int | str | None): group id or name.
@@ -229,11 +251,11 @@ async def apply_link_attrs(
             "setattr", path, uid=uid, gid=gid, mtime=mtime, nofollow=True
         )
     except PermissionError as exc:
-        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], path, exc))
+        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], name, exc))
 
 
 def follow_operand(
-    namespace: Namespace,
+    links: NamespaceLinks,
     cmd: str,
     action: str,
     target: PathSpec,
@@ -242,7 +264,8 @@ def follow_operand(
     """Follow symlinks for one operand, collecting the ELOOP error.
 
     Args:
-        namespace (Namespace): addressing authority.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         cmd (str): command name for the error message.
         action (str): GNU's words for the step that failed ("cannot
             access", "cannot touch", "setting times of").
@@ -250,7 +273,7 @@ def follow_operand(
         errors (list[str]): per-operand error accumulator.
     """
     try:
-        virtual = namespace.follow(target.virtual)
+        virtual = links.follow(target.virtual)
     except CycleError:
         errors.append(
             f"{cmd}: {action} '{target.raw_path}': "
@@ -261,7 +284,7 @@ def follow_operand(
 
 
 async def resolve_operand(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     cmd: str,
     target: PathSpec,
@@ -270,7 +293,8 @@ async def resolve_operand(
     """Follow symlinks and stat one operand, collecting GNU errors.
 
     Args:
-        namespace (Namespace): addressing authority.
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error messages.
         target (PathSpec): the operand as typed.
@@ -280,7 +304,7 @@ async def resolve_operand(
         walk_refusal(target)
         if target.walk_error is not None
         else await dot_refusal(
-            partial(dispatch_stat, dispatch), target, namespace.follow
+            partial(dispatch_stat, dispatch), target, links.follow
         )
     )
     if refusal is not None:
@@ -289,7 +313,7 @@ async def resolve_operand(
             f"{fs_strerror(refusal)}\n"
         )
         return None
-    resolved = follow_operand(namespace, cmd, "cannot access", target, errors)
+    resolved = follow_operand(links, cmd, "cannot access", target, errors)
     if resolved is None:
         return None
     try:
@@ -306,18 +330,22 @@ async def apply_attrs(
     dispatch: DispatchFn,
     cmd: str,
     resolved: PathSpec,
+    name: str,
     errors: list[str],
     *,
     mode: int | None = None,
     uid: int | str | None = None,
     gid: int | str | None = None,
 ) -> None:
-    """Setattr one operand, collecting the read-only refusal.
+    """Setattr one file, collecting its refusal: a read-only mount, or a
+    rule's or policy's deny, is that file's error and the command goes
+    on with the rest, as GNU does.
 
     Args:
         dispatch (DispatchFn): op dispatcher.
         cmd (str): command name for the error message.
         resolved (PathSpec): link-resolved target path.
+        name (str): the file, as the line names it.
         errors (list[str]): per-operand error accumulator.
         mode (int | None): permission bits (e.g. 0o644).
         uid (int | str | None): owner id or name.
@@ -326,16 +354,21 @@ async def apply_attrs(
     try:
         await setattr_via(dispatch, resolved, mode=mode, uid=uid, gid=gid)
     except PermissionError as exc:
-        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], resolved, exc))
+        errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], name, exc))
+
+
+# One entry of a walked subtree: its path, its stat, and the refusal its
+# listing met (None for a file, or a directory that listed).
+WalkEntry = tuple[PathSpec, FileStat, PermissionError | None]
 
 
 async def walk_stats(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
-) -> list[tuple[PathSpec, FileStat]]:
-    """A subtree as ``(path, stat)`` pairs, in fts's pre-order.
+) -> list[WalkEntry]:
+    """A subtree as ``(path, stat, unread)`` triples, in fts's pre-order.
 
     Each entry's stat is captured during the walk because chmod's
     symbolic clauses (``u+x``) build on the entry's own current mode.
@@ -343,30 +376,39 @@ async def walk_stats(
     are namespace structure), GNU chmod -R changes neither a traversed
     link nor its referent, and the skip must come before the stat
     because stat follows a link and would descend through a directory
-    link.
+    link. ``unread`` is the refusal a directory's listing met (a rule
+    that denies the directory lets its stat through): fts's unreadable
+    directory, which the caller reports after the directory's own
+    change, and whose subtree is not walked.
 
     Args:
-        namespace (Namespace): addressing authority (link table).
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
     """
-    entries: list[tuple[PathSpec, FileStat]] = []
+    entries: list[WalkEntry] = []
     # An explicit stack, so a deep tree costs no recursion: a directory's
     # children go on in reverse and come off in listing order.
     stack = [(root, root_stat)]
     while stack:
         path, stat = stack.pop()
-        entries.append((path, stat))
         if stat.type != FileType.DIRECTORY:
+            entries.append((path, stat, None))
             continue
-        children, _ = await dispatch("readdir", path)
+        try:
+            children, _ = await dispatch("readdir", path)
+        except PermissionError as exc:
+            entries.append((path, stat, exc))
+            continue
+        entries.append((path, stat, None))
         found: list[tuple[PathSpec, FileStat]] = []
         for listed in children:
             # A folder-backed readdir spells a directory child with its
             # slash.
             child_virtual = listed.rstrip("/")
-            if namespace.is_link(child_virtual):
+            if links.is_link(child_virtual):
                 continue
             child = PathSpec.from_str_path(child_virtual)
             child_stat, _ = await dispatch("stat", child)
@@ -376,27 +418,36 @@ async def walk_stats(
 
 
 async def walk_owned(
-    namespace: Namespace,
+    links: NamespaceLinks,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
-) -> tuple[list[tuple[PathSpec, FileStat]], list[str]]:
+) -> tuple[list[WalkEntry], list[str]]:
     """A subtree split into backend entries and namespace link nodes.
 
     chown and chgrp change a traversed symlink itself rather than its
     referent (POSIX gives ``-R`` an implicit ``-P``), and a link is
     namespace state that no readdir can report, so the link nodes are
-    folded back in from the node table.
+    folded back in from the node table, but for those under a directory
+    whose listing was refused, which the walk does not descend.
 
     Args:
-        namespace (Namespace): addressing authority (link table).
+        links (NamespaceLinks): the session's link table
+            (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root.
         root_stat (FileStat): the root's stat, already read.
     """
-    walked = await walk_stats(namespace, dispatch, root, root_stat)
-    links = [path for path, _stat in namespace.link_stats_below(root.virtual)]
-    return walked, links
+    walked = await walk_stats(links, dispatch, root, root_stat)
+    unread = {path.virtual for path, _stat, exc in walked if exc is not None}
+    # The root as well, which ``ancestors`` leaves out: a refused listing
+    # of ``/`` keeps every link below it unwalked.
+    owned = [
+        path
+        for path, _stat in links.link_stats_below(root.virtual)
+        if unread.isdisjoint(["/", *ancestors(path)])
+    ]
+    return walked, owned
 
 
 def verbosity(fl: FlagView) -> str | None:
@@ -552,31 +603,36 @@ async def change_owner(
         except (FileNotFoundError, NotADirectoryError):
             stat = None
         before = len(errors)
-        await apply_link_attrs(dispatch, cmd, link, errors, uid=uid, gid=gid)
+        await apply_link_attrs(
+            dispatch, cmd, link, name, errors, uid=uid, gid=gid
+        )
         describe(name, stat, len(errors) > before)
 
+    links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, operands):
         typed = target.raw_path or target.virtual
-        if not follow and namespace.is_link(target.virtual):
+        if not follow and links.is_link(target.virtual):
             await own_link(target, typed)
             continue
-        found = await resolve_operand(namespace, dispatch, cmd, target, errors)
+        found = await resolve_operand(links, dispatch, cmd, target, errors)
         if found is None:
             describe(typed, None, True)
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            walked, links = await walk_owned(
-                namespace, dispatch, resolved, stat
-            )
+            walked, owned = await walk_owned(links, dispatch, resolved, stat)
         else:
-            walked, links = [(resolved, stat)], []
-        for path, path_stat in walked:
-            before = len(errors)
-            await apply_attrs(dispatch, cmd, path, errors, uid=uid, gid=gid)
+            walked, owned = [(resolved, stat, None)], []
+        for path, path_stat, unread in walked:
             name = walked_name(typed, resolved, path)
+            before = len(errors)
+            await apply_attrs(
+                dispatch, cmd, path, name, errors, uid=uid, gid=gid
+            )
             describe(name, path_stat, len(errors) > before)
-        for link in links:
+            if unread is not None:
+                errors.append(unread_error(cmd, name, unread))
+        for link in owned:
             link_spec = PathSpec.from_str_path(link)
             await own_link(link_spec, walked_name(typed, resolved, link_spec))
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")

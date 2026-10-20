@@ -22,6 +22,15 @@ from mirage.shell.types import TSNodeLike
 from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, mark_escaped_globs
 from mirage.workspace.executor.builtins.script.bash import parse_bash_args
+from mirage.workspace.node.test_tokens import (
+    PATTERN_OPS,
+    CondParser,
+    CondSyntax,
+    ExprToken,
+    cond_leaves,
+    cond_tokens,
+    flat_tokens,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +74,118 @@ def read_word(node: TSNodeLike, home: str | None = None) -> Word:
         home (str | None): the home directory a leading tilde names.
     """
     return Word(get_text(node), literal_word(node, home), _word_globs(node))
+
+
+# What a test's expression nests its words in, and the tokens that are
+# no word of it: its brackets.
+_TEST_NESTS = frozenset(
+    {
+        NT.BINARY_EXPRESSION,
+        NT.UNARY_EXPRESSION,
+        NT.NEGATION_EXPRESSION,
+        NT.PARENTHESIZED_EXPRESSION,
+        NT.ERROR,
+    }
+)
+_TEST_SKIPS = frozenset({"[", "]", "[[", "]]"})
+
+
+@dataclass(frozen=True, slots=True)
+class TestRead:
+    """One test of a ``[ ]`` or ``[[ ]]`` as the gate admits it.
+
+    Args:
+        words (list[Word]): its opener, then what it tests.
+        stated (bool): whether the gate admits it on these very words
+            once each is literal; a comparison's pattern side is read in
+            the matcher's dialect instead, and a ``[[`` its grammar
+            cannot read is admitted test by test as the run reaches
+            each, so a question about either is left to the gate.
+    """
+
+    __test__ = False
+
+    words: list[Word]
+    stated: bool = True
+
+
+def reads_of_test(node: TSNodeLike, home: str | None = None) -> list[TestRead]:
+    """A ``[ ]`` or ``[[ ]]`` as the tests the gate admits, read with the
+    tokens and the grammar the run evaluates it by.
+
+    A ``[ ]`` is one test, admitted whole on its words and its closing
+    ``]``, as the command ``[`` is. A ``[[ ]]`` is a test per leaf, each
+    admitted as the run reaches it, since a branch never reached never
+    expands; every reader of the line reads the same leaves, so a
+    question one asked is the one the gate answers.
+
+    Args:
+        node (TSNodeLike): the test_command node.
+        home (str | None): the home directory a leading tilde names.
+    """
+    if not (node.children and node.children[0].type == "[["):
+        words = [_token_word(t, home) for t in flat_tokens(node)]
+        return [TestRead([Word("[", "["), *words, Word("]", "]")])]
+    opener = Word("[[", "[[")
+    try:
+        leaves = cond_leaves(CondParser(cond_tokens(node)).parse())
+    except CondSyntax:
+        return [TestRead([opener, *_test_words(node, home)], False)]
+    out: list[TestRead] = []
+    for leaf in leaves:
+        if leaf[0] == "unary":
+            words = [Word(leaf[1], leaf[1]), _token_word(leaf[2], home)]
+        elif leaf[0] == "binary":
+            words = [
+                _token_word(leaf[2], home),
+                Word(leaf[1], leaf[1]),
+                _token_word(leaf[3], home),
+            ]
+        else:
+            words = [_token_word(leaf[1], home)]
+        stated = leaf[0] != "binary" or leaf[1] not in PATTERN_OPS
+        out.append(TestRead([opener, *words], stated))
+    return out
+
+
+def _token_word(token: ExprToken, home: str | None) -> Word:
+    """One token of a test as a word of the line.
+
+    Args:
+        token (ExprToken): an operator, or an operand node.
+        home (str | None): the home directory a leading tilde names.
+    """
+    if token.op is not None:
+        return Word(token.op, token.op)
+    word = read_word(token.operand, home)
+    if not token.negative:
+        return word
+    text = None if word.text is None else "-" + word.text
+    return Word("-" + word.raw, text, word.glob)
+
+
+def _test_words(node: TSNodeLike, home: str | None) -> list[Word]:
+    """Every operator and operand of a test in source order, for a
+    ``[[`` its grammar cannot read.
+
+    Args:
+        node (TSNodeLike): the test_command node.
+        home (str | None): the home directory a leading tilde names.
+    """
+    words: list[Word] = []
+    stack = list(reversed(node.children))
+    while stack:
+        child = stack.pop()
+        if child.type in _TEST_SKIPS:
+            continue
+        if child.type in _TEST_NESTS:
+            stack.extend(reversed(child.children))
+        elif not child.is_named or child.type == NT.TEST_OPERATOR:
+            text = get_text(child)
+            words.append(Word(text, text))
+        else:
+            words.append(read_word(child, home))
+    return words
 
 
 @dataclass(frozen=True, slots=True)

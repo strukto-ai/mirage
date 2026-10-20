@@ -55,13 +55,14 @@ export async function referenceStat(
   follow: boolean,
 ): Promise<FileStat | null> {
   if (namespace === null) return statPath(virtual)
-  const own = namespace.linkStatAt(virtual)
+  const links = namespace.sessionLinks()
+  const own = links.linkStatAt(virtual)
   if (own === null) {
     const stat = await statPath(virtual)
     return stat === null ? null : mergeOverlayStat(namespace.metaFor(virtual), stat)
   }
   if (!follow) return own
-  const target = namespace.follow(virtual)
+  const target = links.follow(virtual)
   const stat = await statPath(target)
   return stat === null ? own : mergeOverlayStat(namespace.metaFor(target), stat)
 }

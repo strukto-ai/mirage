@@ -190,16 +190,19 @@ describe('name-plane writes go through the dispatcher', () => {
     expect(stdoutStr(io)).not.toContain('y.txt')
   })
 
-  it('scoped shell readlink -m on hidden turf is refused', async () => {
+  it('scoped shell readlink -f on hidden turf names no target', async () => {
     // -m/-f canonicalize without any existence probe, so without the
-    // gate they printed the resolved target of a hidden link.
+    // gate they printed the resolved target of a hidden link. A hidden
+    // link is no link to the session: -m prints the name as it would a
+    // missing one, and -f, whose parent is hidden too, finds nothing.
     const ws = await makeWs()
     ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
     const made = await ws.shell('ln -s /b/y.txt /b/lk')
     expect(made.exitCode).toBe(0)
-    const io = await ws.shell('readlink -m /b/lk', { sessionId: 'agent' })
-    expect(io.exitCode).not.toBe(0)
-    expect(stdoutStr(io)).not.toContain('y.txt')
+    const io = await ws.shell('readlink -m /b/lk; readlink -f /b/lk; echo $?', {
+      sessionId: 'agent',
+    })
+    expect(stdoutStr(io)).toBe('/b/lk\n1\n')
   })
 
   it('shell readlink goes through the dispatcher', async () => {

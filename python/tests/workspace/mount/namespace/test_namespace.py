@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage import Workspace
-from mirage.types import FileType
+from mirage.types import FileType, MountMode
 from mirage.utils.dates import epoch_to_iso
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.mount.namespace import Namespace, NodeMeta
@@ -498,3 +498,27 @@ async def test_xattrs_survive_a_store_round_trip(registry):
     second = Namespace(registry, store=store)
     await second.ensure_loaded()
     assert second.xattrs("/data/f.txt") == {"user.a": b"one"}
+
+
+@pytest.mark.asyncio
+async def test_session_links_answer_as_the_session_sees():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir /data/vault /data/pub; ln -s /data/vault/s.txt /data/lnk; "
+        "ln -s /data/pub /data/pl"
+    )
+    ws.create_session("agent", profile={"paths": {"hide": ["/data/vault"]}})
+    links = ws.namespace.session_links(ws.get_session("agent"))
+    assert links.is_link("/data/pl")
+    assert not links.is_link("/data/lnk")
+    assert links.readlink("/data/lnk") is None
+    assert links.link_stat_at("/data/lnk") is None
+    assert dict(links.symlink_targets()) == {"/data/pl": "/data/pub"}
+    assert [p for p, _ in links.link_stats_below("/data")] == ["/data/pl"]
+    assert links.link_names_under("/data") == {"pl"}
+    assert links.follow("/data/pl/x") == "/data/pub/x"
+    assert links.follow("/data/vault/x") == "/data/vault/x"
+    assert links.follow_parent("/data/pl/x") == "/data/pub/x"
+    whole = ws.namespace.session_links(ws.get_session(ws.default_session_id))
+    assert dict(whole.symlink_targets()) == ws.namespace.symlink_targets()
+    assert whole.is_link("/data/lnk")

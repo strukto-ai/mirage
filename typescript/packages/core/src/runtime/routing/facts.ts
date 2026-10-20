@@ -16,7 +16,8 @@ import type { TSNodeLike } from '../../shell/types.ts'
 
 /**
  * Every command node of a parsed line, in source order, nested ones
- * included (a substitution's command follows the word holding it).
+ * included (a substitution's command follows the word holding it), and
+ * every `[ ]` or `[[ ]]` test, the shell's own command.
  */
 export function commandNodes(root: TSNodeLike): TSNodeLike[] {
   const nodes: TSNodeLike[] = []
@@ -24,7 +25,7 @@ export function commandNodes(root: TSNodeLike): TSNodeLike[] {
   while (stack.length > 0) {
     const node = stack.pop()
     if (node === undefined) break
-    if (node.type === 'command') nodes.push(node)
+    if (node.type === 'command' || node.type === 'test_command') nodes.push(node)
     for (let i = node.children.length - 1; i >= 0; i -= 1) {
       const child = node.children[i]
       if (child !== undefined) stack.push(child)
