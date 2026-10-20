@@ -42,7 +42,7 @@ import { mutationLock, latestFingerprint } from './file/io.ts'
 export class CacheManager {
   private readonly fileCache: FileCache | null
   private readonly index: IndexCacheStore | null
-  private readonly clock: Clock
+  private clock: Clock
   private readonly prefix: string
   private readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
@@ -170,6 +170,7 @@ export class CacheManager {
         this.written.clear()
         this.forgetChecks()
       }
+      this.clock = index.clock
       this.view = new IndexView(
         index,
         this.fileCache,
@@ -688,7 +689,11 @@ export class CacheManager {
       return
     }
     if (this.index !== null) {
-      await this.index.addEntry(key, row, new Date(this.clock.now() * 1000 + this.readTtl * 1000))
+      await this.index.addEntry(
+        key,
+        row,
+        new Date(this.index.clock.now() * 1000 + this.readTtl * 1000),
+      )
     }
   }
 

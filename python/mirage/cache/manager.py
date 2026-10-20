@@ -183,6 +183,7 @@ class CacheManager:
             if self._view is not None:
                 self._written.clear()
                 self._forget_checks()
+            self._clock = index.clock
             self._view = IndexView(
                 index,
                 self._file_cache,
@@ -837,7 +838,7 @@ class CacheManager:
         deadline = (
             None
             if self._read_ttl is None
-            else datetime.fromtimestamp(self._clock.now(), timezone.utc)
+            else datetime.fromtimestamp(self._index.clock.now(), timezone.utc)
             + timedelta(seconds=self._read_ttl)
         )
         await self._index.add_entry(key, row, deadline)

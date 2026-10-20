@@ -614,6 +614,21 @@ describe('which listings a mount trusts', () => {
     expect(manager.listingTrusted('/data')).toBe(false)
   })
 
+  it('times the window of a replaced store on its own clock', async () => {
+    const clock = new ManualClock()
+    const manager = new CacheManager(
+      new RAMFileCacheStore(),
+      new RAMIndexCacheStore({ ttl: 600, clock: new ManualClock() }),
+      '/data/',
+      true,
+    )
+    const replacement = new RAMIndexCacheStore({ ttl: 600, clock })
+    await manager.scopeIndex(replacement).setDir('/data', [])
+    expect(manager.listingTrusted('/data')).toBe(true)
+    clock.advance(LISTING_TRUST_WINDOW)
+    expect(manager.listingTrusted('/data')).toBe(false)
+  })
+
   // A listing the previous command fetched a moment ago is still re-listed by
   // the next one: the window is only for reads that belong to no command.
   it('does not apply the window inside a command', async () => {

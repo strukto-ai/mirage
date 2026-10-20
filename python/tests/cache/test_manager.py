@@ -628,6 +628,17 @@ def clock() -> ManualClock:
 
 
 @pytest.mark.asyncio
+async def test_a_replaced_store_times_its_window_on_its_own_clock(clock):
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    replacement = RAMIndexCacheStore(ttl=600, clock=clock)
+    await manager.scope_index(replacement).set_dir("/data", [])
+    assert manager.listing_trusted("/data") is True
+    clock.advance(LISTING_TRUST_WINDOW)
+    assert manager.listing_trusted("/data") is False
+
+
+@pytest.mark.asyncio
 async def test_outside_a_command_a_listing_is_trusted_for_the_window(clock):
     cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
