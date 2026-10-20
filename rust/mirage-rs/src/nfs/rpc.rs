@@ -81,9 +81,9 @@ pub enum auth_stat {
     AUTH_BADCRED = 1,
     /// client must begin new session
     AUTH_REJECTEDCRED = 2,
-    /// bad verifier (seal broken)    
+    /// bad verifier (seal broken)
     AUTH_BADVERF = 3,
-    /// verifier expired or replayed  
+    /// verifier expired or replayed
     AUTH_REJECTEDVERF = 4,
     /// rejected for security reasons
     AUTH_TOOWEAK = 5,
