@@ -49,7 +49,7 @@ describe('resolveBackend', () => {
   it('offers no auto backend', () => {
     // Deliberate: auto-selecting fskit would silently break every API-backed
     // mount, so the only safe value is also the default.
-    expect(Object.values(MountBackend)).toEqual(['workspace', 'fuse', 'fskit'])
+    expect(Object.values(MountBackend)).toEqual(['workspace', 'fuse', 'fskit', 'nfs'])
   })
 
   it('treats a missing value as workspace, never as a kernel mount', () => {
@@ -188,6 +188,23 @@ describe('unsizedMounts / checkSizes', () => {
       expect(warn).toHaveBeenCalledOnce()
       const message = String(warn.mock.calls[0]?.[0])
       expect(message).toContain('will read as empty')
+      expect(message).toContain('/api/')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('warns for a size-unknown mount on the nfs backend', () => {
+    class UnsizedVFS extends RAMVFS {
+      override readonly sizesAlwaysKnown: boolean = false
+    }
+    const ws = new Workspace({ '/api/': new UnsizedVFS() }, { mode: MountMode.READ })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      checkSizes(MountBackend.NFS, ws, '')
+      expect(warn).toHaveBeenCalledOnce()
+      const message = String(warn.mock.calls[0]?.[0])
+      expect(message).toContain('the nfs mount backend')
       expect(message).toContain('/api/')
     } finally {
       warn.mockRestore()

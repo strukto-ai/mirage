@@ -120,6 +120,10 @@ class MountCore:
     def handles(self) -> FileTable[Handle]:
         return self._handles
 
+    @property
+    def session(self) -> SessionState | None:
+        return self._session
+
     async def _op(self, call: Awaitable[T]) -> T:
         """Run one op under the bound session's mount grants, set around
         the await as ``shell`` brackets a command.

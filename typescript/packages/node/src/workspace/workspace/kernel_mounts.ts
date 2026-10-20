@@ -12,15 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MountBackend } from '@struktoai/mirage-core/types'
+import { MountBackend } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { FuseManager } from '../fuse.ts'
+import { NFSManager } from '../nfs.ts'
 
 /**
- * The workspace's real mountpoints, one {@link FuseManager} per subtree.
+ * The workspace's real mountpoints, one manager per subtree.
  *
- * A `workspace` mount lives only inside mirage; a `fuse` or `fskit` mount also
- * registers a mountpoint with the kernel. This owns the set of those:
+ * A `workspace` mount lives only inside mirage; a `fuse`, `fskit` or `nfs`
+ * mount also registers a mountpoint with the kernel, through a
+ * {@link FuseManager} or, for `nfs`, an {@link NFSManager}. This owns the set of those:
  * which prefix is exposed where, and the manager serving it. Keys are
  * `prefix` or `prefix@sessionId`, so the same subtree can be exposed
  * both unbound and bound to a session.
@@ -32,7 +34,7 @@ import { FuseManager } from '../fuse.ts'
 export class KernelMounts {
   private readonly workspace: Workspace
   private readonly mountpointsMap = new Map<string, string>()
-  private readonly managers = new Map<string, FuseManager>()
+  private readonly managers = new Map<string, FuseManager | NFSManager>()
 
   constructor(workspace: Workspace) {
     this.workspace = workspace
@@ -48,7 +50,7 @@ export class KernelMounts {
    * @param prefix the virtual prefix to expose
    * @param mountpoint where to mount; undefined picks a path
    * @param sessionId session whose grants scope the ops
-   * @param backend fuse or fskit
+   * @param backend fuse, fskit or nfs
    */
   async add(
     prefix: string,
@@ -61,15 +63,25 @@ export class KernelMounts {
     // Register a pinned path BEFORE mounting so a collision is rejected
     // without leaving a partial mount.
     if (mountpoint !== undefined) this.register(key, mountpoint)
-    const manager = new FuseManager()
-    this.managers.set(key, manager)
+    const options = {
+      rootPrefix: prefix,
+      ...(mountpoint !== undefined ? { mountpoint } : {}),
+      ...(session !== undefined ? { session } : {}),
+    }
     try {
-      const resolved = await manager.setup(this.workspace, {
-        rootPrefix: prefix,
-        ...(mountpoint !== undefined ? { mountpoint } : {}),
-        ...(session !== undefined ? { session } : {}),
-        ...(backend !== undefined ? { backend } : {}),
-      })
+      let resolved: string
+      if (backend === MountBackend.NFS) {
+        const manager = new NFSManager()
+        this.managers.set(key, manager)
+        resolved = await manager.setup(this.workspace, options)
+      } else {
+        const manager = new FuseManager()
+        this.managers.set(key, manager)
+        resolved = await manager.setup(this.workspace, {
+          ...options,
+          ...(backend !== undefined ? { backend } : {}),
+        })
+      }
       if (mountpoint === undefined) this.register(key, resolved)
       return resolved
     } catch (err) {

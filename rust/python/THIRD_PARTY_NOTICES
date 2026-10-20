@@ -219,6 +219,7 @@ Apache License 2.0, used by:
 - heck 0.5.0 (https://github.com/withoutboats/heck)
 - log 0.4.33 (https://github.com/rust-lang/log)
 - num-bigint 0.4.8 (https://github.com/rust-num/num-bigint)
+- num-derive 0.4.2 (https://github.com/rust-num/num-derive)
 - num-integer 0.1.47 (https://github.com/rust-num/num-integer)
 - num-traits 0.2.19 (https://github.com/rust-num/num-traits)
 - once_cell 1.21.4 (https://github.com/matklad/once_cell)
@@ -657,6 +658,7 @@ Apache License 2.0, used by:
 - serde_core 1.0.229 (https://github.com/serde-rs/serde)
 - serde_derive 1.0.229 (https://github.com/serde-rs/serde)
 - serde_json 1.0.154 (https://github.com/serde-rs/json)
+- syn 2.0.119 (https://github.com/dtolnay/syn)
 - syn 3.0.9 (https://github.com/dtolnay/syn)
 - unicode-ident 1.0.27 (https://github.com/dtolnay/unicode-ident)
 
@@ -768,6 +770,7 @@ DEALINGS IN THE SOFTWARE.
 MIT License, used by:
 - grep-regex 0.1.13 (https://github.com/BurntSushi/ripgrep/tree/master/crates/regex)
 - aho-corasick 1.1.5 (https://github.com/BurntSushi/aho-corasick)
+- byteorder 1.5.0 (https://github.com/BurntSushi/byteorder)
 - grep-matcher 0.1.7 (https://github.com/BurntSushi/ripgrep/tree/master/crates/matcher)
 - memchr 2.8.3 (https://github.com/BurntSushi/memchr)
 
@@ -895,6 +898,40 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
+
+nfsserve 0.11.0 NFSv3, MOUNT and portmap wire types, XDR codec and procedure handlers
+
+BSD 3-Clause License
+
+Copyright (c) 2023, XetData
+Copyright (c) 2025, Hugging Face
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------
 

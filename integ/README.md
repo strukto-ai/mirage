@@ -210,7 +210,7 @@ flowchart LR
     RS["rust/**<br/>mirage-rs, built into both hosts"] --> core & ts & data & database & runtime
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
-    FS["fuse and mount core modules,<br/>workspace fuse wiring<br/>integ/fuse, check_json.py"] --> fuse
+    FS["fuse and mount core modules,<br/>workspace fuse and nfs wiring<br/>integ/fuse, check_json.py"] --> fuse
     RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
     core --> J1["integ"]
     ts --> J2["integ-ts"]
@@ -237,19 +237,19 @@ Shared TypeScript fixtures under `packages/*/tests/` and the
 `packages/agents/src/openai_agents/` adapter remain covered by the whole-host
 TypeScript filters. Integration runners import some of those fixtures.
 
-| Changed                                                                                                      | Also sets                         |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| python or typescript source, except the runtime drop list below                                              | runtime                           |
-| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                           | runtime                           |
-| `integ/package.json`                                                                                         | runtime, fuse                     |
-| the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                             | database                          |
-| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds | observability                     |
-| `integ/runners/`, `integ/targets.json`                                                                       | database, observability           |
-| the FUSE and mount core modules and the FUSE wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |
-| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language       | fuse                              |
-| `rust/`, the shared command streams, jq scanner and output formatter both hosts run                          | core, ts, data, database, runtime |
-| `data/`                                                                                                      | core only                         |
-| `test_integ.yml`                                                                                             | every filter                      |
+| Changed                                                                                                              | Also sets                         |
+| -------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| python or typescript source, except the runtime drop list below                                                      | runtime                           |
+| `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                                   | runtime                           |
+| `integ/package.json`                                                                                                 | runtime, fuse                     |
+| the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                                     | database                          |
+| the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds         | observability                     |
+| `integ/runners/`, `integ/targets.json`                                                                               | database, observability           |
+| the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |
+| generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language               | fuse                              |
+| `rust/`, the shared command streams, jq scanner and output formatter both hosts run                                  | core, ts, data, database, runtime |
+| `data/`                                                                                                              | core only                         |
+| `test_integ.yml`                                                                                                     | every filter                      |
 
 The runtime drop list is the only subtraction in any filter, and it holds
 only what nothing integ-runtime loads can import, directly or not: unit

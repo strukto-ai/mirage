@@ -9,10 +9,12 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+byteorder = "1.5"
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 grep-regex.workspace = true
 md5.workspace = true
 memchr.workspace = true
+num-derive = "0.4"
 num-bigint.workspace = true
 num-traits.workspace = true
 regex-automata.workspace = true

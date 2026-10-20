@@ -6,6 +6,7 @@ mod generated;
 mod glob;
 mod grep;
 mod jq;
+pub mod nfs;
 mod printf;
 mod regex;
 mod rg;

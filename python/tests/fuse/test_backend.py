@@ -64,7 +64,12 @@ def test_resolve_backend_rejects_unknown():
 def test_no_auto_backend():
     # Deliberate: auto-selecting fskit would silently break every API-backed
     # mount, so the only safe value is also the default.
-    assert [b.value for b in MountBackend] == ["workspace", "fuse", "fskit"]
+    assert [b.value for b in MountBackend] == [
+        "workspace",
+        "fuse",
+        "fskit",
+        "nfs",
+    ]
 
 
 def test_missing_backend_is_vfs_everywhere():
@@ -211,6 +216,14 @@ def test_check_sizes_respects_the_root_prefix(caplog):
     with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
         check_sizes(MountBackend.FSKIT, ws.vfs, "/ram/")
     assert caplog.text == ""
+
+
+def test_check_sizes_warns_for_the_nfs_backend(caplog):
+    ws = Workspace({"/notion/": _notion()}, mode=MountMode.READ)
+    with caplog.at_level("WARNING", logger="mirage.fuse.backend"):
+        check_sizes(MountBackend.NFS, ws.vfs, "")
+    assert "the nfs mount backend" in caplog.text
+    assert "/notion/ (notion)" in caplog.text
 
 
 def test_check_sizes_ignores_fuse_backend():

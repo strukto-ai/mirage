@@ -1,0 +1,392 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { execFile } from 'node:child_process'
+import { type AddressInfo, type Server, type Socket, createServer } from 'node:net'
+import { constants as osConstants } from 'node:os'
+import { posix } from 'node:path'
+import { promisify } from 'node:util'
+import { NFSEngine, type NFSRequest } from '@struktoai/mirage-core/rs/nfs'
+import type { JsonValue } from '@struktoai/mirage-core/types'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { LISTING_CONCURRENCY, OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
+import type { MountCore } from './core.ts'
+import { classifyErrno } from './errors.ts'
+import type { MountAttrs } from './types.ts'
+
+export const HOST = '127.0.0.1'
+export const LINUX_OPTIONS =
+  'vers=3,proto=tcp,mountproto=tcp,mountvers=3,nolock,soft,timeo=50,' +
+  'retrans=2,ro,addr=127.0.0.1,mountaddr=127.0.0.1'
+export const DARWIN_OPTIONS =
+  'vers=3,tcp,nolocks,soft,intr,timeo=50,retrans=2,deadtimeout=60,rdonly,noresvport'
+export const MOUNT_TIMEOUT = 30
+
+/**
+ * The system command that mounts the server on `port` at `mountpoint`:
+ * read-only and soft, so an I/O against a server that went away fails rather
+ * than hangs. Throws on a platform with no NFS client mirage drives.
+ * Mirrors Python's mount_args.
+ */
+export function mountArgs(
+  port: number,
+  mountpoint: string,
+  platform: string = process.platform,
+): string[] {
+  const ports = `port=${String(port)},mountport=${String(port)}`
+  if (platform === 'darwin') {
+    return ['/sbin/mount_nfs', '-o', `${DARWIN_OPTIONS},${ports}`, `${HOST}:/`, mountpoint]
+  }
+  if (platform.startsWith('linux')) {
+    return ['mount', '-t', 'nfs', '-o', `${LINUX_OPTIONS},${ports}`, `${HOST}:/`, mountpoint]
+  }
+  throw new Error(
+    `the nfs mount backend runs on Linux and macOS, not '${platform}'; use backend 'fuse'`,
+  )
+}
+
+/**
+ * The commands that unmount `mountpoint`, tried in order until one succeeds:
+ * a plain unmount, then a forced or lazy one. Mirrors Python's unmount_args.
+ */
+export function unmountArgs(mountpoint: string, platform: string = process.platform): string[][] {
+  if (platform === 'darwin') {
+    return [
+      ['umount', mountpoint],
+      ['diskutil', 'unmount', 'force', mountpoint],
+    ]
+  }
+  return [
+    ['umount', mountpoint],
+    ['umount', '-l', mountpoint],
+  ]
+}
+
+/** Mount the server on `port` at `mountpoint`; throws when the system mount refuses. */
+export async function mountNfs(port: number, mountpoint: string): Promise<void> {
+  const [command = '', ...rest] = mountArgs(port, mountpoint)
+  try {
+    await promisify(execFile)(command, rest, { timeout: MOUNT_TIMEOUT * 1000 })
+  } catch (err) {
+    const failure = err as { stderr?: string; code?: number | string }
+    let reason = failure.stderr?.trim() ?? ''
+    if (reason === '') reason = `exit ${String(failure.code)}`
+    if (process.platform === 'linux' && process.getuid?.() !== 0) {
+      reason += "; mounting NFS needs root on Linux, or use backend 'fuse'"
+    }
+    throw new Error(`nfs mount at ${mountpoint} failed: ${reason}`)
+  }
+}
+
+/** Unmount `mountpoint`, forcing it when a plain unmount is refused. */
+export async function unmountNfs(mountpoint: string): Promise<void> {
+  for (const [command = '', ...rest] of unmountArgs(mountpoint)) {
+    try {
+      await promisify(execFile)(command, rest, { timeout: MOUNT_TIMEOUT * 1000 })
+      return
+    } catch (err) {
+      console.debug(`nfs: ${command} ${rest.join(' ')} failed: ${String(err)}`)
+    }
+  }
+  console.warn(`nfs: ${mountpoint} is still mounted`)
+}
+
+/** A time as NFS carries it: `[seconds, nanoseconds]`; before the epoch reads as the epoch. */
+export function wireTime(date: Date): [number, number] {
+  const ms = Math.max(date.getTime(), 0)
+  return [Math.floor(ms / 1000), (ms % 1000) * 1_000_000]
+}
+
+/** One entry's attributes as the engine reads them. */
+export function wireAttrs(attrs: MountAttrs): Record<string, JsonValue> {
+  return {
+    mode: attrs.mode,
+    size: attrs.size,
+    nlink: attrs.nlink,
+    uid: attrs.uid,
+    gid: attrs.gid,
+    atime: wireTime(attrs.atime),
+    mtime: wireTime(attrs.mtime),
+    ctime: wireTime(attrs.ctime),
+  }
+}
+
+/**
+ * An NFSv3 server over a mount core, on a local TCP port. The protocol is
+ * mirage-rs's (`NFSEngine`); this owns the sockets and runs each file
+ * operation the engine asks for on the core, so a kernel NFS client mounts
+ * the core's tree with no driver installed. NFS has no open or close: a read
+ * opens its file on the core and later reads reuse that handle until the
+ * file's size or mtime moves or the bound session changes, so a new hide or
+ * grant holds. `secure` takes only clients on a reserved
+ * port, as a kernel client mounted by root is; it is on by default on Linux.
+ * Mirrors Python's MirageNFSServer.
+ */
+export class MirageNFSServer {
+  private engine: NFSEngine | null = null
+  private server: Server | null = null
+  private readonly sockets = new Map<number, Socket>()
+  private nextConn = 0
+  private readonly handles = new Map<string, Promise<number>>()
+  private versions = new Map<string, string>()
+  private readonly readers = new Map<string, number>()
+  private generation: number | null = null
+
+  constructor(
+    private readonly core: MountCore,
+    private readonly exportPath = '/',
+    private readonly secure = process.platform === 'linux',
+  ) {}
+
+  /** Listen on `host`, and return the port a client mounts. */
+  async start(host = '127.0.0.1', port = 0): Promise<number> {
+    const server = createServer((socket) => {
+      this.serve(socket)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(port, host, () => {
+        resolve()
+      })
+    })
+    const bound = (server.address() as AddressInfo).port
+    this.server = server
+    this.engine = await NFSEngine.open(this.exportPath, Date.now(), bound)
+    return bound
+  }
+
+  /** Stop listening, drop every connection and release every file the server holds open. */
+  async close(): Promise<void> {
+    const engine = this.engine
+    this.engine = null
+    for (const socket of this.sockets.values()) socket.destroy()
+    const server = this.server
+    if (server !== null) {
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve()
+        })
+      })
+    }
+    await this.releaseAll()
+    engine?.dispose()
+  }
+
+  private serve(socket: Socket): void {
+    const port = socket.remotePort
+    if (this.secure && (port === undefined || port >= RESERVED_PORTS)) {
+      console.warn(`nfs: refused a client on unreserved port ${String(port)}`)
+      socket.destroy()
+      return
+    }
+    const engine = this.engine
+    if (engine === null) {
+      socket.destroy()
+      return
+    }
+    const conn = ++this.nextConn
+    this.sockets.set(conn, socket)
+    socket.on('data', (data: Buffer) => {
+      let out: Uint8Array
+      try {
+        out = engine.feed(conn, data)
+      } catch (err) {
+        console.debug(`nfs: connection ${String(conn)} refused: ${String(err)}`)
+        socket.destroy()
+        return
+      }
+      if (out.length > 0) socket.write(out)
+      this.dispatch(engine)
+    })
+    socket.on('error', (err) => {
+      console.debug(`nfs: connection ${String(conn)} dropped: ${String(err)}`)
+    })
+    socket.on('close', () => {
+      this.sockets.delete(conn)
+      engine.close(conn)
+    })
+  }
+
+  private dispatch(engine: NFSEngine): void {
+    for (const request of engine.requests()) {
+      this.run(engine, request).catch((err: unknown) => {
+        console.debug(`nfs: request ${String(request.id)} failed: ${String(err)}`)
+      })
+    }
+  }
+
+  private async run(engine: NFSEngine, request: NFSRequest): Promise<void> {
+    const [reply, data] = await this.answer(request)
+    if (this.engine !== engine) return
+    let completed: [number | null, Uint8Array]
+    try {
+      completed = engine.complete(request.id, reply, data)
+    } catch (err) {
+      console.debug(`nfs: ${request.op} ${request.path}: ${String(err)}`)
+      completed = engine.complete(request.id, { error: 'EIO' }, new Uint8Array())
+    }
+    const [conn, out] = completed
+    const socket = conn === null ? undefined : this.sockets.get(conn)
+    if (socket !== undefined && out.length > 0) socket.write(out)
+    this.dispatch(engine)
+  }
+
+  private async answer(request: NFSRequest): Promise<[Record<string, JsonValue>, Uint8Array]> {
+    try {
+      switch (request.op) {
+        case 'getattr':
+          return [{ attrs: wireAttrs(await this.getattr(request.path)) }, new Uint8Array()]
+        case 'readdir': {
+          const [entries, end] = await this.listing(
+            request.path,
+            request.after ?? null,
+            request.limit ?? 0,
+          )
+          return [{ entries, end }, new Uint8Array()]
+        }
+        case 'read':
+          return [{}, await this.read(request.path, request.offset ?? 0, request.size ?? 0)]
+        case 'readlink':
+          return [{ target: await this.core.readlink(request.path) }, new Uint8Array()]
+      }
+    } catch (err) {
+      console.debug(`nfs: ${request.op} ${request.path}: ${String(err)}`)
+      const code = classifyErrno(err)
+      const name = Object.entries(osConstants.errno).find(([, errno]) => errno === code)?.[0]
+      return [{ error: name ?? 'EIO' }, new Uint8Array()]
+    }
+  }
+
+  private async listing(
+    path: string,
+    after: string | null,
+    limit: number,
+  ): Promise<[JsonValue[], boolean]> {
+    const names = (await this.core.readdir(path))
+      .filter((name) => {
+        if (name === '.' || name === '..') return false
+        if (!/\p{Cs}/u.test(name)) return true
+        console.debug(`nfs: ${JSON.stringify(name)} left out, not UTF-8`)
+        return false
+      })
+      .sort(compareCodePoints)
+    const found = after === null ? 0 : names.findIndex((name) => compareCodePoints(name, after) > 0)
+    const start = found === -1 ? names.length : found
+    const page = names.slice(start, start + limit)
+    const rows: JsonValue[] = new Array<JsonValue>(page.length).fill(null)
+    const todo = page.entries()
+    const worker = async (): Promise<void> => {
+      for (const [index, name] of todo) {
+        try {
+          const attrs = await this.core.getattr(posix.join(path, name))
+          rows[index] = { name, attrs: wireAttrs(attrs) }
+        } catch (err) {
+          const code = classifyErrno(err)
+          if (code !== osConstants.errno.ENOENT && code !== osConstants.errno.ENOTDIR) throw err
+          console.debug(`nfs: ${name} vanished while listing: ${String(err)}`)
+          rows[index] = { name, attrs: null }
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, page.length) }, worker))
+    return [rows, start + limit >= names.length]
+  }
+
+  private async getattr(path: string): Promise<MountAttrs> {
+    const attrs = await this.core.getattr(path)
+    const held = this.versions.get(path)
+    if (held !== undefined && held !== `${String(attrs.mtime.getTime())}:${String(attrs.size)}`) {
+      await this.release(path)
+    }
+    return attrs
+  }
+
+  private async read(path: string, offset: number, size: number): Promise<Uint8Array> {
+    const generation = this.core.session?.generation ?? null
+    if (generation !== this.generation) {
+      this.generation = generation
+      await this.releaseAll()
+    }
+    this.readers.set(path, (this.readers.get(path) ?? 0) + 1)
+    try {
+      for (;;) {
+        let opened = this.handles.get(path)
+        if (opened === undefined) {
+          opened = this.open(path, this.versions)
+          opened.catch((err: unknown) => {
+            console.debug(`nfs: opening ${path} failed: ${String(err)}`)
+          })
+        }
+        this.handles.delete(path)
+        this.handles.set(path, opened)
+        while (this.handles.size > OPEN_HANDLES) {
+          const idle = [...this.handles.keys()].find((held) => !this.readers.has(held))
+          if (idle === undefined) break
+          await this.release(idle)
+        }
+        let fd: number
+        try {
+          fd = await opened
+        } catch (err) {
+          if (this.handles.get(path) === opened) this.handles.delete(path)
+          throw err
+        }
+        if (this.handles.get(path) === opened) return await this.core.read(path, fd, offset, size)
+      }
+    } finally {
+      const left = (this.readers.get(path) ?? 1) - 1
+      if (left === 0) this.readers.delete(path)
+      else this.readers.set(path, left)
+    }
+  }
+
+  private async open(path: string, versions: Map<string, string>): Promise<number> {
+    const attrs = await this.core.getattr(path)
+    const fd = await this.core.open(path)
+    versions.set(path, `${String(attrs.mtime.getTime())}:${String(attrs.size)}`)
+    return fd
+  }
+
+  private async release(path: string): Promise<void> {
+    const opened = this.handles.get(path)
+    if (opened === undefined) return
+    this.handles.delete(path)
+    let fd: number
+    try {
+      fd = await opened
+    } catch (err) {
+      console.debug(`nfs: ${path} never opened: ${String(err)}`)
+      return
+    } finally {
+      if (!this.handles.has(path)) this.versions.delete(path)
+    }
+    await this.core.release(fd)
+  }
+
+  private async releaseAll(): Promise<void> {
+    const held = [...this.handles]
+    this.handles.clear()
+    this.versions = new Map()
+    for (const [path, opened] of held) {
+      let fd: number
+      try {
+        fd = await opened
+      } catch (err) {
+        console.debug(`nfs: ${path} never opened: ${String(err)}`)
+        continue
+      }
+      await this.core.release(fd)
+    }
+  }
+}

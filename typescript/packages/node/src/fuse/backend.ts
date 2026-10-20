@@ -100,10 +100,10 @@ export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][
 }
 
 /**
- * Warn when an fskit mount will serve size-unknown files as empty.
+ * Warn when an fskit or nfs mount will serve size-unknown files as empty.
  *
- * FSKit drives reads from the size the filesystem reports and has no
- * `direct_io` escape hatch, so a VFS that cannot size a file without
+ * FSKit and the kernel NFS client drive reads from the size the filesystem
+ * reports and have no `direct_io` escape hatch, so a VFS that cannot size a file without
  * fetching it reports 0, the kernel issues no reads, and every such file
  * comes back empty with exit code 0 (verified on a live fskit mount: the
  * read clamp is pinned at lookup-time size and never refreshed). The mount
@@ -111,14 +111,14 @@ export function unsizedMounts(ws: Workspace, rootPrefix = ''): [string, string][
  * degraded mounts are named loudly here rather than refused.
  */
 export function checkSizes(backend: MountBackend, ws: Workspace, rootPrefix = ''): void {
-  if (backend !== MountBackend.FSKIT) return
+  if (backend !== MountBackend.FSKIT && backend !== MountBackend.NFS) return
   const offenders = unsizedMounts(ws, rootPrefix)
   if (offenders.length === 0) return
   const listed = offenders.map(([prefix, kind]) => `${prefix} (${kind})`).join(', ')
   console.warn(
-    'mirage: the fskit mount backend cannot serve mounts whose file sizes are only known ' +
+    `mirage: the ${backend} mount backend cannot serve mounts whose file sizes are only known ` +
       `after a read; size-unknown files under these mounts will read as empty: ${listed}. ` +
-      "Mount them with backend 'fuse', or scope the fskit mount to a byte-store VFS " +
+      `Mount them with backend 'fuse', or scope the ${backend} mount to a byte-store VFS ` +
       '(ram, disk, redis, s3, gridfs).',
   )
 }
