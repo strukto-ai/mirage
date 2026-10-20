@@ -32,14 +32,17 @@ from mirage.workspace.executor.builtins.condition.types import (
         ([], None),
         (["x"], FlatString(0)),
         (["!", "-e", "x"], FlatNot(FlatUnary("-e", 2))),
-        (["-e", "-o", "yes"], FlatOr(FlatString(0), FlatString(2))),
-        (["-f", "-o", "-e", "x"], FlatOr(FlatString(0), FlatUnary("-e", 3))),
+        (["-e", "-o", "yes"], FlatOr((FlatString(0), FlatString(2)))),
+        (
+            ["-f", "-o", "-e", "x"],
+            FlatOr((FlatString(0), FlatUnary("-e", 3))),
+        ),
         (["a", "-nt", "b"], FlatBinary(0, "-nt", 2)),
         (["x", "y"], FlatFail("test: x: unary operator expected")),
         (
             ["1", "-eq", "x", "-a"],
             FlatAnd(
-                FlatBinary(0, "-eq", 2), FlatFail("test: argument expected")
+                (FlatBinary(0, "-eq", 2), FlatFail("test: argument expected"))
             ),
         ),
     ],

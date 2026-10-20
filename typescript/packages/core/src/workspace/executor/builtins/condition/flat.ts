@@ -54,10 +54,11 @@ async function value(
       throw new CondError(node.message)
     case 'and':
     case 'or': {
-      // test evaluates both sides of -a and -o as it reads them.
-      const left = await value(ctx, node.left, argv)
-      const right = await value(ctx, node.right, argv)
-      return node.kind === 'and' ? left && right : left || right
+      // test evaluates every term of -a and -o as it reads them, a chain in
+      // one loop as test's own parser reads it.
+      const values: boolean[] = []
+      for (const term of node.terms) values.push(await value(ctx, term, argv))
+      return node.kind === 'and' ? values.every(Boolean) : values.some(Boolean)
     }
   }
 }

@@ -68,9 +68,9 @@ async def _value(
         return not await _value(ctx, node.inner, argv)
     if isinstance(node, FlatFail):
         raise CondError(node.message)
-    # test evaluates both sides of -a and -o as it reads them.
-    left = await _value(ctx, node.left, argv)
-    right = await _value(ctx, node.right, argv)
+    # test evaluates every term of -a and -o as it reads them, a chain
+    # in one loop as test's own parser reads it.
+    values = [await _value(ctx, term, argv) for term in node.terms]
     if isinstance(node, FlatAnd):
-        return left and right
-    return left or right
+        return all(values)
+    return any(values)

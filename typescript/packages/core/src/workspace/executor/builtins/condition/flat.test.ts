@@ -32,6 +32,22 @@ function ctx(): CondContext {
 }
 
 describe('evalFlat', () => {
+  it('reads a long chain in a loop', async () => {
+    // test reads -a and -o chains in a loop, so a chain's length costs no
+    // stack: 3000 terms read and evaluate as 3 do.
+    const and = (n: number, last: string): string[] => [
+      'x',
+      ...Array.from({ length: n - 2 }, () => ['-a', 'x']).flat(),
+      '-a',
+      last,
+    ]
+    expect(await evalFlat(ctx(), and(3000, 'x'))).toBe(true)
+    expect(
+      await evalFlat(ctx(), ['x', ...Array.from({ length: 2999 }, () => ['-o', '']).flat()]),
+    ).toBe(true)
+    expect(await evalFlat(ctx(), and(3000, ''))).toBe(false)
+  })
+
   it('reaches a term before a grammar error after it', async () => {
     const run = evalFlat(ctx(), ['1', '-eq', 'x', '-a'])
     await expect(run).rejects.toBeInstanceOf(CondError)

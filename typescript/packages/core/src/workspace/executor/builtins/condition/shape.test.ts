@@ -26,11 +26,23 @@ describe('flatShape', () => {
     [['!', '-e', 'x'], { kind: 'not', inner: { kind: 'unary', op: '-e', at: 2 } }],
     [
       ['-e', '-o', 'yes'],
-      { kind: 'or', left: { kind: 'string', at: 0 }, right: { kind: 'string', at: 2 } },
+      {
+        kind: 'or',
+        terms: [
+          { kind: 'string', at: 0 },
+          { kind: 'string', at: 2 },
+        ],
+      },
     ],
     [
       ['-f', '-o', '-e', 'x'],
-      { kind: 'or', left: { kind: 'string', at: 0 }, right: { kind: 'unary', op: '-e', at: 3 } },
+      {
+        kind: 'or',
+        terms: [
+          { kind: 'string', at: 0 },
+          { kind: 'unary', op: '-e', at: 3 },
+        ],
+      },
     ],
     [['a', '-nt', 'b'], { kind: 'binary', left: 0, op: '-nt', right: 2 }],
     [['x', 'y'], { kind: 'fail', message: 'test: x: unary operator expected' }],
@@ -38,8 +50,10 @@ describe('flatShape', () => {
       ['1', '-eq', 'x', '-a'],
       {
         kind: 'and',
-        left: { kind: 'binary', left: 0, op: '-eq', right: 2 },
-        right: { kind: 'fail', message: 'test: argument expected' },
+        terms: [
+          { kind: 'binary', left: 0, op: '-eq', right: 2 },
+          { kind: 'fail', message: 'test: argument expected' },
+        ],
       },
     ],
   ])('reads %j as test does', (words, reading) => {

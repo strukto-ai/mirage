@@ -68,8 +68,8 @@ def flat_leaves(node: FlatNode) -> Iterator[FlatUnary | FlatBinary]:
     elif isinstance(node, FlatNot):
         yield from flat_leaves(node.inner)
     elif isinstance(node, (FlatAnd, FlatOr)):
-        yield from flat_leaves(node.left)
-        yield from flat_leaves(node.right)
+        for term in node.terms:
+            yield from flat_leaves(term)
 
 
 def _two(name: str, words: Sequence[str], at: int) -> FlatNode:
@@ -98,9 +98,9 @@ def _three(name: str, words: Sequence[str], at: int) -> FlatNode:
     """
     mid = words[at + 1]
     if mid == "-a":
-        return FlatAnd(FlatString(at), FlatString(at + 2))
+        return FlatAnd((FlatString(at), FlatString(at + 2)))
     if mid == "-o":
-        return FlatOr(FlatString(at), FlatString(at + 2))
+        return FlatOr((FlatString(at), FlatString(at + 2)))
     if mid in BINARY_OPS:
         return FlatBinary(at, mid, at + 2)
     first = words[at]
@@ -148,22 +148,22 @@ class _Shape:
     def run(self) -> FlatNode:
         node = self._or_expr()
         if not self.failed and self.pos != len(self.words):
-            return FlatAnd(node, self._fail("too many arguments"))
+            return FlatAnd((node, self._fail("too many arguments")))
         return node
 
     def _or_expr(self) -> FlatNode:
-        node = self._and_expr()
+        terms = [self._and_expr()]
         while not self.failed and self._peek() == "-o":
             self.pos += 1
-            node = FlatOr(node, self._and_expr())
-        return node
+            terms.append(self._and_expr())
+        return terms[0] if len(terms) == 1 else FlatOr(tuple(terms))
 
     def _and_expr(self) -> FlatNode:
-        node = self._term()
+        terms = [self._term()]
         while not self.failed and self._peek() == "-a":
             self.pos += 1
-            node = FlatAnd(node, self._term())
-        return node
+            terms.append(self._term())
+        return terms[0] if len(terms) == 1 else FlatAnd(tuple(terms))
 
     def _term(self) -> FlatNode:
         tok = self._peek()
@@ -178,7 +178,7 @@ class _Shape:
             if self.failed:
                 return inner
             if self._peek() != ")":
-                return FlatAnd(inner, self._fail("`)' expected"))
+                return FlatAnd((inner, self._fail("`)' expected")))
             self.pos += 1
             return inner
         nxt = self._peek(1)

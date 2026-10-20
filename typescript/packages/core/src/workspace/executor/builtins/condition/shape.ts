@@ -43,8 +43,7 @@ export function* flatLeaves(node: FlatNode): Generator<FlatUnary | FlatBinary> {
   } else if (node.kind === 'not') {
     yield* flatLeaves(node.inner)
   } else if (node.kind === 'and' || node.kind === 'or') {
-    yield* flatLeaves(node.left)
-    yield* flatLeaves(node.right)
+    for (const term of node.terms) yield* flatLeaves(term)
   }
 }
 
@@ -63,10 +62,22 @@ function two(name: string, words: readonly string[], at: number): FlatNode {
 function three(name: string, words: readonly string[], at: number): FlatNode {
   const mid = words[at + 1] ?? ''
   if (mid === '-a') {
-    return { kind: 'and', left: { kind: 'string', at }, right: { kind: 'string', at: at + 2 } }
+    return {
+      kind: 'and',
+      terms: [
+        { kind: 'string', at },
+        { kind: 'string', at: at + 2 },
+      ],
+    }
   }
   if (mid === '-o') {
-    return { kind: 'or', left: { kind: 'string', at }, right: { kind: 'string', at: at + 2 } }
+    return {
+      kind: 'or',
+      terms: [
+        { kind: 'string', at },
+        { kind: 'string', at: at + 2 },
+      ],
+    }
   }
   if (BINARY_OPS.has(mid)) return { kind: 'binary', left: at, op: mid, right: at + 2 }
   const first = words[at]
@@ -109,27 +120,29 @@ class Shape {
   run(): FlatNode {
     const node = this.orExpr()
     if (!this.failed && this.pos !== this.words.length) {
-      return { kind: 'and', left: node, right: this.fail('too many arguments') }
+      return { kind: 'and', terms: [node, this.fail('too many arguments')] }
     }
     return node
   }
 
   private orExpr(): FlatNode {
-    let node = this.andExpr()
+    const first = this.andExpr()
+    const terms = [first]
     while (!this.failed && this.peek() === '-o') {
       this.pos += 1
-      node = { kind: 'or', left: node, right: this.andExpr() }
+      terms.push(this.andExpr())
     }
-    return node
+    return terms.length === 1 ? first : { kind: 'or', terms }
   }
 
   private andExpr(): FlatNode {
-    let node = this.term()
+    const first = this.term()
+    const terms = [first]
     while (!this.failed && this.peek() === '-a') {
       this.pos += 1
-      node = { kind: 'and', left: node, right: this.term() }
+      terms.push(this.term())
     }
-    return node
+    return terms.length === 1 ? first : { kind: 'and', terms }
   }
 
   private term(): FlatNode {
@@ -143,7 +156,7 @@ class Shape {
       this.pos += 1
       const inner = this.orExpr()
       if (this.failed) return inner
-      if (this.peek() !== ')') return { kind: 'and', left: inner, right: this.fail("`)' expected") }
+      if (this.peek() !== ')') return { kind: 'and', terms: [inner, this.fail("`)' expected")] }
       this.pos += 1
       return inner
     }

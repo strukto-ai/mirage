@@ -107,14 +107,17 @@ class FlatNot:
 
 @dataclass(frozen=True, slots=True)
 class FlatAnd:
-    left: "FlatNode"
-    right: "FlatNode"
+    """Terms joined by ``-a``, a chain held flat so its length costs no
+    depth."""
+
+    terms: tuple["FlatNode", ...]
 
 
 @dataclass(frozen=True, slots=True)
 class FlatOr:
-    left: "FlatNode"
-    right: "FlatNode"
+    """Terms joined by ``-o``, held flat as ``FlatAnd``'s are."""
+
+    terms: tuple["FlatNode", ...]
 
 
 @dataclass(frozen=True, slots=True)

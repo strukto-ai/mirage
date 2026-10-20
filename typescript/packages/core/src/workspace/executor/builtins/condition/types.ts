@@ -62,16 +62,16 @@ export interface FlatNot {
   inner: FlatNode
 }
 
+/** Terms joined by `-a`, a chain held flat so its length costs no depth. */
 export interface FlatAnd {
   kind: 'and'
-  left: FlatNode
-  right: FlatNode
+  terms: FlatNode[]
 }
 
+/** Terms joined by `-o`, held flat as `FlatAnd`'s are. */
 export interface FlatOr {
   kind: 'or'
-  left: FlatNode
-  right: FlatNode
+  terms: FlatNode[]
 }
 
 /** A grammar error, the test's whole answer once it is reached. */
