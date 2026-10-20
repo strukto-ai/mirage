@@ -3862,6 +3862,127 @@
       ]
     },
     {
+      "id": "a_load_keeps_every_session_profile",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "config": {}
+          }
+        },
+        "profiles": {
+          "default": {
+            "paths": {
+              "hide": [
+                "/data/a"
+              ]
+            }
+          },
+          "locked": {
+            "paths": {
+              "hide": [
+                "/data/b"
+              ]
+            }
+          },
+          "reviewer": {
+            "paths": {
+              "hide": [
+                "/data/secrets"
+              ]
+            },
+            "commands": {
+              "deny": [
+                "rm"
+              ]
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "session",
+          "id": "seed"
+        },
+        {
+          "op": "exec",
+          "session": "seed",
+          "command": "mkdir -p /data/a /data/b /data/secrets && echo A > /data/a/f && echo B > /data/b/f && echo S > /data/secrets/k",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "session",
+          "id": "rev"
+        },
+        {
+          "op": "set_profile",
+          "session": "rev",
+          "profile": "reviewer"
+        },
+        {
+          "op": "set_profile",
+          "profile": "locked"
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "whoami; cat /data/a/f /data/b/f",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "locked\nA\n",
+              "stderr": "cat: /data/b/f: No such file or directory\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "rev",
+          "command": "whoami; cat /data/b/f /data/secrets/k",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "reviewer\nB\n",
+              "stderr": "cat: /data/secrets/k: No such file or directory\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "rev",
+          "command": "rm /data/b/f",
+          "expect": {
+            "value": {
+              "exit_code": 126,
+              "stdout": "",
+              "stderr": "rm: Permission denied\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "session": "seed",
+          "command": "cat /data/a/f /data/b/f /data/secrets/k",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "A\nB\nS\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "stream_head_closes_without_fetching_tail",
       "settings": {
         "mounts": {

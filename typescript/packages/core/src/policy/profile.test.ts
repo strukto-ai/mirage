@@ -21,6 +21,8 @@ import {
   parseProfileMounts,
   parseProfilePolicy,
   parseSessionProfile,
+  profileFromDict,
+  profileToDict,
 } from './profile.ts'
 
 const mountSection = (raw: unknown): unknown => parseProfileMount(raw, '/repo', 'mounts[/repo]')
@@ -411,6 +413,84 @@ describe('parseProfilePolicy', () => {
     expect(policyRuntime({ autoLoadFromImports: false }, true)).toEqual({
       name: 'pyodide',
       config: { autoLoadFromImports: false },
+    })
+  })
+})
+
+// The document a snapshot carries, as both hosts write it: test_profile.py
+// holds the same literal, so either host reads what the other wrote.
+const DOCUMENT = {
+  cwd: '/repo',
+  env: {
+    PAGER: 'cat',
+    ROLE: { value: 'agent', readonly: true },
+    TOKEN: { from: 'vault', ref: 'kv/agent', key: 'token' },
+  },
+  vars: { hide: ['TOKEN', 'AWS_*'] },
+  policy: {
+    pre_command: [
+      {
+        script: { source: 'print()', language: 'python', module: false },
+        runtime: { name: 'monty', config: { auto_load_from_imports: true } },
+      },
+    ],
+  },
+  command_limits: {
+    cat: { max_bytes: 10, max_lines: null, timeout_seconds: null, on_exceed: 'truncate' },
+  },
+  processes: { list: 'workspace', kill: 'workspace', max: null },
+  mounts: {
+    '/repo': {
+      mode: 'read',
+      paths: { hide: ['/repo/.env'], show: { '/repo/.env.example': null }, reasons: [] },
+      commands: {
+        ask: [{ reason: 'sign-off', commands: { 'git push': ['/repo'] } }],
+        deny: [{ reason: 'denied by policy', commands: ['git rebase'] }],
+      },
+    },
+    '/scratch': { mode: 'exec' },
+  },
+  paths: {
+    hide: ['/repo/secrets', '*.pem'],
+    show: { '/repo/secrets/public': 'read' },
+    reasons: [{ patterns: ['*.pem'], reason: 'keys' }],
+  },
+  commands: {
+    ask: [{ reason: 'shared', commands: { rm: ['/scratch/*'] } }],
+    deny: [
+      { reason: 'sealed', paths: ['/repo/sealed'] },
+      { reason: 'denied by policy', commands: ['curl'] },
+    ],
+    allow: ['ls', 'cat', 'git push', 'rm'],
+  },
+}
+
+describe('profileToDict', () => {
+  it('writes the document it parses from', () => {
+    expect(profileToDict(profileFromDict(DOCUMENT))).toEqual(DOCUMENT)
+    // A rule naming commands beside paths, which the document cannot
+    // spell, is written one command per rule and admits the same lines.
+    const profile = { commands: { deny: [{ reason: 'r', commands: ['rm', 'mv'], paths: ['/a'] }] } }
+    expect(profileFromDict(profileToDict(profile)).commands?.deny).toEqual([
+      { reason: 'r', commands: ['rm'], paths: ['/a'] },
+      { reason: 'r', commands: ['mv'], paths: ['/a'] },
+    ])
+    // A path shown twice answers with its weaker mode, which the mapping
+    // keeps rather than the last entry's.
+    const shown = {
+      paths: {
+        hide: [],
+        show: [
+          { path: '/data', mode: MountMode.READ },
+          { path: '/data', mode: MountMode.WRITE },
+          { path: '/docs', mode: null },
+          { path: '/docs', mode: MountMode.WRITE },
+        ],
+      },
+    }
+    expect((profileToDict(shown).paths as { show: unknown }).show).toEqual({
+      '/data': 'read',
+      '/docs': 'write',
     })
   })
 })

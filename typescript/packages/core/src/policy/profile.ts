@@ -14,7 +14,7 @@
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
-import { parseCommandLimits } from './builtin/output_cap.ts'
+import { commandLimitsToJSON, parseCommandLimits } from './builtin/output_cap.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import type {
   CommandRule,
@@ -23,9 +23,10 @@ import type {
   ProfileScripts,
   ScriptMethod,
 } from './types.ts'
-import { ScriptSource } from '../runtime/types.ts'
+import { type Language, ScriptSource } from '../runtime/types.ts'
+import { EnvVarSchema, type EnvEntries } from '../secrets/config.ts'
 import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
-import { type MountMode, parseMountMode } from '../types.ts'
+import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
 import type { HideReason } from './types.ts'
 import { isGlob } from '../utils/hidden.ts'
 import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
@@ -137,7 +138,13 @@ export interface ProfileMount {
  */
 export interface SessionProfile {
   readonly cwd?: string | null
-  readonly env?: Readonly<Record<string, string>> | null
+  /**
+   * The env entries seeded into the session at creation, in the
+   * workspace `env` grammar: a bare string is an exported literal, and a
+   * `from` entry a managed pointer, so a credential is named here and
+   * fetched, never written as its value.
+   */
+  readonly env?: Readonly<EnvEntries> | null
   readonly mounts?: ReadonlyMap<string, ProfileMount> | null
   readonly paths?: PathsBlock | null
   readonly vars?: VarsBlock | null
@@ -186,7 +193,7 @@ export type ProfilePolicy = Readonly<Partial<Record<ScriptMethod, readonly Profi
  * afterwards, so a stored session keeps its own.
  */
 export interface ProfileSetup {
-  readonly env: Readonly<Record<string, string>> | null
+  readonly env: Readonly<EnvEntries> | null
   readonly cwd: string | null
 }
 
@@ -679,7 +686,7 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   rejectUnknownKeys(obj, PROFILE_FIELDS, where)
   const out: {
     cwd?: string | null
-    env?: Readonly<Record<string, string>> | null
+    env?: Readonly<EnvEntries> | null
     mounts?: ReadonlyMap<string, ProfileMount> | null
     paths?: PathsBlock | null
     vars?: VarsBlock | null
@@ -700,9 +707,16 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   if (obj.env !== undefined && obj.env !== null) {
     const env = asObject(obj.env, `${where}.env`)
     for (const [k, v] of Object.entries(env)) {
-      if (typeof v !== 'string') throw new Error(`${where}.env.${k} must be a string`)
+      if (typeof v === 'string') continue
+      if (!isPlainObject(v)) throw new Error(`${where}.env.${k} must be a string or an env entry`)
+      const parsed = EnvVarSchema.safeParse(v)
+      if (!parsed.success) {
+        throw new Error(
+          `${where}.env.${k}: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
+        )
+      }
     }
-    out.env = env as Record<string, string>
+    out.env = env as EnvEntries
   }
   if (obj.mounts !== undefined && obj.mounts !== null) {
     out.mounts = parseProfileMounts(obj.mounts, `${where}.mounts`)
@@ -714,4 +728,137 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   if (obj.commands !== undefined && obj.commands !== null)
     out.commands = parseCommandsBlock(obj.commands, `${where}.commands`)
   return out
+}
+
+/**
+ * A profile as the document that parses back to it: the shape a
+ * `profiles:` entry has in YAML, which either host reads. Every block is
+ * spelled as the document spells it, a program's runtime settings
+ * included, and a script as its source, language and module flag.
+ * Mirrors Python `profile_to_dict`.
+ */
+export function profileToDict(profile: SessionProfile): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (profile.cwd != null) doc.cwd = profile.cwd
+  if (profile.env != null) doc.env = { ...profile.env }
+  if (profile.vars != null) doc.vars = { hide: [...profile.vars.hide] }
+  if (profile.policy != null) {
+    doc.policy = Object.fromEntries(
+      Object.entries(profile.policy).map(([method, programs]) => [
+        METHODS[method as ScriptMethod],
+        programs.map(({ script, runtime = PROGRAM_RUNTIME }) => ({
+          script:
+            typeof script === 'string'
+              ? script
+              : { source: script.source, language: script.language, module: script.module },
+          runtime:
+            typeof runtime === 'string'
+              ? runtime
+              : {
+                  name: runtime.name,
+                  ...(runtime.config !== undefined
+                    ? {
+                        config: Object.fromEntries(
+                          Object.entries(runtime.config).map(([key, value]) => [
+                            key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
+                            value,
+                          ]),
+                        ),
+                      }
+                    : {}),
+                },
+        })),
+      ]),
+    )
+  }
+  if (profile.commandLimits != null) doc.command_limits = commandLimitsToJSON(profile.commandLimits)
+  if (profile.processes != null) doc.processes = parseProcessPermissions(profile.processes)
+  if (profile.mounts != null) {
+    doc.mounts = Object.fromEntries(
+      [...profile.mounts].map(([prefix, entry]) => [prefix, mountDoc(entry)]),
+    )
+  }
+  if (profile.paths != null) doc.paths = pathsDoc(profile.paths)
+  if (profile.commands != null) doc.commands = commandsDoc(profile.commands)
+  return doc
+}
+
+/**
+ * The profile a document states, as `profileToDict` writes it: a script
+ * written as its source comes back as the ScriptSource code passes.
+ * Mirrors Python `profile_from_dict`.
+ */
+export function profileFromDict(doc: Readonly<Record<string, unknown>>): SessionProfile {
+  if (!isPlainObject(doc.policy)) return parseSessionProfile(doc)
+  const policy = Object.fromEntries(
+    Object.entries(doc.policy).map(([method, programs]) => [
+      method,
+      Array.isArray(programs)
+        ? programs.map((program: unknown) =>
+            isPlainObject(program) &&
+            isPlainObject(program.script) &&
+            typeof program.script.source === 'string'
+              ? {
+                  ...program,
+                  script: new ScriptSource(
+                    program.script.source,
+                    program.script.language as Language,
+                    program.script.module === true,
+                  ),
+                }
+              : program,
+          )
+        : programs,
+    ]),
+  )
+  return parseSessionProfile({ ...doc, policy })
+}
+
+function mountDoc(entry: ProfileMount): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (entry.mode != null) doc.mode = entry.mode
+  if (entry.paths != null) doc.paths = pathsDoc(entry.paths)
+  if (entry.commands != null) doc.commands = commandsDoc(entry.commands)
+  return doc
+}
+
+function pathsDoc(block: PathsBlock): Record<string, unknown> {
+  // A path shown twice answers with the weaker of its modes, and an
+  // entry without one states visibility only (`shownMode`), so the
+  // mapping keeps that answer for each path.
+  const show = new Map<string, MountMode | null>()
+  for (const e of block.show ?? []) {
+    const held = show.get(e.path) ?? null
+    show.set(e.path, held === null ? e.mode : e.mode === null ? held : weakerMode(held, e.mode))
+  }
+  return {
+    hide: [...block.hide],
+    show: Object.fromEntries(show),
+    reasons: (block.reasons ?? []).map((g) => ({ patterns: [...g.patterns], reason: g.reason })),
+  }
+}
+
+function commandsDoc(block: CommandsBlock | MountCommandsBlock): Record<string, unknown> {
+  const doc: Record<string, unknown> = {
+    ask: (block.ask ?? []).map(ruleDoc),
+    deny: (block.deny ?? []).map(ruleDoc),
+  }
+  if ('allow' in block && block.allow != null) doc.allow = [...block.allow]
+  return doc
+}
+
+function ruleDoc(rule: CommandRule): Record<string, unknown> {
+  const commands = rule.commands ?? []
+  const paths = rule.paths ?? []
+  // A rule naming commands and paths is the mapping form, each command
+  // on the rule's paths; it reads back as one rule per command, which
+  // admits exactly what the one rule did.
+  if (commands.length > 0 && paths.length > 0) {
+    return {
+      reason: rule.reason,
+      commands: Object.fromEntries(commands.map((c) => [c, [...paths]])),
+    }
+  }
+  if (paths.length > 0) return { reason: rule.reason, paths: [...paths] }
+  return { reason: rule.reason, commands: [...commands] }
 }

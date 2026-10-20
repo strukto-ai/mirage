@@ -31,6 +31,9 @@ class StateKey(StrEnum):
     NODES = "nodes"
     CLIS = "clis"
     WRITE = "write"
+    PROFILES = "profiles"
+    PROFILE = "profile"
+    COMMAND_LIMITS = "command_limits"
 
 
 class MountKey(StrEnum):

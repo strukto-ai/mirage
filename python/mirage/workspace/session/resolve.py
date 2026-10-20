@@ -46,7 +46,10 @@ from mirage.types import (
 from mirage.utils.hidden import classify_paths, classify_shows, classify_vars
 from mirage.utils.path import norm
 from mirage.workspace.session.constants import DEFAULT_PROFILE
-from mirage.workspace.session.session import SessionState, vars_from_env
+from mirage.workspace.session.session import (
+    SessionState,
+    vars_from_entries,
+)
 from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.session.validate import check_rules
 
@@ -582,17 +585,39 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     session.processes = policies.processes
 
 
+def narrowing_of(session: SessionState) -> CompiledProfile:
+    """The narrowing a session holds, as the compiled profile ``narrow``
+    stamps back unchanged: how a recorded session's restrictions land
+    on another, the inline document and every later profile change kept.
+
+    Args:
+        session (SessionState): the session to read.
+    """
+    return CompiledProfile(
+        visibility=session.visibility,
+        policies=ProfilePolicies(
+            mount_modes=session.mount_modes,
+            commands=session.commands,
+            scripts=session.scripts,
+            command_limits=session.command_limits,
+            processes=session.processes,
+        ),
+        hide_reasons=session.hide_reasons,
+        profile=session.profile,
+    )
+
+
 def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
     """Narrow a fresh session and seed its scratch state from the profile.
 
-    A profile's env is a *process* environment, the same shape
-    ``ws.env = {...}`` speaks, so every name in it is exported: seeding
-    them plain left ``$TOKEN`` expanding while every command, CLI and
-    guest runtime in the profiled session saw nothing, since all three
-    read ``env_snapshot`` and that is the exported set. The cwd is where
-    the session starts; both are the agent's to change afterwards,
-    which is why hydration keeps the stored ones and re-stamps only
-    :func:`narrow`.
+    A profile's env speaks the workspace ``env`` block's grammar, so a
+    bare string is exported: seeding it plain left ``$TOKEN`` expanding
+    while every command, CLI and guest runtime in the profiled session
+    saw nothing, since all three read ``env_snapshot`` and that is the
+    exported set. A managed entry lands as its pointer, fetched when a
+    line names it. The cwd is where the session starts; both are the
+    agent's to change afterwards, which is why hydration keeps the
+    stored ones and re-stamps only :func:`narrow`.
 
     Args:
         session (SessionState): the session just created.
@@ -600,6 +625,6 @@ def apply_profile(session: SessionState, compiled: CompiledProfile) -> None:
     """
     narrow(session, compiled)
     if compiled.setup.env:
-        session.vars.update(vars_from_env(compiled.setup.env))
+        session.vars.update(vars_from_entries(compiled.setup.env))
     if compiled.setup.cwd is not None:
         set_cwd(session, compiled.setup.cwd)

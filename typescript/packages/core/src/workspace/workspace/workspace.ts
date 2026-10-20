@@ -45,6 +45,7 @@ import type { CLI } from '../../commands/cli/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
+import { parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
@@ -136,9 +137,10 @@ import { varsFromEnv, varsFromEntries, type SessionState } from '../session/sess
 import {
   parseProfileMounts,
   parseProfilePolicy,
+  profileFromDict,
   type SessionProfile,
 } from '../../policy/profile.ts'
-import { applyProfile, compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
+import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
@@ -244,8 +246,9 @@ export class Workspace {
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
   private readonly scriptPolicy: ScriptPolicy
-  private readonly profiles: Record<string, SessionProfile>
-  private readonly defaultProfileName: string | null
+  /** The profile table every session here runs under, and its default. */
+  readonly profiles: Readonly<Record<string, SessionProfile>>
+  readonly defaultProfileName: string | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -380,6 +383,16 @@ export class Workspace {
       }
       if (profile.policy != null) {
         parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
+      }
+      // Its env names pointers in the workspace env grammar, so the
+      // sources it names are checked here too, before a session runs.
+      for (const entry of Object.values(varsFromEntries(profile.env ?? {}))) {
+        if (
+          entry.managed !== undefined &&
+          !Object.hasOwn(this.declaredSecretSources, entry.managed.source)
+        ) {
+          sourceFor(entry.managed.source)
+        }
       }
     }
     // Admission policies, consulted in registration order after the
@@ -1015,9 +1028,7 @@ export class Workspace {
       this.profileName(options.profile ?? null),
     )
     checkCliVerbs(compiled.policies.commands, this.cliVerbs())
-    const session = this.sessionManager.create(sessionId)
-    applyProfile(session, compiled)
-    return session
+    return this.sessionManager.create(sessionId, { profile: compiled })
   }
 
   /**
@@ -2048,6 +2059,20 @@ export class Workspace {
       // Each restored Mount carries its own mode, so this reaches only the
       // scratch root the workspace adds again.
       ...(args.anchorMode !== undefined ? { mode: args.anchorMode } : {}),
+      commandLimits: parseCommandLimits(state.command_limits),
+      // The state's profile table and its default; a caller's own table
+      // brings its own default.
+      ...(options.profiles === undefined
+        ? {
+            profiles: Object.fromEntries(
+              Object.entries(state.profiles ?? {}).map(([name, doc]) => [
+                name,
+                profileFromDict(doc),
+              ]),
+            ),
+            profile: state.profile ?? null,
+          }
+        : {}),
       ...options,
       write: args.writeDefault,
     }
@@ -2055,7 +2080,12 @@ export class Workspace {
     for (const override of Object.values(overrides)) {
       ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }
-    await applyStateDict(ws, state)
+    // A caller's own profile table or default is a document the state did
+    // not record, so the restored sessions keep the narrowing it gave
+    // them, as a checkout's do, rather than the recorded one.
+    await applyStateDict(ws, state, {
+      builtForState: options.profiles === undefined && options.profile === undefined,
+    })
     return ws
   }
 
@@ -2081,17 +2111,15 @@ export class Workspace {
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the
-      // first read with "unknown secrets source". Profiles and command
-      // limits are deployment config the state never carries; without
-      // them the copy runs every session unconfined. Policy instances and
+      // first read with "unknown secrets source". Policy instances and
       // the route policy stay behind: a policy is a live host object whose
       // state two workspaces must not share, and the route names runtimes
       // the copy does not carry. A caller's own profile table brings its
       // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
-      commandLimits: options.commandLimits ?? this.registry.commandLimits,
-      profiles: options.profiles ?? this.profiles,
-      profile: options.profile ?? (options.profiles == null ? this.defaultProfileName : null),
+      ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
+      ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
+      ...(options.profile != null ? { profile: options.profile } : {}),
     }
     const parser = options.shellParser ?? this.shellParser
     if (parser !== null) opts.shellParser = parser

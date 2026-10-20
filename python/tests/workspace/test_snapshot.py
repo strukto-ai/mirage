@@ -14,6 +14,7 @@
 
 import asyncio
 import importlib.metadata
+import io
 import json
 import tarfile
 
@@ -26,7 +27,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
-from mirage.types import MountMode, ReadPolicy, ReadSpec
+from mirage.types import Limit, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.box import BoxConfig, BoxVFS
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -387,6 +388,46 @@ async def test_copy_keeps_profiles_and_the_default_profile():
     finally:
         await cp.close()
         await src.close()
+
+
+# A load built its workspace with no profile table: every restored session
+# lost its hides and rules, and one created afterwards ran unconfined. Each
+# session now lands as its table recorded it, an inline document included,
+# and the table and the limits are the loaded workspace's own.
+@pytest.mark.asyncio
+async def test_load_keeps_inline_documents_limits_and_the_default_profile():
+    src = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {"commands": {"deny": ["rm"]}},
+            "ro": {"paths": {"hide": ["/data/secrets"]}},
+        },
+        command_limits={"cat": Limit(max_bytes=2)},
+    )
+    tar = io.BytesIO()
+    try:
+        seeded = await src.shell("mkdir /data/secrets; echo hello > /data/a")
+        assert seeded.exit_code == 0
+        src.create_session(
+            "agent", profile="ro", permissions={"paths": {"hide": ["/data/a"]}}
+        )
+        await src.snapshot(tar)
+    finally:
+        await src.close()
+    tar.seek(0)
+    loaded = await Workspace.load(tar)
+    try:
+        listed = await loaded.shell("ls /data", session_id="agent")
+        assert (listed.exit_code, listed.stdout) == (0, b"")
+        assert loaded.get_session("agent").profile == "ro"
+        capped = await loaded.shell("cat /data/a")
+        assert capped.stdout == b"he"
+        loaded.create_session("later")
+        refused = await loaded.shell("rm /data/a", session_id="later")
+        assert refused.exit_code == 126
+    finally:
+        await loaded.close()
 
 
 # ── state dict shape ───────────────────────────────────────────────

@@ -139,7 +139,15 @@ type Step = (
   | { op: 'vfs'; call: string; args?: Record<string, unknown>; explain?: boolean }
   | { op: 'unregister_policy'; id: string }
   | {
-      op: 'mounts' | 'clis' | 'runtimes' | 'close' | 'snapshot' | 'checkout' | 'drain_processes'
+      op:
+        | 'mounts'
+        | 'clis'
+        | 'runtimes'
+        | 'close'
+        | 'snapshot'
+        | 'checkout'
+        | 'load'
+        | 'drain_processes'
     }
   | { op: 'concurrent'; steps: Step[] }
 ) & { expect?: Record<string, unknown>; session?: string }
@@ -245,11 +253,22 @@ interface Host {
   name: string
   workspace: new (mounts: Record<string, BaseVFS>, options: WorkspaceOptions) => Workspace
   build: (name: string, config: Record<string, unknown>) => Promise<BaseVFS>
+  load: (tar: Uint8Array) => Promise<Workspace>
 }
 
 const HOSTS: Host[] = [
-  { name: 'node', workspace: NodeWorkspace, build: buildNodeVfs },
-  { name: 'browser', workspace: BrowserWorkspace, build: buildBrowserVfs },
+  {
+    name: 'node',
+    workspace: NodeWorkspace,
+    build: buildNodeVfs,
+    load: (tar) => NodeWorkspace.load(tar),
+  },
+  {
+    name: 'browser',
+    workspace: BrowserWorkspace,
+    build: buildBrowserVfs,
+    load: (tar) => BrowserWorkspace.load(tar),
+  },
 ]
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -752,6 +771,13 @@ async function action(
   return null
 }
 
+/** Save `ws` to a tar and load it as a new workspace, closing `ws`. */
+async function reload(host: Host, ws: Workspace): Promise<Workspace> {
+  const loaded = await host.load(await ws.snapshot())
+  await ws.close()
+  return loaded
+}
+
 async function run(host: Host, testCase: Case): Promise<number> {
   const mounts: Record<string, BaseVFS> = {}
   for (const [prefix, config] of Object.entries(testCase.settings.mounts)) {
@@ -763,7 +789,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
       parseSessionProfile(profile),
     ]),
   )
-  const ws = new host.workspace(mounts, {
+  let ws = new host.workspace(mounts, {
     mode: testCase.settings.mode,
     profiles,
     ...(testCase.settings.runtimes !== undefined ? { runtimes: testCase.settings.runtimes } : {}),
@@ -774,7 +800,12 @@ async function run(host: Host, testCase: Case): Promise<number> {
     for (const [index, step] of testCase.steps.entries()) {
       let actual: Record<string, unknown>
       try {
-        actual = { value: await action(host, ws, step, policies, held) }
+        if (step.op === 'load') {
+          ws = await reload(host, ws)
+          actual = { value: null }
+        } else {
+          actual = { value: await action(host, ws, step, policies, held) }
+        }
       } catch (err) {
         actual = { error: err instanceof Error ? err.message : String(err) }
         const condition = classify(err)

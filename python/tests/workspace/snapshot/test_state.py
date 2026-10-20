@@ -524,6 +524,40 @@ async def test_a_restored_variable_clears_the_session_gate():
         await target.close()
 
 
+class CwdGate(Policy):
+    """Allow TASK only in /data, read off the session's own view."""
+
+    async def pre_session(self, ctx: SessionContext) -> Action | None:
+        assert ctx.session is not None
+        if ctx.key == "TASK" and ctx.session.cwd() != "/data":
+            return Deny("TASK is set in /data\n")
+        return None
+
+
+# A workspace built for the state seats each table before the gate judges
+# it, its cwd and variables included, so a program reading the session sees
+# the session the snapshot recorded rather than a fresh one at /.
+@pytest.mark.asyncio
+async def test_a_built_target_judges_each_table_as_the_session_it_records():
+    source = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        assert (await source.shell("cd /data && TASK=1")).exit_code == 0
+        state = await to_state_dict(source)
+    finally:
+        await source.close()
+    target = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        session_id=state["default_session_id"],
+        policies=[CwdGate()],
+    )
+    try:
+        await apply_state_dict(target, state, built_for_state=True)
+        assert target.get_session(target.default_session_id).cwd == "/data"
+    finally:
+        await target.close()
+
+
 @pytest.mark.asyncio
 async def test_a_restore_the_gate_allows_lands_every_variable():
     source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)

@@ -26,7 +26,9 @@ import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
 
-import { narrow } from '../session/resolve.ts'
+import { narrow, narrowingOf } from '../session/resolve.ts'
+import { profileToDict, type SessionProfile } from '../../policy/profile.ts'
+import { commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
@@ -112,6 +114,8 @@ export interface WorkspaceLike {
   readonly documents: Documents
   readonly records: OpRecord[]
   readonly defaultSessionId: string
+  readonly profiles: Readonly<Record<string, SessionProfile>>
+  readonly defaultProfileName: string | null
   adoptDefaultSession(sessionId: string): Promise<void>
   forgetReads(): void
   quiesced<T>(capture: () => Promise<T>): Promise<T>
@@ -241,6 +245,13 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     live_only_mounts: liveOnly,
     nodes,
     clis: clisState,
+    // The profile table and the limits are what every session here
+    // runs under: a load built without them ran each one unconfined.
+    profiles: Object.fromEntries(
+      Object.entries(ws.profiles).map(([name, profile]) => [name, profileToDict(profile)]),
+    ),
+    profile: ws.defaultProfileName,
+    command_limits: commandLimitsToJSON(ws.registry.commandLimits),
   }
 }
 
@@ -562,16 +573,20 @@ export async function withRebuiltMounts(
  * the state has nothing to drop. It sits behind the gate because the
  * callers used to clear before calling, and a refused checkout then
  * still sent every cached read back to an origin that may have moved.
+ * `builtForState` says the workspace was just built from this state,
+ * under its profile table, and has run nothing: each session then lands
+ * the narrowing its table recorded, as a stored record hydrates, where a
+ * checkout onto a running workspace keeps its own sessions' narrowing.
  * The target's VFS.md and SKILL.md bindings are dropped, since a
  * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
-  options: { replaceCache?: boolean } = {},
+  options: { replaceCache?: boolean; builtForState?: boolean } = {},
 ): Promise<void> {
   checkFormatVersion(state)
-  const [sessions, seed] = await gateRestoredState(ws, state)
+  const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
   // A snapshot holds no document bindings, so a load into a live
   // workspace drops its own: one left in place would shadow a file the
   // snapshot restores at the same path.
@@ -639,21 +654,36 @@ async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promi
  * already been overwritten left the workspace in a state no snapshot
  * describes, and one its close then persisted. The template is gated
  * under the id the restore makes the default session, which is the
- * session a live write of it would land in. Each table is judged under
- * the policy the target gives its session, never the one the snapshot's
- * own profile compiled, which was the source deployment's and does not
- * land: the live session's for an id the target already has, and the
- * default profile's for one the restore will create, which is what
- * `scriptsOf` answers for an id the manager does not know and the
- * profile `restoreSessions` then puts the created session under.
+ * session a live write of it would land in. On a checkout each table is
+ * judged under the policy the target gives its session, never the one
+ * the snapshot's own profile compiled, which was the source deployment's
+ * and does not land: the live session's for an id the target already
+ * has, and the default profile's for one the restore will create, which
+ * is what `scriptsOf` answers for an id the manager does not know and
+ * the profile `restoreSessions` then puts the created session under. A
+ * workspace built for the state seats every table first, its narrowing,
+ * cwd and variables, so each is judged as the session it records, under
+ * the policy it then runs under.
  * Returns the parsed session tables and the template, null when the
  * snapshot carries none. Mirrors Python `_gate_restored_state`.
  */
 async function gateRestoredState(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
+  builtForState = false,
 ): Promise<[SessionState[], Record<string, ShellVar> | null]> {
   const sessions = state.sessions.map((s) => SessionState.fromDict(s))
+  if (builtForState) {
+    for (const fields of sessions) {
+      const exists = ws.sessionManager.list().some((x) => x.sessionId === fields.sessionId)
+      const session = exists
+        ? ws.sessionManager.get(fields.sessionId)
+        : ws.sessionManager.create(fields.sessionId)
+      narrow(session, narrowingOf(fields))
+      setCwd(session, fields.cwd)
+      session.vars = fields.vars
+    }
+  }
   for (const fields of sessions) {
     await gateRestoredVars(ws.registry.policies, fields.sessionId, fields.vars)
   }

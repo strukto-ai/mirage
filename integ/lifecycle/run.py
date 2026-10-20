@@ -20,6 +20,7 @@ shell command can answer directly through a backend's command handler.
 
 import asyncio
 import errno
+import io
 import json
 import sys
 from collections.abc import Callable
@@ -636,6 +637,20 @@ async def action(
     return None
 
 
+async def reload(ws: Workspace) -> Workspace:
+    """Save ``ws`` to a tar and load it as a new workspace, closing ``ws``.
+
+    Args:
+        ws (Workspace): the workspace the case has run so far.
+    """
+    tar = io.BytesIO()
+    await ws.snapshot(tar)
+    tar.seek(0)
+    loaded = await Workspace.load(tar)
+    await ws.close()
+    return loaded
+
+
 async def run(case: dict[str, Any]) -> int:
     """Stop a failed scenario at its first mismatch and always close it."""
     ws = Workspace(**load_config(case["settings"]).to_workspace_kwargs())
@@ -644,7 +659,11 @@ async def run(case: dict[str, Any]) -> int:
     try:
         for index, step in enumerate(case["steps"]):
             try:
-                actual = {"value": await action(ws, step, policies, held)}
+                if step["op"] == "load":
+                    ws = await reload(ws)
+                    actual: dict[str, Any] = {"value": None}
+                else:
+                    actual = {"value": await action(ws, step, policies, held)}
             except Exception as exc:
                 actual = {"error": str(exc)}
                 condition = classify(exc)

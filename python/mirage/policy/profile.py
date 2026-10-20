@@ -34,6 +34,7 @@ from mirage.policy.types import (
 )
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
+from mirage.secrets.config import EnvVar
 from mirage.types import (
     DEFAULT_VISIBILITY,
     Limit,
@@ -41,6 +42,7 @@ from mirage.types import (
     ShowEntry,
     Visibility,
     parse_mount_mode,
+    weaker_mode,
 )
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import norm
@@ -658,8 +660,11 @@ class SessionProfile(BaseModel):
 
     Args:
         cwd (str | None): the session's working directory at creation.
-        env (dict[str, str] | None): a process environment seeded and
-            exported into the session at creation.
+        env (dict[str, str | EnvVar] | None): the env entries seeded
+            into the session at creation, in the workspace ``env``
+            grammar: a bare string is an exported literal, and a
+            ``from:`` entry a managed pointer, so a credential is
+            named here and fetched, never written as its value.
         mounts (dict[str, ProfileMount] | None): per-mount settings,
             keyed by prefix: a mode, ask and deny rules for lines
             working inside the mount, and hides under it. A mount the
@@ -676,7 +681,7 @@ class SessionProfile(BaseModel):
     model_config = _DOC
 
     cwd: str | None = None
-    env: dict[str, str] | None = None
+    env: dict[str, str | EnvVar] | None = None
     mounts: dict[str, ProfileMount] | None = None
     paths: PathsBlock | None = None
     vars: VarsBlock | None = None
@@ -769,17 +774,149 @@ class SessionProfile(BaseModel):
         return self
 
 
+def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
+    """A profile as the document that parses back to it: the shape a
+    ``profiles:`` entry has in YAML, which either host reads.
+
+    ``model_dump`` writes that document except in three blocks: a show
+    entry dumps as a row rather than a path mapped to its mode, and a
+    rule dumps its compiled ``mount`` and, when it names commands and
+    paths, a pair the document refuses. Those blocks are spelled here,
+    the limits and process scopes keep their unset fields, as the
+    session record writes them on both hosts, and an env entry is
+    written with the fields its author set, a managed one as its
+    pointer.
+
+    Args:
+        profile (SessionProfile): the profile.
+    """
+    doc = profile.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={
+            "env",
+            "mounts",
+            "paths",
+            "commands",
+            "command_limits",
+            "processes",
+        },
+    )
+    if profile.env is not None:
+        doc["env"] = {
+            name: (
+                entry
+                if isinstance(entry, str)
+                else entry.model_dump(
+                    mode="json",
+                    by_alias=True,
+                    exclude_unset=True,
+                    exclude_none=True,
+                )
+            )
+            for name, entry in profile.env.items()
+        }
+    if profile.command_limits is not None:
+        doc["command_limits"] = {
+            name: limit.model_dump(mode="json")
+            for name, limit in profile.command_limits.items()
+        }
+    if profile.processes is not None:
+        doc["processes"] = profile.processes.model_dump(mode="json")
+    if profile.mounts is not None:
+        doc["mounts"] = {
+            prefix: _mount_doc(entry)
+            for prefix, entry in profile.mounts.items()
+        }
+    if profile.paths is not None:
+        doc["paths"] = _paths_doc(profile.paths)
+    if profile.commands is not None:
+        doc["commands"] = _commands_doc(profile.commands)
+    return doc
+
+
+def profile_from_dict(doc: Mapping[str, Any]) -> SessionProfile:
+    """The profile a document states, as ``profile_to_dict`` writes it.
+
+    Args:
+        doc (Mapping[str, Any]): the document.
+    """
+    return SessionProfile.model_validate(doc)
+
+
+def _mount_doc(entry: ProfileMount) -> dict[str, Any]:
+    doc: dict[str, Any] = {}
+    if entry.mode is not None:
+        doc["mode"] = entry.mode.value
+    if entry.paths is not None:
+        doc["paths"] = _paths_doc(entry.paths)
+    if entry.commands is not None:
+        doc["commands"] = _commands_doc(entry.commands)
+    return doc
+
+
+def _paths_doc(block: PathsBlock) -> dict[str, Any]:
+    # A path shown twice answers with the weaker of its modes, and an
+    # entry without one states visibility only (``shown_mode``), so the
+    # mapping keeps that answer for each path.
+    show: dict[str, MountMode | None] = {}
+    for e in block.show:
+        held = show.get(e.path)
+        show[e.path] = (
+            e.mode
+            if held is None
+            else held
+            if e.mode is None
+            else weaker_mode(held, e.mode)
+        )
+    return {
+        "hide": list(block.hide),
+        "show": {
+            path: mode.value if mode is not None else None
+            for path, mode in show.items()
+        },
+        "reasons": [
+            {"patterns": list(g.patterns), "reason": g.reason}
+            for g in block.reasons
+        ],
+    }
+
+
+def _commands_doc(block: CommandsBlock | MountCommandsBlock) -> dict[str, Any]:
+    doc: dict[str, Any] = {
+        "ask": [_rule_doc(rule) for rule in block.ask],
+        "deny": [_rule_doc(rule) for rule in block.deny],
+    }
+    if isinstance(block, CommandsBlock) and block.allow is not None:
+        doc["allow"] = list(block.allow)
+    return doc
+
+
+def _rule_doc(rule: CommandRule) -> dict[str, Any]:
+    # A rule naming commands and paths is the mapping form, each
+    # command on the rule's paths; it reads back as one rule per
+    # command, which admits exactly what the one rule did.
+    if rule.commands and rule.paths:
+        return {
+            "reason": rule.reason,
+            "commands": {c: list(rule.paths) for c in rule.commands},
+        }
+    if rule.paths:
+        return {"reason": rule.reason, "paths": list(rule.paths)}
+    return {"reason": rule.reason, "commands": list(rule.commands)}
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileSetup:
     """What a profile seeds a new session with; the agent's to change
     afterwards, so a stored session keeps its own.
 
     Args:
-        env (dict[str, str] | None): variables to seed and export.
+        env (dict[str, str | EnvVar] | None): the env entries to seed.
         cwd (str | None): the working directory to start in.
     """
 
-    env: dict[str, str] | None = None
+    env: dict[str, str | EnvVar] | None = None
     cwd: str | None = None
 
 
