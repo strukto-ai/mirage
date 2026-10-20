@@ -612,29 +612,37 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
   },
 )
 
-// The mount a line runs on is picked by the words the cwd's spec classified as
-// operand paths, never by a file an option reads or a word it left as text: a
-// builtin grep on /b reads its pattern file from /a, whose own grep is
-// borrowed, and that grep keeps `/b/input` as text.
-it('keeps a borrowed name and the builtin on their own lines', async () => {
+// The mount a line runs on is picked by the words in operand slots that were
+// classified as paths, read by position: never a file an option reads, even
+// one an operand repeats, nor a word the cwd's spec left as text. /a borrows
+// grep (text operands) and find (path operands).
+it.each([
+  ['cd /b && grep -f /a/patterns /b/input', 'hi\n'],
+  ['cd /b && grep -f /a/patterns /b/input /a/patterns', '/b/input:hi\n[["/a/patterns"],[]]'],
+  ['cd /a && grep hi /b/input', '[[],["hi","/b/input"]]'],
+  ['cd /a && find //b/input -print0', '//b/input\0'],
+])('keeps `%s` on its own command', async (line, stdout) => {
   const ws = new Workspace(
     { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
     { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
   )
   try {
-    ws.mount('/a/').register(
-      new Command({
-        name: 'grep',
-        spec: new CommandSpec({ arguments: [new Argument('rest', { nargs: '*' })] }),
-        vfs: null,
-        fn: ECHO_CMD,
-      }),
-    )
+    for (const [name, type] of [
+      ['grep', 'str'],
+      ['find', 'path'],
+    ] as const) {
+      ws.mount('/a/').register(
+        new Command({
+          name,
+          spec: new CommandSpec({ arguments: [new Argument('rest', { nargs: '*', type })] }),
+          vfs: null,
+          fn: ECHO_CMD,
+        }),
+      )
+    }
     await ws.shell("echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input")
-    const builtin = await ws.shell('cd /b && grep -f /a/patterns /b/input')
-    const borrowed = await ws.shell('cd /a && grep hi /b/input')
-    expect([builtin.exitCode, builtin.stdoutText]).toEqual([0, 'hi\n'])
-    expect([borrowed.exitCode, borrowed.stdoutText]).toEqual([0, '[[],["hi","/b/input"]]'])
+    const result = await ws.shell(line)
+    expect([result.exitCode, result.stdoutText]).toEqual([0, stdout])
   } finally {
     await ws.close()
   }

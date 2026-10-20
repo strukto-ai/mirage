@@ -434,6 +434,29 @@ def _parsed_kinds(
     return [role or WordKind.OPERAND for role in parsed.word_roles]
 
 
+def operand_paths(
+    cmd_name: str, words: Sequence[str | PathSpec], cwd: str
+) -> list[PathSpec]:
+    """The classified path words a builtin's grammar reads as operands.
+
+    Read by position, so an option's value never counts even where its
+    spelling repeats an operand's, and a word the classifier left as
+    text never counts as a path.
+
+    Args:
+        cmd_name (str): command name.
+        words (Sequence[str | PathSpec]): the classified words after it.
+        cwd (str): working directory the line was typed under.
+    """
+    argv = [p.virtual if isinstance(p, PathSpec) else p for p in words]
+    kinds = _parsed_kinds(SPECS.get(cmd_name), argv, cwd, cmd_name)
+    return [
+        p
+        for p, kind in zip(words, kinds)
+        if isinstance(p, PathSpec) and kind is WordKind.OPERAND
+    ]
+
+
 def command_words(
     registry: MountRegistry,
     name: str,

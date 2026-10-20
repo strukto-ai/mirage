@@ -75,9 +75,9 @@ from mirage.workspace.executor.command.routing import (
     CWD_DEFAULT_RAW,
     default_cwd_operand,
     merge_scopes,
+    operand_paths,
     option_loop_exits,
     path_flag_scopes,
-    positional_scopes,
     routable_scopes,
     routed_operands,
 )
@@ -486,23 +486,8 @@ async def handle_command(
     # picks it. Only a word classified as a path in an operand slot picks
     # one: not a file an option reads (`grep -f`), nor a word the cwd's
     # spec left as text.
-    operands = {
-        scope.virtual
-        for scope in positional_scopes(
-            cmd_name,
-            [p.virtual if isinstance(p, PathSpec) else p for p in parts[1:]],
-            session.cwd,
-            parts[1:],
-        )
-    }
     own_mount = registry.command_mount(
-        cmd_name,
-        [
-            p
-            for p in parts[1:]
-            if isinstance(p, PathSpec) and p.virtual in operands
-        ],
-        session.cwd,
+        cmd_name, operand_paths(cmd_name, parts[1:], session.cwd), session.cwd
     )
     borrowed = (
         cmd_name in SPECS

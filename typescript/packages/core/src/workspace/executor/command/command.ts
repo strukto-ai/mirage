@@ -96,8 +96,8 @@ import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
   mergeScopes,
+  operandPaths,
   pathFlagScopes,
-  positionalScopes,
   routableScopes,
   optionLoopExits,
   routedOperands,
@@ -437,17 +437,9 @@ export async function handleCommand(
   // whose operands (or cwd) pick such a mount, as resolveMount picks it.
   // Only a word classified as a path in an operand slot picks one: not a
   // file an option reads (`grep -f`), nor a word the cwd's spec left as text.
-  const operands = new Set(
-    positionalScopes(
-      cmdName,
-      parts.slice(1).map((p) => (typeof p === 'string' ? p : p.virtual)),
-      session.cwd,
-      parts.slice(1),
-    ).map((scope) => scope.virtual),
-  )
   const ownMount = registry.commandMount(
     cmdName,
-    parts.slice(1).filter((p): p is PathSpec => p instanceof PathSpec && operands.has(p.virtual)),
+    operandPaths(cmdName, parts.slice(1), session.cwd),
     session.cwd,
   )
   const borrowed =
