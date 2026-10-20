@@ -11,10 +11,14 @@ import { quotePath } from './render.ts'
 import { deltas, shownSides, type Delta, type Side } from './rows.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
+import { matches, type Pickaxe } from './pickaxe.ts'
 import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const RENAME_SCORE = 50
+// What a combined diff's mode line starts with; `log --graph` prints that line
+// with no graph in front of it.
+export const COMBINED_MODE = 'mode '
 
 /** One interpretation of Git diff options, shared by all tree readers. */
 export interface DiffFlags {
@@ -35,6 +39,7 @@ export interface DiffFlags {
   context: number
   quotePathFully: boolean
   pathspecs: readonly string[]
+  pickaxe?: Pickaxe | null
 }
 
 export function parseDiffFlags(
@@ -294,7 +299,7 @@ function summaryLines(row: Change, display: string, shown: string): string[] {
  * @param recursive whether to descend into subtrees
  * @param pathspecs repository-relative patterns, all paths when empty
  */
-async function entries(
+export async function entries(
   repo: Repo,
   tree: string | null,
   recursive: boolean,
@@ -366,14 +371,49 @@ export async function commitSummary(
   })
 }
 
-/** One comparison's diff block, null when its sides do not differ. */
+/**
+ * The pairs of one comparison a pickaxe keeps: the ones it matches, or every
+ * pair under `--pickaxe-all` once one matches, and none when none does.
+ *
+ * The search runs on the pairs as renames left them, so a rename that keeps the
+ * count matches nothing however many times the string occurs (git 2.47.3).
+ *
+ * @param repo repository holding the blobs
+ * @param rows one comparison's pairs
+ * @param pickaxe the search, null for none
+ */
+export async function picked(
+  repo: Repo,
+  rows: Change[],
+  pickaxe: Pickaxe | null | undefined,
+): Promise<Change[]> {
+  if (!pickaxe) return rows
+  const kept: Change[] = []
+  for (const row of rows) if (await matches(repo, pickaxe, row.old, row.new)) kept.push(row)
+  return kept.length && pickaxe.every ? rows : kept
+}
+
+/** The pairs one comparison's diff block shows, the pickaxe applied. */
+async function rowsOf(
+  repo: Repo,
+  before: ReadonlyMap<string, TreeEntry>,
+  after: ReadonlyMap<string, TreeEntry>,
+  flags: DiffFlags,
+): Promise<Change[]> {
+  return picked(repo, await compare(repo, before, after, flags.renames), flags.pickaxe)
+}
+
+/**
+ * One comparison's diff block, null when its sides do not differ or the pickaxe
+ * keeps none of its pairs.
+ */
 async function block(
   repo: Repo,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
   flags: DiffFlags,
 ): Promise<string | null> {
-  const rows = await compare(repo, before, after, flags.renames)
+  const rows = await rowsOf(repo, before, after, flags)
   return rows.length ? renderChanges(repo, rows, flags) : null
 }
 
@@ -408,6 +448,26 @@ export async function commitSides(
   for (const tree of trees)
     sides.push([await entries(repo, tree, recursive, flags.pathspecs), after])
   return sides
+}
+
+/**
+ * Whether a log the pickaxe filters prints a commit.
+ *
+ * A commit with one parent or none is printed when the pickaxe keeps a pair of
+ * its diff. A merge follows the merge diff: never by default, when its first
+ * parent's diff keeps one under first-parent, when any parent's does under
+ * `-m`, and always under `-c` and `--cc`, whatever the pickaxe says (git
+ * 2.47.3).
+ *
+ * @param repo repository to read
+ * @param commit the commit
+ * @param flags the diff flags, carrying the pickaxe
+ */
+export async function shows(repo: Repo, commit: CommitFacts, flags: DiffFlags): Promise<boolean> {
+  if (!flags.pickaxe || isCombined(commit, flags)) return true
+  for (const [before, after] of await commitSides(repo, commit, flags))
+    if ((await rowsOf(repo, before, after, flags)).length) return true
+  return false
 }
 
 /**
@@ -482,8 +542,7 @@ export async function commitOutput(
     return out
   }
   const comparisons: Change[][] = []
-  for (const [before, after] of sides)
-    comparisons.push(await compare(repo, before, after, flags.renames))
+  for (const [before, after] of sides) comparisons.push(await rowsOf(repo, before, after, flags))
   const maps = comparisons.map((rows) => new Map(rows.map((row) => [row.path, row])))
   const common = [...(maps[0]?.keys() ?? [])]
     .filter((path) => maps.every((m) => m.has(path)))
@@ -564,7 +623,7 @@ async function combinedPatch(
     if (moved && created) output.push(`new file mode ${mode}\n`)
     else if (moved)
       output.push(
-        (deleted ? 'deleted file mode ' : 'mode ') +
+        (deleted ? 'deleted file mode ' : COMBINED_MODE) +
           old.map((e) => e?.mode ?? '000000').join(',') +
           (deleted ? '' : `..${mode}`) +
           '\n',
@@ -650,7 +709,7 @@ export function joinOutput(
       text = text.replace(id, `${id} (from ${parent})`)
     }
     let gap = text && body && line !== null ? `${line}\n` : ''
-    if (!body && text && emptySummary) gap = '\n'
+    if (!body && text && (emptySummary || isCombined(commit, flags))) gap = '\n'
     blocks.push(text + gap + body)
   })
   const separator = TEMPLATE_KINDS.includes(kind) || TERMINATED_KINDS.includes(kind) ? '' : '\n'
@@ -670,6 +729,7 @@ export function joinOutput(
  * @param decor ref labels when the format asked
  * @param emptySummary put a blank line under a header whose diff is empty, as
  *   `show` does for a summary or a combined diff
+ * @param parents the parents the header prints, the commit's own when null
  */
 export async function commitEntry(
   repo: Repo,
@@ -679,8 +739,9 @@ export async function commitEntry(
   sides: readonly Side[],
   decor: Decorations | null,
   emptySummary = false,
+  parents: readonly string[] | null = null,
 ): Promise<string> {
-  const head = commitHeader(commit, display, repo.abbrev, decor)
+  const head = commitHeader(commit, display, repo.abbrev, decor, parents)
   const bodies = await commitOutput(repo, commit, diff, sides)
   return joinOutput(commit, head, bodies, display.pretty.kind, repo.abbrev, diff, emptySummary)
 }

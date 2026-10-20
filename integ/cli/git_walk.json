@@ -1,0 +1,408 @@
+{
+  "targets": [
+    "git-ram",
+    "git-disk"
+  ],
+  "cases": [
+    {
+      "id": "git_walk_setup",
+      "seq": 17600100,
+      "command": "(export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q -b main /repo/walk && cd /repo/walk && tr_() { git add -A && git commit -q --allow-empty -m snap && git rev-parse 'HEAD^{tree}'; } && c() { s=$1 t=$2 w=$3; shift 3; { printf 'tree %s\\n' $t; for p in \"$@\"; do printf 'parent %s\\n' $p; done; printf 'author A <a@example.com> %s +0000\\ncommitter A <a@example.com> %s +0000\\n\\n%s\\n' $w $w \"$s\"; } | git hash-object -w -t commit --stdin; } && printf '1\\n' > f && printf '1\\n' > g && printf 'keep\\nneedle\\n' > r && t0=$(tr_) && printf '2\\n' > f && t1=$(tr_) && printf '1\\n' > f && printf '2\\nneedle\\n' > g && t2=$(tr_) && printf '2\\n' > f && t3=$(tr_) && printf '2\\nneedle\\n' > f && t4=$(tr_) && git mv r r2 && t5=$(tr_) && mkdir -p d && printf 'needle\\n' > d/h && t6=$(tr_) && A=$(c A $t0 1700000100) && B=$(c B $t1 1700000200 $A) && C=$(c C $t2 1700000300 $A) && M=$(c M $t3 1700000400 $B $C) && D=$(c D $t4 1700000500 $M) && R=$(c R $t5 1700000600 $D) && E=$(c E $t6 1700000700 $R) && printf '%s\\n' $E > .git/refs/heads/main && printf '%s\\n' $C > .git/refs/heads/side)",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_follows_a_treesame_parent",
+      "seq": 17600101,
+      "command": "git -C /repo/walk log --format=%s main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nB\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_takes_the_other_side",
+      "seq": 17600102,
+      "command": "git -C /repo/walk log --format=%s main -- g",
+      "expect": {
+        "exit": 0,
+        "stdout": "C\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_without_marker",
+      "seq": 17600103,
+      "command": "git -C /repo/walk log --format=%s main f",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nB\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_graph",
+      "seq": 17600104,
+      "command": "git -C /repo/walk log --graph --format=%s main -- f g",
+      "expect": {
+        "exit": 0,
+        "stdout": "* D\n*   M\n|\\  \n| * C\n* | B\n|/  \n* A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_directory",
+      "seq": 17600105,
+      "command": "git -C /repo/walk log --format=%s main -- d",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_glob",
+      "seq": 17600106,
+      "command": "git -C /repo/walk log --format=%s main -- 'r*'",
+      "expect": {
+        "exit": 0,
+        "stdout": "R\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_patch_limited",
+      "seq": 17600107,
+      "command": "git -C /repo/walk log --format=%s --stat main -- g",
+      "expect": {
+        "exit": 0,
+        "stdout": "C\n\n g | 3 ++-\n 1 file changed, 2 insertions(+), 1 deletion(-)\nA\n\n g | 1 +\n 1 file changed, 1 insertion(+)\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_m_keeps_merges",
+      "seq": 17600108,
+      "command": "git -C /repo/walk log --oneline -m --name-only main -- g",
+      "expect": {
+        "exit": 0,
+        "stdout": "29c60de (from 07ddcb3) M\ng\n2594311 C\ng\nc55bde4 A\ng\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_range",
+      "seq": 17600109,
+      "command": "git -C /repo/walk log --format=%s side..main -- g f",
+      "expect": {
+        "exit": 0,
+        "stdout": "D\nM\nB\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_path_then_revision",
+      "seq": 17600110,
+      "command": "git -C /repo/walk log --format=%s f main",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: main: no such path in the working tree.\nUse 'git <command> -- <path>...' to specify paths that do not exist locally.\n"
+      }
+    },
+    {
+      "id": "git_walk_log_unknown_operand",
+      "seq": 17600111,
+      "command": "git -C /repo/walk log --format=%s nosuch",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: ambiguous argument 'nosuch': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_walk_log_bad_revision_before_marker",
+      "seq": 17600112,
+      "command": "git -C /repo/walk log --format=%s nosuch -- f",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: bad revision 'nosuch'\n"
+      }
+    },
+    {
+      "id": "git_walk_log_revision_and_filename",
+      "seq": 17600113,
+      "command": "printf x > /repo/walk/side && git -C /repo/walk log --format=%s side; s=$?; rm /repo/walk/side; exit $s",
+      "expect": {
+        "exit": 128,
+        "stdout": "",
+        "stderr": "fatal: ambiguous argument 'side': both revision and filename\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_walk_rev_list_path",
+      "seq": 17600114,
+      "command": "git -C /repo/walk rev-list --count main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_shortlog_path",
+      "seq": 17600115,
+      "command": "git -C /repo/walk shortlog -s main -- g",
+      "expect": {
+        "exit": 0,
+        "stdout": "     2\tA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_boundary_oneline",
+      "seq": 17600116,
+      "command": "git -C /repo/walk log --oneline --boundary side..main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1b51f22 E\n34f082c R\n0b7d599 D\n29c60de M\n07ddcb3 B\n- 2594311 C\n- c55bde4 A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_boundary_medium",
+      "seq": 17600117,
+      "command": "git -C /repo/walk log --boundary side..main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "commit 0b7d59961e723aec747be4dfe1703572701449dc\nAuthor: A <a@example.com>\nDate:   Tue Nov 14 22:21:40 2023 +0000\n\n    D\n\ncommit 07ddcb302ffbc80806ec698a3b7def871bdf1aee\nAuthor: A <a@example.com>\nDate:   Tue Nov 14 22:16:40 2023 +0000\n\n    B\n\ncommit - c55bde49c6be154f0a9b2c9eff8d1c310998be94\nAuthor: A <a@example.com>\nDate:   Tue Nov 14 22:15:00 2023 +0000\n\n    A\n\ncommit - 29c60de525842711689bfe6027dc2cace0152366\nAuthor: A <a@example.com>\nDate:   Tue Nov 14 22:20:00 2023 +0000\n\n    M\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_boundary_graph",
+      "seq": 17600118,
+      "command": "git -C /repo/walk log --graph --oneline --boundary side..main",
+      "expect": {
+        "exit": 0,
+        "stdout": "* 1b51f22 E\n* 34f082c R\n* 0b7d599 D\n*   29c60de M\n|\\  \n* | 07ddcb3 B\n| o 2594311 C\n|/  \no c55bde4 A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_boundary_count",
+      "seq": 17600119,
+      "command": "git -C /repo/walk log --oneline --boundary -n 2 main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1b51f22 E\n34f082c R\n- 0b7d599 D\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_rev_list_boundary",
+      "seq": 17600120,
+      "command": "git -C /repo/walk rev-list --boundary side..main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1b51f22ed4522619f5780543fd733ef9f9811f39\n34f082c778e43c1e3a0fc0bbb434fcb680245aa4\n0b7d59961e723aec747be4dfe1703572701449dc\n29c60de525842711689bfe6027dc2cace0152366\n07ddcb302ffbc80806ec698a3b7def871bdf1aee\n-2594311a57b331a05141e0fedf31b23ce1565856\n-c55bde49c6be154f0a9b2c9eff8d1c310998be94\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_boundary_prints_the_kept_parent",
+      "seq": 17600121,
+      "command": "git -C /repo/walk log --format='%h %p' --boundary side..main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "0b7d599 29c60de\n07ddcb3 c55bde4\nc55bde4 \n29c60de 07ddcb3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_graph_prints_rewritten_parents",
+      "seq": 17600122,
+      "command": "git -C /repo/walk log --graph --format='%h %p' --boundary side..main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "* 0b7d599 07ddcb3\n* 07ddcb3 c55bde4\no c55bde4 \n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_skips_merges",
+      "seq": 17600123,
+      "command": "git -C /repo/walk log --format=%s -Sneedle main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\nD\nC\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_m_names_parents",
+      "seq": 17600124,
+      "command": "git -C /repo/walk log --oneline -Sneedle -m main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1b51f22 E\n0b7d599 D\n29c60de (from 07ddcb3) M\n2594311 C\nc55bde4 A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_cc_shows_merges",
+      "seq": 17600125,
+      "command": "git -C /repo/walk log --format=%s -Sneedle -c -s main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\nD\nM\nC\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_no_renames",
+      "seq": 17600126,
+      "command": "git -C /repo/walk log --format=%s -Sneedle --no-renames main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\nR\nD\nC\nA\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_lists_matches",
+      "seq": 17600127,
+      "command": "git -C /repo/walk log --format=%s -Sneedle --name-only main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\n\nd/h\nD\n\nf\nC\n\ng\nA\n\nr\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_all_lists_everything",
+      "seq": 17600128,
+      "command": "git -C /repo/walk log --format=%s -Sneedle --pickaxe-all --name-status main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\n\nA\td/h\nD\n\nM\tf\nC\n\nM\tg\nA\n\nA\tf\nA\tg\nA\tr\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_pickaxe_graph_skip_rows",
+      "seq": 17600129,
+      "command": "git -C /repo/walk log --graph --oneline -Sneedle -m main",
+      "expect": {
+        "exit": 0,
+        "stdout": "* 1b51f22 E\n...\n* 0b7d599 D\n*   29c60de (from 07ddcb3) M\n|\\  \n| * 2594311 C\n...\n* c55bde4 A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_cc_empty_merge_keeps_its_line",
+      "seq": 17600130,
+      "command": "git -C /repo/walk log --oneline --cc main",
+      "expect": {
+        "exit": 0,
+        "stdout": "1b51f22 E\ndiff --git a/d/h b/d/h\nnew file mode 100644\nindex 0000000..a6b681b\n--- /dev/null\n+++ b/d/h\n@@ -0,0 +1 @@\n+needle\n34f082c R\ndiff --git a/r b/r2\nsimilarity index 100%\nrename from r\nrename to r2\n0b7d599 D\ndiff --git a/f b/f\nindex 0cfbf08..126fe25 100644\n--- a/f\n+++ b/f\n@@ -1 +1,2 @@\n 2\n+needle\n29c60de M\n\n2594311 C\ndiff --git a/g b/g\nindex d00491f..126fe25 100644\n--- a/g\n+++ b/g\n@@ -1 +1,2 @@\n-1\n+2\n+needle\n07ddcb3 B\ndiff --git a/f b/f\nindex d00491f..0cfbf08 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-1\n+2\nc55bde4 A\ndiff --git a/f b/f\nnew file mode 100644\nindex 0000000..d00491f\n--- /dev/null\n+++ b/f\n@@ -0,0 +1 @@\n+1\ndiff --git a/g b/g\nnew file mode 100644\nindex 0000000..d00491f\n--- /dev/null\n+++ b/g\n@@ -0,0 +1 @@\n+1\ndiff --git a/r b/r\nnew file mode 100644\nindex 0000000..de12179\n--- /dev/null\n+++ b/r\n@@ -0,0 +1,2 @@\n+keep\n+needle\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_cc_graph_name_status",
+      "seq": 17600131,
+      "command": "git -C /repo/walk log --graph --oneline -c --name-status main",
+      "expect": {
+        "exit": 0,
+        "stdout": "* 1b51f22 E\n| A\td/h\n* 34f082c R\n| R100\tr\tr2\n* 0b7d599 D\n| M\tf\n*   29c60de M\n|\\  \n| | \n| * 2594311 C\n| | M\tg\n* | 07ddcb3 B\n|/  \n|   M\tf\n* c55bde4 A\n  A\tf\n  A\tg\n  A\tr\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_summary_blank_line",
+      "seq": 17600132,
+      "command": "git -C /repo/walk log --format=%s --summary main",
+      "expect": {
+        "exit": 0,
+        "stdout": "E\n\n create mode 100644 d/h\nR\n\n rename r => r2 (100%)\nD\n\nM\nC\n\nB\n\nA\n\n create mode 100644 f\n create mode 100644 g\n create mode 100644 r\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_show_oneline_summary",
+      "seq": 17600133,
+      "command": "git -C /repo/walk show --oneline --summary main~2",
+      "expect": {
+        "exit": 0,
+        "stdout": "0b7d599 D\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_rev_parse_three_hex_digits",
+      "seq": 17600134,
+      "command": "git -C /repo/walk rev-parse $(git -C /repo/walk rev-parse main | cut -c1-3)",
+      "expect": {
+        "exit": 128,
+        "stdout": "1b5\n",
+        "stderr": "fatal: ambiguous argument '1b5': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_walk_rev_parse_names_the_whole_revision",
+      "seq": 17600135,
+      "command": "git -C /repo/walk rev-parse nosuch~1",
+      "expect": {
+        "exit": 128,
+        "stdout": "nosuch~1\n",
+        "stderr": "fatal: ambiguous argument 'nosuch~1': unknown revision or path not in the working tree.\nUse '--' to separate paths from revisions, like this:\n'git <command> [<revision>...] -- [<file>...]'\n"
+      }
+    },
+    {
+      "id": "git_walk_rev_list_paths_need_a_revision",
+      "seq": 17600136,
+      "command": "git -C /repo/walk rev-list --count -- f 2>&1 >/dev/null | head -1; git -C /repo/walk rev-list f > /dev/null 2>&1; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: git rev-list [<options>] <commit>... [--] [<path>...]\n129\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_graph_raw_keeps_stored_parents",
+      "seq": 17600137,
+      "command": "git -C /repo/walk log --graph --format=raw main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "* commit 0b7d59961e723aec747be4dfe1703572701449dc\n| tree 61c9d63c519d8242f439dfde6b2954e539e055f4\n| parent 29c60de525842711689bfe6027dc2cace0152366\n| author A <a@example.com> 1700000500 +0000\n| committer A <a@example.com> 1700000500 +0000\n| \n|     D\n| \n* commit 07ddcb302ffbc80806ec698a3b7def871bdf1aee\n| tree 9aaade3bd1063b04d65796996b3cd172c3c416ff\n| parent c55bde49c6be154f0a9b2c9eff8d1c310998be94\n| author A <a@example.com> 1700000200 +0000\n| committer A <a@example.com> 1700000200 +0000\n| \n|     B\n| \n* commit c55bde49c6be154f0a9b2c9eff8d1c310998be94\n  tree cd65081a58e5462698f1082b18075eeb92f3e2b7\n  author A <a@example.com> 1700000100 +0000\n  committer A <a@example.com> 1700000100 +0000\n  \n      A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_log_first_parent_graph_simplifies_merges",
+      "seq": 17600138,
+      "command": "git -C /repo/walk log --graph --first-parent --oneline main -- f",
+      "expect": {
+        "exit": 0,
+        "stdout": "* 0b7d599 D\n* 07ddcb3 B\n* c55bde4 A\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_walk_cleanup",
+      "seq": 17600139,
+      "command": "rm -rf /repo/walk",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ]
+}

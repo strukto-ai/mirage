@@ -28,6 +28,7 @@ import { exists, readOptional } from './io.ts'
 
 import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
+import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { loadRefs, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
 import type { AncestryStep, GitObject, RevOp } from './types.ts'
@@ -206,7 +207,8 @@ export function refsNamed(table: { has(name: string): boolean }, name: string): 
 
 /**
  * The object id a revision's base names, a ref read without peeling it or an
- * id, full or abbreviated.
+ * id, full or abbreviated; an abbreviation shorter than four hex digits names
+ * nothing, however few objects it would match (git 2.47.3).
  *
  * A name two refs answer to reads as the first, and git warns that it is
  * ambiguous each time it reads one, which is where the repository's list of
@@ -222,6 +224,7 @@ async function namedObject(repo: Repo, base: string, revision: string): Promise<
     oid = await git.resolveRef({ ...repoArgs(repo), ref: base })
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
+    if (base.length < MINIMUM_ABBREV) throw new AmbiguousArgumentError(revision)
     try {
       return await git.expandOid({ ...repoArgs(repo), oid: base })
     } catch (missed) {
@@ -422,6 +425,7 @@ export async function tagObject(repo: Repo, stem: string): Promise<GitObject | n
     oid = await git.resolveRef({ ...repoArgs(repo), ref: `${TAG_PREFIX}${stem}` })
   } catch (err) {
     if (!(err instanceof Errors.NotFoundError)) throw err
+    if (stem.length < MINIMUM_ABBREV) return null
     try {
       oid = await git.expandOid({ ...repoArgs(repo), oid: stem })
     } catch (missed) {
@@ -679,8 +683,10 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
     return { oid, type: await typeOf(repo, oid, revision) }
   }
   // Every operator but `^{tag}` and `^{object}` unwraps a tag, which is git's
-  // own rule and costs nothing here.
-  let obj = await resolveObject(repo, base)
+  // own rule and costs nothing here. A base that names nothing fails naming the
+  // whole revision, as git's does.
+  const named = await namedObject(repo, base, revision)
+  let obj: GitObject = { oid: named, type: await typeOf(repo, named, revision) }
   for (const op of ops) {
     if ('want' in op) {
       obj = await peeled(repo, obj, op.want, revision)

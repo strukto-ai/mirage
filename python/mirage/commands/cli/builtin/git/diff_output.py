@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from io import BytesIO
 
@@ -43,6 +44,7 @@ from mirage.commands.cli.builtin.git.patch import (
     short_oid,
 )
 from mirage.commands.cli.builtin.git.pathspec import pathspec_selects
+from mirage.commands.cli.builtin.git.pickaxe import Pickaxe, matches
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.rows import (
     Delta,
@@ -63,6 +65,9 @@ from mirage.shell.bytes import encode_text
 from mirage.workspace.files import Files
 
 RENAME_SCORE = 50
+# What a combined diff's mode line starts with; ``log --graph`` prints
+# that line with no graph in front of it.
+COMBINED_MODE = "mode "
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +91,7 @@ class DiffFlags:
     context: int = HUNK_CONTEXT
     quote_path_fully: bool = True
     pathspecs: tuple[str, ...] = ()
+    pickaxe: Pickaxe | None = None
 
 
 def parse_diff_flags(
@@ -493,13 +499,35 @@ def limited(
     }
 
 
-def _block(
+def picked(
+    repo: BaseRepo, rows: list[Change], pickaxe: Pickaxe | None
+) -> list[Change]:
+    """The pairs of one comparison a pickaxe keeps: the ones it matches,
+    or every pair under ``--pickaxe-all`` once one matches, and none
+    when none does.
+
+    The search runs on the pairs as renames left them, so a rename that
+    keeps the count matches nothing however many times the string
+    occurs (git 2.47.3).
+
+    Args:
+        repo (BaseRepo): repository holding the blobs.
+        rows (list[Change]): one comparison's pairs.
+        pickaxe (Pickaxe | None): the search, None for none.
+    """
+    if pickaxe is None:
+        return rows
+    kept = [row for row in rows if matches(repo, pickaxe, row.old, row.new)]
+    return rows if kept and pickaxe.every else kept
+
+
+def _rows_of(
     repo: BaseRepo,
     before: dict[bytes, tuple[int, bytes]],
     after: dict[bytes, tuple[int, bytes]],
     flags: DiffFlags,
-) -> bytes | None:
-    """One comparison's diff block, None when its sides do not differ.
+) -> list[Change]:
+    """The pairs one comparison's diff block shows, the pickaxe applied.
 
     Args:
         repo (BaseRepo): repository to read.
@@ -507,7 +535,27 @@ def _block(
         after (dict): the new side.
         flags (DiffFlags): the diff flags.
     """
-    rows = compare(repo, before, after, flags.renames)
+    return picked(
+        repo, compare(repo, before, after, flags.renames), flags.pickaxe
+    )
+
+
+def _block(
+    repo: BaseRepo,
+    before: dict[bytes, tuple[int, bytes]],
+    after: dict[bytes, tuple[int, bytes]],
+    flags: DiffFlags,
+) -> bytes | None:
+    """One comparison's diff block, None when its sides do not differ or
+    the pickaxe keeps none of its pairs.
+
+    Args:
+        repo (BaseRepo): repository to read.
+        before (dict): the old side, path to (mode, id).
+        after (dict): the new side.
+        flags (DiffFlags): the diff flags.
+    """
+    rows = _rows_of(repo, before, after, flags)
     return render_changes(repo, rows, flags) if rows else None
 
 
@@ -548,6 +596,28 @@ def commit_sides(
         (entries(repo, tree, recursive, flags.pathspecs), after)
         for tree in trees
     ]
+
+
+def shows(repo: BaseRepo, commit: Commit, flags: DiffFlags) -> bool:
+    """Whether a log the pickaxe filters prints a commit.
+
+    A commit with one parent or none is printed when the pickaxe keeps a
+    pair of its diff. A merge follows the merge diff: never by default,
+    when its first parent's diff keeps one under first-parent, when any
+    parent's does under ``-m``, and always under ``-c`` and ``--cc``,
+    whatever the pickaxe says (git 2.47.3).
+
+    Args:
+        repo (BaseRepo): repository to read.
+        commit (Commit): the commit.
+        flags (DiffFlags): the diff flags, carrying the pickaxe.
+    """
+    if flags.pickaxe is None or is_combined(commit, flags):
+        return True
+    return any(
+        _rows_of(repo, before, after, flags)
+        for before, after in commit_sides(repo, commit, flags)
+    )
 
 
 def commit_deltas(
@@ -617,7 +687,7 @@ def commit_output(
     if not sides or not is_combined(commit, flags):
         return [_block(repo, before, after, flags) for before, after in sides]
     comparisons = [
-        compare(repo, before, after, flags.renames) for before, after in sides
+        _rows_of(repo, before, after, flags) for before, after in sides
     ]
     common = set.intersection(
         *({row.path for row in rows} for rows in comparisons)
@@ -741,7 +811,7 @@ def combined_patch(
             out.append(f"new file mode {mode:06o}\n")
         elif moved:
             out.append(
-                ("deleted file mode " if deleted else "mode ")
+                ("deleted file mode " if deleted else COMBINED_MODE)
                 + ",".join(f"{entry[0] if entry else 0:06o}" for entry in old)
                 + ("" if deleted else f"..{mode:06o}")
                 + "\n"
@@ -848,7 +918,7 @@ def join_output(
         gap = (
             f"{line}\n".encode() if head and body and line is not None else b""
         )
-        if not body and head and empty_summary:
+        if not body and head and (empty_summary or is_combined(commit, flags)):
             gap = b"\n"
         blocks.append(head + gap + body)
     separator = b"\n" if kind not in TEMPLATE_KINDS + TERMINATED_KINDS else b""
@@ -863,6 +933,7 @@ def commit_entry(
     sides: list[Side],
     decor: Decorations | None,
     empty_summary: bool = False,
+    parents: Sequence[bytes] | None = None,
 ) -> bytes:
     """A commit's log entry and its diff against its parents, as ``log``
     and ``show`` print it.
@@ -880,8 +951,10 @@ def commit_entry(
         empty_summary (bool): put a blank line under a header whose
             diff is empty, as ``show`` does for a summary or a combined
             diff.
+        parents (Sequence[bytes] | None): the parents the header
+            prints, the commit's own when None.
     """
-    header = commit_header(commit, display, abbrev_for(repo), decor)
+    header = commit_header(commit, display, abbrev_for(repo), decor, parents)
     return join_output(
         commit,
         header,

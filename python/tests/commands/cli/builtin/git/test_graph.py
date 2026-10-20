@@ -378,3 +378,32 @@ def test_a_skipped_commit_holds_one_row_at_a_time():
     finally:
         tracemalloc.stop()
     assert peak < 250_000
+
+
+def test_a_skip_row_is_as_wide_as_the_merge_it_stands_before():
+    # `git log --graph -S` passing by the commit above a merge pads the
+    # `...` row to the merge's own row (git 2.47.3).
+    walked = _walk("X: M\nM: A B\nB: A\nA:")
+    assert _log(walked, shown="M B A")[0] == "... "
+
+
+def test_draws_a_boundary_commit_with_an_o():
+    walked = _walk("M: A B\nB: A\nA:")
+    ids = {commit.id for commit in walked}
+    graph = CommitGraph(ids.__contains__, False, frozenset({b"A"}))
+    out = ""
+    for commit in walked:
+        graph.walk(commit)
+        out += graph.lead_in() + graph.around(f"{commit.id.decode()}\n")
+    assert out.split("\n")[:-1] == ["*   M", "|\\  ", "| * B", "|/  ", "o A"]
+
+
+def test_draws_the_parents_a_path_limited_walk_hands_over():
+    walked = _walk("X: Y\nA:")
+    ids = {commit.id for commit in walked}
+    graph = CommitGraph(ids.__contains__, False, parents={b"X": (b"A",)})
+    out = ""
+    for commit in walked:
+        graph.walk(commit)
+        out += graph.lead_in() + graph.around(f"{commit.id.decode()}\n")
+    assert out.split("\n")[:-1] == ["* X", "* A"]

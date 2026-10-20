@@ -1052,8 +1052,8 @@ Apache License 2.0, used by:
 - num-bigint 0.4.8 (https://github.com/rust-num/num-bigint)
 - num-integer 0.1.47 (https://github.com/rust-num/num-integer)
 - num-traits 0.2.19 (https://github.com/rust-num/num-traits)
-- regex-automata 0.4.7 (https://github.com/rust-lang/regex/tree/master/regex-automata)
-- regex-syntax 0.8.4 (https://github.com/rust-lang/regex/tree/master/regex-syntax)
+- regex-automata 0.4.18 (https://github.com/rust-lang/regex)
+- regex-syntax 0.8.11 (https://github.com/rust-lang/regex)
 
                               Apache License
                         Version 2.0, January 2004

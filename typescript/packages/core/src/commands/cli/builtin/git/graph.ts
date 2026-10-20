@@ -15,6 +15,8 @@
 import type { CommitFacts } from './format.ts'
 
 export const SKIPPED = '...'
+// The cell a `--boundary` commit is drawn with, in place of `*`.
+export const BOUNDARY = 'o'
 
 /**
  * One line of the graph: the edge from a printed commit to the commit it
@@ -74,7 +76,9 @@ function line(sha: string, at: number, goal: number): Line {
  * nothing, and the next printed one is preceded by a `...` row. Lines move
  * one cell per row, skipping a column another line stands in, and slide under
  * a run of standing columns with `_`; a printed commit owes the rows its
- * lines need to settle. Mirrors CommitGraph in graph.py.
+ * lines need to settle. A `--boundary` commit is drawn with `o`; a line leads
+ * on from it only to a parent the graph draws too. A path-limited walk hands
+ * over the parents it drew its history with. Mirrors CommitGraph in graph.py.
  */
 export class CommitGraph {
   private lines: Line[] = []
@@ -88,6 +92,8 @@ export class CommitGraph {
   constructor(
     private readonly interesting: (oid: string) => boolean,
     private readonly firstParent: boolean,
+    private readonly boundary: ReadonlySet<string> = new Set(),
+    private readonly parents: ReadonlyMap<string, readonly string[]> | null = null,
   ) {}
 
   /** Move on to the next walked commit, printed or not. */
@@ -115,7 +121,7 @@ export class CommitGraph {
     const out = this.skipped ? this.skipRow(commit) + '\n' : ''
     const rows = this.ahead.length > 0 ? this.ahead : [...this.place(commit)]
     this.ahead = []
-    const star = rows.findIndex((row) => row.includes('*'))
+    const star = rows.findIndex((row) => row.includes('*') || row.includes(BOUNDARY))
     this.owed = rows.slice(star + 1)
     return (
       out +
@@ -177,8 +183,7 @@ export class CommitGraph {
   }
 
   private skipRow(commit: CommitFacts): string {
-    const columns = this.columns()
-    const width = 2 * (columns.length + (columns.includes(commit.oid) ? 0 : 1))
+    const width = this.shape(commit).width
     this.rest(width, true)
     this.skipped = false
     return SKIPPED.padEnd(Math.max(SKIPPED.length, width))
@@ -190,7 +195,8 @@ export class CommitGraph {
   }
 
   private parentsOf(commit: CommitFacts, columns: string[], col: number): Parents {
-    const followed = this.firstParent ? commit.parents.slice(0, 1) : commit.parents
+    const own = this.parents?.get(commit.oid) ?? commit.parents
+    const followed = this.firstParent ? own.slice(0, 1) : own
     const parents = [...new Set(followed.filter((p) => this.interesting(p)))]
     const where = new Map(columns.map((sha, i) => [sha, i]))
     const opened: string[] = []
@@ -254,7 +260,8 @@ export class CommitGraph {
     for (const each of right) base.set(each, each.at + (each.at % 2 ? each.heading : 0))
     const lift = shape.spreads ? 2 * extra : 0
     if (lift) yield* this.spreadRows(others, right, base, here, width, lift)
-    yield this.commitRow(others, right, base, here, width, lift, spread, goal, extra)
+    const row = this.commitRow(others, right, base, here, width, lift, spread, goal, extra)
+    yield this.boundary.has(commit.oid) ? row.slice(0, here) + BOUNDARY + row.slice(here + 1) : row
     const born = parents.opened.map((sha) => line(sha, here, goal(sha)))
     const led = parents.lead === null ? [] : [line(parents.lead, here, goal(parents.lead))]
     for (const each of others) each.goal = goal(each.sha)

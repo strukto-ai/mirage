@@ -19,13 +19,40 @@ from dulwich import porcelain
 from dulwich.objects import Commit
 from dulwich.repo import Repo
 
-from mirage.commands.cli.builtin.git.pickaxe import contains, greps, touches
+from mirage.commands.cli.builtin.git.diff_output import (
+    RENAME_SCORE,
+    DiffFlags,
+    shows,
+)
+from mirage.commands.cli.builtin.git.pickaxe import Pickaxe, contains
 from mirage.rs.regex import PosixRegex
 from tests.commands.cli.builtin.git.conftest import (
     AUTHOR,
     commit_file,
     commit_gitlink,
 )
+
+
+def touches(repo: Repo, commit: Commit, needle: bytes) -> bool:
+    """Whether ``-S`` keeps a commit, its diff read without renames.
+
+    Args:
+        repo (Repo): the repository.
+        commit (Commit): the commit.
+        needle (bytes): the string.
+    """
+    return shows(repo, commit, DiffFlags(pickaxe=Pickaxe(needle=needle)))
+
+
+def greps(repo: Repo, commit: Commit, pattern: PosixRegex) -> bool:
+    """Whether ``-G`` keeps a commit.
+
+    Args:
+        repo (Repo): the repository.
+        commit (Commit): the commit.
+        pattern (PosixRegex): the pattern.
+    """
+    return shows(repo, commit, DiffFlags(pickaxe=Pickaxe(changed=pattern)))
 
 
 def commits_of(repo_path: Path) -> list[Commit]:
@@ -95,6 +122,27 @@ def test_moving_a_line_between_files_is_reported(repo_path):
     )
     with Repo(str(repo_path)) as repo:
         head = commits_of(repo_path)[0]
+        assert touches(repo, head, b"one changed")
+
+
+def test_a_rename_that_keeps_the_count_is_not_reported(repo_path):
+    # git pairs renames before it counts, so moving a file that holds the
+    # string is no match, while the same move read as a delete and an
+    # add is (git 2.47.3).
+    (repo_path / "a.txt").rename(repo_path / "moved.txt")
+    porcelain.add(str(repo_path), paths=[str(repo_path / "moved.txt")])
+    porcelain.remove(
+        str(repo_path), paths=[str(repo_path / "a.txt")], cached=True
+    )
+    porcelain.commit(
+        str(repo_path), message=b"move", author=AUTHOR, committer=AUTHOR
+    )
+    with Repo(str(repo_path)) as repo:
+        head = commits_of(repo_path)[0]
+        renamed = DiffFlags(
+            renames=RENAME_SCORE, pickaxe=Pickaxe(needle=b"one changed")
+        )
+        assert not shows(repo, head, renamed)
         assert touches(repo, head, b"one changed")
 
 

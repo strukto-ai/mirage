@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 from dulwich.repo import BaseRepo
 
@@ -13,12 +14,13 @@ from mirage.commands.cli.builtin.git.history import (
     parse_flags,
     ref_commits,
     select,
+    walk_ends,
+    walk_operands,
 )
 from mirage.commands.cli.builtin.git.mailmap import (
     load_mailmap,
     mapped_identity,
 )
-from mirage.commands.cli.builtin.git.revparse import split_revisions
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import MailmapEntry
 from mirage.commands.cli.builtin.git.util import (
@@ -40,6 +42,7 @@ def _summary(
     numbered: bool,
     summary: bool,
     mailmap: tuple[MailmapEntry, ...],
+    dashed: bool = False,
 ) -> bytes:
     """Group selected commits by author.
 
@@ -50,9 +53,11 @@ def _summary(
         email (bool): include the email in each author identity.
         numbered (bool): sort by descending commit count.
         summary (bool): omit commit subjects.
+        mailmap (tuple[MailmapEntry, ...]): the identities to map.
+        dashed (bool): whether ``--`` is on the line.
     """
-    starts, hidden = split_revisions(
-        repo, revisions or (() if flags.all_refs else ("HEAD",))
+    starts, hidden = walk_ends(
+        repo, revisions or (() if flags.all_refs else ("HEAD",)), dashed
     )
     if flags.all_refs:
         starts.extend(ref_commits(repo))
@@ -96,15 +101,19 @@ async def shortlog(
         repo, location = await opened(ctx, fl)
         assert ctx.vfs is not None
         mailmap = await load_mailmap(ctx.vfs, location)
+        revisions, patterns, dashed = await walk_operands(
+            ctx, fl, repo, location, texts
+        )
         out = await asyncio.to_thread(
             _summary,
             repo,
-            tuple(texts),
-            parse_flags(fl),
+            revisions,
+            replace(parse_flags(fl), pathspecs=patterns),
             fl.as_bool("email"),
             fl.as_bool("numbered"),
             fl.as_bool("summary"),
             mailmap,
+            dashed,
         )
         return out, IOResult()
     except GitError as exc:

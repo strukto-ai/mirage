@@ -111,6 +111,7 @@ class AmbiguousArgumentError(GitError):
     """
 
     def __init__(self, revision: str) -> None:
+        self.revision = revision
         super().__init__(
             f"ambiguous argument '{revision}': unknown revision or path "
             f"not in the working tree.\n"
@@ -133,6 +134,39 @@ class BadRevisionError(GitError):
 
     def __init__(self, revision: str) -> None:
         super().__init__(f"bad revision '{revision}'")
+
+
+class RevisionAndFilenameError(GitError):
+    """A walk's operand, with no ``--`` on the line, that names both a
+    revision and a file in the working tree, which git refuses to guess
+    between (pinned against git 2.47.3).
+
+    Args:
+        operand (str): the operand as typed.
+    """
+
+    def __init__(self, operand: str) -> None:
+        super().__init__(
+            f"ambiguous argument '{operand}': both revision and filename\n"
+            f"Use '--' to separate paths from revisions, like this:\n"
+            f"'git <command> [<revision>...] -- [<file>...]'"
+        )
+
+
+class NoSuchPathError(GitError):
+    """An operand after a walk's first path, with no ``--`` on the line,
+    that names nothing in the working tree (pinned against git 2.47.3).
+
+    Args:
+        operand (str): the operand as typed.
+    """
+
+    def __init__(self, operand: str) -> None:
+        super().__init__(
+            f"{operand}: no such path in the working tree.\n"
+            f"Use 'git <command> -- <path>...' to specify paths that do not "
+            f"exist locally."
+        )
 
 
 class NoMergeBaseError(GitError):

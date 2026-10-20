@@ -14,12 +14,13 @@
 
 import pytest
 from dulwich.objects import Commit
-from dulwich.repo import Repo
+from dulwich.repo import MemoryRepo, Repo
 
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import BadDateError, GitError
 from mirage.commands.cli.builtin.git.format import subject
 from mirage.commands.cli.builtin.git.history import (
+    _Simplifier,
     decoration_style,
     parse_flags,
     select,
@@ -60,7 +61,7 @@ def test_flags_default_to_off():
     assert parsed.max_count is None
     assert not parsed.oneline
     assert not parsed.reverse
-    assert parsed.search is None
+    assert parsed.pickaxe is None
     assert parsed.since is None and parsed.until is None
 
 
@@ -295,3 +296,16 @@ def test_decoration_style_names_git_styles(
     value: bytes, style: Decoration | None
 ):
     assert decoration_style(value) is style
+
+
+def test_a_long_untouched_stretch_reaches_the_next_shown_commit():
+    # A path left alone for longer than the interpreter recurses still
+    # leads the graph from one commit that changed it to the next.
+    simplify = _Simplifier(MemoryRepo(), ("f",), graph=True)
+    ids = [b"%040x" % n for n in range(5000)]
+    for child, parent in zip(ids, ids[1:]):
+        simplify.followed[child] = (parent,)
+        simplify.shown[child] = False
+    simplify.followed[ids[-1]] = ()
+    simplify.shown[ids[-1]] = True
+    assert simplify._shown_below(ids[1]) == (ids[-1],)

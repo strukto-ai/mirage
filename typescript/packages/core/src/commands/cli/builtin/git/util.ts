@@ -32,7 +32,7 @@ const ROOT = '/'
 export const STDOUT = 'stdout'
 export const STDERR = 'stderr'
 // The end-of-options marker, which the parser consumes.
-const MARKER = '--'
+export const MARKER = '--'
 const TRUE_WORDS = ['true', 'yes', 'on']
 const FALSE_WORDS = ['false', 'no', 'off', '']
 // A config integer as git reads one: C-locale space, a number read the way
@@ -137,12 +137,8 @@ export function splitMarked(
  * option here; see `escaped`, which is where the marker survives the parser.
  *
  * Which side of the marker an operand fell on says nothing about what it
- * *means* here. `diff`, `show` and `diff-tree` read what follows the marker as
- * pathspecs (`splitMarked`); a walk (`log`, `rev-list`, `shortlog`) reads an
- * escaped word as a revision and fails with git's own "unknown revision or
- * path" wording, where git would narrow the walk by it instead. That divergence
- * is deliberate, because limiting by nothing would print every commit and look
- * like an answer.
+ * *means* here. `diff`, `show`, `diff-tree` and the walks (`log`, `rev-list`,
+ * `shortlog`) read what follows the marker as pathspecs (`splitMarked`).
  *
  * @param texts positional text operands, as typed
  * @param marked operands a `--` on the line escaped

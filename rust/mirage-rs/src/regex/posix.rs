@@ -92,7 +92,6 @@ impl Posix {
                 &[lower.pattern(ast, options.word, false)],
                 b'\n',
                 true,
-                false,
             )?)
         };
         // A raw byte under UTF-8 could be found inside a character, where

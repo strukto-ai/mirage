@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
@@ -244,7 +245,9 @@ def message_block(commit: Commit) -> list[str]:
     return [INDENT + line for line in lines[start:end]]
 
 
-def _merge_line(commit: Commit, length: int) -> list[str]:
+def _merge_line(
+    commit: Commit, length: int, parents: Sequence[bytes] | None = None
+) -> list[str]:
     """The ``Merge:`` line every block preset prints for a merge, which
     git puts between the id and the author for both ``log`` and
     ``show``.
@@ -252,10 +255,13 @@ def _merge_line(commit: Commit, length: int) -> list[str]:
     Args:
         commit (Commit): the commit to render.
         length (int): how many hex digits of a parent id to print.
+        parents (Sequence[bytes] | None): the parents to print, the
+            commit's own when None.
     """
-    if len(commit.parents) <= 1:
+    shown = commit.parents if parents is None else parents
+    if len(shown) <= 1:
         return []
-    return [f"Merge: {' '.join(short(p, length) for p in commit.parents)}"]
+    return [f"Merge: {' '.join(short(p, length) for p in shown)}"]
 
 
 def preset_block(
@@ -264,6 +270,7 @@ def preset_block(
     length: int,
     date: DateMode = DEFAULT_DATE,
     mailmap: tuple[MailmapEntry, ...] = (),
+    parents: Sequence[bytes] | None = None,
 ) -> list[str]:
     """One commit as a block preset renders it (short/medium/full/fuller).
 
@@ -276,6 +283,10 @@ def preset_block(
         commit (Commit): the commit to render.
         kind (str): the preset name, already validated.
         length (int): how many hex digits of a parent id to print.
+        parents (Sequence[bytes] | None): the parents to print, the
+            commit's own when None; a path-limited log prints the ones
+            it kept, though raw prints the stored ones whatever the
+            graph draws (git 2.47.3).
     """
     if kind == "raw":
         return [
@@ -295,7 +306,10 @@ def preset_block(
     committer = mapped_identity(
         commit.committer.decode("utf-8", errors="replace"), mailmap
     )
-    lines = [f"commit {commit.id.decode()}", *_merge_line(commit, length)]
+    lines = [
+        f"commit {commit.id.decode()}",
+        *_merge_line(commit, length, parents),
+    ]
     if kind == "medium":
         lines.extend(
             [
@@ -404,6 +418,7 @@ def render_template(
     decor: Decorations | None,
     date: DateMode = DEFAULT_DATE,
     mailmap: tuple[MailmapEntry, ...] = (),
+    parents: Sequence[bytes] | None = None,
 ) -> str:
     """Expand a format:/tformat: template for one commit.
 
@@ -419,6 +434,8 @@ def render_template(
         commit (Commit): the commit to render.
         length (int): abbreviated id width for %h/%p/%t.
         decor (Decorations | None): ref labels for %d/%D.
+        parents (Sequence[bytes] | None): the parents %p/%P print, the
+            commit's own when None.
     """
     message = commit.message.decode("utf-8", errors="replace")
     labels = [] if decor is None else decor.get(commit.id, [])
@@ -431,7 +448,9 @@ def render_template(
             i += 1
             continue
         marker = template[i + 1]
-        expanded = _simple_placeholder(marker, commit, message, length, labels)
+        expanded = _simple_placeholder(
+            marker, commit, message, length, labels, parents
+        )
         if expanded is not None:
             out.append(expanded)
             i += 2
@@ -459,7 +478,12 @@ def render_template(
 
 
 def _simple_placeholder(
-    marker: str, commit: Commit, message: str, length: int, labels: list[str]
+    marker: str,
+    commit: Commit,
+    message: str,
+    length: int,
+    labels: list[str],
+    parents: Sequence[bytes] | None = None,
 ) -> str | None:
     """One single-letter placeholder's value, None when it is not one.
 
@@ -469,6 +493,7 @@ def _simple_placeholder(
         message (str): the decoded message.
         length (int): abbreviated id width.
         labels (list[str]): decoration labels for %d/%D.
+        parents (Sequence[bytes] | None): the parents %p/%P print.
     """
     if marker == "H":
         return commit.id.decode()
@@ -478,10 +503,11 @@ def _simple_placeholder(
         return commit.tree.decode()
     if marker == "t":
         return short(commit.tree, length)
+    shown = commit.parents if parents is None else parents
     if marker == "P":
-        return " ".join(p.decode() for p in commit.parents)
+        return " ".join(p.decode() for p in shown)
     if marker == "p":
-        return " ".join(short(p, length) for p in commit.parents)
+        return " ".join(short(p, length) for p in shown)
     if marker == "s":
         return _subject_folded(message)
     if marker == "b":
@@ -547,6 +573,7 @@ def commit_header(
     display: CommitDisplay,
     width: int,
     decor: Decorations | None,
+    parents: Sequence[bytes] | None = None,
 ) -> bytes:
     """One commit's header, as ``log`` and ``show`` print it.
 
@@ -563,6 +590,8 @@ def commit_header(
         display (CommitDisplay): the invocation's presentation flags.
         width (int): abbreviated id width for this repository.
         decor (Decorations | None): ref labels when the format asked.
+        parents (Sequence[bytes] | None): the parents to print, the
+            commit's own when None.
     """
     fmt = display.pretty
     decorated = display.decorate is not Decoration.NONE
@@ -582,6 +611,7 @@ def commit_header(
             decor,
             display.date,
             display.mailmap,
+            parents,
         )
         if fmt.kind == "tformat":
             return encode_text(f"{rendered}\n") if fmt.template else b""
@@ -592,6 +622,7 @@ def commit_header(
         width,
         display.date,
         display.mailmap if display.use_mailmap else (),
+        parents,
     )
     if decorated and block and block[0].startswith("commit "):
         block[0] += render_template("%d", commit, width, decor)

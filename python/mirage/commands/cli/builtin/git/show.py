@@ -37,7 +37,6 @@ from mirage.commands.cli.builtin.git.diff_output import (
     commit_output,
     commit_shown,
     commit_sides,
-    is_combined,
     parse_diff_flags,
     renames_enabled,
 )
@@ -277,7 +276,6 @@ def _render(
             shown_one = True
         elif isinstance(target, Commit) and target.id not in shown_commits:
             shown_commits.add(target.id)
-            combined = is_combined(target, flags.diff)
             entry = commit_entry(
                 repo,
                 target,
@@ -285,7 +283,9 @@ def _render(
                 flags.diff,
                 sides[target.id],
                 decor,
-                (flags.diff.summary or combined) and not flags.diff.no_patch,
+                flags.diff.summary
+                and not flags.diff.no_patch
+                and flags.pretty.kind != "oneline",
             )
             parts.append(
                 (b"\n" if shown_one and not terminated else b"") + entry
