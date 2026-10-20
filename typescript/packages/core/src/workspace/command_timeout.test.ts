@@ -17,7 +17,7 @@ import type { Context } from '../commands/config.ts'
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import type { Program, RunResult } from '../runtime/types.ts'
@@ -350,7 +350,6 @@ describe('large in-memory commands', () => {
     'cat -s /blank',
     'head -n -2500000 /blank',
     'uniq /big',
-    'tr a b < /big',
   ])('honors a caller abort during %s', async (command) => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
@@ -366,6 +365,47 @@ describe('large in-memory commands', () => {
       })
     } finally {
       clearTimeout(timer)
+      await ws.close()
+    }
+  })
+
+  it('lets a caller abort tr after output starts', async () => {
+    const ram = new RAMVFS()
+    ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
+    const ws = new Workspace({ '/': ram }, { shellParser: parser })
+    const abort = new AbortController()
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let fired = false
+    try {
+      const execution = await ws.shell('tr a b < /big', {
+        signal: abort.signal,
+        stream: true,
+      })
+      try {
+        const first = await execution.events.next()
+        if (first.done === true) throw new Error('tr finished before producing output')
+        expect(first.value.stream).toBe('stdout')
+        expect(first.value.data.byteLength).toBeGreaterThan(0)
+        timer = setTimeout(() => {
+          fired = true
+          abort.abort()
+        }, 0)
+        // Elapsed work must let the real abort timer run, regardless of CPU speed.
+        now = 1_000_000
+        async function consume(): Promise<void> {
+          for await (const event of execution.events) expect(event.stream).toBe('stdout')
+        }
+        await expect(consume()).rejects.toMatchObject({ name: 'AbortError' })
+        expect(fired).toBe(true)
+      } finally {
+        await execution.close()
+      }
+    } finally {
+      clearTimeout(timer)
+      clock.mockRestore()
+      await ws.close()
     }
   })
 })
