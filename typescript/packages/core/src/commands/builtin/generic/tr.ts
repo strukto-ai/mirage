@@ -12,119 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteView, fromByteView } from '../../../shell/bytes.ts'
-import { classCharacters } from '../../../utils/posix.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { openStream, type OpenStream } from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import type { JsonValue, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { interpretEscapes } from '../utils/escapes.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { resolveSource, streamOutput } from '../utils/stream.ts'
 import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { UsageError } from '../../errors.ts'
-import { quoteText, quoteWord } from '../../quote.ts'
+import { quoteText } from '../../quote.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 const TRY_HELP = `\n${usageHint('tr')}`
-const PRINTABLE_ESCAPES: Readonly<Record<string, string>> = {
-  '\\': '\\',
-  '\x07': '\\a',
-  '\b': '\\b',
-  '\f': '\\f',
-  '\n': '\\n',
-  '\r': '\\r',
-  '\t': '\\t',
-  '\v': '\\v',
-}
-
-// A piece of an operand as GNU tr spells it in a diagnostic. Its
-// diagnostics quote this spelling, so a byte outside ASCII shows as an
-// octal escape whose backslash the quoting doubles.
-function printable(view: string): string {
-  let out = ''
-  for (const ch of view) {
-    out +=
-      PRINTABLE_ESCAPES[ch] ??
-      (ch >= ' ' && ch <= '~' ? ch : '\\' + ch.charCodeAt(0).toString(8).padStart(3, '0'))
-  }
-  return out
-}
-
-function expandRanges(s: string): string {
-  let out = ''
-  let i = 0
-  while (i < s.length) {
-    if (s.startsWith('[:', i) && s.includes(':]', i + 2)) {
-      const end = s.indexOf(':]', i + 2)
-      const name = s.slice(i + 2, end)
-      const members = classCharacters(name)
-      if (members === null)
-        throw new Error(`tr: invalid character class '${quoteWord(printable(name))}'`)
-      out += members
-      i = end + 2
-    } else if (i + 2 < s.length && s[i + 1] === '-') {
-      const start = s.charCodeAt(i)
-      const end = s.charCodeAt(i + 2)
-      for (let c = start; c <= end; c++) out += String.fromCharCode(c)
-      i += 3
-    } else {
-      out += s[i] ?? ''
-      i += 1
-    }
-  }
-  return out
-}
-
-interface TrOptions {
-  set1: string
-  set2: string
-  del: boolean
-  squeeze: boolean
-  table: Map<string, string> | null
-}
-
-async function* trStream(
-  source: AsyncIterable<Uint8Array>,
-  opts: TrOptions,
-): AsyncIterable<Uint8Array> {
-  const squeezeSet: Set<string> =
-    opts.squeeze && opts.set2 !== ''
-      ? new Set(opts.set2)
-      : opts.squeeze
-        ? new Set(opts.set1)
-        : new Set()
-  let prevChar = ''
-  for await (const chunk of source) {
-    const text = byteView(chunk)
-    let result: string
-    if (opts.del) {
-      const set1Set = new Set(opts.set1)
-      result = Array.from(text)
-        .filter((c) => !set1Set.has(c))
-        .join('')
-    } else if (opts.table !== null) {
-      result = Array.from(text)
-        .map((c) => opts.table?.get(c) ?? c)
-        .join('')
-    } else {
-      result = text
-    }
-    if (squeezeSet.size > 0) {
-      const squeezed: string[] = []
-      for (const c of result) {
-        if (squeezeSet.has(c) && c === prevChar) continue
-        squeezed.push(c)
-        prevChar = c
-      }
-      result = squeezed.join('')
-    } else if (result.length > 0) {
-      prevChar = result[result.length - 1] ?? ''
-    }
-    yield fromByteView(result)
-  }
-}
 
 interface TrFlags {
   readonly delete: boolean
@@ -143,11 +46,12 @@ function parseFlags(bag: Record<string, FlagValue>): TrFlags {
   }
 }
 
-function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>): TrOptions {
+function buildConfig(
+  texts: readonly string[],
+  bag: Record<string, FlagValue>,
+): Readonly<Record<string, JsonValue>> {
   if (texts.length === 0) throw missingOperandError(CommandName.TR, null)
   const { delete: del, squeeze, complement, truncateSet1 } = parseFlags(bag)
-  // -d without -s takes one string, so the extra operand is the second one:
-  // `tr -d a b c` names b, the first past the strings it takes.
   const operandLimit = del && !squeeze ? 1 : 2
   if (texts.length > operandLimit) {
     if (texts.length === 2) {
@@ -158,61 +62,42 @@ function buildOptions(texts: readonly string[], bag: Record<string, FlagValue>):
     }
     throw extraOperandError(CommandName.TR, texts[operandLimit] ?? '')
   }
-  let set1 = expandRanges(interpretEscapes(byteView(texts[0] ?? '')))
-  if (complement) {
-    let allChars = ''
-    for (let i = 0; i < 256; i++) allChars += String.fromCharCode(i)
-    const s1 = new Set(set1)
-    set1 = Array.from(allChars)
-      .filter((c) => !s1.has(c))
-      .join('')
+  return {
+    set1: byteView(texts[0] ?? ''),
+    set2: texts.length >= 2 ? byteView(texts[1] ?? '') : null,
+    delete: del,
+    squeeze,
+    complement,
+    truncate_set1: truncateSet1,
   }
-  let set2 = texts.length >= 2 ? expandRanges(interpretEscapes(byteView(texts[1] ?? ''))) : ''
-  if (set2 !== '' && truncateSet1) {
-    set1 = set1.slice(0, set2.length)
-  } else if (set2 !== '' && set2.length < set1.length) {
-    const last = set2[set2.length - 1] ?? ''
-    set2 = set2 + last.repeat(set1.length - set2.length)
-  }
-  let table: Map<string, string> | null = null
-  if (!del && set2 !== '') {
-    table = new Map<string, string>()
-    for (let i = 0; i < set1.length; i++) {
-      const from = set1[i]
-      const to = set2[i]
-      if (from !== undefined && to !== undefined) table.set(from, to)
-    }
-  } else if (!del && set2 === '' && !squeeze) {
-    throw new Error(
-      `tr: missing operand after '${quoteText(texts[0] ?? '')}'\n` +
-        `Two strings must be given when translating.${TRY_HELP}`,
-    )
-  }
-  return { set1, set2, del, squeeze, table }
 }
 
-// eslint-disable-next-line @typescript-eslint/require-await
 export async function trGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  let trOpts: TrOptions
+  let engine: OpenStream
   try {
-    trOpts = buildOptions(texts, ctx.flags)
+    engine = await openStream('tr', buildConfig(texts, ctx.flags))
   } catch (err) {
     if (err instanceof UsageError) throw err
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg =
+      err instanceof StreamRefusal && err.message === 'tr: missing translation operand'
+        ? `tr: missing operand after '${quoteText(texts[0] ?? '')}'\n` +
+          `Two strings must be given when translating.${TRY_HELP}`
+        : err instanceof Error
+          ? err.message
+          : String(err)
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
   }
-  let source: AsyncIterable<Uint8Array>
-  if (paths.length > 0) {
-    const first = paths[0]
-    if (first === undefined) return [null, new IOResult()]
-    source = stream(first)
-  } else {
-    source = resolveSource(ctx.stdin)
+  const first = paths[0]
+  try {
+    const source = first === undefined ? resolveSource(ctx.stdin) : stream(first)
+    return [streamOutput(engine, source, ctx.signal), new IOResult()]
+  } catch (error) {
+    engine.close()
+    throw error
   }
-  return [trStream(source, trOpts), new IOResult()]
 }

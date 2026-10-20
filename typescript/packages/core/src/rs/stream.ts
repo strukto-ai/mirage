@@ -15,6 +15,7 @@
 import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
 import { chunks } from '../io/cooperative.ts'
 import type { util } from 'zod'
+import { YieldBudget } from '../io/yield_budget.ts'
 import { concat } from '../utils/bytes.ts'
 import { decodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
@@ -29,6 +30,7 @@ interface Exports {
   mirage_rs_finish(handle: number): number
   mirage_rs_wants(handle: number): number
   mirage_rs_busy(handle: number): number
+  mirage_rs_cancel(handle: number): number
   mirage_rs_drain(handle: number): number
   mirage_rs_feed_input(handle: number, index: number, len: number): number
   mirage_rs_end_input(handle: number, index: number): number
@@ -124,6 +126,11 @@ export class OpenStream {
   /** Whether `drain` has work or output left. */
   busy(): boolean {
     return this.guard(() => this.exports.mirage_rs_busy(this.handle) === 1)
+  }
+
+  /** Stop processing and report whether bounded retirement is available. */
+  cancel(): boolean {
+    return this.guard(() => this.exports.mirage_rs_cancel(this.handle) === 1)
   }
 
   /** One bounded step of the work `busy` reports, and its output. */
@@ -308,13 +315,48 @@ export async function* runStream(
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
   const stream = await openStream(kind, config)
+  yield* streamOutputChunks(stream, source, signal)
+}
+
+export async function* streamOutputChunks(
+  stream: OpenStream,
+  source: Uint8Array | AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  const budget = new YieldBudget(signal)
   try {
     for await (const chunk of chunks(source, signal)) {
       const output = stream.feed(chunk)
       if (output.byteLength > 0) yield output
+      while (stream.busy()) {
+        await budget.run()
+        const output = stream.drain()
+        if (output.byteLength > 0) yield output
+      }
     }
     const tail = stream.finish()
     if (tail.byteLength > 0) yield tail
+    while (stream.busy()) {
+      await budget.run()
+      const output = stream.drain()
+      if (output.byteLength > 0) yield output
+    }
+  } finally {
+    await closeStream(stream)
+  }
+}
+
+/** Retire cancelled records through bounded calls before releasing the handle. */
+export async function closeStream(stream: OpenStream): Promise<void> {
+  if (!stream.live) return
+  try {
+    if (stream.cancel()) {
+      const budget = new YieldBudget()
+      while (stream.busy()) {
+        await budget.run()
+        stream.drain()
+      }
+    }
   } finally {
     stream.close()
   }

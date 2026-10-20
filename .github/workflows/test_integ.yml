@@ -72,6 +72,7 @@ jobs:
             # and runtime; workspace/abort owns only line orchestration.
             # The bc package split and shared Rust jq codecs stay covered
             # by the whole-host filters, including Node/browser providers.
+            # Rust cut/tr streams and both host adapters use these filters.
             # Shared fixtures under packages/*/tests and the openai_agents
             # adapter stay covered by the whole TypeScript filters. Some
             # integration runners import those fixtures, so keep them covered.

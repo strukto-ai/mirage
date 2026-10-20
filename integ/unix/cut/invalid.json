@@ -743,7 +743,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\tb\\n' | cut -f '2-3é'",
+      "command": "printf 'a\\tb\\n' | cut -f '2-3\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -780,7 +780,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\n' | cut -b '1,é'",
+      "command": "printf 'ab\\n' | cut -b '1,\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -817,7 +817,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab\\n' | cut -c 'xé'",
+      "command": "printf 'ab\\n' | cut -c 'x\u00e9'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -854,7 +854,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\tb\\n' | cut -f '😀'",
+      "command": "printf 'a\\tb\\n' | cut -f '\ud83d\ude00'",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -1459,6 +1459,43 @@
       "flags": [
         "f",
         "c"
+      ]
+    },
+    {
+      "id": "cut_invalid_list_precedes_missing_operand",
+      "seq": 17300004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cut -f 0 /missing-cut-input",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cut: fields are numbered from 1\nTry 'cut --help' for more information.\n"
+      },
+      "flags": [
+        "f"
       ]
     }
   ]

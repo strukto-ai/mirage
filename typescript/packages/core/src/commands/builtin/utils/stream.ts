@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { closeStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
@@ -19,6 +21,7 @@ import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STDIN_HEADER_NAME } from './constants.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { mergeSignals } from '../../../utils/abort.ts'
 
 export async function readStdinAsync(stdin: ByteSource | null): Promise<Uint8Array | null> {
   if (stdin === null) return null
@@ -131,4 +134,39 @@ export function stdinStat(
     isStdin(path, dash)
       ? Promise.resolve(new FileStat({ name: '-', type: FileType.FIFO }))
       : stat(path)
+}
+
+/** Drive an already validated stream through bounded calls. Mirrors Python's stream_output. */
+export function streamOutput(
+  stream: OpenStream,
+  source: Uint8Array | AsyncIterable<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncIterableIterator<Uint8Array> {
+  let started = false
+  const stop = new AbortController()
+  const stopped = mergeSignals(signal, stop.signal)
+  async function* output(): AsyncGenerator<Uint8Array> {
+    started = true
+    try {
+      yield* streamOutputChunks(stream, source, stopped)
+    } catch (error) {
+      if (
+        !stop.signal.aborted ||
+        stopped?.reason !== stop.signal.reason ||
+        !(error instanceof DOMException) ||
+        error.name !== 'AbortError'
+      )
+        throw error
+    }
+  }
+  const producer = output()
+  return new OutputStream(producer, async () => {
+    stop.abort()
+    try {
+      await producer.return(undefined)
+    } finally {
+      await closeStream(stream)
+      if (!started) await closeQuietly(source)
+    }
+  })
 }

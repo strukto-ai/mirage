@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.commands.builtin.utils.stream import (
@@ -19,7 +21,9 @@ from mirage.commands.builtin.utils.stream import (
     operand_label,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
+from mirage.rs.stream import open_stream
 from mirage.types import FileStat, FileType, PathSpec
 
 
@@ -76,3 +80,68 @@ async def test_stdin_stat_and_stream_honor_dash():
     assert b"".join([c async for c in stream(dev)]) == b"piped"
     assert b"".join([c async for c in stream(dash)]) == b"backend"
     assert backend_hits == ["/-", "/-"]
+
+
+@pytest.mark.asyncio
+async def test_unstarted_output_closes_its_source_without_pulling():
+    class Source:
+        def __init__(self):
+            self.closed = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise AssertionError("unstarted output pulled input")
+
+        async def aclose(self):
+            self.closed += 1
+
+    source = Source()
+    output = stream_output(
+        open_stream("base64", {"mode": "decode", "ignore_garbage": False}),
+        source,
+    )
+    await output.aclose()
+    await output.aclose()
+    assert source.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_close_cancels_a_pending_input_read():
+    entered = asyncio.Event()
+
+    class Source:
+        def __init__(self):
+            self.closed = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            entered.set()
+            await asyncio.Future()
+            return b"YWJj"
+
+        async def aclose(self):
+            self.closed += 1
+
+    source = Source()
+    output = stream_output(
+        open_stream("base64", {"mode": "decode", "ignore_garbage": False}),
+        source,
+    )
+    reading = asyncio.create_task(anext(output))
+    await entered.wait()
+    await asyncio.wait_for(output.aclose(), 0.5)
+    with pytest.raises(asyncio.CancelledError):
+        await reading
+    await output.aclose()
+    assert source.closed == 1
+    with pytest.raises(StopAsyncIteration):
+        await anext(output)
+    fresh = stream_output(
+        open_stream("base64", {"mode": "decode", "ignore_garbage": False}),
+        b"YWJj",
+    )
+    assert b"".join([part async for part in fresh]) == b"abc"
