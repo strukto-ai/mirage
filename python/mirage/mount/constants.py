@@ -18,8 +18,8 @@
 LISTING_CONCURRENCY = 16
 
 # The files an NFS server keeps open between reads. NFS has no open or
-# close, so a read opens its file and later reads reuse that handle; the
-# least recently read is released past this many.
+# close, so a read opens its file and later reads reuse that handle; past
+# this many, the least recently read one no read is using is released.
 OPEN_HANDLES = 64
 
 # A client port below this one is bound by root. Linux's own NFS server

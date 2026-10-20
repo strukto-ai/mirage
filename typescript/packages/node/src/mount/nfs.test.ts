@@ -14,6 +14,7 @@
 
 import { type Socket, connect } from 'node:net'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -359,6 +360,44 @@ describe('MirageNFSServer handles and shutdown', () => {
     } finally {
       vi.restoreAllMocks()
       socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('finishes more concurrent reads than the cap holds', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e']
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('for f in a b c d e; do echo $f > /$f; done')
+    const core = new MountCore(ws.vfs)
+    const server = new MirageNFSServer(core, '/', false)
+    const port = await server.start()
+    const sockets = names.map(() => connect(port, '127.0.0.1'))
+    for (const socket of sockets) {
+      await new Promise<void>((resolve) => socket.once('connect', resolve))
+    }
+    const clients = sockets.map((socket) => new Client(socket))
+    const opened: string[] = []
+    const realOpen = core.open.bind(core)
+    vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+      opened.push(path)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return realOpen(path, flags)
+    })
+    try {
+      const handles = await Promise.all(clients.map((client, i) => client.handle(names[i] ?? '')))
+      const reads = Promise.all(
+        clients.map((client, i) => client.read(handles[i] ?? new Uint8Array(), 0, 10)),
+      )
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('reads never finished'))
+        }, 5000)
+      })
+      expect(await Promise.race([reads, timeout])).toEqual(names.map((name) => `${name}\n`))
+      expect([...opened].sort(compareCodePoints)).toEqual(names.map((name) => `/${name}`))
+    } finally {
+      vi.restoreAllMocks()
+      for (const socket of sockets) socket.destroy()
       await server.close()
     }
   })

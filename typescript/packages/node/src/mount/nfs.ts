@@ -140,6 +140,7 @@ export class MirageNFSServer {
   private nextConn = 0
   private readonly handles = new Map<string, Promise<number>>()
   private versions = new Map<string, string>()
+  private readonly readers = new Map<string, number>()
   private generation: number | null = null
 
   constructor(
@@ -305,29 +306,36 @@ export class MirageNFSServer {
       this.generation = generation
       await this.releaseAll()
     }
-    for (;;) {
-      let opened = this.handles.get(path)
-      if (opened === undefined) {
-        opened = this.open(path, this.versions)
-        opened.catch((err: unknown) => {
-          console.debug(`nfs: opening ${path} failed: ${String(err)}`)
-        })
+    this.readers.set(path, (this.readers.get(path) ?? 0) + 1)
+    try {
+      for (;;) {
+        let opened = this.handles.get(path)
+        if (opened === undefined) {
+          opened = this.open(path, this.versions)
+          opened.catch((err: unknown) => {
+            console.debug(`nfs: opening ${path} failed: ${String(err)}`)
+          })
+        }
+        this.handles.delete(path)
+        this.handles.set(path, opened)
+        while (this.handles.size > OPEN_HANDLES) {
+          const idle = [...this.handles.keys()].find((held) => !this.readers.has(held))
+          if (idle === undefined) break
+          await this.release(idle)
+        }
+        let fd: number
+        try {
+          fd = await opened
+        } catch (err) {
+          if (this.handles.get(path) === opened) this.handles.delete(path)
+          throw err
+        }
+        if (this.handles.get(path) === opened) return await this.core.read(path, fd, offset, size)
       }
-      this.handles.delete(path)
-      this.handles.set(path, opened)
-      while (this.handles.size > OPEN_HANDLES) {
-        const oldest = this.handles.keys().next()
-        if (oldest.done === true) break
-        await this.release(oldest.value)
-      }
-      let fd: number
-      try {
-        fd = await opened
-      } catch (err) {
-        if (this.handles.get(path) === opened) this.handles.delete(path)
-        throw err
-      }
-      if (this.handles.get(path) === opened) return this.core.read(path, fd, offset, size)
+    } finally {
+      const left = (this.readers.get(path) ?? 1) - 1
+      if (left === 0) this.readers.delete(path)
+      else this.readers.set(path, left)
     }
   }
 

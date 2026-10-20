@@ -469,3 +469,36 @@ async def test_a_reset_after_a_session_change_keeps_handles_opened_since() -> (
         a.writer.close()
         b.writer.close()
         await server.close()
+
+
+class Slow(Counting):
+    async def open(self, path: str, flags: int = 0) -> int:
+        await asyncio.sleep(0.01)
+        return await super().open(path, flags)
+
+
+@pytest.mark.asyncio
+async def test_more_concurrent_reads_than_the_cap_all_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(nfs, "OPEN_HANDLES", 2)
+    names = ["a", "b", "c", "d", "e"]
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("for f in a b c d e; do echo $f > /$f; done")
+    core = Slow(ws)
+    server = MirageNFSServer(core, secure=False)
+    port = await server.start()
+    clients = [
+        Client(*await asyncio.open_connection("127.0.0.1", port))
+        for _ in names
+    ]
+    try:
+        handles = [await c.handle(n) for c, n in zip(clients, names)]
+        reads = [c.read(h, 0, 10) for c, h in zip(clients, handles)]
+        done = await asyncio.wait_for(asyncio.gather(*reads), 5)
+        assert done == [f"{name}\n".encode() for name in names]
+        assert sorted(core.opened) == [f"/{name}" for name in names]
+    finally:
+        for c in clients:
+            c.writer.close()
+        await server.close()

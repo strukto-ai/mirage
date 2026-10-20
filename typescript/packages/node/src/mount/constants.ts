@@ -40,9 +40,9 @@ export const LISTING_CONCURRENCY = 16
 
 /**
  * The files an NFS server keeps open between reads: NFS has no open or
- * close, so a read opens its file and later reads reuse that handle. The
- * least recently read is released past this many. Mirrors Python's
- * OPEN_HANDLES.
+ * close, so a read opens its file and later reads reuse that handle. Past
+ * this many, the least recently read one no read is using is released.
+ * Mirrors Python's OPEN_HANDLES.
  */
 export const OPEN_HANDLES = 64
 

@@ -202,6 +202,7 @@ class MirageNFSServer:
         self._stats = asyncio.Semaphore(LISTING_CONCURRENCY)
         self._handles: dict[str, asyncio.Future[int]] = {}
         self._versions: dict[str, tuple[int, int]] = {}
+        self._readers: dict[str, int] = {}
         self._generation: int | None = None
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> int:
@@ -348,23 +349,35 @@ class MirageNFSServer:
         if generation != self._generation:
             self._generation = generation
             await self._release_all()
-        while True:
-            opened = self._handles.pop(path, None)
-            if opened is None:
-                opened = asyncio.ensure_future(
-                    self._open(path, self._versions)
-                )
-            self._handles[path] = opened
-            while len(self._handles) > OPEN_HANDLES:
-                await self._release(next(iter(self._handles)))
-            try:
-                fh = await asyncio.shield(opened)
-            except Exception:
+        self._readers[path] = self._readers.get(path, 0) + 1
+        try:
+            while True:
+                opened = self._handles.pop(path, None)
+                if opened is None:
+                    opened = asyncio.ensure_future(
+                        self._open(path, self._versions)
+                    )
+                self._handles[path] = opened
+                while len(self._handles) > OPEN_HANDLES:
+                    idle = next(
+                        (p for p in self._handles if p not in self._readers),
+                        None,
+                    )
+                    if idle is None:
+                        break
+                    await self._release(idle)
+                try:
+                    fh = await asyncio.shield(opened)
+                except Exception:
+                    if self._handles.get(path) is opened:
+                        del self._handles[path]
+                    raise
                 if self._handles.get(path) is opened:
-                    del self._handles[path]
-                raise
-            if self._handles.get(path) is opened:
-                return await self._core.read(path, size, offset, fh)
+                    return await self._core.read(path, size, offset, fh)
+        finally:
+            self._readers[path] -= 1
+            if not self._readers[path]:
+                del self._readers[path]
 
     async def _open(
         self, path: str, versions: dict[str, tuple[int, int]]
