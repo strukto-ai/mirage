@@ -46,17 +46,9 @@ def main(tag: str) -> None:
     project = tomllib.loads((ROOT / "python/pyproject.toml").read_text())[
         "project"
     ]
-    pins = [
-        dep.removeprefix("mirage-rs==")
-        for dep in project["dependencies"]
-        if dep.startswith("mirage-rs")
-    ]
-    if len(pins) != 1 or "==" in pins[0] or pins[0].startswith("mirage-rs"):
-        sys.exit(f"mirage-ai must pin mirage-rs with ==, found {pins!r}")
     cargo = tomllib.loads((ROOT / "rust/Cargo.toml").read_text())
     found = {
         "python/pyproject.toml": project["version"],
-        "python/pyproject.toml mirage-rs pin": pins[0],
         "rust/Cargo.toml": pep440(cargo["workspace"]["package"]["version"]),
     }
     for name in NPM_PACKAGES:

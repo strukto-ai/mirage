@@ -54,7 +54,6 @@ dependencies = [
     "jsonschema>=4.26.0",
     "regex>=2026.4.4",
     "multidict>=6.0",
-    "mirage-rs==0.0.7a3",
 ]
 
 [project.urls]
@@ -67,18 +66,21 @@ Issues = "https://github.com/strukto-ai/mirage/issues"
 mirage = "mirage.cli.main:main"
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
-[tool.setuptools.packages.find]
-include = ["mirage*"]
-
-[tool.setuptools.package-data]
-# py.typed is PEP 561 consent: without the marker a type checker refuses
-# to read an installed package's annotations and every mirage import
-# resolves to Any, so our own gated-at-zero mypy proves nothing to anyone
-# downstream. It caught the 0.0.5 build_vfs break in one line.
-mirage = ["**/*.lua", "**/*.js", "py.typed"]
+# The streams both hosts run are compiled from rust/ into mirage._rs, so a
+# wheel is per platform and carries everything under mirage/ beside it.
+# That includes py.typed, which is PEP 561 consent: without the marker a
+# type checker refuses to read an installed package's annotations and
+# every mirage import resolves to Any, so our own gated-at-zero mypy proves
+# nothing to anyone downstream. It caught the 0.0.5 build_vfs break in one
+# line.
+[tool.maturin]
+manifest-path = "../rust/python/Cargo.toml"
+module-name = "mirage._rs"
+features = ["pyo3/extension-module"]
+exclude = ["**/__pycache__/**"]
 
 [project.optional-dependencies]
 # --- python runtime (sandboxed python3 default) ---
@@ -237,9 +239,20 @@ e2b = [
 
 [tool.uv]
 constraint-dependencies = ["pypdf>=6.19.0"]
-
-[tool.uv.sources]
-mirage-rs = { path = "../rust/python" }
+# uv rebuilds the project only when one of these changes; by default that
+# is pyproject.toml alone, which would leave a Rust edit unbuilt.
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "../rust/Cargo.toml" },
+  { file = "../rust/Cargo.lock" },
+  { file = "../rust/python/Cargo.toml" },
+  { file = "../rust/python/src/**/*.rs" },
+  { file = "../rust/mirage-rs/Cargo.toml" },
+  { file = "../rust/mirage-rs/src/**/*.rs" },
+  { file = "../rust/mirage-rs/src/generated/*.dfa" },
+  { file = "../rust/vendor/grep-regex/Cargo.toml" },
+  { file = "../rust/vendor/grep-regex/src/**/*.rs" },
+]
 
 [dependency-groups]
 dev = [

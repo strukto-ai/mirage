@@ -14,6 +14,9 @@ permissions:
       - scripts/check_mirage_rs_wheel.py
       - scripts/check_release_artifacts.py
       - licenses/third_party/**
+      - python/THIRD_PARTY_NOTICES
+      # The wheels build from its [tool.maturin].
+      - python/pyproject.toml
       - typescript/packages/core/THIRD_PARTY_NOTICES
       - .github/workflows/test_rust.yml
       - .github/workflows/build_wheels.yml
@@ -26,6 +29,7 @@ permissions:
       - scripts/gen_unicode_classes.py
       - scripts/gen_rust_notices.py
       - licenses/third_party/**
+      - python/THIRD_PARTY_NOTICES
       - typescript/packages/core/THIRD_PARTY_NOTICES
       - .github/workflows/test_rust.yml
       - .github/actions/setup-rust/action.yml

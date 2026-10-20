@@ -16,8 +16,7 @@ import json
 from collections.abc import Mapping
 from typing import Literal, NotRequired, TypedDict
 
-from mirage_rs import NFSServer, StreamError
-
+from mirage._rs import NFSServer, StreamError
 from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue
 

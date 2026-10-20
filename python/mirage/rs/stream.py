@@ -16,8 +16,7 @@ import json
 from collections.abc import AsyncGenerator, Mapping
 from contextlib import aclosing
 
-from mirage_rs import Stream, StreamError
-
+from mirage._rs import Stream, StreamError
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.rs.errors import StreamRefusal
