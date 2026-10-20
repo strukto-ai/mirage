@@ -62,9 +62,13 @@ async def main():
                     parsed = json.loads(content)
                     print(f"  subject: {parsed.get('subject', 'N/A')}")
                     print(f"  from: {parsed.get('from', 'N/A')}")
+                    snippet = parsed.get("snippet", "")[:120]
+                    print(f"  snippet: {snippet}...")
 
                 print("\n--- os.path.exists() ---")
                 print(f"  {first}: {os.path.exists(path)}")
+                nope = os.path.exists("/gmail/INBOX/nope.json")
+                print(f"  nonexistent: {nope}")
 
         print("\n--- bash history ---")
         with open("/.bash_history") as f:

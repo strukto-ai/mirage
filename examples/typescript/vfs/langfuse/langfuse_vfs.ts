@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     if (traces.length > 0) {
       const t0 = traces[0]!
       console.log(`\n--- fs.readFile() ${t0} ---`)
-      const traceBytes = await fs.promises.readFile(t0, 'utf-8')
+      const traceBytes = await fs.promises.readFile(`/langfuse/traces/${t0}`, 'utf-8')
       try {
         const doc = JSON.parse(traceBytes) as Record<string, unknown>
         console.log(`  name: ${String(doc.name ?? '?')}`)

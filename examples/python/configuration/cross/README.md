@@ -170,5 +170,8 @@ mirage workspace delete cross_sg
 
 ## SDK alternative
 
-The same flow driven from Python (with snapshot fingerprinting) lives
-in [example.py](example.py) + [load_check.py](load_check.py).
+The same flow driven from the SDK (with snapshot fingerprinting) lives
+in [example.py](example.py) + [load_check.py](load_check.py), and in
+[example.ts](../../../typescript/configuration/cross/example.ts) +
+[load_check.ts](../../../typescript/configuration/cross/load_check.ts)
+for TypeScript.

@@ -18,7 +18,7 @@ import time
 from dotenv import load_dotenv
 from langfuse import Langfuse, propagate_attributes
 
-load_dotenv("/Users/zecheng/strukto/mirage/.env.development")
+load_dotenv(".env.development")
 
 langfuse = Langfuse(
     public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
@@ -251,7 +251,7 @@ langfuse.flush()
 time.sleep(3)
 
 print("\n=== Verifying ===")
-traces = langfuse.fetch_traces(limit=5)
+traces = langfuse.api.trace.list(limit=5)
 print(f"  traces: {len(traces.data)} found")
 for t in traces.data[:3]:
     print(f"    {t.name} (session={t.session_id})")

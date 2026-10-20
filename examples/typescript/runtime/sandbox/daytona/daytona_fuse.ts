@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     console.log(result.result.trimEnd())
     if (result.exitCode !== 0) {
       console.error(`\n=== exit code: ${String(result.exitCode)} ===`)
-      process.exit(result.exitCode)
+      process.exitCode = result.exitCode
     }
   } finally {
     console.log(`\n=== deleting sandbox ${sandbox.id} ===`)

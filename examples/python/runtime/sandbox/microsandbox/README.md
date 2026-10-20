@@ -77,8 +77,5 @@ This is a libkrun + macFUSE interaction, not a Mirage or Microsandbox bug:
   `EPERM` (not `EACCES`), from a macOS-specific VFS operation libkrun's host-side
   virtio-fs server issues during share setup that macFUSE rejects.
 
-On macOS, use the sibling [`wasmer`](../wasmer/README.md) example instead: it maps
-the same host FUSE mount into a WASIX guest with `--mapdir` and works on macOS.
-
 Not run in CI. It needs the Microsandbox runtime, host FUSE, and live AWS
 credentials.

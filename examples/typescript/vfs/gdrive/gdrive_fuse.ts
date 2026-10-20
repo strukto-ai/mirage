@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,13 @@ function buildConfig(): GDriveConfig {
   }
   return { clientId, clientSecret, refreshToken };
 }
+
+const isFile = (p: string): Promise<boolean> =>
+  stat(p).then(
+    (s) => s.isFile(),
+    () => false,
+  );
+
 async function main(): Promise<void> {
   const vfs = new GoogleDriveVFS(buildConfig());
   const ws = new Workspace({
@@ -53,29 +60,27 @@ async function main(): Promise<void> {
   try {
     console.log(`=== FUSE MODE: mounted at ${mp} ===\n`);
 
-    console.log(`--- readdir() ${mp} (first 10) ---`);
-    const top = await readdir(mp);
-    for (const r of top.slice(0, 10)) console.log(`  ${r}`);
-    if (top.length > 10) console.log(`  ... (${String(top.length)} total)`);
+    console.log("--- readdir() root ---");
+    const entries = await readdir(mp);
+    for (const e of entries.slice(0, 10)) console.log(`  ${e}`);
 
-    if (top[0] !== undefined) {
-      const path = `${mp}/${top[0]}`;
-      const s = await stat(path);
-      console.log(`\n--- stat() ${top[0]} ---`);
-      console.log(`  isDirectory: ${String(s.isDirectory())}`);
-      console.log(`  isFile: ${String(s.isFile())}`);
-      console.log(`  size: ${String(s.size)}`);
-      if (s.isFile()) {
-        console.log(`\n--- readFile() ${top[0]} (first 200 chars) ---`);
-        const text = await readFile(path, "utf-8");
-        console.log(text.slice(0, 200));
+    for (const e of entries) {
+      const path = `${mp}/${e}`;
+      if (!(await isFile(path))) continue;
+      console.log(`\n--- reading ${e} ---`);
+      const fh = await open(path, "r");
+      try {
+        const { bytesRead } = await fh.read(Buffer.alloc(1024), 0, 1024, 0);
+        console.log(`  ${String(bytesRead)} bytes (first 1024)`);
+      } finally {
+        await fh.close();
       }
+      break;
     }
 
     console.log(`\n>>> FUSE mounted at: ${mp}`);
-    console.log(">>> Try in another terminal:");
+    console.log(">>> Open another terminal and run:");
     console.log(`>>>   ls ${mp}/`);
-    console.log(`>>>   find ${mp} -name '*.gdoc.json' | head`);
     console.log(">>> Press Enter to unmount and exit...");
 
     const rl = createInterface({
@@ -84,6 +89,10 @@ async function main(): Promise<void> {
     });
     await rl.question("");
     rl.close();
+
+    const records = ws.records;
+    const total = records.reduce((s, r) => s + (r.bytes ?? 0), 0);
+    console.log(`\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`);
   } finally {
     await ws.close();
   }

@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DevVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { MountMode, Workspace } from '@struktoai/mirage-node'
 
 async function main(): Promise<void> {
-  const dev = new DevVFS()
-  const ws = new Workspace({ '/dev': dev }, { mode: MountMode.WRITE })
+  // Every workspace mounts /dev itself; a second DevVFS there is refused.
+  const ws = new Workspace({}, { mode: MountMode.WRITE })
 
   console.log('=== ls /dev/ ===')
   const lsRes = await ws.shell('ls /dev/')

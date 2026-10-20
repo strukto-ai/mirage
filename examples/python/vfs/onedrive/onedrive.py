@@ -18,7 +18,8 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
-from mirage.core.onedrive.versions import list_versions
+from mirage.core.msgraph.client import graph_list
+from mirage.core.onedrive.client import drive_loc
 from mirage.types import PathSpec
 from mirage.vfs.onedrive import OneDriveConfig, OneDriveVFS
 
@@ -90,8 +91,9 @@ async def main() -> None:
     print(await (await ws.shell(f"cat {TEST_FILE}")).stdout_str())
 
     print("=== version history ===")
-    versions = await list_versions(
-        backend.accessor, PathSpec.from_str_path(TEST_FILE, TEST_KEY)
+    versions = await graph_list(
+        backend.accessor,
+        drive_loc(backend.accessor.config, TEST_KEY).item("/versions"),
     )
     for v in versions:
         print(

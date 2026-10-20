@@ -187,6 +187,7 @@ jobs:
           run integ/truth/custom_cli.json
           run integ/truth/session.json
           run integ/truth/typescript/filetype.json
+          run integ/truth/ram_python.json
           run integ/truth/typescript/pyodide_basic.json
           run integ/truth/typescript/pyodide_env.json
           run integ/truth/typescript/pyodide_heredoc.json

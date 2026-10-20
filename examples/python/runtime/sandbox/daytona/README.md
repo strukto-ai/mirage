@@ -5,9 +5,9 @@ sandbox, with an S3 bucket mounted live inside the sandbox. Mirage runs **in the
 sandbox** and FUSE-mounts S3 there, so the job reads and writes `/data/...` as
 local files and every write streams straight back to the bucket, no sync step.
 
-Unlike the [`microsandbox`](../microsandbox/README.md) and
-[`wasmer`](../wasmer/README.md) examples (which share a **host** FUSE mount into
-a guest), here the guest has its own `/dev/fuse` and runs Mirage itself.
+Unlike the [`microsandbox`](../microsandbox/README.md) example (which shares a
+**host** FUSE mount into a guest), here the guest has its own `/dev/fuse` and
+runs Mirage itself.
 
 ## How it works
 

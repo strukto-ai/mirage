@@ -24,6 +24,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,16 @@ def unmount(mountpoint: str) -> None:
         subprocess.run(["fusermount", "-u", mountpoint], capture_output=True)
 
 
+async def print_files(ws: Workspace) -> None:
+    for path in await ws.vfs.readdir("/"):
+        if await ws.vfs.is_dir(path):
+            print(f"\n--- {path}/ (directory) ---")
+            continue
+        content = await ws.vfs.read(path)
+        print(f"\n--- {path} ({len(content)} bytes) ---")
+        print(content.decode(errors="replace"))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -53,7 +64,7 @@ def main() -> None:
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
 
     with tempfile.TemporaryDirectory() as mountpoint:
-        t = mount_background(ws, mountpoint)
+        t = mount_background(ws.vfs, mountpoint)
         print(f"Mounted memory filesystem at {mountpoint}")
 
         try:
@@ -66,13 +77,7 @@ def main() -> None:
             t.join(timeout=3)
 
     print("\n=== Files Claude created (in memory) ===")
-    for path in ws.ls("/"):
-        try:
-            content = ws.cat(path)
-            print(f"\n--- {path} ({len(content)} bytes) ---")
-            print(content.decode(errors="replace"))
-        except (IsADirectoryError, ValueError):
-            print(f"\n--- {path}/ (directory) ---")
+    asyncio.run(print_files(ws))
 
 
 if __name__ == "__main__":

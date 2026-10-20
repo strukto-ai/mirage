@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import os
 
 from dotenv import load_dotenv
@@ -50,6 +51,39 @@ async def main():
                 with open(path) as f:
                     content = f.read()
                 print(f"  {len(content)} bytes")
+
+        # Docs, Sheets and Slides render to JSON with their own shapes.
+        gdoc = next((e for e in entries if e.endswith(".gdoc.json")), None)
+        gsheet = next((e for e in entries if e.endswith(".gsheet.json")), None)
+        gslide = next((e for e in entries if e.endswith(".gslide.json")), None)
+
+        if gdoc:
+            print(f"\n--- open() Google Doc: {gdoc} ---")
+            with open(f"/gdrive/{gdoc}") as f:
+                content = f.read()
+                parsed = json.loads(content)
+                print(f"  title: {parsed.get('title', 'N/A')}")
+                print(f"  preview: {content[:200]}...")
+
+        if gsheet:
+            print(f"\n--- open() Google Sheet: {gsheet} ---")
+            with open(f"/gdrive/{gsheet}") as f:
+                parsed = json.loads(f.read())
+                title = parsed.get("properties", {}).get("title", "N/A")
+                print(f"  title: {title}")
+                print(f"  sheets: {len(parsed.get('sheets', []))}")
+
+        if gslide:
+            print(f"\n--- open() Google Slides: {gslide} ---")
+            with open(f"/gdrive/{gslide}") as f:
+                parsed = json.loads(f.read())
+                print(f"  title: {parsed.get('title', 'N/A')}")
+                print(f"  slides: {len(parsed.get('slides', []))}")
+
+        print("\n--- os.path.exists() ---")
+        if gdoc:
+            print(f"  {gdoc}: {os.path.exists(f'/gdrive/{gdoc}')}")
+        print(f"  nonexistent: {os.path.exists('/gdrive/nope.txt')}")
 
         print("\n--- bash history ---")
         with open("/.bash_history") as f:

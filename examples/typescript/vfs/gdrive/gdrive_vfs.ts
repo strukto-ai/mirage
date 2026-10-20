@@ -40,37 +40,78 @@ function buildConfig(): GDriveConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
+const exists = (p: string): Promise<boolean> =>
+  fs.promises.stat(p).then(
+    () => true,
+    () => false,
+  )
+
+async function readJson<T>(path: string): Promise<{ content: string; parsed: T }> {
+  const content = await fs.promises.readFile(path, 'utf-8')
+  return { content, parsed: JSON.parse(content) as T }
+}
+
 async function main(): Promise<void> {
   const vfs = new GoogleDriveVFS(buildConfig())
   const ws = new Workspace({ '/gdrive/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
-    console.log('=== VFS MODE: fs.readFile() reads from Google Drive transparently ===\n')
+    console.log('=== VFS MODE ===\n')
 
     console.log('--- fs.readdir() root ---')
     const entries = await fs.promises.readdir('/gdrive')
     for (const e of entries.slice(0, 10)) console.log(`  ${e}`)
-    if (entries.length > 10) console.log(`  ... (${String(entries.length)} total)`)
 
     if (entries.length > 0) {
       const first = entries[0]!
       const path = `/gdrive/${first}`
-      console.log(`\n--- fs.promises.stat(${path}) ---`)
       const stat = await fs.promises.stat(path)
-      console.log(`  isDirectory: ${String(stat.isDirectory())}`)
-      console.log(`  isFile: ${String(stat.isFile())}`)
-      console.log(`  size: ${String(stat.size)}`)
+      console.log(`\n--- isDirectory(${first}) ---`)
+      console.log(`  ${String(stat.isDirectory())}`)
 
       if (stat.isFile()) {
-        console.log(`\n--- open() + read ${path} (first 200 bytes) ---`)
+        console.log(`\n--- fs.readFile() ${first} ---`)
         const content = await fs.promises.readFile(path, 'utf-8')
-        console.log(`  ${content.slice(0, 200)}...`)
-      } else if (stat.isDirectory()) {
-        console.log(`\n--- fs.readdir(${path}) ---`)
-        const sub = await fs.promises.readdir(path)
-        for (const s of sub.slice(0, 5)) console.log(`  ${s}`)
+        console.log(`  ${String(content.length)} bytes`)
       }
     }
+
+    // Docs, Sheets and Slides render to JSON with their own shapes.
+    const gdoc = entries.find((e) => e.endsWith('.gdoc.json'))
+    const gsheet = entries.find((e) => e.endsWith('.gsheet.json'))
+    const gslide = entries.find((e) => e.endsWith('.gslide.json'))
+
+    if (gdoc !== undefined) {
+      console.log(`\n--- fs.readFile() Google Doc: ${gdoc} ---`)
+      const { content, parsed } = await readJson<{ title?: string }>(`/gdrive/${gdoc}`)
+      console.log(`  title: ${parsed.title ?? 'N/A'}`)
+      console.log(`  preview: ${content.slice(0, 200)}...`)
+    }
+
+    if (gsheet !== undefined) {
+      console.log(`\n--- fs.readFile() Google Sheet: ${gsheet} ---`)
+      const { parsed } = await readJson<{ properties?: { title?: string }; sheets?: unknown[] }>(
+        `/gdrive/${gsheet}`,
+      )
+      console.log(`  title: ${parsed.properties?.title ?? 'N/A'}`)
+      console.log(`  sheets: ${String(parsed.sheets?.length ?? 0)}`)
+    }
+
+    if (gslide !== undefined) {
+      console.log(`\n--- fs.readFile() Google Slides: ${gslide} ---`)
+      const { parsed } = await readJson<{ title?: string; slides?: unknown[] }>(`/gdrive/${gslide}`)
+      console.log(`  title: ${parsed.title ?? 'N/A'}`)
+      console.log(`  slides: ${String(parsed.slides?.length ?? 0)}`)
+    }
+
+    console.log('\n--- exists via fs.promises.stat() ---')
+    if (gdoc !== undefined) console.log(`  ${gdoc}: ${String(await exists(`/gdrive/${gdoc}`))}`)
+    console.log(`  nonexistent: ${String(await exists('/gdrive/nope.txt'))}`)
+
+    console.log('\n--- bash history ---')
+    const history = await fs.promises.readFile('/.bash_history', 'utf-8')
+    const lines = history.split('\n').filter((line) => line.trim() !== '')
+    for (const line of lines.slice(0, 6)) console.log(`  ${line.slice(0, 120)}`)
 
     const records = ws.records
     const total = records.reduce((s, r) => s + (r.bytes ?? 0), 0)

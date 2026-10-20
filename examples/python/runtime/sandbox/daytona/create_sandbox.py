@@ -44,7 +44,8 @@ mounts:
       aws_access_key_id: {key_id}
       aws_secret_access_key: {secret}
       key_prefix: mirage-daytona-cli-demo
-    fuse: /data
+    backend: fuse
+    mountpoint: /data
 """
 
 

@@ -66,7 +66,7 @@ async def bounds() -> None:
         read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=600),
     )
     try:
-        for mount in sorted(ws._registry.mounts(), key=lambda m: m.prefix):
+        for mount in sorted(ws.mounts(), key=lambda m: m.prefix):
             spec = mount.read
             print(f"{mount.prefix:16} {spec.policy.value} ttl={spec.ttl}")
     finally:

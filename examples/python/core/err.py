@@ -21,19 +21,22 @@ ws = Workspace(
     mode=MountMode.WRITE,
 )
 
-ws.dispatch("mkdir", "/data/logs")
-ws.dispatch("mkdir", "/data/src")
 APP_LOG = (
     b"INFO  server started\nERROR disk full\nINFO  request ok\nERROR timeout\n"
 )
-ws.dispatch("tee", "/data/logs/app.log", data=APP_LOG)
-ws.dispatch(
-    "tee", "/data/src/main.py", data=b'def main():\n    print("hello")\n'
-)
-ws.dispatch(
-    "tee", "/data/src/utils.py", data=b"def add(a, b):\n    return a + b\n"
-)
-ws.dispatch("tee", "/data/notes.txt", data=b"line one\nline two\nline three\n")
+
+
+async def seed() -> None:
+    await ws.vfs.mkdir("/data/logs")
+    await ws.vfs.mkdir("/data/src")
+    await ws.vfs.write("/data/logs/app.log", APP_LOG)
+    await ws.vfs.write(
+        "/data/src/main.py", b'def main():\n    print("hello")\n'
+    )
+    await ws.vfs.write(
+        "/data/src/utils.py", b"def add(a, b):\n    return a + b\n"
+    )
+    await ws.vfs.write("/data/notes.txt", b"line one\nline two\nline three\n")
 
 
 async def log_result(label: str, io) -> None:
@@ -54,6 +57,8 @@ async def log_result(label: str, io) -> None:
 
 
 async def main():
+    await seed()
+
     print("=" * 60)
     print(" Stderr Warnings & Error Handling Demo")
     print("=" * 60)

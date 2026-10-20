@@ -40,36 +40,45 @@ function buildConfig(): GSlidesConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
+const exists = (p: string): Promise<boolean> =>
+  fs.promises.stat(p).then(
+    () => true,
+    () => false,
+  )
+
 async function main(): Promise<void> {
   const vfs = new GSlidesVFS(buildConfig())
   const ws = new Workspace({ '/gslides/': vfs }, { mode: MountMode.READ })
   const restore = patchNodeFs(ws)
   try {
-    console.log('=== VFS MODE: fs.readFile() reads from Google Docs transparently ===\n')
+    console.log('=== VFS MODE: fs.readFile() reads from Google Slides transparently ===\n')
 
     console.log('--- fs.readdir() root ---')
-    const dirs = await fs.promises.readdir('/gslides')
-    for (const d of dirs) console.log(`  ${d}`)
+    for (const d of await fs.promises.readdir('/gslides')) console.log(`  ${d}`)
 
     console.log('\n--- fs.readdir() owned ---')
-    const docs = await fs.promises.readdir('/gslides/owned')
-    for (const d of docs.slice(0, 5)) console.log(`  ${d}`)
-    if (docs.length > 5) console.log(`  ... (${String(docs.length)} total)`)
+    const presentations = await fs.promises.readdir('/gslides/owned')
+    for (const p of presentations.slice(0, 5)) console.log(`  ${p}`)
 
-    if (docs.length > 0) {
-      const first = docs[0]!
-      const path = `/gslides/owned/${first.split('/').pop() ?? first}`
-      console.log(`\n--- open() + read first doc ---`)
+    if (presentations.length > 0) {
+      const first = presentations[0]!
+      const path = `/gslides/owned/${first}`
+      console.log('\n--- fs.readFile() first presentation ---')
       const content = await fs.promises.readFile(path, 'utf-8')
-      const parsed = JSON.parse(content) as { title?: string }
+      const parsed = JSON.parse(content) as { title?: string; slides?: unknown[] }
       console.log(`  title: ${parsed.title ?? 'N/A'}`)
-      console.log(`  content preview: ${content.slice(0, 200)}...`)
+      console.log(`  slides: ${String(parsed.slides?.length ?? 0)}`)
+      console.log(`  preview: ${content.slice(0, 200)}...`)
 
-      console.log('\n--- fs.promises.stat() ---')
-      const stat = await fs.promises.stat(path)
-      console.log(`  size: ${String(stat.size)}`)
-      console.log(`  isFile: ${String(stat.isFile())}`)
+      console.log('\n--- exists via fs.promises.stat() ---')
+      console.log(`  ${first}: ${String(await exists(path))}`)
+      console.log(`  nonexistent: ${String(await exists('/gslides/owned/nope.json'))}`)
     }
+
+    console.log('\n--- bash history ---')
+    const history = await fs.promises.readFile('/.bash_history', 'utf-8')
+    const lines = history.split('\n').filter((line) => line.trim() !== '')
+    for (const line of lines.slice(0, 6)) console.log(`  ${line.slice(0, 120)}`)
 
     const records = ws.records
     const total = records.reduce((s, r) => s + (r.bytes ?? 0), 0)

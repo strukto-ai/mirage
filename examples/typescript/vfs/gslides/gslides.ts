@@ -30,21 +30,6 @@ function buildConfig(): GSlidesConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
-async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
-  try {
-    const r = await ws.shell(cmd)
-    return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
-  } catch (err) {
-    return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
-  }
-}
-
-function printOut(label: string, out: string, err: string, max = 500): void {
-  console.log(`=== ${label} ===`)
-  if (out !== '') console.log(out.length > max ? out.slice(0, max) + '...' : out)
-  if (err !== '') process.stderr.write(`  STDERR: ${err.trim().slice(0, 200)}\n`)
-}
-
 async function main(): Promise<void> {
   const config = buildConfig()
   const vfs = new GSlidesVFS(config)
@@ -52,106 +37,136 @@ async function main(): Promise<void> {
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
-    const root = await run(ws, 'ls /gslides/')
-    printOut('ls /gslides/', root.out, root.err)
+    console.log('=== not-found errors show the full virtual path ===')
+    for (const cmd of [
+      'cat /gslides/__nf_missing__.txt',
+      'head /gslides/__nf_missing__.txt',
+      'stat /gslides/__nf_missing__.txt',
+    ]) {
+      const res = await ws.shell(cmd)
+      console.log(`$ ${cmd}`)
+      console.log(`  exit=${String(res.exitCode)}  ${res.stderrText.trim()}`)
+    }
 
-    const ownedHead = await run(ws, 'ls /gslides/owned/ | head -n 5')
-    printOut('ls /gslides/owned/ (first 5)', ownedHead.out, ownedHead.err)
-    const first = ownedHead.out.trim().split('\n')[0]
-    if (first === undefined || first === '') {
+    console.log('=== ls /gslides/ ===')
+    let r = await ws.shell('ls /gslides/')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /gslides/owned/ (first 5) ===')
+    r = await ws.shell('ls /gslides/owned/ | head -n 5')
+    console.log(r.stdoutText)
+
+    const first = r.stdoutText.trim().split('\n')[0] ?? ''
+    if (first === '') {
       console.log('no decks in /gslides/owned/')
       return
     }
+    const path = `/gslides/owned/${first}`
 
-    const cat = await run(ws, `cat "/gslides/owned/${first}"`)
-    printOut('cat (first 300)', cat.out, cat.err, 300)
+    console.log('=== cat ===')
+    r = await ws.shell(`cat "${path}"`)
+    console.log(r.stdoutText.slice(0, 300))
 
-    const stat = await run(ws, `stat "/gslides/owned/${first}"`)
+    console.log('\n=== head -n 20 ===')
+    r = await ws.shell(`head -n 20 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== head -c 200 ===')
+    r = await ws.shell(`head -c 200 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -n 10 ===')
+    r = await ws.shell(`tail -n 10 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -c 200 ===')
+    r = await ws.shell(`tail -c 200 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== wc ===')
+    r = await ws.shell(`wc "${path}"`)
+    console.log(r.stdoutText)
+
     console.log('=== stat ===')
-    console.log(`  ${stat.out.trim()}`)
-
+    r = await ws.shell(`stat "${path}"`)
+    console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Slides API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
-    console.log(`=== metadata overlay on /gslides/owned/${first} ===`)
-    const metaRes = await ws.shell(
-      `chmod 640 "/gslides/owned/${first}" && chown 500:dev "/gslides/owned/${first}" && touch -t 202601021530 "/gslides/owned/${first}"`,
+    console.log(`=== metadata overlay on ${path} ===`)
+    r = await ws.shell(
+      `chmod 640 "${path}" && chown 500:dev "${path}" && touch -t 202601021530 "${path}"`,
     )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', `/gslides/owned/${first}`)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const st = (await ws.dispatch('stat', path)) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
     console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
     )
 
-    const jq = await run(ws, `jq ".title" "/gslides/owned/${first}"`)
     console.log('=== jq .title ===')
-    console.log(`  ${jq.out.trim()}`)
+    r = await ws.shell(`jq ".title" "${path}"`)
+    console.log(r.stdoutText)
 
-    const tree = await run(ws, 'tree /gslides/')
-    printOut('tree /gslides/', tree.out, tree.err, 500)
+    console.log('=== jq ".slides | length" ===')
+    r = await ws.shell(`jq ".slides | length" "${path}"`)
+    console.log(r.stdoutText)
 
-    const findOwned = await run(ws, "find /gslides/owned/ -name '*.gslide.json' | head -n 5")
-    printOut('find /gslides/owned/', findOwned.out, findOwned.err, 2000)
+    console.log('=== nl ===')
+    r = await ws.shell(`nl "${path}" | head -n 10`)
+    console.log(r.stdoutText)
 
-    console.log('\n=== gws slides presentations create ===')
-    const create = await run(
-      ws,
-      "gws slides presentations create --json '{\"title\": \"MIRAGE TS Example Deck\"}'",
-    )
-    if (create.code !== 0) {
-      printOut('create FAILED', create.out, create.err)
-      return
-    }
-    const deck = JSON.parse(create.out) as { presentationId?: string; slides?: { objectId?: string }[] }
-    const presId = deck.presentationId
-    if (presId === undefined || presId === '') {
-      console.log('  no presentationId returned')
-      return
-    }
+    console.log('=== tree /gslides/ ===')
+    r = await ws.shell('tree /gslides/')
+    console.log(r.stdoutText.slice(0, 500))
+
+    console.log('\n=== find /gslides/owned/ ===')
+    r = await ws.shell("find /gslides/owned/ -name '*.gslide.json' | head -n 5")
+    console.log(r.stdoutText)
+
+    console.log('=== grep textRun ===')
+    r = await ws.shell(`grep textRun "${path}" | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== rg textRun ===')
+    r = await ws.shell(`rg textRun "${path}" | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== basename ===')
+    r = await ws.shell(`basename "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== dirname ===')
+    r = await ws.shell(`dirname "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== realpath ===')
+    r = await ws.shell(`realpath "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== gws slides presentations create ===')
+    r = await ws.shell("gws slides presentations create --json '{\"title\": \"MIRAGE TS Slides Test\"}'")
+    const presId = (JSON.parse(r.stdoutText) as { presentationId: string }).presentationId
     console.log(`Created: ${presId}`)
 
-    console.log('\n=== gws slides presentations batchUpdate (insert text on first slide) ===')
-    const slideId = deck.slides?.[0]?.objectId ?? ''
-    if (slideId !== '') {
-      const params = JSON.stringify({ presentationId: presId })
-      const body = JSON.stringify({
-        requests: [
-          {
-            createShape: {
-              objectId: 'mirage_textbox',
-              shapeType: 'TEXT_BOX',
-              elementProperties: {
-                pageObjectId: slideId,
-                size: {
-                  height: { magnitude: 50, unit: 'PT' },
-                  width: { magnitude: 300, unit: 'PT' },
-                },
-                transform: {
-                  scaleX: 1,
-                  scaleY: 1,
-                  translateX: 100,
-                  translateY: 100,
-                  unit: 'PT',
-                },
-              },
-            },
+    console.log('\n=== gws slides presentations batchUpdate ===')
+    const body = JSON.stringify({
+      requests: [
+        {
+          createSlide: {
+            insertionIndex: 1,
+            slideLayoutReference: { predefinedLayout: 'BLANK' },
           },
-          {
-            insertText: {
-              objectId: 'mirage_textbox',
-              text: 'Hello from MIRAGE TS!',
-            },
-          },
-        ],
-      })
-      const batch = await run(
-        ws,
-        `gws slides presentations batchUpdate --params '${params}' --json '${body}'`,
-      )
-      console.log(`Updated: ${batch.out.slice(0, 80)}`)
+        },
+      ],
+    })
+    const params = JSON.stringify({ presentationId: presId })
+    r = await ws.shell(`gws slides presentations batchUpdate --params '${params}' --json '${body}'`)
+    const update = JSON.parse(r.stdoutText) as {
+      replies: { createSlide: { objectId: string } }[]
     }
+    console.log(`Added slide: ${update.replies[0]!.createSlide.objectId}`)
 
     console.log(`\nOpen: https://docs.google.com/presentation/d/${presId}/edit`)
   } finally {

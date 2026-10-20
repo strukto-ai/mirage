@@ -4,7 +4,8 @@ Runnable scripts, laid out like the docs: `vfs/` holds one directory per
 backend and `vfs/new/` the custom-VFS examples, `agents/` one per agent
 framework, `runtime/` the Pyodide runtime and `runtime/sandbox/` one
 directory per sandbox, and `core/`, `cli/`, `policy/`, `configuration/`,
-`notifications/` and `fuse/` match the docs sections of the same name.
+`integration/`, `notifications/` and `fuse/` match the docs sections of the
+same name.
 Browser examples live in `examples/browser/`. The examples import the
 workspace packages from `typescript/`, so rebuild those dists first:
 

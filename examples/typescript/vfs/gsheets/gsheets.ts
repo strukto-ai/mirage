@@ -40,28 +40,6 @@ function buildConfig(): GSheetsConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
-async function run(
-  ws: Workspace,
-  cmd: string,
-): Promise<{ out: string; err: string; code: number }> {
-  try {
-    const r = await ws.shell(cmd)
-    return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
-  } catch (err) {
-    return {
-      out: '',
-      err: err instanceof Error ? err.message : String(err),
-      code: 1,
-    }
-  }
-}
-
-function printOut(label: string, out: string, err: string, max = 500): void {
-  console.log(`=== ${label} ===`)
-  if (out !== '') console.log(out.length > max ? out.slice(0, max) + '...' : out)
-  if (err !== '') process.stderr.write(`  STDERR: ${err.trim().slice(0, 200)}\n`)
-}
-
 async function main(): Promise<void> {
   const config = buildConfig()
   const vfs = new GSheetsVFS(config)
@@ -69,88 +47,166 @@ async function main(): Promise<void> {
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
-    const root = await run(ws, 'ls /gsheets/')
-    printOut('ls /gsheets/', root.out, root.err)
+    console.log('=== not-found errors show the full virtual path ===')
+    for (const cmd of [
+      'cat /gsheets/__nf_missing__.txt',
+      'head /gsheets/__nf_missing__.txt',
+      'stat /gsheets/__nf_missing__.txt',
+    ]) {
+      const res = await ws.shell(cmd)
+      console.log(`$ ${cmd}`)
+      console.log(`  exit=${String(res.exitCode)}  ${res.stderrText.trim()}`)
+    }
 
-    const ownedHead = await run(ws, 'ls /gsheets/owned/ | head -n 5')
-    printOut('ls /gsheets/owned/ (first 5)', ownedHead.out, ownedHead.err)
-    const first = ownedHead.out.trim().split('\n')[0]
-    if (first === undefined || first === '') {
+    console.log('=== ls /gsheets/ ===')
+    let r = await ws.shell('ls /gsheets/')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /gsheets/owned/ (first 5) ===')
+    r = await ws.shell('ls /gsheets/owned/ | head -n 5')
+    console.log(r.stdoutText)
+
+    const first = r.stdoutText.trim().split('\n')[0] ?? ''
+    if (first === '') {
       console.log('no sheets in /gsheets/owned/')
       return
     }
+    const path = `/gsheets/owned/${first}`
 
-    const cat = await run(ws, `cat "/gsheets/owned/${first}"`)
-    printOut('cat (first 300)', cat.out, cat.err, 300)
+    console.log('=== cat ===')
+    r = await ws.shell(`cat "${path}"`)
+    console.log(r.stdoutText.slice(0, 300))
 
-    const stat = await run(ws, `stat "/gsheets/owned/${first}"`)
+    console.log('\n=== head -n 20 ===')
+    r = await ws.shell(`head -n 20 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== head -c 200 ===')
+    r = await ws.shell(`head -c 200 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -n 10 ===')
+    r = await ws.shell(`tail -n 10 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -c 200 ===')
+    r = await ws.shell(`tail -c 200 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== wc ===')
+    r = await ws.shell(`wc "${path}"`)
+    console.log(r.stdoutText)
+
     console.log('=== stat ===')
-    console.log(`  ${stat.out.trim()}`)
+    r = await ws.shell(`stat "${path}"`)
+    console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Sheets API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
-    console.log(`=== metadata overlay on /gsheets/owned/${first} ===`)
-    const metaRes = await ws.shell(
-      `chmod 640 "/gsheets/owned/${first}" && chown 500:dev "/gsheets/owned/${first}" && touch -t 202601021530 "/gsheets/owned/${first}"`,
+    console.log(`=== metadata overlay on ${path} ===`)
+    r = await ws.shell(
+      `chmod 640 "${path}" && chown 500:dev "${path}" && touch -t 202601021530 "${path}"`,
     )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', `/gsheets/owned/${first}`)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const st = (await ws.dispatch('stat', path)) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
     console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
     )
 
-    const jq = await run(ws, `jq ".properties.title" "/gsheets/owned/${first}"`)
     console.log('=== jq .properties.title ===')
-    console.log(`  ${jq.out.trim()}`)
+    r = await ws.shell(`jq ".properties.title" "${path}"`)
+    console.log(r.stdoutText)
 
-    const tree = await run(ws, 'tree /gsheets/')
-    printOut('tree /gsheets/', tree.out, tree.err, 500)
+    console.log('=== jq ".sheets | length" ===')
+    r = await ws.shell(`jq ".sheets | length" "${path}"`)
+    console.log(r.stdoutText)
 
-    const findOwned = await run(ws, "find /gsheets/owned/ -name '*.gsheet.json' | head -n 5")
-    printOut('find /gsheets/owned/', findOwned.out, findOwned.err, 2000)
+    console.log('=== nl ===')
+    r = await ws.shell(`nl "${path}" | head -n 10`)
+    console.log(r.stdoutText)
 
-    console.log('\n=== gws sheets spreadsheets create ===')
-    const create = await run(
-      ws,
-      'gws sheets spreadsheets create --json \'{"properties": {"title": "MIRAGE TS Example Sheet"}}\'',
-    )
-    if (create.code !== 0) {
-      printOut('create FAILED', create.out, create.err)
+    console.log('=== tree /gsheets/ ===')
+    r = await ws.shell('tree /gsheets/')
+    console.log(r.stdoutText.slice(0, 500))
+
+    console.log('\n=== find /gsheets/owned/ ===')
+    r = await ws.shell("find /gsheets/owned/ -name '*.gsheet.json' | head -n 5")
+    console.log(r.stdoutText)
+
+    console.log('=== grep title ===')
+    r = await ws.shell(`grep title "${path}" | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== rg title ===')
+    r = await ws.shell(`rg title "${path}" | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== basename ===')
+    r = await ws.shell(`basename "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== dirname ===')
+    r = await ws.shell(`dirname "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== realpath ===')
+    r = await ws.shell(`realpath "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== gws sheets spreadsheets create ===')
+    const body = JSON.stringify({ properties: { title: 'MIRAGE TS Sheets Test' } })
+    r = await ws.shell(`gws sheets spreadsheets create --json '${body}'`)
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
       return
     }
-    const sheet = JSON.parse(create.out) as { spreadsheetId?: string }
-    const sheetId = sheet.spreadsheetId
-    if (sheetId === undefined || sheetId === '') {
-      console.log('  no spreadsheetId returned')
-      return
-    }
+    const sheetId = (JSON.parse(r.stdoutText) as { spreadsheetId: string }).spreadsheetId
     console.log(`Created: ${sheetId}`)
 
-    console.log('\n=== gws sheets write (A1:B2) ===')
-    const writeValues = JSON.stringify([
-      ['hello', 'world'],
-      ['foo', 'bar'],
+    console.log('\n=== gws sheets write ===')
+    const values = JSON.stringify([
+      ['Name', 'Age', 'City'],
+      ['Alice', '30', 'NYC'],
+      ['Bob', '25', 'SF'],
     ])
-    const write = await run(
-      ws,
-      `gws sheets write --spreadsheet ${sheetId} --range "A1:B2" --json-values '${writeValues}'`,
+    r = await ws.shell(
+      `gws sheets write --spreadsheet ${sheetId} --range "Sheet1!A1:C3" --json-values '${values}'`,
     )
-    console.log(`Written: ${write.out.slice(0, 80)}`)
+    console.log(`Written: ${r.stdoutText.slice(0, 80)}`)
 
-    console.log('\n=== gws sheets append (A:B) ===')
-    const append = await run(
-      ws,
-      `gws sheets append --spreadsheet ${sheetId} --range "A:B" --json-values '[["appended", "row"]]'`,
+    console.log('\n=== gws sheets read ===')
+    r = await ws.shell(`gws sheets read --spreadsheet ${sheetId} --range "Sheet1!A1:C3"`)
+    console.log(`Values: ${r.stdoutText}`)
+
+    console.log('=== gws sheets append ===')
+    r = await ws.shell(`gws sheets append --spreadsheet ${sheetId} --values Diana,28,Chicago`)
+    console.log(`Appended: ${r.stdoutText.slice(0, 80)}`)
+
+    console.log('\n=== gws sheets read (all) ===')
+    r = await ws.shell(`gws sheets read --spreadsheet ${sheetId} --range Sheet1`)
+    console.log(`All: ${r.stdoutText}`)
+
+    console.log('\n=== gws sheets spreadsheets batchUpdate ===')
+    const batchBody = JSON.stringify({
+      requests: [
+        {
+          updateSpreadsheetProperties: {
+            properties: { title: 'MIRAGE TS Sheets Test (Updated)' },
+            fields: 'title',
+          },
+        },
+      ],
+    })
+    const batchParams = JSON.stringify({ spreadsheetId: sheetId })
+    r = await ws.shell(
+      `gws sheets spreadsheets batchUpdate --params '${batchParams}' --json '${batchBody}'`,
     )
-    console.log(`Appended: ${append.out.slice(0, 80)}`)
+    console.log(`BatchUpdate: ${r.stdoutText.slice(0, 80)}`)
 
-    console.log('\n=== gws sheets read (A1:B3) ===')
-    const read = await run(ws, `gws sheets read --spreadsheet ${sheetId} --range "A1:B3"`)
-    console.log(read.out.trim())
-
-    console.log(`\nOpen: https://docs.google.com/spreadsheets/d/${sheetId}/edit`)
+    console.log(`\nOpen: https://docs.google.com/spreadsheets/d/${sheetId}`)
   } finally {
     await ws.close()
   }

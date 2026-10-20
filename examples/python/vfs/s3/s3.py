@@ -426,7 +426,7 @@ async def main():
 
     entry = events[-1]
     print(f"\n  Last command: {entry['command']}")
-    print(f"  Agent: {entry['agent']}")
+    print(f"  Session: {entry['session']}")
     print(f"  Exit code: {entry['exit_code']}")
 
     print("\n  --- history (shell builtin, this session) ---")

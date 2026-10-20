@@ -68,8 +68,16 @@ async def main() -> None:
     r = await ws.shell(f"head -n 20 /gsheets/owned/{first}")
     print(await r.stdout_str())
 
+    print("=== head -c 200 ===")
+    r = await ws.shell(f"head -c 200 /gsheets/owned/{first}")
+    print(await r.stdout_str())
+
     print("=== tail -n 10 ===")
     r = await ws.shell(f"tail -n 10 /gsheets/owned/{first}")
+    print(await r.stdout_str())
+
+    print("=== tail -c 200 ===")
+    r = await ws.shell(f"tail -c 200 /gsheets/owned/{first}")
     print(await r.stdout_str())
 
     print("=== wc ===")
@@ -143,7 +151,12 @@ async def main() -> None:
     print("=== gws sheets spreadsheets create ===")
     body = json.dumps({"properties": {"title": "MIRAGE Sheets Test"}})
     r = await ws.shell(f"gws sheets spreadsheets create --json '{body}'")
-    sheet = json.loads(await r.stdout_str())
+    out = await r.stdout_str()
+    if r.exit_code != 0 or not out.strip():
+        err = (await r.stderr_str()).strip() or "empty response"
+        print(f"  create failed (exit={r.exit_code}): {err}")
+        return
+    sheet = json.loads(out)
     sheet_id = sheet["spreadsheetId"]
     print(f"Created: {sheet_id}")
 

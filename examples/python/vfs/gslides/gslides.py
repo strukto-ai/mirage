@@ -68,8 +68,16 @@ async def main() -> None:
     r = await ws.shell(f"head -n 20 /gslides/owned/{first}")
     print(await r.stdout_str())
 
+    print("=== head -c 200 ===")
+    r = await ws.shell(f"head -c 200 /gslides/owned/{first}")
+    print(await r.stdout_str())
+
     print("=== tail -n 10 ===")
     r = await ws.shell(f"tail -n 10 /gslides/owned/{first}")
+    print(await r.stdout_str())
+
+    print("=== tail -c 200 ===")
+    r = await ws.shell(f"tail -c 200 /gslides/owned/{first}")
     print(await r.stdout_str())
 
     print("=== wc ===")

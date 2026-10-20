@@ -30,19 +30,11 @@ function buildConfig(): GDriveConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
-async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
-  try {
-    const r = await ws.shell(cmd)
-    return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
-  } catch (err) {
-    return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
-  }
-}
-
-function printOut(label: string, out: string, err: string, max = 500): void {
-  console.log(`=== ${label} ===`)
-  if (out !== '') console.log(out.length > max ? out.slice(0, max) + '...' : out)
-  if (err !== '') process.stderr.write(`  STDERR: ${err.trim().slice(0, 200)}\n`)
+function lines(text: string): string[] {
+  return text
+    .trim()
+    .split('\n')
+    .filter((s) => s !== '')
 }
 
 async function main(): Promise<void> {
@@ -52,109 +44,155 @@ async function main(): Promise<void> {
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
-    const root = await run(ws, 'ls /gdrive/')
-    printOut('ls /gdrive/', root.out, root.err)
+    console.log('=== not-found errors show the full virtual path ===')
+    for (const cmd of [
+      'cat /gdrive/__nf_missing__.txt',
+      'head /gdrive/__nf_missing__.txt',
+      'stat /gdrive/__nf_missing__.txt',
+    ]) {
+      const res = await ws.shell(cmd)
+      console.log(`$ ${cmd}`)
+      console.log(`  exit=${String(res.exitCode)}  ${res.stderrText.trim()}`)
+    }
 
-    const entries = root.out.trim().split('\n').filter((s) => s !== '')
+    console.log('=== ls /gdrive/ ===')
+    let r = await ws.shell('ls /gdrive/')
+    console.log(r.stdoutText)
+
+    const entries = lines(r.stdoutText)
     if (entries.length === 0) {
-      console.log('No files in /gdrive/')
+      console.log('No files')
       return
     }
     const first = entries[0]!
 
-    const stat = await run(ws, `stat "/gdrive/${first}"`)
     console.log(`=== stat /gdrive/${first} ===`)
-    console.log(`  ${stat.out.trim()}`)
-
+    r = await ws.shell(`stat "/gdrive/${first}"`)
+    console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Drive API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
     console.log(`=== metadata overlay on /gdrive/${first} ===`)
-    const metaRes = await ws.shell(
+    r = await ws.shell(
       `chmod 640 "/gdrive/${first}" && chown 500:dev "/gdrive/${first}" && touch -t 202601021530 "/gdrive/${first}"`,
     )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', `/gdrive/${first}`)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const st = (await ws.dispatch('stat', `/gdrive/${first}`)) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
     console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
     )
 
     if (first.endsWith('/')) {
-      const subLs = await run(ws, `ls "/gdrive/${first}"`)
-      printOut(`ls /gdrive/${first}`, subLs.out, subLs.err)
-      const subEntries = subLs.out.trim().split('\n').filter((s) => s !== '')
-      const sub = subEntries[0]
+      console.log(`=== ls /gdrive/${first} ===`)
+      r = await ws.shell(`ls "/gdrive/${first}"`)
+      console.log(r.stdoutText)
+      const sub = lines(r.stdoutText)[0]
       if (sub !== undefined && !sub.endsWith('/')) {
-        const cat = await run(ws, `cat "/gdrive/${first}${sub}"`)
-        printOut(`cat /gdrive/${first}${sub}`, cat.out, cat.err)
+        console.log(`=== cat /gdrive/${first}${sub} ===`)
+        r = await ws.shell(`cat "/gdrive/${first}${sub}"`)
+        console.log(r.stdoutText.slice(0, 500))
       }
     }
 
-    const tree = await run(ws, 'tree -L 1 /gdrive/')
-    printOut('tree -L 1 /gdrive/', tree.out, tree.err, 800)
+    console.log('=== tree -L 1 /gdrive/ ===')
+    r = await ws.shell('tree -L 1 /gdrive/')
+    console.log(r.stdoutText)
 
-    console.log('\n=== find /gdrive/ -name \'*.gdoc.json\' | head -n 5 ===')
-    const findDocs = await run(ws, "find /gdrive/ -name '*.gdoc.json' | head -n 5")
-    console.log(findDocs.out.trim())
+    console.log("=== find /gdrive/ -name '*.gdoc.json' | head -n 5 ===")
+    r = await ws.shell("find /gdrive/ -name '*.gdoc.json' | head -n 5")
+    console.log(r.stdoutText)
 
-    const docFiles = findDocs.out.trim().split('\n').filter((s) => s !== '')
-    const firstDoc = docFiles[0]
-    if (firstDoc !== undefined && firstDoc !== '') {
-      const jq = await run(ws, `cat "${firstDoc}" | jq ".title"`)
-      printOut(`cat ${firstDoc} | jq .title`, jq.out, jq.err)
+    const gdoc = lines(r.stdoutText)[0]
+    if (gdoc !== undefined) {
+      console.log(`=== cat ${gdoc} | jq .title ===`)
+      r = await ws.shell(`cat "${gdoc}" | jq ".title"`)
+      console.log(r.stdoutText)
 
-      const head = await run(ws, `head -n 3 "${firstDoc}"`)
-      printOut(`head -n 3 ${firstDoc}`, head.out, head.err)
+      console.log(`=== head -n 3 ${gdoc} ===`)
+      r = await ws.shell(`head -n 3 "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const wc = await run(ws, `wc "${firstDoc}"`)
-      printOut(`wc ${firstDoc}`, wc.out, wc.err)
+      console.log(`=== head -c 150 ${gdoc} ===`)
+      r = await ws.shell(`head -c 150 "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const basename = await run(ws, `basename "${firstDoc}"`)
-      printOut(`basename ${firstDoc}`, basename.out, basename.err)
+      console.log(`=== wc ${gdoc} ===`)
+      r = await ws.shell(`wc "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const dirname = await run(ws, `dirname "${firstDoc}"`)
-      printOut(`dirname ${firstDoc}`, dirname.out, dirname.err)
+      console.log(`=== basename ${gdoc} ===`)
+      r = await ws.shell(`basename "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const tail = await run(ws, `tail -n 3 "${firstDoc}"`)
-      printOut(`tail -n 3 ${firstDoc}`, tail.out, tail.err)
+      console.log(`=== dirname ${gdoc} ===`)
+      r = await ws.shell(`dirname "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const nl = await run(ws, `nl "${firstDoc}"`)
-      printOut(`nl ${firstDoc}`, nl.out, nl.err, 300)
+      console.log(`=== tail -n 3 ${gdoc} ===`)
+      r = await ws.shell(`tail -n 3 "${gdoc}"`)
+      console.log(r.stdoutText)
 
-      const grep = await run(ws, `grep title "${firstDoc}"`)
-      printOut(`grep title ${firstDoc}`, grep.out, grep.err, 300)
+      console.log(`=== nl ${gdoc} ===`)
+      r = await ws.shell(`nl "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
 
-      const rg = await run(ws, `rg title "${firstDoc}"`)
-      printOut(`rg title ${firstDoc}`, rg.out, rg.err, 300)
+      console.log(`=== grep title ${gdoc} ===`)
+      r = await ws.shell(`grep title "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
 
-      const cut = await run(ws, `cut -c 1-40 "${firstDoc}"`)
-      printOut(`cut -c 1-40 ${firstDoc}`, cut.out, cut.err, 300)
+      console.log(`=== rg title ${gdoc} ===`)
+      r = await ws.shell(`rg title "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
 
-      const sedPrint = await run(ws, `sed -n 2p "${firstDoc}"`)
-      printOut(`sed -n 2p ${firstDoc}`, sedPrint.out, sedPrint.err, 300)
+      console.log(`=== cut -c 1-40 ${gdoc} ===`)
+      r = await ws.shell(`cut -c 1-40 "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
 
-      const sedSub = await run(ws, `sed "s/title/TITLE/g" "${firstDoc}"`)
-      printOut(`sed s/title/TITLE/g ${firstDoc}`, sedSub.out, sedSub.err, 300)
+      console.log(`=== sed -n 2p ${gdoc} ===`)
+      r = await ws.shell(`sed -n 2p "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
 
-      const realpath = await run(ws, `realpath "${firstDoc}"`)
-      printOut(`realpath ${firstDoc}`, realpath.out, realpath.err)
+      console.log(`=== sed s/title/TITLE/g ${gdoc} ===`)
+      r = await ws.shell(`sed "s/title/TITLE/g" "${gdoc}"`)
+      console.log(r.stdoutText.slice(0, 300))
+
+      console.log(`=== realpath ${gdoc} ===`)
+      r = await ws.shell(`realpath "${gdoc}"`)
+      console.log(r.stdoutText)
     }
 
-    console.log('\n=== gws docs documents create ===')
-    const create = await run(
-      ws,
-      "gws docs documents create --json '{\"title\": \"Test from MIRAGE gdrive\"}'",
-    )
-    printOut('gws docs documents create', create.out, create.err, 300)
+    // Slides and Sheets render to their own JSON shapes in the same tree.
+    const gslide = entries.find((e) => e.endsWith('.gslide.json'))
+    if (gslide !== undefined) {
+      console.log(`=== jq .title /gdrive/${gslide} ===`)
+      r = await ws.shell(`jq ".title" "/gdrive/${gslide}"`)
+      console.log(r.stdoutText)
 
-    console.log('\n=== gws sheets spreadsheets create ===')
-    const createSheet = await run(
-      ws,
-      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Test Sheet from gdrive\"}}'",
+      console.log(`=== jq '.slides | length' /gdrive/${gslide} ===`)
+      r = await ws.shell(`jq ".slides | length" "/gdrive/${gslide}"`)
+      console.log(r.stdoutText)
+    }
+
+    const gsheet = entries.find((e) => e.endsWith('.gsheet.json'))
+    if (gsheet !== undefined) {
+      console.log(`=== jq .properties.title /gdrive/${gsheet} ===`)
+      r = await ws.shell(`jq ".properties.title" "/gdrive/${gsheet}"`)
+      console.log(r.stdoutText)
+    }
+
+    console.log('=== gws docs documents create ===')
+    r = await ws.shell(
+      "gws docs documents create --json '{\"title\": \"Test from MIRAGE TS gdrive\"}'",
     )
-    printOut('gws sheets spreadsheets create', createSheet.out, createSheet.err, 300)
+    console.log(r.stdoutText.slice(0, 300))
+
+    console.log('=== gws sheets spreadsheets create ===')
+    r = await ws.shell(
+      "gws sheets spreadsheets create --json '{\"properties\": {\"title\": \"Test Sheet from TS gdrive\"}}'",
+    )
+    console.log(r.stdoutText.slice(0, 300))
   } finally {
     await ws.close()
   }

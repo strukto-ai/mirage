@@ -13,19 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import tempfile
 
 from build_table import build_table
 
 from mirage import MountMode, Workspace
-from mirage.types import PathSpec
 from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
-
-
-async def show(ws: Workspace, cmd: str) -> None:
-    print(f"\n=== {cmd} ===")
-    result = await ws.shell(cmd)
-    print((await result.stdout_str()).rstrip())
 
 
 async def main() -> None:
@@ -43,47 +37,62 @@ async def main() -> None:
         vector_column="vector",
         search_limit=4,
     )
-    ws = Workspace({"/fashion/": LanceDBVFS(config)}, mode=MountMode.READ)
+    vfs = LanceDBVFS(config)
+    with Workspace({"/fashion/": vfs}, mode=MountMode.READ) as ws:
+        print(
+            f"=== VFS MODE: LanceDB table 'fashion' ({uri}) at /fashion/ ==="
+        )
 
-    print(f"=== mounted LanceDB table 'fashion' ({uri}) at /fashion/ ===")
+        print("\n--- list /fashion ---")
+        for entry in os.listdir("/fashion"):
+            print(f"  {entry}")
 
-    await show(ws, "ls /fashion/")
-    await show(ws, "tree -L 2 /fashion/")
-    await show(ws, "ls /fashion/Men/Shoes")
-    await show(ws, "cat /fashion/Men/Shoes/White/3.md")
-    await show(ws, "head -n 3 /fashion/Men/Shoes/White/3.md")
-    await show(ws, "tail -n 2 /fashion/Men/Shoes/White/3.md")
+        print("\n--- list /fashion/Men/Shoes/White ---")
+        for entry in os.listdir("/fashion/Men/Shoes/White"):
+            print(f"  {entry}")
 
-    print("\n=== stat /fashion/Men/Shoes/White/3.jpg (raw image bytes) ===")
-    r = await ws.shell("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
-    print(f"  image size: {(await r.stdout_str()).strip()} bytes")
+        print("\n--- read /fashion/Men/Shoes/White/3.md ---")
+        with open("/fashion/Men/Shoes/White/3.md") as f:
+            for line in f.read().rstrip().splitlines():
+                print(f"  {line}")
 
-    # chmod/chown/touch never hit the LanceDB API: attrs land in the
-    # workspace namespace (durable, snapshot-captured) and merge into
-    # dispatch-level stat.
-    print("=== metadata overlay on /fashion/Men/Shoes/White/3.md ===")
-    meta_res = await ws.shell(
-        'chmod 640 "/fashion/Men/Shoes/White/3.md"'
-        ' && chown 500:dev "/fashion/Men/Shoes/White/3.md"'
-        ' && touch -t 202601021530 "/fashion/Men/Shoes/White/3.md"'
-    )
-    print(f"  chmod/chown/touch exit={meta_res.exit_code}")
-    meta_st, _ = await ws.dispatch(
-        "stat", PathSpec.from_str_path("/fashion/Men/Shoes/White/3.md")
-    )
-    print(
-        f"  dispatch stat: mode={oct(meta_st.mode)[2:]} uid={meta_st.uid} "
-        f"gid={meta_st.gid} mtime={meta_st.modified}"
-    )
+        print(
+            "\n--- read /fashion/Men/Shoes/White/3.jpg (raw image bytes) ---"
+        )
+        with open("/fashion/Men/Shoes/White/3.jpg", "rb") as f:
+            image = f.read()
+        print(f"  size: {len(image)} bytes, magic: {image[:3].hex()}")
 
-    await show(ws, 'search "white running sneakers" /fashion')
+        print("\n--- stat ---")
+        for path in ("/fashion/Men/Shoes", "/fashion/Men/Shoes/White/3.md"):
+            kind = "directory" if os.path.isdir(path) else "file"
+            print(f"  {path}: {kind}")
 
-    await show(ws, "grep -ril blue /fashion/Women")
-    await show(ws, "rg -li running /fashion/Men")
+        # Every product is a card under gender/articleType/baseColour.
+        print("\n--- walk /fashion: product cards ---")
+        cards = sorted(
+            f"{root}/{name}"
+            for root, _, files in os.walk("/fashion")
+            for name in files
+            if name.endswith(".md")
+        )
+        for card in cards:
+            print(f"  {card}")
+        print(f"  total: {len(cards)}")
 
-    print("\n=== find /fashion -name '*.md' | wc -l ===")
-    r = await ws.shell("find /fashion -name '*.md' | wc -l")
-    print(f"  product cards: {(await r.stdout_str()).strip()}")
+        print("\n--- shell view ---")
+        r = await ws.shell('search "white running sneakers" /fashion')
+        hits = [
+            line
+            for line in (await r.stdout_str()).splitlines()
+            if line.startswith("/fashion/")
+        ]
+        for hit in hits:
+            print(f"  {hit}")
+
+        records = ws.vfs.records
+        total = sum(record.bytes for record in records)
+        print(f"\nStats: {len(records)} ops, {total} bytes transferred")
 
 
 if __name__ == "__main__":

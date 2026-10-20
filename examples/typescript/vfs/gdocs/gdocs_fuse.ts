@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,13 @@ function buildConfig(): GDocsConfig {
   }
   return { clientId, clientSecret, refreshToken };
 }
+
+const isDir = (p: string): Promise<boolean> =>
+  stat(p).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+
 async function main(): Promise<void> {
   const vfs = new GDocsVFS(buildConfig());
   const ws = new Workspace({
@@ -53,25 +60,29 @@ async function main(): Promise<void> {
   try {
     console.log(`=== FUSE MODE: mounted at ${mp} ===\n`);
 
-    console.log(`--- readdir() ${mp} ---`);
+    console.log("--- readdir() root ---");
     for (const r of await readdir(mp)) console.log(`  ${r}`);
 
-    console.log(`\n--- readdir() ${mp}/owned (first 5) ---`);
-    const owned = await readdir(`${mp}/owned`);
-    for (const o of owned.slice(0, 5)) console.log(`  ${o}`);
-    if (owned.length > 5) console.log(`  ... (${String(owned.length)} total)`);
+    for (const section of ["owned", "shared"]) {
+      const sectionPath = `${mp}/${section}`;
+      if (!(await isDir(sectionPath))) continue;
+      const docs = await readdir(sectionPath);
+      const first = docs[0];
+      if (first === undefined) continue;
+      console.log(`\n--- readdir() ${section} (first 5) ---`);
+      for (const d of docs.slice(0, 5)) console.log(`  ${d}`);
 
-    if (owned[0] !== undefined) {
-      const path = `${mp}/owned/${owned[0]}`;
-      console.log(`\n--- readFile() ${owned[0]} (first 200 chars) ---`);
-      const text = await readFile(path, "utf-8");
-      console.log(text.slice(0, 200));
+      console.log(`\n--- readFile() ${first.slice(0, 60)} ---`);
+      const content = await readFile(`${sectionPath}/${first}`, "utf-8");
+      const parsed = JSON.parse(content) as { title?: string };
+      console.log(`  title: ${parsed.title ?? "N/A"}`);
+      break;
     }
 
     console.log(`\n>>> FUSE mounted at: ${mp}`);
-    console.log(">>> Try in another terminal:");
+    console.log(">>> Open another terminal and run:");
+    console.log(`>>>   ls ${mp}/`);
     console.log(`>>>   ls ${mp}/owned/`);
-    console.log(`>>>   cat ${mp}/owned/<file> | jq .title`);
     console.log(">>> Press Enter to unmount and exit...");
 
     const rl = createInterface({
@@ -80,6 +91,10 @@ async function main(): Promise<void> {
     });
     await rl.question("");
     rl.close();
+
+    const records = ws.records;
+    const total = records.reduce((s, r) => s + (r.bytes ?? 0), 0);
+    console.log(`\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`);
   } finally {
     await ws.close();
   }

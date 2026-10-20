@@ -112,6 +112,10 @@ async def main() -> None:
         result = await ws.shell(f'head -n 3 "{gdoc}"')
         print(await result.stdout_str())
 
+        print(f"=== head -c 150 {gdoc} ===")
+        result = await ws.shell(f'head -c 150 "{gdoc}"')
+        print(await result.stdout_str())
+
         print(f"=== wc {gdoc} ===")
         result = await ws.shell(f'wc "{gdoc}"')
         print(await result.stdout_str())
@@ -154,6 +158,23 @@ async def main() -> None:
 
         print(f"=== realpath {gdoc} ===")
         result = await ws.shell(f'realpath "{gdoc}"')
+        print(await result.stdout_str())
+
+    # Slides and Sheets render to their own JSON shapes in the same tree.
+    gslide = next((e for e in entries if e.endswith(".gslide.json")), None)
+    if gslide:
+        print(f"=== jq .title /gdrive/{gslide} ===")
+        result = await ws.shell(f'jq ".title" "/gdrive/{gslide}"')
+        print(await result.stdout_str())
+
+        print(f"=== jq '.slides | length' /gdrive/{gslide} ===")
+        result = await ws.shell(f'jq ".slides | length" "/gdrive/{gslide}"')
+        print(await result.stdout_str())
+
+    gsheet = next((e for e in entries if e.endswith(".gsheet.json")), None)
+    if gsheet:
+        print(f"=== jq .properties.title /gdrive/{gsheet} ===")
+        result = await ws.shell(f'jq ".properties.title" "/gdrive/{gsheet}"')
         print(await result.stdout_str())
 
     print("=== gws docs documents create ===")

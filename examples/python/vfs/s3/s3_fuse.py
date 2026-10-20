@@ -65,30 +65,33 @@ with Workspace(
     size = os.path.getsize(f"{mp}/data/example.jsonl")
     print(f"  size: {size} bytes")
 
+    # Only /s3/ is kernel-mounted, so the mountpoint is the bucket root.
+    # /deep/ stays virtual: inside the `with` block os and open() reach
+    # it through the workspace, in this process.
     print("\n=== KEY_PREFIX MOUNT (/deep → subdata/subsubdata/) ===")
     print(f"  key_prefix = {deep_config.key_prefix!r}\n")
 
-    print(f"--- os.listdir({mp}/deep) ---")
-    for e in os.listdir(f"{mp}/deep"):
+    print("--- os.listdir('/deep') ---")
+    for e in os.listdir("/deep"):
         print(f"  {e}")
 
-    print(f"\n--- open({mp}/deep/example.jsonl) + read 3 lines ---")
-    with open(f"{mp}/deep/example.jsonl") as f:
+    print("\n--- open('/deep/example.jsonl') + read 3 lines ---")
+    with open("/deep/example.jsonl") as f:
         for i, line in enumerate(f):
             if i >= 3:
                 break
             print(f"  [{i}] {line.strip()[:100]}...")
 
-    print(f"\n--- os.path.getsize({mp}/deep/example.jsonl) ---")
-    deep_size = os.path.getsize(f"{mp}/deep/example.jsonl")
+    print("\n--- os.path.getsize('/deep/example.jsonl') ---")
+    deep_size = os.path.getsize("/deep/example.jsonl")
     print(f"  size: {deep_size} bytes")
     print("  (resolves to s3://bucket/subdata/subsubdata/example.jsonl)")
 
     print(f"\n>>> FUSE mounted at: {mp}")
     print(">>> Open another terminal and run:")
     print(f">>>   ls {mp}/data/")
-    print(f">>>   ls {mp}/deep/")
-    print(f">>>   cat {mp}/deep/example.json")
+    print(f">>>   ls {mp}/subdata/subsubdata/")
+    print(f">>>   cat {mp}/subdata/subsubdata/example.json")
     print(">>> Press Enter to unmount and exit...")
     try:
         input()

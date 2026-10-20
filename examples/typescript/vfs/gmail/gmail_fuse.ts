@@ -44,6 +44,12 @@ function buildConfig(): GmailConfig {
   return { clientId, clientSecret, refreshToken };
 }
 
+const isDir = (p: string): Promise<boolean> =>
+  stat(p).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+
 async function main(): Promise<void> {
   const vfs = new GmailVFS(buildConfig());
   const ws = new Workspace({
@@ -58,45 +64,49 @@ async function main(): Promise<void> {
     const labels = await readdir(mp);
     for (const label of labels) console.log(`  ${label}`);
 
-    if (labels.includes("INBOX")) {
-      const inboxPath = `${mp}/INBOX`;
-      console.log("\n--- readdir() INBOX (first 5 dates) ---");
+    const inboxPath = `${mp}/INBOX`;
+    if (await isDir(inboxPath)) {
+      console.log("\n--- readdir() INBOX (dates) ---");
       const dates = await readdir(inboxPath);
-      for (const date of dates.slice(0, 5)) console.log(`  ${date}`);
+      for (const d of dates.slice(0, 5)) console.log(`  ${d}`);
 
       const firstDate = dates[0];
       if (firstDate !== undefined) {
         const datePath = `${inboxPath}/${firstDate}`;
-        console.log(`\n--- readdir() ${firstDate} (first 5 messages) ---`);
+        console.log(`\n--- readdir() ${firstDate} ---`);
         const messages = await readdir(datePath);
-        for (const message of messages.slice(0, 5)) console.log(`  ${message}`);
+        for (const m of messages.slice(0, 5)) console.log(`  ${m}`);
 
-        const firstMessage = messages.find((message) =>
-          message.endsWith(".gmail.json"),
-        );
-        if (firstMessage !== undefined) {
-          const messagePath = `${datePath}/${firstMessage}`;
-          console.log("\n--- stat before read ---");
-          console.log(`  size: ${(await stat(messagePath)).size}`);
+        const first = messages.find((m) => m.endsWith(".gmail.json"));
+        if (first !== undefined) {
+          const path = `${datePath}/${first}`;
 
-          console.log(`--- readFile() ${firstMessage.slice(0, 60)} ---`);
-          const content = await readFile(messagePath, "utf8");
-          const message = JSON.parse(content) as {
+          // Size-unknown semantics: rendered .gmail.json length is not
+          // knowable without rendering (Gmail's sizeEstimate is the
+          // source message, not the render), so stat before open
+          // reports 0; after a read the real size is served from the
+          // hydrated handle.
+          console.log("\n--- stat before open (expect size 0) ---");
+          console.log(`  size: ${String((await stat(path)).size)}`);
+
+          console.log(`--- readFile() ${first.slice(0, 60)} ---`);
+          const content = await readFile(path, "utf8");
+          const parsed = JSON.parse(content) as {
             subject?: string;
-            from?: string;
+            from?: { name?: string; email?: string };
           };
-          console.log(`  subject: ${message.subject ?? "N/A"}`);
-          console.log(`  from: ${message.from ?? "N/A"}`);
-          console.log(`  rendered bytes: ${Buffer.byteLength(content)}`);
+          console.log(`  subject: ${parsed.subject ?? "N/A"}`);
+          console.log(`  from: ${parsed.from !== undefined ? JSON.stringify(parsed.from) : "N/A"}`);
+          console.log(`  rendered bytes: ${String(Buffer.byteLength(content))}`);
 
-          console.log("--- stat after read ---");
-          console.log(`  size: ${(await stat(messagePath)).size}`);
+          console.log("--- stat after read (real rendered size) ---");
+          console.log(`  size: ${String((await stat(path)).size)}`);
         }
       }
     }
 
     console.log(`\n>>> FUSE mounted at: ${mp}`);
-    console.log(">>> Try in another terminal:");
+    console.log(">>> Open another terminal and run:");
     console.log(`>>>   ls ${mp}/`);
     console.log(`>>>   ls ${mp}/INBOX/`);
     console.log(">>> Press Enter to unmount and exit...");
@@ -107,6 +117,10 @@ async function main(): Promise<void> {
     });
     await rl.question("");
     rl.close();
+
+    const records = ws.records;
+    const total = records.reduce((s, r) => s + (r.bytes ?? 0), 0);
+    console.log(`\nStats: ${String(records.length)} ops, ${String(total)} bytes transferred`);
   } finally {
     await ws.close();
   }

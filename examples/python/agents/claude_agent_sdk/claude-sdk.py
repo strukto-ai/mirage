@@ -48,14 +48,14 @@ def unmount(mountpoint: str) -> None:
         subprocess.run(["fusermount", "-u", mountpoint], capture_output=True)
 
 
-def print_workspace(ws: Workspace, prefix: str = "/") -> None:
-    for path in ws.ls(prefix):
-        try:
-            content = ws.cat(path)
-            print(f"\n--- {path} ({len(content)} bytes) ---")
-            print(content.decode(errors="replace"))
-        except (IsADirectoryError, ValueError):
+async def print_workspace(ws: Workspace, prefix: str = "/") -> None:
+    for path in await ws.vfs.readdir(prefix):
+        if await ws.vfs.is_dir(path):
             print(f"\n--- {path}/ (directory) ---")
+            continue
+        content = await ws.vfs.read(path)
+        print(f"\n--- {path} ({len(content)} bytes) ---")
+        print(content.decode(errors="replace"))
 
 
 def print_ops(ops: list[dict]) -> None:
@@ -109,10 +109,7 @@ def main() -> None:
         print("  (no operations recorded)")
 
     print("\n=== Files in workspace (all in-memory) ===")
-    try:
-        print_workspace(ws)
-    except FileNotFoundError:
-        print("  (workspace is empty)")
+    anyio.run(print_workspace, ws)
 
 
 if __name__ == "__main__":

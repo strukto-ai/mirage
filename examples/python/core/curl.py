@@ -21,12 +21,15 @@ ws = Workspace(
     mode=MountMode.WRITE,
 )
 
-print("=== curl (returns the raw page body) ===")
-result = asyncio.run(ws.shell("curl https://example.com"))
-print(result.stdout)
 
-print("\n=== curl a documentation page ===")
-result = asyncio.run(
-    ws.shell("curl https://docs.python.org/3/library/json.html")
-)
-print(result.stdout)
+async def main() -> None:
+    print("=== curl (returns the raw page body) ===")
+    result = await ws.shell("curl https://example.com")
+    print(await result.stdout_str())
+
+    print("\n=== curl a documentation page ===")
+    result = await ws.shell("curl https://docs.python.org/3/library/json.html")
+    print(await result.stdout_str())
+
+
+asyncio.run(main())

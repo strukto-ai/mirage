@@ -12,83 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { connect } from '@lancedb/lancedb'
-import { getRegistry, LanceSchema, TextEmbeddingFunction } from '@lancedb/lancedb/embedding'
-import { Binary, Int32, Utf8 } from 'apache-arrow'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LanceDBVFS, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
-
-const FASHION_VOCAB = [
-  'men', 'women', 'tshirt', 'shirt', 'jeans', 'shoes', 'sneakers', 'heels',
-  'jacket', 'dress', 'blue', 'red', 'black', 'white', 'green', 'running',
-  'casual', 'formal', 'sports', 'summer', 'winter',
-]
-const INDEX = new Map(FASHION_VOCAB.map((token, i) => [token, i]))
-
-const PRODUCTS: [string, string, string, string][] = [
-  ['Men', 'Tshirts', 'Blue', 'Roadster Men Blue Casual Tshirt'],
-  ['Men', 'Tshirts', 'Black', 'HRX Men Black Sports Tshirt'],
-  ['Men', 'Shoes', 'White', 'Nike Men White Running Sneakers'],
-  ['Men', 'Shoes', 'Black', 'Puma Men Black Formal Shoes'],
-  ['Men', 'Jeans', 'Blue', 'Levis Men Blue Casual Jeans'],
-  ['Women', 'Tshirts', 'Red', 'Roadster Women Red Casual Tshirt'],
-  ['Women', 'Shoes', 'Red', 'Steve Madden Women Red Heels'],
-  ['Women', 'Shoes', 'White', 'Adidas Women White Running Sneakers'],
-  ['Women', 'Dress', 'Black', 'Zara Women Black Formal Dress'],
-  ['Women', 'Jeans', 'Blue', 'H&M Women Blue Summer Jeans'],
-]
-
-function embed(text: string): number[] {
-  const vector = new Array<number>(FASHION_VOCAB.length).fill(0)
-  for (const word of text.toLowerCase().split(/\s+/)) {
-    const idx = INDEX.get(word.replace(/^[.,]+|[.,]+$/g, ''))
-    if (idx !== undefined) vector[idx] = 1
-  }
-  const magnitude = Math.sqrt(vector.reduce((sum, x) => sum + x * x, 0))
-  const norm = magnitude === 0 ? 1 : magnitude
-  return vector.map((x) => x / norm)
-}
-
-class KeywordEmbedding extends TextEmbeddingFunction {
-  ndims(): number {
-    return FASHION_VOCAB.length
-  }
-  toJSON(): Record<string, never> {
-    return {}
-  }
-  generateEmbeddings(texts: string[]): Promise<number[][]> {
-    return Promise.resolve(texts.map(embed))
-  }
-}
-getRegistry().register('fashion-keyword')(KeywordEmbedding)
-
-async function buildTable(uri: string): Promise<void> {
-  const create = getRegistry().get('fashion-keyword')
-  if (create === undefined) throw new Error('fashion-keyword embedding not registered')
-  const func = create.create() as KeywordEmbedding
-  const schema = LanceSchema({
-    id: new Int32(),
-    gender: new Utf8(),
-    articleType: new Utf8(),
-    baseColour: new Utf8(),
-    productDisplayName: func.sourceField(),
-    image_bytes: new Binary(),
-    vector: func.vectorField(),
-  })
-  const enc = new TextEncoder()
-  const rows = PRODUCTS.map(([gender, articleType, baseColour, name], i) => ({
-    id: i + 1,
-    gender,
-    articleType,
-    baseColour,
-    productDisplayName: name,
-    image_bytes: new Uint8Array([0xff, 0xd8, 0xff, ...enc.encode(name)]),
-  }))
-  const db = await connect(uri)
-  await db.createTable('fashion', rows, { schema })
-}
+import { buildTable } from './build_table.ts'
 
 const DEC = new TextDecoder()
 
@@ -100,7 +28,7 @@ async function show(ws: Workspace, cmd: string): Promise<void> {
 
 async function main(): Promise<void> {
   const uri = mkdtempSync(join(tmpdir(), 'mirage-fashion-'))
-  await buildTable(uri)
+  await buildTable(uri, 'fashion')
 
   const vfs = new LanceDBVFS({
     config: {
@@ -129,7 +57,6 @@ async function main(): Promise<void> {
   console.log('\n=== stat /fashion/Men/Shoes/White/3.jpg (raw image bytes) ===')
   const s = await ws.shell("stat -c '%s' /fashion/Men/Shoes/White/3.jpg")
   console.log(`  image size: ${DEC.decode(s.stdout).trim()} bytes`)
-
 
   // chmod/chown/touch never hit LanceDB: attrs land in the
   // workspace namespace (durable, snapshot-captured) and merge into

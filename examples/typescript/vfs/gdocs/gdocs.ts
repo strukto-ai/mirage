@@ -30,21 +30,6 @@ function buildConfig(): GDocsConfig {
   return { clientId, clientSecret, refreshToken }
 }
 
-async function run(ws: Workspace, cmd: string): Promise<{ out: string; err: string; code: number }> {
-  try {
-    const r = await ws.shell(cmd)
-    return { out: r.stdoutText, err: r.stderrText, code: r.exitCode }
-  } catch (err) {
-    return { out: '', err: err instanceof Error ? err.message : String(err), code: 1 }
-  }
-}
-
-function printOut(label: string, out: string, err: string, max = 500): void {
-  console.log(`=== ${label} ===`)
-  if (out !== '') console.log(out.length > max ? out.slice(0, max) + '...' : out)
-  if (err !== '') process.stderr.write(`  STDERR: ${err.trim().slice(0, 200)}\n`)
-}
-
 async function main(): Promise<void> {
   const config = buildConfig()
   const vfs = new GDocsVFS(config)
@@ -52,95 +37,113 @@ async function main(): Promise<void> {
   // The gws verbs are a CLI install, separate from the mount.
   ws.registerCli('gws', GWS, { ...config })
   try {
-    const root = await run(ws, 'ls /gdocs/')
-    printOut('ls /gdocs/', root.out, root.err)
+    console.log('=== not-found errors show the full virtual path ===')
+    for (const cmd of [
+      'cat /gdocs/__nf_missing__.txt',
+      'head /gdocs/__nf_missing__.txt',
+      'stat /gdocs/__nf_missing__.txt',
+    ]) {
+      const res = await ws.shell(cmd)
+      console.log(`$ ${cmd}`)
+      console.log(`  exit=${String(res.exitCode)}  ${res.stderrText.trim()}`)
+    }
 
-    const ownedHead = await run(ws, 'ls /gdocs/owned/ | head -n 5')
-    printOut('ls /gdocs/owned/ (first 5)', ownedHead.out, ownedHead.err)
-    const first = ownedHead.out.trim().split('\n')[0]
-    if (first === undefined || first === '') {
+    console.log('=== ls /gdocs/ ===')
+    let r = await ws.shell('ls /gdocs/')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /gdocs/owned/ (first 5) ===')
+    r = await ws.shell('ls /gdocs/owned/ | head -n 5')
+    console.log(r.stdoutText)
+
+    const first = r.stdoutText.trim().split('\n')[0] ?? ''
+    if (first === '') {
       console.log('no docs in /gdocs/owned/')
       return
     }
+    const path = `/gdocs/owned/${first}`
 
-    const cat = await run(ws, `cat "/gdocs/owned/${first}"`)
-    printOut('cat (first 300)', cat.out, cat.err, 300)
+    console.log('=== cat ===')
+    r = await ws.shell(`cat "${path}"`)
+    console.log(r.stdoutText.slice(0, 300))
 
-    const head = await run(ws, `head -n 20 "/gdocs/owned/${first}"`)
-    printOut('head -n 20', head.out, head.err)
+    console.log('\n=== head -n 20 ===')
+    r = await ws.shell(`head -n 20 "${path}"`)
+    console.log(r.stdoutText)
 
-    const tail = await run(ws, `tail -n 10 "/gdocs/owned/${first}"`)
-    printOut('tail -n 10', tail.out, tail.err)
+    console.log('=== head -c 200 ===')
+    r = await ws.shell(`head -c 200 "${path}"`)
+    console.log(r.stdoutText)
 
-    const wc = await run(ws, `wc "/gdocs/owned/${first}"`)
+    console.log('=== tail -n 10 ===')
+    r = await ws.shell(`tail -n 10 "${path}"`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -c 200 ===')
+    r = await ws.shell(`tail -c 200 "${path}"`)
+    console.log(r.stdoutText)
+
     console.log('=== wc ===')
-    console.log(`  ${wc.out.trim()}`)
+    r = await ws.shell(`wc "${path}"`)
+    console.log(r.stdoutText)
 
-    const stat = await run(ws, `stat "/gdocs/owned/${first}"`)
     console.log('=== stat ===')
-    console.log(`  ${stat.out.trim()}`)
-
+    r = await ws.shell(`stat "${path}"`)
+    console.log(r.stdoutText)
 
     // chmod/chown/touch never hit the Docs API: attrs land in the
     // workspace namespace (durable, snapshot-captured) and merge into
     // dispatch-level stat.
-    console.log(`=== metadata overlay on /gdocs/owned/${first} ===`)
-    const metaRes = await ws.shell(
-      `chmod 640 "/gdocs/owned/${first}" && chown 500:dev "/gdocs/owned/${first}" && touch -t 202601021530 "/gdocs/owned/${first}"`,
+    console.log(`=== metadata overlay on ${path} ===`)
+    r = await ws.shell(
+      `chmod 640 "${path}" && chown 500:dev "${path}" && touch -t 202601021530 "${path}"`,
     )
-    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
-    const metaSt = (await ws.dispatch('stat', `/gdocs/owned/${first}`)) as FileStat
-    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const st = (await ws.dispatch('stat', path)) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
     console.log(
-      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
     )
 
-    const jq = await run(ws, `jq ".title" "/gdocs/owned/${first}"`)
     console.log('=== jq .title ===')
-    console.log(`  ${jq.out.trim()}`)
+    r = await ws.shell(`jq ".title" "${path}"`)
+    console.log(r.stdoutText)
 
-    const nl = await run(ws, `nl "/gdocs/owned/${first}" | head -n 10`)
-    printOut('nl | head -n 10', nl.out, nl.err)
+    console.log('=== nl ===')
+    r = await ws.shell(`nl "${path}" | head -n 10`)
+    console.log(r.stdoutText)
 
-    const tree = await run(ws, 'tree /gdocs/')
-    printOut('tree /gdocs/', tree.out, tree.err, 500)
+    console.log('=== tree /gdocs/ ===')
+    r = await ws.shell('tree /gdocs/')
+    console.log(r.stdoutText.slice(0, 500))
 
-    const find = await run(ws, "find /gdocs/owned/ -name '*.gdoc.json' | head -n 5")
-    printOut("find -name '*.gdoc.json' (first 5)", find.out, find.err)
+    console.log('\n=== find /gdocs/owned/ ===')
+    r = await ws.shell("find /gdocs/owned/ -name '*.gdoc.json' | head -n 5")
+    console.log(r.stdoutText)
 
-    const grep = await run(ws, `grep textRun "/gdocs/owned/${first}" | head -c 200`)
-    printOut('grep textRun (first 200B)', grep.out, grep.err, 200)
+    console.log('=== grep textRun ===')
+    r = await ws.shell(`grep textRun "${path}" | head -c 200`)
+    console.log(r.stdoutText)
 
-    const rg = await run(ws, `rg textRun "/gdocs/owned/${first}" | head -c 200`)
-    printOut('rg textRun (first 200B)', rg.out, rg.err, 200)
+    console.log('\n=== rg textRun ===')
+    r = await ws.shell(`rg textRun "${path}" | head -c 200`)
+    console.log(r.stdoutText)
 
-    const basename = await run(ws, `basename "/gdocs/owned/${first}"`)
-    console.log('=== basename ===')
-    console.log(`  ${basename.out.trim()}`)
+    console.log('\n=== basename ===')
+    r = await ws.shell(`basename "${path}"`)
+    console.log(r.stdoutText)
 
-    const dirname = await run(ws, `dirname "/gdocs/owned/${first}"`)
     console.log('=== dirname ===')
-    console.log(`  ${dirname.out.trim()}`)
+    r = await ws.shell(`dirname "${path}"`)
+    console.log(r.stdoutText)
 
-    const realpath = await run(ws, `realpath "/gdocs/owned/${first}"`)
     console.log('=== realpath ===')
-    console.log(`  ${realpath.out.trim()}`)
+    r = await ws.shell(`realpath "${path}"`)
+    console.log(r.stdoutText)
 
-    console.log('\n=== gws docs documents create ===')
-    const create = await run(
-      ws,
-      "gws docs documents create --json '{\"title\": \"MIRAGE TS Example Doc\"}'",
-    )
-    if (create.code !== 0) {
-      printOut('create FAILED', create.out, create.err)
-      return
-    }
-    const doc = JSON.parse(create.out) as { documentId?: string }
-    const docId = doc.documentId
-    if (docId === undefined || docId === '') {
-      console.log('  no documentId returned')
-      return
-    }
+    console.log('=== gws docs documents create ===')
+    r = await ws.shell("gws docs documents create --json '{\"title\": \"MIRAGE TS Example Doc\"}'")
+    const docId = (JSON.parse(r.stdoutText) as { documentId: string }).documentId
     console.log(`Created: ${docId}`)
 
     console.log('\n=== gws docs documents batchUpdate ===')
@@ -148,18 +151,12 @@ async function main(): Promise<void> {
       requests: [{ insertText: { location: { index: 1 }, text: 'Hello from MIRAGE TS!\n' } }],
     })
     const params = JSON.stringify({ documentId: docId })
-    const update = await run(
-      ws,
-      `gws docs documents batchUpdate --params '${params}' --json '${body}'`,
-    )
-    console.log(`Updated: ${update.out.slice(0, 80)}`)
+    r = await ws.shell(`gws docs documents batchUpdate --params '${params}' --json '${body}'`)
+    console.log(`Updated: ${r.stdoutText.slice(0, 80)}`)
 
     console.log('\n=== gws docs write ===')
-    const write = await run(
-      ws,
-      `gws docs write --document ${docId} --text "Appended via gws docs write."`,
-    )
-    console.log(`Written: ${write.out.slice(0, 80)}`)
+    r = await ws.shell(`gws docs write --document ${docId} --text "Appended via gws docs write."`)
+    console.log(`Written: ${r.stdoutText.slice(0, 80)}`)
 
     console.log(`\nOpen: https://docs.google.com/document/d/${docId}/edit`)
   } finally {
