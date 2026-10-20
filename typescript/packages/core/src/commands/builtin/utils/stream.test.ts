@@ -98,3 +98,96 @@ it('closes an unstarted output without pulling its source', async () => {
   await output.return?.()
   expect(closed).toBe(1)
 })
+
+it.each(['late bytes', 'stalled input'])(
+  'stops a pending read before closing its native stream (%s)',
+  async (inputState) => {
+    let enter: () => void = () => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    let release: (result: IteratorResult<Uint8Array>) => void = () => undefined
+    const input = new Promise<IteratorResult<Uint8Array>>((resolve) => {
+      release = resolve
+    })
+    let closed = 0
+    const source: AsyncIterableIterator<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next() {
+        enter()
+        return input
+      },
+      return() {
+        closed += 1
+        return Promise.resolve({ done: true, value: undefined })
+      },
+    }
+    const native = await openStream('base64', { mode: 'decode', ignore_garbage: false })
+    const output = streamOutput(native, source)
+    const reading = output.next()
+    const read = reading.then(
+      (result) => result,
+      (error: unknown) => error,
+    )
+    await entered
+    const closing = output.return?.()
+    const prompt = await Promise.race([
+      Promise.resolve(closing).then(() => true),
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => {
+          resolve(false)
+        }, 50),
+      ),
+    ])
+    if (inputState === 'late bytes' || !prompt)
+      release({ done: false, value: new TextEncoder().encode('YWJj') })
+    await closing
+    const result = await read
+    await output.return?.()
+    expect(result).toEqual({ done: true, value: undefined })
+    expect(prompt).toBe(true)
+    expect(closed).toBe(1)
+    expect(native.live).toBe(false)
+    expect(await output.next()).toEqual({ done: true, value: undefined })
+    const fresh = streamOutput(
+      await openStream('base64', { mode: 'decode', ignore_garbage: false }),
+      new TextEncoder().encode('YWJj'),
+    )
+    expect(await materialize(fresh)).toEqual(new TextEncoder().encode('abc'))
+  },
+)
+
+it('propagates caller cancellation during a pending read', async () => {
+  let enter: () => void = () => undefined
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve
+  })
+  const abort = new AbortController()
+  const reason = new Error('caller cancelled')
+  let closed = 0
+  const source: AsyncIterableIterator<Uint8Array> = {
+    [Symbol.asyncIterator]() {
+      return this
+    },
+    next() {
+      enter()
+      return new Promise<IteratorResult<Uint8Array>>(() => undefined)
+    },
+    return() {
+      closed += 1
+      return Promise.resolve({ done: true, value: undefined })
+    },
+  }
+  const native = await openStream('base64', { mode: 'decode', ignore_garbage: false })
+  const output = streamOutput(native, source, abort.signal)
+  const reading = output.next()
+  const rejected = expect(reading).rejects.toMatchObject({ name: 'AbortError', cause: reason })
+  await entered
+  abort.abort(reason)
+  await rejected
+  await output.return?.()
+  expect(closed).toBe(1)
+  expect(native.live).toBe(false)
+})

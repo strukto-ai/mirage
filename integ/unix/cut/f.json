@@ -225,6 +225,44 @@
         "d",
         "c"
       ]
+    },
+    {
+      "id": "cut_f_preserves_leading_bom",
+      "seq": 17340002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\357\\273\\277a,b\\n' | cut -d, -f1 | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " ef bb bf 61 0a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f",
+        "d"
+      ]
     }
   ]
 }
