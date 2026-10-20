@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeGitHub, blobSha } from '../../../tests/core/github/_test_util.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
-import { shiftPerformanceNow } from '../../../tests/cache/_test_util.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../../types.ts'
 import type { BaseVFS } from '../base.ts'
 import { RAMVFS } from '../ram/ram.ts'
@@ -60,13 +60,14 @@ async function ws(
   vfs: BaseVFS,
   policy: ReadPolicy = ReadPolicy.FRESH,
   prefix = '/gh',
+  clock?: ManualClock,
 ): Promise<Workspace> {
   return new Workspace(
     {
       [prefix]: new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: DEFAULT_READ_TTL } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { shellParser: await getTestParser() },
+    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
   )
 }
 
@@ -604,12 +605,12 @@ describe('github dispatcher under read: fresh', () => {
   })
 
   it('sees an outside change after the window', async () => {
-    const clock = shiftPerformanceNow()
-    const w = await ws(await vfsOf())
+    const clock = new ManualClock(100)
+    const w = await ws(await vfsOf(), ReadPolicy.FRESH, '/gh', clock)
     try {
       expect(await w.readdir('/gh/docs')).not.toContain('/gh/docs/c.txt')
       gh.set('docs/c.txt', 'new')
-      clock.advance(LISTING_TRUST_WINDOW * 1000)
+      clock.advance(LISTING_TRUST_WINDOW)
       expect(await w.readdir('/gh/docs')).toContain('/gh/docs/c.txt')
     } finally {
       await w.close()

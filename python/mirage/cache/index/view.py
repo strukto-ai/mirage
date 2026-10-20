@@ -76,7 +76,7 @@ class IndexView(IndexCacheStore):
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
         """
-        super().__init__()
+        super().__init__(store.clock)
         self._store = store
         self._cache = cache
         self._prefix = prefix or "/"
@@ -118,7 +118,8 @@ class IndexView(IndexCacheStore):
             return self._cap(expired_at)
         if self._read_ttl is None or self._store.ttl <= self._read_ttl:
             return None
-        return datetime.now(timezone.utc) + timedelta(seconds=self._read_ttl)
+        now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
+        return now + timedelta(seconds=self._read_ttl)
 
     def _cap(self, at: datetime) -> datetime:
         """Shorten an explicit expiry to this mount's bound.
@@ -128,9 +129,8 @@ class IndexView(IndexCacheStore):
         """
         if self._read_ttl is None:
             return at
-        return min(
-            at, datetime.now(timezone.utc) + timedelta(seconds=self._read_ttl)
-        )
+        now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
+        return min(at, now + timedelta(seconds=self._read_ttl))
 
     async def get(self, vfs_path: str) -> LookupResult:
         # A lookup may flush a queued snapshot, so reads share the write fence.

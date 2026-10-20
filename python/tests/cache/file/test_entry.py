@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
-
 from mirage.cache.file.entry import CacheEntry
 
 
 def test_cache_entry_creation():
-    entry = CacheEntry(cached_at=int(time.time()), size=5)
+    entry = CacheEntry(cached_at=1000, size=5)
     assert entry.fingerprint is None
     assert entry.size == 5
 
@@ -31,15 +29,21 @@ def test_cache_entry_mutable():
 
 def test_expired_with_ttl():
     entry = CacheEntry(cached_at=1000, size=1, ttl=10)
-    assert entry.expired is True
+    assert entry.is_expired(1010) is True
 
 
 def test_not_expired_without_ttl():
-    entry = CacheEntry(cached_at=int(time.time()), size=1)
+    entry = CacheEntry(cached_at=1000, size=1)
     assert entry.ttl is None
-    assert entry.expired is False
+    assert entry.is_expired(999_999) is False
 
 
 def test_not_expired_within_ttl():
-    entry = CacheEntry(cached_at=int(time.time()), size=1, ttl=3600)
-    assert entry.expired is False
+    entry = CacheEntry(cached_at=1000, size=1, ttl=3600)
+    assert entry.is_expired(4599) is False
+
+
+def test_expiry_is_read_at_the_boundary():
+    entry = CacheEntry(cached_at=1000, size=1, ttl=10)
+    assert entry.is_expired(1009) is False
+    assert entry.is_expired(1010) is True

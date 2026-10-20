@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { FileStat } from '../../types.ts'
+import type { Clock } from '../../utils/clock.ts'
 import type { ListResult } from './config.ts'
 import { LISTING_TRUST_WINDOW, ROW_READ_BATCH } from './constants.ts'
 import { soleCommandStarted } from './scope.ts'
@@ -57,7 +58,15 @@ export class ListingMemo {
   private readonly reads = new Map<string, Read>()
   private closed = false
 
-  constructor(private readonly keyPrefix: string) {
+  /**
+   * @param keyPrefix the store's key prefix, whose writes count.
+   * @param clock the store's clock, whose wall time a listing's expiry is
+   *   compared with.
+   */
+  constructor(
+    private readonly keyPrefix: string,
+    private readonly clock: Clock,
+  ) {
     HOLDERS_BY_PREFIX.set(keyPrefix, (HOLDERS_BY_PREFIX.get(keyPrefix) ?? 0) + 1)
   }
 
@@ -69,7 +78,7 @@ export class ListingMemo {
     return (
       kept.writesBefore === this.written() &&
       performance.now() - kept.readAt < LISTING_TRUST_WINDOW * 1000 &&
-      Date.now() / 1000 < kept.expiresAt
+      this.clock.now() < kept.expiresAt
     )
   }
 

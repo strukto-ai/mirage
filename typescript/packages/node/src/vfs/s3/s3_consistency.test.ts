@@ -39,6 +39,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { createHash } from 'node:crypto'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace } from '../../workspace.ts'
@@ -686,19 +687,18 @@ describe('S3 cache consistency (mocked)', () => {
 
 describe('S3 listing lifetime: workspace index ttl meets the mount ttl', () => {
   let mock: S3Mock
+  let clock: ManualClock
 
   beforeAll(() => {
     mock = installS3Mock()
   })
 
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    clock = new ManualClock(Date.UTC(2026, 0, 1) / 1000)
     mock.store.set(BUCKET, 'lt/a.txt', ENC.encode('a'))
   })
 
   afterEach(() => {
-    vi.useRealTimers()
     for (const b of mock.store.allBuckets()) mock.store.objects(b).clear()
   })
 
@@ -714,7 +714,7 @@ describe('S3 listing lifetime: workspace index ttl meets the mount ttl', () => {
           read: { policy: ReadPolicy.BOUNDED, ttl: mountTtl },
         }),
       },
-      { index: { type: IndexType.RAM, ttl: indexTtl } },
+      { index: { type: IndexType.RAM, ttl: indexTtl }, clock },
     )
   }
 
@@ -729,17 +729,16 @@ describe('S3 listing lifetime: workspace index ttl meets the mount ttl', () => {
     try {
       expect(await ls(w)).toBe('a.txt\n')
       mock.store.set(BUCKET, 'lt/b.txt', ENC.encode('b'))
-      const t0 = Date.now()
       // A warm `ls` still pays one LIST: the operand's own directory probe.
       mock.resetCalls()
       expect(await ls(w)).toBe('a.txt\n')
       const warm = mock.commandCalls(ListObjectsV2Command)
       mock.resetCalls()
-      vi.setSystemTime(t0 + 1000)
+      clock.advance(1)
       expect(await ls(w)).toBe('a.txt\n')
       expect(mock.commandCalls(ListObjectsV2Command)).toBe(warm)
       mock.resetCalls()
-      vi.setSystemTime(t0 + 3000)
+      clock.advance(2)
       expect(await ls(w)).toBe('a.txt\nb.txt\n')
       expect(mock.commandCalls(ListObjectsV2Command)).toBe(warm + 1)
     } finally {
@@ -752,7 +751,7 @@ describe('S3 listing lifetime: workspace index ttl meets the mount ttl', () => {
     try {
       expect(await ls(w)).toBe('a.txt\n')
       mock.store.set(BUCKET, 'lt/b.txt', ENC.encode('b'))
-      vi.setSystemTime(Date.now() + 6000)
+      clock.advance(6)
       expect(await ls(w)).toBe('a.txt\nb.txt\n')
     } finally {
       await w.close()

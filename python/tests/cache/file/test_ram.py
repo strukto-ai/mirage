@@ -20,6 +20,7 @@ from collections.abc import Coroutine
 import pytest
 
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.utils.clock import ManualClock
 from mirage.workspace.snapshot.keys import CacheKey
 from mirage.workspace.snapshot.state import _restore_cache
 
@@ -431,10 +432,11 @@ async def test_a_version_restamped_counts_its_size_once():
 
 @pytest.mark.asyncio
 async def test_a_version_an_expiry_leaves_stays_within_the_limit():
-    cache = RAMFileCacheStore(cache_limit=20)
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(cache_limit=20, clock=clock)
     await cache.set("/a-long-key", b"x", fingerprint="v1234567890", ttl=1)
     await cache.keep_fingerprints({"/a-long-key": "v1234567890"})
-    cache._entries["/a-long-key"].cached_at -= 10
+    clock.advance(10)
     assert await cache.get("/a-long-key") is None
     assert cache.cache_size <= 20
 
@@ -444,13 +446,41 @@ async def test_a_version_an_expiry_leaves_stays_within_the_limit():
 async def test_an_expired_entry_still_answers_its_version(kept):
     # The token stays true for the bytes read, all a condition says; a
     # version kept for a conditional mount outlives its bytes, as on redis.
-    cache = RAMFileCacheStore()
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(clock=clock)
     await cache.set("/a", b"x", fingerprint="v1", ttl=1)
     if kept:
         await cache.keep_fingerprints({"/a": "v1"})
-    cache._entries["/a"].cached_at -= 10
+    clock.advance(10)
     assert not await cache.exists("/a")
     assert await cache.fingerprint("/a") == "v1"
     assert await cache.get("/a") is None
     assert await cache.fingerprint("/a") == ("v1" if kept else None)
     assert "/a" not in cache._store.files
+
+
+@pytest.mark.asyncio
+async def test_ttl_boundary_is_exact_on_the_store_clock():
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/f.txt", b"hello", ttl=10)
+    clock.advance(9)
+    assert await cache.exists("/f.txt") is True
+    assert await cache.get("/f.txt") == b"hello"
+    clock.advance(1)
+    assert await cache.exists("/f.txt") is False
+    assert await cache.get("/f.txt") is None
+    assert cache.cache_size == 0
+
+
+@pytest.mark.asyncio
+async def test_a_version_replaces_bytes_the_clock_expired():
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
+    await cache.set("/a", b"old", fingerprint="v1", ttl=5)
+    await cache.keep_fingerprints({"/a": "v2"})
+    assert await cache.fingerprint("/a") == "v1"
+    clock.advance(5)
+    await cache.keep_fingerprints({"/a": "v2"})
+    assert await cache.fingerprint("/a") == "v2"
+    assert await cache.get("/a") is None

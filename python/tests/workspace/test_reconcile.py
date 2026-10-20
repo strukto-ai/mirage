@@ -29,6 +29,7 @@ from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.errors.fs import enotsup
 from mirage.types import FileStat, FileType, PathSpec, ReadPolicy, ReadSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.mount.namespace.namespace import NodeMeta
@@ -143,21 +144,18 @@ async def test_may_serve_listing_trusts_the_index_under_bounded():
 
 
 @pytest.mark.asyncio
-async def test_may_serve_listing_under_fresh_trusts_only_this_commands_writes(
-    monkeypatch,
-):
+async def test_may_serve_listing_under_fresh_trusts_only_this_commands_writes():
     # fresh re-lists anything listed before the command started; a listing
     # the command itself refreshed is served, so one ls costs one re-list.
     # Outside any command a listing is trusted only for the window.
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    clock = ManualClock(start=100.0)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
     mount = ws.namespace.mount_for("/data/d")
     mount.read = ReadSpec(policy=ReadPolicy.FRESH)
     rec = Reconciler(ws.cache, ws.namespace)
     await mount.index.set_dir("/data/d", [])
     assert await rec.may_serve_listing(mount, "/data/d", None) is True
-    now[0] += LISTING_TRUST_WINDOW
+    clock.advance(LISTING_TRUST_WINDOW)
     assert await rec.may_serve_listing(mount, "/data/d", None) is False
     async with command_scope():
         assert await rec.may_serve_listing(mount, "/data/d", None) is False
@@ -866,9 +864,12 @@ async def _versioned(
     remote: str | None = "v1",
     *,
     has_stat: bool = True,
+    clock: ManualClock | None = None,
 ):
     vfs = (VersionedVFS if has_stat else StatlessVersionedVFS)(kind, remote)
-    ws = Workspace({"/m/": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
+    ws = Workspace(
+        {"/m/": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH), clock=clock
+    )
     mount = ws.namespace.mount_for("/m/a")
     try:
         yield vfs, mount, Reconciler(ws.cache, ws.namespace)
@@ -1084,19 +1085,16 @@ async def test_listing_gate_check_survives_its_first_waiter_cancelling():
 
 
 @pytest.mark.asyncio
-async def test_listing_gate_outside_a_command_reuses_a_check_for_the_window(
-    monkeypatch,
-):
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
-    async with _versioned() as (vfs, mount, rec):
+async def test_listing_gate_outside_a_command_reuses_a_check_for_the_window():
+    clock = ManualClock(start=100.0)
+    async with _versioned(clock=clock) as (vfs, mount, rec):
         await _store(mount, "/m/a", "v1")
         assert await rec.may_serve_listing(mount, "/m/a", "v1") is True
         assert vfs.stats == ["/m"]
-        now[0] += LISTING_TRUST_WINDOW / 2
+        clock.advance(LISTING_TRUST_WINDOW / 2)
         assert await rec.may_serve_listing(mount, "/m/a", "v1") is True
         assert vfs.stats == ["/m"]
-        now[0] += LISTING_TRUST_WINDOW
+        clock.advance(LISTING_TRUST_WINDOW)
         assert await rec.may_serve_listing(mount, "/m/a", "v1") is True
         assert vfs.stats == ["/m", "/m"]
 

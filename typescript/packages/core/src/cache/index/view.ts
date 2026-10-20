@@ -67,7 +67,7 @@ export class IndexView extends IndexCacheStore {
     private readonly owns: (path: string) => boolean,
     options: IndexViewOptions = {},
   ) {
-    super()
+    super(inner.clock)
     this.locked = options.locked ?? false
     this.readTtl = options.readTtl
     this.onGone = options.onGone
@@ -98,13 +98,13 @@ export class IndexView extends IndexCacheStore {
   private deadline(expiredAt: Date | null | undefined): Date | null | undefined {
     if (expiredAt !== null && expiredAt !== undefined) return this.cap(expiredAt)
     if (this.readTtl === undefined || this.inner.ttl <= this.readTtl) return expiredAt
-    return new Date(Date.now() + this.readTtl * 1000)
+    return new Date(this.clock.now() * 1000 + this.readTtl * 1000)
   }
 
   /** Shorten an explicit expiry to this mount's bound. */
   private cap(at: Date): Date {
     if (this.readTtl === undefined) return at
-    const bound = Date.now() + this.readTtl * 1000
+    const bound = this.clock.now() * 1000 + this.readTtl * 1000
     return at.getTime() > bound ? new Date(bound) : at
   }
 

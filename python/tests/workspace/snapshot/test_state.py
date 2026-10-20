@@ -48,6 +48,7 @@ from mirage.types import (
     ReadSpec,
     WritePolicy,
 )
+from mirage.utils.clock import ManualClock
 from mirage.utils.loader import SCRIPT_MODULE_NAME, load_backend_class
 from mirage.utils.ranges import slice_window
 from mirage.vfs import registry as vfs_registry
@@ -1442,3 +1443,35 @@ async def test_a_version_kept_without_bytes_is_not_snapshotted(track):
     state = await to_state_dict(ws)
     keys = [e["key"] for e in state[StateKey.CACHE][CacheKey.ENTRIES]]
     assert keys == ["/d/a"]
+
+
+@pytest.mark.asyncio
+async def test_restored_cache_entry_ages_on_the_injected_clock(track):
+    src = track(
+        Workspace(
+            {"/": RAMVFS()},
+            mode=MountMode.WRITE,
+            clock=ManualClock(start=1000.0),
+        )
+    )
+    await src._cache.set("/c.txt", b"cached", ttl=10)
+    state = await to_state_dict(src)
+    clock = ManualClock(start=1000.0)
+    restored = track(await Workspace.from_state(state, clock=clock))
+    assert await restored._cache.exists("/c.txt") is True
+    clock.advance(9)
+    assert await restored._cache.exists("/c.txt") is True
+    clock.advance(1)
+    assert await restored._cache.exists("/c.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_the_workspace_clock(track):
+    clock = ManualClock(start=1000.0)
+    ws = track(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, clock=clock))
+    copied = track(await ws.copy())
+    await copied._cache.set("/c.txt", b"cached", ttl=10)
+    clock.advance(9)
+    assert await copied._cache.exists("/c.txt") is True
+    clock.advance(1)
+    assert await copied._cache.exists("/c.txt") is False

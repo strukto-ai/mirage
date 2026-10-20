@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -45,11 +44,6 @@ from mirage.utils.key_prefix import mount_key
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-def _now() -> float:
-    """Monotonic seconds, read through one name so tests can move it."""
-    return time.monotonic()
 
 
 class CacheManager:
@@ -108,6 +102,7 @@ class CacheManager:
         """
         self._file_cache = file_cache
         self._index = index
+        self._clock = index.clock
         self._prefix = prefix.rstrip("/")
         self._caches_reads = caches_reads
         self._owns_path = owns_path
@@ -188,6 +183,7 @@ class CacheManager:
             if self._view is not None:
                 self._written.clear()
                 self._forget_checks()
+            self._clock = index.clock
             self._view = IndexView(
                 index,
                 self._file_cache,
@@ -229,7 +225,11 @@ class CacheManager:
         self._probe_bound = PROBED_LIMIT
 
     def _note_written(self, folder: str) -> None:
-        self._written[folder] = (tick(), _now(), sole_command_started())
+        self._written[folder] = (
+            tick(),
+            self._clock.monotonic(),
+            sole_command_started(),
+        )
 
     def listed_this_command(self, folder: str) -> bool:
         """Whether the running command fetched ``folder``'s listing itself.
@@ -277,7 +277,7 @@ class CacheManager:
         started = command_started()
         if started is not None:
             return stamp > started
-        return _now() - at < LISTING_TRUST_WINDOW
+        return self._clock.monotonic() - at < LISTING_TRUST_WINDOW
 
     def _prune_checks(self) -> None:
         # A check answers only a caller inside its window, so the rest are
@@ -303,8 +303,7 @@ class CacheManager:
         self._checking.clear()
         self._check_epoch += 1
 
-    @staticmethod
-    def _sent_recently(sent_tick: int, sent_at: float) -> bool:
+    def _sent_recently(self, sent_tick: int, sent_at: float) -> bool:
         """Whether a version check is recent enough to answer for the caller.
 
         The rule ``listing_trusted`` applies to listings: inside a command,
@@ -319,7 +318,7 @@ class CacheManager:
         started = command_started()
         if started is not None:
             return sent_tick > started
-        return _now() - sent_at < LISTING_TRUST_WINDOW
+        return self._clock.monotonic() - sent_at < LISTING_TRUST_WINDOW
 
     async def checked_version(
         self, key: str, stored: str, check: Callable[[], Awaitable[str | None]]
@@ -366,7 +365,7 @@ class CacheManager:
         self, key: str, check: Callable[[], Awaitable[str | None]]
     ) -> tuple[int, float, asyncio.Task[str | None]]:
         sent_tick = tick()
-        sent_at = _now()
+        sent_at = self._clock.monotonic()
         epoch = self._check_epoch
 
         async def run() -> str | None:
@@ -839,7 +838,8 @@ class CacheManager:
         deadline = (
             None
             if self._read_ttl is None
-            else datetime.now(timezone.utc) + timedelta(seconds=self._read_ttl)
+            else datetime.fromtimestamp(self._index.clock.now(), timezone.utc)
+            + timedelta(seconds=self._read_ttl)
         )
         await self._index.add_entry(key, row, deadline)
 

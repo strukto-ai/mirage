@@ -17,7 +17,7 @@ import { GitHubAccessor, GitHubAccount } from '../accessor/github.ts'
 import { read as githubRead } from '../core/github/read.ts'
 import { stat as githubStat } from '../core/github/stat.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
-import { shiftPerformanceNow } from '../../tests/cache/_test_util.ts'
+import { ManualClock } from '../utils/clock.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -160,15 +160,15 @@ describe('Reconciler', () => {
   // the command itself refreshed is served, so one ls costs one re-list.
   // Outside any command a listing is trusted only for the window.
   it("mayServeListing under fresh trusts only this command's writes", async () => {
-    const clock = shiftPerformanceNow()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    const clock = new ManualClock()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
     try {
       const mount = withFresh(mountOf(ws, '/data/d'))
       const rec = new Reconciler(ws.cache, ws.namespace)
       const index = mount.index
       await index.setDir('/data/d', [])
       expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(true)
-      clock.advance(LISTING_TRUST_WINDOW * 1000)
+      clock.advance(LISTING_TRUST_WINDOW)
       expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(false)
       await runInCommandScope(async () => {
         expect(await rec.mayServeListing(mount, '/data/d', null)).toBe(false)
@@ -177,7 +177,6 @@ describe('Reconciler', () => {
         expect(await rec.mayServeListing(mount, '/data/other', null)).toBe(false)
       })
     } finally {
-      clock.spy.mockRestore()
       await ws.close()
     }
   })
@@ -776,8 +775,9 @@ describe('the listing version gate', () => {
   async function withVersioned(
     vfs: VersionedVFS,
     body: (ctx: ReturnType<typeof versionedWorkspace>) => Promise<void>,
+    clock?: ManualClock,
   ): Promise<void> {
-    const ctx = versionedWorkspace(vfs)
+    const ctx = versionedWorkspace(vfs, undefined, clock)
     try {
       await body(ctx)
     } finally {
@@ -990,19 +990,23 @@ describe('the listing version gate', () => {
   })
 
   it('outside a command reuses a check for the window', async () => {
-    const clock = shiftPerformanceNow()
+    const clock = new ManualClock()
     const vfs = new VersionedVFS('mount')
-    await withVersioned(vfs, async ({ mount, rec }) => {
-      await store(mount, '/m/a', 'v1')
-      expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
-      expect(vfs.stats).toEqual(['/m'])
-      clock.advance((LISTING_TRUST_WINDOW * 1000) / 2)
-      expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
-      expect(vfs.stats).toEqual(['/m'])
-      clock.advance(LISTING_TRUST_WINDOW * 1000)
-      expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
-      expect(vfs.stats).toEqual(['/m', '/m'])
-    })
+    await withVersioned(
+      vfs,
+      async ({ mount, rec }) => {
+        await store(mount, '/m/a', 'v1')
+        expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
+        expect(vfs.stats).toEqual(['/m'])
+        clock.advance(LISTING_TRUST_WINDOW / 2)
+        expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
+        expect(vfs.stats).toEqual(['/m'])
+        clock.advance(LISTING_TRUST_WINDOW)
+        expect(await rec.mayServeListing(mount, '/m/a', 'v1')).toBe(true)
+        expect(vfs.stats).toEqual(['/m', '/m'])
+      },
+      clock,
+    )
   })
 
   it('forgets its checks when the store changes', async () => {

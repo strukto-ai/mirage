@@ -48,6 +48,7 @@ from mirage.types import (
     ReadSpec,
     WritePolicy,
 )
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.path import norm_dir, owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
@@ -100,10 +101,19 @@ class MountRegistry:
     Given a virtual path like "/s3-prod/data/file.json",
     resolves to the mount at "/s3-prod/" and returns the
     stripped VFS path "/data/file.json".
+
+    Args:
+        io (IOConfig | None): the workspace's IO knobs; None keeps the
+            defaults.
+        clock (Clock | None): the clock every index store this registry
+            builds reads time through; None means the system clock.
     """
 
-    def __init__(self, io: IOConfig | None = None) -> None:
+    def __init__(
+        self, io: IOConfig | None = None, clock: Clock | None = None
+    ) -> None:
         self.io = io if io is not None else IOConfig()
+        self.clock: Clock = clock if clock is not None else SystemClock()
         self.process_view: Callable[[SessionState], ProcessView] | None = None
         # Fetches the managed names a tree a mount serves reads, once the
         # executor has picked that mount; the workspace sets it.
@@ -404,7 +414,7 @@ class MountRegistry:
         elif isinstance(vfs, DevVFS):
             store = NULL_INDEX
         elif store is None:
-            store = build_index(index, vfs.index_ttl)
+            store = build_index(index, vfs.index_ttl, self.clock)
         m = MountEntry(
             norm_prefix,
             vfs,

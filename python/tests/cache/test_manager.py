@@ -37,6 +37,7 @@ from mirage.observe.context import (
 )
 from mirage.observe.record import OpRecord, RecordIndex
 from mirage.types import DEFAULT_READ_TTL, FileStat, FileType, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mount_key
 
 
@@ -48,8 +49,12 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _stores() -> tuple[RAMFileCacheStore, RAMIndexCacheStore]:
-    return RAMFileCacheStore(), RAMIndexCacheStore(ttl=600)
+def _stores(
+    clock: ManualClock | None = None,
+) -> tuple[RAMFileCacheStore, RAMIndexCacheStore]:
+    return RAMFileCacheStore(clock=clock), RAMIndexCacheStore(
+        ttl=600, clock=clock
+    )
 
 
 async def _seed(cache: RAMFileCacheStore, index: RAMIndexCacheStore) -> None:
@@ -617,30 +622,31 @@ async def test_a_replaced_store_forgets_what_the_old_one_was_written():
         assert manager.listing_trusted("/data") is False
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 100.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 @pytest.fixture
-def clock(monkeypatch) -> _Clock:
-    fake = _Clock()
-    monkeypatch.setattr("mirage.cache.manager._now", fake)
-    return fake
+def clock() -> ManualClock:
+    return ManualClock(start=100.0)
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_store_times_its_window_on_its_own_clock(clock):
+    cache, index = _stores()
+    manager = CacheManager(cache, index, "/data/", True)
+    replacement = RAMIndexCacheStore(ttl=600, clock=clock)
+    await manager.scope_index(replacement).set_dir("/data", [])
+    assert manager.listing_trusted("/data") is True
+    clock.advance(LISTING_TRUST_WINDOW)
+    assert manager.listing_trusted("/data") is False
 
 
 @pytest.mark.asyncio
 async def test_outside_a_command_a_listing_is_trusted_for_the_window(clock):
-    cache, index = _stores()
+    cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
     await manager.scope_index(index).set_dir("/data", [])
-    clock.now += LISTING_TRUST_WINDOW - 0.01
+    clock.advance(LISTING_TRUST_WINDOW - 0.01)
     assert manager.listing_trusted("/data") is True
     assert manager.listing_trusted("/data/other") is False
-    clock.now += 0.02
+    clock.advance(0.02)
     assert manager.listing_trusted("/data") is False
 
 
@@ -648,14 +654,14 @@ async def test_outside_a_command_a_listing_is_trusted_for_the_window(clock):
 async def test_inside_a_command_the_window_does_not_apply(clock):
     # A listing the previous command fetched a moment ago is still re-listed by
     # the next one: the window is only for reads that belong to no command.
-    cache, index = _stores()
+    cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
     await manager.scope_index(index).set_dir("/data", [])
-    clock.now += 0.01
+    clock.advance(0.01)
     async with command_scope():
         assert manager.listing_trusted("/data") is False
         await manager.scope_index(index).set_dir("/data", [])
-        clock.now += LISTING_TRUST_WINDOW * 10
+        clock.advance(LISTING_TRUST_WINDOW * 10)
         assert manager.listing_trusted("/data") is True
 
 
@@ -667,7 +673,7 @@ async def test_version_checks_out_of_their_window_are_dropped_past_the_bound(
     # full the stale entries are dead weight; dropping one costs at most
     # another check, never a stale listing.
     monkeypatch.setattr("mirage.cache.manager.CHECKED_LIMIT", 4, raising=False)
-    cache, index = _stores()
+    cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
 
     async def check() -> str:
@@ -677,7 +683,7 @@ async def test_version_checks_out_of_their_window_are_dropped_past_the_bound(
         assert (
             await manager.checked_version(f"/data/old{n}", "V", check) == "V"
         )
-    clock.now += LISTING_TRUST_WINDOW + 0.01
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     assert await manager.checked_version("/data/new", "V", check) == "V"
     assert list(manager._checked) == ["/data/new"]
 
@@ -689,7 +695,7 @@ async def test_a_late_older_check_never_replaces_a_newer_memo(clock):
     # head it saw before the move. Recording A would put the memo back to
     # V1: a listing stored at V2 would be re-checked, and one stored at V1
     # served as current.
-    cache, index = _stores()
+    cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
     release = asyncio.Event()
     asked: list[str] = []
@@ -709,7 +715,7 @@ async def test_a_late_older_check_never_replaces_a_newer_memo(clock):
         manager.checked_version("/data", "V0", check_a)
     )
     await asyncio.sleep(0)
-    clock.now += LISTING_TRUST_WINDOW + 0.01
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     assert await manager.checked_version("/data", "V0", answer("V2")) == "V2"
     release.set()
     assert await first == "V1"
@@ -728,7 +734,7 @@ async def test_a_recent_answer_refuses_the_listing_it_refused_without_asking(
     # refused inside the window: nothing about that listing changed, so
     # asking again would only repeat the answer. Another stored version,
     # or the same one past the window, is asked.
-    cache, index = _stores()
+    cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
     asked: list[str] = []
 
@@ -744,7 +750,7 @@ async def test_a_recent_answer_refuses_the_listing_it_refused_without_asking(
     assert asked == ["V2"]
     assert await manager.checked_version("/data", "V0", answer("V4")) == "V4"
     assert asked == ["V2", "V4"]
-    clock.now += LISTING_TRUST_WINDOW + 0.01
+    clock.advance(LISTING_TRUST_WINDOW + 0.01)
     assert await manager.checked_version("/data", "V0", answer("V5")) == "V5"
     assert asked == ["V2", "V4", "V5"]
 
@@ -1021,7 +1027,7 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
 @pytest.mark.parametrize("fingerprint", ["verified", None])
 async def test_fill_keeps_exact_read_fact_without_observing(fingerprint):
     cache = RAMFileCacheStore()
-    manager = CacheManager(cache, None, "/s3/", True)
+    manager = CacheManager(cache, RAMIndexCacheStore(), "/s3/", True)
     data = b"payload"
 
     async def fetch():
@@ -1044,7 +1050,10 @@ async def test_fill_keeps_exact_read_fact_without_observing(fingerprint):
 @pytest.mark.asyncio
 async def test_concurrent_fills_cannot_borrow_a_same_path_token():
     caches = [RAMFileCacheStore(), RAMFileCacheStore()]
-    managers = [CacheManager(cache, None, "/s3/", True) for cache in caches]
+    managers = [
+        CacheManager(cache, RAMIndexCacheStore(), "/s3/", True)
+        for cache in caches
+    ]
     first_ready, release = asyncio.Event(), asyncio.Event()
     data = [b"first", b"other"]
 
@@ -1071,7 +1080,7 @@ async def test_concurrent_fills_cannot_borrow_a_same_path_token():
 @pytest.mark.asyncio
 async def test_failed_fact_capture_does_not_leak_into_next_fill():
     cache = RAMFileCacheStore()
-    manager = CacheManager(cache, None, "/s3/", True)
+    manager = CacheManager(cache, RAMIndexCacheStore(), "/s3/", True)
     data = b"payload"
 
     async def failing():
@@ -1126,7 +1135,9 @@ async def test_a_line_is_indexed_a_bounded_number_of_times(monkeypatch):
         real(self, records)
 
     monkeypatch.setattr(RecordIndex, "__init__", counted)
-    manager = CacheManager(RAMFileCacheStore(), None, "/data/", True)
+    manager = CacheManager(
+        RAMFileCacheStore(), RAMIndexCacheStore(), "/data/", True
+    )
     path = _spec("/data/f")
     scope = RecordingScope()
     try:

@@ -15,7 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { type CacheConfig, CacheType, type RedisCacheConfig } from '../../cache/file/config.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { IndexType } from '../../cache/index/config.ts'
+import { IndexType, LookupStatus } from '../../cache/index/config.ts'
+import { MountMode } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import type { WorkspaceOptions } from './types.ts'
 import { Workspace } from './workspace.ts'
 import { Mount } from '../mount/spec.ts'
@@ -104,5 +106,30 @@ describe('the workspace cache', () => {
   it('takes max_drain_bytes as maxDrainBytes', () => {
     const ws = new Workspace({}, { cache: { limit: '1MB', max_drain_bytes: 7 } as CacheConfig })
     expect(ws.maxDrainBytes).toBe(7)
+  })
+})
+
+describe('the workspace clock', () => {
+  it('ages the file cache and every mount index on the one clock', async () => {
+    const clock = new ManualClock(1000)
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      { mode: MountMode.WRITE, index: { type: IndexType.RAM, ttl: 60 }, clock },
+    )
+    try {
+      const late = ws.addMount('/b', new RAMVFS(), MountMode.WRITE)
+      const stores = [ws.mount('/a').indexStore, late.indexStore]
+      await ws.cache.set('/a/f.txt', new TextEncoder().encode('x'), { ttl: 60 })
+      for (const store of stores) await store.setDir('/d', [])
+      clock.advance(59)
+      expect(await ws.cache.exists('/a/f.txt')).toBe(true)
+      for (const store of stores) expect((await store.listDir('/d')).status).toBeUndefined()
+      clock.advance(1)
+      expect(await ws.cache.exists('/a/f.txt')).toBe(false)
+      for (const store of stores)
+        expect((await store.listDir('/d')).status).toBe(LookupStatus.EXPIRED)
+    } finally {
+      await ws.close()
+    }
   })
 })

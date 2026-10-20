@@ -21,6 +21,7 @@ import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { type Clock, ManualClock } from '../../utils/clock.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import {
   beyondWindow,
@@ -200,10 +201,14 @@ class Folders extends BaseVFS {
 
 const ENC = new TextEncoder()
 
-async function workspace(store: Folders): Promise<Workspace> {
+async function workspace(store: Folders, clock?: Clock): Promise<Workspace> {
   return new Workspace(
     { '/f/': store },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    {
+      mode: MountMode.WRITE,
+      shellParser: await getTestParser(),
+      ...(clock === undefined ? {} : { clock }),
+    },
   )
 }
 
@@ -358,14 +363,13 @@ describe('a mount that keeps its VFS listings', () => {
   it('asks the backend for a stat once its listing expires', async () => {
     const store = new Folders()
     const a = store.add('a.txt', 'root', ENC.encode('a'))
-    const ws = await workspace(store)
-    vi.useFakeTimers({ toFake: ['Date'] })
+    const clock = new ManualClock(Date.parse('2026-01-01T00:00:00Z') / 1000)
+    const ws = await workspace(store, clock)
     try {
-      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
       await ws.dispatch('readdir', '/f')
       await ws.dispatch('stat', '/f/a.txt')
       expect(store.calls).toEqual([['list', 'root']])
-      vi.setSystemTime(Date.now() + (store.indexTtl + 1) * 1000)
+      clock.advance(store.indexTtl + 1)
       await ws.dispatch('stat', '/f/a.txt')
       expect(store.calls).toEqual([
         ['list', 'root'],
@@ -373,7 +377,6 @@ describe('a mount that keeps its VFS listings', () => {
         ['stat', a],
       ])
     } finally {
-      vi.useRealTimers()
       await ws.close()
     }
   })

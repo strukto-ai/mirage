@@ -27,6 +27,7 @@ from mirage.types import (
     ReadSpec,
     Visibility,
 )
+from mirage.utils.clock import ManualClock
 from mirage.vfs.github import GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -65,14 +66,20 @@ def _vfs(hub: FakeGitHub):
     )
 
 
-def _ws(vfs, policy: ReadPolicy = ReadPolicy.FRESH, prefix: str = "/gh"):
+def _ws(
+    vfs,
+    policy: ReadPolicy = ReadPolicy.FRESH,
+    prefix: str = "/gh",
+    clock: ManualClock | None = None,
+):
     return Workspace(
         {
             prefix: Mount(
                 vfs=vfs, mode=MountMode.READ, read=ReadSpec(policy=policy)
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        clock=clock,
     )
 
 
@@ -681,17 +688,14 @@ async def test_an_ops_entry_point_burst_fetches_the_tree_once():
 
 
 @pytest.mark.asyncio
-async def test_an_ops_entry_point_read_sees_an_outside_change_after_the_window(
-    monkeypatch,
-):
-    now = [100.0]
-    monkeypatch.setattr("mirage.cache.manager._now", lambda: now[0])
+async def test_an_ops_entry_point_read_sees_an_outside_change_after_the_window():
+    clock = ManualClock(start=100.0)
     with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
+        ws = _ws(_vfs(hub), clock=clock)
         try:
             assert "/gh/docs/c.txt" not in await ws.readdir("/gh/docs")
             hub.files["docs/c.txt"] = b"new"
-            now[0] += LISTING_TRUST_WINDOW
+            clock.advance(LISTING_TRUST_WINDOW)
             assert "/gh/docs/c.txt" in await ws.readdir("/gh/docs")
         finally:
             await ws.close()

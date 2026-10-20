@@ -13,9 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../types.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 import type { Evicted, IndexSnapshot, ListResult, LookupResult, SetDirOptions } from './config.ts'
 
 export abstract class IndexCacheStore {
+  /** The clock every listing deadline of this store is set and read on. */
+  readonly clock: Clock
+
+  /** @param clock the clock listings expire on; undefined means the real one. */
+  constructor(clock: Clock = new SystemClock()) {
+    this.clock = clock
+  }
+
   /** Seconds a listing lives when its writer names no expiry. */
   abstract readonly ttl: number
   /**

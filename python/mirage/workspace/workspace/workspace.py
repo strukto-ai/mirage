@@ -127,6 +127,7 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.abort import MirageAbortError, run_cancellable
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import new_session_id, new_workspace_id
 from mirage.vfs.base import BaseVFS
@@ -264,9 +265,11 @@ class Workspace:
         env: Mapping[str, str | EnvVar | Mapping[str, Any]] | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         io: IOConfig | Mapping[str, Any] | None = None,
+        clock: Clock | None = None,
     ) -> None:
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._registry = MountRegistry(
-            IOConfig.model_validate({} if io is None else io)
+            IOConfig.model_validate({} if io is None else io), self._clock
         )
         self._registry.process_view = self._process_view
         self._registry.fill_env = self._fill_tree_env
@@ -306,7 +309,9 @@ class Workspace:
         )
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
-        self._cache: FileCacheMixin = build_file_cache(cache, cache_limit)
+        self._cache: FileCacheMixin = build_file_cache(
+            cache, cache_limit, self._clock
+        )
         self._index_config = index
         self._closed = False
         self._closing = False
@@ -1675,6 +1680,7 @@ class Workspace:
         | None = None,
         profile: str | None = None,
         s3: S3Config | None = None,
+        clock: Clock | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -1730,6 +1736,11 @@ class Workspace:
                 keep the narrowing the caller's document gives them, as
                 a checkout's do.
             s3 (S3Config | None): the S3-like store the tar is in.
+            clock (Clock | None): the clock the restored workspace reads
+                time through; None means the system clock. A restored
+                entry ages on it from the ``cached_at`` the snapshot
+                recorded in the writer's wall seconds, so restoring onto
+                a clock with another epoch shifts its expiry.
         """
         # Disk mount files are staged on disk, not held in memory, until
         # the restored mounts have copied them in.
@@ -1747,6 +1758,7 @@ class Workspace:
                 policies=policies,
                 profiles=profiles,
                 profile=profile,
+                clock=clock,
             )
         finally:
             await run_blocking(shutil.rmtree, staging, ignore_errors=True)
@@ -1765,6 +1777,7 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        clock: Clock | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -1803,6 +1816,11 @@ class Workspace:
                 of the recorded one. Given either, the restored sessions
                 keep the narrowing the caller's document gives them, as
                 a checkout's do.
+            clock (Clock | None): the clock the restored workspace reads
+                time through; None means the system clock. A restored
+                entry ages on it from the ``cached_at`` the snapshot
+                recorded in the writer's wall seconds, so restoring onto
+                a clock with another epoch shifts its expiry.
         """
         ws = await cls._from_state(
             state,
@@ -1813,6 +1831,7 @@ class Workspace:
             policies=policies,
             profiles=profiles,
             profile=profile,
+            clock=clock,
         )
         install_fingerprints(
             ws._registry,
@@ -1863,6 +1882,7 @@ class Workspace:
             clis=reusable_clis(self),
             secrets=self._declared_sources,
             shared=frozenset(mounts),
+            clock=self._clock,
         )
 
     @classmethod
@@ -1879,6 +1899,7 @@ class Workspace:
         | None = None,
         profile: str | None = None,
         shared: frozenset[str] = frozenset(),
+        clock: Clock | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # A caller's own profile table or default is a document the
@@ -1901,6 +1922,7 @@ class Workspace:
             profile=args.profile if built_for_state else profile,
             runtimes=runtimes,
             policies=policies,
+            clock=clock,
         )
         if mounts:
             ws._shared_mounts = {

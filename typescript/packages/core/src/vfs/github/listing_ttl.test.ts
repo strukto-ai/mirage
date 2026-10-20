@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
-import { shiftPerformanceNow } from '../../../tests/cache/_test_util.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { IndexView } from '../../cache/index/view.ts'
 import { FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
@@ -28,6 +28,7 @@ import { GitHubVFS } from './github.ts'
 const DEC = new TextDecoder()
 const OLD_LS = 'a.txt\nb.txt\n'
 const NEW_LS = 'a.txt\nb.txt\nc.txt\n'
+const T0 = Date.UTC(2026, 0, 1) / 1000
 
 let gh: FakeGitHub
 
@@ -39,7 +40,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  vi.useRealTimers()
 })
 
 async function vfsOf(): Promise<GitHubVFS> {
@@ -58,12 +58,16 @@ async function wsOf(
   vfs: GitHubVFS,
   read: { policy: ReadPolicy; ttl: number } | null = { policy: ReadPolicy.BOUNDED, ttl: 1 },
   prefix = '/gh',
+  clock?: ManualClock,
 ): Promise<Workspace> {
   const mount =
     read === null
       ? new Mount(vfs, { mode: MountMode.READ })
       : new Mount(vfs, { mode: MountMode.READ, read })
-  return new Workspace({ [prefix]: mount }, { shellParser: await getTestParser() })
+  return new Workspace(
+    { [prefix]: mount },
+    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
+  )
 }
 
 async function out(w: Workspace, line: string, sessionId?: string): Promise<string> {
@@ -374,21 +378,20 @@ describe('github listings respect the mount ttl', () => {
   })
 
   it('writes the listing a */ directory stat refills through the mount view', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    const clock = new ManualClock(T0)
     const vfs = await vfsOf()
-    const w = await wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 })
+    const w = await wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 }, '/gh', clock)
     try {
       const readdir = vfs.readdir.bind(vfs)
       vi.spyOn(vfs, 'readdir').mockImplementationOnce(async (path, handed) => {
         const found = await readdir(path, handed)
-        vi.setSystemTime(Date.now() + 3000)
+        clock.advance(3)
         return found
       })
       expect(await out(w, 'echo /gh/*/')).toBe('/gh/docs/\n')
       vi.restoreAllMocks()
       gh.set('docs/c.txt', 'charlie\n')
-      vi.setSystemTime(Date.now() + 3000)
+      clock.advance(3)
       expect(await out(w, 'ls /gh/docs')).toBe(NEW_LS)
     } finally {
       await w.close()
@@ -396,16 +399,14 @@ describe('github listings respect the mount ttl', () => {
   })
 
   it('caps a mount with no ttl key at the default 600 s', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
-    const w = await wsOf(await vfsOf(), null)
+    const clock = new ManualClock(T0)
+    const w = await wsOf(await vfsOf(), null, '/gh', clock)
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
-      const t0 = Date.now()
       gh.set('docs/c.txt', 'charlie\n')
-      vi.setSystemTime(t0 + 599_000)
+      clock.advance(599)
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
-      vi.setSystemTime(t0 + 601_000)
+      clock.advance(2)
       expect(await out(w, 'ls /gh/docs')).toBe(NEW_LS)
     } finally {
       await w.close()
@@ -442,13 +443,13 @@ function three(): void {
   vi.stubGlobal('fetch', gh.fetch)
 }
 
-async function freshOf(vfs: GitHubVFS): Promise<Workspace> {
+async function freshOf(vfs: GitHubVFS, clock?: ManualClock): Promise<Workspace> {
   return new Workspace(
     {
       '/gh': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { shellParser: await getTestParser() },
+    { shellParser: await getTestParser(), ...(clock === undefined ? {} : { clock }) },
   )
 }
 
@@ -607,9 +608,9 @@ describe('a fresh mount re-lists once per command', () => {
   // listing written within the window: a burst refetches once, not once per
   // call. Task 1.3 is what makes the refetch itself cheaper.
   it('trusts a listing for the window on an unscoped read', async () => {
-    const clock = shiftPerformanceNow()
+    const clock = new ManualClock(100)
     three()
-    const w = await freshOf(await vfsOf())
+    const w = await freshOf(await vfsOf(), clock)
     try {
       await out(w, 'ls /gh')
       gh.log.length = 0
@@ -620,7 +621,7 @@ describe('a fresh mount re-lists once per command', () => {
       ])
       await w.vfs.stat('/gh/d1/a.txt')
       expect(gh.counts()).toEqual([0, 0, 0])
-      clock.advance(LISTING_TRUST_WINDOW * 1000)
+      clock.advance(LISTING_TRUST_WINDOW)
       await w.vfs.readdir('/gh/d1')
       await w.vfs.stat('/gh/d1/a.txt')
       // One version check answers both calls inside the window; it replaces

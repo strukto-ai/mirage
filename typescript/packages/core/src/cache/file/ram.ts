@@ -15,6 +15,7 @@
 import { underPath } from '../../utils/key_prefix.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
 import { Invalidation } from '../invalidation.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry, Holds } from './entry.ts'
@@ -25,14 +26,27 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   private readonly entries = new Map<string, CacheEntry>()
   private readonly lock = new KeyLock()
   private readonly limit: number
+  private readonly clock: Clock
   private size = 0
   private readonly invalidation = new Invalidation()
   private maxDrainBytesValue: number | null = null
 
-  constructor(options: { limit?: string | number; maxDrainBytes?: number | null } = {}) {
+  /**
+   * @param options.limit capacity, as bytes or a size string.
+   * @param options.maxDrainBytes cap on a background drain's buffer; null derives it from `limit`.
+   * @param options.clock the clock every entry's age is measured on; undefined means the real one.
+   */
+  constructor(
+    options: { limit?: string | number; maxDrainBytes?: number | null; clock?: Clock } = {},
+  ) {
     super()
     this.limit = parseLimit(options.limit ?? '512MB')
+    this.clock = options.clock ?? new SystemClock()
     this.maxDrainBytes = options.maxDrainBytes ?? null
+  }
+
+  private seconds(): number {
+    return Math.floor(this.clock.now())
   }
 
   get maxDrainBytes(): number | null {
@@ -73,7 +87,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
       (): Promise<[Uint8Array | null, boolean]> => {
         const entry = this.entries.get(key)
         if (!entry?.hasBytes) return Promise.resolve([null, false])
-        if (entry.expired) {
+        if (entry.isExpired(this.seconds())) {
           this.dropEntry(key)
           // A kept version outlives its bytes, as redis's meta key does.
           if (
@@ -100,7 +114,9 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   override exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath
     const entry = this.entries.get(k)
-    return Promise.resolve(entry !== undefined && entry.hasBytes && !entry.expired)
+    return Promise.resolve(
+      entry !== undefined && entry.hasBytes && !entry.isExpired(this.seconds()),
+    )
   }
   async set(
     key: string,
@@ -116,7 +132,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
         this.dropEntry(key)
         const entry = new CacheEntry({
           size: data.byteLength,
-          cachedAt: Math.floor(Date.now() / 1000),
+          cachedAt: this.seconds(),
           fingerprint: tokenOrNull(options.fingerprint),
           ttl: options.ttl ?? null,
         })
@@ -179,7 +195,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
       await this.lock.withLock(key, () => {
         if (this.invalidation.stale(key, stamp)) return Promise.resolve()
         const entry = this.entries.get(key)
-        if (entry !== undefined && entry.hasBytes && !entry.expired) {
+        if (entry !== undefined && entry.hasBytes && !entry.isExpired(this.seconds())) {
           if (entry.fingerprint === fingerprint) {
             this.entries.set(
               key,
@@ -216,7 +232,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   private putVersion(key: string, fingerprint: string): void {
     const version = new CacheEntry({
       size: key.length + fingerprint.length,
-      cachedAt: Math.floor(Date.now() / 1000),
+      cachedAt: this.seconds(),
       fingerprint,
       holds: Holds.VERSION,
     })
