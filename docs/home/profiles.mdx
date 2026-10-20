@@ -85,7 +85,10 @@ glob patterns use `*`, `?` and `[`, and `*` can cross `/`. A rule naming only
 `paths` also applies to direct VFS operations.
 
 `paths.hide` makes a path appear absent; `paths.show` reopens a more specific
-path. Ask and deny rules control operations while leaving paths visible.
+path. A hide stays where it is written, so moving a directory that holds a
+hidden path, or one the session reaches only through a `paths.show` below it,
+is refused with `Permission denied`: the hidden content would land in view.
+Ask and deny rules control operations while leaving paths visible.
 A hidden path is also left out of what commands and CLIs print from their own
 data, and out of their counts and totals: `git status`, `git ls-files`,
 `git diff --stat` and `git log --name-only` neither name nor count a file
@@ -96,7 +99,8 @@ hidden as well, for every command: `readlink -f`, `test -L`, `ln`, `touch -h`,
 A repository's history counts as the path too. Under a hide, no revision ever
 held it: `git show HEAD:secret.txt` answers as it would for a path never
 committed, `git log -S` finds nothing in it, and an object id stored only
-there names nothing. Under a deny rule, git refuses to print the path's content
+there names nothing. A checkout or a branch switch leaves a hidden file as it
+is: an edit to it neither blocks the switch nor is named in git's refusal. Under a deny rule, git refuses to print the path's content
 from any revision (`git log -p`, `git show HEAD:secret.txt`) as it refuses the
 file, and still lists the name.
 
