@@ -32,6 +32,32 @@ describe('RAMObserverStore', () => {
     expect(decode(await store.readAll())).toEqual({ '/d/s.jsonl': 'a\nb\n' })
   })
 
+  it('append copies only its own bytes, not the log so far', async () => {
+    const store = new RAMObserverStore()
+    const buffers = new Set<ArrayBufferLike>()
+    for (let i = 0; i < 1000; i++) {
+      await store.append('/d/s.jsonl', ENC.encode(`${String(i % 10)}\n`))
+      buffers.add(store.files.get('/d/s.jsonl')?.buffer ?? new ArrayBuffer(0))
+    }
+    expect(buffers.size).toBeLessThan(20)
+    const want = Array.from({ length: 1000 }, (_, i) => `${String(i % 10)}\n`).join('')
+    expect(decode(await store.readAll())).toEqual({ '/d/s.jsonl': want })
+  })
+
+  it('append extends a file set by write or by hand', async () => {
+    const store = new RAMObserverStore()
+    await store.append('/d/s.jsonl', ENC.encode('a\n'))
+    await store.append('/d/s.jsonl', ENC.encode('b\n'))
+    await store.write('/d/s.jsonl', ENC.encode('w\n'))
+    await store.append('/d/s.jsonl', ENC.encode('c\n'))
+    store.files.set('/d/t.jsonl', ENC.encode('h\n'))
+    await store.append('/d/t.jsonl', ENC.encode('d\n'))
+    expect(decode(await store.readAll())).toEqual({
+      '/d/s.jsonl': 'w\nc\n',
+      '/d/t.jsonl': 'h\nd\n',
+    })
+  })
+
   it('write overwrites', async () => {
     const store = new RAMObserverStore()
     await store.append('/d/s.jsonl', ENC.encode('old\n'))
