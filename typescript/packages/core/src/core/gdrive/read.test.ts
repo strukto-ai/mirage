@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-import type * as VersionsModule from './versions.ts'
 import type * as ContextModule from '../../observe/context.ts'
 
 // A read outside any recording scope reaches record() and returns early, so
@@ -39,43 +37,29 @@ vi.mock('../../observe/context.ts', async () => {
   }
 })
 
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return {
-    ...actual,
-    listFiles: vi.fn(),
-    listSharedDrives: vi.fn(),
-    downloadFile: vi.fn(),
-    getFile: vi.fn(),
-  }
-})
-
-vi.mock('./versions.ts', async () => {
-  const actual = await vi.importActual<typeof VersionsModule>('./versions.ts')
-  return { ...actual, downloadRevision: vi.fn(), captureFileMetadata: vi.fn() }
-})
-
 vi.mock('../gdocs/read.ts', () => ({ readDoc: vi.fn() }))
 vi.mock('../gsheets/read.ts', () => ({ readSpreadsheet: vi.fn() }))
 vi.mock('../gslides/read.ts', () => ({ readPresentation: vi.fn() }))
 
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { TokenManager } from '../google/client.ts'
 import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
-import * as drive from '../google/drive.ts'
 import { driveFingerprint } from './fingerprint.ts'
 import { read, readFileVersioned } from './read.ts'
 import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
-import * as versions from './versions.ts'
 import * as gdocs from '../gdocs/read.ts'
 import * as gsheets from '../gsheets/read.ts'
 import * as gslides from '../gslides/read.ts'
 import { md5Hex } from '../../utils/hash.ts'
+import {
+  type StubDrive,
+  makeGDriveAccessor,
+  stubDrive,
+} from '../../../tests/core/gdrive/_test_util.ts'
 
 // A row as a Drive listing names it, odd token shapes kept as given.
 // Mirrors python's `_row`.
@@ -105,18 +89,17 @@ function row(
 
 const VERSIONED_ENTRY = row('f1', 'f.txt')
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+let drive: StubDrive
 
 function makeAccessor(): GDriveAccessor {
-  return new GDriveAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+  return makeGDriveAccessor(drive)
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
   UNRECORDED.records.length = 0
-  vi.mocked(drive.listSharedDrives).mockResolvedValue([])
+  drive = stubDrive()
+  drive.listSharedDrives.mockResolvedValue([])
 })
 
 async function workspace(): Promise<Workspace> {
@@ -130,8 +113,8 @@ async function workspace(): Promise<Workspace> {
 
 describe('a cold gdrive read through a mount', () => {
   it('lists its parent first', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
-      if (opts?.folderId === 'root') {
+    drive.listFiles.mockImplementation((opts) => {
+      if (opts.folderId === 'root') {
         return Promise.resolve([
           {
             id: 'f1',
@@ -141,10 +124,10 @@ describe('a cold gdrive read through a mount', () => {
           },
         ])
       }
-      throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
+      throw new Error(`unexpected folderId=${opts.folderId}`)
     })
-    vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
+    drive.downloadFile.mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
+    drive.captureFileMetadata.mockResolvedValue([null, null])
     const ws = await workspace()
     try {
       const out = (await ws.dispatch('read', '/drive/report.pdf')) as Uint8Array
@@ -155,8 +138,8 @@ describe('a cold gdrive read through a mount', () => {
   })
 
   it('never downloads a name its parent does not list', async () => {
-    vi.mocked(drive.listFiles).mockImplementation((_tm, opts) => {
-      if (opts?.folderId === 'root') {
+    drive.listFiles.mockImplementation((opts) => {
+      if (opts.folderId === 'root') {
         return Promise.resolve([
           {
             id: 'f1',
@@ -166,9 +149,9 @@ describe('a cold gdrive read through a mount', () => {
           },
         ])
       }
-      throw new Error(`unexpected folderId=${String(opts?.folderId)}`)
+      throw new Error(`unexpected folderId=${opts.folderId}`)
     })
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
     const ws = await workspace()
     try {
       await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toMatchObject({
@@ -182,8 +165,8 @@ describe('a cold gdrive read through a mount', () => {
   // Mirrors test_read_propagates_parent_listing_failure: only an absent
   // parent may collapse into the operand's ENOENT.
   it('propagates a failed parent listing instead of reporting ENOENT', async () => {
-    vi.mocked(drive.listFiles).mockRejectedValue(new Error('drive unavailable'))
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.listFiles.mockRejectedValue(new Error('drive unavailable'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
     const ws = await workspace()
     try {
       await expect(ws.dispatch('read', '/drive/missing.txt')).rejects.toThrow(/drive unavailable/)
@@ -201,7 +184,7 @@ describe('gdrive read', () => {
   })
 
   it('throws EISDIR when reading a shared drive root', async () => {
-    vi.mocked(drive.downloadFile).mockRejectedValue(new Error('should not call downloadFile'))
+    drive.downloadFile.mockRejectedValue(new Error('should not call downloadFile'))
     const path = new PathSpec({
       vfsPath: 'Team Drive',
       virtual: '/Team Drive',
@@ -218,41 +201,36 @@ describe('gdrive read', () => {
         row('drive1', 'Team Drive', 'gdrive/shared_drive', '', { drive_id: 'drive1' }),
       ),
     ).rejects.toMatchObject({ code: 'EISDIR', virtualPath: '/Team Drive' })
-    expect(vi.mocked(drive.downloadFile)).not.toHaveBeenCalled()
+    expect(drive.downloadFile).not.toHaveBeenCalled()
   })
 })
 
 describe('gdrive versioned reads', () => {
   it('a pinned path reads that revision, not live content', async () => {
     const enc = new TextEncoder()
-    vi.mocked(versions.downloadRevision).mockResolvedValue(enc.encode('pinned'))
+    drive.downloadRevision.mockResolvedValue(enc.encode('pinned'))
     const data = await runWithRevisions(new Map([['/data/f.txt', 'r1']]), () =>
-      readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', VERSIONED_ENTRY),
+      readFileVersioned(drive, 'f1', '/data/f.txt', VERSIONED_ENTRY),
     )
     expect(new TextDecoder().decode(data)).toBe('pinned')
-    expect(versions.downloadRevision).toHaveBeenCalledWith(
-      STUB_TOKEN_MANAGER,
-      'f1',
-      'r1',
-      undefined,
-    )
+    expect(drive.downloadRevision).toHaveBeenCalledWith('f1', 'r1', undefined)
     expect(drive.downloadFile).not.toHaveBeenCalled()
   })
 
   it('an unpinned unrecorded read skips the metadata call', async () => {
     const enc = new TextEncoder()
-    vi.mocked(drive.downloadFile).mockResolvedValue(enc.encode('live'))
-    const data = await readFileVersioned(STUB_TOKEN_MANAGER, 'f1', '/data/f.txt', VERSIONED_ENTRY)
+    drive.downloadFile.mockResolvedValue(enc.encode('live'))
+    const data = await readFileVersioned(drive, 'f1', '/data/f.txt', VERSIONED_ENTRY)
     expect(new TextDecoder().decode(data)).toBe('live')
-    expect(versions.captureFileMetadata).not.toHaveBeenCalled()
+    expect(drive.captureFileMetadata).not.toHaveBeenCalled()
   })
 })
 
 // A key named like its mount: neither `m/k.txt` nor `/m/k.txt` is virtual.
 describe('gdrive read record path', () => {
   it('records the virtual path for a binary file', async () => {
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
-    vi.mocked(drive.downloadFile).mockResolvedValue(new TextEncoder().encode('live'))
+    drive.captureFileMetadata.mockResolvedValue([null, null])
+    drive.downloadFile.mockResolvedValue(new TextEncoder().encode('live'))
     const path = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
     const [data, records] = await runWithRecording(() =>
       read(makeAccessor(), path, undefined, row('f1', 'k.txt')),
@@ -280,8 +258,8 @@ function specFor(name = 'report.pdf', mount = ''): PathSpec {
 
 describe('the gdrive read record', () => {
   beforeEach(() => {
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([DIGEST, REVISION])
-    vi.mocked(drive.downloadFile).mockResolvedValue(CONTENT)
+    drive.captureFileMetadata.mockResolvedValue([DIGEST, REVISION])
+    drive.downloadFile.mockResolvedValue(CONTENT)
   })
 
   it('stamps the token stat stamps', async () => {
@@ -351,7 +329,7 @@ describe('the gdrive read record', () => {
     // The capture and the download are two separate requests, so a writer
     // that changes the file between them caches bytes B under md5(A). A later
     // revert to A then reads as FRESH and serves B, silently.
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([
+    drive.captureFileMetadata.mockResolvedValue([
       md5Hex(new TextEncoder().encode('the previous content')),
       REVISION,
     ])
@@ -379,7 +357,7 @@ describe('the gdrive read record', () => {
     // Drive withholds md5Checksum for some binary files. There is nothing to
     // verify, and dropping the token would leave the read at null against
     // stat's head revision -- the mismatch this change removes.
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, REVISION])
+    drive.captureFileMetadata.mockResolvedValue([null, REVISION])
     const [, records] = await runWithRecording(async () =>
       read(makeAccessor(), specFor(), undefined, binaryRow()),
     )
@@ -393,8 +371,8 @@ describe('the gdrive read record', () => {
     // later op with `Device not configured`. Big enough to span several
     // chunks, small enough to stay fast.
     const BIG = new Uint8Array(4 * 1024 * 1024).fill(7)
-    vi.mocked(drive.downloadFile).mockResolvedValue(BIG)
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([md5Hex(BIG), REVISION])
+    drive.downloadFile.mockResolvedValue(BIG)
+    drive.captureFileMetadata.mockResolvedValue([md5Hex(BIG), REVISION])
     // Order, not eventual firing: `await timer` resolves only after the
     // callback that would set a flag, so a flag assertion cannot fail once
     // reached and passes against a fully synchronous hash too. The timeout is
@@ -489,10 +467,10 @@ async function readUnrecorded(
   // Built rather than listed: a listing drops an empty or missing md5, so a
   // listed row could not carry the odd shapes these rows need.
   const offset = options?.offset ?? 0
-  vi.mocked(drive.downloadFile).mockResolvedValue(
+  drive.downloadFile.mockResolvedValue(
     BODY.slice(offset, options?.size === undefined ? undefined : offset + options.size),
   )
-  vi.mocked(versions.captureFileMetadata).mockResolvedValue([null, null])
+  drive.captureFileMetadata.mockResolvedValue([null, null])
   await read(
     makeAccessor(),
     UNRECORDED_SPEC,
@@ -557,12 +535,12 @@ describe('an unrecorded gdrive read', () => {
   it('issues no metadata request', async () => {
     await readUnrecorded({ md5_checksum: BODY_MD5 })
     expect(drive.downloadFile).toHaveBeenCalledTimes(1)
-    expect(versions.captureFileMetadata).not.toHaveBeenCalled()
+    expect(drive.captureFileMetadata).not.toHaveBeenCalled()
   })
 
   it('stamps no entry token on a pinned read', async () => {
     // Pinned bytes are an old revision; the entry's md5 describes head.
-    vi.mocked(versions.downloadRevision).mockResolvedValue(BODY)
+    drive.downloadRevision.mockResolvedValue(BODY)
     await runWithRevisions(new Map([['/gd/a.txt', 'r1']]), () =>
       read(
         makeAccessor(),
@@ -573,13 +551,13 @@ describe('an unrecorded gdrive read', () => {
     )
     expect(UNRECORDED.records).toEqual([['/gd/a.txt', { fingerprint: null, revision: 'r1' }]])
     expect(drive.downloadFile).not.toHaveBeenCalled()
-    expect(versions.downloadRevision).toHaveBeenCalledTimes(1)
+    expect(drive.downloadRevision).toHaveBeenCalledTimes(1)
   })
 
   it('a recorded read prefers the capture over the entry', async () => {
     // The capture is the fresher of the two; the entry can be a TTL old.
-    vi.mocked(drive.downloadFile).mockResolvedValue(BODY)
-    vi.mocked(versions.captureFileMetadata).mockResolvedValue([BODY_MD5, 'r9'])
+    drive.downloadFile.mockResolvedValue(BODY)
+    drive.captureFileMetadata.mockResolvedValue([BODY_MD5, 'r9'])
     const [, records] = await runWithRecording(() =>
       read(
         makeAccessor(),

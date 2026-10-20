@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +24,7 @@ from mirage.core.google.config import GoogleConfig
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 STAMP = "2026-04-01T00:00:00.000Z"
 DOC_MIME = "application/vnd.google-apps.document"
@@ -86,7 +87,7 @@ async def test_stat_of_nothing_is_not_found(accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_cold_stat_lists_its_parent_once(accessor):
+async def test_a_cold_stat_lists_its_parent_once(accessor, monkeypatch):
     files = [
         _file(
             "f99",
@@ -97,22 +98,18 @@ async def test_a_cold_stat_lists_its_parent_once(accessor):
         )
     ]
     ws = _workspace(accessor)
+    mock_list = AsyncMock(return_value=files)
     try:
-        with (
-            patch(
-                "mirage.core.gdrive.readdir.list_files",
-                new_callable=AsyncMock,
-                return_value=files,
-            ) as mock_list,
-            patch(
-                "mirage.core.gdrive.readdir.list_shared_drives",
-                new_callable=AsyncMock,
-                return_value=[],
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                list_files=mock_list,
+                list_shared_drives=AsyncMock(return_value=[]),
             ),
-        ):
-            result, _ = await ws.dispatch(
-                "stat", PathSpec.from_str_path("/drive/fresh.pdf")
-            )
+        )
+        result, _ = await ws.dispatch(
+            "stat", PathSpec.from_str_path("/drive/fresh.pdf")
+        )
         assert result.name == "fresh.pdf"
         assert result.extra["file_id"] == "f99"
         # binary files download raw, so Drive's size is the rendered length
@@ -123,18 +120,21 @@ async def test_a_cold_stat_lists_its_parent_once(accessor):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_parent_listing_propagates(accessor):
+async def test_a_failed_parent_listing_propagates(accessor, monkeypatch):
     ws = _workspace(accessor)
     try:
-        with patch(
-            "mirage.core.gdrive.readdir.list_files",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("drive unavailable"),
-        ):
-            with pytest.raises(RuntimeError, match="drive unavailable"):
-                await ws.dispatch(
-                    "stat", PathSpec.from_str_path("/drive/missing.txt")
+        install_drive(
+            monkeypatch,
+            StubDrive(
+                list_files=AsyncMock(
+                    side_effect=RuntimeError("drive unavailable")
                 )
+            ),
+        )
+        with pytest.raises(RuntimeError, match="drive unavailable"):
+            await ws.dispatch(
+                "stat", PathSpec.from_str_path("/drive/missing.txt")
+            )
     finally:
         await ws.close()
 
@@ -147,7 +147,7 @@ async def test_a_partial_root_does_not_make_a_child_a_permanent_hit(
     """A best-effort root listing must not make a child a permanent hit."""
     phase = "initial"
 
-    async def list_files(_tm, folder_id="root", **_kwargs):
+    async def list_files(folder_id="root", **_kwargs):
         assert folder_id == "root"
         if phase == "initial":
             return [_file("old-file", "readme.txt", size="3")]
@@ -155,14 +155,16 @@ async def test_a_partial_root_does_not_make_a_child_a_permanent_hit(
             return []
         return [_file("new-file", "readme.txt", size="42")]
 
-    async def list_shared_drives(_tm):
+    async def list_shared_drives():
         if phase == "initial":
             raise RuntimeError("missing scope")
         return []
 
-    monkeypatch.setattr("mirage.core.gdrive.readdir.list_files", list_files)
-    monkeypatch.setattr(
-        "mirage.core.gdrive.readdir.list_shared_drives", list_shared_drives
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            list_files=list_files, list_shared_drives=list_shared_drives
+        ),
     )
     ws = _workspace(accessor)
     try:

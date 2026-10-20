@@ -13,5 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GoogleApiAccessor } from './google_api.ts'
+import { DriveClient, type DriveApi } from '../core/gdrive/api.ts'
 
-export class GDriveAccessor extends GoogleApiAccessor {}
+export class GDriveAccessor extends GoogleApiAccessor {
+  /** The one door every gdrive core op reaches Drive through. */
+  get drive(): DriveApi {
+    return new DriveClient(this.tokenManager)
+  }
+}

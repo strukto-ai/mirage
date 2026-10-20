@@ -13,10 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import hashlib
 from collections import Counter
+from collections.abc import AsyncGenerator
 from contextlib import ExitStack
+from typing import Any
 from unittest.mock import patch
 
+from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.google.drive import ITEM_FIELDS
 from mirage.io.spool import ByteSpool
+from mirage.utils.ranges import ByteWindow
+from tests.fixtures.gdrive_api import payload
 
 _FAKE_TOKEN = "fake-gdrive-token"
 _FAKE_EXPIRES_IN = 9999999999
@@ -43,69 +49,6 @@ def _is_native(mime: str) -> bool:
         mime (str): the item's MIME type.
     """
     return mime in _NATIVE_MIMES
-
-
-_PATCH_TARGETS = {
-    # Every module that imports the function by value needs its own
-    # binding: patching one leaves the others pointing at the real Drive
-    # API, which 401s mid-test. `find` reaches Drive through tree, which
-    # readdir's binding does not cover (#684).
-    "list_files": [
-        "mirage.core.gdrive.readdir.list_files",
-        "mirage.core.gdrive.rename.list_files",
-        "mirage.core.gdrive.rmdir.list_files",
-    ],
-    "list_children": [
-        "mirage.core.gdrive.tree.list_children",
-    ],
-    "list_shared_drives": [
-        "mirage.core.gdrive.readdir.list_shared_drives",
-    ],
-    "list_all_files": [
-        "mirage.core.google.readdir.list_all_files",
-    ],
-    "download_file": [
-        "mirage.core.gdrive.read.download_file",
-    ],
-    "download_file_stream": [
-        "mirage.core.gdrive.read.download_file_stream",
-    ],
-    "capture_file_metadata": [
-        "mirage.core.gdrive.read.capture_file_metadata",
-    ],
-    # A write's reply is the uploaded file resource, rendered through
-    # `public` like a listing entry, so the token a write records and the
-    # token a later probe lists cannot disagree.
-    "upload_file": [
-        "mirage.core.gdrive.write.upload_file",
-    ],
-    "update_file_content": [
-        "mirage.core.gdrive.write.update_file_content",
-    ],
-    "create_folder": [
-        "mirage.core.gdrive.mkdir.create_folder",
-        "mirage.core.gdrive.copy.create_folder",
-    ],
-    # The configured root folder's drive, and an app file by id. The guard
-    # below catches only a target that no longer resolves, so an unlisted
-    # binding would keep pointing at the real Drive API (#684's shape).
-    "get_file": [
-        "mirage.core.google.entry.get_file",
-        "mirage.core.gdrive.resolve.get_file",
-        "mirage.core.gdrive.readdir.get_file",
-    ],
-    # A native file's bytes do not exist until Docs, Sheets or Slides
-    # renders them, so the fake stands in for the renderer and counts each
-    # render as the cost a warm native read avoids.
-    "render": [
-        "mirage.core.gdrive.read.read_doc",
-        "mirage.core.gdrive.read.read_spreadsheet",
-        "mirage.core.gdrive.read.read_presentation",
-        "mirage.core.gdocs.read.read_doc",
-        "mirage.core.gsheets.read.read_spreadsheet",
-        "mirage.core.gslides.read.read_presentation",
-    ],
-}
 
 
 class FakeGDrive:
@@ -343,96 +286,178 @@ class FakeGDrive:
         return None
 
 
-def _sliced(data: bytes, range_header: str | None) -> bytes:
-    """Apply an HTTP ``Range`` value the way Drive would.
+_RENDERERS = (
+    "mirage.core.gdrive.read.read_doc",
+    "mirage.core.gdrive.read.read_spreadsheet",
+    "mirage.core.gdrive.read.read_presentation",
+    "mirage.core.gdocs.read.read_doc",
+    "mirage.core.gsheets.read.read_spreadsheet",
+    "mirage.core.gslides.read.read_presentation",
+)
+_APP_GET_FILE = "mirage.core.google.entry.get_file"
+_APP_LIST_ALL_FILES = "mirage.core.google.readdir.list_all_files"
+
+
+def _sliced(data: bytes, window: ByteWindow | None) -> bytes:
+    """Serve a byte window the way Drive serves a ``Range``.
 
     Args:
         data (bytes): the whole object.
-        range_header (str | None): a ``bytes=<start>-<end>`` value, or
-            None for the whole thing.
+        window (ByteWindow | None): the window, or None for all of it.
     """
-    if not range_header:
+    if window is None:
         return data
-    span = range_header.split("=", 1)[1]
-    start_text, _, end_text = span.partition("-")
-    start = int(start_text)
-    return data[start : int(end_text) + 1] if end_text else data[start:]
+    end = None if window.size is None else window.offset + window.size
+    return data[window.offset : end]
 
 
-def _bytes_for(fake, registry, file_id: str) -> bytes:
-    """The stored bytes for ``file_id``, from any registered fake.
+class FakeDriveApi:
+    """The ``DriveApi`` one ``FakeGDrive`` answers, counting each call on
+    the fake. A call it does not answer fails the test."""
 
-    A cross-mount read reaches a file another fake owns, so the lookup
-    falls through the registry before giving up.
+    def __init__(
+        self, fake: FakeGDrive, registry: list[tuple[Any, FakeGDrive]]
+    ) -> None:
+        """Args:
+        fake (FakeGDrive): the tree this mount's token resolved to.
+        registry (list[tuple[Any, FakeGDrive]]): every (token_manager,
+            FakeGDrive) pair, for a cross-mount read of another's file.
+        """
+        self._fake = fake
+        self._registry = registry
 
-    Args:
-        fake (FakeGDrive): the fake the caller's token resolved to.
-        registry (list): every (token_manager, FakeGDrive) pair.
-        file_id (str): the Drive file id.
-    """
-    if fake.has_id(file_id):
-        return fake.get_bytes(file_id)
-    for _, other in registry:
-        if other.has_id(file_id):
-            return other.get_bytes(file_id)
-    raise FileNotFoundError(file_id)
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise AssertionError(f"gdrive_mock does not answer Drive.{name}")
 
-
-def _resolve_fake(token_manager, registry):
-    if not registry:
-        return None
-    for tm, fake in registry:
-        if tm is token_manager:
-            return fake
-    return registry[0][1]
-
-
-def _build_fakes(registry):
-    async def fake_refresh(_config):
-        return _FAKE_TOKEN, _FAKE_EXPIRES_IN
-
-    async def fake_list_files(
-        token_manager,
-        folder_id: str = "root",
+    async def list_files(
+        self,
+        folder_id: str,
         drive_id: str | None = None,
-        mime_type: str | None = None,
-        trashed: bool = False,
-        page_size: int = 1000,
-        modified_after: str | None = None,
-        modified_before: str | None = None,
-        name: str | None = None,
+        limit: int | None = None,
     ) -> list[dict]:
-        # The signature mirrors the real list_files so a caller that passes
-        # a filter this fake ignores fails loudly at the call site rather
-        # than silently listing an unfiltered folder. `name` is honored
-        # because resolve_key walks a path one exact name at a time.
-        del drive_id, mime_type, trashed, page_size
-        del modified_after, modified_before
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            return []
-        fake.calls["list_files"] += 1
-        children = fake.list_children(folder_id)
-        if name is not None:
-            children = [c for c in children if c.get("name") == name]
-        return children
+        del drive_id
+        self._fake.calls["list_files"] += 1
+        children = self._fake.list_children(folder_id)
+        return children if limit is None else children[:limit]
 
-    async def fake_list_children(
-        token_manager,
-        folder_ids: list[str],
-        drive_id: str | None = None,
-        page_size: int = 1000,
+    async def list_children(
+        self, folder_ids: list[str], drive_id: str | None
     ) -> list[dict]:
-        del drive_id, page_size
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            return []
-        fake.calls["list_children"] += 1
+        del drive_id
+        self._fake.calls["list_children"] += 1
         return [
             child
             for folder_id in folder_ids
-            for child in fake.list_children(folder_id)
+            for child in self._fake.list_children(folder_id)
         ]
+
+    async def list_shared_drives(self) -> list[dict]:
+        return []
+
+    async def get_file(self, file_id: str, fields: str = ITEM_FIELDS) -> dict:
+        del fields
+        self._fake.calls["get_file"] += 1
+        entry = self._fake.find_entry(file_id)
+        if entry is None:
+            raise FileNotFoundError(file_id)
+        return entry
+
+    async def download_file(
+        self, file_id: str, window: ByteWindow | None = None
+    ) -> bytes:
+        self._fake.calls["download_file"] += 1
+        return _sliced(self.bytes_of(file_id), window)
+
+    async def download_file_stream(
+        self, file_id: str
+    ) -> AsyncGenerator[bytes, None]:
+        self._fake.calls["download_file"] += 1
+        data = self.bytes_of(file_id)
+        for at in range(0, len(data), _STREAM_CHUNK):
+            yield data[at : at + _STREAM_CHUNK]
+
+    async def capture_file_metadata(
+        self, file_id: str
+    ) -> tuple[str | None, str | None]:
+        self._fake.calls["capture_file_metadata"] += 1
+        digest = hashlib.md5(self.bytes_of(file_id)).hexdigest()
+        return digest, f"rev-{digest}"
+
+    async def upload_file(
+        self, name: str, parent_id: str, data: bytes | ByteSpool
+    ) -> dict:
+        self._fake.calls["upload_file"] += 1
+        return self._fake.upload(parent_id, name, await payload(data))
+
+    async def update_file_content(
+        self, file_id: str, data: bytes | ByteSpool
+    ) -> dict:
+        self._fake.calls["update_file_content"] += 1
+        return self._fake.update(file_id, await payload(data))
+
+    async def create_folder(self, name: str, parent_id: str) -> dict:
+        self._fake.calls["create_folder"] += 1
+        return self._fake.mkdir(parent_id, name)
+
+    def render(self, file_id: str) -> bytes:
+        """A native file's rendering: its stored bytes, counted as the
+        cost a warm native read avoids.
+
+        Args:
+            file_id (str): the Drive file id.
+        """
+        self._fake.calls["render"] += 1
+        return self.bytes_of(file_id)
+
+    def bytes_of(self, file_id: str) -> bytes:
+        """The stored bytes for ``file_id``, from any registered fake, as
+        a cross-mount read reaches a file another fake owns.
+
+        Args:
+            file_id (str): the Drive file id.
+        """
+        for fake in (self._fake, *(other for _, other in self._registry)):
+            if fake.has_id(file_id):
+                return fake.get_bytes(file_id)
+        raise FileNotFoundError(file_id)
+
+
+def _resolve_fake(token_manager, registry) -> FakeGDrive:
+    for tm, fake in registry:
+        if tm is None or tm is token_manager:
+            return fake
+    raise AssertionError("no FakeGDrive was registered for this mount")
+
+
+def patch_gdrive(*pairs) -> ExitStack:
+    """Serve gdrive from in-memory fakes, selected by token manager.
+
+    Every ``GDriveAccessor`` serves a ``FakeDriveApi``, so any Drive call
+    the backend makes is answered by the fake or fails the test. The
+    renderers and the app mounts' own Drive calls are patched by name.
+
+    Args:
+        *pairs: (token_manager, FakeGDrive) tuples, or one FakeGDrive.
+            The right fake is selected by token_manager identity, so
+            several gdrive mounts can coexist with separate trees.
+    """
+    if len(pairs) == 1 and isinstance(pairs[0], FakeGDrive):
+        registry = [(None, pairs[0])]
+    else:
+        registry = list(pairs)
+    if not registry:
+        raise AssertionError("patch_gdrive was given no FakeGDrive")
+
+    def drive_for(token_manager) -> FakeDriveApi:
+        return FakeDriveApi(_resolve_fake(token_manager, registry), registry)
+
+    async def fake_refresh(_config):
+        return _FAKE_TOKEN, _FAKE_EXPIRES_IN
+
+    async def fake_get_file(token_manager, file_id: str) -> dict:
+        return await drive_for(token_manager).get_file(file_id)
 
     async def fake_list_all_files(
         token_manager,
@@ -442,167 +467,31 @@ def _build_fakes(registry):
         modified_after: str | None = None,
         modified_before: str | None = None,
     ) -> tuple[list[dict], bool]:
-        # Same rule as fake_list_files: the full signature, so a filter this
-        # fake ignores still binds. The mime type is honoured because each
-        # of gdocs, gsheets and gslides lists only its own kind.
         del trashed, page_size, modified_after, modified_before
         fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            return [], True
         return [
             f
             for f in fake.all_files()
             if mime_type is None or f["mimeType"] == mime_type
         ], True
 
-    async def fake_list_shared_drives(token_manager) -> list[dict]:
-        return []
-
-    async def fake_download_file(
-        token_manager, file_id: str, range_header: str | None = None
-    ) -> bytes:
-        # The Range is served here rather than ignored: Drive honours it
-        # for a binary file, so a fake that returned the whole object
-        # would hide a ranged read asking for the wrong window.
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["download_file"] += 1
-        return _sliced(_bytes_for(fake, registry, file_id), range_header)
-
-    async def fake_download_file_stream(token_manager, file_id: str):
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["download_file"] += 1
-        data = _bytes_for(fake, registry, file_id)
-        for at in range(0, len(data), _STREAM_CHUNK):
-            yield data[at : at + _STREAM_CHUNK]
-
-    async def fake_get_file(token_manager, file_id: str) -> dict:
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["get_file"] += 1
-        entry = fake.find_entry(file_id)
-        if entry is None:
-            raise FileNotFoundError(file_id)
-        return entry
-
-    async def fake_capture_file_metadata(
-        token_manager, file_id: str
-    ) -> tuple[str | None, str | None]:
-        # Reads the bytes directly rather than through `fake_download_file`,
-        # so the download counter stays honest: the real call is a metadata
-        # GET and must not read as a download.
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["capture_file_metadata"] += 1
-        digest = hashlib.md5(_bytes_for(fake, registry, file_id)).hexdigest()
-        return digest, f"rev-{digest}"
-
-    async def fake_upload_file(
-        token_manager,
-        name: str,
-        parent_id: str,
-        data: bytes,
-        mime_type: str = _FILE_MIME,
-    ) -> dict:
-        del mime_type
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(parent_id)
-        fake.calls["upload_file"] += 1
-        return fake.upload(
-            parent_id,
-            name,
-            await data.read(0, data.size)
-            if isinstance(data, ByteSpool)
-            else data,
-        )
-
-    async def fake_update_file_content(
-        token_manager, file_id: str, data: bytes, mime_type: str = _FILE_MIME
-    ) -> dict:
-        del mime_type
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["update_file_content"] += 1
-        return fake.update(
-            file_id,
-            await data.read(0, data.size)
-            if isinstance(data, ByteSpool)
-            else data,
-        )
-
-    async def fake_create_folder(
-        token_manager, name: str, parent_id: str
-    ) -> dict:
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(parent_id)
-        fake.calls["create_folder"] += 1
-        return fake.mkdir(parent_id, name)
-
     async def fake_render(token_manager, file_id: str) -> bytes:
-        fake = _resolve_fake(token_manager, registry)
-        if fake is None:
-            raise FileNotFoundError(file_id)
-        fake.calls["render"] += 1
-        return _bytes_for(fake, registry, file_id)
+        return drive_for(token_manager).render(file_id)
 
-    return {
-        "refresh": fake_refresh,
-        "render": fake_render,
-        "list_files": fake_list_files,
-        "list_children": fake_list_children,
-        "list_shared_drives": fake_list_shared_drives,
-        "list_all_files": fake_list_all_files,
-        "download_file": fake_download_file,
-        "download_file_stream": fake_download_file_stream,
-        "capture_file_metadata": fake_capture_file_metadata,
-        "get_file": fake_get_file,
-        "upload_file": fake_upload_file,
-        "update_file_content": fake_update_file_content,
-        "create_folder": fake_create_folder,
+    by_name = {
+        "mirage.core.google.client.refresh_access_token": fake_refresh,
+        _APP_GET_FILE: fake_get_file,
+        _APP_LIST_ALL_FILES: fake_list_all_files,
+        **dict.fromkeys(_RENDERERS, fake_render),
     }
-
-
-def patch_gdrive(*pairs) -> ExitStack:
-    """Patch gdrive HTTP layer with (token_manager, FakeGDrive) pairs.
-
-    Args:
-        *pairs: tuples of (token_manager, FakeGDrive). The right fake is
-            selected by token_manager identity, so multiple gdrive mounts
-            can coexist with separate file trees.
-    """
-    if len(pairs) == 1 and isinstance(pairs[0], FakeGDrive):
-        registry = [(None, pairs[0])]
-    else:
-        registry = list(pairs)
-    fakes = _build_fakes(registry)
-    stack = ExitStack()
-    stack.enter_context(
-        patch(
-            "mirage.core.google.client.refresh_access_token",
-            new=fakes["refresh"],
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(
+                GDriveAccessor,
+                "drive",
+                property(lambda accessor: drive_for(accessor.token_manager)),
+            )
         )
-    )
-    for name, targets in _PATCH_TARGETS.items():
-        for target in targets:
-            # A target that will not resolve used to be skipped, which is
-            # how #684 stayed quiet: the binding kept pointing at the real
-            # Drive API and the test reached the network. A stale target is
-            # a fixture bug, so it fails here.
-            try:
-                stack.enter_context(patch(target, new=fakes[name]))
-            except (AttributeError, ModuleNotFoundError) as exc:
-                stack.close()
-                raise AssertionError(
-                    f"gdrive_mock cannot patch {target!r}: {exc}. Fix the "
-                    "target in _PATCH_TARGETS; leaving it unpatched sends "
-                    "the test to the real Drive API."
-                ) from exc
-    return stack
+        for target, fake in by_name.items():
+            stack.enter_context(patch(target, new=fake))
+        return stack.pop_all()

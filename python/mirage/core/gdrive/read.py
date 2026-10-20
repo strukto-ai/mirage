@@ -19,14 +19,8 @@ from contextlib import aclosing
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.fingerprint import drive_fingerprint
-from mirage.core.gdrive.versions import (
-    capture_file_metadata,
-    download_revision,
-    download_revision_stream,
-)
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import download_file, download_file_stream
 from mirage.core.gsheets.read import read_spreadsheet
 from mirage.core.gslides.read import read_presentation
 from mirage.errors.fs import eisdir, enoent
@@ -72,7 +66,7 @@ def _stale_md5(md5: JsonValue, data: bytes) -> bool:
 
 
 async def read_file_versioned(
-    token_manager: TokenManager,
+    drive: DriveApi,
     file_id: str,
     virtual: str,
     entry: FileStat,
@@ -89,7 +83,7 @@ async def read_file_versioned(
     revision with it.
 
     Args:
-        token_manager (TokenManager): OAuth2 token manager.
+        drive (DriveApi): the Drive client.
         file_id (str): file ID.
         virtual (str): full virtual path, the pin lookup key and the
             recorded path.
@@ -104,10 +98,10 @@ async def read_file_versioned(
     fingerprint = None
     revision = pinned
     if pinned:
-        data = await download_revision(token_manager, file_id, pinned, window)
+        data = await drive.download_revision(file_id, pinned, window)
     elif active_recorder() is not None:
-        md5, revision = await capture_file_metadata(token_manager, file_id)
-        data = await download_file(token_manager, file_id, window)
+        md5, revision = await drive.capture_file_metadata(file_id)
+        data = await drive.download_file(file_id, window)
         if whole and _stale_md5(md5, data):
             revision = None
         elif whole:
@@ -115,7 +109,7 @@ async def read_file_versioned(
                 entry.extra["resource_type"], md5, revision, entry.modified
             )
     else:
-        data = await download_file(token_manager, file_id, window)
+        data = await drive.download_file(file_id, window)
         if whole and not _stale_md5(entry.extra.get("md5_checksum"), data):
             fingerprint = entry.fingerprint
     record(
@@ -174,7 +168,7 @@ async def read(
     resource_type = found.extra["resource_type"]
     if resource_type not in NATIVE_RESOURCE_TYPES:
         return await read_file_versioned(
-            accessor.token_manager, file_id, virtual, found, offset, size
+            accessor.drive, file_id, virtual, found, offset, size
         )
     timer = start_op()
     if resource_type == "gdrive/gdoc":
@@ -219,17 +213,17 @@ async def read_stream(
     if found.extra["resource_type"] in NATIVE_RESOURCE_TYPES:
         yield await read(accessor, path, entry=found)
         return
-    tm = accessor.token_manager
+    drive = accessor.drive
     pinned = revision_for(path.virtual)
     rec = record_stream("read", path.virtual, "gdrive", revision=pinned)
     md5: str | None = None
     revision = None
     if pinned:
-        chunks = download_revision_stream(tm, file_id, pinned)
+        chunks = drive.download_revision_stream(file_id, pinned)
     else:
         if rec is not None:
-            md5, revision = await capture_file_metadata(tm, file_id)
-        chunks = download_file_stream(tm, file_id)
+            md5, revision = await drive.capture_file_metadata(file_id)
+        chunks = drive.download_file_stream(file_id)
     digest = hashlib.md5() if md5 else None
     async with aclosing(chunks) as source:
         async for chunk in source:

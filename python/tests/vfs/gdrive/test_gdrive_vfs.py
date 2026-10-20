@@ -22,6 +22,7 @@ from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, FileType
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace.files import Files
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 
 def _make_gdrive_ops() -> tuple[Files, IndexCacheStore]:
@@ -65,7 +66,7 @@ async def test_read_gdoc_via_filetype_cascade():
 
 
 @pytest.mark.asyncio
-async def test_read_plain_file_falls_through():
+async def test_read_plain_file_falls_through(monkeypatch):
     ops, index = _make_gdrive_ops()
     await index.set_dir(
         "/gdrive",
@@ -86,20 +87,15 @@ async def test_read_plain_file_falls_through():
     )
     # A cold read through the dispatcher fills the cache, so it asks for the
     # md5 its entry is stamped with, as a command's read does.
-    with (
-        patch(
-            "mirage.core.gdrive.read.capture_file_metadata",
-            new_callable=AsyncMock,
-            return_value=(None, None),
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            capture_file_metadata=AsyncMock(return_value=(None, None)),
+            download_file=AsyncMock(return_value=b"plain content"),
         ),
-        patch(
-            "mirage.core.gdrive.read.download_file",
-            new_callable=AsyncMock,
-            return_value=b"plain content",
-        ),
-    ):
-        result = await ops.read("/gdrive/notes.txt")
-        assert result == b"plain content"
+    )
+    result = await ops.read("/gdrive/notes.txt")
+    assert result == b"plain content"
 
 
 @pytest.mark.asyncio

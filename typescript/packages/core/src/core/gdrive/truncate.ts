@@ -17,7 +17,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eisdir } from '../../errors/fs.ts'
-import { downloadFile } from '../google/drive.ts'
 import { liveRow } from './readdir.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
 import { eaccesOnDenied } from './resolve.ts'
@@ -37,7 +36,7 @@ async function truncateImpl(
   if (entry === null || NATIVE_RESOURCE_TYPES.has(entry.extra.resource_type as string)) {
     data = new Uint8Array(0)
   } else {
-    data = await downloadFile(accessor.tokenManager, entry.extra.file_id as string)
+    data = await accessor.drive.downloadFile(entry.extra.file_id as string)
   }
   let out: Uint8Array
   if (length <= data.length) {

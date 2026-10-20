@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +24,7 @@ from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import FOLDER_MIME
 from mirage.types import FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 
 ROOT = PathSpec(
     vfs_path=mount_key("/drive", "/drive"),
@@ -63,7 +64,7 @@ def item(
 
 
 @pytest.mark.asyncio
-async def test_changes_are_placed_by_their_parents():
+async def test_changes_are_placed_by_their_parents(monkeypatch):
     config = GoogleConfig(client_id="cid", refresh_token="rt")
     hook = build_delta_hook(
         GDriveAccessor(config=config, token_manager=TokenManager(config))
@@ -91,36 +92,23 @@ async def test_changes_are_placed_by_their_parents():
             "3",
         ),
     ]
-    with (
-        patch(
-            "mirage.core.gdrive.events.start_page_token",
-            new_callable=AsyncMock,
-            return_value="1",
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            start_page_token=AsyncMock(return_value="1"),
+            list_changes=AsyncMock(side_effect=feed),
+            get_file=AsyncMock(side_effect=lambda file_id: FOLDERS[file_id]),
+            list_files=AsyncMock(
+                return_value=[{"name": "Team", "mimeType": FOLDER_MIME}]
+            ),
+            list_shared_drives=AsyncMock(
+                return_value=[{"id": "D", "name": "Team"}]
+            ),
         ),
-        patch(
-            "mirage.core.gdrive.events.list_changes",
-            new_callable=AsyncMock,
-            side_effect=feed,
-        ),
-        patch(
-            "mirage.core.gdrive.events.get_file",
-            new_callable=AsyncMock,
-            side_effect=lambda tm, file_id: FOLDERS[file_id],
-        ),
-        patch(
-            "mirage.core.gdrive.events.list_files",
-            new_callable=AsyncMock,
-            return_value=[{"name": "Team", "mimeType": FOLDER_MIME}],
-        ),
-        patch(
-            "mirage.core.gdrive.events.list_shared_drives",
-            new_callable=AsyncMock,
-            return_value=[{"id": "D", "name": "Team"}],
-        ),
-    ):
-        baseline = await hook.pull(ROOT, None)
-        first = await hook.pull(ROOT, baseline.checkpoint)
-        second = await hook.pull(ROOT, first.checkpoint)
+    )
+    baseline = await hook.pull(ROOT, None)
+    first = await hook.pull(ROOT, baseline.checkpoint)
+    second = await hook.pull(ROOT, first.checkpoint)
     assert baseline.changes == ()
     assert [(c.kind, c.path.virtual) for c in first.changes] == [
         (FileChangeKind.UPDATE, "/drive/Docs"),
@@ -136,7 +124,9 @@ async def test_changes_are_placed_by_their_parents():
     ]
 
 
-async def _pulls(feed: list, root_names: list[list[str]]) -> list:
+async def _pulls(
+    monkeypatch: pytest.MonkeyPatch, feed: list, root_names: list[list[str]]
+) -> list:
     """Pull a baseline and then one read per page of ``feed``, the root
     listing naming ``root_names[n]`` on read ``n``."""
     config = GoogleConfig(client_id="cid", refresh_token="rt")
@@ -144,48 +134,38 @@ async def _pulls(feed: list, root_names: list[list[str]]) -> list:
         GDriveAccessor(config=config, token_manager=TokenManager(config))
     )
     listings = iter(root_names)
-    with (
-        patch(
-            "mirage.core.gdrive.events.start_page_token",
-            new_callable=AsyncMock,
-            return_value="1",
+    install_drive(
+        monkeypatch,
+        StubDrive(
+            start_page_token=AsyncMock(return_value="1"),
+            list_changes=AsyncMock(side_effect=feed),
+            get_file=AsyncMock(side_effect=lambda file_id: FOLDERS[file_id]),
+            list_files=AsyncMock(
+                side_effect=lambda folder: [
+                    {"name": name, "mimeType": FOLDER_MIME}
+                    for name in next(listings)
+                ]
+            ),
+            list_shared_drives=AsyncMock(
+                return_value=[{"id": "D", "name": "Team"}]
+            ),
         ),
-        patch(
-            "mirage.core.gdrive.events.list_changes",
-            new_callable=AsyncMock,
-            side_effect=feed,
-        ),
-        patch(
-            "mirage.core.gdrive.events.get_file",
-            new_callable=AsyncMock,
-            side_effect=lambda tm, file_id: FOLDERS[file_id],
-        ),
-        patch(
-            "mirage.core.gdrive.events.list_files",
-            new_callable=AsyncMock,
-            side_effect=lambda tm, folder: [
-                {"name": name, "mimeType": FOLDER_MIME}
-                for name in next(listings)
-            ],
-        ),
-        patch(
-            "mirage.core.gdrive.events.list_shared_drives",
-            new_callable=AsyncMock,
-            return_value=[{"id": "D", "name": "Team"}],
-        ),
-    ):
-        delta = await hook.pull(ROOT, None)
-        out = []
-        for _ in feed:
-            delta = await hook.pull(ROOT, delta.checkpoint)
-            out.append([(c.kind, c.path.virtual) for c in delta.changes])
+    )
+    delta = await hook.pull(ROOT, None)
+    out = []
+    for _ in feed:
+        delta = await hook.pull(ROOT, delta.checkpoint)
+        out.append([(c.kind, c.path.virtual) for c in delta.changes])
     return out
 
 
 @pytest.mark.asyncio
-async def test_a_child_listed_before_its_renamed_folder_lands_in_it():
+async def test_a_child_listed_before_its_renamed_folder_lands_in_it(
+    monkeypatch,
+):
     edited = "2026-10-01T00:00:00.000Z"
     first, second = await _pulls(
+        monkeypatch,
         [
             ([item("F", "Docs", "R", mime=FOLDER_MIME)], "2"),
             (
@@ -207,10 +187,13 @@ async def test_a_child_listed_before_its_renamed_folder_lands_in_it():
 
 
 @pytest.mark.asyncio
-async def test_a_shared_drive_is_named_as_the_root_listing_names_it_now():
+async def test_a_shared_drive_is_named_as_the_root_listing_names_it_now(
+    monkeypatch,
+):
     # A My Drive folder named like the drive arrives between two reads,
     # and the root listing renames the drive "Team [Shared Drive]".
     first, second = await _pulls(
+        monkeypatch,
         [([item("d", "d.txt", "D")], "2"), ([item("d", "d.txt", "D")], "3")],
         [[], ["Team"]],
     )
@@ -222,11 +205,14 @@ async def test_a_shared_drive_is_named_as_the_root_listing_names_it_now():
 
 
 @pytest.mark.asyncio
-async def test_a_folder_taking_anothers_name_keeps_its_own_children():
+async def test_a_folder_taking_anothers_name_keeps_its_own_children(
+    monkeypatch,
+):
     # A renamed to Z and B renamed to A in one read, B's child listed
     # first: the child is in the new A, and stays there for the next read.
     edited = "2026-10-01T00:00:00.000Z"
     first, second, third = await _pulls(
+        monkeypatch,
         [
             (
                 [

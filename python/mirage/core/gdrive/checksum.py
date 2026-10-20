@@ -16,7 +16,6 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.read import file_entry
-from mirage.core.google.client import drive_base, google_get
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import FileStat, PathSpec
 
@@ -56,13 +55,10 @@ async def checksum(
     row = file_entry(path, entry)
     if row.extra["resource_type"] in NATIVE_RESOURCE_TYPES:
         return None
-    token_manager = accessor.token_manager
     timer = start_op()
     fields = dict.fromkeys([field, "md5Checksum", "headRevisionId"])
-    item = await google_get(
-        token_manager,
-        f"{drive_base(token_manager)}/files/{row.extra['file_id']}",
-        params={"fields": ",".join(fields), "supportsAllDrives": "true"},
+    item = await accessor.drive.get_file(
+        row.extra["file_id"], ",".join(fields)
     )
     found = item.get(field)
     if not isinstance(found, str) or not found:

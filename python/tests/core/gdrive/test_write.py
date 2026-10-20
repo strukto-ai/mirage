@@ -14,7 +14,6 @@
 
 import pytest
 
-import mirage.core.gdrive.write as write_mod
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.write import write
 from mirage.observe.context import RecordingScope
@@ -147,12 +146,12 @@ async def _write_recorded(accessor, virtual: str, data: bytes, monkeypatch):
 
 def _patch_replies(fake_drive, monkeypatch, overrides) -> None:
     monkeypatch.setattr(
-        write_mod,
+        fake_drive,
         "upload_file",
         _replying(fake_drive.upload_file, {**_HAPPY, **overrides}),
     )
     monkeypatch.setattr(
-        write_mod,
+        fake_drive,
         "update_file_content",
         _replying(fake_drive.update_file_content, {**_HAPPY, **overrides}),
     )
@@ -179,10 +178,12 @@ async def test_a_write_whose_reply_is_empty_still_records_it(
 ):
     # The upload landed, so the write counts even without a token: an
     # earlier write's claim on the path must not win.
-    async def _empty(*args, **kwargs):
-        await fake_drive.upload_file(*args, **kwargs)
+    upload_file = fake_drive.upload_file
 
-    monkeypatch.setattr(write_mod, "upload_file", _empty)
+    async def _empty(*args, **kwargs):
+        await upload_file(*args, **kwargs)
+
+    monkeypatch.setattr(fake_drive, "upload_file", _empty)
     rows = await _write_recorded(
         gdrive_accessor, "/f.txt", b"hello", monkeypatch
     )

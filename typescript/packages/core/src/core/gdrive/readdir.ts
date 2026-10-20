@@ -15,14 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
-import {
-  type DriveFile,
-  FOLDER_MIME,
-  MIME_TO_EXT,
-  getFile,
-  listFiles,
-  listSharedDrives,
-} from '../google/drive.ts'
+import { type DriveFile, FOLDER_MIME, MIME_TO_EXT } from '../google/drive.ts'
 import { driveFingerprint } from './fingerprint.ts'
 import { rootContext } from './resolve.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -120,9 +113,9 @@ export async function liveRow(
   const folders = entry.extra.parents as string[] | undefined
   const folder = folders?.[0]
   if (folders === undefined || folder === undefined) return entry
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   try {
-    const item = await getFile(tm, entry.extra.file_id as string)
+    const item = await drive.getFile(entry.extra.file_id as string)
     const row = statFromItem(item)
     const filed = row.extra.parents as string[] | undefined
     if (
@@ -136,7 +129,7 @@ export async function liveRow(
     if (!(err instanceof GoogleApiError) || err.status !== 404) throw err
     console.debug(`listed id for ${path.virtual} is gone: ${String(err)}`)
   }
-  const files = await listFiles(tm, {
+  const files = await drive.listFiles({
     folderId: folder,
     driveId: (entry.extra.drive_id as string | undefined) ?? null,
   })
@@ -171,7 +164,8 @@ export async function readdir(
     const entryDriveId = entry.extra.drive_id
     driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
-  const files = await listFiles(accessor.tokenManager, { folderId, driveId })
+  const drive = accessor.drive
+  const files = await drive.listFiles({ folderId, driveId })
   const rows = files.map((f) => statFromItem(f))
   let complete = true
   if (atRoot && folderId === 'root') {
@@ -181,7 +175,7 @@ export async function readdir(
     // drives never surface there.
     let sharedDrives: { id: string; name: string }[] = []
     try {
-      sharedDrives = await listSharedDrives(accessor.tokenManager)
+      sharedDrives = await drive.listSharedDrives()
     } catch {
       sharedDrives = []
       complete = false

@@ -20,13 +20,7 @@ import aiohttp
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.resolve import root_context
-from mirage.core.google.drive import (
-    FOLDER_MIME,
-    MIME_TO_EXT,
-    get_file,
-    list_files,
-    list_shared_drives,
-)
+from mirage.core.google.drive import FOLDER_MIME, MIME_TO_EXT
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
@@ -140,9 +134,9 @@ async def live_row(
     folders = None if entry is None else entry.extra.get("parents")
     if entry is None or not folders:
         return entry
-    tm = accessor.token_manager
+    drive = accessor.drive
     try:
-        item = await get_file(tm, entry.extra["file_id"])
+        item = await drive.get_file(entry.extra["file_id"])
     except aiohttp.ClientResponseError as exc:
         if exc.status != 404:
             raise
@@ -155,8 +149,8 @@ async def live_row(
             and row.extra.get("parents") == folders
         ):
             return row
-    files = await list_files(
-        tm, folder_id=folders[0], drive_id=entry.extra.get("drive_id")
+    files = await drive.list_files(
+        folder_id=folders[0], drive_id=entry.extra.get("drive_id")
     )
     return next(
         (row for row in map(stat_from_item, files) if row.name == entry.name),
@@ -193,9 +187,8 @@ async def readdir(
     else:
         folder_id = entry.extra["file_id"]
         drive_id = entry.extra.get("drive_id")
-    files = await list_files(
-        accessor.token_manager, folder_id=folder_id, drive_id=drive_id
-    )
+    drive = accessor.drive
+    files = await drive.list_files(folder_id=folder_id, drive_id=drive_id)
     rows = [stat_from_item(f) for f in files]
     complete = True
     if folder_id == "root" and not target.vfs_path.strip("/"):
@@ -204,7 +197,7 @@ async def readdir(
         # A folder-scoped mount lists only the folder's children, so shared
         # drives never surface there.
         try:
-            shared_drives = await list_shared_drives(accessor.token_manager)
+            shared_drives = await drive.list_shared_drives()
         except Exception:
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []

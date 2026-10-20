@@ -17,7 +17,6 @@ import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
-import { deleteFile, listFiles } from '../google/drive.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
@@ -42,13 +41,14 @@ async function rmdirImpl(
   if (entry === null) throw enoent(path)
   if (entry.type !== FileType.DIRECTORY) throw enotdir(path)
   const driveId = entry.extra.drive_id
-  const children = await listFiles(accessor.tokenManager, {
+  const drive = accessor.drive
+  const children = await drive.listFiles({
     folderId: entry.extra.file_id as string,
     driveId: typeof driveId === 'string' ? driveId : null,
     limit: 1,
   })
   if (children.length > 0) throw enotempty(path)
-  await deleteFile(accessor.tokenManager, entry.extra.file_id as string)
+  await drive.deleteFile(entry.extra.file_id as string)
 }
 
 export const rmdir = eaccesOnDenied(rmdirImpl)

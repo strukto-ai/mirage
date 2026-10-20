@@ -12,24 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Mock } from 'vitest'
+import { vi } from 'vitest'
 import { GDriveAccessor } from '../../../src/accessor/gdrive.ts'
+import type { DriveApi } from '../../../src/core/gdrive/api.ts'
+import type { TokenManager } from '../../../src/core/google/client.ts'
+import { FOLDER_MIME, MIME_TO_EXT } from '../../../src/core/google/drive.ts'
+import type { DriveChange, DriveFile, SharedDrive } from '../../../src/core/google/drive.ts'
 import { ByteSpool } from '../../../src/io/spool.ts'
 import { md5Hex } from '../../../src/utils/hash.ts'
-import type { TokenManager } from '../../../src/core/google/client.ts'
-import type { DriveFile } from '../../../src/core/google/drive.ts'
+import type { ByteWindow } from '../../../src/utils/ranges.ts'
 
-const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const FILE_MIME = 'application/octet-stream'
+const STREAM_CHUNK = 4
 export const DOC_MIME = 'application/vnd.google-apps.document'
-// Local, not imported from ../google/drive.ts: the tests mock that module
-// with a factory importing this file, and the cycle hangs module init.
-const NATIVE_MIMES = new Set([
-  DOC_MIME,
-  'application/vnd.google-apps.spreadsheet',
-  'application/vnd.google-apps.presentation',
-])
 
-export interface FakeItem {
+export const TOKEN_MANAGER = { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager
+
+interface FakeItem {
   id: string
   name: string
   mimeType: string
@@ -39,19 +39,28 @@ export interface FakeItem {
   driveId?: string
 }
 
-// In-memory Drive: id-addressed items with parent links. Test files mock
-// ../google/drive.ts and delegate its functions to the current instance.
 function bytesOf(data: Uint8Array | ByteSpool): Promise<Uint8Array> {
   return data instanceof ByteSpool ? data.read(0, data.size) : Promise.resolve(data)
 }
 
-export class FakeDrive {
+function unserved(call: string): Error {
+  return new Error(`the fake Drive does not serve ${call}`)
+}
+
+/**
+ * In-memory Drive: id-addressed items with parent links. It implements the
+ * one seam every gdrive core op reaches Drive through, so a test hands it to
+ * an accessor (`makeGDriveAccessor`) or installs it behind every accessor
+ * (`installDrive`). It keeps one version of each item, so a revision read
+ * answers the current content.
+ */
+export class FakeDrive implements DriveApi {
   items = new Map<string, FakeItem>()
   // Every `limit` a caller asked for, so a test can pin that an emptiness
   // probe is bounded. `pageSize` cannot express that: it caps the page, not
   // the walk, so a small page turns a listing of a large folder into more
   // requests rather than fewer.
-  listLimits: (number | null | undefined)[] = []
+  listLimits: (number | undefined)[] = []
   // The parent ids of every full-text search, and whether Drive gave up on
   // a corpus.
   searches: string[][] = []
@@ -91,9 +100,14 @@ export class FakeDrive {
     return null
   }
 
-  public(id: string): DriveFile {
+  private item(id: string): FakeItem {
     const item = this.items.get(id)
     if (item === undefined) throw new Error(`no item ${id}`)
+    return item
+  }
+
+  public(id: string): DriveFile {
+    const item = this.item(id)
     return {
       id: item.id,
       name: item.name,
@@ -103,39 +117,24 @@ export class FakeDrive {
       size: String(item.content.length),
       ...(item.driveId === undefined ? {} : { driveId: item.driveId }),
       // As Drive does: a folder and a Doc, Sheet or Slides file have neither.
-      ...(item.mimeType === FOLDER_MIME || NATIVE_MIMES.has(item.mimeType)
+      ...(item.mimeType === FOLDER_MIME || item.mimeType in MIME_TO_EXT
         ? {}
         : { md5Checksum: md5Hex(item.content), headRevisionId: `${item.id}-r1` }),
     }
   }
 
-  listFiles(
-    _tm: TokenManager,
-    opts: {
-      folderId?: string
-      mimeType?: string | null
-      name?: string | null
-      limit?: number | null
-    } = {},
-  ): Promise<DriveFile[]> {
+  listFiles(opts: { folderId: string; limit?: number }): Promise<DriveFile[]> {
     this.listLimits.push(opts.limit)
-    const folderId = opts.folderId ?? 'root'
     const out: DriveFile[] = []
     for (const item of this.items.values()) {
-      if (!item.parents.includes(folderId)) continue
-      if (opts.name != null && item.name !== opts.name) continue
-      if (opts.mimeType != null && item.mimeType !== opts.mimeType) continue
+      if (!item.parents.includes(opts.folderId)) continue
       out.push(this.public(item.id))
-      if (opts.limit != null && out.length >= opts.limit) break
+      if (opts.limit !== undefined && out.length >= opts.limit) break
     }
     return Promise.resolve(out)
   }
 
-  listChildren(
-    _tm: TokenManager,
-    folderIds: readonly string[],
-    driveId: string | null = null,
-  ): Promise<DriveFile[]> {
+  listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]> {
     this.childQueries.push([[...folderIds], driveId])
     const out: DriveFile[] = []
     for (const item of this.items.values()) {
@@ -145,7 +144,6 @@ export class FakeDrive {
   }
 
   searchFiles(
-    _tm: TokenManager,
     text: string,
     parentIds: readonly string[],
   ): Promise<{ ids: string[]; complete: boolean }> {
@@ -159,36 +157,36 @@ export class FakeDrive {
     return Promise.resolve({ ids, complete: !this.incomplete })
   }
 
-  listSharedDrives(): Promise<never[]> {
+  listSharedDrives(): Promise<SharedDrive[]> {
     return Promise.resolve([])
   }
 
-  createFolder(_tm: TokenManager, name: string, parentId: string): Promise<DriveFile> {
+  getFile(fileId: string): Promise<DriveFile> {
+    return Promise.resolve(this.public(fileId))
+  }
+
+  storageQuota(): Promise<{ limit?: string; usage?: string }> {
+    return Promise.reject(unserved('storageQuota'))
+  }
+
+  createFolder(name: string, parentId: string): Promise<DriveFile> {
     return Promise.resolve(this.public(this.folder(name, parentId)))
   }
 
   async uploadFile(
-    _tm: TokenManager,
     name: string,
     parentId: string,
     data: Uint8Array | ByteSpool,
-    mimeType: string = FILE_MIME,
   ): Promise<DriveFile> {
-    return this.public(this.add(name, parentId, mimeType, await bytesOf(data)))
+    return this.public(this.add(name, parentId, FILE_MIME, await bytesOf(data)))
   }
 
-  async updateFileContent(
-    _tm: TokenManager,
-    fileId: string,
-    data: Uint8Array | ByteSpool,
-  ): Promise<DriveFile> {
-    const item = this.items.get(fileId)
-    if (item === undefined) throw new Error(`no item ${fileId}`)
-    item.content = await bytesOf(data)
+  async updateFileContent(fileId: string, data: Uint8Array | ByteSpool): Promise<DriveFile> {
+    this.item(fileId).content = await bytesOf(data)
     return this.public(fileId)
   }
 
-  deleteFile(_tm: TokenManager, fileId: string): Promise<void> {
+  deleteFile(fileId: string): Promise<void> {
     const stack = [fileId]
     for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
       for (const item of this.items.values()) {
@@ -200,14 +198,12 @@ export class FakeDrive {
   }
 
   patchFile(
-    _tm: TokenManager,
     fileId: string,
-    opts: { body?: Record<string, unknown>; addParents?: string; removeParents?: string } = {},
+    opts: { body: Record<string, unknown>; addParents?: string; removeParents?: string },
   ): Promise<DriveFile> {
-    const item = this.items.get(fileId)
-    if (item === undefined) throw new Error(`no item ${fileId}`)
-    if (opts.body?.name !== undefined) item.name = opts.body.name as string
-    item.modifiedTime = (opts.body?.modifiedTime as string | undefined) ?? '2026-10-01T00:00:00Z'
+    const item = this.item(fileId)
+    if (opts.body.name !== undefined) item.name = opts.body.name as string
+    item.modifiedTime = (opts.body.modifiedTime as string | undefined) ?? '2026-10-01T00:00:00Z'
     if (opts.addParents !== undefined) item.parents.push(opts.addParents)
     if (opts.removeParents !== undefined) {
       item.parents = item.parents.filter((p) => p !== opts.removeParents)
@@ -215,94 +211,115 @@ export class FakeDrive {
     return Promise.resolve(this.public(fileId))
   }
 
-  copyFile(_tm: TokenManager, fileId: string, name: string, parentId: string): Promise<DriveFile> {
-    const src = this.items.get(fileId)
-    if (src === undefined) throw new Error(`no item ${fileId}`)
+  copyFile(fileId: string, name: string, parentId: string): Promise<DriveFile> {
+    const src = this.item(fileId)
     return Promise.resolve(this.public(this.add(name, parentId, src.mimeType, src.content)))
   }
 
-  downloadFile(_tm: TokenManager, fileId: string): Promise<Uint8Array> {
-    const item = this.items.get(fileId)
-    if (item === undefined) throw new Error(`no item ${fileId}`)
-    return Promise.resolve(item.content)
+  downloadFile(fileId: string, window?: ByteWindow): Promise<Uint8Array> {
+    const content = this.item(fileId).content
+    if (window === undefined) return Promise.resolve(content)
+    const end = window.size === null ? undefined : window.offset + window.size
+    return Promise.resolve(content.slice(window.offset, end))
   }
 
-  getFile(_tm: TokenManager, fileId: string): Promise<DriveFile> {
-    if (!this.items.has(fileId)) throw new Error(`no item ${fileId}`)
-    return Promise.resolve(this.public(fileId))
+  async *downloadFileStream(fileId: string): AsyncGenerator<Uint8Array, void> {
+    const content = await this.downloadFile(fileId)
+    for (let at = 0; at < content.length; at += STREAM_CHUNK) {
+      yield content.subarray(at, at + STREAM_CHUNK)
+    }
+  }
+
+  startPageToken(): Promise<string> {
+    return Promise.reject(unserved('startPageToken'))
+  }
+
+  listChanges(): Promise<[DriveChange[], string]> {
+    return Promise.reject(unserved('listChanges'))
+  }
+
+  captureFileMetadata(fileId: string): Promise<[string | null, string | null]> {
+    const file = this.public(fileId)
+    return Promise.resolve([file.md5Checksum ?? null, file.headRevisionId ?? null])
+  }
+
+  downloadRevision(fileId: string, _revisionId: string, window?: ByteWindow): Promise<Uint8Array> {
+    return this.downloadFile(fileId, window)
+  }
+
+  downloadRevisionStream(fileId: string): AsyncGenerator<Uint8Array, void> {
+    return this.downloadFileStream(fileId)
   }
 }
 
-// Mutable singleton the module mock delegates to; reset per test.
-let currentFakeDrive = new FakeDrive()
+/** A `DriveApi` whose every call is a spy. */
+export type StubDrive = { [K in keyof DriveApi]: Mock<DriveApi[K]> }
 
-export function resetFakeDrive(): FakeDrive {
-  currentFakeDrive = new FakeDrive()
-  return currentFakeDrive
+function unarmed<K extends keyof DriveApi>(name: K): Mock<DriveApi[K]> {
+  return vi.fn((() => {
+    throw new Error(`the test reached Drive.${name} without arming it`)
+  }) as DriveApi[K])
 }
 
-// vi.mock factory body for ../google/drive.ts: keeps real constants and
-// pure helpers, routes API calls to the current FakeDrive.
-export function driveModuleMock(actual: object): object {
+/**
+ * A `DriveApi` that answers only the calls a test arms; an unarmed call
+ * throws. Mirrors Python's `StubDrive`.
+ */
+export function stubDrive(): StubDrive {
   return {
-    ...actual,
-    listFiles: (...args: unknown[]) =>
-      currentFakeDrive.listFiles(args[0] as TokenManager, args[1] as never),
-    listSharedDrives: () => currentFakeDrive.listSharedDrives(),
-    listChildren: (...args: unknown[]) =>
-      currentFakeDrive.listChildren(
-        args[0] as TokenManager,
-        args[1] as readonly string[],
-        (args[2] as string | null | undefined) ?? null,
-      ),
-    searchFiles: (...args: unknown[]) =>
-      currentFakeDrive.searchFiles(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as readonly string[],
-      ),
-    createFolder: (...args: unknown[]) =>
-      currentFakeDrive.createFolder(args[0] as TokenManager, args[1] as string, args[2] as string),
-    uploadFile: (...args: unknown[]) =>
-      currentFakeDrive.uploadFile(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as string,
-        args[3] as Uint8Array | ByteSpool,
-        args[4] as string | undefined,
-      ),
-    updateFileContent: (...args: unknown[]) =>
-      currentFakeDrive.updateFileContent(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as Uint8Array | ByteSpool,
-      ),
-    deleteFile: (...args: unknown[]) =>
-      currentFakeDrive.deleteFile(args[0] as TokenManager, args[1] as string),
-    patchFile: (...args: unknown[]) =>
-      currentFakeDrive.patchFile(args[0] as TokenManager, args[1] as string, args[2] as never),
-    copyFile: (...args: unknown[]) =>
-      currentFakeDrive.copyFile(
-        args[0] as TokenManager,
-        args[1] as string,
-        args[2] as string,
-        args[3] as string,
-      ),
-    downloadFile: (...args: unknown[]) =>
-      currentFakeDrive.downloadFile(args[0] as TokenManager, args[1] as string),
-    getFile: (...args: unknown[]) =>
-      currentFakeDrive.getFile(args[0] as TokenManager, args[1] as string),
+    listFiles: unarmed('listFiles'),
+    listChildren: unarmed('listChildren'),
+    listSharedDrives: unarmed('listSharedDrives'),
+    searchFiles: unarmed('searchFiles'),
+    getFile: unarmed('getFile'),
+    storageQuota: unarmed('storageQuota'),
+    deleteFile: unarmed('deleteFile'),
+    downloadFile: unarmed('downloadFile'),
+    downloadFileStream: unarmed('downloadFileStream'),
+    createFolder: unarmed('createFolder'),
+    uploadFile: unarmed('uploadFile'),
+    updateFileContent: unarmed('updateFileContent'),
+    patchFile: unarmed('patchFile'),
+    copyFile: unarmed('copyFile'),
+    startPageToken: unarmed('startPageToken'),
+    listChanges: unarmed('listChanges'),
+    captureFileMetadata: unarmed('captureFileMetadata'),
+    downloadRevision: unarmed('downloadRevision'),
+    downloadRevisionStream: unarmed('downloadRevisionStream'),
   }
 }
 
-export function makeGDriveAccessor(): GDriveAccessor {
-  return new GDriveAccessor({
-    tokenManager: { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager,
-  })
+class FakeDriveAccessor extends GDriveAccessor {
+  private readonly fake: DriveApi
+
+  constructor(tokenManager: TokenManager, fake: DriveApi) {
+    super({ tokenManager })
+    this.fake = fake
+  }
+
+  override get drive(): DriveApi {
+    return this.fake
+  }
 }
 
-export function makeScopedGDriveAccessor(folderId: string): GDriveAccessor {
-  return new GDriveAccessor({
-    tokenManager: { config: { clientId: 'cid', refreshToken: 'rt', folderId } } as TokenManager,
-  })
+/** A GDriveAccessor for My Drive whose seam is `drive`. */
+export function makeGDriveAccessor(drive: DriveApi): GDriveAccessor {
+  return new FakeDriveAccessor(TOKEN_MANAGER, drive)
+}
+
+/** A GDriveAccessor scoped to the folder `folderId`, whose seam is `drive`. */
+export function makeScopedGDriveAccessor(folderId: string, drive: DriveApi): GDriveAccessor {
+  return new FakeDriveAccessor(
+    { config: { clientId: 'cid', refreshToken: 'rt', folderId } } as TokenManager,
+    drive,
+  )
+}
+
+/**
+ * Serve `drive` behind every GDriveAccessor, for a test whose VFS builds its
+ * own accessor. Undone by `vi.restoreAllMocks()`. Mirrors Python's
+ * `install_drive`.
+ */
+export function installDrive(drive: DriveApi): void {
+  vi.spyOn(GDriveAccessor.prototype, 'drive', 'get').mockReturnValue(drive)
 }

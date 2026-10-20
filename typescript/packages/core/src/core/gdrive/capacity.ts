@@ -14,7 +14,6 @@
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { CapacityState, type CapacityResult } from '../../types.ts'
-import { driveBase, googleGet } from '../google/client.ts'
 import { rootContext } from './resolve.ts'
 
 /**
@@ -26,11 +25,7 @@ import { rootContext } from './resolve.ts'
 export async function capacity(accessor: GDriveAccessor): Promise<CapacityResult> {
   const [, shared] = await rootContext(accessor)
   if (shared !== null && shared !== '') return { state: CapacityState.UNKNOWN }
-  const tm = accessor.tokenManager
-  const about = (await googleGet(tm, `${driveBase(tm)}/about`, {
-    fields: 'storageQuota',
-  })) as { storageQuota?: { limit?: string; usage?: string } }
-  const quota = about.storageQuota ?? {}
+  const quota = await accessor.drive.storageQuota()
   if (quota.limit === undefined) return { state: CapacityState.ELASTIC }
   const total = Number(quota.limit)
   const used = Number(quota.usage ?? 0)

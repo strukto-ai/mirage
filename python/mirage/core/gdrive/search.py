@@ -19,7 +19,6 @@ import aiohttp
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.resolve import root_context
 from mirage.core.gdrive.tree import PARENTS_PER_QUERY, iter_tree
-from mirage.core.google.drive import search_files
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mounted_path
 
@@ -70,11 +69,10 @@ async def files_containing(
                 files.setdefault(str(item["id"]), []).append(
                     mounted_path(under, f"/{rel}")
                 )
+        drive = accessor.drive
         for start in range(0, len(folders), PARENTS_PER_QUERY):
             parents = folders[start : start + PARENTS_PER_QUERY]
-            ids, complete = await search_files(
-                accessor.token_manager, text, parents
-            )
+            ids, complete = await drive.search_files(text, parents)
             if not complete:
                 return None
             for file_id in ids:

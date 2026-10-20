@@ -15,8 +15,6 @@
 import aiohttp
 import pytest
 
-import mirage.core.gdrive.search as search_mod
-import mirage.core.gdrive.tree as tree_mod
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.search import files_containing
 from mirage.core.gdrive.tree import PARENTS_PER_QUERY
@@ -97,10 +95,12 @@ async def test_a_search_that_cannot_answer_answers_none(
     fake_drive.incomplete = case == "incomplete"
     if case == "search fails":
         error = aiohttp.ClientConnectionError("down")
-        monkeypatch.setattr(search_mod, "search_files", _raise(error))
+        monkeypatch.setattr(fake_drive, "search_files", _raise(error))
     if case == "timeout":
-        monkeypatch.setattr(search_mod, "search_files", _raise(TimeoutError()))
+        monkeypatch.setattr(fake_drive, "search_files", _raise(TimeoutError()))
     if case == "listing fails":
-        monkeypatch.setattr(tree_mod, "list_children", _raise(TimeoutError()))
+        monkeypatch.setattr(
+            fake_drive, "list_children", _raise(TimeoutError())
+        )
     out = await files_containing(gdrive_accessor, "wombat", scope(), None)
     assert out is None

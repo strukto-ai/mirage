@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, patchFile: vi.fn() }
-})
-
+import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import * as drive from '../google/drive.ts'
-import { makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
+import { makeGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
 import { setAttrs } from './set_attrs.ts'
 
 const MTIME = '2020-01-01T00:00:00+00:00'
@@ -33,19 +25,19 @@ describe('gdrive setAttrs', () => {
     ['/a.txt', [{ body: { modifiedTime: '2020-01-01T00:00:00Z' } }], { uid: 7 }],
     ['/', [], { uid: 7, mtime: MTIME }],
   ])('stores an mtime on %s as the modified time', async (path, sent, residual) => {
-    vi.mocked(drive.patchFile).mockClear()
-    vi.mocked(drive.patchFile).mockResolvedValue({ id: 'f1', name: 'a.txt' })
+    const drive = stubDrive()
+    drive.patchFile.mockResolvedValue({ id: 'f1', name: 'a.txt' })
     expect(
       await setAttrs(
-        makeGDriveAccessor(),
+        makeGDriveAccessor(drive),
         PathSpec.fromStrPath(path),
         { uid: 7, mtime: MTIME },
         path === '/' ? null : ROW,
       ),
     ).toEqual(residual)
-    expect(vi.mocked(drive.patchFile).mock.calls.map((call) => call[1])).toEqual(
+    expect(drive.patchFile.mock.calls.map((call) => call[0])).toEqual(
       sent.length === 0 ? [] : ['f1'],
     )
-    expect(vi.mocked(drive.patchFile).mock.calls.map((call) => call[2])).toEqual(sent)
+    expect(drive.patchFile.mock.calls.map((call) => call[1])).toEqual(sent)
   })
 })

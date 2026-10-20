@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,7 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.gdrive_api import StubDrive, install_drive
 from tests.fixtures.vfs_io import call_over
 
 
@@ -44,7 +45,7 @@ def accessor():
 
 
 @pytest.mark.asyncio
-async def test_readdir_lists_the_folder_its_row_names(accessor):
+async def test_readdir_lists_the_folder_its_row_names(accessor, monkeypatch):
     folder = FileStat(
         name="docs", type=FileType.DIRECTORY, extra={"file_id": "folder1"}
     )
@@ -56,11 +57,8 @@ async def test_readdir_lists_the_folder_its_row_names(accessor):
             "modifiedTime": "2026-04-01T00:00:00Z",
         }
     ]
-    with patch(
-        "mirage.core.gdrive.readdir.list_files",
-        new_callable=AsyncMock,
-        return_value=files,
-    ) as lister:
-        result = await readdir(accessor, _scope("/docs"), entry=folder)
+    lister = AsyncMock(return_value=files)
+    install_drive(monkeypatch, StubDrive(list_files=lister))
+    result = await readdir(accessor, _scope("/docs"), entry=folder)
     assert [row.name for row in result] == ["readme.txt"]
     assert lister.await_args.kwargs["folder_id"] == "folder1"

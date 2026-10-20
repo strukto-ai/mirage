@@ -20,7 +20,6 @@ import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eacces, eisdir } from '../../errors/fs.ts'
 import { uploadToken } from '../../utils/upload.ts'
-import { updateFileContent, uploadFile } from '../google/drive.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import { eaccesOnDenied, parentFolder } from './resolve.ts'
@@ -39,7 +38,7 @@ async function writeImpl(
   const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const timer = startOp()
-  const tm = accessor.tokenManager
+  const drive = accessor.drive
   const entry = await liveRow(accessor, path, handed.entry)
   if (entry !== null && entry.type === FileType.DIRECTORY) throw eisdir(path)
   // Google-native files are written through the gws commands, not raw bytes.
@@ -48,11 +47,11 @@ async function writeImpl(
   }
   let reply
   if (entry !== null) {
-    reply = await updateFileContent(tm, entry.extra.file_id as string, data)
+    reply = await drive.updateFileContent(entry.extra.file_id as string, data)
   } else {
     const [parentId] = await parentFolder(accessor, path, handed.parent)
     const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-    reply = await uploadFile(tm, basename, parentId, data)
+    reply = await drive.uploadFile(basename, parentId, data)
   }
   const token = uploadToken(reply, statFromItem, path.virtual)
   record(

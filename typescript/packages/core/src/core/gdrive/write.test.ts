@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import type * as ObserveModule from '../../observe/context.ts'
-import type * as DriveModule from '../google/drive.ts'
 import type { DriveFile } from '../google/drive.ts'
 
 const H = vi.hoisted(() => ({
@@ -32,31 +32,21 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
   }
 })
 
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  const { driveModuleMock } = await import('../../../tests/core/gdrive/_test_util.ts')
-  return driveModuleMock(actual)
-})
-
 import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
-import type { FakeDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import {
-  DOC_MIME,
-  makeGDriveAccessor,
-  resetFakeDrive,
-} from '../../../tests/core/gdrive/_test_util.ts'
+import { DOC_MIME, FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { write } from './write.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 let fake: FakeDrive
-const accessor = makeGDriveAccessor()
+let accessor: GDriveAccessor
 
 beforeEach(() => {
-  fake = resetFakeDrive()
+  fake = new FakeDrive()
+  accessor = makeGDriveAccessor(fake)
   H.order = []
 })
 

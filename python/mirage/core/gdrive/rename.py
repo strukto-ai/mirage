@@ -21,11 +21,6 @@ from mirage.core.gdrive.resolve import (
     eacces_on_denied,
     parent_folder,
 )
-from mirage.core.google.drive import (
-    delete_file,
-    list_files,
-    patch_file,
-)
 from mirage.errors.fs import enoent, enotempty
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -51,7 +46,7 @@ async def rename(
         dst_parent (FileStat | None): what is at ``dst``'s parent path.
         dst_entry (FileStat | None): what is at ``dst``.
     """
-    token_manager = accessor.token_manager
+    drive = accessor.drive
     entry = await live_row(accessor, src, entry)
     if entry is None:
         raise enoent(src.virtual)
@@ -61,15 +56,14 @@ async def rename(
         # empty folder) before the move. A non-empty folder conflict is mv's
         # "Directory not empty", mirroring the msgraph rename_replace.
         if dst_entry.type is FileType.DIRECTORY:
-            children = await list_files(
-                token_manager,
+            children = await drive.list_files(
                 folder_id=dst_entry.extra["file_id"],
                 drive_id=dst_entry.extra.get("drive_id"),
                 limit=1,
             )
             if children:
                 raise enotempty(dst)
-        await delete_file(token_manager, dst_entry.extra["file_id"])
+        await drive.delete_file(dst_entry.extra["file_id"])
     src_parent_id, _ = await parent_folder(accessor, src, parent)
     dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
     name = drive_target_name(
@@ -84,8 +78,7 @@ async def rename(
     body = {"name": name}
     if entry.modified:
         body["modifiedTime"] = entry.modified
-    item = await patch_file(
-        token_manager,
+    item = await drive.patch_file(
         entry.extra["file_id"],
         body,
         add_parents=add_parents,

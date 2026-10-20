@@ -15,7 +15,6 @@
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
-from mirage.core.google.drive import delete_file, list_files
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import FileStat, FileType, PathSpec
 
@@ -50,12 +49,12 @@ async def rmdir(
         raise enoent(virtual)
     if entry.type is not FileType.DIRECTORY:
         raise enotdir(virtual)
-    children = await list_files(
-        accessor.token_manager,
+    drive = accessor.drive
+    children = await drive.list_files(
         folder_id=entry.extra["file_id"],
         drive_id=entry.extra.get("drive_id"),
         limit=1,
     )
     if children:
         raise enotempty(path)
-    await delete_file(accessor.token_manager, entry.extra["file_id"])
+    await drive.delete_file(entry.extra["file_id"])

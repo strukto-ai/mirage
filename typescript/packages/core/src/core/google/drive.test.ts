@@ -30,11 +30,13 @@ import * as client from './client.ts'
 import {
   deleteFile,
   downloadFile,
+  downloadRevision,
   getFile,
   listAllFiles,
   listFiles,
   listSharedDrives,
   searchFiles,
+  storageQuota,
 } from './drive.ts'
 
 const STUB_TOKEN_MANAGER = {
@@ -184,5 +186,42 @@ describe('searchFiles', () => {
     expect(first.orderBy).toBeUndefined()
     const second = vi.mocked(client.googleGet).mock.calls[1]?.[2] as Record<string, unknown>
     expect(second.pageToken).toBe('p2')
+  })
+})
+
+describe('getFile', () => {
+  it('sends the fields a caller names in place of the listing mask', async () => {
+    vi.mocked(client.googleGet).mockResolvedValue({ id: 'f1' })
+    await getFile(STUB_TOKEN_MANAGER, 'f1', 'headRevisionId,md5Checksum')
+    const [, url, params] = vi.mocked(client.googleGet).mock.calls[0] ?? []
+    expect(url).toMatch(/\/files\/f1$/)
+    expect(params).toEqual({ fields: 'headRevisionId,md5Checksum', supportsAllDrives: 'true' })
+  })
+})
+
+describe('storageQuota', () => {
+  it('asks /about for the storage quota', async () => {
+    vi.mocked(client.googleGet).mockResolvedValue({ storageQuota: { limit: '10', usage: '3' } })
+    expect(await storageQuota(STUB_TOKEN_MANAGER)).toEqual({ limit: '10', usage: '3' })
+    const [, url, params] = vi.mocked(client.googleGet).mock.calls[0] ?? []
+    expect(url).toMatch(/\/about$/)
+    expect(params).toEqual({ fields: 'storageQuota' })
+  })
+
+  it('answers empty when Drive gives no quota', async () => {
+    vi.mocked(client.googleGet).mockResolvedValue({ storageQuota: null })
+    expect(await storageQuota(STUB_TOKEN_MANAGER)).toEqual({})
+  })
+})
+
+describe('downloadRevision', () => {
+  it('reads the pinned revision over its window', async () => {
+    const window = { offset: 3, size: 5 }
+    vi.mocked(client.googleGetBytes).mockResolvedValue(new TextEncoder().encode('old'))
+    const data = await downloadRevision(STUB_TOKEN_MANAGER, 'f1', 'r1', window)
+    expect(new TextDecoder().decode(data)).toBe('old')
+    const [, url, sent] = vi.mocked(client.googleGetBytes).mock.calls[0] ?? []
+    expect(url).toMatch(/\/files\/f1\/revisions\/r1\?alt=media$/)
+    expect(sent).toBe(window)
   })
 })
