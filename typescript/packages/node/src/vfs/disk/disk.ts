@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
 import { createWriteStream, mkdirSync } from 'node:fs'
@@ -256,9 +256,9 @@ export class DiskVFS extends BaseVFS {
     }
   }
 
-  override async loadState(state: DiskVFSState): Promise<void> {
+  override async loadState(state: VFSStateBase & Partial<DiskVFSState>): Promise<void> {
     await mkdir(this.root, { recursive: true })
-    for (const [rel, data] of Object.entries(state.files)) {
+    for (const [rel, data] of Object.entries(state.files ?? {})) {
       if (path.isAbsolute(rel)) throw new Error(`snapshot path must be relative: ${rel}`)
       const full = await resolveInside(this.root, PathSpec.fromStrPath('/' + rel), rel)
       await mkdir(path.dirname(full), { recursive: true })

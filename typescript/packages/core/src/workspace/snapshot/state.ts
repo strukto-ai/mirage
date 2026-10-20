@@ -26,9 +26,10 @@ import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
 
-import { narrow, narrowingOf } from '../session/resolve.ts'
-import { profileToDict, type SessionProfile } from '../../policy/profile.ts'
-import { commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
+import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
+import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
+import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { IOConfig } from '../../io/config.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { CLIInstall } from '../cli/types.ts'
@@ -472,6 +473,15 @@ export function buildMountArgs(
     writeDefault: coerceWritePolicy(savedName(savedDefault)),
     ...(cliEntries.length > 0 ? { clis: cliArgs } : {}),
     ...(anchorMode !== undefined ? { anchorMode } : {}),
+    io:
+      state.io === undefined
+        ? new IOConfig()
+        : new IOConfig({ bufferBytes: state.io.buffer_bytes }),
+    commandLimits: parseCommandLimits(state.command_limits),
+    profiles: Object.fromEntries(
+      Object.entries(state.profiles ?? {}).map(([name, doc]) => [name, profileFromDict(doc)]),
+    ),
+    profile: state.profile ?? null,
   }
 }
 
@@ -575,15 +585,23 @@ export async function withRebuiltMounts(
  * still sent every cached read back to an origin that may have moved.
  * `builtForState` says the workspace was just built from this state,
  * under its profile table, and has run nothing: each session then lands
- * the narrowing its table recorded, as a stored record hydrates, where a
- * checkout onto a running workspace keeps its own sessions' narrowing.
+ * the narrowing and ask decisions its table recorded, as a stored record
+ * hydrates, where a checkout onto a running workspace keeps its own
+ * sessions' narrowing and decisions, and a table's mount caps only narrow
+ * them. `shared` names the prefixes whose mount a copy shares with its
+ * origin: their content is already there, so no state is loaded into
+ * them.
  * The target's VFS.md and SKILL.md bindings are dropped, since a
  * snapshot never carries them. Mirrors Python `apply_state_dict`.
  */
 export async function applyStateDict(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
-  options: { replaceCache?: boolean; builtForState?: boolean } = {},
+  options: {
+    replaceCache?: boolean
+    builtForState?: boolean
+    shared?: ReadonlySet<string>
+  } = {},
 ): Promise<void> {
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
@@ -599,9 +617,11 @@ export async function applyStateDict(
     // Exact-prefix lookup, mirroring Python: a snapshot prefix the new
     // workspace does not mount is skipped, never resolved to an
     // ancestor mount (which would load state into the wrong VFS).
-    // It runs before the override skip below so a mount that asks to be
-    // handed back live is reported too: those are the remote and
-    // config-backed mounts, exactly the ones a renamed prefix matters for.
+    // loadState runs for every mount, an overridden one included, so a
+    // disk's content is written into the new root and redis content into
+    // the new URL; a mount keeping no content has a no-op loadState. Only
+    // a mount a copy shares is left as it is: replaying the captured bytes
+    // would undo what another writer did to it since.
     const mount = ws.registry.tryMountForPrefix(m.prefix)
     if (mount === null) {
       // Said out loud: a renamed or missing mount otherwise left no trace.
@@ -611,7 +631,7 @@ export async function applyStateDict(
       )
       continue
     }
-    if (vfsStateRequiresOverride(m.vfs_state)) continue
+    if (options.shared?.has(mount.prefix) === true) continue
     // A disk restored into another mount that keeps content (one
     // overriding loadState, as the fresh RAM stand-in of
     // `restoresAsFreshRAM`, redis and OPFS do, under any name) takes the
@@ -662,8 +682,8 @@ async function restoreNodes(ws: WorkspaceLike, state: WorkspaceStateDict): Promi
  * is what `scriptsOf` answers for an id the manager does not know and
  * the profile `restoreSessions` then puts the created session under. A
  * workspace built for the state seats every table first, its narrowing,
- * cwd and variables, so each is judged as the session it records, under
- * the policy it then runs under.
+ * ask decisions, cwd and variables, so each is judged as the session it
+ * records, under the policy it then runs under.
  * Returns the parsed session tables and the template, null when the
  * snapshot carries none. Mirrors Python `_gate_restored_state`.
  */
@@ -674,12 +694,12 @@ async function gateRestoredState(
 ): Promise<[SessionState[], Record<string, ShellVar> | null]> {
   const sessions = state.sessions.map((s) => SessionState.fromDict(s))
   if (builtForState) {
+    const manager = ws.sessionManager
     for (const fields of sessions) {
-      const exists = ws.sessionManager.list().some((x) => x.sessionId === fields.sessionId)
-      const session = exists
-        ? ws.sessionManager.get(fields.sessionId)
-        : ws.sessionManager.create(fields.sessionId)
+      const sid = fields.sessionId
+      const session = manager.has(sid) ? manager.get(sid) : manager.create(sid)
       narrow(session, narrowingOf(fields))
+      session.decisions = fields.decisions
       setCwd(session, fields.cwd)
       session.vars = fields.vars
     }
@@ -712,7 +732,7 @@ async function restoreSessions(
   }
   const restored: SessionState[] = []
   for (const fields of tables) {
-    const exists = ws.sessionManager.list().some((x) => x.sessionId === fields.sessionId)
+    const exists = ws.sessionManager.has(fields.sessionId)
     const session = exists
       ? ws.sessionManager.get(fields.sessionId)
       : ws.sessionManager.create(fields.sessionId)
@@ -720,8 +740,7 @@ async function restoreSessions(
       // A session the restore creates is one created without a profile
       // name, so it runs under the document's default: the policy
       // `gateRestoredState` judged its table under, where a bare session
-      // ran under none. Stamped ahead of the table so the grants below
-      // stay the snapshot's, as they do for a session that exists.
+      // ran under none.
       const compiled = ws.sessionManager.defaultProfile
       if (compiled !== null) narrow(session, compiled)
     }
@@ -733,7 +752,9 @@ async function restoreSessions(
     session.functionSites.clear()
     session.readonlyFunctions = fields.readonlyFunctions
     session.exportedFunctions = fields.exportedFunctions
-    session.mountModes = fields.mountModes
+    // The caps are narrowing, which a checkout keeps: the table's narrow
+    // the session's further and never lift one it holds.
+    session.mountModes = stricterModes(session.mountModes, fields.mountModes)
     restored.push(session)
   }
   // The snapshot's session table wins over prior store contents,

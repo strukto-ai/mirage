@@ -84,7 +84,6 @@ from mirage.policy import (
     ShellExplanation,
 )
 from mirage.policy.builtin import PlacementPolicy
-from mirage.policy.profile import profile_from_dict
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
@@ -437,13 +436,10 @@ class Workspace:
                 session = get_current_session_unless_foreign(self._session_mgr)
             if session is None or session_id not in ("", session.session_id):
                 wanted = session_id or self._session_mgr.default_id
-                session = next(
-                    (
-                        s
-                        for s in self._session_mgr.list()
-                        if s.session_id == wanted
-                    ),
-                    None,
+                session = (
+                    self._session_mgr.get(wanted)
+                    if self._session_mgr.has(wanted)
+                    else None
                 )
             if session is None:
                 return None
@@ -1673,6 +1669,11 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
+        runtimes: list[Runtime[Any] | str] | None = None,
+        policies: list[Policy] | None = None,
+        profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+        profile: str | None = None,
         s3: S3Config | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace from a tar.
@@ -1714,6 +1715,20 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
+            runtimes (list[Runtime[Any] | str] | None): the runtimes to
+                build the workspace with; a snapshot carries none, so a
+                profile policy naming one needs it here.
+            policies (list[Policy] | None): the coded policies to
+                register, as the constructor takes them. A snapshot
+                carries none, and the restored session tables are
+                vetted under these.
+            profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
+                None): a profile table of the caller's own, in place of
+                the one the snapshot recorded; it brings its own default.
+            profile (str | None): the default profile's name, in place
+                of the recorded one. Given either, the restored sessions
+                keep the narrowing the caller's document gives them, as
+                a checkout's do.
             s3 (S3Config | None): the S3-like store the tar is in.
         """
         # Disk mount files are staged on disk, not held in memory, until
@@ -1728,6 +1743,10 @@ class Workspace:
                 clis=clis,
                 secrets=secrets,
                 drift_policy=drift_policy,
+                runtimes=runtimes,
+                policies=policies,
+                profiles=profiles,
+                profile=profile,
             )
         finally:
             await run_blocking(shutil.rmtree, staging, ignore_errors=True)
@@ -1741,6 +1760,11 @@ class Workspace:
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         drift_policy: DriftPolicy = DriftPolicy.STRICT,
+        runtimes: list[Runtime[Any] | str] | None = None,
+        policies: list[Policy] | None = None,
+        profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+        profile: str | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -1765,9 +1789,30 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
+            runtimes (list[Runtime[Any] | str] | None): the runtimes to
+                build the workspace with; a snapshot carries none, so a
+                profile policy naming one needs it here.
+            policies (list[Policy] | None): the coded policies to
+                register, as the constructor takes them. A snapshot
+                carries none, and the restored session tables are
+                vetted under these.
+            profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
+                None): a profile table of the caller's own, in place of
+                the one the snapshot recorded; it brings its own default.
+            profile (str | None): the default profile's name, in place
+                of the recorded one. Given either, the restored sessions
+                keep the narrowing the caller's document gives them, as
+                a checkout's do.
         """
         ws = await cls._from_state(
-            state, mounts=mounts, clis=clis, secrets=secrets
+            state,
+            mounts=mounts,
+            clis=clis,
+            secrets=secrets,
+            runtimes=runtimes,
+            policies=policies,
+            profiles=profiles,
+            profile=profile,
         )
         install_fingerprints(
             ws._registry,
@@ -1817,6 +1862,7 @@ class Workspace:
             mounts=mounts,
             clis=reusable_clis(self),
             secrets=self._declared_sources,
+            shared=frozenset(mounts),
         )
 
     @classmethod
@@ -1827,37 +1873,43 @@ class Workspace:
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
+        runtimes: list[Runtime[Any] | str] | None = None,
+        policies: list[Policy] | None = None,
+        profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
+        | None = None,
+        profile: str | None = None,
+        shared: frozenset[str] = frozenset(),
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
+        # A caller's own profile table or default is a document the
+        # state did not record, so the restored sessions keep the
+        # narrowing it gives them, as a checkout's do.
+        built_for_state = profiles is None and profile is None
         # No read= here: each restored Mount carries its own spec, and
         # its own mode, so `mode` reaches only the scratch root the
         # workspace adds again.
         ws = cls(
             args.mount_args,
-            io=IOConfig.model_validate(state.get("io", {})),
+            io=args.io,
             mode=args.anchor_mode or MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,
             clis=args.clis,
             secrets=secrets,
-            command_limits={
-                name: Limit.model_validate(limit)
-                for name, limit in state.get(
-                    StateKey.COMMAND_LIMITS, {}
-                ).items()
-            },
-            profiles={
-                name: profile_from_dict(doc)
-                for name, doc in state.get(StateKey.PROFILES, {}).items()
-            },
-            profile=state.get(StateKey.PROFILE),
+            command_limits=args.command_limits,
+            profiles=args.profiles if profiles is None else profiles,
+            profile=args.profile if built_for_state else profile,
+            runtimes=runtimes,
+            policies=policies,
         )
         if mounts:
             ws._shared_mounts = {
                 id(r.vfs if isinstance(r, Mount) else r)
                 for r in mounts.values()
             }
-        await apply_state_dict(ws, state, built_for_state=True)
+        await apply_state_dict(
+            ws, state, built_for_state=built_for_state, shared=shared
+        )
         return ws
 
     def __deepcopy__(self, memo) -> "Workspace":
@@ -1961,7 +2013,7 @@ class Workspace:
                 permissions were given.
         """
         await self.ensure_sessions_loaded()
-        if any(s.session_id == session_id for s in self._session_mgr.list()):
+        if self._session_mgr.has(session_id):
             if (
                 mounts is not None
                 or profile is not None
@@ -2276,9 +2328,10 @@ class Workspace:
         if bound is not None:
             return bound
         wanted = session_id or self._session_mgr.default_id
-        return next(
-            (s for s in self._session_mgr.list() if s.session_id == wanted),
-            None,
+        return (
+            self._session_mgr.get(wanted)
+            if self._session_mgr.has(wanted)
+            else None
         )
 
     def _facade_visibility(self, session_id: str | None) -> Visibility | None:

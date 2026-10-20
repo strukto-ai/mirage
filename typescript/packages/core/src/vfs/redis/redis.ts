@@ -16,7 +16,7 @@ import { RedisAccessor } from '../../accessor/redis.ts'
 import { VFSName } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { BaseVFS } from '../base.ts'
+import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
@@ -207,10 +207,10 @@ export class RedisVFS extends BaseVFS {
     }
   }
 
-  override loadState(state: RedisVFSState): Promise<void> {
+  override loadState(state: VFSStateBase & Partial<RedisVFSState>): Promise<void> {
     return this.store.restore({
-      files: state.files,
-      dirs: state.dirs,
+      files: state.files ?? {},
+      dirs: state.dirs ?? ['/'],
       attrs: state.attrs ?? {},
       modified: state.modified ?? {},
     })

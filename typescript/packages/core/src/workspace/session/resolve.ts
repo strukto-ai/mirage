@@ -488,6 +488,27 @@ export function narrowingOf(session: SessionState): CompiledProfile {
 }
 
 /**
+ * Two sets of per-mount caps held at once: every prefix either one caps,
+ * at the weaker mode, so the result is never wider than either. Mirrors
+ * Python `stricter_modes`.
+ */
+export function stricterModes(
+  a: ReadonlyMap<string, MountMode> | null,
+  b: ReadonlyMap<string, MountMode> | null,
+): ReadonlyMap<string, MountMode> | null {
+  if (a === null || b === null) {
+    const caps = a ?? b
+    return caps === null ? null : new Map(caps)
+  }
+  const out = new Map(a)
+  for (const [prefix, mode] of b) {
+    const held = out.get(prefix)
+    out.set(prefix, held === undefined ? mode : weakerMode(held, mode))
+  }
+  return out
+}
+
+/**
  * Narrow a fresh session and seed its scratch state from the profile.
  * A profile's env speaks the workspace `env` block's grammar, so a bare
  * string is exported: seeding it plain left `$TOKEN` expanding while
