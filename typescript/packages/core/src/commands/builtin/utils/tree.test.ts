@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Handed } from '../../../vfs/types.ts'
-import { enotsup, walkDeclined } from '../../../errors/fs.ts'
+import { enotdir, enotsup, walkDeclined } from '../../../errors/fs.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -117,6 +117,9 @@ describe('treeWalk', () => {
   it.each([
     ['none', new Mount(null)],
     ['declined', new Mount(null, walkDeclined)],
+    // A subtree read stops at a link at the final name; readdir opens what it
+    // leads to.
+    ['a link', new Mount(null, (_vfs, _op, path) => enotdir(path))],
   ])('walks the usual way with %s and asks once', async (_label, mount) => {
     const [readdir] = mount.walk()
     for (let i = 0; i < 2; i++) await readdir(at('/m'))

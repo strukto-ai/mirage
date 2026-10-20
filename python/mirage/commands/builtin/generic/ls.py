@@ -1155,7 +1155,14 @@ async def probe_operand(
             row, refused = None, stat_exc
         if row is not None:
             return Operand(path, row, []), warnings
-        if child_mounts is None or not child_mounts(path.virtual):
+        if (
+            # A directory the session may not open is refused whole: the
+            # names the namespace owes it (a link in it, a mount below it)
+            # are as much its listing as the backend's are.
+            isinstance(exc, PermissionError)
+            or child_mounts is None
+            or not child_mounts(path.virtual)
+        ):
             # GNU 9.7 stats an operand before it opens one: a stat that
             # fails is what it names, and a directory it may not read is
             # worded apart, the entry being there.

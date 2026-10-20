@@ -23,8 +23,10 @@ from mirage.types import (
     FileStat,
     FileType,
     FindType,
+    MountMode,
     PathSpec,
 )
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from tests.fixtures.vfs_io import BatchedRAM
@@ -720,6 +722,50 @@ async def test_walk_find_reports_a_directory_it_may_not_open():
             stat=stat,
             args=FindArgs(),
         )
+
+
+_SEALED_DOC = {
+    "commands": {
+        "deny": [
+            {
+                "reason": "sealed",
+                "paths": ["/s/d/hdir", "/s/d/hdir/*", "/v/ax/hl"],
+            }
+        ]
+    }
+}
+_SEALED_SEED = (
+    "mkdir -p /s/d/hdir /v/ax/empty && echo i > /s/d/hdir/inner && "
+    "echo o > /s/d/ok && echo k > /v/ax/empty/k && echo p > /v/ax/p && "
+    "echo h > /v/ax/hl && ln -s /s/d/ok /s/d/hdir/il && "
+    "ln -s /s/d/hdir /v/ax/dl"
+)
+
+
+@pytest.mark.asyncio
+async def test_find_follow_reports_a_linked_directory_a_rule_refuses():
+    # -L opens what a link leads to, so a link onto a directory a rule
+    # refuses to list is named as that directory would be, keeps its
+    # row, and the walk goes on with the rest (exit 1). The rule on
+    # /v/ax/hl makes the dispatcher decline /v/ax's subtree read, so
+    # each directory is opened on its own and dl is reached through
+    # the link rather than from an answer that covers it.
+    ws = Workspace(
+        {"/s": (RAMVFS(), MountMode.WRITE), "/v": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"sealed": _SEALED_DOC},
+    )
+    ws.create_session("g", profile="sealed")
+    try:
+        await ws.shell(_SEALED_SEED)
+        r = await ws.shell("find -L /v/ax", session_id="g")
+        assert r.exit_code == 1
+        assert await r.stdout_str() == (
+            "/v/ax\n/v/ax/dl\n/v/ax/empty\n/v/ax/empty/k\n/v/ax/hl\n/v/ax/p\n"
+        )
+        assert await r.stderr_str() == "find: '/v/ax/dl': Permission denied\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

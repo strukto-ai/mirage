@@ -117,8 +117,11 @@ def tree_walk(
     declines it (a path rule below the directory) leaves the walk to
     ``readdir`` and ``stat``, each judged on its own, as does a path the
     answer does not hold; under a hide the dispatcher answers without the
-    hidden entries. Both take the path first and pass everything else
-    through.
+    hidden entries. A subtree read stops at a link (ENOTDIR), so a
+    directory a walk reached through one is opened by ``readdir``, which
+    follows it as opendir(3) does and meets whatever refuses the
+    directory it leads to. Both take the path first and pass everything
+    else through.
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
@@ -149,7 +152,7 @@ def tree_walk(
             asked.add(virtual)
             try:
                 found = await read_tree(path)
-            except WalkDeclinedError:
+            except (WalkDeclinedError, NotADirectoryError):
                 found = None
             if found is not None:
                 found = dict(found)

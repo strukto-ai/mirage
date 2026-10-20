@@ -27,9 +27,12 @@ from mirage.types import (
     LsIndicator,
     LsSortBy,
     LsTimeKind,
+    MountMode,
     PathSpec,
 )
+from mirage.vfs.ram import RAMVFS
 from mirage.view.types import MountView
+from mirage.workspace import Workspace
 
 
 def _spec(path: str) -> PathSpec:
@@ -336,6 +339,102 @@ async def test_structure_only_chain_descends_under_recursive():
     )
     assert io.exit_code == 0
     assert out.decode() == "/ghost:\ndeep\n\n/ghost/deep:\nlnk\n"
+
+
+@pytest.mark.asyncio
+async def test_a_directory_it_may_not_open_lists_nothing_owed_to_it():
+    """A directory whose listing is refused is refused whole: a name the
+    namespace owes it (a link in it) is as much its listing as the
+    backend's, so -R reports it as GNU reports an unreadable directory
+    below an operand (exit 1) and lists none of it."""
+    tree = {
+        "/base": _dir("base"),
+        "/base/sealed": _dir("sealed"),
+        "/base/x": _file("x"),
+    }
+    readdir, stat = _make_fs_backend(tree)
+
+    async def guarded(p: PathSpec, index=None) -> list[str]:
+        if p.virtual == "/base/sealed":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return await readdir(p)
+
+    out, io = await ls(
+        [PathSpec.from_str_path("/base")],
+        readdir=guarded,
+        stat=stat,
+        recursive=True,
+        child_mounts=lambda d: ["il"] if d == "/base/sealed" else [],
+    )
+    assert io.exit_code == LS_MINOR_PROBLEM
+    assert out.decode() == "/base:\nsealed\nx\n"
+    assert io.stderr == (
+        b"ls: cannot open directory '/base/sealed': Permission denied\n"
+    )
+
+
+_SEALED_DOC = {
+    "commands": {
+        "deny": [
+            {
+                "reason": "sealed",
+                "paths": ["/s/d/hdir", "/s/d/hdir/*", "/v/ax/hl"],
+            }
+        ]
+    }
+}
+_SEALED_SEED = (
+    "mkdir -p /s/d/hdir /v/ax/empty && echo i > /s/d/hdir/inner && "
+    "echo o > /s/d/ok && echo k > /v/ax/empty/k && echo p > /v/ax/p && "
+    "echo h > /v/ax/hl && ln -s /s/d/ok /s/d/hdir/il && "
+    "ln -s /s/d/hdir /v/ax/dl"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,out,err",
+    [
+        (
+            "ls -R /s/d",
+            "/s/d:\nhdir\nok\n",
+            "ls: cannot open directory '/s/d/hdir': Permission denied\n",
+        ),
+        # Two operands on two mounts: the relay lists them, the same way.
+        (
+            "ls -R /s/d /v/ax",
+            "/s/d:\nhdir\nok\n\n/v/ax:\ndl\nempty\nhl\np\n\n/v/ax/empty:\nk\n",
+            "ls: cannot open directory '/s/d/hdir': Permission denied\n",
+        ),
+        # -L opens what the link leads to, which the rule refuses.
+        (
+            "ls -RL /v/ax",
+            "/v/ax:\ndl\nempty\nhl\np\n\n/v/ax/empty:\nk\n",
+            "ls: cannot open directory '/v/ax/dl': Permission denied\n",
+        ),
+    ],
+)
+async def test_recursive_ls_reports_a_directory_a_rule_refuses(line, out, err):
+    # The rule refuses to list /s/d/hdir, which holds a link (il) only
+    # the namespace knows: the refusal wins over that name, and the
+    # directory is reported after its parent's group, GNU's unreadable
+    # subdirectory, with the exit 1 of a problem below an operand.
+    ws = Workspace(
+        {"/s": (RAMVFS(), MountMode.WRITE), "/v": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"sealed": _SEALED_DOC},
+    )
+    ws.create_session("g", profile="sealed")
+    try:
+        await ws.shell(_SEALED_SEED)
+        r = await ws.shell(line, session_id="g")
+        assert (r.exit_code, await r.stdout_str(), await r.stderr_str()) == (
+            1,
+            out,
+            err,
+        )
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
