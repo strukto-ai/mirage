@@ -1715,18 +1715,20 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes: the runtimes to build the workspace with; a
-                snapshot carries none, so a profile policy naming one
-                needs it here.
-            policies: the coded policies to register, as the
-                constructor takes them. A snapshot carries none, and
-                the restored session tables are vetted under these.
-            profiles: a profile table of the caller's own, in place of
+            runtimes (list[Runtime[Any] | str] | None): the runtimes to
+                build the workspace with; a snapshot carries none, so a
+                profile policy naming one needs it here.
+            policies (list[Policy] | None): the coded policies to
+                register, as the constructor takes them. A snapshot
+                carries none, and the restored session tables are
+                vetted under these.
+            profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
+                None): a profile table of the caller's own, in place of
                 the one the snapshot recorded; it brings its own default.
-            profile: the default profile's name, in place of the
-                recorded one. Given either, the restored sessions keep
-                the narrowing the caller's document gives them, as a
-                checkout's do.
+            profile (str | None): the default profile's name, in place
+                of the recorded one. Given either, the restored sessions
+                keep the narrowing the caller's document gives them, as
+                a checkout's do.
             s3 (S3Config | None): the S3-like store the tar is in.
         """
         # Disk mount files are staged on disk, not held in memory, until
@@ -1787,18 +1789,20 @@ class Workspace:
                 cache entries for fingerprinted paths; a Redis cache is
                 never restored from a snapshot, so it has nothing to
                 drop.
-            runtimes: the runtimes to build the workspace with; a
-                snapshot carries none, so a profile policy naming one
-                needs it here.
-            policies: the coded policies to register, as the
-                constructor takes them. A snapshot carries none, and
-                the restored session tables are vetted under these.
-            profiles: a profile table of the caller's own, in place of
+            runtimes (list[Runtime[Any] | str] | None): the runtimes to
+                build the workspace with; a snapshot carries none, so a
+                profile policy naming one needs it here.
+            policies (list[Policy] | None): the coded policies to
+                register, as the constructor takes them. A snapshot
+                carries none, and the restored session tables are
+                vetted under these.
+            profiles (Mapping[str, SessionProfile | Mapping[str, Any]] |
+                None): a profile table of the caller's own, in place of
                 the one the snapshot recorded; it brings its own default.
-            profile: the default profile's name, in place of the
-                recorded one. Given either, the restored sessions keep
-                the narrowing the caller's document gives them, as a
-                checkout's do.
+            profile (str | None): the default profile's name, in place
+                of the recorded one. Given either, the restored sessions
+                keep the narrowing the caller's document gives them, as
+                a checkout's do.
         """
         ws = await cls._from_state(
             state,
@@ -1858,6 +1862,7 @@ class Workspace:
             mounts=mounts,
             clis=reusable_clis(self),
             secrets=self._declared_sources,
+            shared=frozenset(mounts),
         )
 
     @classmethod
@@ -1873,6 +1878,7 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        shared: frozenset[str] = frozenset(),
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # A caller's own profile table or default is a document the
@@ -1901,7 +1907,9 @@ class Workspace:
                 id(r.vfs if isinstance(r, Mount) else r)
                 for r in mounts.values()
             }
-        await apply_state_dict(ws, state, built_for_state=built_for_state)
+        await apply_state_dict(
+            ws, state, built_for_state=built_for_state, shared=shared
+        )
         return ws
 
     def __deepcopy__(self, memo) -> "Workspace":

@@ -588,6 +588,8 @@ export async function withRebuiltMounts(
  * the narrowing and ask decisions its table recorded, as a stored record
  * hydrates, where a checkout onto a running workspace keeps its own
  * sessions' narrowing and decisions, and a table's mount caps only narrow
+ * them. `shared` names the prefixes whose mount a copy shares with its
+ * origin: their content is already there, so no state is loaded into
  * them.
  * The target's VFS.md and SKILL.md bindings are dropped, since a
  * snapshot never carries them. Mirrors Python `apply_state_dict`.
@@ -595,7 +597,11 @@ export async function withRebuiltMounts(
 export async function applyStateDict(
   ws: WorkspaceLike,
   state: WorkspaceStateDict,
-  options: { replaceCache?: boolean; builtForState?: boolean } = {},
+  options: {
+    replaceCache?: boolean
+    builtForState?: boolean
+    shared?: ReadonlySet<string>
+  } = {},
 ): Promise<void> {
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
@@ -613,7 +619,9 @@ export async function applyStateDict(
     // ancestor mount (which would load state into the wrong VFS).
     // loadState runs for every mount, an overridden one included, so a
     // disk's content is written into the new root and redis content into
-    // the new URL; a mount keeping no content has a no-op loadState.
+    // the new URL; a mount keeping no content has a no-op loadState. Only
+    // a mount a copy shares is left as it is: replaying the captured bytes
+    // would undo what another writer did to it since.
     const mount = ws.registry.tryMountForPrefix(m.prefix)
     if (mount === null) {
       // Said out loud: a renamed or missing mount otherwise left no trace.
@@ -623,6 +631,7 @@ export async function applyStateDict(
       )
       continue
     }
+    if (options.shared?.has(mount.prefix) === true) continue
     // A disk restored into another mount that keeps content (one
     // overriding loadState, as the fresh RAM stand-in of
     // `restoresAsFreshRAM`, redis and OPFS do, under any name) takes the

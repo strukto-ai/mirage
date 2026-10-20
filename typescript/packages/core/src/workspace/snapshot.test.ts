@@ -35,7 +35,8 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { secretStr } from '../vfs/secrets.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
+import { RAMVFS, type RAMVFSState } from '../vfs/ram/ram.ts'
+import type { VFSStateBase } from '../vfs/base.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
@@ -320,6 +321,33 @@ describe('Workspace.copy', () => {
     expect(new TextDecoder().decode(rCopy.stdout)).toBe('mutated\n')
     await ws.close()
     await cp.close()
+  })
+
+  // A copy shares a mount it cannot rebuild with its origin, and loaded the
+  // captured bytes back into it: a file another writer dropped after the
+  // capture came back. Mirrors the Python test of the same name.
+  it('leaves a mount it shares as it is', async () => {
+    class SharedRAM extends RAMVFS {
+      override getState(): RAMVFSState & VFSStateBase {
+        const state = super.getState()
+        this.store.files.delete('/gone.txt')
+        return { ...state, needs_override: true }
+      }
+    }
+    const shared = new SharedRAM()
+    const ws = new Workspace({ '/r': shared }, { mode: MountMode.WRITE, shellParser: parser })
+    try {
+      expect((await ws.shell('echo x > /r/gone.txt')).exitCode).toBe(0)
+      const cp = await ws.copy()
+      try {
+        expect(cp.mounts().find((m) => m.prefix === '/r/')?.vfs).toBe(shared)
+        expect(shared.store.files.has('/gone.txt')).toBe(false)
+      } finally {
+        await cp.close()
+      }
+    } finally {
+      await ws.close()
+    }
   })
 
   it('keeps profiles and the default profile', async () => {

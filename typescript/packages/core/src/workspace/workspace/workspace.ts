@@ -1996,6 +1996,7 @@ export class Workspace {
     options: WorkspaceOptions = {},
     overrides: Record<string, BaseVFS | Mount> = {},
     cliOverrides: CLIOverrides = {},
+    shared: ReadonlySet<string> = new Set(),
   ): Promise<InstanceType<T>> {
     const rebuilt = await withRebuiltMounts(state, overrides, (m) => this.buildSavedVfs(m))
     // The caller's own overrides, named before the rebuilds are merged
@@ -2041,6 +2042,7 @@ export class Workspace {
     // them, as a checkout's do, rather than the recorded one.
     await applyStateDict(ws, state, {
       builtForState: options.profiles === undefined && options.profile === undefined,
+      shared,
     })
     return ws
   }
@@ -2096,7 +2098,13 @@ export class Workspace {
       cliOverrides[name] = [install.cli, install.config as Record<string, unknown> | null]
     }
     const Ctor = this.constructor as typeof Workspace
-    return (await Ctor._fromState(state, opts, overrides, cliOverrides)) as this
+    return (await Ctor._fromState(
+      state,
+      opts,
+      overrides,
+      cliOverrides,
+      new Set(Object.keys(overrides)),
+    )) as this
   }
 
   async close(): Promise<void> {

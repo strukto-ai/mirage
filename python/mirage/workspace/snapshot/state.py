@@ -594,6 +594,7 @@ async def apply_state_dict(
     *,
     replace_cache: bool = False,
     built_for_state: bool = False,
+    shared: frozenset[str] = frozenset(),
 ) -> None:
     """Restore post-construction state into an already-built Workspace.
 
@@ -627,6 +628,9 @@ async def apply_state_dict(
             recorded, as a stored record hydrates. A checkout onto a
             running workspace keeps its own sessions' narrowing and
             decisions, and a table's mount caps only narrow them.
+        shared (frozenset[str]): the prefixes whose mount a copy shares
+            with its origin. Their content is already there, so no
+            state is loaded into them.
     """
     check_format_version(state)
     sessions, seed_vars = await _gate_restored_state(
@@ -640,9 +644,11 @@ async def apply_state_dict(
         await ws.cache.clear()
     # load_state runs for ALL mounts (overridden too), so disk content
     # is written into the new root, redis content into the new URL, etc.
-    # Cred-only mounts (S3 et al.) define load_state as no-op. Every
-    # state is prepared before any mount loads, so a captured disk file
-    # that is gone or now a link fails the load with no mount changed.
+    # Cred-only mounts (S3 et al.) define load_state as no-op. Only a
+    # mount a copy shares is left as it is: replaying the captured bytes
+    # would undo what another writer did to it since. Every state is
+    # prepared before any mount loads, so a captured disk file that is
+    # gone or now a link fails the load with no mount changed.
     loads = []
     for m in state[StateKey.MOUNTS]:
         mount = ws.registry.try_mount_for_prefix(m[MountKey.PREFIX])
@@ -656,6 +662,8 @@ async def apply_state_dict(
                 "prefix in this workspace; its state was not restored",
                 m[MountKey.PREFIX],
             )
+            continue
+        if mount.prefix in shared:
             continue
         vfs_state = m[MountKey.VFS_STATE]
         # A disk state loaded into another mount that keeps content (one

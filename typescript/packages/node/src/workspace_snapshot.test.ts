@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
@@ -28,6 +31,8 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
 import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { DiskVFS } from './vfs/disk/disk.ts'
+import { RedisVFS } from './vfs/redis/redis.ts'
 import { buildVfs, registerVfs } from './vfs/registry.ts'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { conditionalS3, s3Vfs } from '../tests/test-utils.ts'
@@ -149,6 +154,54 @@ describe('snapshot rebuild through the registry', () => {
     expect(() => buildMountArgs(state)).toThrow(/mounts= must include overrides for: \/b\//)
     await expect(Workspace.fromState(state)).rejects.toThrow(/mounts= must include/)
   })
+
+  // A config-only state loads into an override of another backend that
+  // keeps content: the loader finds no files in it and loads none, where
+  // disk and redis threw on the missing files. Mirrors the Python test of
+  // the same name.
+  it('a config-only state loads into an override keeping content', async () => {
+    const ws = new Workspace({ '/b/': new Bare() }, { mode: MountMode.READ })
+    const state = await toStateDict(ws)
+    await ws.close()
+    const root = await mkdtemp(join(tmpdir(), 'mirage-config-only-'))
+    try {
+      const restored = await Workspace.fromState(state, {}, { '/b/': new DiskVFS({ root }) })
+      try {
+        expect((await restored.shell('ls /b/')).exitCode).toBe(0)
+        expect(await readdir(root)).toEqual([])
+      } finally {
+        await restored.close()
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  const REDIS_URL = process.env.REDIS_URL
+  it.skipIf(REDIS_URL === undefined)(
+    'a config-only state loads into a redis override',
+    async () => {
+      const ws = new Workspace({ '/b/': new Bare() }, { mode: MountMode.READ })
+      const state = await toStateDict(ws)
+      await ws.close()
+      const redis = new RedisVFS({
+        ...(REDIS_URL !== undefined ? { url: REDIS_URL } : {}),
+        keyPrefix: `mirage:fs:config-only:${String(Date.now())}:`,
+      })
+      try {
+        const restored = await Workspace.fromState(state, {}, { '/b/': redis })
+        try {
+          expect((await restored.shell('ls /b/')).exitCode).toBe(0)
+          expect(await redis.store.listFiles()).toEqual([])
+        } finally {
+          await restored.close()
+        }
+      } finally {
+        await redis.store.clear()
+        await redis.close()
+      }
+    },
+  )
 
   it('records the reference a mount was placed with', async () => {
     const ws = new Workspace(

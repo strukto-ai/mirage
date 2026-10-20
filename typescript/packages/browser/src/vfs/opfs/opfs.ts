@@ -14,7 +14,7 @@
 
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -233,14 +233,14 @@ export class OPFSVFS extends BaseVFS {
     }
   }
 
-  override async loadState(state: OPFSVFSState): Promise<void> {
+  override async loadState(state: VFSStateBase & Partial<OPFSVFSState>): Promise<void> {
     const handle = await this.root()
-    for (const dir of state.dirs) {
+    for (const dir of state.dirs ?? []) {
       const rel = lstripSlash(dir)
       if (rel === '') continue
       await splitAndCreate(handle, rel)
     }
-    for (const [rel, data] of Object.entries(state.files)) {
+    for (const [rel, data] of Object.entries(state.files ?? {})) {
       const segs = rel.split('/').filter((s) => s !== '' && s !== '.')
       const fileName = segs.pop()
       if (fileName === undefined) continue

@@ -319,6 +319,28 @@ async def test_a_generic_vfs_keeping_the_default_state_needs_an_override():
     assert isinstance(args.mount_args["/b/"].vfs, Bare)
 
 
+# A config-only state loads into an override of another backend that
+# keeps content: the loader finds no files in it and loads none. Mirrors
+# the TypeScript test of the same name.
+@pytest.mark.asyncio
+async def test_a_config_only_state_loads_into_an_override_keeping_content(
+    tmp_path,
+):
+    ws = Workspace({"/b/": Bare()}, mode=MountMode.READ)
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    restored = await Workspace.from_state(
+        state, mounts={"/b/": DiskVFS(root=str(tmp_path))}
+    )
+    try:
+        assert (await restored.shell("ls /b/")).exit_code == 0
+        assert list(tmp_path.iterdir()) == []
+    finally:
+        await restored.close()
+
+
 TAGGED_MODULE = '''
 from pydantic import BaseModel
 
@@ -776,6 +798,35 @@ async def test_a_load_takes_the_callers_profiles_and_runtimes():
         assert (await loaded.shell("rm /f.txt")).exit_code == 0
     finally:
         await loaded.close()
+
+
+class SharedRAM(RAMVFS):
+    """Handed back live, and another writer drops a file once captured."""
+
+    def get_state(self) -> dict[str, Any]:
+        state = super().get_state()
+        self._store.files.pop("/gone.txt")
+        return {**state, "needs_override": True}
+
+
+# A copy shares a mount it cannot rebuild with its origin, and loaded the
+# captured bytes back into it: a file another writer dropped after the
+# capture came back. Mirrors the TypeScript test of the same name.
+@pytest.mark.asyncio
+async def test_a_copy_leaves_a_mount_it_shares_as_it_is():
+    shared = SharedRAM()
+    ws = Workspace({"/r": shared}, mode=MountMode.WRITE)
+    try:
+        assert (await ws.shell("echo x > /r/gone.txt")).exit_code == 0
+        copied = await ws.copy()
+        try:
+            entry = next(m for m in copied.mounts() if m.prefix == "/r/")
+            assert entry.vfs is shared
+            assert "/gone.txt" not in shared._store.files
+        finally:
+            await copied.close()
+    finally:
+        await ws.close()
 
 
 # A snapshot prefix the workspace does not mount was skipped in silence
