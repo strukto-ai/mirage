@@ -247,7 +247,9 @@ export function readers(
   links: NamespaceLinks | null = null,
   visibility: Visibility | null = null,
 ): (sessionId: string | null) => NamespaceReader {
-  const table = rows.map((row): MountRow => (typeof row === 'string' ? { prefix: row, kind: 'ram' } : row))
+  const table = rows.map((row): MountRow =>
+    typeof row === 'string' ? { prefix: row, kind: 'ram' } : row,
+  )
   return (sessionId) =>
     new NamespaceReader(
       links,

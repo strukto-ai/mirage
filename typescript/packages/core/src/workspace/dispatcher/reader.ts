@@ -260,8 +260,7 @@ export class NamespaceReader {
         const vis = this.visibility()
         return below(path).filter((root) => pathVisible(vis, root))
       },
-      isRoot: (path: string) =>
-        !crossing && this.served().some((m) => m.prefix === normDir(path)),
+      isRoot: (path: string) => !crossing && this.served().some((m) => m.prefix === normDir(path)),
       rootOf: (path: string) => owner(path)?.prefix ?? '/',
       maxDuEntries: (path: string) => owner(path)?.maxDuEntries ?? null,
       answers: (path: string, name: string) =>

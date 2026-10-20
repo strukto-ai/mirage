@@ -156,7 +156,9 @@ function selects(path: string, pattern: string, directory: boolean): boolean {
  */
 export function visiblePath(location: RepoLocation, relative: string): boolean {
   const vfs = location.vfs
-  return vfs === undefined || vfs === null || readerOf(vfs).visible(location.worktree.join(relative))
+  return (
+    vfs === undefined || vfs === null || readerOf(vfs).visible(location.worktree.join(relative))
+  )
 }
 
 /** A session view of Git entries; the persistent mapping stays intact. */

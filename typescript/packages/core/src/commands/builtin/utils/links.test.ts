@@ -296,9 +296,7 @@ describe('mountsOf', () => {
   it('walks and answers as its mount inside a mount scope, and across outside one', async () => {
     const row = { prefix: '/data/', kind: 'ram', calls: new Set(['read_tree']) }
     const [dispatch] = recorder()
-    const ctx = ctxOf(
-      new Files(dispatch, readers([row, '/data/inner/'])),
-    )
+    const ctx = ctxOf(new Files(dispatch, readers([row, '/data/inner/'])))
     const across = mountsOf(ctx)
     expect([crossesMounts(ctx), mountRoot(ctx)]).toEqual([true, ''])
     expect(across?.descendants('/data')).toEqual([])

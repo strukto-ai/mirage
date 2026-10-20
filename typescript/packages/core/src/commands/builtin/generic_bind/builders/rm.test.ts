@@ -52,7 +52,13 @@ function files(removed?: string[]): Files {
       ...(removed === undefined ? {} : { unlink: remove, rm_r: remove }),
     },
     {},
-    [{ prefix: '/', kind: 'fake', calls: new Set(removed === undefined ? [] : ['unlink', 'rm_r']) }],
+    [
+      {
+        prefix: '/',
+        kind: 'fake',
+        calls: new Set(removed === undefined ? [] : ['unlink', 'rm_r']),
+      },
+    ],
   )
 }
 

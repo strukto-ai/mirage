@@ -211,9 +211,7 @@ describe('session predicates on the fallback storage', () => {
       await hold
     })
     const short = runWithSession(other, () => {
-      folded = readerOf(new Files(dispatch, readers([], null, other.visibility))).visible(
-        '/data/x',
-      )
+      folded = readerOf(new Files(dispatch, readers([], null, other.visibility))).visible('/data/x')
       release()
       return Promise.resolve()
     })

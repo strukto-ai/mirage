@@ -135,8 +135,7 @@ export function captureBinding(
   const vfs =
     dispatch === null
       ? undefined
-      : (views.ctx?.vfs?.over(dispatch) ??
-        new Files(dispatch, null, null, { ledger: false }))
+      : (views.ctx?.vfs?.over(dispatch) ?? new Files(dispatch, null, null, { ledger: false }))
   // A read of the session reads the session it is bound to; only a write
   // passes the gates, which read the caller, so only a write runs as it.
   const session = views.ctx?.session

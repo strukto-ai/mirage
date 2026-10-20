@@ -249,11 +249,5 @@ export async function realpathGeneric(
     ctx.vfs !== undefined
       ? dispatchStat(ctx.vfs.dispatch)
       : async (path) => (await stat(path)) as FileStat
-  return realpath(
-    paths,
-    pathStat,
-    ctx.cwd.virtual,
-    linkTarget(linksOf(ctx)),
-    parseFlags(ctx.flags),
-  )
+  return realpath(paths, pathStat, ctx.cwd.virtual, linkTarget(linksOf(ctx)), parseFlags(ctx.flags))
 }

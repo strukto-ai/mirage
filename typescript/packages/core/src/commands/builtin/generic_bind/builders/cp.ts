@@ -18,14 +18,7 @@ import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
 import { cpGeneric, parseFlags } from '../../generic/cp.ts'
-import {
-  serves,
-  typedLink,
-  linksOf,
-  mountsOf,
-  dispatchOf,
-  mountRoot,
-} from '../../utils/links.ts'
+import { serves, typedLink, linksOf, mountsOf, dispatchOf, mountRoot } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { enotsup } from '../../../../errors/fs.ts'
 import { commandFiles } from '../files.ts'
@@ -114,11 +107,8 @@ export const BUILDER: GenericCommand = {
       links === null ? undefined : (p: PathSpec) => typedLink(links, p, cwd),
       links === null || ctx.vfs === undefined
         ? undefined
-        : transferLinksOf(
-            links,
-            ctx.vfs.dispatch,
-            cwd,
-            (virtual) => serves(mountsOf(ctx), mountRoot(ctx), virtual),
+        : transferLinksOf(links, ctx.vfs.dispatch, cwd, (virtual) =>
+            serves(mountsOf(ctx), mountRoot(ctx), virtual),
           ),
       ctx.stdin,
       dispatchOf(ctx),

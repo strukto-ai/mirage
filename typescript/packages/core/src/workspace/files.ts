@@ -269,7 +269,12 @@ export class Files {
    */
   private reader(): NamespaceReader {
     if (this.namespace === null) {
-      return new NamespaceReader(null, () => [], this.sessionId, () => sessionVisibility())
+      return new NamespaceReader(
+        null,
+        () => [],
+        this.sessionId,
+        () => sessionVisibility(),
+      )
     }
     return this.namespace(this.sessionId)
   }

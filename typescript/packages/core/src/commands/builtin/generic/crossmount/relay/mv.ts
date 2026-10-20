@@ -80,9 +80,7 @@ export async function runMv(
     storageKey,
     undefined,
     refuseReveal,
-    links === undefined
-      ? undefined
-      : transferLinksOf(links, dispatch, '/'),
+    links === undefined ? undefined : transferLinksOf(links, dispatch, '/'),
     stdin,
     mounts === undefined ? undefined : (p: string) => mounts.isRoot(p),
     dispatch,

@@ -538,8 +538,7 @@ export function findGeneric(
       // native find op: a walk through the dispatcher meets no hidden row,
       // but a backend's own find knows nothing of hides.
       const reader = ctx.vfs === undefined ? null : readerOf(ctx.vfs)
-      const visibleRows =
-        reader === null ? unpruned : unpruned.filter((row) => reader.visible(row))
+      const visibleRows = reader === null ? unpruned : unpruned.filter((row) => reader.visible(row))
       const added = respellRaw(visibleRows, root.virtual, root.rawPath)
       for (const row of added) if (!first.includes(row)) yield ENC.encode(row + '\n')
       for (const r of added) records.push({ path: matchedPath(r, root), run })
