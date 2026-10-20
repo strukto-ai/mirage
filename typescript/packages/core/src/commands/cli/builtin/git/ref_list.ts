@@ -45,7 +45,7 @@ import {
 import { DETACHED_AT, DETACHED_FROM, NO_BRANCH } from './render.ts'
 import { refsNamed } from './revparse.ts'
 import { commitFacts, idsUnder, objectType, rawObject, repoArgs, type Repo } from './repo.ts'
-import { visibleObject } from './seen.ts'
+import { guarded, shownRaw, visibleObject } from './seen.ts'
 import {
   RefKind,
   type DateMode,
@@ -198,6 +198,10 @@ async function peeledObject(repo: Repo, obj: RefObject): Promise<RefObject | nul
     if (seen.has(target) || !(await visibleObject(repo, target))) return null
     seen.add(target)
     shown = await rawObject(repo, target)
+    // A tree's bytes name its entries, so one a tag points at lists only those
+    // the session sees there.
+    if (shown.type === 'tree' && guarded(repo))
+      shown = { ...shown, raw: await shownRaw(repo, shown) }
   }
   return shown
 }
@@ -242,7 +246,10 @@ export async function listedRefs(
       worktree: '',
     }
     if (objects) {
-      const obj = await rawObject(repo, oid)
+      let obj = await rawObject(repo, oid)
+      // A tree's bytes name its entries, so a ref to one lists only those the
+      // session sees there.
+      if (obj.type === 'tree' && guarded(repo)) obj = { ...obj, raw: await shownRaw(repo, obj) }
       item = {
         ...item,
         obj,

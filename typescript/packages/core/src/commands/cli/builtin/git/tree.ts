@@ -111,7 +111,7 @@ export async function resolveTree(repo: Repo, name: string, resolved?: GitObject
   const obj = await unwrapped(repo, resolved ?? (await resolveObject(repo, name)), name)
   if (obj.type === 'commit') {
     const tree = (await git.readCommit({ ...repoArgs(repo), oid: obj.oid })).commit.tree
-    rooted(repo, tree)
+    rooted(repo, tree, name)
     return tree
   }
   if (obj.type === 'tree') return obj.oid

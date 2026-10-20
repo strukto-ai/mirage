@@ -55,7 +55,11 @@ from mirage.commands.cli.builtin.git.render import (
 )
 from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.revparse import refs_named
-from mirage.commands.cli.builtin.git.seen import visible_object
+from mirage.commands.cli.builtin.git.seen import (
+    guarded,
+    shown_raw,
+    visible_object,
+)
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
     HeadRef,
@@ -262,7 +266,12 @@ def _object(repo: BaseRepo, oid: str) -> RefObject:
         oid (str): the hex object id.
     """
     kind, raw = repo.object_store.get_raw(ObjectID(oid.encode()))
-    return RefObject(oid=oid, type=OBJECT_TYPES.get(kind, ""), raw=raw)
+    kind_name = OBJECT_TYPES.get(kind, "")
+    # A tree's bytes name its entries, so a ref to one lists only those
+    # the session sees there.
+    if kind_name == "tree" and guarded(repo):
+        raw = shown_raw(repo, repo.object_store[ObjectID(oid.encode())])
+    return RefObject(oid=oid, type=kind_name, raw=raw)
 
 
 def _peeled(repo: BaseRepo, obj: RefObject) -> RefObject | None:

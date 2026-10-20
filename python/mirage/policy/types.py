@@ -1209,3 +1209,14 @@ class EntryGate(Protocol):
             virtual (str): absolute virtual path of the entry.
         """
         ...
+
+    def refusal(self, virtual: str) -> str | None:
+        """The reason a rule in force refuses this entry for the running
+        command, None when it may touch it: ``check``'s answer, asked
+        without refusing, for a reader choosing among places that hold
+        the same bytes.
+
+        Args:
+            virtual (str): absolute virtual path of the entry.
+        """
+        ...

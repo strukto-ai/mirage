@@ -67,7 +67,11 @@ from mirage.commands.cli.builtin.git.rows import (
     deltas,
     shown_sides,
 )
-from mirage.commands.cli.builtin.git.seen import located, shown_items
+from mirage.commands.cli.builtin.git.seen import (
+    located,
+    place_named,
+    shown_items,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
@@ -276,7 +280,9 @@ def _render(
                 + f"tree {name}\n\n".encode()
                 + b"".join(
                     entry + (b"/" if mode == TREE else b"") + b"\n"
-                    for entry, mode, _ in shown_items(repo, target)
+                    for entry, mode, _ in shown_items(
+                        repo, target, place_named(repo, name, target.id)
+                    )
                 )
             )
             shown_one = True

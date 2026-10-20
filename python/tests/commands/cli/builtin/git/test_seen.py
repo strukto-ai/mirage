@@ -12,17 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.objects import ObjectID
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.discover import discover
+from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.seen import (
+    located,
+    readable,
+    shown_entries,
+)
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
-from tests.commands.cli.builtin.git.conftest import commit_file
+from tests.commands.cli.builtin.git.conftest import (
+    REPO,
+    commit_file,
+    repo_context,
+)
 
 PROFILES = {
     "veiled": {
@@ -32,6 +51,15 @@ PROFILES = {
     "sealed": {
         "commands": {
             "deny": [{"reason": "sealed", "paths": ["/repo/secret.txt"]}]
+        }
+    },
+    "half": {"paths": {"hide": ["/repo/a/secret.txt"]}},
+    "fresh": {
+        "commands": {"deny": [{"reason": "fresh", "paths": ["/repo/new.txt"]}]}
+    },
+    "walled": {
+        "commands": {
+            "deny": [{"reason": "walled", "paths": ["/repo/boxf/secret.txt"]}]
         }
     },
 }
@@ -58,9 +86,9 @@ def history(tmp_path: Path) -> Path:
     return path
 
 
-async def shell(
+async def raw_shell(
     history: Path, line: str, session: str | None = None
-) -> tuple[int, str, str]:
+) -> tuple[int, bytes, bytes]:
     """Run one line in /repo, as a session or unrestricted.
 
     Args:
@@ -79,11 +107,21 @@ async def shell(
             ws.create_session(session, profile=session)
             kw["session_id"] = session
         io = await ws.shell(f"cd /repo && {line}", **kw)
-        return (
-            io.exit_code,
-            (io.stdout or b"").decode(),
-            (io.stderr or b"").decode(),
-        )
+        return io.exit_code, io.stdout or b"", io.stderr or b""
+
+
+async def shell(
+    history: Path, line: str, session: str | None = None
+) -> tuple[int, str, str]:
+    """``raw_shell``'s answer as text.
+
+    Args:
+        history (Path): the repository's working tree.
+        line (str): the git line.
+        session (str | None): the profile to run under, None for none.
+    """
+    code, out, err = await raw_shell(history, line, session)
+    return code, out.decode(), err.decode()
 
 
 @pytest.mark.asyncio
@@ -243,3 +281,141 @@ async def test_a_tag_or_a_ref_naming_a_hidden_blob_names_nothing(
     ) == (0, "", "error: refs/tags/raw does not point to a valid object!\n")
     _, out, _ = await shell(history, "git cat-file blob atag")
     assert out == "S3CR3T two\n"
+
+
+@pytest.fixture
+def twins(tmp_path: Path) -> Path:
+    """Two directories holding the same files, so one tree id stands at
+    two places.
+
+    Args:
+        tmp_path (Path): pytest temporary directory.
+    """
+    path = tmp_path / "twins"
+    (path / "a").mkdir(parents=True)
+    (path / "b").mkdir()
+    Repo.init(str(path), default_branch=b"refs/heads/main").close()
+    for side in ("a", "b"):
+        commit_file(path, f"{side}/secret.txt", "S3CR3T twin\n", side)
+        commit_file(path, f"{side}/pub.txt", "pub\n", side)
+    return path
+
+
+@pytest.mark.asyncio
+async def test_an_operand_shows_its_tree_at_its_own_place(twins: Path):
+    code, out, _ = await shell(
+        twins, "git grep -l S3CR3T HEAD:a HEAD:b", "half"
+    )
+    assert (code, out) == (0, "HEAD:b:secret.txt\n")
+    assert await shell(twins, "git show HEAD:a HEAD:b", "half") == (
+        0,
+        "tree HEAD:a\n\npub.txt\n\ntree HEAD:b\n\npub.txt\nsecret.txt\n",
+        "",
+    )
+
+
+@pytest.mark.asyncio
+async def test_staged_content_answers_to_the_rules(history: Path):
+    (history / "new.txt").write_text("S3CR3T new\n")
+    assert (await shell(history, "git add new.txt"))[0] == 0
+    assert await shell(history, "git diff --cached", "fresh") == (
+        1,
+        "",
+        "git diff: /repo/new.txt: Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_tree_bytes_name_only_what_is_seen(history: Path):
+    code, raw, _ = await raw_shell(history, "git cat-file tree HEAD", "veiled")
+    assert code == 0 and b"copy.txt" in raw and b"secret.txt" not in raw
+    _, size, _ = await shell(history, "git cat-file -s HEAD^{tree}", "veiled")
+    assert int(size) == len(raw)
+    _, batch, _ = await raw_shell(
+        history, "echo 'HEAD^{tree}' | git cat-file --batch", "veiled"
+    )
+    assert b"copy.txt" in batch and b"secret.txt" not in batch
+    _, tree, _ = await shell(history, "git rev-parse 'HEAD^{tree}'")
+    (history / ".git" / "refs" / "tags" / "root").write_text(tree)
+    _, listed, _ = await raw_shell(
+        history, "git for-each-ref --format='%(raw)' refs/tags/root", "veiled"
+    )
+    assert b"copy.txt" in listed and b"secret.txt" not in listed
+
+
+class OnePlaceGate:
+    """A gate whose rules could reach every place but refuse only one."""
+
+    scoped = True
+    granted = ()
+
+    def __init__(self, refused: str) -> None:
+        self.refused = refused
+
+    def scopes(self, virtual: str) -> bool:
+        return True
+
+    def refusal(self, virtual: str) -> str | None:
+        return "sealed" if virtual == self.refused else None
+
+    def check(self, virtual: str) -> None:
+        if self.refusal(virtual) is not None:
+            raise PermissionError(virtual)
+
+
+@pytest.mark.asyncio
+async def test_a_blob_reads_where_any_place_lets_it(history: Path):
+    # The same bytes stand at secret.txt in history and at copy.txt; a
+    # rule keeps only copy.txt, so they read at secret.txt.
+    with Workspace(
+        {"/repo/": DiskVFS(root=str(history))}, mode=MountMode.WRITE
+    ) as ws:
+        ws.register_cli("git", GIT)
+        vfs = repo_context(ws).vfs
+        assert vfs is not None
+        location = await discover(vfs, REPO)
+        repo = await open_repo(vfs, replace(location, vfs=vfs))
+        blob = ObjectID(repo[b"HEAD"].tree)
+        _, copy = repo[blob].lookup_path(
+            repo.object_store.__getitem__, b"copy.txt"
+        )
+        token = bind_caller(
+            replace(current_caller(), gate=OnePlaceGate("/repo/copy.txt"))
+        )
+        try:
+            found = await asyncio.to_thread(
+                located, repo, repo.object_store[copy]
+            )
+            assert found is not None
+            assert repo.places[copy] == "secret.txt"
+            shown_entries(
+                repo,
+                {
+                    b"copy.txt": (0o100644, copy),
+                    b"other.txt": (0o100644, copy),
+                },
+            )
+            readable(repo, copy)
+        finally:
+            reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_checkout_over_a_directory_leaves_the_index(
+    tmp_path: Path,
+):
+    path = tmp_path / "work"
+    path.mkdir()
+    Repo.init(str(path), default_branch=b"refs/heads/main").close()
+    commit_file(path, "boxf", "a file\n", "file")
+    porcelain.remove(str(path), paths=[str(path / "boxf")])
+    (path / "boxf").mkdir()
+    commit_file(path, "boxf/secret.txt", "S3CR3T dir\n", "directory")
+    before = await shell(path, "git ls-files -s")
+    code, _, err = await shell(path, "git checkout HEAD~1 -- boxf", "walled")
+    assert (code, err) == (
+        1,
+        "git checkout: /repo/boxf/secret.txt: Permission denied\n",
+    )
+    assert await shell(path, "git ls-files -s") == before
+    assert (path / "boxf" / "secret.txt").read_text() == "S3CR3T dir\n"

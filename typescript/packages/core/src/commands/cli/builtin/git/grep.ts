@@ -28,7 +28,7 @@ import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
-import { placeOf, shownEntries } from './seen.ts'
+import { placeNamed, shownEntries } from './seen.ts'
 import { resolveTree, treeEntries, type TreeEntry } from './tree.ts'
 import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util.ts'
 
@@ -153,7 +153,7 @@ async function searchEntries(repo: Repo, name: string): Promise<Map<string, Tree
   const obj = await unwrapped(repo, await resolveObject(repo, name), name)
   if (obj.type === 'blob') return new Map([['', { mode: REGULAR_MODE, oid: obj.oid }]])
   const tree = await resolveTree(repo, name, obj)
-  return shownEntries(repo, await treeEntries(repo, tree), await placeOf(repo, tree))
+  return shownEntries(repo, await treeEntries(repo, tree), await placeNamed(repo, name, tree))
 }
 
 /** Search tracked working files, index blobs, or named historical trees. */

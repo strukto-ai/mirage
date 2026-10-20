@@ -15,11 +15,13 @@
 import git, { Errors, type TreeObject } from 'isomorphic-git'
 
 import { getAdmission } from '../../../../context/session_context.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { readerOf } from '../../../../workspace/files.ts'
 import { readIndex } from './index_file.ts'
 import { visiblePath } from './pathspec.ts'
 import { loadRefs } from './refs.ts'
-import { objectType, repoArgs, type Repo } from './repo.ts'
+import { objectType, rawObject, repoArgs, type Repo } from './repo.ts'
 import type { GitObject, RepoLocation } from './types.ts'
 
 /** A leaf as a tree or the index lists it: its mode and its object id. */
@@ -67,6 +69,19 @@ export function checkRules(location: RepoLocation, relative: string): void {
 }
 
 /**
+ * Whether no rule in force refuses a place for the running command, asked
+ * without refusing it.
+ *
+ * @param location the discovered repository
+ * @param relative the repository-relative place
+ */
+export function permitted(location: RepoLocation, relative: string): boolean {
+  const gate = getAdmission()
+  if (gate === null || location.vfs === undefined || location.vfs === null) return true
+  return gate.refusal(location.worktree.join(relative).virtual) === null
+}
+
+/**
  * An object a revision found at a place, which the session may be shown there:
  * noted, so a tree prints what that place holds, and a blob's content refused
  * where a rule keeps the place from the command. A rule guards content, not
@@ -77,10 +92,18 @@ export function checkRules(location: RepoLocation, relative: string): void {
  * @param repo the opened repository
  * @param obj the object found
  * @param relative the repository-relative place
+ * @param revision the operand that named it, whose place this is whatever other
+ *   place holds the same object
  */
-export function placed<T extends GitObject>(repo: Repo, obj: T, relative: string): T {
+export function placed<T extends GitObject>(
+  repo: Repo,
+  obj: T,
+  relative: string,
+  revision: string | null = null,
+): T {
   if (obj.type === 'blob') checkRules(repo.location, relative)
   if (!repo.places.has(obj.oid)) repo.places.set(obj.oid, relative)
+  if (revision !== null) repo.named.set(revision, relative)
   return obj
 }
 
@@ -89,9 +112,11 @@ export function placed<T extends GitObject>(repo: Repo, obj: T, relative: string
  *
  * @param repo the opened repository
  * @param tree the root tree's id
+ * @param revision the operand that named it
  */
-export function rooted(repo: Repo, tree: string): void {
+export function rooted(repo: Repo, tree: string, revision: string | null = null): void {
   if (!repo.places.has(tree)) repo.places.set(tree, '')
+  if (revision !== null) repo.named.set(revision, '')
 }
 
 /**
@@ -110,7 +135,7 @@ export function rooted(repo: Repo, tree: string): void {
 export async function located<T extends GitObject>(repo: Repo, obj: T): Promise<T | null> {
   if (!guarded(repo) || obj.type === 'commit' || obj.type === 'tag' || repo.places.has(obj.oid))
     return obj
-  const place = await find(repo, obj.oid)
+  const place = await find(repo, obj.oid, obj.type === 'blob')
   if (place === null) return null
   repo.places.set(obj.oid, place)
   return obj
@@ -139,8 +164,22 @@ export async function visibleObject(repo: Repo, oid: string): Promise<boolean> {
  */
 export async function placeOf(repo: Repo, oid: string): Promise<string> {
   let found = repo.places.get(oid) ?? null
-  if (found === null && guarded(repo)) found = await find(repo, oid)
+  if (found === null && guarded(repo)) found = await find(repo, oid, false)
   return found ?? ''
+}
+
+/**
+ * Where the object an operand names stands for that operand: the place its own
+ * path gave it (`HEAD:b` is `b` even where `HEAD:a` holds the same tree), else
+ * where this command found it.
+ *
+ * @param repo the opened repository
+ * @param name the operand as typed
+ * @param oid the object's id
+ */
+export async function placeNamed(repo: Repo, name: string, oid: string): Promise<string> {
+  const named = repo.named.get(name)
+  return named ?? (await placeOf(repo, oid))
 }
 
 /**
@@ -148,14 +187,55 @@ export async function placeOf(repo: Repo, oid: string): Promise<string> {
  *
  * @param repo the opened repository
  * @param tree the tree's id
+ * @param base the place it stands at, null for where this command found it
  */
-export async function shownItems(repo: Repo, tree: string): Promise<TreeObject> {
+export async function shownItems(
+  repo: Repo,
+  tree: string,
+  base: string | null = null,
+): Promise<TreeObject> {
   const items = (await git.readTree({ ...repoArgs(repo), oid: tree })).tree
   if (!guarded(repo)) return items
-  const base = await placeOf(repo, tree)
+  const where = base ?? (await placeOf(repo, tree))
   return items.filter((entry) =>
-    visiblePath(repo.location, base ? `${base}/${entry.path}` : entry.path),
+    visiblePath(repo.location, where ? `${where}/${entry.path}` : entry.path),
   )
+}
+
+/**
+ * An object's stored bytes as the session is shown them: a tree's with only the
+ * entries it sees, so neither the bytes nor their count name a hidden one.
+ *
+ * A tree's entries stand in its bytes in git's order, each its mode, its name
+ * and its id, so dropping the ones the session does not see leaves exactly the
+ * tree git would store for the rest.
+ *
+ * @param repo the opened repository
+ * @param obj the object
+ * @param base a tree's place, null for where this command found it
+ */
+export async function shownRaw(
+  repo: Repo,
+  obj: GitObject,
+  base: string | null = null,
+): Promise<Uint8Array> {
+  const { raw } = await rawObject(repo, obj.oid)
+  if (obj.type !== 'tree' || !guarded(repo)) return raw
+  const where = base ?? (await placeOf(repo, obj.oid))
+  // Each entry ends in its id's twenty bytes, right after the NUL.
+  const idBytes = 20
+  const kept: Uint8Array[] = []
+  for (let at = 0; at < raw.length;) {
+    const space = raw.indexOf(0x20, at)
+    const nul = space < 0 ? -1 : raw.indexOf(0, space)
+    if (nul < 0) break
+    const end = nul + 1 + idBytes
+    const name = decodeText(raw.subarray(space + 1, nul))
+    if (visiblePath(repo.location, where ? `${where}/${name}` : name))
+      kept.push(raw.subarray(at, end))
+    at = end
+  }
+  return concat(kept)
 }
 
 /**
@@ -163,7 +243,7 @@ export async function shownItems(repo: Repo, tree: string): Promise<TreeObject> 
  *
  * What a diff, a log or a search reads its sides from, so a hidden path is no
  * change, no match and no count, as if never committed. A leaf at a place a
- * rule may keep from the command stays listed, a rule guarding content rather
+ * rule keeps from the command stays listed, a rule guarding content rather
  * than names, and its blob is noted so `readable` refuses to read it there.
  *
  * @param repo the opened repository
@@ -177,17 +257,13 @@ export function shownEntries(
 ): Map<string, Entry> {
   if (!guarded(repo)) return new Map(entries)
   const location = repo.location
-  const gate = getAdmission()
   const shown = new Map<string, Entry>()
   for (const [path, entry] of entries) {
     const relative = base ? `${base}/${path}` : path
     if (!visiblePath(location, relative)) continue
     shown.set(path, entry)
-    if (gate?.scopes(location.worktree.join(relative).virtual) === true) {
-      if (!repo.sealed.has(entry.oid)) repo.sealed.set(entry.oid, relative)
-    } else {
-      repo.free.add(entry.oid)
-    }
+    if (permitted(location, relative)) repo.free.add(entry.oid)
+    else if (!repo.sealed.has(entry.oid)) repo.sealed.set(entry.oid, relative)
   }
   return shown
 }
@@ -209,63 +285,81 @@ export function readable(repo: Repo, sha: string): void {
 
 /**
  * The first place the index or the history holds an object at that the session
- * sees and, for a blob, no rule keeps from the command.
+ * sees and, for content, no rule keeps from the command.
  *
- * The index comes first, then every commit any ref reaches; a subtree is read
- * once per place, however many commits share it. A hidden place is never
- * descended into: what stands under it is hidden too. A blob found only where
- * a rule may refuse it is judged at the first such place, the gate's own
- * answer, so a granted ask still reads.
+ * Every lookup a command makes shares one walk (`sightings`), resumed where the
+ * last stopped and remembered as it goes, so a batch naming the same or many
+ * ids reads the history once. Content held only where rules refuse it is judged
+ * at the first such place, which throws that rule's `PolicyDenied`.
  *
  * @param repo the opened repository
  * @param oid the object's id
- * @throws PolicyDenied it is held only where a rule keeps it
+ * @param content whether it is a blob, whose bytes rules guard
  */
-async function find(repo: Repo, oid: string): Promise<string | null> {
+async function find(repo: Repo, oid: string, content: boolean): Promise<string | null> {
   const location = repo.location
-  const gate = getAdmission()
-  const ruled: string[] = []
-  const allowed = (relative: string): boolean => {
-    const where = location.worktree.join(relative).virtual
-    if (gate?.scopes(where) !== true) return true
-    ruled.push(relative)
-    return false
+  const usable = (place: string): boolean => !content || permitted(location, place)
+  for (const place of repo.seen.get(oid) ?? []) if (usable(place)) return place
+  repo.sightings ??= sightings(repo)
+  // Stepped by hand: leaving a `for await` early would close the walk the
+  // next lookup resumes.
+  for (let next = await repo.sightings.next(); next.done !== true;) {
+    const [found, place] = next.value
+    const held = repo.seen.get(found)
+    if (held === undefined) repo.seen.set(found, [place])
+    else held.push(place)
+    if (found === oid && usable(place)) return place
+    next = await repo.sightings.next()
   }
+  const first = repo.seen.get(oid)?.[0]
+  if (first === undefined) return null
+  checkRules(location, first)
+  return first
+}
+
+/**
+ * Every object the index and the history hold, each with a place the session
+ * sees, in the order a lookup wants them: the index first, then each commit any
+ * ref reaches. A subtree is read once per place, however many commits share
+ * it, and a hidden place is never descended into: what stands under it is
+ * hidden too. An object only a ref names directly stands at no place and is
+ * never sighted.
+ *
+ * @param repo the opened repository
+ */
+async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
+  const location = repo.location
   const state = await readIndex(repo, repo.vfs)
   const staged: [string, string][] = [...state.entries].map(([name, entry]) => [name, entry.oid])
   for (const [name, conflict] of state.conflicts) {
     for (const side of [conflict.ancestor, conflict.this, conflict.other])
       if (side !== null) staged.push([name, side.oid])
   }
-  for (const [relative, sha] of staged) {
-    if (sha === oid && relative && visiblePath(location, relative) && allowed(relative))
-      return relative
-  }
+  for (const [relative, sha] of staged)
+    if (relative && visiblePath(location, relative)) yield [sha, relative]
   const walked = new Set<string>()
-  const walk = async (treeId: string, base: string): Promise<string | null> => {
+  const walk = async function* (
+    treeId: string,
+    base: string,
+  ): AsyncGenerator<[string, string], void> {
     const key = `${treeId}\0${base}`
-    if (walked.has(key)) return null
+    if (walked.has(key)) return
     walked.add(key)
-    if (treeId === oid) return base
+    yield [treeId, base]
     for (const entry of (await git.readTree({ ...repoArgs(repo), oid: treeId })).tree) {
       const relative = base ? `${base}/${entry.path}` : entry.path
       if (!visiblePath(location, relative)) continue
-      if (entry.type === 'tree') {
-        const found = await walk(entry.oid, relative)
-        if (found !== null) return found
-      } else if (entry.oid === oid && allowed(relative)) {
-        return relative
-      }
+      if (entry.type === 'tree') yield* walk(entry.oid, relative)
+      else yield [entry.oid, relative]
     }
-    return null
   }
   const refs = await loadRefs(repo.vfs, location.gitdir, location.commondir)
   // A symbolic ref names another ref the table already holds.
   const pending = [...refs.values()].filter((value) => /^[0-9a-f]{40}$/.test(value))
-  const seen = new Set<string>()
+  const reached = new Set<string>()
   for (let sha = pending.pop(); sha !== undefined; sha = pending.pop()) {
-    if (seen.has(sha)) continue
-    seen.add(sha)
+    if (reached.has(sha)) continue
+    reached.add(sha)
     let read
     try {
       // Deprecated upstream for being general, but one read saying which kind
@@ -279,16 +373,9 @@ async function find(repo: Repo, oid: string): Promise<string | null> {
     if (read.format !== 'parsed') continue
     if (read.type === 'tag') {
       pending.push(read.object.object)
-      continue
-    }
-    if (read.type === 'commit') {
+    } else if (read.type === 'commit') {
       pending.push(...read.object.parent)
-      const found = await walk(read.object.tree, '')
-      if (found !== null) return found
+      yield* walk(read.object.tree, '')
     }
   }
-  const first = ruled[0]
-  if (first === undefined) return null
-  checkRules(location, first)
-  return first
 }

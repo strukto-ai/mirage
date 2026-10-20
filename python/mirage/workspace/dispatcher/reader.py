@@ -102,7 +102,20 @@ class NamespaceReader:
             path (str | PathSpec): virtual path.
         """
         virtual = PathSpec.from_str_path(path, cwd="/").virtual
-        return hidden_under(self._visibility(), virtual)
+        vis = self._visibility()
+        if hidden_under(vis, virtual):
+            return True
+        if self._links is None or not hidden_under(vis, "/"):
+            return False
+        # ``visible`` follows links, so a link at, under or above the
+        # path can lead where the session hides even when nothing named
+        # under the path is hidden.
+        return any(
+            link == virtual
+            or link.startswith(virtual.rstrip("/") + "/")
+            or virtual.startswith(link.rstrip("/") + "/")
+            for link in self._links.symlink_targets()
+        )
 
     def rows(self) -> list[MountRow]:
         """Every registered mount, hides and sessions aside: what the

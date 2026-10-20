@@ -529,7 +529,7 @@ def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
     if want == "":
         return obj
     if want == TREE and isinstance(obj, Commit):
-        rooted(repo, obj.tree)
+        rooted(repo, obj.tree, revision)
         obj = _object_by_id(repo, obj.tree, revision)
     if obj.type_name.decode() != want:
         raise AmbiguousArgumentError(revision)
@@ -578,7 +578,7 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
         and not visible_path(repo.location, place)
     ):
         raise PathNotInRevisionError(path, rev, False)
-    return placed(repo, _object_by_id(repo, sha, revision), place)
+    return placed(repo, _object_by_id(repo, sha, revision), place, revision)
 
 
 def _on_disk(repo: BaseRepo, path: str) -> bool:
@@ -635,7 +635,10 @@ def _in_index(repo: BaseRepo, spec: str) -> ShaFile:
     found = stages[stage]
     if found is not None:
         return placed(
-            repo, _object_by_id(repo, ObjectID(found.sha), spec), path
+            repo,
+            _object_by_id(repo, ObjectID(found.sha), spec),
+            path,
+            PATH_MARK + spec,
         )
     held = next(
         (at for at, entry in enumerate(stages) if entry is not None), -1

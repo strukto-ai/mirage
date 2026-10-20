@@ -17,6 +17,13 @@ import { describe, expect, it } from 'vitest'
 import { readers } from '../../test-utils.ts'
 import { DEFAULT_VISIBILITY } from '../../types.ts'
 import { classifyPaths } from '../../utils/hidden.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
+
+/** A link table holding one link. */
+function links(link: string, target: string): NamespaceLinks {
+  const table = new Map([[link, target]])
+  return { symlinkTargets: () => table } as unknown as NamespaceLinks
+}
 
 describe('NamespaceReader.hidesUnder', () => {
   it('names a subtree holding a hidden entry', () => {
@@ -31,5 +38,13 @@ describe('NamespaceReader.hidesUnder', () => {
 
   it('is false without hides', () => {
     expect(readers()('agent').hidesUnder('/repo')).toBe(false)
+  })
+
+  it('counts a link that can lead into a hide', () => {
+    const vis = { ...DEFAULT_VISIBILITY, paths: classifyPaths(['/outside/private']) }
+    const reader = readers([], links('/repo/link', '/outside/private'), vis)('agent')
+    expect(reader.hidesUnder('/repo')).toBe(true)
+    expect(reader.hidesUnder('/repo/link/secret.txt')).toBe(true)
+    expect(reader.hidesUnder('/elsewhere')).toBe(false)
   })
 })

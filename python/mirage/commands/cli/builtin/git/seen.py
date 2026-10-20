@@ -79,7 +79,23 @@ def check_rules(location: RepoLocation, relative: str) -> None:
         gate.check(location.worktree.join(relative).virtual)
 
 
-def placed(repo: BaseRepo, obj: T, relative: str) -> T:
+def permitted(location: RepoLocation, relative: str) -> bool:
+    """Whether no rule in force refuses a place for the running command,
+    asked without refusing it.
+
+    Args:
+        location (RepoLocation): the discovered repository.
+        relative (str): the repository-relative place.
+    """
+    gate = current_caller().gate
+    if gate is None or location.vfs is None:
+        return True
+    return gate.refusal(location.worktree.join(relative).virtual) is None
+
+
+def placed(
+    repo: BaseRepo, obj: T, relative: str, revision: str | None = None
+) -> T:
     """An object a revision found at a place, which the session may be
     shown there: noted, so a tree prints what that place holds, and a
     blob's content refused where a rule keeps the place from the
@@ -91,23 +107,30 @@ def placed(repo: BaseRepo, obj: T, relative: str) -> T:
         repo (BaseRepo): the opened repository.
         obj (T): the object found.
         relative (str): the repository-relative place.
+        revision (str | None): the operand that named it, whose place
+            this is whatever other place holds the same object.
     """
     if isinstance(repo, Repo) and isinstance(obj, ShaFile):
         if isinstance(obj, Blob):
             check_rules(repo.location, relative)
         repo.places.setdefault(obj.id, relative)
+        if revision is not None:
+            repo.named[revision] = relative
     return obj
 
 
-def rooted(repo: BaseRepo, tree: bytes) -> None:
+def rooted(repo: BaseRepo, tree: bytes, revision: str | None = None) -> None:
     """Note a commit's tree, which stands at the repository's root.
 
     Args:
         repo (BaseRepo): the opened repository.
         tree (bytes): the root tree's id.
+        revision (str | None): the operand that named it.
     """
     if isinstance(repo, Repo):
         repo.places.setdefault(tree, "")
+        if revision is not None:
+            repo.named[revision] = ""
 
 
 def located(repo: BaseRepo, obj: ShaFile) -> ShaFile | None:
@@ -129,7 +152,7 @@ def located(repo: BaseRepo, obj: ShaFile) -> ShaFile | None:
     assert isinstance(repo, Repo)
     if obj.id in repo.places:
         return obj
-    place = _find(repo, obj.id)
+    place = _find(repo, obj.id, isinstance(obj, Blob))
     if place is None:
         return None
     repo.places[obj.id] = place
@@ -163,26 +186,64 @@ def place_of(repo: BaseRepo, oid: bytes) -> str:
         return ""
     found = repo.places.get(oid)
     if found is None and guarded(repo):
-        found = _find(repo, oid)
+        found = _find(repo, oid, False)
     return found or ""
 
 
-def shown_items(repo: BaseRepo, tree: Tree) -> Iterator[TreeEntry]:
+def place_named(repo: BaseRepo, name: str, oid: bytes) -> str:
+    """Where the object an operand names stands for that operand: the
+    place its own path gave it (``HEAD:b`` is ``b`` even where ``HEAD:a``
+    holds the same tree), else where this command found it.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        name (str): the operand as typed.
+        oid (bytes): the object's id.
+    """
+    if isinstance(repo, Repo) and name in repo.named:
+        return repo.named[name]
+    return place_of(repo, oid)
+
+
+def shown_items(
+    repo: BaseRepo, tree: Tree, base: str | None = None
+) -> Iterator[TreeEntry]:
     """A tree's entries the session sees, at the place it was found.
 
     Args:
         repo (BaseRepo): the opened repository.
         tree (Tree): the tree to list.
+        base (str | None): the place it stands at, None for where this
+            command found it.
     """
     if not guarded(repo):
         yield from tree.iteritems()
         return
     assert isinstance(repo, Repo)
-    base = place_of(repo, tree.id)
+    where = place_of(repo, tree.id) if base is None else base
     for entry in tree.iteritems():
         name = entry.path.decode("utf-8", "surrogateescape")
-        if visible_path(repo.location, posixpath.join(base, name)):
+        if visible_path(repo.location, posixpath.join(where, name)):
             yield entry
+
+
+def shown_raw(repo: BaseRepo, obj: ShaFile, base: str | None = None) -> bytes:
+    """An object's stored bytes as the session is shown them: a tree's
+    re-encoded with only the entries it sees, so neither the bytes nor
+    their count name a hidden one.
+
+    Args:
+        repo (BaseRepo): the opened repository.
+        obj (ShaFile): the object.
+        base (str | None): a tree's place, None for where this command
+            found it.
+    """
+    if not isinstance(obj, Tree) or not guarded(repo):
+        return obj.as_raw_string()
+    kept = Tree()
+    for entry in shown_items(repo, obj, base):
+        kept.add(entry.path, entry.mode, entry.sha)
+    return kept.as_raw_string()
 
 
 def shown_entries(
@@ -192,8 +253,8 @@ def shown_entries(
 
     What a diff, a log or a search reads its sides from, so a hidden
     path is no change, no match and no count, as if never committed. A
-    leaf at a place a rule may keep from the command stays listed, a
-    rule guarding content rather than names, and its blob is noted so
+    leaf at a place a rule keeps from the command stays listed, a rule
+    guarding content rather than names, and its blob is noted so
     ``readable`` refuses to read it there.
 
     Args:
@@ -205,7 +266,6 @@ def shown_entries(
         return dict(entries)
     assert isinstance(repo, Repo)
     location = repo.location
-    gate = current_caller().gate
     shown: dict[bytes, Entry] = {}
     for path, (mode, sha) in entries.items():
         relative = posixpath.join(
@@ -214,12 +274,10 @@ def shown_entries(
         if not visible_path(location, relative):
             continue
         shown[path] = (mode, sha)
-        if gate is not None and gate.scopes(
-            location.worktree.join(relative).virtual
-        ):
-            repo.sealed.setdefault(sha, relative)
-        else:
+        if permitted(location, relative):
             repo.free.add(sha)
+        else:
+            repo.sealed.setdefault(sha, relative)
     return shown
 
 
@@ -242,35 +300,54 @@ def readable(repo: BaseRepo, sha: bytes) -> None:
         check_rules(repo.location, place)
 
 
-def _find(repo: Repo, oid: bytes) -> str | None:
+def _find(repo: Repo, oid: bytes, content: bool) -> str | None:
     """The first place the index or the history holds an object at that
-    the session sees and, for a blob, no rule keeps from the command.
+    the session sees and, for content, no rule keeps from the command.
 
-    The index comes first, then every commit any ref reaches; a subtree
-    is read once per place, however many commits share it. A hidden
-    place is never descended into: what stands under it is hidden too.
-    A blob found only where a rule may refuse it is judged at the first
-    such place, the gate's own answer, so a granted ask still reads. An
-    object only a ref names directly stands at no place and is not found.
+    Every lookup a command makes shares one walk (``_sightings``),
+    resumed where the last stopped and remembered as it goes, so a
+    batch naming the same or many ids reads the history once. Content
+    held only where rules refuse it is judged at the first such place,
+    which raises that rule's ``PolicyDenied``.
 
     Args:
         repo (Repo): the opened repository.
         oid (bytes): the object's id.
-
-    Raises:
-        PolicyDenied: it is held only where a rule keeps it.
+        content (bool): whether it is a blob, whose bytes rules guard.
     """
     location = repo.location
-    gate = current_caller().gate
-    ruled: list[str] = []
 
-    def allowed(relative: str) -> bool:
-        where = location.worktree.join(relative).virtual
-        if gate is None or not gate.scopes(where):
-            return True
-        ruled.append(relative)
-        return False
+    def usable(place: str) -> bool:
+        return not content or permitted(location, place)
 
+    for place in repo.seen.get(oid, ()):
+        if usable(place):
+            return place
+    if repo.sightings is None:
+        repo.sightings = _sightings(repo)
+    for found, place in repo.sightings:
+        repo.seen.setdefault(found, []).append(place)
+        if found == oid and usable(place):
+            return place
+    held = repo.seen.get(oid)
+    if not held:
+        return None
+    check_rules(location, held[0])
+    return held[0]
+
+
+def _sightings(repo: Repo) -> Iterator[tuple[bytes, str]]:
+    """Every object the index and the history hold, each with a place
+    the session sees, in the order a lookup wants them: the index first,
+    then each commit any ref reaches. A subtree is read once per place,
+    however many commits share it, and a hidden place is never descended
+    into: what stands under it is hidden too. An object only a ref names
+    directly stands at no place and is never sighted.
+
+    Args:
+        repo (Repo): the opened repository.
+    """
+    location = repo.location
     state = run_async_from_sync(
         read_index(repo.dispatch, location.gitdir), repo.loop
     )
@@ -283,24 +360,18 @@ def _find(repo: Repo, oid: bytes) -> str | None:
         )
     for name, sha in staged:
         relative = name.decode("utf-8", "surrogateescape")
-        if (
-            sha == oid
-            and relative
-            and visible_path(location, relative)
-            and allowed(relative)
-        ):
-            return relative
+        if relative and visible_path(location, relative):
+            yield sha, relative
     walked: set[tuple[bytes, str]] = set()
 
-    def walk(tree_id: bytes, base: str) -> str | None:
+    def walk(tree_id: bytes, base: str) -> Iterator[tuple[bytes, str]]:
         if (tree_id, base) in walked:
-            return None
+            return
         walked.add((tree_id, base))
-        if tree_id == oid:
-            return base
+        yield tree_id, base
         tree = repo.object_store[ObjectID(tree_id)]
         if not isinstance(tree, Tree):
-            return None
+            return
         for entry in tree.iteritems():
             relative = posixpath.join(
                 base, entry.path.decode("utf-8", "surrogateescape")
@@ -308,12 +379,9 @@ def _find(repo: Repo, oid: bytes) -> str | None:
             if not visible_path(location, relative):
                 continue
             if entry.mode == TREE:
-                found = walk(entry.sha, relative)
-                if found is not None:
-                    return found
-            elif entry.sha == oid and allowed(relative):
-                return relative
-        return None
+                yield from walk(entry.sha, relative)
+            else:
+                yield entry.sha, relative
 
     pending: list[bytes] = []
     for ref in repo.refs.allkeys():
@@ -321,25 +389,18 @@ def _find(repo: Repo, oid: bytes) -> str | None:
             pending.append(repo.refs[ref])
         except KeyError:
             continue
-    seen: set[bytes] = set()
+    reached: set[bytes] = set()
     while pending:
-        reached = pending.pop()
-        if reached in seen:
+        head = pending.pop()
+        if head in reached:
             continue
-        seen.add(reached)
+        reached.add(head)
         try:
-            obj = repo.object_store[ObjectID(reached)]
+            obj = repo.object_store[ObjectID(head)]
         except KeyError:
             continue
         if isinstance(obj, Tag):
             pending.append(obj.object[1])
-            continue
-        if isinstance(obj, Commit):
+        elif isinstance(obj, Commit):
             pending.extend(obj.parents)
-            found = walk(obj.tree, "")
-            if found is not None:
-                return found
-    if not ruled:
-        return None
-    check_rules(location, ruled[0])
-    return ruled[0]
+            yield from walk(obj.tree, "")

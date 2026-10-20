@@ -32,7 +32,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.rows import Line, entry_path, printed
-from mirage.commands.cli.builtin.git.seen import place_of
+from mirage.commands.cli.builtin.git.seen import place_named
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import listed_tree, resolve_tree
 from mirage.commands.cli.builtin.git.util import (
@@ -127,7 +127,7 @@ async def ls_tree(
             raise GitError(f"Not a valid object name {name}") from exc
         # Each row stands where the tree does, so the hides it is
         # filtered by are the ones at that place, not at the root.
-        base = await asyncio.to_thread(place_of, repo, tree)
+        base = await asyncio.to_thread(place_named, repo, name, tree)
         full_tree = fl.as_bool("full_tree")
         start = (
             location.worktree.virtual if full_tree else start_point(fl).virtual

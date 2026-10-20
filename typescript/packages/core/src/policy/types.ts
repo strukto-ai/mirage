@@ -968,4 +968,10 @@ export interface EntryGate {
    * running command, so a native walk there gives way to the guarded one;
    * per operand, unlike `scoped`. */
   scopes(virtual: string): boolean
+  /**
+   * The reason a rule in force refuses this entry for the running command,
+   * null when it may touch it: `check`'s answer, asked without refusing, for
+   * a reader choosing among places that hold the same bytes.
+   */
+  refusal(virtual: string): string | null
 }

@@ -406,6 +406,7 @@ describe('the admission binding', () => {
       scopes: () => scoped,
       granted: [],
       check: () => undefined,
+      refusal: () => null,
     })
     expect(getAdmission()).toBeNull()
     const outer = gate(true)

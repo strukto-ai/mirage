@@ -80,13 +80,19 @@ export interface Repo {
    * running command, once asked (`guarded`); null until then.
    */
   guarded: boolean | null
+  /** The place each operand's own path gave the object it names (`placeNamed`). */
+  readonly named: Map<string, string>
   /**
-   * Blobs this command listed at a place a rule may keep from it, each with
+   * Blobs this command listed only at places a rule keeps from it, each with
    * the first such place.
    */
   readonly sealed: Map<string, string>
   /** Blobs it listed where it may read them. */
   readonly free: Set<string>
+  /** Every place the shared history walk has sighted each object at so far (`seen.ts`). */
+  readonly seen: Map<string, string[]>
+  /** That walk, resumed by each lookup; null until one starts it. */
+  sightings: AsyncGenerator<[string, string], void> | null
 }
 
 /** The argument bag every isomorphic-git call in this package shares. */
@@ -236,8 +242,11 @@ export async function openRepo(
     ambiguous,
     places: new Map(),
     guarded: null,
+    named: new Map(),
     sealed: new Map(),
     free: new Set(),
+    seen: new Map(),
+    sightings: null,
   }
 }
 

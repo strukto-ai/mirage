@@ -38,8 +38,10 @@ from mirage.commands.cli.builtin.git.revparse import resolve_object
 from mirage.commands.cli.builtin.git.seen import (
     guarded,
     located,
+    place_named,
     rooted,
     shown_items,
+    shown_raw,
 )
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
@@ -99,32 +101,40 @@ def peeled(repo: BaseRepo, obj: ShaFile, want: str) -> ShaFile | None:
     return obj
 
 
-def typed_object(repo: BaseRepo, name: str, want: str) -> ShaFile | None:
-    """The object a name stands for, peeled to a type; off the event
-    loop, since peeling may look for where the session sees a target.
+def typed_bytes(repo: BaseRepo, name: str, want: str) -> bytes | None:
+    """The stored bytes of what a name stands for, peeled to a type, as
+    the session is shown them; None when the chain never reaches the
+    type. Off the event loop, since peeling may look for where the
+    session sees a target.
 
     Args:
         repo (BaseRepo): the opened repository.
         name (str): the object name as typed.
         want (str): the type asked for.
     """
-    return peeled(repo, named_object(repo, name), want)
+    obj = peeled(repo, named_object(repo, name), want)
+    if obj is None:
+        return None
+    return shown_raw(repo, obj, place_named(repo, name, obj.id))
 
 
-def pretty(repo: BaseRepo, obj: ShaFile) -> bytes:
+def pretty(repo: BaseRepo, obj: ShaFile, name: str) -> bytes:
     """``-p``: a tree as ls-tree lists it, the entries the session sees
-    at the place it was found, any other object as stored.
+    at the place the name gave it, any other object as stored.
 
     Args:
         repo (BaseRepo): the opened repository.
         obj (ShaFile): the object.
+        name (str): the object name as typed.
     """
     if not isinstance(obj, Tree):
         return obj.as_raw_string()
     kinds = {TREE: b"tree", GITLINK: b"commit"}
     return b"".join(
-        b"%06o %s %s\t%s\n" % (mode, kinds.get(mode, b"blob"), sha, name)
-        for name, mode, sha in shown_items(repo, obj)
+        b"%06o %s %s\t%s\n" % (mode, kinds.get(mode, b"blob"), sha, entry)
+        for entry, mode, sha in shown_items(
+            repo, obj, place_named(repo, name, obj.id)
+        )
     )
 
 
@@ -152,19 +162,21 @@ def _query(repo: BaseRepo, mode: str, name: str) -> tuple[bytes, int]:
     if mode == "t":
         return obj.type_name + b"\n", 0
     if mode == "s":
-        return b"%d\n" % len(obj.as_raw_string()), 0
+        raw = shown_raw(repo, obj, place_named(repo, name, obj.id))
+        return b"%d\n" % len(raw), 0
     if mode == "e":
         return b"", 0
-    return pretty(repo, obj), 0
+    return pretty(repo, obj, name), 0
 
 
 def _batch_head(
     repo: BaseRepo, line: str, template: str
-) -> tuple[bytes, ObjectID | None]:
-    """One ``--batch``/``--batch-check`` format line and the id it names,
-    ``<name> missing`` and None for a name that stands for nothing. With
-    ``%(rest)`` in the format the name ends at the first blank and the rest
-    of the line is ``%(rest)``.
+) -> tuple[bytes, ObjectID | None, str]:
+    """One ``--batch``/``--batch-check`` format line, the id it names
+    and the place the name gave it; ``<name> missing`` and None for a
+    name that stands for nothing. With ``%(rest)`` in the format the
+    name ends at the first blank and the rest of the line is
+    ``%(rest)``.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -177,19 +189,22 @@ def _batch_head(
     try:
         obj = resolve_object(repo, name)
     except GitError:
-        return f"{name} missing\n".encode(), None
+        return f"{name} missing\n".encode(), None, ""
+    base = place_named(repo, name, obj.id)
     atoms = {
         "objectname": obj.id.decode(),
         "objecttype": obj.type_name.decode(),
-        "objectsize": str(len(obj.as_raw_string())),
+        "objectsize": str(len(shown_raw(repo, obj, base))),
         "rest": rest,
     }
     head = FORMAT_ATOM.sub(lambda m: atoms[m.group(1)], template)
-    return f"{head}\n".encode(), obj.id
+    return f"{head}\n".encode(), obj.id, base
 
 
 async def _batch_lines(
-    repo: BaseRepo, heads: list[tuple[bytes, ObjectID | None]], contents: bool
+    repo: BaseRepo,
+    heads: list[tuple[bytes, ObjectID | None, str]],
+    contents: bool,
 ) -> AsyncIterator[bytes]:
     """The batch answers in order, each object's bytes read only when its
     turn comes, so a long ``--batch`` never holds every object at once; a
@@ -197,16 +212,17 @@ async def _batch_lines(
 
     Args:
         repo (BaseRepo): the opened repository.
-        heads (list[tuple[bytes, ObjectID | None]]): each line's format
-            answer and the id it names.
+        heads (list[tuple[bytes, ObjectID | None, str]]): each line's
+            format answer, the id it names and that object's place.
         contents (bool): ``--batch``, which prints the bytes too.
     """
-    for head, sha in heads:
+    for head, sha, base in heads:
         if not contents or sha is None:
             yield head
             continue
         obj = await asyncio.to_thread(repo.__getitem__, sha)
-        yield head + obj.as_raw_string() + b"\n"
+        raw = await asyncio.to_thread(shown_raw, repo, obj, base)
+        yield head + raw + b"\n"
 
 
 async def cat_file(
@@ -284,9 +300,9 @@ async def cat_file(
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
         repo, _ = await opened(ctx, fl)
-        obj = await asyncio.to_thread(typed_object, repo, name, kind)
-        if obj is None:
+        raw = await asyncio.to_thread(typed_bytes, repo, name, kind)
+        if raw is None:
             raise GitError(f"git cat-file {name}: bad file")
-        return obj.as_raw_string(), IOResult()
+        return raw, IOResult()
     except GitError as exc:
         return fatal(exc)

@@ -30,7 +30,7 @@ import {
 import { OBJECT_TYPES } from './constants.ts'
 import { rawObject, repoArgs, type Repo } from './repo.ts'
 import { resolveObject } from './revparse.ts'
-import { guarded, located, rooted, shownItems } from './seen.ts'
+import { guarded, located, placeNamed, rooted, shownItems, shownRaw } from './seen.ts'
 import { opened } from './session.ts'
 import type { GitObject } from './types.ts'
 import { checkSwitches, fatal, verbUsage } from './util.ts'
@@ -88,25 +88,31 @@ async function peeled(repo: Repo, obj: GitObject, want: string): Promise<GitObje
 }
 
 /**
- * The object a name stands for, peeled to a type, as `git cat-file <type>`
- * reads it.
+ * The stored bytes of what a name stands for, peeled to a type, as the session
+ * is shown them; null when the chain never reaches the type.
  *
  * @param repo the opened repository
  * @param name the object name as typed
  * @param want the type asked for
  */
-async function typedObject(repo: Repo, name: string, want: string): Promise<GitObject | null> {
-  return peeled(repo, await namedObject(repo, name), want)
+async function typedBytes(repo: Repo, name: string, want: string): Promise<Uint8Array | null> {
+  const obj = await peeled(repo, await namedObject(repo, name), want)
+  if (obj === null) return null
+  return shownRaw(repo, obj, await placeNamed(repo, name, obj.oid))
 }
 
 /**
  * `-p`: a tree as ls-tree lists it, the entries the session sees at the place
- * it was found, any other object as stored.
+ * the name gave it, any other object as stored.
+ *
+ * @param repo the opened repository
+ * @param obj the object
+ * @param name the object name as typed
  */
-async function pretty(repo: Repo, obj: GitObject): Promise<Uint8Array> {
+async function pretty(repo: Repo, obj: GitObject, name: string): Promise<Uint8Array> {
   if (obj.type !== 'tree') return raw(repo, obj.oid)
   return ENC.encode(
-    (await shownItems(repo, obj.oid))
+    (await shownItems(repo, obj.oid, await placeNamed(repo, name, obj.oid)))
       .map((entry) => `${entry.mode.padStart(6, '0')} ${entry.type} ${entry.oid}\t${entry.path}\n`)
       .join(''),
   )
@@ -136,22 +142,25 @@ async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Arra
   }
   const obj = await namedObject(repo, name)
   if (mode === 't') return [ENC.encode(`${obj.type}\n`), 0]
-  if (mode === 's') return [ENC.encode(`${String((await raw(repo, obj.oid)).length)}\n`), 0]
+  if (mode === 's') {
+    const shown = await shownRaw(repo, obj, await placeNamed(repo, name, obj.oid))
+    return [ENC.encode(`${String(shown.length)}\n`), 0]
+  }
   if (mode === 'e') return [new Uint8Array(), 0]
-  return [await pretty(repo, obj), 0]
+  return [await pretty(repo, obj, name), 0]
 }
 
 /**
- * One `--batch`/`--batch-check` format line and the id it names, `<name>
- * missing` and null for a name that stands for nothing. With `%(rest)` in the
- * format the name ends at the first blank and the rest of the line is
- * `%(rest)`.
+ * One `--batch`/`--batch-check` format line, the object it names and the place
+ * the name gave it; `<name> missing` and null for a name that stands for
+ * nothing. With `%(rest)` in the format the name ends at the first blank and
+ * the rest of the line is `%(rest)`.
  */
 async function batchHead(
   repo: Repo,
   line: string,
   template: string,
-): Promise<[Uint8Array, string | null]> {
+): Promise<[Uint8Array, GitObject | null, string]> {
   let name = line
   let rest = ''
   if (template.includes('%(rest)')) {
@@ -165,17 +174,18 @@ async function batchHead(
   try {
     obj = await resolveObject(repo, name)
   } catch (err) {
-    if (err instanceof GitError) return [ENC.encode(`${name} missing\n`), null]
+    if (err instanceof GitError) return [ENC.encode(`${name} missing\n`), null, '']
     throw err
   }
+  const base = await placeNamed(repo, name, obj.oid)
   const atoms: Record<string, string> = {
     objectname: obj.oid,
     objecttype: obj.type,
-    objectsize: String((await raw(repo, obj.oid)).length),
+    objectsize: String((await shownRaw(repo, obj, base)).length),
     rest,
   }
   const head = template.replace(FORMAT_ATOM, (_, atom: string) => atoms[atom] ?? '')
-  return [ENC.encode(`${head}\n`), obj.oid]
+  return [ENC.encode(`${head}\n`), obj, base]
 }
 
 /**
@@ -185,11 +195,11 @@ async function batchHead(
  */
 async function* batchLines(
   repo: Repo,
-  heads: readonly [Uint8Array, string | null][],
+  heads: readonly [Uint8Array, GitObject | null, string][],
   contents: boolean,
 ): AsyncIterable<Uint8Array> {
-  for (const [head, oid] of heads) {
-    const body = contents && oid !== null ? await raw(repo, oid) : null
+  for (const [head, obj, base] of heads) {
+    const body = contents && obj !== null ? await shownRaw(repo, obj, base) : null
     yield head
     if (body !== null) {
       yield body
@@ -234,7 +244,7 @@ export async function catFile(
       const text = DEC.decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
       const lines = text.split('\n')
       if (lines.at(-1) === '') lines.pop()
-      const heads: [Uint8Array, string | null][] = []
+      const heads: [Uint8Array, GitObject | null, string][] = []
       for (const line of lines) heads.push(await batchHead(repo, line, template))
       return [batchLines(repo, heads, batch === 'batch'), new IOResult()]
     }
@@ -264,9 +274,9 @@ export async function catFile(
       throw new GitError(`invalid object type "${kind}"`)
     }
     const repo = await opened(ctx, fl)
-    const obj = await typedObject(repo, name, kind)
-    if (obj === null) throw new GitError(`git cat-file ${name}: bad file`)
-    return [await raw(repo, obj.oid), new IOResult()]
+    const shown = await typedBytes(repo, name, kind)
+    if (shown === null) throw new GitError(`git cat-file ${name}: bad file`)
+    return [shown, new IOResult()]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

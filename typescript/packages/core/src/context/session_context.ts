@@ -538,7 +538,8 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * On an isolating runtime one gate is live and answers as bound. On
  * the fallback storage several commands' gates can be live at once
  * with nothing to say whose op is asking, so they merge toward
- * refusal: an entry must pass every live gate's `check`, and a rule counts
+ * refusal: an entry must pass every live gate's `check`, its `refusal` is
+ * the first live gate's that refuses it, and a rule counts
  * as granted only when every live gate carries it (a once-grant nodded
  * for one line must not authorize another's dispatcher). `scoped` and
  * `scopes` are true when any live gate scopes, keeping walks off the
@@ -557,6 +558,13 @@ export function getAdmission(): EntryGate | null {
     },
     scopes(virtual: string): boolean {
       return gates.some((gate) => gate.scopes(virtual))
+    },
+    refusal(virtual: string): string | null {
+      for (const gate of gates) {
+        const reason = gate.refusal(virtual)
+        if (reason !== null) return reason
+      }
+      return null
     },
   }
 }

@@ -30,7 +30,7 @@ import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
 import { entryPath, printed, type Line } from './rows.ts'
-import { placeOf } from './seen.ts'
+import { placeNamed } from './seen.ts'
 import { opened } from './session.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { listedTree, resolveTree, TREE_MODE } from './tree.ts'
@@ -107,7 +107,7 @@ export async function lsTree(
     }
     // Each row stands where the tree does, so the hides it is filtered by are
     // the ones at that place, not at the root.
-    const base = await placeOf(repo, tree)
+    const base = await placeNamed(repo, name, tree)
     const fullTree = fl.asBool('full_tree')
     const start = fullTree ? repo.location.worktree.virtual : startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')

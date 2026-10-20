@@ -1736,6 +1736,7 @@ function refusing(refused: string) {
         if (virtual === refused) throw new Error(`sealed ${virtual}`)
       },
       scopes: (): boolean => false,
+      refusal: (virtual: string): string | null => (virtual === refused ? 'sealed' : null),
     },
   }
 }

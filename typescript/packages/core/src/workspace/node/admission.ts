@@ -199,7 +199,7 @@ export class Admitted implements EntryGate {
 
   // The reason a rule in force refuses this entry, null when the line was
   // admitted on it or nothing refuses it.
-  private refusal(virtual: string): string | null {
+  refusal(virtual: string): string | null {
     if (this.judged.has(norm(virtual))) return null
     return ioRefusal(this.rules, this.ctx.tokens ?? [], virtual, this.granted)
   }

@@ -85,7 +85,16 @@ export class NamespaceReader {
    */
   hidesUnder(path: string | PathSpec): boolean {
     const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
-    return hiddenUnder(this.visibility(), virtual)
+    const vis = this.visibility()
+    if (hiddenUnder(vis, virtual)) return true
+    if (this.links === null || !hiddenUnder(vis, '/')) return false
+    // `visible` follows links, so a link at, under or above the path can lead
+    // where the session hides even when nothing named under the path is hidden.
+    const below = `${rstripSlash(virtual)}/`
+    return [...this.links.symlinkTargets().keys()].some(
+      (link) =>
+        link === virtual || link.startsWith(below) || virtual.startsWith(`${rstripSlash(link)}/`),
+    )
   }
 
   /**

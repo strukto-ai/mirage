@@ -199,13 +199,13 @@ class Admitted:
         Args:
             virtual (str): absolute virtual path of the entry.
         """
-        reason = self._refusal(virtual)
+        reason = self.refusal(virtual)
         if reason is not None:
             raise policy_denied(
                 Deny(reason, policy=PermissionsPolicy.__name__), virtual
             )
 
-    def _refusal(self, virtual: str) -> str | None:
+    def refusal(self, virtual: str) -> str | None:
         """The reason a rule in force refuses this entry, None when the
         line was admitted on it or nothing refuses it.
 

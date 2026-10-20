@@ -84,7 +84,7 @@ def resolve_tree(
         repo, resolve_object(repo, name) if obj is None else obj, name
     )
     if isinstance(obj, Commit):
-        rooted(repo, obj.tree)
+        rooted(repo, obj.tree, name)
         return ObjectID(obj.tree)
     if isinstance(obj, GitTree):
         return ObjectID(obj.id)

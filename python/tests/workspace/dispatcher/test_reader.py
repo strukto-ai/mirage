@@ -29,3 +29,22 @@ def test_hides_under_names_a_subtree_holding_a_hidden_entry():
 
 def test_hides_under_is_false_without_hides():
     assert not readers()("agent").hides_under("/repo")
+
+
+class Links:
+    """A link table holding one link."""
+
+    def __init__(self, link: str, target: str) -> None:
+        self.table = {link: target}
+
+    def symlink_targets(self) -> dict[str, str]:
+        return self.table
+
+
+def test_hides_under_counts_a_link_that_can_lead_into_a_hide():
+    vis = Visibility(paths=classify_paths(["/outside/private"]))
+    links = Links("/repo/link", "/outside/private")
+    reader = readers(links=links, visibility=vis)("agent")  # type: ignore[arg-type]
+    assert reader.hides_under("/repo")
+    assert reader.hides_under("/repo/link/secret.txt")
+    assert not reader.hides_under("/elsewhere")

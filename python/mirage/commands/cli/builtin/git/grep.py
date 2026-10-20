@@ -33,7 +33,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
-from mirage.commands.cli.builtin.git.seen import place_of, shown_entries
+from mirage.commands.cli.builtin.git.seen import place_named, shown_entries
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.commands.cli.builtin.git.tree import (
@@ -230,7 +230,9 @@ def search_entries(repo: BaseRepo, name: str) -> Tree:
     if isinstance(obj, Blob):
         return {b"": (REGULAR, obj.id)}
     tree = resolve_tree(repo, name, obj)
-    return shown_entries(repo, tree_entries(repo, tree), place_of(repo, tree))
+    return shown_entries(
+        repo, tree_entries(repo, tree), place_named(repo, name, tree)
+    )
 
 
 async def grep(

@@ -42,7 +42,7 @@ import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject } from './revparse.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
-import { located, shownItems } from './seen.ts'
+import { located, placeNamed, shownItems } from './seen.ts'
 import {
   checkOperands,
   fatal,
@@ -226,7 +226,8 @@ export async function show(
           continue
         }
         if (target.type === 'tree') {
-          const body = (await shownItems(repo, target.oid))
+          const base = await placeNamed(repo, name, target.oid)
+          const body = (await shownItems(repo, target.oid, base))
             .map((entry) => entry.path + (entry.type === 'tree' ? '/' : '') + '\n')
             .join('')
           parts.push(encodeText(`${shownOne ? '\n' : ''}tree ${name}\n\n${body}`))

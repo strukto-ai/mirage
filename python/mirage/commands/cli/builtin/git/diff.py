@@ -223,7 +223,7 @@ async def diff(
             state = await read_index(vfs, location.gitdir)
             refuse_unresolved(state)
             before = await asyncio.to_thread(_base, repo, revisions)
-            after = staged_entries(state)
+            after = shown_entries(repo, staged_entries(state))
         else:
             old, new, warning = await asyncio.to_thread(
                 _sides, repo, revisions
@@ -234,7 +234,11 @@ async def diff(
                 if old is None:
                     for path in state.conflicts:
                         after.pop(path, None)
-                before = staged_entries(state) if old is None else old
+                before = (
+                    shown_entries(repo, staged_entries(state))
+                    if old is None
+                    else old
+                )
             else:
                 before, after = old or {}, new
         patterns = pathspec_patterns(

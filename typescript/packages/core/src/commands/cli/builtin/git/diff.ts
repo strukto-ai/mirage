@@ -129,7 +129,7 @@ export async function diff(
           ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
           : ((await headEntries(repo)) ?? new Map<string, TreeEntry>()),
       )
-      after = stagedEntries(state)
+      after = shownEntries(repo, stagedEntries(state))
     } else {
       const [old, fresh, note] = await sides(repo, revisions)
       warning = note
@@ -137,7 +137,7 @@ export async function diff(
         const state = await readIndex(repo, repo.vfs)
         after = await workEntries(repo, vfs, state)
         if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
-        before = old ?? stagedEntries(state)
+        before = old ?? shownEntries(repo, stagedEntries(state))
       } else {
         before = old ?? new Map<string, TreeEntry>()
         after = fresh

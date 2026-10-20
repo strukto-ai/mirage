@@ -330,7 +330,7 @@ async function peeled(
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
     oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
-    rooted(repo, oid)
+    rooted(repo, oid, revision)
     type = TREE
   }
   if (type !== want) throw new AmbiguousArgumentError(revision)
@@ -379,7 +379,7 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   const place = base ? `${base}/${path}` : path
   if (guarded(repo) && !visiblePath(repo.location, place))
     throw new PathNotInRevisionError(path, rev, false)
-  return placed(repo, found, place)
+  return placed(repo, found, place, revision)
 }
 
 /**
@@ -422,7 +422,7 @@ async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
   const found = stages[stage]
   if (found !== undefined && found !== null) {
     const type = found.mode.toString(8) === GITLINK_MODE ? COMMIT : 'blob'
-    return placed(repo, { oid: found.oid, type }, path)
+    return placed(repo, { oid: found.oid, type }, path, PATH_MARK + spec)
   }
   const held = stages.findIndex((entry) => entry !== undefined && entry !== null)
   if (held !== -1) throw new PathNotAtStageError(path, stage, held)
