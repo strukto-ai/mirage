@@ -414,6 +414,33 @@ function unmet(namespace: Namespace, session: SessionState, pattern: string): Se
   return kept
 }
 
+/**
+ * What `rm` meets as absent, read before it runs: per glob operand the node
+ * entries it never removes (`unmet`), and the literal operands the session
+ * cannot see. Read afterwards, a link hidden only because its walk passed
+ * through a directory the line removed reads as a visible dangling link, and
+ * its node would go. Mirrors Python's _rm_unseen.
+ */
+function rmUnseen(
+  namespace: Namespace,
+  session: SessionState,
+  operands: readonly (string | PathSpec)[],
+): { kept: Map<string, Set<string>>; hidden: Set<string> } {
+  const links = namespace.sessionLinks(session)
+  const kept = new Map<string, Set<string>>()
+  const hidden = new Set<string>()
+  for (const item of operands) {
+    if (!(item instanceof PathSpec)) continue
+    if (item.pattern !== null) {
+      const pattern = globPattern(item.virtual)
+      kept.set(pattern, unmet(namespace, session, pattern))
+    } else if (!links.visible(item.virtual)) {
+      hidden.add(item.virtual)
+    }
+  }
+  return { kept, hidden }
+}
+
 /** A prefix assignment a session policy refused: bash's line, exit 1. */
 function writeRefused(err: PolicyDenied, command: string): Result {
   const stderr = encodeText(`bash: ${err.message}\n`)
@@ -1070,6 +1097,14 @@ async function routeArgv(
     dispatchArgv = argv.withOperands(operands)
   }
 
+  // What rm's bookkeeping may drop is read before rm runs: removing a
+  // directory can leave a hidden link dangling, which the session would see
+  // afterwards, though rm met it as absent.
+  const unseen =
+    name === 'rm' && namespace.nodes.size > 0
+      ? rmUnseen(namespace, session, operands)
+      : { kept: new Map<string, Set<string>>(), hidden: new Set<string>() }
+
   // Default: mount-dispatched command
   const [source, io, execNode] = await handleCommand(
     recurse,
@@ -1101,7 +1136,6 @@ async function routeArgv(
       // table matches the pattern itself. A name the session cannot see
       // was never removed: rm met it as absent (-f silenced that), so its
       // node stays.
-      const links = namespace.sessionLinks(session)
       for (const item of operands) {
         if (!(item instanceof PathSpec)) continue
         // The walk refused it, so rm removed nothing there (-f only
@@ -1119,8 +1153,8 @@ async function routeArgv(
           // table is matched with the same pattern the backend resolved
           // with.
           const pattern = globPattern(item.virtual)
-          await namespace.unlinkGlob(pattern, unmet(namespace, session, pattern))
-        } else if (links.visible(item.virtual)) {
+          await namespace.unlinkGlob(pattern, unseen.kept.get(pattern))
+        } else if (!unseen.hidden.has(item.virtual)) {
           await namespace.unlink(item.virtual)
           await namespace.purgeUnder(item.virtual)
         }

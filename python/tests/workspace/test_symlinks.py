@@ -1961,6 +1961,24 @@ async def test_rm_leaves_a_hidden_link_it_never_met(line):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["rm -rf /data/*", "rm -rf /data/a /data/b"])
+async def test_rm_keeps_a_hidden_link_its_removal_left_dangling(line):
+    # /data/a is hidden because its walk passes /data/b/l into the hide.
+    # Removing /data/b leaves /data/a dangling, which the session would
+    # see afterwards, but rm met it as absent, so it stays.
+    ws = _ws()
+    await ws.shell(
+        "mkdir -p /data/b /data/vault; echo s > /data/vault/s;"
+        " ln -s /data/vault/s /data/b/l; ln -s /data/b/l /data/a"
+    )
+    ws.create_session("agent", profile={"paths": {"hide": ["/data/vault"]}})
+    r = await ws.shell(line, session_id="agent")
+    assert r.exit_code == 0
+    assert ws.namespace.readlink("/data/a") == "/data/b/l"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["test", "[", "[["])
 @pytest.mark.parametrize(
     ("where", "status"),

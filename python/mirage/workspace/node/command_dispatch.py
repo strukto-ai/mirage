@@ -14,7 +14,13 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from functools import partial
 from itertools import accumulate
 from typing import Any, TypeVar
@@ -457,6 +463,36 @@ def _unmet(
             "/" + "/".join(path.strip("/").split("/")[:depth])
         )
     )
+
+
+def _rm_unseen(
+    namespace: Namespace,
+    session: SessionState,
+    operands: Sequence[str | PathSpec],
+) -> tuple[dict[str, frozenset[str]], frozenset[str]]:
+    """What ``rm`` meets as absent, read before it runs: per glob
+    operand the node entries it never removes (``_unmet``), and the
+    literal operands the session cannot see. Read afterwards, a link
+    hidden only because its walk passed through a directory the line
+    removed reads as a visible dangling link, and its node would go.
+
+    Args:
+        namespace (Namespace): the name plane.
+        session (SessionState): the session ``rm`` runs in.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    links = namespace.session_links(session)
+    kept: dict[str, frozenset[str]] = {}
+    hidden: set[str] = set()
+    for item in operands:
+        if not isinstance(item, PathSpec):
+            continue
+        if item.pattern:
+            pattern = glob_pattern(item.virtual)
+            kept[pattern] = _unmet(namespace, session, pattern)
+        elif not links.visible(item.virtual):
+            hidden.add(item.virtual)
+    return kept, frozenset(hidden)
 
 
 def _write_refused(
@@ -1086,6 +1122,15 @@ async def _route_argv(
             )
         argv = argv.with_operands(operands)
 
+    # What rm's bookkeeping may drop is read before rm runs: removing a
+    # directory can leave a hidden link dangling, which the session
+    # would see afterwards, though rm met it as absent.
+    unseen = (
+        _rm_unseen(namespace, session, operands)
+        if name == "rm" and namespace.nodes
+        else ({}, frozenset())
+    )
+
     # ── mount command (default) ─────────────────
     stdout, io, exec_node = await handle_command(
         recurse,
@@ -1114,7 +1159,7 @@ async def _route_argv(
             # the node table matches the pattern itself. A name the
             # session cannot see was never removed: rm met it as absent
             # (-f silenced that), so its node stays.
-            links = namespace.session_links(session)
+            kept, hidden = unseen
             for item in operands:
                 if not isinstance(item, PathSpec):
                     continue
@@ -1137,9 +1182,9 @@ async def _route_argv(
                     # pattern the backend resolved with.
                     pattern = glob_pattern(item.virtual)
                     await namespace.unlink_glob(
-                        pattern, keep=_unmet(namespace, session, pattern)
+                        pattern, keep=kept.get(pattern, frozenset())
                     )
-                elif links.visible(item.virtual):
+                elif item.virtual not in hidden:
                     await namespace.unlink(item.virtual)
                     await namespace.purge_under(item.virtual)
     if link_errors:

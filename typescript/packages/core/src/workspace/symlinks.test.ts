@@ -1600,6 +1600,25 @@ it.each(['rm -f /data/lk.sec', 'rm -f /data/*.sec', 'rm -rf /data/*'])(
   },
 )
 
+it.each(['rm -rf /data/*', 'rm -rf /data/a /data/b'])(
+  'rm keeps a hidden link its removal left dangling: %s',
+  async (line) => {
+    // /data/a is hidden because its walk passes /data/b/l into the hide.
+    // Removing /data/b leaves /data/a dangling, which the session would see
+    // afterwards, but rm met it as absent, so it stays.
+    const ws = buildWorkspace()
+    await ws.shell(
+      'mkdir -p /data/b /data/vault; echo s > /data/vault/s; ' +
+        'ln -s /data/vault/s /data/b/l; ln -s /data/b/l /data/a',
+    )
+    ws.createSession('agent', { profile: { paths: { hide: ['/data/vault'] } } })
+    const r = await ws.shell(line, { sessionId: 'agent' })
+    expect(r.exitCode).toBe(0)
+    expect(ws.namespace.readlink('/data/a')).toBe('/data/b/l')
+    await ws.close()
+  },
+)
+
 describe.each(['test', '[', '[['])('%s -L', (name) => {
   it.each([
     ['d/lnk', '0'],
