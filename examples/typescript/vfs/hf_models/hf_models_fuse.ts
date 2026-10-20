@@ -1,0 +1,82 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { createInterface } from 'node:readline/promises'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+import {
+  HfModelsVFS,
+  Mount,
+  MountBackend,
+  MountMode,
+  Workspace,
+  type HfModelsConfig,
+} from '@struktoai/mirage-node'
+
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+function configFromEnv(): HfModelsConfig {
+  return {
+    repoId: process.env.HF_MODEL_REPO ?? 'sapientinc/HRM-Text-1B',
+    ...(process.env.HF_TOKEN !== undefined ? { token: process.env.HF_TOKEN } : {}),
+  }
+}
+
+async function main(): Promise<void> {
+  const vfs = new HfModelsVFS(configFromEnv())
+  const ws = new Workspace({
+    '/m/': new Mount(vfs, { mode: MountMode.READ, backend: MountBackend.FUSE }),
+  })
+  await ws.fuseReady()
+  const mp = ws.fuseMountpoint as string
+  try {
+    console.log(`=== FUSE: mounted at ${mp} ===\n`)
+
+    // Async fs only: this process serves the mount, so a sync call on
+    // the mountpoint would block the event loop that answers it.
+    console.log(`--- readdir(${mp}) ---`)
+    const rootEntries = await readdir(mp)
+    for (const e of rootEntries) console.log(`  ${e}`)
+
+    if (rootEntries.includes('config.json')) {
+      const cfgPath = `${mp}/config.json`
+      const { size } = await stat(cfgPath)
+      console.log(`\n--- ${cfgPath} (${String(size)} bytes) ---`)
+      console.log((await readFile(cfgPath, 'utf-8')).slice(0, 400))
+    }
+
+    console.log(`\n>>> FUSE mounted at: ${mp}`)
+    console.log('>>> In another terminal:')
+    console.log(`>>>   ls -lh ${mp}/`)
+    console.log(`>>>   cat ${mp}/config.json | jq .`)
+    console.log('>>> Press Enter to unmount...')
+
+    const rl = createInterface({ input: process.stdin, output: process.stdout })
+    await rl.question('')
+    rl.close()
+
+    const total = ws.records.reduce((acc, r) => acc + r.bytes, 0)
+    console.log(`\nStats: ${String(ws.records.length)} ops, ${String(total)} bytes transferred`)
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

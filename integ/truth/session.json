@@ -1,10 +1,10 @@
 {
   "runs": {
     "python": {
-      "command": ["./python/.venv/bin/python", "examples/python/permissions/session.py"]
+      "command": ["./python/.venv/bin/python", "examples/python/policy/session.py"]
     },
     "typescript": {
-      "command": ["pnpm", "-C", "examples/typescript", "exec", "tsx", "permissions/session.ts"]
+      "command": ["pnpm", "-C", "examples/typescript", "exec", "tsx", "policy/session.ts"]
     }
   },
   "exit": 0,

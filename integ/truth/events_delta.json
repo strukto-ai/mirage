@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/notification/push/disk.py"
+        "examples/python/notifications/push/disk.py"
       ]
     },
     "typescript": {
@@ -13,7 +13,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "notification/push/disk.ts"
+        "notifications/push/disk.ts"
       ]
     }
   },

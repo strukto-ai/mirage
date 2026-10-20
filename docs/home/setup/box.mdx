@@ -47,7 +47,7 @@ fastest path, no redirect URI, no client secret, no curl exchange:
    ```bash
    BOX_DEVELOPER_TOKEN=...
    ```
-1. Run any of the examples in [`examples/typescript/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/box).
+1. Run any of the examples in [`examples/typescript/vfs/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/box).
 
 The token expires in **60 minutes** and there is no programmatic way to renew it; you regenerate
 by hand. For long-running processes, use the OAuth flow below instead.
@@ -69,7 +69,7 @@ Open the app's **Configuration** tab:
 - **OAuth 2.0 Redirect URIs**: add every destination you'll redirect back to. Box accepts
   multiple values, register them all up front so you don't bounce between dev and prod:
   - For the CLI flow below: `http://localhost:1`
-  - For the browser PKCE example: `http://localhost:5173/box_pkce.html`
+  - For the browser PKCE example: `http://localhost:5173/vfs/box/box_pkce.html`
   - For production: e.g. `https://yourapp.com/box/callback`
 - **Allowed Origins** (only needed if you'll call from a browser; older Box docs call this
   "CORS Domains"):
@@ -141,11 +141,11 @@ BOX_REFRESH_TOKEN=...
 
 ## Alternative: PKCE Flow (browser, no client secret)
 
-1. Add `http://localhost:5173/box_pkce.html` to **OAuth 2.0 Redirect URIs**
+1. Add `http://localhost:5173/vfs/box/box_pkce.html` to **OAuth 2.0 Redirect URIs**
 1. Add `http://localhost:5173` to **Allowed Origins**
 1. Set only `BOX_CLIENT_ID` in `.env.development`
-1. From `examples/typescript/browser/`, run `pnpm dev`
-1. Open `http://localhost:5173/box_pkce.html` and click **Connect Box**
+1. From `examples/browser/`, run `pnpm dev`
+1. Open `http://localhost:5173/vfs/box/box_pkce.html` and click **Connect Box**
 
 The example persists the rotated refresh token to `localStorage` via the
 `onRefreshTokenRotated` callback so subsequent page loads work without re-auth.

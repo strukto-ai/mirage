@@ -7,7 +7,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "redis/redis_cache.ts"
+        "vfs/redis/redis_cache.ts"
       ]
     }
   },

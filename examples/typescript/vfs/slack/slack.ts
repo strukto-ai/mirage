@@ -1,0 +1,412 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+import {
+  MountMode,
+  SlackVFS,
+  Workspace,
+  type FileStat,
+  type SlackConfig,
+} from '@struktoai/mirage-node'
+
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+function buildConfig(): SlackConfig {
+  const token = process.env.SLACK_BOT_TOKEN
+  if (token === undefined || token === '') {
+    throw new Error('SLACK_BOT_TOKEN env var is required')
+  }
+  const searchToken = process.env.SLACK_USER_TOKEN
+  return {
+    token,
+    ...(searchToken !== undefined && searchToken !== '' ? { searchToken } : {}),
+  }
+}
+
+function assertNonEmpty(out: string, msg: string): void {
+  if (out.trim() === '') throw new Error(`regression: ${msg}`)
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+async function main(): Promise<void> {
+  const vfs = new SlackVFS(buildConfig())
+  const ws = new Workspace({ '/slack': vfs }, { mode: MountMode.READ })
+
+  try {
+    // ── discover structure ─────────────────────────────
+    console.log('=== ls /slack/ (root) ===')
+    let r = await ws.shell('ls /slack/')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /slack/channels/ ===')
+    r = await ws.shell('ls /slack/channels/ | head -n 5')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /slack/users/ ===')
+    r = await ws.shell('ls /slack/users/ | head -n 5')
+    console.log(r.stdoutText)
+
+    r = await ws.shell('ls /slack/channels/ | head -n 1')
+    const firstCh = r.stdoutText.trim()
+    if (firstCh === '') {
+      console.log('no channels found')
+      return
+    }
+
+    const base = `/slack/channels/${firstCh}`
+
+    console.log(`=== ls ${firstCh} (dates) ===`)
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 5`)
+    console.log(r.stdoutText)
+
+    // Pick the most recent date dir and target its chat.jsonl
+    r = await ws.shell(`ls ${shellQuote(`${base}/`)} | tail -n 1`)
+    const dateDir = r.stdoutText.trim()
+    if (dateDir === '') {
+      console.log('  no dates found')
+      return
+    }
+    const datePath = `${base}/${dateDir}`
+    const filePath = `${datePath}/chat.jsonl`
+    const target = 'chat.jsonl'
+
+    console.log(`  using date: ${datePath}`)
+    console.log(`  using file: ${target}`)
+
+    // ── ls inside date dir (chat.jsonl + files/) ──────
+    console.log(`\n=== ls ${datePath}/ ===`)
+    r = await ws.shell(`ls ${shellQuote(`${datePath}/`)}`)
+    console.log(r.stdoutText.trimEnd())
+
+    // ── cat ────────────────────────────────────────────
+    console.log(`\n=== cat ${target} | head -n 3 ===`)
+    r = await ws.shell(`cat ${shellQuote(filePath)} | head -n 3`)
+    console.log(r.stdoutText.slice(0, 300))
+
+    // ── cat user profile ───────────────────────────────
+    r = await ws.shell('ls /slack/users/ | head -n 1')
+    const firstUser = r.stdoutText.trim()
+    console.log(`\n=== cat /slack/users/${firstUser} ===`)
+    r = await ws.shell(`cat ${shellQuote(`/slack/users/${firstUser}`)}`)
+    const userOut = r.stdoutText.trim()
+    if (userOut !== '') {
+      console.log(`  ${userOut.slice(0, 200)}`)
+    } else {
+      console.log('  (empty)')
+    }
+
+    // ── stat ───────────────────────────────────────────
+    console.log(`\n=== stat ${target} ===`)
+    r = await ws.shell(`stat ${shellQuote(filePath)}`)
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    // ── wc ─────────────────────────────────────────────
+    console.log(`\n=== wc -l ${target} ===`)
+    r = await ws.shell(`wc -l ${shellQuote(filePath)}`)
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    // ── head ───────────────────────────────────────────
+    console.log(`\n=== head -n 2 ${target} ===`)
+    r = await ws.shell(`head -n 2 ${shellQuote(filePath)}`)
+    const headOut = r.stdoutText.trim()
+    if (headOut !== '') {
+      for (const line of headOut.split('\n')) {
+        console.log(`  ${line.slice(0, 120)}`)
+      }
+    }
+
+    // ── tail ───────────────────────────────────────────
+    console.log(`\n=== tail -n 1 ${target} ===`)
+    r = await ws.shell(`tail -n 1 ${shellQuote(filePath)}`)
+    const tailOut = r.stdoutText.trim()
+    if (tailOut !== '') {
+      console.log(`  ${tailOut.slice(0, 120)}`)
+    }
+
+    // ── metadata (namespace overlay) ───────────────────
+    // chmod/chown/touch never hit the Slack API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`\n=== metadata overlay on ${target} ===`)
+    r = await ws.shell(
+      `chmod 640 ${shellQuote(filePath)} && chown 500:dev ${shellQuote(filePath)} && touch -t 202601021530 ${shellQuote(filePath)}`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', filePath)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
+
+    // ── basename / dirname / realpath (path ops) ───────
+    console.log(`\n=== basename ${filePath} ===`)
+    r = await ws.shell(`basename ${shellQuote(filePath)}`)
+    const baseOut = r.stdoutText.trim()
+    console.log(`  ${baseOut}`)
+    if (baseOut !== target) throw new Error(`basename expected ${target}, got ${baseOut}`)
+
+    console.log(`\n=== dirname ${filePath} ===`)
+    r = await ws.shell(`dirname ${shellQuote(filePath)}`)
+    const dirOut = r.stdoutText.trim()
+    console.log(`  ${dirOut}`)
+    if (dirOut !== datePath) throw new Error(`dirname expected ${datePath}, got ${dirOut}`)
+
+    console.log(`\n=== realpath ${filePath} ===`)
+    r = await ws.shell(`realpath ${shellQuote(filePath)}`)
+    const realOut = r.stdoutText.trim()
+    console.log(`  ${realOut}`)
+    if (realOut !== filePath) throw new Error(`realpath expected ${filePath}, got ${realOut}`)
+
+    console.log(`\n=== realpath -e ${filePath} (must exist) ===`)
+    r = await ws.shell(`realpath -e ${shellQuote(filePath)}`)
+    console.log(`  exit=${r.exitCode} ${r.stdoutText.trim()}`)
+    if (r.exitCode !== 0) {
+      throw new Error(`regression: realpath -e failed for existing file; stderr=${r.stderrText}`)
+    }
+
+    // ── grep at FILE level ─────────────────────────────
+    console.log(`\n=== grep message ${target} ===`)
+    r = await ws.shell(`grep message ${shellQuote(filePath)}`)
+    const grepOut = r.stdoutText.trim()
+    const grepLines = grepOut === '' ? [] : grepOut.split('\n')
+    console.log(`  matches: ${String(grepLines.length)}`)
+    if (grepLines.length > 0) {
+      console.log(`  first: ${grepLines[0]?.slice(0, 120) ?? ''}...`)
+    }
+
+    console.log(`\n=== grep -c message ${target} ===`)
+    r = await ws.shell(`grep -c message ${shellQuote(filePath)}`)
+    console.log(`  count: ${r.stdoutText.trim()}`)
+
+    // ── rg (directory scan) ────────────────────────────
+    console.log(`\n=== rg message ${base}/ ===`)
+    r = await ws.shell(`rg message ${shellQuote(`${base}/`)}`)
+    const rgOut = r.stdoutText.trim()
+    const rgLines = rgOut === '' ? [] : rgOut.split('\n')
+    console.log(`  matches across dates: ${String(rgLines.length)}`)
+
+    console.log(`\n=== rg -l message ${base}/ ===`)
+    r = await ws.shell(`rg -l message ${shellQuote(`${base}/`)}`)
+    const rglOut = r.stdoutText.trim()
+    const rglFiles = rglOut === '' ? [] : rglOut.split('\n')
+    console.log(`  files with matches: ${String(rglFiles.length)}`)
+    for (const f of rglFiles) {
+      console.log(`  ${f}`)
+    }
+
+    // ── attachments: ls + stat on files/ ──────────────
+    const filesDir = `${datePath}/files`
+    console.log(`\n=== ls ${filesDir}/ (attachments) ===`)
+    r = await ws.shell(`ls ${shellQuote(`${filesDir}/`)}`)
+    const blobLines = r.stdoutText.trim() === '' ? [] : r.stdoutText.trim().split('\n')
+    for (const line of blobLines) {
+      console.log(`  ${line}`)
+    }
+
+    if (blobLines.length > 0) {
+      const firstBlob = blobLines[0]?.split('/').pop() ?? ''
+      const blobPath = `${filesDir}/${firstBlob}`
+      console.log(`\n=== stat ${firstBlob} ===`)
+      r = await ws.shell(`stat ${shellQuote(blobPath)}`)
+      console.log(`  ${r.stdoutText.trim()}`)
+
+      // rg reads each blob under files/.
+      console.log(`\n=== rg . ${filesDir}/ ===`)
+      r = await ws.shell(`rg . ${shellQuote(`${filesDir}/`)}`)
+      const rgOut = r.stdoutText.trim()
+      const rgLines = rgOut === '' ? [] : rgOut.split('\n').slice(0, 5)
+      for (const line of rgLines) {
+        console.log(`  ${line.slice(0, 150)}`)
+      }
+    }
+
+    // ── grep and rg at each scope ──────────────────────
+    // With contentSearch: true and a user token (xoxp-) with search:read,
+    // grep -w and rg -w read only the channel days Slack search names.
+    const scopes: { label: string; cmd: string }[] = [
+      {
+        label: `grep hello ${datePath}/chat.jsonl (date scope)`,
+        cmd: `grep hello ${shellQuote(`${datePath}/chat.jsonl`)}`,
+      },
+      {
+        label: `grep -rw hello ${base}/ (channel scope)`,
+        cmd: `grep -rw hello ${shellQuote(`${base}/`)}`,
+      },
+      {
+        label: 'grep -rw hello /slack/channels/ (workspace scope)',
+        cmd: 'grep -rw hello /slack/channels/',
+      },
+      {
+        label: 'rg -w hello /slack/ (workspace scope)',
+        cmd: 'rg -w hello /slack/',
+      },
+    ]
+    for (const { label, cmd } of scopes) {
+      console.log(`\n=== ${label} ===`)
+      r = await ws.shell(cmd)
+      const out = r.stdoutText.trim()
+      const err = r.stderrText.trim()
+      const lines = out === '' ? [] : out.split('\n')
+      console.log(`  exit=${String(r.exitCode)} matches: ${String(lines.length)}`)
+      if (err !== '') {
+        console.log(`  stderr: ${err.slice(0, 200)}`)
+      }
+      for (const line of lines.slice(0, 3)) {
+        console.log(`  ${line.slice(0, 150)}`)
+      }
+    }
+
+    // ── jq ─────────────────────────────────────────────
+    console.log(`\n=== jq '.user' ${target} ===`)
+    r = await ws.shell(`jq ".user" ${shellQuote(filePath)}`)
+    console.log(`  exit=${String(r.exitCode)}`)
+    const jqOut = r.stdoutText.trim()
+    if (jqOut !== '') {
+      for (const line of jqOut.split('\n').slice(0, 5)) {
+        console.log(`  ${line}`)
+      }
+    }
+
+    console.log(`\n=== cat ${target} | jq -r '.text' | head -n 5 ===`)
+    r = await ws.shell(`cat ${shellQuote(filePath)} | jq -r ".text" | head -n 5`)
+    console.log(`  exit=${String(r.exitCode)}`)
+    const jqTextOut = r.stdoutText.trim()
+    if (jqTextOut !== '') {
+      for (const line of jqTextOut.split('\n').slice(0, 5)) {
+        console.log(`  ${line}`)
+      }
+    }
+
+    // ── tree ───────────────────────────────────────────
+    console.log('\n=== tree -L 1 /slack/ ===')
+    r = await ws.shell('tree -L 1 /slack/')
+    console.log(`  exit=${String(r.exitCode)}`)
+    const treeOut = r.stdoutText.trim()
+    if (treeOut !== '') {
+      for (const line of treeOut.split('\n')) {
+        console.log(`  ${line}`)
+      }
+    }
+
+    // ── find ───────────────────────────────────────────
+    console.log(`\n=== find ${base}/ -name 'chat.jsonl' | tail -n 5 ===`)
+    r = await ws.shell(`find ${shellQuote(`${base}/`)} -name "chat.jsonl" | tail -n 5`)
+    console.log(`  exit=${String(r.exitCode)}`)
+    const findOut = r.stdoutText.trim()
+    if (findOut !== '') {
+      for (const line of findOut.split('\n')) {
+        console.log(`  ${line}`)
+      }
+    }
+
+    console.log("\n=== find /slack/ -name 'general*' ===")
+    r = await ws.shell('find /slack/ -name "general*"')
+    console.log(`  exit=${String(r.exitCode)}`)
+    const findGeneralOut = r.stdoutText.trim()
+    if (findGeneralOut !== '') {
+      for (const line of findGeneralOut.split('\n')) {
+        console.log(`  ${line}`)
+      }
+    }
+
+    // ── pwd / cd ───────────────────────────────────────
+    console.log('\n=== pwd ===')
+    r = await ws.shell('pwd')
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    console.log(`\n=== cd "${base}" ===`)
+    r = await ws.shell(`cd ${shellQuote(base)}`)
+    console.log(`  exit=${String(r.exitCode)}`)
+
+    console.log('\n=== pwd (after cd) ===')
+    r = await ws.shell('pwd')
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    // ── ls (no args) after cd — regression: would return [] if mount
+    // prefix was dropped while rebuilding cwd's PathSpec.
+    console.log('\n=== ls (no args, in channel dir) ===')
+    r = await ws.shell('ls | tail -n 5')
+    const relLsOut = r.stdoutText.trim()
+    assertNonEmpty(relLsOut, '`ls` (no args) after cd returned empty')
+    for (const line of relLsOut.split('\n')) {
+      console.log(`  ${line}`)
+    }
+
+    // relative `cat` (after cd) for a path two segments deep
+    const relChat = `${dateDir}/chat.jsonl`
+    console.log(`\n=== cat ${relChat} (relative) | head -n 1 ===`)
+    r = await ws.shell(`cat ${shellQuote(relChat)} | head -n 1`)
+    const relCatOut = r.stdoutText.trim()
+    assertNonEmpty(relCatOut, 'relative `cat` after cd returned empty')
+    console.log(`  ${relCatOut.slice(0, 120)}`)
+
+    // ── workspace-wide find — regression: would abort with
+    // not_in_channel if any channel was inaccessible. Now skips
+    // those channels and walks the rest.
+    console.log("\n=== find /slack/ -name 'chat.jsonl' (must not abort) ===")
+    r = await ws.shell(`find /slack/ -name "chat.jsonl" | wc -l`)
+    const count = Number.parseInt(r.stdoutText.trim() === '' ? '0' : r.stdoutText.trim(), 10)
+    console.log(`  matches: ${String(count)}`)
+    if (r.exitCode !== 0) {
+      throw new Error(`regression: workspace-wide find aborted; stderr=${r.stderrText}`)
+    }
+    if (count === 0) {
+      throw new Error('regression: workspace-wide find returned no matches')
+    }
+
+    // ── glob expansion: mid-path segments walk like bash, so
+    // channels/*/<date>/chat.jsonl lists channels once, then each
+    // channel's dates, keeping only channels that have that day.
+    console.log(`\n=== echo /slack/channels/*/${dateDir}/chat.jsonl ===`)
+    r = await ws.shell(`echo /slack/channels/*/${shellQuote(`${dateDir}/chat.jsonl`)}`)
+    const globOut = r.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.includes('/chat.jsonl')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    console.log(`\n=== for f in ${base}/* (date glob loop) ===`)
+    r = await ws.shell(`for f in ${shellQuote(`${base}/`)}*; do echo found:$f; done | head -n 3`)
+    for (const line of r.stdoutText.trim().split('\n')) {
+      console.log(`  ${line.slice(0, 120)}`)
+    }
+
+    // A glob that matches nothing stays the literal word (bash with
+    // nullglob off), so the command reports it like GNU coreutils.
+    console.log('\n=== cat /slack/channels/zz-none-*/chat.jsonl (no match) ===')
+    r = await ws.shell('cat /slack/channels/zz-none-*/chat.jsonl')
+    const globErr = r.stderrText.trim()
+    console.log(`  exit=${r.exitCode}  ${globErr.slice(0, 120)}`)
+    if (r.exitCode !== 1 || !globErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

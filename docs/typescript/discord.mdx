@@ -185,10 +185,10 @@ tree stays read-oriented.
 
 ## Examples
 
-- [`examples/typescript/discord/discord.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord.ts), shell commands against `/discord/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
-- [`examples/typescript/discord/discord_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
-- [`examples/typescript/discord/discord_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/discord/discord_fuse.ts), FUSE-mount the workspace so external processes can browse `/discord/` as a real filesystem.
-- [`examples/typescript/discord/discord_browser/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/discord/discord_browser), proxy server + `@struktoai/mirage-browser` DiscordVFS demo.
+- [`examples/typescript/vfs/discord/discord.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord.ts), shell commands against `/discord/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
+- [`examples/typescript/vfs/discord/discord_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
+- [`examples/typescript/vfs/discord/discord_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/discord/discord_fuse.ts), FUSE-mount the workspace so external processes can browse `/discord/` as a real filesystem.
+- [`examples/browser/vfs/discord/`](https://github.com/strukto-ai/mirage/tree/main/examples/browser/vfs/discord), proxy server + `@struktoai/mirage-browser` DiscordVFS demo.
 
 See [Python Discord VFS](/python/vfs/discord) for the equivalent Python wiring.
 

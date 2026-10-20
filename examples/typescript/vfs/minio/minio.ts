@@ -1,0 +1,108 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+import { MinIOVFS, MountMode, Workspace, type FileStat, type MinIOConfig } from '@struktoai/mirage-node'
+
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+function configFromEnv(): MinIOConfig {
+  return {
+    bucket: process.env.MINIO_BUCKET ?? 'mirage-demo',
+    endpoint: process.env.MINIO_ENDPOINT ?? 'http://localhost:9000',
+    accessKeyId: process.env.MINIO_ACCESS_KEY ?? 'minioadmin',
+    secretAccessKey: process.env.MINIO_SECRET_KEY ?? 'minioadmin',
+  }
+}
+
+async function main(): Promise<void> {
+  const config = configFromEnv()
+  const ws = new Workspace({ '/minio/': new MinIOVFS(config) }, { mode: MountMode.WRITE })
+  try {
+    console.log(`=== MinIO at ${config.endpoint} (bucket ${config.bucket}) ===`)
+
+    // Seed a few objects so the demo is self-contained (WRITE mode).
+    await ws.shell(`echo '{"event":"queue-operation","tool":"mirage"}' > /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"event":"read","tool":"mirage"}' >> /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"event":"queue-operation","tool":"other"}' >> /minio/data/example.jsonl`)
+    await ws.shell(`echo '{"name":"mirage","version":1,"tags":["s3","minio"]}' > /minio/data/config.json`)
+    await ws.shell('echo "hello from minio" > /minio/notes.txt')
+
+
+    // chmod/chown/touch never hit the MinIO API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on /minio/notes.txt ===`)
+    const metaRes = await ws.shell(
+      `chmod 640 "/minio/notes.txt" && chown 500:dev "/minio/notes.txt" && touch -t 202601021530 "/minio/notes.txt"`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `/minio/notes.txt`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
+
+    console.log('\n--- ls /minio/ ---')
+    let r = await ws.shell('ls /minio/')
+    console.log(r.stdoutText)
+
+    console.log('--- tree /minio/ ---')
+    r = await ws.shell('tree /minio/')
+    console.log(r.stdoutText)
+
+    console.log('--- stat /minio/notes.txt ---')
+    r = await ws.shell('stat /minio/notes.txt')
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    console.log('\n--- cat /minio/notes.txt ---')
+    r = await ws.shell('cat /minio/notes.txt')
+    console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
+
+    console.log('\n--- head -c 40 /minio/data/example.jsonl (byte range) ---')
+    r = await ws.shell('head -c 40 /minio/data/example.jsonl')
+    console.log(`  ${JSON.stringify(r.stdoutText.trim())}`)
+
+    console.log('\n--- grep -c queue-operation /minio/data/example.jsonl ---')
+    r = await ws.shell('grep -c queue-operation /minio/data/example.jsonl')
+    console.log(`  count: ${r.stdoutText.trim()}`)
+
+    console.log("--- find /minio/ -name '*.json' ---")
+    r = await ws.shell("find /minio/ -name '*.json'")
+    console.log(r.stdoutText)
+
+    console.log('--- jq .tags /minio/data/config.json ---')
+    r = await ws.shell('jq .tags /minio/data/config.json')
+    console.log(`  ${r.stdoutText.trim()}`)
+
+    console.log('\n--- rm seeded objects ---')
+    for (const key of ['/minio/data/example.jsonl', '/minio/data/config.json', '/minio/notes.txt']) {
+      await ws.shell(`rm ${key}`)
+    }
+    console.log('  cleaned')
+
+    const bytes = ws.records.reduce((acc, rec) => acc + rec.bytes, 0)
+    console.log(`\nStats: ${String(ws.records.length)} ops, ${String(bytes)} bytes transferred`)
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

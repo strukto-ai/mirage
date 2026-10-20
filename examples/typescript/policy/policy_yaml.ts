@@ -1,0 +1,81 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import {
+  Workspace,
+  configToWorkspaceArgs,
+  loadWorkspaceConfigFile,
+} from '@struktoai/mirage-node'
+
+// The reviewer's policy as a document. workspace.yaml names a program
+// per method (guard.py and credentials.py, beside it) and the runtime
+// each runs on; the config loader reads the files, embeds their source,
+// and hands back what `new Workspace` takes, which is what
+// `mirage workspace create` does behind the daemon. A path in the document is relative to the
+// document, never to the process. The document is written once and read
+// by both implementations, so this file loads the python example's. The
+// in-code spelling of the same block is policy.ts.
+
+const CONFIG = new URL('../../python/policy/workspace.yaml', import.meta.url).pathname
+
+const SEED = [
+  'echo marker > /repo/flagged.txt',
+  'echo hello > /repo/notes.txt',
+]
+
+// "host" runs the line with no session, which is the workspace's own
+// unrestricted view: no profile, so no program.
+const LINES: [string, string, string][] = [
+  ['reviewer', 'cat /repo/notes.txt', 'pre_command read the file and found no marker'],
+  ['reviewer', 'cat /repo/flagged.txt', 'and refuses one that holds it'],
+  ['reviewer', 'export AWS_SECRET=x', 'pre_session refuses a credential'],
+  ['reviewer', 'export SAFE=1 && echo $SAFE', 'silence where no method objects'],
+  ['host', 'cat /repo/flagged.txt', 'no profile, so no program'],
+  ['host', 'export AWS_SECRET=x', "the program is the profile's, not the workspace's"],
+]
+
+const dec = new TextDecoder()
+
+/** One line's outcome: what came back, or why nothing did. */
+function answer(out: string, err: string, code: number): string {
+  if (err !== '') return `[${code}] ${err.split('\n')[0]}`
+  return `[${code}] ${out.split(/\s+/).filter(Boolean).join(' ')}`.trimEnd()
+}
+
+function pad(text: string, width: number): string {
+  return text.length >= width ? text : text + ' '.repeat(width - text.length)
+}
+
+async function main(): Promise<void> {
+  const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
+  // The config loader hands back `Mount` objects, which `new Workspace`
+  // takes as-is; this used to rebuild them from [vfs, mode] tuples.
+  const ws = new Workspace(args.mounts, args.options)
+  try {
+    for (const line of SEED) await ws.shell(line)
+    ws.createSession('reviewer', { profile: 'reviewer' })
+
+    for (const [who, line, note] of LINES) {
+      const res = await (who === 'host' ? ws.shell(line) : ws.shell(line, { sessionId: who }))
+      const out = res.stdout === null ? '' : dec.decode(res.stdout)
+      const err = res.stderr === null ? '' : dec.decode(res.stderr)
+      console.log(`${pad(who, 9)} ${pad(line, 30)} ${answer(out, err, res.exitCode)}`)
+      console.log(`${pad('', 9)} ${pad('', 30)} ${note}`)
+    }
+  } finally {
+    await ws.close()
+  }
+}
+
+await main()

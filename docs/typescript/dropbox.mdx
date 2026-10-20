@@ -148,7 +148,7 @@ pnpm add @struktoai/mirage-browser
 ```ts
 import { DropboxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-// Refresh token obtained via the PKCE flow, see examples/typescript/browser/src/dropbox_pkce.ts.
+// Refresh token obtained via the PKCE flow, see examples/browser/vfs/dropbox/dropbox_pkce.ts.
 const dropbox = new DropboxVFS({
   clientId: import.meta.env.VITE_DROPBOX_APP_KEY,
   refreshToken: refreshTokenFromLocalStorage,
@@ -159,8 +159,8 @@ await ws.shell('ls /dropbox/')
 ```
 
 Set the redirect URI on your Dropbox app's **Settings** tab to your dev/prod origin
-(e.g. `http://localhost:5173/dropbox_pkce.html`). The bundled
-[`examples/typescript/browser/src/dropbox_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/src/dropbox_pkce.ts)
+(e.g. `http://localhost:5173/vfs/dropbox/dropbox_pkce.html`). The bundled
+[`examples/browser/vfs/dropbox/dropbox_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/dropbox/dropbox_pkce.ts)
 runs the full PKCE dance end-to-end and persists the refresh token to `localStorage`.
 
 ## VFS mode (`patchNodeFs`)
@@ -226,10 +226,10 @@ Requires [macFUSE](https://osxfuse.github.io/) on macOS or libfuse on Linux. See
 ## Examples
 
 End-to-end runnable scripts are in
-[`examples/typescript/dropbox/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/dropbox):
+[`examples/typescript/vfs/dropbox/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/dropbox):
 
-- [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
-- [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
-- [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal
+- [`dropbox.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
+- [`dropbox_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
+- [`dropbox_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/dropbox/dropbox_fuse.ts), FUSE mount with shell access in another terminal
 
 `grep` classifies the bytes it reads, including downloaded attachments. Use `-I` to skip binary inputs or `-a` (`--binary-files=text`) to search them as text. Text mode bypasses the content-search index and scans files directly.

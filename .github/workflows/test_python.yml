@@ -203,7 +203,7 @@ jobs:
           # at once on a 4 vCPU runner crashed it with SIGABRT (exit -6) in
           # https://github.com/strukto-ai/mirage/actions/runs/33043622744 while
           # every other example passed, so it runs on its own.
-          run integ/truth/python/ram_python.json
+          run integ/truth/ram_python.json
           # The policy examples boot monty too, one engine per judged line,
           # so they stay out of the parallel batch for the same reason.
           run integ/truth/policy.json

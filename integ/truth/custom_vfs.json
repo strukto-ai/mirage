@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/other/custom_vfs.py"
+        "examples/python/vfs/new/custom_vfs.py"
       ]
     },
     "typescript": {
@@ -13,7 +13,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "other/custom_vfs.ts"
+        "vfs/new/custom_vfs.ts"
       ]
     }
   },

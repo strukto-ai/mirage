@@ -7,7 +7,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "other/custom_command.ts"
+        "vfs/new/custom_command.ts"
       ]
     }
   },

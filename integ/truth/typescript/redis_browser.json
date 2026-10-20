@@ -4,10 +4,10 @@
       "command": [
         "pnpm",
         "-C",
-        "examples/typescript",
+        "examples/browser",
         "exec",
         "tsx",
-        "redis/redis_browser.ts"
+        "vfs/redis/main.ts"
       ]
     }
   },

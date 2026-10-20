@@ -301,11 +301,11 @@ if __name__ == "__main__":
 
 ## Runnable examples
 
-Three working examples live under `examples/python/mongodb/`:
+Three working examples live under `examples/python/vfs/mongodb/`:
 
-- [`mongodb.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb.py) — agent-shell workflow: `ls`, `tree`, `cat`, `head`, `tail`, `wc`, `stat`, `grep`/`rg` at every scope, `jq`, `find`, `cd` + relative paths.
-- [`mongodb_vfs.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb_vfs.py) — in-process VFS: `os.listdir` and `open()` walk every readdir level (root, database, `collections/`, `views/`, entity) and read `database.json`, `schema.json`, `documents.jsonl` (collection + view).
-- [`mongodb_fuse.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/mongodb/mongodb_fuse.py) — same coverage as the VFS example, but the tree is mounted as a real filesystem so other processes can `cat`/`ls`/`head` the mountpoint directly.
+- [`mongodb.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/mongodb/mongodb.py) — agent-shell workflow: `ls`, `tree`, `cat`, `head`, `tail`, `wc`, `stat`, `grep`/`rg` at every scope, `jq`, `find`, `cd` + relative paths.
+- [`mongodb_vfs.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/mongodb/mongodb_vfs.py) — in-process VFS: `os.listdir` and `open()` walk every readdir level (root, database, `collections/`, `views/`, entity) and read `database.json`, `schema.json`, `documents.jsonl` (collection + view).
+- [`mongodb_fuse.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/mongodb/mongodb_fuse.py) — same coverage as the VFS example, but the tree is mounted as a real filesystem so other processes can `cat`/`ls`/`head` the mountpoint directly.
 
 All three default to the `mirage_test` database seeded by `python/scripts/seed_mongodb_test.py`.
 

@@ -3,7 +3,7 @@
     "python": {
       "command": [
         "./python/.venv/bin/python",
-        "examples/python/permissions/ask_pending.py"
+        "examples/python/policy/ask_pending.py"
       ]
     },
     "typescript": {
@@ -13,7 +13,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "permissions/ask_pending.ts"
+        "policy/ask_pending.ts"
       ]
     }
   },

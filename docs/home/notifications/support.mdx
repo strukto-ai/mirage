@@ -33,22 +33,22 @@ See the [Python and TypeScript examples](#push-examples).
 
 | Backend | Python | TypeScript | What to provide |
 | --- | --- | --- | --- |
-| Disk | [disk.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/disk.py) | [disk.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/disk.ts) | Nothing; changes temporary files locally |
-| S3 | [s3.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/s3.py) | [s3.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/s3.ts) | `S3_BUCKET` and a saved S3 notification JSON file |
-| GitHub | [github.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/push/github.py) | [github.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/push/github.ts) | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` (`owner/repo`), and a saved push webhook JSON file; `GITHUB_REF` accepts a short name or full ref and defaults to `main` |
+| Disk | [disk.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/disk.py) | [disk.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/disk.ts) | Nothing; changes temporary files locally |
+| S3 | [s3.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/s3.py) | [s3.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/s3.ts) | `S3_BUCKET` and a saved S3 notification JSON file |
+| GitHub | [github.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/push/github.py) | [github.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/push/github.ts) | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` (`owner/repo`), and a saved push webhook JSON file; `GITHUB_REF` accepts a short name or full ref and defaults to `main` |
 
 The S3 and GitHub examples process a saved payload; they do not start a webhook server.
 Run from the repository root after installing the language's dependencies:
 
 <CodeGroup>
 ```bash Python
-./python/.venv/bin/python examples/python/notification/push/disk.py
-./python/.venv/bin/python examples/python/notification/push/s3.py notification.json
+./python/.venv/bin/python examples/python/notifications/push/disk.py
+./python/.venv/bin/python examples/python/notifications/push/s3.py notification.json
 ```
 
 ```bash TypeScript
-pnpm -C examples/typescript exec tsx notification/push/disk.ts
-pnpm -C examples/typescript exec tsx notification/push/s3.ts /absolute/path/to/notification.json
+pnpm -C examples/typescript exec tsx notifications/push/disk.ts
+pnpm -C examples/typescript exec tsx notifications/push/s3.ts /absolute/path/to/notification.json
 ```
 </CodeGroup>
 
@@ -100,9 +100,9 @@ directly with `ws.notify()`.
 
 | Backend | Python | TypeScript | Environment variables |
 | --- | --- | --- | --- |
-| Dropbox | [dropbox.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/poll/dropbox.py) | [dropbox.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/poll/dropbox.ts) | `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` |
-| Box | [box.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/poll/box.py) | [box.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/poll/box.ts) | `BOX_ACCESS_TOKEN` |
-| Google Drive | [gdrive.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notification/poll/gdrive.py) | [gdrive.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notification/poll/gdrive.ts) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
+| Dropbox | [dropbox.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/dropbox.py) | [dropbox.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/dropbox.ts) | `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` |
+| Box | [box.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/box.py) | [box.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/box.ts) | `BOX_ACCESS_TOKEN` |
+| Google Drive | [gdrive.py](https://github.com/strukto-ai/mirage/blob/main/examples/python/notifications/poll/gdrive.py) | [gdrive.ts](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/notifications/poll/gdrive.ts) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
 
 Dropbox waits for a long-poll notification. Box and Google Drive check every
 five seconds. Start an example, then edit files in that service to see their
@@ -110,11 +110,11 @@ virtual paths. Press Ctrl-C to stop. Each run starts from the current state.
 
 <CodeGroup>
 ```bash Python
-./python/.venv/bin/python examples/python/notification/poll/box.py
+./python/.venv/bin/python examples/python/notifications/poll/box.py
 ```
 
 ```bash TypeScript
-pnpm -C examples/typescript exec tsx notification/poll/box.ts
+pnpm -C examples/typescript exec tsx notifications/poll/box.ts
 ```
 </CodeGroup>
 

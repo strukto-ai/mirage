@@ -142,7 +142,7 @@ chroma   = ["chromadb-client>=1.0.0"]
 qdrant   = ["qdrant-client[fastembed]>=1.18.0"]
 
 # --- openai ---
-openai      = ["openai>=2.46.0", "openai-agents>=0.18.3"]
+openai      = ["openai>=3.13.0", "openai-agents>=0.21.0"]
 
 # --- pydantic-ai ---
 pydantic-ai = [

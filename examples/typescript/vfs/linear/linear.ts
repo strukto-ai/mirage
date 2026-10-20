@@ -1,0 +1,179 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+import { LINEAR } from '@struktoai/mirage-core'
+import {
+  LinearVFS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type LinearConfig,
+} from '@struktoai/mirage-node'
+
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })
+
+function buildConfig(): LinearConfig {
+  const apiKey = process.env.LINEAR_API_KEY
+  if (apiKey === undefined || apiKey === '') {
+    throw new Error('LINEAR_API_KEY env var is required')
+  }
+  return { apiKey }
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+async function run(ws: Workspace, cmd: string): Promise<string> {
+  console.log(`$ ${cmd}`)
+  const r = await ws.shell(cmd)
+  if (r.exitCode !== 0 && r.stderrText !== '') {
+    console.log(`  STDERR: ${r.stderrText.slice(0, 200)}`)
+  }
+  const out = r.stdoutText.replace(/\s+$/, '')
+  if (out !== '') {
+    for (const line of out.split('\n').slice(0, 10)) console.log(`  ${line.slice(0, 200)}`)
+  }
+  return out
+}
+
+async function main(): Promise<void> {
+  const ws = new Workspace(
+    { '/linear': new LinearVFS(buildConfig()) },
+    { mode: MountMode.READ },
+  )
+  ws.registerCli('linear', LINEAR, buildConfig() as unknown as Record<string, unknown>)
+  try {
+    console.log('=== ls /linear/ ===')
+    await run(ws, 'ls /linear/')
+
+    console.log('\n=== ls /linear/teams/ ===')
+    const t0 = (await run(ws, 'ls /linear/teams/ | head -n 1')).trim()
+    if (t0 === '') {
+      console.log('no teams')
+      return
+    }
+    const teamKey = t0.split('__')[0] ?? ''
+    const teamBase = `/linear/teams/${t0}`
+
+    console.log('\n=== linear team list ===')
+    await run(ws, 'linear team list')
+
+    console.log(`\n=== linear team get ${teamKey} ===`)
+    await run(ws, `linear team get ${shellQuote(teamKey)}`)
+
+    console.log(`\n=== tree -L 2 ${teamBase} ===`)
+    await run(ws, `tree -L 2 ${shellQuote(teamBase)}`)
+
+    console.log(`\n=== cat ${teamBase}/team.json ===`)
+    await run(ws, `cat ${shellQuote(`${teamBase}/team.json`)}`)
+
+    console.log(`\n=== ls ${teamBase}/issues/ ===`)
+    const i0 = (await run(ws, `ls ${shellQuote(`${teamBase}/issues/`)} | head -n 1`)).trim()
+    if (i0 === '') return
+    const issueKey = i0.split('__')[0] ?? ''
+    const issuePath = `${teamBase}/issues/${i0}`
+
+    console.log(`\n=== linear issue list --team ${teamKey} ===`)
+    await run(ws, `linear issue list --team ${shellQuote(teamKey)}`)
+
+    console.log(`\n=== linear issue get ${issueKey} ===`)
+    await run(ws, `linear issue get ${shellQuote(issueKey)}`)
+
+    console.log(`\n=== cat ${i0}/issue.json ===`)
+    await run(ws, `cat ${shellQuote(`${issuePath}/issue.json`)}`)
+
+    console.log(`\n=== jq -r '.title' issue.json ===`)
+    await run(ws, `jq -r ".title" ${shellQuote(`${issuePath}/issue.json`)}`)
+
+    console.log(`\n=== jq -r '.state_name' issue.json ===`)
+    await run(ws, `jq -r ".state_name" ${shellQuote(`${issuePath}/issue.json`)}`)
+
+    console.log(`\n=== ls ${teamBase}/members/ ===`)
+    await run(ws, `ls ${shellQuote(`${teamBase}/members/`)}`)
+
+    console.log(`\n=== ls ${teamBase}/projects/ ===`)
+    await run(ws, `ls ${shellQuote(`${teamBase}/projects/`)}`)
+
+    console.log(`\n=== find ${teamBase} -name "issue.json" | head -n 5 ===`)
+    await run(ws, `find ${shellQuote(teamBase)} -name "issue.json" | head -n 5`)
+
+    console.log(`\n=== find ${teamBase} -type d | head -n 5 ===`)
+    await run(ws, `find ${shellQuote(teamBase)} -type d | head -n 5`)
+
+    console.log(`\n=== du -s ${teamBase} (walk fallback) ===`)
+    await run(ws, `du -s ${shellQuote(teamBase)}`)
+
+    console.log(`\n=== grep -r -l bug ${teamBase}/issues/ | head -n 3 ===`)
+    await run(ws, `grep -r -l bug ${shellQuote(`${teamBase}/issues/`)} | head -n 3`)
+
+    console.log(`\n=== stat ${i0}/issue.json ===`)
+    await run(ws, `stat ${shellQuote(`${issuePath}/issue.json`)}`)
+
+    // chmod/chown/touch never hit the Linear API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${issuePath}/issue.json ===`)
+    const metaRes = await ws.shell(
+      `chmod 640 ${shellQuote(`${issuePath}/issue.json`)} && chown 500:dev ${shellQuote(`${issuePath}/issue.json`)} && touch -t 202601021530 ${shellQuote(`${issuePath}/issue.json`)}`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(metaRes.exitCode)}`)
+    const metaSt = (await ws.dispatch('stat', `${issuePath}/issue.json`)) as FileStat
+    const metaMode = metaSt.mode !== null ? metaSt.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${metaMode} uid=${String(metaSt.uid)} gid=${String(metaSt.gid)} mtime=${String(metaSt.modified)}`,
+    )
+
+    console.log(`\n=== wc / tail issue.json ===`)
+    await run(ws, `wc ${shellQuote(`${issuePath}/issue.json`)}`)
+    await run(ws, `tail -n 3 ${shellQuote(`${issuePath}/issue.json`)}`)
+
+    console.log(`\n=== rg -l title ${teamBase}/issues/ | head -n 3 ===`)
+    await run(ws, `rg -l "title" ${shellQuote(`${teamBase}/issues/`)} | head -n 3`)
+
+    // ── mid-path glob: the team segment is the pattern, the literal
+    // tail keeps walking (lists teams once, then filters).
+    console.log('\n=== echo /linear/teams/*/issues (mid-path glob) ===')
+    const globR = await ws.shell('echo /linear/teams/*/issues')
+    const globOut = globR.stdoutText.trim()
+    console.log(`  ${globOut.slice(0, 200)}`)
+    if (!globOut.endsWith('/issues')) {
+      throw new Error('regression: mid-path glob did not expand')
+    }
+
+    // A glob that matches nothing stays the literal word, so the
+    // command reports it like GNU coreutils.
+    console.log('\n=== cat /linear/teams/zz-none-*/team.json (no match) ===')
+    const litR = await ws.shell('cat /linear/teams/zz-none-*/team.json')
+    const litErr = litR.stderrText.trim()
+    console.log(`  exit=${litR.exitCode}  ${litErr.slice(0, 120)}`)
+    if (litR.exitCode !== 1 || !litErr.includes('zz-none-*')) {
+      throw new Error('regression: zero-match glob did not keep the literal')
+    }
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

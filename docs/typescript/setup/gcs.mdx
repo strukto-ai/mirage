@@ -120,7 +120,7 @@ GCS rejects S3-flavored `PutBucketCors` calls, its CORS schema differs. Use **ei
 The browser example ships a signer that crafts the GCS-shaped CORS XML and submits it via AWS SigV4 to `https://storage.googleapis.com/<bucket>?cors`:
 
 ```bash
-cd examples/typescript/browser
+cd examples/browser
 npx tsx scripts/configure-gcs-cors.ts http://localhost:5173 https://app.example.com
 ```
 

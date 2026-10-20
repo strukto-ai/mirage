@@ -99,7 +99,7 @@ pnpm add @struktoai/mirage-browser
 ```ts
 import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
-// Refresh token obtained via the PKCE flow, see examples/typescript/browser/src/box_pkce.ts.
+// Refresh token obtained via the PKCE flow, see examples/browser/vfs/box/box_pkce.ts.
 const box = new BoxVFS({
   clientId: import.meta.env.VITE_BOX_CLIENT_ID,
   refreshToken: localStorage.getItem('box-refresh')!,
@@ -112,7 +112,7 @@ await ws.shell('ls /box/')
 
 Box requires the origin to be allowlisted on the app's **Allowed Origins** config (see
 [setup](/home/setup/box#cors-notes)). The bundled
-[`examples/typescript/browser/src/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/browser/src/box_pkce.ts)
+[`examples/browser/vfs/box/box_pkce.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/browser/vfs/box/box_pkce.ts)
 runs the full PKCE dance and persists the rotated refresh token to `localStorage`.
 
 ## VFS mode (`patchNodeFs`)
@@ -248,8 +248,8 @@ commands operate on Google file IDs and do not apply to Box.
 ## Examples
 
 End-to-end runnable scripts are in
-[`examples/typescript/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/box):
+[`examples/typescript/vfs/box/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/vfs/box):
 
-- [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
-- [`box_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
-- [`box_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/box/box_fuse.ts), FUSE mount with shell access in another terminal
+- [`box.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box.ts), `Workspace.shell('ls/stat/cat/tree …')` shell demo
+- [`box_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box_vfs.ts), `patchNodeFs` + native `fs.promises.*` calls
+- [`box_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/box/box_fuse.ts), FUSE mount with shell access in another terminal

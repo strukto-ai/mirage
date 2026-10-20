@@ -1,0 +1,208 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import dotenv from 'dotenv'
+import {
+  GSlidesVFS,
+  GWS,
+  MountMode,
+  Workspace,
+  type FileStat,
+  type GSlidesConfig,
+} from '@struktoai/mirage-node'
+
+const __HERE = fileURLToPath(new URL('.', import.meta.url))
+dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
+
+function buildConfig(): GSlidesConfig {
+  const clientId = process.env.GOOGLE_CLIENT_ID ?? ''
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? ''
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN ?? ''
+  if (clientId === '' || clientSecret === '' || refreshToken === '') {
+    throw new Error('GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN are required')
+  }
+  return { clientId, clientSecret, refreshToken }
+}
+
+// Python's shlex.quote, so the printed commands match the Python example.
+function shellQuote(value: string): string {
+  if (value === '') return "''"
+  if (/^[\w@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+async function main(): Promise<void> {
+  const config = buildConfig()
+  const vfs = new GSlidesVFS(config)
+  const ws = new Workspace({ '/gslides': vfs }, { mode: MountMode.WRITE })
+  // The gws verbs are a CLI install, separate from the mount.
+  ws.registerCli('gws', GWS, { ...config })
+  try {
+    console.log('=== not-found errors show the full virtual path ===')
+    for (const cmd of [
+      'cat /gslides/__nf_missing__.txt',
+      'head /gslides/__nf_missing__.txt',
+      'stat /gslides/__nf_missing__.txt',
+    ]) {
+      const res = await ws.shell(cmd)
+      console.log(`$ ${cmd}`)
+      console.log(`  exit=${String(res.exitCode)}  ${res.stderrText.trim()}`)
+    }
+
+    console.log('=== ls /gslides/ ===')
+    let r = await ws.shell('ls /gslides/')
+    console.log(r.stdoutText)
+
+    console.log('=== ls /gslides/owned/ (first 5) ===')
+    r = await ws.shell('ls /gslides/owned/ | head -n 5')
+    console.log(r.stdoutText)
+
+    const first = r.stdoutText.trim().split('\n')[0] ?? ''
+    if (first === '') {
+      console.log('no decks in /gslides/owned/')
+      return
+    }
+    const path = `/gslides/owned/${first}`
+
+    console.log('=== cat ===')
+    r = await ws.shell(`cat ${shellQuote(path)}`)
+    console.log(r.stdoutText.slice(0, 300))
+
+    console.log('\n=== head -n 20 ===')
+    r = await ws.shell(`head -n 20 ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== head -c 200 ===')
+    r = await ws.shell(`head -c 200 ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -n 10 ===')
+    r = await ws.shell(`tail -n 10 ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== tail -c 200 ===')
+    r = await ws.shell(`tail -c 200 ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== wc ===')
+    r = await ws.shell(`wc ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== stat ===')
+    r = await ws.shell(`stat ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    // chmod/chown/touch never hit the Slides API: attrs land in the
+    // workspace namespace (durable, snapshot-captured) and merge into
+    // dispatch-level stat.
+    console.log(`=== metadata overlay on ${path} ===`)
+    r = await ws.shell(
+      `chmod 640 ${shellQuote(path)} && chown 500:dev ${shellQuote(path)} && touch -t 202601021530 ${shellQuote(path)}`,
+    )
+    console.log(`  chmod/chown/touch exit=${String(r.exitCode)}`)
+    const st = (await ws.dispatch('stat', path)) as FileStat
+    const mode = st.mode !== null ? st.mode.toString(8) : '-'
+    console.log(
+      `  dispatch stat: mode=${mode} uid=${String(st.uid)} gid=${String(st.gid)} mtime=${String(st.modified)}`,
+    )
+
+    console.log('=== jq .title ===')
+    r = await ws.shell(`jq ".title" ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== jq ".slides | length" ===')
+    r = await ws.shell(`jq ".slides | length" ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== nl ===')
+    r = await ws.shell(`nl ${shellQuote(path)} | head -n 10`)
+    console.log(r.stdoutText)
+
+    console.log('=== tree /gslides/ ===')
+    r = await ws.shell('tree /gslides/')
+    console.log(r.stdoutText.slice(0, 500))
+
+    console.log('\n=== find /gslides/owned/ ===')
+    r = await ws.shell("find /gslides/owned/ -name '*.gslide.json' | head -n 5")
+    console.log(r.stdoutText)
+
+    console.log('=== grep textRun ===')
+    r = await ws.shell(`grep textRun ${shellQuote(path)} | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== rg textRun ===')
+    r = await ws.shell(`rg textRun ${shellQuote(path)} | head -c 200`)
+    console.log(r.stdoutText)
+
+    console.log('\n=== basename ===')
+    r = await ws.shell(`basename ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== dirname ===')
+    r = await ws.shell(`dirname ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== realpath ===')
+    r = await ws.shell(`realpath ${shellQuote(path)}`)
+    console.log(r.stdoutText)
+
+    console.log('=== gws slides presentations create ===')
+    r = await ws.shell(
+      'gws slides presentations create --json \'{"title": "MIRAGE TS Slides Test"}\'',
+    )
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  create failed (exit=${String(r.exitCode)}): ${err}`)
+      return
+    }
+    const presId = (JSON.parse(r.stdoutText) as { presentationId: string }).presentationId
+    console.log(`Created: ${presId}`)
+
+    console.log('\n=== gws slides presentations batchUpdate ===')
+    const body = JSON.stringify({
+      requests: [
+        {
+          createSlide: {
+            insertionIndex: 1,
+            slideLayoutReference: { predefinedLayout: 'BLANK' },
+          },
+        },
+      ],
+    })
+    const params = JSON.stringify({ presentationId: presId })
+    r = await ws.shell(
+      `gws slides presentations batchUpdate --params ${shellQuote(params)} --json ${shellQuote(body)}`,
+    )
+    if (r.exitCode !== 0 || r.stdoutText.trim() === '') {
+      const err = r.stderrText.trim() || 'empty response'
+      console.log(`  update failed (exit=${String(r.exitCode)}): ${err}`)
+      return
+    }
+    const update = JSON.parse(r.stdoutText) as {
+      replies: { createSlide: { objectId: string } }[]
+    }
+    console.log(`Added slide: ${update.replies[0]!.createSlide.objectId}`)
+
+    console.log(`\nOpen: https://docs.google.com/presentation/d/${presId}/edit`)
+  } finally {
+    await ws.close()
+  }
+}
+
+main().catch((err: unknown) => {
+  console.error(err)
+  process.exit(1)
+})

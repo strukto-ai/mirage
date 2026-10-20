@@ -1,0 +1,246 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import asyncio
+import re
+
+from mirage import MountMode, Workspace
+from mirage.vfs.ram import RAMVFS
+
+# An incident-response workspace: the service tree, the runbooks the
+# oncall works from, and the credentials nobody reads by hand.
+#
+# Three roles read the same three mounts and see three different
+# filesystems. Every refusal below comes from one of two orderings, and
+# the point of the example is that they are different orderings:
+#
+#   the command axis   a rule naming no path is read by verb alone,
+#                      deny before ask, and a word the allow list
+#                      leaves out is refused.
+#   the path axis      a rule carrying paths is read by anchor depth,
+#                      the number of literal components before its
+#                      first wildcard. /runbook/frozen/* is 2 and
+#                      /runbook/* is 1, so the deeper one wins wherever
+#                      both reach, whichever verb it carries.
+#
+# Hiding is neither: it is not a refusal at all. A hidden path answers
+# ENOENT, so the role never learns the name; a denied path stays in the
+# listing and fails when read. /vault is denied for the oncall and
+# hidden for the auditor, which is the same three files seen two ways.
+#
+# The third role, the commander, states no allow list, which is how a
+# role says "every tool". That is the opposite of a deny list and worth
+# seeing beside one: the list is not a filter over some default set, it
+# IS the set, so omitting it allows everything and an empty one
+# allows nothing. Its rules still run.
+
+PROFILES = {
+    "oncall": {
+        "commands": {
+            # The allow list names the tools this role may run. A word
+            # missing from it is refused: `sort: Permission denied`.
+            "allow": ["ls", "cat", "grep", "rm", "cp"],
+            "ask": [
+                {
+                    "reason": "a runbook edit needs a nod",
+                    # Anchor depth 1: /runbook, then a wildcard.
+                    "commands": {
+                        "rm": ["/runbook/*"],
+                        "cp": ["/runbook/*"],
+                    },
+                },
+            ],
+            "deny": [
+                {
+                    "reason": "credentials are never read by hand",
+                    # A rule with paths and no command reaches the
+                    # dispatcher too, so FUSE and the cache cannot go around
+                    # it.
+                    "paths": ["/vault/*"],
+                },
+            ],
+        },
+        "mounts": {
+            "/repo": {
+                # Modes only ever narrow: the workspace mounts /repo
+                # write, and this role reads it.
+                "mode": "read",
+                # A name pattern written in a mount section is anchored
+                # to that mount when the role compiles, so this is
+                # every .env under /repo and nothing anywhere else.
+                "paths": {"hide": ["*.env"]},
+            },
+            "/runbook": {
+                "commands": {
+                    "deny": [
+                        {
+                            "reason": "the rollback plan is frozen",
+                            # Anchor depth 2, so it outranks the ask at
+                            # 1 that also covers these files. Writing
+                            # it in the mount section is not what makes
+                            # it win; the extra component is.
+                            "commands": {"rm": ["/runbook/frozen/*"]},
+                        },
+                    ],
+                },
+            },
+        },
+    },
+    "auditor": {
+        # No rm, no cp: this role cannot be talked into a write, because
+        # there is no rule to argue with.
+        "commands": {"allow": ["ls", "cat", "grep"]},
+        # Hidden, where the oncall has it denied. Same mount, same
+        # files, two different answers to `ls /vault`.
+        "paths": {"hide": ["/vault"]},
+    },
+    "commander": {
+        "commands": {
+            # No allow list, which allows every command mirage ships,
+            # this role's own `sort` and `wc` included. ``allow: ["*"]``
+            # says the same thing out loud; ``allow: []`` says the
+            # opposite and allows nothing. What it does not say is
+            # "unrestricted": the deny below still runs, and so would an
+            # ask.
+            "deny": [
+                {
+                    "reason": "credentials are never read by hand",
+                    "paths": ["/vault/*"],
+                },
+            ],
+        },
+        # No mount section either, so every mount stays at the mode the
+        # workspace declared. A role narrows by naming; naming nothing
+        # narrows nothing.
+    },
+}
+
+SEED = [
+    "mkdir -p /runbook/frozen",
+    "echo \"print('serving')\" > /repo/service.py",
+    "echo DSN=postgres://localhost/app > /repo/.env",
+    "echo '1. page the oncall' > /runbook/steps.md",
+    "echo PAGER=cat > /runbook/local.env",
+    "echo '1. flip the flag' > /runbook/frozen/rollback.md",
+    "echo AKIA-not-a-real-key > /vault/aws.token",
+]
+
+LINES = [
+    ("oncall", "cat /repo/service.py", "the allow list names cat"),
+    (
+        "oncall",
+        "sort /repo/service.py",
+        "unlisted, so the allow list refuses it",
+    ),
+    ("oncall", "ls /repo", "the hide takes .env out of the listing"),
+    ("oncall", "cat /repo/.env", "and answers absence, not refusal"),
+    (
+        "oncall",
+        "cat /runbook/local.env",
+        "the same pattern, anchored to /repo, reaches no further",
+    ),
+    ("oncall", "ls /vault", "a deny leaves the name where it is"),
+    ("oncall", "cat /vault/aws.token", "and refuses the read: paths, depth 1"),
+    ("oncall", "rm /runbook/steps.md", "ask at depth 1"),
+    (
+        "oncall",
+        "rm /runbook/frozen/rollback.md",
+        "deny at depth 2 outranks it",
+    ),
+    (
+        "oncall",
+        "cp /vault/aws.token /runbook/steps.md",
+        "every operand is judged: the source's deny wins",
+    ),
+    ("oncall", "rm /repo/service.py", "the mount section narrowed the mode"),
+    ("auditor", "ls /vault", "hidden here, so the mount is not there at all"),
+    (
+        "auditor",
+        "cat /repo/.env",
+        "the hide was the other role's, not the workspace's",
+    ),
+    ("auditor", "rm /runbook/steps.md", "no rm in this allow list"),
+    (
+        "commander",
+        "sort /repo/service.py",
+        "no allow list, so every tool runs",
+    ),
+    (
+        "commander",
+        "wc -l /runbook/steps.md",
+        "including the ones no other role names",
+    ),
+    (
+        "commander",
+        "cat /vault/aws.token",
+        "and it is still not unrestricted: the deny runs",
+    ),
+    (
+        "commander",
+        "rm /repo/service.py",
+        "no mount section, so /repo keeps the workspace's write mode",
+    ),
+]
+
+# The approval id is a digest of the session, cwd and words; it is
+# stable, and it is noise here.
+ASK_ID = re.compile(r"\(ask [0-9a-f]+\)")
+
+
+def answer(out: bytes, err: bytes, code: int) -> str:
+    """One line's outcome, as a reader of the table wants it: what came
+    back, or why nothing did.
+
+    Args:
+        out (bytes): the line's stdout.
+        err (bytes): the line's stderr.
+        code (int): the line's exit code.
+    """
+    if err:
+        first = ASK_ID.sub("(ask ...)", err.decode()).splitlines()[0]
+        return f"[{code}] {first}"
+    return f"[{code}] {' '.join(out.decode().split())}".rstrip()
+
+
+async def main() -> None:
+    ws = Workspace(
+        {
+            "/repo/": RAMVFS(),
+            "/runbook/": RAMVFS(),
+            "/vault/": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+        profiles=PROFILES,
+    )
+
+    # A session that names no role is unrestricted, which is the host's
+    # own view and the only place this seeding could run.
+    for line in SEED:
+        await ws.shell(line)
+
+    for role in PROFILES:
+        ws.create_session(role, profile=role)
+
+    for role, line, note in LINES:
+        res = await ws.shell(line, session_id=role)
+        print(
+            f"{role:10} {line:42} "
+            f"{answer(res.stdout or b'', res.stderr or b'', res.exit_code)}"
+        )
+        print(f"{'':10} {'':42} {note}")
+    await ws.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

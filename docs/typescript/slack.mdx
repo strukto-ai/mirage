@@ -203,10 +203,10 @@ bot's username, an unfurled link) is not searched.
 
 ## Examples
 
-- [`examples/typescript/slack/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/slack/slack.ts), shell commands against `/slack/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
-- [`examples/typescript/slack/slack_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/slack/slack_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
-- [`examples/typescript/slack/slack_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/slack/slack_fuse.ts), FUSE-mount the workspace so external processes can browse `/slack/` as a real filesystem.
-- [`examples/typescript/slack/slack_browser/`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/slack/slack_browser), proxy server + `@struktoai/mirage-browser` SlackVFS demo.
+- [`examples/typescript/vfs/slack/slack.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack.ts), shell commands against `/slack/` (`ls`, `cat`, `grep`, `jq`, `tree`, `find`, `cd`, glob).
+- [`examples/typescript/vfs/slack/slack_vfs.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack_vfs.ts), `patchNodeFs(ws)` so native `node:fs` calls route through the workspace.
+- [`examples/typescript/vfs/slack/slack_fuse.ts`](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/vfs/slack/slack_fuse.ts), FUSE-mount the workspace so external processes can browse `/slack/` as a real filesystem.
+- [`examples/browser/vfs/slack/`](https://github.com/strukto-ai/mirage/tree/main/examples/browser/vfs/slack), proxy server + `@struktoai/mirage-browser` SlackVFS demo.
 
 See [Python Slack VFS](/python/vfs/slack) for the equivalent Python wiring.
 

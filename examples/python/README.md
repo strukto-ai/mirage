@@ -1,10 +1,14 @@
 # Python examples
 
-Runnable scripts, one directory per backend or topic. Run them from the repo
-root with the venv interpreter so `.env.development` resolves:
+Runnable scripts, laid out like the docs: `vfs/` holds one directory per
+backend and `vfs/new/` the custom-VFS examples, `agents/` one per agent
+framework, `runtime/sandbox/` one per sandbox, and `core/`, `cli/`,
+`policy/`, `configuration/`, `integration/`, `notifications/` and `fuse/`
+match the docs sections of the same name. Run them from the repo root with
+the venv interpreter so `.env.development` resolves:
 
 ```bash
-./python/.venv/bin/python examples/python/s3/s3.py
+./python/.venv/bin/python examples/python/vfs/s3/s3.py
 ```
 
 Naming: `<backend>.py` uses the command surface, `<backend>_fuse.py` adds a

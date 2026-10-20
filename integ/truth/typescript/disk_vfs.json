@@ -7,7 +7,7 @@
         "examples/typescript",
         "exec",
         "tsx",
-        "disk/disk_vfs.ts"
+        "vfs/disk/disk_vfs.ts"
       ]
     }
   },
