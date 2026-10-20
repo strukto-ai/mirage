@@ -578,6 +578,50 @@
         "stdout": "declare -a x=([0]=\"7\" [1]=\"5\")\ndeclare -a y=([0]=\"7\" [2]=\"5\")\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "shell_exact_prototype_unset",
+      "seq": 905,
+      "command": "echo $((constructor+toString+__proto__))",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shell_exact_prototype_writes",
+      "seq": 906,
+      "command": "echo $((__proto__=5,__proto__+1)); echo $__proto__",
+      "expect": {
+        "exit": 0,
+        "stdout": "6\n5\n",
+        "stderr": ""
+      }
     }
+  ],
+  "targets": [
+    "ram",
+    "disk",
+    "redis",
+    "opfs",
+    "s3",
+    "databricks",
+    "gridfs",
+    "s3-prefix",
+    "databricks-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "sharepoint-prefix",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
   ]
 }

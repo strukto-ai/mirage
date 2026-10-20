@@ -26,8 +26,8 @@ INERT_CLOSE = "\x01"
 
 # GNU sequence-expression grammar for `{x..y[..step]}`: numeric
 # endpoints (optionally signed), or single alphabetic characters.
-NUM_SEQ = re.compile(r"^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$")
-CHAR_SEQ = re.compile(r"^([A-Za-z])\.\.([A-Za-z])(?:\.\.(-?\d+))?$")
+NUM_SEQ = re.compile(r"^([+-]?[0-9]+)\.\.([+-]?[0-9]+)(?:\.\.([+-]?[0-9]+))?$")
+CHAR_SEQ = re.compile(r"^([A-Za-z])\.\.([A-Za-z])(?:\.\.([+-]?[0-9]+))?$")
 
 # Node types that may carry a brace-expandable word.
 BRACE_WORD_TYPES = frozenset(

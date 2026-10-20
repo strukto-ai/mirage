@@ -47,14 +47,24 @@ function isPadded(text: string): boolean {
   return digits.length > 1 && digits.startsWith('0')
 }
 
-function parseStep(stepText: string | undefined): number {
-  if (stepText === undefined) return 1
-  const step = Math.abs(Number(stepText))
-  return step === 0 ? 1 : step
+function parseInteger(text: string): bigint | null {
+  const negative = text.startsWith('-')
+  const digits = (negative || text.startsWith('+') ? text.slice(1) : text).replace(/^0+/, '') || '0'
+  if (digits.length > 19) return null
+  const value = BigInt(digits) * (negative ? -1n : 1n)
+  return value >= -(1n << 63n) && value < 1n << 63n ? value : null
 }
 
-function seqValues(lo: number, hi: number, step: number): number[] {
-  const out: number[] = []
+function parseStep(stepText: string | undefined, descending: boolean): bigint | null {
+  if (stepText === undefined) return 1n
+  const value = parseInteger(stepText)
+  if (value === null || (value === -(1n << 63n) && !descending)) return null
+  const step = value < 0n ? -value : value
+  return step === 0n ? 1n : step
+}
+
+function seqValues(lo: bigint, hi: bigint, step: bigint): bigint[] {
+  const out: bigint[] = []
   if (lo <= hi) {
     for (let v = lo; v <= hi; v += step) out.push(v)
   } else {
@@ -63,14 +73,9 @@ function seqValues(lo: number, hi: number, step: number): number[] {
   return out
 }
 
-function padValue(v: number, width: number): string {
-  const sign = v < 0 ? '-' : ''
-  return (
-    sign +
-    Math.abs(v)
-      .toString()
-      .padStart(width - sign.length, '0')
-  )
+function padValue(v: bigint, width: number): string {
+  const sign = v < 0n ? '-' : ''
+  return sign + (v < 0n ? -v : v).toString().padStart(width - sign.length, '0')
 }
 
 // Generate `{x..y[..step]}` sequence words, or null if not a range. A
@@ -83,9 +88,14 @@ function padValue(v: number, width: number): string {
 function genSequence(body: string): string[] | null {
   if (body.includes(INERT_OPEN) || body.includes('\\')) return null
   const num = NUM_SEQ.exec(body)
-  if (num !== null) {
+  if (num !== null && num[0] === body) {
     const [, loText = '', hiText = '', stepText] = num
-    const values = seqValues(Number(loText), Number(hiText), parseStep(stepText))
+    const lo = parseInteger(loText)
+    const hi = parseInteger(hiText)
+    if (lo === null || hi === null) return null
+    const step = parseStep(stepText, lo >= hi)
+    if (step === null) return null
+    const values = seqValues(lo, hi, step)
     if (isPadded(loText) || isPadded(hiText)) {
       const width = Math.max(loText.length, hiText.length)
       return values.map((v) => padValue(v, width))
@@ -93,10 +103,12 @@ function genSequence(body: string): string[] | null {
     return values.map((v) => String(v))
   }
   const chr = CHAR_SEQ.exec(body)
-  if (chr !== null) {
+  if (chr !== null && chr[0] === body) {
     const [, loText = '', hiText = '', stepText] = chr
-    const values = seqValues(loText.charCodeAt(0), hiText.charCodeAt(0), parseStep(stepText))
-    return values.map((v) => String.fromCharCode(v))
+    const step = parseStep(stepText, loText >= hiText)
+    if (step === null) return null
+    const values = seqValues(BigInt(loText.charCodeAt(0)), BigInt(hiText.charCodeAt(0)), step)
+    return values.map((v) => String.fromCharCode(Number(v)))
   }
   return null
 }
