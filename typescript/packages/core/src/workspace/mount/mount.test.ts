@@ -570,6 +570,48 @@ it.each(['grep', 'diff', 'python3', 'curl', 'tar', 'mycmd'])(
   },
 )
 
+const ECHO_CMD: CommandFn = (_accessor, paths, texts, ctx) => [
+  new TextEncoder().encode(JSON.stringify([paths.map((p) => p.virtual), texts, ctx.flags.f])),
+  new IOResult(),
+]
+
+// The steps that read a line with the builtin's grammar before routing
+// (find's expression, the implied `.`, the program file, a path flag's mount,
+// the help page) belong to the builtin, so a command a mount registers under
+// its name runs as the control `mycmd` does.
+it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --help'])(
+  'routes a borrowed `%s` like a custom command',
+  async (line) => {
+    const ws = new Workspace(
+      { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParserFactory: () => getTestParser() },
+    )
+    try {
+      const [name = '', ...words] = line.split(' ')
+      const spec = new CommandSpec({
+        arguments: [
+          new Argument('--mode'),
+          new Argument('-f'),
+          new Argument('-o'),
+          new Argument('rest', { nargs: '*' }),
+        ],
+      })
+      for (const registered of [name, 'mycmd']) {
+        ws.mount('/a/').register(new Command({ name: registered, spec, vfs: null, fn: ECHO_CMD }))
+      }
+      const borrowed = await ws.shell(`cd /a && ${line}`)
+      const control = await ws.shell(`cd /a && mycmd ${words.join(' ')}`)
+      expect([borrowed.exitCode, borrowed.stdoutText, borrowed.stderrText]).toEqual([
+        control.exitCode,
+        control.stdoutText,
+        control.stderrText.replaceAll('mycmd', name),
+      ])
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
 it.each([false, true])(
   'closes native output and releases mount admission (started=%s)',
   async (started) => {

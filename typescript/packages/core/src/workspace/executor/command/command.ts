@@ -431,7 +431,16 @@ export async function handleCommand(
     )
   }
 
-  if (cmdName in CWD_DEFAULT_RAW) {
+  // A mount may register its own command under a builtin's name. The steps
+  // below that read the line with the builtin's grammar then run only when
+  // the mount resolveMount will pick holds that grammar.
+  const ownMount = registry.commandMount(
+    cmdName,
+    parts.slice(1).filter((p): p is PathSpec => p instanceof PathSpec),
+    session.cwd,
+  )
+  const builtin = ownMount === null || isBuiltinGrammar(cmdName, ownMount.specFor(cmdName))
+  if (builtin && cmdName in CWD_DEFAULT_RAW) {
     const operand = defaultCwdOperand(parts, cmdName, registry, session.cwd, stdin)
     if (operand !== null) {
       // Where GNU's implied `.` sits: after the pattern for grep/rg
@@ -460,7 +469,7 @@ export async function handleCommand(
   // `mv --help /ram/a /disk/b` reaches the cross-mount relay, which bypasses
   // the registered wrapper that answers help and MOVED THE FILE instead of
   // printing the page.
-  const cmdMount = registry.mountForCommand(cmdName)
+  const cmdMount = ownMount ?? registry.mountForCommand(cmdName)
   const cmdSpec = cmdMount?.specFor(cmdName) ?? null
   const standardOut = standardRequest(cmdName, cmdSpec, rawArgv)
   const builtinSpec = SPECS[cmdName]
@@ -492,7 +501,7 @@ export async function handleCommand(
   }
 
   let prepared: ParsedCommand | null = null
-  if (PROGRAM_FILE_COMMANDS.has(cmdName)) {
+  if (builtin && PROGRAM_FILE_COMMANDS.has(cmdName)) {
     const programSpec = SPECS[cmdName]
     if (programSpec !== undefined) {
       const candidate = parseFlags(
@@ -549,18 +558,20 @@ export async function handleCommand(
   let routingScopes: PathSpec[] = []
   let flagScopes: PathSpec[] = []
   if (!optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)) {
-    const routed = routableScopes(
-      cmdName,
-      prepared !== null
-        ? pathScopes
-        : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
-    )
-    flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
+    const routed = builtin
+      ? routableScopes(
+          cmdName,
+          prepared !== null
+            ? pathScopes
+            : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
+        )
+      : pathScopes
+    if (builtin) flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
     routingScopes = mergeScopes(routed, flagScopes).filter((s) => s.walkError !== 'ENOENT')
   }
 
   let findExprTokens: string[] | null = null
-  if (cmdName === 'find') {
+  if (builtin && cmdName === 'find') {
     findExprTokens = findExprTail(rawArgv)
     let findExpr: FindExpr
     try {
@@ -601,7 +612,10 @@ export async function handleCommand(
 
   // Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
   // exactly like a positional destination would.
-  if (isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)) {
+  if (
+    builtin &&
+    isCrossMount(cmdName, operandMounts(registry, cmdName, routingScopes), flagScopes)
+  ) {
     // Parse against the shared spec so flags and text operands do not
     // depend on the source mount: raw argv would hand flag tokens ("-c")
     // to the generic as the search pattern. The bound single-mount runner
@@ -636,7 +650,7 @@ export async function handleCommand(
     // mount but is not an input. Parsed operands preserve aliases, order, and
     // repeated path values. find's expression is not the spec's grammar, so
     // its start points are the words classified as paths.
-    let csScopes = cmdName === 'find' ? pathScopes : csParsed.paths
+    let csScopes = findExprTokens !== null ? pathScopes : csParsed.paths
     if (RELAY_COMMANDS.has(cmdName)) {
       // STREAM and FANOUT (and a custom command's reducer) run each operand
       // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
@@ -699,7 +713,7 @@ export async function handleCommand(
       exitCode: csIo.exitCode,
     })
     let csStdout = csStdout0
-    if (cmdName === 'find') {
+    if (findExprTokens !== null) {
       csStdout = await finishFind(
         csStdout,
         csIo,
@@ -830,7 +844,7 @@ export async function handleCommand(
       : null
 
   const singleStat: StatPath = (path) => pathStat(dispatch, path)
-  if (shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+  if (builtin && shouldFanOut(cmdName, paths, flagKwargs, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,
@@ -850,7 +864,7 @@ export async function handleCommand(
       follow,
     )
     let fanOut = fanOut0
-    if (cmdName === 'find') {
+    if (findExprTokens !== null) {
       fanOut = await finishFind(
         fanOut,
         fanIo,
@@ -883,7 +897,7 @@ export async function handleCommand(
     argv: spelledWords(parts.slice(1)),
   })
   let stdout = rawStdout
-  if (cmdName === 'find') {
+  if (findExprTokens !== null) {
     stdout = await finishFind(
       stdout,
       io,

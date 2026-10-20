@@ -479,7 +479,18 @@ async def handle_command(
             follow,
         )
 
-    if cmd_name in CWD_DEFAULT_RAW:
+    # A mount may register its own command under a builtin's name. The
+    # steps below that read the line with the builtin's grammar then run
+    # only when the mount resolve_mount will pick holds that grammar.
+    own_mount = registry.command_mount(
+        cmd_name,
+        [p for p in parts[1:] if isinstance(p, PathSpec)],
+        session.cwd,
+    )
+    builtin = own_mount is None or is_builtin_grammar(
+        cmd_name, own_mount.spec_for(cmd_name)
+    )
+    if builtin and cmd_name in CWD_DEFAULT_RAW:
         operand = default_cwd_operand(
             parts, cmd_name, registry, session.cwd, stdin
         )
@@ -505,7 +516,7 @@ async def handle_command(
     # option, and `mv --help /ram/a /disk/b` reaches the cross-mount
     # relay, which bypasses the registered wrapper that answers help and
     # MOVED THE FILE instead of printing the page.
-    cmd_mount = registry.mount_for_command(cmd_name)
+    cmd_mount = own_mount or registry.mount_for_command(cmd_name)
     cmd_spec = cmd_mount.spec_for(cmd_name) if cmd_mount else None
     standard_out = standard_request(cmd_name, cmd_spec, raw_argv)
     if (
@@ -532,7 +543,7 @@ async def handle_command(
         )
 
     prepared: ParsedCommand | None = None
-    if cmd_name in PROGRAM_FILE_COMMANDS and dispatch is not None:
+    if builtin and cmd_name in PROGRAM_FILE_COMMANDS and dispatch is not None:
         candidate = parse_flags(
             parts[1:],
             registered_spec(cmd_name, SPECS[cmd_name]),
@@ -587,15 +598,20 @@ async def handle_command(
         raw_argv,
         session.cwd,
     ):
-        routed = routable_scopes(
-            cmd_name,
-            path_scopes
-            if prepared is not None
-            else routed_operands(
-                cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
-            ),
+        routed = (
+            routable_scopes(
+                cmd_name,
+                path_scopes
+                if prepared is not None
+                else routed_operands(
+                    cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
+                ),
+            )
+            if builtin
+            else path_scopes
         )
-        flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
+        if builtin:
+            flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
         routing_scopes = [
             s
             for s in merge_scopes(routed, flag_scopes)
@@ -603,7 +619,7 @@ async def handle_command(
         ]
 
     find_expr_tokens: list[str] | None = None
-    if cmd_name == "find":
+    if builtin and cmd_name == "find":
         find_expr_tokens = find_expr_tail(raw_argv)
         try:
             find_expr = parse_find_expression(find_expr_tokens)
@@ -639,7 +655,7 @@ async def handle_command(
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would.
-    if is_cross_mount(
+    if builtin and is_cross_mount(
         cmd_name,
         _operand_mounts(registry, cmd_name, routing_scopes),
         flag_scopes,
@@ -686,7 +702,7 @@ async def handle_command(
         # is not the spec's grammar, so its start points are the words
         # classified as paths.
         cross_scopes = (
-            path_scopes if cmd_name == "find" else cross_parsed.paths
+            path_scopes if find_expr_tokens is not None else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
         if cmd_name in RELAY_COMMANDS:
@@ -766,7 +782,7 @@ async def handle_command(
             check_unlink=make_check_unlink(registry),
             follow=follow,
         )
-        if cmd_name == "find":
+        if find_expr_tokens is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
@@ -895,7 +911,7 @@ async def handle_command(
         if dispatch is not None
         else None
     )
-    if _should_fan_out(cmd_name, paths, flag_kwargs, registry):
+    if builtin and _should_fan_out(cmd_name, paths, flag_kwargs, registry):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested
         # mount's ancestor) has no backend listing, so without them the
@@ -929,7 +945,7 @@ async def handle_command(
             ),
             follow=follow,
         )
-        if cmd_name == "find":
+        if find_expr_tokens is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
@@ -967,7 +983,7 @@ async def handle_command(
         execute_fn=execute_fn,
         follow=follow,
     )
-    if cmd_name == "find":
+    if find_expr_tokens is not None:
         stdout = await _finish_find(
             stdout,
             io,

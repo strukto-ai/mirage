@@ -186,3 +186,50 @@ async def test_a_borrowed_builtin_name_is_refused_like_a_custom_command(
             1,
             f"{name}: {line}\nTry '{name} --help' for more information.\n".encode(),
         ), words
+
+
+async def echo_command(accessor, paths, texts, ctx):
+    shown = [p.virtual for p in paths], list(texts), ctx.flags.get("f")
+    return f"{shown}\n".encode(), IOResult()
+
+
+# The steps that read a line with the builtin's grammar before routing
+# (find's expression, the implied `.`, the program file, a path flag's
+# mount, the help page) belong to the builtin, so a command a mount
+# registers under its name runs as the control `mycmd` does.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "find --mode=a x",
+        "rg x",
+        "grep -f a x",
+        "sort -o /b/out x",
+        "grep --help",
+    ],
+)
+async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
+    ws_two_mounts, line
+):
+    name, words = line.split(" ", 1)
+    spec = CommandSpec(
+        arguments=(
+            Argument("--mode"),
+            Argument("-f"),
+            Argument("-o"),
+            Argument("rest", nargs="*"),
+        )
+    )
+    for registered in (name, "mycmd"):
+        ws_two_mounts.mount("/a/").register(
+            Command(
+                registered, spec=spec, vfs=None, filetype=None, fn=echo_command
+            )
+        )
+    borrowed = await ws_two_mounts.shell(f"cd /a && {line}")
+    control = await ws_two_mounts.shell(f"cd /a && mycmd {words}")
+    assert (borrowed.exit_code, borrowed.stdout, borrowed.stderr or b"") == (
+        control.exit_code,
+        control.stdout,
+        (control.stderr or b"").replace(b"mycmd", name.encode()),
+    )
