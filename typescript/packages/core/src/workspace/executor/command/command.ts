@@ -434,14 +434,14 @@ export async function handleCommand(
 
   // A mount may register its own command under a builtin's name. The steps
   // below that read the line with the builtin's grammar then skip a line
-  // whose operands (or cwd) pick such a mount, as resolveMount picks it.
-  // Only a word classified as a path in an operand slot picks one: not a
-  // file an option reads (`grep -f`), nor a word the cwd's spec left as text.
-  const ownMount = registry.commandMount(
-    cmdName,
-    operandPaths(cmdName, parts.slice(1), session.cwd),
-    session.cwd,
+  // whose operands (or cwd) pick such a mount, as resolveMount picks it, and
+  // the line routes by those operands alone. Only a word classified as a path
+  // in a path operand slot picks one: not a file an option reads (`grep -f`),
+  // a pattern, or a word the cwd's spec left as text.
+  const operands = operandPaths(cmdName, parts.slice(1), session.cwd).filter(
+    (s) => s.walkError !== 'ENOENT',
   )
+  const ownMount = registry.commandMount(cmdName, operands, session.cwd)
   const borrowed =
     SPECS[cmdName] !== undefined &&
     ownMount !== null &&
@@ -561,19 +561,19 @@ export async function handleCommand(
   // operands (or the cwd) put it, and that run's op guards refuse it. A line
   // is not cross-mount because one of its words is empty.
   // A prepared program line already holds its positional operands.
-  let routingScopes: PathSpec[] = []
+  let routingScopes: PathSpec[] = borrowed ? operands : []
   let flagScopes: PathSpec[] = []
-  if (!optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)) {
-    let routed = pathScopes
-    if (!borrowed) {
-      routed = routableScopes(
-        cmdName,
-        prepared !== null
-          ? pathScopes
-          : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
-      )
-      flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
-    }
+  if (
+    !borrowed &&
+    !optionLoopExits(cmdName, cmdMount?.specFor(cmdName) ?? null, rawArgv, session.cwd)
+  ) {
+    const routed = routableScopes(
+      cmdName,
+      prepared !== null
+        ? pathScopes
+        : routedOperands(cmdName, rawArgv, session.cwd, parts.slice(1), pathScopes),
+    )
+    flagScopes = pathFlagScopes(cmdName, rawArgv, session.cwd)
     routingScopes = mergeScopes(routed, flagScopes).filter((s) => s.walkError !== 'ENOENT')
   }
 

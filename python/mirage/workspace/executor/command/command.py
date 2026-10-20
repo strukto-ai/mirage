@@ -483,12 +483,16 @@ async def handle_command(
     # A mount may register its own command under a builtin's name. The
     # steps below that read the line with the builtin's grammar then skip
     # a line whose operands (or cwd) pick such a mount, as resolve_mount
-    # picks it. Only a word classified as a path in an operand slot picks
-    # one: not a file an option reads (`grep -f`), nor a word the cwd's
-    # spec left as text.
-    own_mount = registry.command_mount(
-        cmd_name, operand_paths(cmd_name, parts[1:], session.cwd), session.cwd
-    )
+    # picks it, and the line routes by those operands alone. Only a word
+    # classified as a path in a path operand slot picks one: not a file an
+    # option reads (`grep -f`), a pattern, or a word the cwd's spec left
+    # as text.
+    operands = [
+        s
+        for s in operand_paths(cmd_name, parts[1:], session.cwd)
+        if s.walk_error != "ENOENT"
+    ]
+    own_mount = registry.command_mount(cmd_name, operands, session.cwd)
     borrowed = (
         cmd_name in SPECS
         and own_mount is not None
@@ -598,25 +602,23 @@ async def handle_command(
     # other operands (or the cwd) put it, and that run's op guards refuse
     # it. A line is not cross-mount because one of its words is empty.
     # A prepared program line already holds its positional operands.
-    routing_scopes: list[PathSpec] = []
+    routing_scopes: list[PathSpec] = operands if borrowed else []
     flag_scopes: list[PathSpec] = []
-    if not option_loop_exits(
+    if not borrowed and not option_loop_exits(
         cmd_name,
         cmd_mount.spec_for(cmd_name) if cmd_mount else None,
         raw_argv,
         session.cwd,
     ):
-        routed = path_scopes
-        if not borrowed:
-            routed = routable_scopes(
-                cmd_name,
-                path_scopes
-                if prepared is not None
-                else routed_operands(
-                    cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
-                ),
-            )
-            flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
+        routed = routable_scopes(
+            cmd_name,
+            path_scopes
+            if prepared is not None
+            else routed_operands(
+                cmd_name, raw_argv, session.cwd, parts[1:], path_scopes
+            ),
+        )
+        flag_scopes = path_flag_scopes(cmd_name, raw_argv, session.cwd)
         routing_scopes = [
             s
             for s in merge_scopes(routed, flag_scopes)

@@ -238,7 +238,8 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
 # were classified as paths, read by position: never a file an option
 # reads, even one an operand repeats, nor a word the cwd's spec left as
 # text. /a borrows grep (text operands), find and rg (path operands);
-# the builtin rg reads `/a/patterns` as its pattern, a text slot.
+# the builtin rg reads `/a/patterns` and a lone `/b/input` as its pattern,
+# a text slot, so that line stays on /a with the borrowed rg.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, stdout",
@@ -250,6 +251,7 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
         ),
         ("cd /a && grep hi /b/input", b"[] ['hi', '/b/input']\n"),
         ("cd /a && rg /a/patterns /b/input", b"/a/patterns\n"),
+        ("cd /a && rg /b/input", b"['/b/input'] []\n"),
         ("cd /a && find //b/input -print0", b"//b/input\x00"),
     ],
 )
