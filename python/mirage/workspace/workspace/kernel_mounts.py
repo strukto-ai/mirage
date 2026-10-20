@@ -15,14 +15,16 @@
 from mirage.types import MountBackend
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.fuse import FuseManager
+from mirage.workspace.nfs import NFSManager
 from mirage.workspace.session import SessionManager
 
 
 class KernelMounts:
-    """The workspace's real mountpoints, one FuseManager per subtree.
+    """The workspace's real mountpoints, one manager per subtree.
 
-    A ``workspace`` mount lives only inside mirage; a ``fuse`` or ``fskit``
-    mount also registers a mountpoint with the kernel. This owns the
+    A ``workspace`` mount lives only inside mirage; a ``fuse``, ``fskit`` or
+    ``nfs`` mount also registers a mountpoint with the kernel, through a
+    FuseManager or, for ``nfs``, an NFSManager. This owns the
     set of those: which prefix is exposed where, and the manager
     serving it. Keys are ``prefix`` or ``prefix@session_id``, so the
     same subtree can be exposed both unbound and bound to a session.
@@ -34,7 +36,7 @@ class KernelMounts:
         self._files = files
         self._sessions = sessions
         self._mountpoints: dict[str, str] = {}
-        self._managers: dict[str, FuseManager] = {}
+        self._managers: dict[str, FuseManager | NFSManager] = {}
 
     def add(
         self,
@@ -53,7 +55,7 @@ class KernelMounts:
             prefix (str): the virtual prefix to expose.
             mountpoint (str | None): where to mount; None picks a path.
             session_id (str | None): session whose grants scope the ops.
-            backend (str | MountBackend): fuse or fskit.
+            backend (str | MountBackend): fuse, fskit or nfs.
 
         Raises:
             ValueError: the mountpoint is already serving another prefix.
@@ -66,16 +68,24 @@ class KernelMounts:
         key = prefix if session_id is None else f"{prefix}@{session_id}"
         if mountpoint is not None:
             self._register(key, mountpoint)
-        manager = FuseManager()
-        self._managers[key] = manager
+        manager: FuseManager | NFSManager
         try:
-            resolved = manager.setup(
-                self._files,
-                prefix,
-                mountpoint,
-                session=session,
-                backend=backend,
-            )
+            if MountBackend(backend) is MountBackend.NFS:
+                manager = NFSManager()
+                self._managers[key] = manager
+                resolved = manager.setup(
+                    self._files, prefix, mountpoint, session=session
+                )
+            else:
+                manager = FuseManager()
+                self._managers[key] = manager
+                resolved = manager.setup(
+                    self._files,
+                    prefix,
+                    mountpoint,
+                    session=session,
+                    backend=backend,
+                )
         except Exception:
             # The mount never came up; drop the manager and any
             # registered path so mountpoints does not misreport it.

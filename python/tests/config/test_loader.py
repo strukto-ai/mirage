@@ -90,6 +90,26 @@ async def test_load_full_yaml_with_env_interpolation():
     assert "kernel_mounts" not in cfg.to_workspace_kwargs()
 
 
+def test_an_nfs_backend_is_a_kernel_mount():
+    cfg = load_config(
+        {
+            "mounts": {
+                "/project": {
+                    "vfs": "disk",
+                    "mode": "read",
+                    "config": {"root": "/srv/project"},
+                    "backend": "nfs",
+                    "mountpoint": "/tmp/mirage-project",
+                }
+            }
+        }
+    )
+    assert cfg.mounts["/project"].backend is MountBackend.NFS
+    assert cfg.kernel_mounts() == {
+        "/project": (MountBackend.NFS, "/tmp/mirage-project")
+    }
+
+
 def test_missing_env_var_raises_with_full_list():
     with pytest.raises(ValueError, match="missing environment variables"):
         load_config(FIXTURES / "full.yaml", env={})

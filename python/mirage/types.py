@@ -461,16 +461,23 @@ class MountBackend(StrEnum):
     ``integ/fuse/truth_fskit.json``.
     There is deliberately no ``auto``: auto-selecting FSKIT would silently
     degrade every API-backed mount.
+
+    NFS mounts through the operating system's own NFS client, so nothing
+    is installed: mirage serves NFSv3 on a local port and runs the system
+    ``mount``. Linux and macOS; Linux needs root to mount. It is read-only
+    for now, and like FSKIT it reads only as far as the size a file
+    reports, so it serves mounts that set ``sizes_always_known``.
     """
 
     WORKSPACE = "workspace"
     FUSE = "fuse"
     FSKIT = "fskit"
+    NFS = "nfs"
 
 
 # Backends that register a real mountpoint with the kernel.
 KERNEL_BACKENDS: frozenset[MountBackend] = frozenset(
-    {MountBackend.FUSE, MountBackend.FSKIT}
+    {MountBackend.FUSE, MountBackend.FSKIT, MountBackend.NFS}
 )
 
 

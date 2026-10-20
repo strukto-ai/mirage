@@ -1,5 +1,5 @@
 {
-  "baseline": 3217,
+  "baseline": 3216,
  "modules": {
   "runtime/sandbox/microsandbox/config": {
    "typescript_only": {
@@ -50,6 +50,11 @@
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
     "lineMeta": "Validates the line matcher's metadata at the JavaScript boundary; Python reads the same JSON record into typed fields.",
     "posixMeta": "Validates the POSIX matcher's metadata at the JavaScript boundary; Python reads the same JSON record into a typed field."
+   }
+  },
+  "rs/nfs": {
+   "typescript_only": {
+    "Exports": "The raw ABI mirage-rs-wasm exports for its NFS server; the NFS engine runs on a wasm instance of its own; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile."
    }
   },
   "rs/stream": {

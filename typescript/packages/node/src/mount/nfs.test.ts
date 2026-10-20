@@ -1,0 +1,260 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { type Socket, connect } from 'node:net'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { Workspace } from '../workspace.ts'
+import { MountCore } from './core.ts'
+import { MirageNFSServer, mountArgs, unmountArgs } from './nfs.ts'
+
+const NFS = 100003
+const MOUNT = 100005
+const FATTR = 84
+
+function u32(value: number): Uint8Array {
+  const out = new Uint8Array(4)
+  new DataView(out.buffer).setUint32(0, value)
+  return out
+}
+
+function u64(value: number): Uint8Array {
+  const out = new Uint8Array(8)
+  new DataView(out.buffer).setBigUint64(0, BigInt(value))
+  return out
+}
+
+function opaque(data: Uint8Array | string): Uint8Array {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+  return concat([u32(bytes.length), bytes, new Uint8Array((4 - (bytes.length % 4)) % 4)])
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0))
+  let at = 0
+  for (const part of parts) {
+    out.set(part, at)
+    at += part.length
+  }
+  return out
+}
+
+class Reply {
+  private at = 0
+  private readonly view: DataView
+
+  constructor(private readonly body: Uint8Array) {
+    this.view = new DataView(body.buffer, body.byteOffset, body.byteLength)
+  }
+
+  u32(): number {
+    const value = this.view.getUint32(this.at)
+    this.at += 4
+    return value
+  }
+
+  u64(): number {
+    const value = Number(this.view.getBigUint64(this.at))
+    this.at += 8
+    return value
+  }
+
+  opaque(): Uint8Array {
+    const size = this.u32()
+    const data = this.body.slice(this.at, this.at + size)
+    this.at += size + ((4 - (size % 4)) % 4)
+    return data
+  }
+
+  fattr(): [number, number, number] {
+    const found: [number, number, number] = [
+      this.view.getUint32(this.at),
+      this.view.getUint32(this.at + 4),
+      Number(this.view.getBigUint64(this.at + 20)),
+    ]
+    this.at += FATTR
+    return found
+  }
+
+  postOpAttr(): [number, number, number] | null {
+    return this.u32() === 1 ? this.fattr() : null
+  }
+}
+
+class Client {
+  private xid = 0
+  private buffer: Uint8Array = new Uint8Array()
+  private waiting: (() => void) | null = null
+
+  constructor(private readonly socket: Socket) {
+    socket.on('data', (data: Buffer) => {
+      this.buffer = concat([this.buffer, data])
+      this.waiting?.()
+    })
+  }
+
+  async call(prog: number, proc: number, args: Uint8Array = new Uint8Array()): Promise<Reply> {
+    this.xid += 1
+    const body = concat([...[this.xid, 0, 2, prog, 3, proc, 0, 0, 0, 0].map(u32), args])
+    this.socket.write(concat([u32((body.length | 0x80000000) >>> 0), body]))
+    const record = await this.record()
+    const reply = new Reply(record)
+    expect([0, 1, 2, 3, 4, 5].map(() => reply.u32())).toEqual([this.xid, 1, 0, 0, 0, 0])
+    return reply
+  }
+
+  async root(): Promise<Uint8Array> {
+    const reply = await this.call(MOUNT, 1, opaque('/'))
+    expect(reply.u32()).toBe(0)
+    return reply.opaque()
+  }
+
+  async lookup(dir: Uint8Array, name: string): Promise<[number, Uint8Array]> {
+    const reply = await this.call(NFS, 3, concat([opaque(dir), opaque(name)]))
+    const status = reply.u32()
+    return [status, status === 0 ? reply.opaque() : new Uint8Array()]
+  }
+
+  private async record(): Promise<Uint8Array> {
+    for (;;) {
+      if (this.buffer.length >= 4) {
+        const len =
+          new DataView(this.buffer.buffer, this.buffer.byteOffset).getUint32(0) & 0x7fffffff
+        if (this.buffer.length >= 4 + len) {
+          const record = this.buffer.slice(4, 4 + len)
+          this.buffer = this.buffer.slice(4 + len)
+          return record
+        }
+      }
+      await new Promise<void>((resolve) => {
+        this.waiting = resolve
+      })
+    }
+  }
+}
+
+describe('MirageNFSServer', () => {
+  let server: MirageNFSServer
+  let socket: Socket
+  let client: Client
+
+  beforeEach(async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
+    server = new MirageNFSServer(new MountCore(ws.vfs))
+    const port = await server.start()
+    socket = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => socket.once('connect', resolve))
+    client = new Client(socket)
+  })
+
+  afterEach(async () => {
+    socket.destroy()
+    await server.close()
+  })
+
+  it('answers getattr of the mounted root as a directory', async () => {
+    const root = await client.root()
+    const reply = await client.call(NFS, 1, opaque(root))
+    expect(reply.u32()).toBe(0)
+    expect(reply.fattr()[0]).toBe(2)
+  })
+
+  it('looks a file up and reads its bytes', async () => {
+    const root = await client.root()
+    const [, docs] = await client.lookup(root, 'docs')
+    const [status, handle] = await client.lookup(docs, 'a.txt')
+    expect(status).toBe(0)
+    const reply = await client.call(NFS, 6, concat([opaque(handle), u64(0), u32(4096)]))
+    expect(reply.u32()).toBe(0)
+    expect(reply.postOpAttr()).toEqual([1, 0o644, 6])
+    expect([reply.u32(), reply.u32()]).toEqual([6, 1])
+    expect(new TextDecoder().decode(reply.opaque())).toBe('hello\n')
+  })
+
+  it('lists a directory with readdirplus', async () => {
+    const root = await client.root()
+    const [, docs] = await client.lookup(root, 'docs')
+    const args = concat([opaque(docs), u64(0), new Uint8Array(8), u32(4096), u32(32768)])
+    const reply = await client.call(NFS, 17, args)
+    expect(reply.u32()).toBe(0)
+    reply.postOpAttr()
+    reply.u64()
+    const names: string[] = []
+    while (reply.u32() === 1) {
+      reply.u64()
+      names.push(new TextDecoder().decode(reply.opaque()))
+      reply.u64()
+      reply.postOpAttr()
+      if (reply.u32() === 1) reply.opaque()
+    }
+    expect(names).toEqual(['a.txt', 'sub'])
+    expect(reply.u32()).toBe(1)
+  })
+
+  it('answers a lookup of a missing name with NOENT', async () => {
+    const root = await client.root()
+    const [status] = await client.lookup(root, 'nope')
+    expect(status).toBe(2)
+  })
+
+  it('refuses a write as a read-only filesystem', async () => {
+    const root = await client.root()
+    const reply = await client.call(
+      NFS,
+      9,
+      concat([opaque(root), opaque('new'), new Uint8Array(24)]),
+    )
+    expect(reply.u32()).toBe(30)
+  })
+})
+
+describe('mountArgs / unmountArgs', () => {
+  it('mounts read-only and soft on the server port on Linux', () => {
+    const args = mountArgs(2049, '/mnt/x', 'linux')
+    expect(args.slice(0, 3)).toEqual(['mount', '-t', 'nfs'])
+    expect(args.slice(-2)).toEqual(['127.0.0.1:/', '/mnt/x'])
+    const options = new Set((args[4] ?? '').split(','))
+    for (const option of ['vers=3', 'soft', 'ro', 'nolock', 'port=2049', 'mountport=2049']) {
+      expect(options.has(option)).toBe(true)
+    }
+  })
+
+  it('mounts with mount_nfs and no reserved port on macOS', () => {
+    const args = mountArgs(2049, '/mnt/x', 'darwin')
+    expect(args[0]).toBe('/sbin/mount_nfs')
+    const options = new Set((args[2] ?? '').split(','))
+    for (const option of ['vers=3', 'soft', 'rdonly', 'noresvport', 'port=2049']) {
+      expect(options.has(option)).toBe(true)
+    }
+  })
+
+  it('refuses other platforms', () => {
+    expect(() => mountArgs(2049, '/mnt/x', 'win32')).toThrow('Linux and macOS')
+  })
+
+  it('falls back to a forced unmount', () => {
+    expect(unmountArgs('/mnt/x', 'linux')).toEqual([
+      ['umount', '/mnt/x'],
+      ['umount', '-l', '/mnt/x'],
+    ])
+    expect(unmountArgs('/mnt/x', 'darwin').at(-1)).toEqual([
+      'diskutil',
+      'unmount',
+      'force',
+      '/mnt/x',
+    ])
+  })
+})

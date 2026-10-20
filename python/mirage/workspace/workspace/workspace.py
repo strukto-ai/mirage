@@ -1021,7 +1021,7 @@ class Workspace:
             mountpoint (str | None): where to mount; None picks a path.
             session_id (str | None): session whose mount grants scope
                 every op served through this mountpoint.
-            backend (str | MountBackend): fuse or fskit.
+            backend (str | MountBackend): fuse, fskit or nfs.
         """
         return self._kernel_mounts.add(
             prefix, mountpoint, session_id, backend=backend

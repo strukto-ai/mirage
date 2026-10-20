@@ -18,13 +18,18 @@ import { forceUnmount, mount, type FuseHandle, type MountOptions } from '../fuse
 
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 type Signal = (typeof SIGNALS)[number]
-interface CleanupEntry {
+export interface CleanupEntry {
   mountpoint: string
   // Cleanup owns only generated temp directories, never explicit mountpoints.
   ownsMountpoint: boolean
+  // How the mount is torn down synchronously at exit; FUSE's force unmount when unset.
+  release?: (mountpoint: string) => void
 }
 
-function removeMountpointIfOwned(entry: { mountpoint: string; ownsMountpoint: boolean }): void {
+export function removeMountpointIfOwned(entry: {
+  mountpoint: string
+  ownsMountpoint: boolean
+}): void {
   if (!entry.ownsMountpoint) return
   try {
     // Empty-directory cleanup only. Recursive removal is unsafe because a
@@ -84,14 +89,15 @@ class FuseCleanupRegistry {
 
   private drainSync(): void {
     for (const entry of this.mounts) {
-      forceUnmount(entry.mountpoint)
+      const release = entry.release ?? forceUnmount
+      release(entry.mountpoint)
       removeMountpointIfOwned(entry)
     }
     this.mounts.clear()
   }
 }
 
-const CLEANUP = new FuseCleanupRegistry()
+export const CLEANUP = new FuseCleanupRegistry()
 
 // Passive mounting primitive: it mounts a workspace subtree and tears it down.
 // Registry/lifecycle ownership lives on the node Workspace (addFuseMount /

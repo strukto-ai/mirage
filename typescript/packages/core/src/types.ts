@@ -58,11 +58,18 @@ export type MountMode = (typeof MountMode)[keyof typeof MountMode]
  * not already have (a new file, or truncate-then-write) as NUL bytes (pinned
  * in `integ/fuse/truth_fskit.json`). There is deliberately no `auto`:
  * auto-selecting fskit would silently degrade every API-backed mount.
+ *
+ * `nfs` mounts through the operating system's own NFS client, so nothing is
+ * installed: mirage serves NFSv3 on a local port and runs the system `mount`.
+ * Linux and macOS; Linux needs root to mount. It is read-only for now, and
+ * like fskit it reads only as far as the size a file reports, so it serves
+ * mounts that set `sizesAlwaysKnown`.
  */
 export const MountBackend = Object.freeze({
   WORKSPACE: 'workspace',
   FUSE: 'fuse',
   FSKIT: 'fskit',
+  NFS: 'nfs',
 } as const)
 
 export type MountBackend = (typeof MountBackend)[keyof typeof MountBackend]
@@ -71,6 +78,7 @@ export type MountBackend = (typeof MountBackend)[keyof typeof MountBackend]
 export const KERNEL_BACKENDS: readonly MountBackend[] = Object.freeze([
   MountBackend.FUSE,
   MountBackend.FSKIT,
+  MountBackend.NFS,
 ])
 
 export const MOUNT_MODE_RANK: Readonly<Record<MountMode, number>> = Object.freeze({

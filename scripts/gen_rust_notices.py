@@ -11,6 +11,7 @@ RULE = "-" * 72
 # cargo about cannot see because it is not a dependency.
 ADAPTED = [
     ROOT / "licenses/third_party/jq.txt",
+    ROOT / "licenses/third_party/nfsserve.txt",
     ROOT / "licenses/third_party/uutils-coreutils.txt",
     ROOT / "licenses/third_party/regex-automata.txt",
     ROOT / "licenses/third_party/ripgrep.txt",

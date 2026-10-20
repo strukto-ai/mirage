@@ -115,9 +115,72 @@ impl Stream {
     }
 }
 
+/// An NFSv3 server with no I/O of its own: the host feeds it each
+/// connection's bytes, runs the file operations `requests` names, and
+/// hands each result back through `complete`.
+#[pyclass(module = "mirage_rs")]
+struct NFSServer {
+    inner: streams::nfs::Server,
+}
+
+#[pymethods]
+impl NFSServer {
+    #[new]
+    fn new(config: &[u8]) -> PyResult<Self> {
+        let inner = streams::nfs::Server::new(config)
+            .map_err(|err| StreamError::new_err((err.message,)))?;
+        Ok(Self { inner })
+    }
+
+    /// Take what connection `conn` sent; returns the replies it answers
+    /// at once.
+    fn feed<'py>(
+        &mut self,
+        py: Python<'py>,
+        conn: u32,
+        data: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let mut out = Vec::new();
+        self.inner
+            .feed(conn, data, &mut out)
+            .map_err(|err| StreamError::new_err((err.message,)))?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// The file operations calls wait on, as a JSON array.
+    fn requests<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        let mut out = Vec::new();
+        self.inner.requests(&mut out);
+        PyBytes::new(py, &out)
+    }
+
+    /// Hand back request `id`'s JSON reply and data; returns the call's
+    /// connection (None once it has closed) and its reply once it has one.
+    fn complete<'py>(
+        &mut self,
+        py: Python<'py>,
+        id: u32,
+        reply: &[u8],
+        data: &[u8],
+    ) -> PyResult<(Option<u32>, Bound<'py, PyBytes>)> {
+        let mut out = Vec::new();
+        let conn = self
+            .inner
+            .complete(id, reply, data, &mut out)
+            .map_err(|err| StreamError::new_err((err.message,)))?;
+        Ok((conn, PyBytes::new(py, &out)))
+    }
+
+    /// Forget connection `conn` and the calls it has out.
+    fn close(&mut self, conn: u32) {
+        self.inner.close(conn);
+    }
+}
+
 #[pymodule]
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stream>()?;
+    m.add_class::<NFSServer>()?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
     Ok(())
 }

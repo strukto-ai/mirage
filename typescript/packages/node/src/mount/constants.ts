@@ -34,3 +34,6 @@ export const STATUS = {
 // SSH connection around it, and the size it cuts each answer to there.
 export const SSH2_SFTP_MODULE = 'ssh2/lib/protocol/SFTP.js'
 export const PIPE_PACKET_SIZE = 64 * 1024
+
+/** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
+export const LISTING_CONCURRENCY = 16

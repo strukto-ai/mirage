@@ -120,10 +120,12 @@ def check_mountpoint(backend: MountBackend, mountpoint: str) -> None:
 def check_sizes(
     backend: MountBackend, files: WorkspaceFiles, root_prefix: str = ""
 ) -> None:
-    """Warn when an fskit mount will serve size-unknown files as empty.
+    """Warn when an fskit or nfs mount will serve size-unknown files as
+    empty.
 
-    FSKit drives reads from the size the filesystem reports and has no
-    ``direct_io`` escape hatch, so a VFS that cannot size a file
+    FSKit and the kernel NFS client drive reads from the size the
+    filesystem reports and have no ``direct_io`` escape hatch, so a VFS
+    that cannot size a file
     without fetching it reports 0, the kernel issues no reads, and every
     such file comes back empty with exit code 0 (verified on a live fskit
     mount: the read clamp is pinned at lookup-time size and never
@@ -136,19 +138,21 @@ def check_sizes(
         files (WorkspaceFiles): ``ws.vfs`` whose mounts are being served.
         root_prefix (str): mount root, when the tree is scoped to one mount.
     """
-    if backend is not MountBackend.FSKIT:
+    if backend not in (MountBackend.FSKIT, MountBackend.NFS):
         return
     offenders = files.unsized_mounts(root_prefix)
     if not offenders:
         return
     listed = ", ".join(f"{prefix} ({name})" for prefix, name in offenders)
     logger.warning(
-        "the fskit mount backend cannot serve mounts whose file sizes "
+        "the %s mount backend cannot serve mounts whose file sizes "
         "are only known after a read; size-unknown files under these "
         "mounts will read as empty: %s. Mount them with backend='fuse', "
-        "or scope the fskit mount to a byte-store VFS (ram, disk, "
+        "or scope the %s mount to a byte-store VFS (ram, disk, "
         "redis, s3, gridfs).",
+        backend.value,
         listed,
+        backend.value,
     )
 
 
