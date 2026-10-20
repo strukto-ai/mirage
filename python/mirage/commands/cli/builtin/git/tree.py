@@ -21,6 +21,7 @@ from dulwich.repo import BaseRepo
 from mirage.commands.cli.builtin.git.constants import TREE
 from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
+from mirage.commands.cli.builtin.git.seen import rooted
 
 Tree = dict[bytes, tuple[int, bytes]]
 
@@ -83,6 +84,7 @@ def resolve_tree(
         repo, resolve_object(repo, name) if obj is None else obj, name
     )
     if isinstance(obj, Commit):
+        rooted(repo, obj.tree)
         return ObjectID(obj.tree)
     if isinstance(obj, GitTree):
         return ObjectID(obj.id)

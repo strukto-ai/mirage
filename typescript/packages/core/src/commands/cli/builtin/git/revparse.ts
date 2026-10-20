@@ -25,12 +25,14 @@ import {
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, readOptional } from './io.ts'
+import { visiblePath } from './pathspec.ts'
 
 import { isEnotdir } from '../../../../errors/fs.ts'
 import type { CommitFacts } from './format.ts'
 import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { loadRefs, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { guarded, located, placeOf, placed, rooted } from './seen.ts'
 import type { AncestryStep, GitObject, RevOp } from './types.ts'
 
 const ANCESTOR = '~'
@@ -288,10 +290,13 @@ export async function unwrapped(
   revision: string,
 ): Promise<GitObject> {
   let { oid, type } = found
+  const tagged = type === TAG
   while (type === TAG) {
     oid = (await git.readTag({ ...repoArgs(repo), oid })).tag.object
     type = await typeOf(repo, oid, revision)
   }
+  if (tagged && (await located(repo, { oid, type })) === null)
+    throw new AmbiguousArgumentError(revision)
   return { oid, type }
 }
 
@@ -325,6 +330,7 @@ async function peeled(
   if (want === '') return { oid, type }
   if (want === TREE && type === COMMIT) {
     oid = (await git.readCommit({ ...repoArgs(repo), oid })).commit.tree
+    rooted(repo, oid)
     type = TREE
   }
   if (type !== want) throw new AmbiguousArgumentError(revision)
@@ -350,16 +356,30 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   // A tag is no tree and holds no path, so it comes off first: the rev half is
   // a tree-ish, and `<tag-id>:a.txt` reads the blob through it exactly as
   // `v1:a.txt` does.
-  const holder = await unwrapped(repo, named, revision)
+  let holder = await unwrapped(repo, named, revision)
+  if (holder.type === COMMIT) {
+    const tree = (await git.readCommit({ ...repoArgs(repo), oid: holder.oid })).commit.tree
+    rooted(repo, tree)
+    holder = { oid: tree, type: TREE }
+  }
+  let found: GitObject
   try {
     // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const found = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
-    return { oid: found.oid, type: found.type }
+    const read = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
+    found = { oid: read.oid, type: read.type }
   } catch (err) {
     if (err instanceof Errors.NotFoundError || err instanceof Errors.ObjectTypeError)
       throw new PathNotInRevisionError(path, rev, await onDisk(repo, path))
     throw err
   }
+  // The path is the tree's own, so it stands where the tree does: a commit's
+  // at the root, a subtree named by id where it was found. A hidden place is
+  // one the history never had, in the same words.
+  const base = await placeOf(repo, holder.oid)
+  const place = base ? `${base}/${path}` : path
+  if (guarded(repo) && !visiblePath(repo.location, place))
+    throw new PathNotInRevisionError(path, rev, false)
+  return placed(repo, found, place)
 }
 
 /**
@@ -389,6 +409,8 @@ async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
   const staged = STAGED.exec(spec)
   const stage = staged === null ? 0 : Number(spec.charAt(0))
   const path = staged === null ? spec : spec.slice(staged[0].length)
+  // A hidden place is one the index never held, in the same words.
+  if (guarded(repo) && !visiblePath(repo.location, path)) throw new PathNotInIndexError(path, false)
   const state = await readIndex(repo, repo.vfs)
   const conflicted = state.conflicts.get(path)
   const stages = [
@@ -399,7 +421,8 @@ async function inIndex(repo: Repo, spec: string): Promise<GitObject> {
   ]
   const found = stages[stage]
   if (found !== undefined && found !== null) {
-    return { oid: found.oid, type: found.mode.toString(8) === GITLINK_MODE ? COMMIT : 'blob' }
+    const type = found.mode.toString(8) === GITLINK_MODE ? COMMIT : 'blob'
+    return placed(repo, { oid: found.oid, type }, path)
   }
   const held = stages.findIndex((entry) => entry !== undefined && entry !== null)
   if (held !== -1) throw new PathNotAtStageError(path, stage, held)
@@ -674,19 +697,17 @@ export async function resolveObject(repo: Repo, revision: string): Promise<GitOb
   if (mark === 0) return inIndex(repo, revision.slice(1))
   if (mark > 0) return atPath(repo, revision.slice(0, mark), revision.slice(mark + 1), revision)
   const [base, ops] = splitOperators(revision)
-  if (ops.length === 0) {
-    // A name or id stands for exactly the object it names, so an annotated
-    // tag is the tag rather than the commit behind it: git does not peel one
-    // until a caller asks for a commit-ish, and `git rev-parse v1` prints the
-    // tag's id.
-    const oid = await namedObject(repo, revision, revision)
-    return { oid, type: await typeOf(repo, oid, revision) }
-  }
+  // A name or id stands for exactly the object it names, so an annotated tag
+  // is the tag rather than the commit behind it: git does not peel one until a
+  // caller asks for a commit-ish, and `git rev-parse v1` prints the tag's id.
   // Every operator but `^{tag}` and `^{object}` unwraps a tag, which is git's
   // own rule and costs nothing here. A base that names nothing fails naming the
   // whole revision, as git's does.
-  const named = await namedObject(repo, base, revision)
+  const named = await namedObject(repo, ops.length === 0 ? revision : base, revision)
   let obj: GitObject = { oid: named, type: await typeOf(repo, named, revision) }
+  // An id, or a ref pointing past every commit, names an object with no place:
+  // it is shown where the session sees it, else names nothing.
+  if ((await located(repo, obj)) === null) throw new AmbiguousArgumentError(revision)
   for (const op of ops) {
     if ('want' in op) {
       obj = await peeled(repo, obj, op.want, revision)

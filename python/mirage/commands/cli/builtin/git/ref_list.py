@@ -55,6 +55,7 @@ from mirage.commands.cli.builtin.git.render import (
 )
 from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.revparse import refs_named
+from mirage.commands.cli.builtin.git.seen import visible_object
 from mirage.commands.cli.builtin.git.types import (
     DateMode,
     HeadRef,
@@ -280,10 +281,7 @@ def _peeled(repo: BaseRepo, obj: RefObject) -> RefObject | None:
             return None
         target = head[len(OBJECT_HEADER) :].decode("ascii", "replace").strip()
         # Only a store that does not hash what it holds can loop.
-        if (
-            target in seen
-            or ObjectID(target.encode()) not in repo.object_store
-        ):
+        if target in seen or not visible_object(repo, target.encode()):
             return None
         seen.add(target)
         shown = _object(repo, target)
@@ -324,7 +322,9 @@ def listed_refs(
         oid, symref = resolve_ref(table, name)
         if oid is None:
             continue
-        if ObjectID(oid.encode()) not in repo.object_store:
+        # An object the session is not shown is one the store lacks:
+        # a ref can be written to name any id, a hidden blob's included.
+        if not visible_object(repo, oid.encode()):
             errors.append(f"error: {name} does not point to a valid object!\n")
             continue
         item = RefItem(name=name, oid=oid, kind=ref_kind(name), symref=symref)

@@ -42,6 +42,7 @@ import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject } from './revparse.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
+import { located, shownItems } from './seen.ts'
 import {
   checkOperands,
   fatal,
@@ -210,19 +211,22 @@ export async function show(
       let shownOne = false
       for (const [name, obj] of objects) {
         let target = obj
+        const tagged = target.type === 'tag'
         while (target.type === 'tag') {
           const [block, next] = await tagBlock(repo, target.oid, parsed)
           parts.push(encodeText(`${shownOne ? '\n' : ''}${block}`))
           shownOne = true
           target = next
         }
+        // A tag can point past every commit at a tree or a blob, which is
+        // shown only where the session sees it.
+        if (tagged && (await located(repo, target)) === null) continue
         if (target.type === 'blob') {
           parts.push((await git.readBlob({ ...repoArgs(repo), oid: target.oid })).blob)
           continue
         }
         if (target.type === 'tree') {
-          const { tree } = await git.readTree({ ...repoArgs(repo), oid: target.oid })
-          const body = tree
+          const body = (await shownItems(repo, target.oid))
             .map((entry) => entry.path + (entry.type === 'tree' ? '/' : '') + '\n')
             .join('')
           parts.push(encodeText(`${shownOne ? '\n' : ''}tree ${name}\n\n${body}`))

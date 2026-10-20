@@ -25,6 +25,7 @@ from mirage.commands.cli.builtin.git.constants import (
     GITLINK,
 )
 from mirage.commands.cli.builtin.git.render import quote_path
+from mirage.commands.cli.builtin.git.seen import readable
 from mirage.commands.cli.builtin.git.summary import BINARY_SNIFF
 from mirage.shell.bytes import encode_text
 
@@ -47,6 +48,7 @@ def blob_data(repo: BaseRepo, entry: tuple[int, bytes] | None) -> bytes:
         return b""
     if entry[0] == GITLINK:
         return b"Subproject commit " + entry[1] + b"\n"
+    readable(repo, entry[1])
     obj = repo.object_store[ObjectID(entry[1])]
     assert isinstance(obj, Blob)
     return obj.data

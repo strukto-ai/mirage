@@ -35,6 +35,12 @@ from mirage.commands.cli.builtin.git.errors import (
     UsageError,
 )
 from mirage.commands.cli.builtin.git.revparse import resolve_object
+from mirage.commands.cli.builtin.git.seen import (
+    guarded,
+    located,
+    rooted,
+    shown_items,
+)
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
@@ -81,17 +87,36 @@ def peeled(repo: BaseRepo, obj: ShaFile, want: str) -> ShaFile | None:
     while obj.type_name.decode() != want:
         if isinstance(obj, Tag):
             obj = repo[obj.object[1]]
+            # A tag can point past every commit at a tree or a blob,
+            # which is there only where the session is shown it.
+            if located(repo, obj) is None:
+                return None
         elif isinstance(obj, Commit) and want == "tree":
+            rooted(repo, obj.tree)
             obj = repo[obj.tree]
         else:
             return None
     return obj
 
 
-def pretty(obj: ShaFile) -> bytes:
-    """``-p``: a tree as ls-tree lists it, any other object as stored.
+def typed_object(repo: BaseRepo, name: str, want: str) -> ShaFile | None:
+    """The object a name stands for, peeled to a type; off the event
+    loop, since peeling may look for where the session sees a target.
 
     Args:
+        repo (BaseRepo): the opened repository.
+        name (str): the object name as typed.
+        want (str): the type asked for.
+    """
+    return peeled(repo, named_object(repo, name), want)
+
+
+def pretty(repo: BaseRepo, obj: ShaFile) -> bytes:
+    """``-p``: a tree as ls-tree lists it, the entries the session sees
+    at the place it was found, any other object as stored.
+
+    Args:
+        repo (BaseRepo): the opened repository.
         obj (ShaFile): the object.
     """
     if not isinstance(obj, Tree):
@@ -99,7 +124,7 @@ def pretty(obj: ShaFile) -> bytes:
     kinds = {TREE: b"tree", GITLINK: b"commit"}
     return b"".join(
         b"%06o %s %s\t%s\n" % (mode, kinds.get(mode, b"blob"), sha, name)
-        for name, mode, sha in obj.iteritems()
+        for name, mode, sha in shown_items(repo, obj)
     )
 
 
@@ -112,7 +137,17 @@ def _query(repo: BaseRepo, mode: str, name: str) -> tuple[bytes, int]:
         name (str): the object name as typed.
     """
     if mode == "e" and HEX_ID.fullmatch(name):
-        return b"", 0 if ObjectID(name.encode()) in repo.object_store else 1
+        if not guarded(repo):
+            return b"", 0 if ObjectID(
+                name.encode()
+            ) in repo.object_store else 1
+        # The session could be hiding what the id names, so only an
+        # object it is shown exists; any other is as silent as none.
+        try:
+            named_object(repo, name)
+        except GitError:
+            return b"", 1
+        return b"", 0
     obj = named_object(repo, name)
     if mode == "t":
         return obj.type_name + b"\n", 0
@@ -120,7 +155,7 @@ def _query(repo: BaseRepo, mode: str, name: str) -> tuple[bytes, int]:
         return b"%d\n" % len(obj.as_raw_string()), 0
     if mode == "e":
         return b"", 0
-    return pretty(obj), 0
+    return pretty(repo, obj), 0
 
 
 def _batch_head(
@@ -249,9 +284,7 @@ async def cat_file(
         if kind not in OBJECT_TYPES:
             raise GitError(f'invalid object type "{kind}"')
         repo, _ = await opened(ctx, fl)
-        obj = peeled(
-            repo, await asyncio.to_thread(named_object, repo, name), kind
-        )
+        obj = await asyncio.to_thread(typed_object, repo, name, kind)
         if obj is None:
             raise GitError(f"git cat-file {name}: bad file")
         return obj.as_raw_string(), IOResult()

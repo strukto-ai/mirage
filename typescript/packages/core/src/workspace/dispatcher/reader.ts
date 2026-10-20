@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type FileStat, PathSpec, type Visibility } from '../../types.ts'
-import { leadsHidden, pathVisible } from '../../utils/hidden.ts'
+import { hiddenUnder, leadsHidden, pathVisible } from '../../utils/hidden.ts'
 import { norm, posixNormpath } from '../../utils/path.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -76,6 +76,16 @@ export class NamespaceReader {
   visible(path: string | PathSpec): boolean {
     const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
     return sees(this.visibility(), this.links, virtual)
+  }
+
+  /**
+   * Whether the session could hide anything at or under `path`, so a reader
+   * of a store of its own (a repository's history, say) has to ask `visible`
+   * of what it finds there.
+   */
+  hidesUnder(path: string | PathSpec): boolean {
+    const virtual = PathSpec.fromStrPath(path, undefined, '/').virtual
+    return hiddenUnder(this.visibility(), virtual)
   }
 
   /**

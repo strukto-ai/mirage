@@ -51,6 +51,7 @@ import { BRANCH_PREFIX, loadRefs, SYMREF_PREFIX } from './refs.ts'
 import { opened } from './session.ts'
 import { restored } from './reset.ts'
 import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
+import { checkRules } from './seen.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
 import type { GitObject, IndexEntry } from './types.ts'
 import { checkSwitches, fatal, startPoint } from './util.ts'
@@ -272,6 +273,9 @@ export async function restorePaths(
   const dropped = absent.filter((name) => !linked.some((root) => inside(name, root)))
   if (worktree) {
     await refuseReplacedMounts(vfs, repo.location.worktree, replacing)
+    // A rule refusing a file the working-tree pass writes or removes is asked
+    // here too, so its refusal leaves the index as it was.
+    for (const name of [...replacing, ...dropped]) checkRules(repo.location, name)
   }
   if (staged) {
     const staged = new Map<string, StagedEntry>()

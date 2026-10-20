@@ -87,5 +87,12 @@ data, and out of their counts and totals: `git status`, `git ls-files`,
 `git diff --stat` and `git log --name-only` neither name nor count a file
 another session staged under it.
 
+A repository's history counts as the path too. Under a hide, no revision ever
+held it: `git show HEAD:secret.txt` answers as it would for a path never
+committed, `git log -S` finds nothing in it, and an object id stored only
+there names nothing. Under a deny rule, git refuses to print the path's content
+from any revision (`git log -p`, `git show HEAD:secret.txt`) as it refuses the
+file, and still lists the name.
+
 Use [Explain](/home/policy/explain) to check a rule before running a line.
 For conditions beyond these patterns, attach a [policy script](/home/policy/scripts).

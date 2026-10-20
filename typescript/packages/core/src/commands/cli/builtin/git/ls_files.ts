@@ -30,6 +30,7 @@ import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
 import { entryPath, printed, type Line } from './rows.ts'
+import { placeOf } from './seen.ts'
 import { opened } from './session.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { listedTree, resolveTree, TREE_MODE } from './tree.ts'
@@ -104,6 +105,9 @@ export async function lsTree(
         throw new GitError(`Not a valid object name ${name}`)
       throw err
     }
+    // Each row stands where the tree does, so the hides it is filtered by are
+    // the ones at that place, not at the root.
+    const base = await placeOf(repo, tree)
     const fullTree = fl.asBool('full_tree')
     const start = fullTree ? repo.location.worktree.virtual : startPoint(fl).virtual
     const prefix = repoRelative(repo.location, start, '.')
@@ -133,7 +137,7 @@ export async function lsTree(
       const label = nul ? relative : quotePath(relative, false, fully)
       const kind = mode === TREE_MODE ? 'tree' : mode === GITLINK_MODE ? 'commit' : 'blob'
       const text = (names ? '' : `${mode} ${kind} ${oid}\t`) + label + terminator
-      out.push({ path: entryPath(repo.location, path), text })
+      out.push({ path: entryPath(repo.location, base ? `${base}/${path}` : path), text })
     }
     return [null, new IOResult({ rows: { items: out, render: printed } })]
   } catch (err) {

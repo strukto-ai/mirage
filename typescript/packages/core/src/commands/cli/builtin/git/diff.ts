@@ -33,6 +33,7 @@ import {
 import { pathspecPatterns } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
+import { shownEntries } from './seen.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
 import { fatal, optionOperand, splitMarked, startPoint, STDERR, verbUsage } from './util.ts'
@@ -62,20 +63,22 @@ async function sides(
   if (ends === null) {
     const second = texts[1]
     return [
-      await commitEntries(repo, await resolveCommit(repo, first)),
-      second === undefined ? null : await commitEntries(repo, await resolveCommit(repo, second)),
+      shownEntries(repo, await commitEntries(repo, await resolveCommit(repo, first))),
+      second === undefined
+        ? null
+        : shownEntries(repo, await commitEntries(repo, await resolveCommit(repo, second))),
       '',
     ]
   }
   const [left, right, symmetric] = ends
-  const after = await treeEntries(repo, right.tree)
-  if (!symmetric) return [await treeEntries(repo, left.tree), after, '']
+  const after = shownEntries(repo, await treeEntries(repo, right.tree))
+  if (!symmetric) return [shownEntries(repo, await treeEntries(repo, left.tree)), after, '']
   const bases = await mergeBases(repo, left, right)
   const base = bases[0]
   if (base === undefined) throw new NoMergeBaseError(first)
   const warning =
     bases.length > 1 ? `warning: ${first}: multiple merge bases, using ${base.oid}\n` : ''
-  return [await treeEntries(repo, base.tree), after, warning]
+  return [shownEntries(repo, await treeEntries(repo, base.tree)), after, warning]
 }
 
 /**
@@ -120,9 +123,12 @@ export async function diff(
       if (revisions.length > 1) throw new GitError('--cached accepts at most one revision')
       const state = await readIndex(repo, repo.vfs)
       refuseUnresolved(state)
-      before = revisions.length
-        ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
-        : ((await headEntries(repo)) ?? new Map<string, TreeEntry>())
+      before = shownEntries(
+        repo,
+        revisions.length
+          ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
+          : ((await headEntries(repo)) ?? new Map<string, TreeEntry>()),
+      )
       after = stagedEntries(state)
     } else {
       const [old, fresh, note] = await sides(repo, revisions)

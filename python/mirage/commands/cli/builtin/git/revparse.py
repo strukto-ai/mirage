@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import posixpath
 import re
 from collections.abc import Iterable
 
@@ -33,9 +34,17 @@ from mirage.commands.cli.builtin.git.errors import (
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import exists, read_optional
+from mirage.commands.cli.builtin.git.pathspec import visible_path
 from mirage.commands.cli.builtin.git.ref_fields import MINIMUM_ABBREV
 from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
 from mirage.commands.cli.builtin.git.repo import Repo
+from mirage.commands.cli.builtin.git.seen import (
+    guarded,
+    located,
+    place_of,
+    placed,
+    rooted,
+)
 from mirage.commands.cli.builtin.git.types import AncestryStep, PeelStep, RevOp
 
 ANCESTOR = "~"
@@ -478,8 +487,11 @@ def unwrapped(repo: BaseRepo, obj: ShaFile, revision: str) -> ShaFile:
         obj (ShaFile): the object to unwrap.
         revision (str): the whole revision, for error attribution.
     """
+    tagged = isinstance(obj, Tag)
     while isinstance(obj, Tag):
         obj = _object_by_id(repo, obj.object[1], revision)
+    if tagged and located(repo, obj) is None:
+        raise AmbiguousArgumentError(revision)
     return obj
 
 
@@ -517,6 +529,7 @@ def _peeled(repo: BaseRepo, obj: ShaFile, want: str, revision: str) -> ShaFile:
     if want == "":
         return obj
     if want == TREE and isinstance(obj, Commit):
+        rooted(repo, obj.tree)
         obj = _object_by_id(repo, obj.tree, revision)
     if obj.type_name.decode() != want:
         raise AmbiguousArgumentError(revision)
@@ -545,6 +558,7 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
     # through it exactly as ``v1:a.txt`` does.
     holder = unwrapped(repo, named, revision)
     if isinstance(holder, Commit):
+        rooted(repo, holder.tree)
         holder = _object_by_id(repo, holder.tree, revision)
     if not isinstance(holder, Tree):
         raise AmbiguousArgumentError(revision)
@@ -554,7 +568,17 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
         )
     except (KeyError, NotTreeError, ValueError) as exc:
         raise PathNotInRevisionError(path, rev, _on_disk(repo, path)) from exc
-    return _object_by_id(repo, sha, revision)
+    # The path is the tree's own, so it stands where the tree does: a
+    # commit's at the root, a subtree named by id where it was found. A
+    # hidden place is one the history never had, in the same words.
+    place = posixpath.join(place_of(repo, holder.id), path)
+    if (
+        isinstance(repo, Repo)
+        and guarded(repo)
+        and not visible_path(repo.location, place)
+    ):
+        raise PathNotInRevisionError(path, rev, False)
+    return placed(repo, _object_by_id(repo, sha, revision), place)
 
 
 def _on_disk(repo: BaseRepo, path: str) -> bool:
@@ -592,7 +616,10 @@ def _in_index(repo: BaseRepo, spec: str) -> ShaFile:
     staged = STAGED.match(spec)
     stage = int(spec[0]) if staged else 0
     path = spec[staged.end() :] if staged else spec
-    if not isinstance(repo, Repo):
+    # A hidden place is one the index never held, in the same words.
+    if not isinstance(repo, Repo) or (
+        guarded(repo) and not visible_path(repo.location, path)
+    ):
         raise PathNotInIndexError(path, False)
     state = run_async_from_sync(
         read_index(repo.dispatch, repo.location.gitdir), repo.loop
@@ -607,7 +634,9 @@ def _in_index(repo: BaseRepo, spec: str) -> ShaFile:
     )
     found = stages[stage]
     if found is not None:
-        return _object_by_id(repo, ObjectID(found.sha), spec)
+        return placed(
+            repo, _object_by_id(repo, ObjectID(found.sha), spec), path
+        )
     held = next(
         (at for at, entry in enumerate(stages) if entry is not None), -1
     )
@@ -671,11 +700,17 @@ def _named_object(repo: BaseRepo, name: str, revision: str) -> ShaFile:
         except KeyError as exc:
             raise AmbiguousArgumentError(revision) from exc
         note_ambiguity(repo, name)
-        return _object_by_id(repo, ObjectID(sha), revision)
-    try:
-        return object_at(repo, name)
-    except (KeyError, ValueError) as exc:
-        raise AmbiguousArgumentError(revision) from exc
+        obj = _object_by_id(repo, ObjectID(sha), revision)
+    else:
+        try:
+            obj = object_at(repo, name)
+        except (KeyError, ValueError) as exc:
+            raise AmbiguousArgumentError(revision) from exc
+    # An id, or a ref pointing past every commit, names an object with no
+    # place: it is shown where the session sees it, else names nothing.
+    if located(repo, obj) is None:
+        raise AmbiguousArgumentError(revision)
+    return obj
 
 
 def tag_object(repo: BaseRepo, stem: str) -> Tag | None:

@@ -18,6 +18,7 @@ import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { FUNCNAME_START, GIT_SPACE, GITLINK_MODE } from './constants.ts'
 import { quotePath } from './render.ts'
 import { readBlobBytes, type Repo } from './repo.ts'
+import { readable } from './seen.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
 
@@ -31,6 +32,7 @@ export const DEV_NULL = '/dev/null'
 export async function blobData(repo: Repo, entry: TreeEntry | null): Promise<Uint8Array> {
   if (!entry) return new Uint8Array()
   if (entry.mode === GITLINK_MODE) return encodeText(`Subproject commit ${entry.oid}\n`)
+  readable(repo, entry.oid)
   return readBlobBytes(repo, entry.oid)
 }
 

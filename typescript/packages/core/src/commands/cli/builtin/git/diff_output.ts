@@ -10,6 +10,7 @@ import { blobData, DEV_NULL, filePatch, HUNK_CONTEXT, OID_HEX, shortOid } from '
 import { quotePath } from './render.ts'
 import { deltas, shownSides, type Delta, type Side } from './rows.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { readable, shownEntries } from './seen.ts'
 import { BINARY_SNIFF, diffstat, statTable, type FileStat } from './summary.ts'
 import { matches, type Pickaxe } from './pickaxe.ts'
 import { TREE_MODE, treeEntries, treeItems, type TreeEntry } from './tree.ts'
@@ -267,6 +268,8 @@ export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags
 async function rowStat(repo: Repo, row: Change, display: string): Promise<FileStat> {
   const before = new Map(row.old ? [[row.path, row.old]] : []),
     after = new Map(row.new ? [[row.path, row.new]] : [])
+  // Counting lines reads both sides, as a patch does.
+  for (const side of [row.old, row.new]) if (side !== null) readable(repo, side.oid)
   const counted = (await diffstat(repo, before, after))[0]
   if (counted) return { ...counted, path: display }
   const fresh = (await diffstat(repo, new Map(), after))[0]
@@ -306,9 +309,12 @@ export async function entries(
   pathspecs: readonly string[] = [],
 ): Promise<Map<string, TreeEntry>> {
   if (tree === null) return new Map()
-  if (recursive) return limited(await treeEntries(repo, tree), pathspecs)
-  const items = await treeItems(repo, tree)
-  return limited(new Map(items.map((e) => [e.path, { mode: e.mode, oid: e.oid }])), pathspecs)
+  const found = recursive
+    ? await treeEntries(repo, tree)
+    : new Map((await treeItems(repo, tree)).map((e) => [e.path, { mode: e.mode, oid: e.oid }]))
+  // A commit's tree stands at the root; what the session cannot see there is
+  // no side of any change, so no patch, count or match.
+  return limited(shownEntries(repo, found), pathspecs)
 }
 
 /**

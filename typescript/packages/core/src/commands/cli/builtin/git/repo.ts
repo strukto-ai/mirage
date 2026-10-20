@@ -70,6 +70,23 @@ export interface Repo {
    * when `core.warnAmbiguousRefs` is off or nothing collects them.
    */
   readonly ambiguous: string[] | null
+  /**
+   * Where this command found each tree and blob it was shown,
+   * repository-relative (`seen.ts`).
+   */
+  readonly places: Map<string, string>
+  /**
+   * Whether a hide or a rule could cover anything in the working tree for the
+   * running command, once asked (`guarded`); null until then.
+   */
+  guarded: boolean | null
+  /**
+   * Blobs this command listed at a place a rule may keep from it, each with
+   * the first such place.
+   */
+  readonly sealed: Map<string, string>
+  /** Blobs it listed where it may read them. */
+  readonly free: Set<string>
 }
 
 /** The argument bag every isomorphic-git call in this package shares. */
@@ -217,6 +234,10 @@ export async function openRepo(
     abbrev: abbrevLength(await packedCount(vfs, location.commondir)),
     held: new Map(),
     ambiguous,
+    places: new Map(),
+    guarded: null,
+    sealed: new Map(),
+    free: new Set(),
   }
 }
 

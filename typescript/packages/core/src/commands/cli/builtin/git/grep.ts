@@ -20,7 +20,7 @@ import {
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { exists, isLink, readOptional } from './io.ts'
-import { pathspecPatterns, pathspecSelects, repoRelative, visiblePath } from './pathspec.ts'
+import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { EXECUTABLE, EXECUTABLE_MODE, REGULAR, REGULAR_MODE } from './constants.ts'
 import { blobData } from './patch.ts'
@@ -28,6 +28,7 @@ import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
+import { placeOf, shownEntries } from './seen.ts'
 import { resolveTree, treeEntries, type TreeEntry } from './tree.ts'
 import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util.ts'
 
@@ -144,11 +145,15 @@ function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Arra
   ]
 }
 
-/** The searchable leaves of a tree-ish, or a directly named blob. */
+/**
+ * The searchable leaves of a tree-ish the session sees, keyed relative to it,
+ * or a directly named blob.
+ */
 async function searchEntries(repo: Repo, name: string): Promise<Map<string, TreeEntry>> {
   const obj = await unwrapped(repo, await resolveObject(repo, name), name)
   if (obj.type === 'blob') return new Map([['', { mode: REGULAR_MODE, oid: obj.oid }]])
-  return treeEntries(repo, await resolveTree(repo, name, obj))
+  const tree = await resolveTree(repo, name, obj)
+  return shownEntries(repo, await treeEntries(repo, tree), await placeOf(repo, tree))
 }
 
 /** Search tracked working files, index blobs, or named historical trees. */
@@ -231,7 +236,7 @@ export async function grep(
           }
         }
       }
-      sources.push(['', entries])
+      sources.push(['', shownEntries(repo, entries)])
     }
     const out: Uint8Array[] = []
     let found = false
@@ -239,9 +244,11 @@ export async function grep(
       for (const [path, entry] of [...entries].sort(([a], [b]) =>
         compareCodePoints(byteView(a), byteView(b)),
       )) {
+        // Every source is what the session sees already, at the place its
+        // tree stands.
         if (
           ![REGULAR_MODE, EXECUTABLE_MODE].includes(entry.mode) ||
-          (path && (!visiblePath(repo.location, path) || !pathspecSelects(path, specs)))
+          (path && !pathspecSelects(path, specs))
         )
           continue
         let data: Uint8Array | null

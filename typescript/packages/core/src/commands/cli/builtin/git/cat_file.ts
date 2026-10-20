@@ -30,6 +30,7 @@ import {
 import { OBJECT_TYPES } from './constants.ts'
 import { rawObject, repoArgs, type Repo } from './repo.ts'
 import { resolveObject } from './revparse.ts'
+import { guarded, located, rooted, shownItems } from './seen.ts'
 import { opened } from './session.ts'
 import type { GitObject } from './types.ts'
 import { checkSwitches, fatal, verbUsage } from './util.ts'
@@ -72,8 +73,12 @@ async function peeled(repo: Repo, obj: GitObject, want: string): Promise<GitObje
     if (at.type === 'tag') {
       const { tag } = await git.readTag({ ...repoArgs(repo), oid: at.oid })
       at = { oid: tag.object, type: tag.type }
+      // A tag can point past every commit at a tree or a blob, which is there
+      // only where the session is shown it.
+      if ((await located(repo, at)) === null) return null
     } else if (at.type === 'commit' && want === 'tree') {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid: at.oid })
+      rooted(repo, commit.tree)
       at = { oid: commit.tree, type: 'tree' }
     } else {
       return null
@@ -82,12 +87,26 @@ async function peeled(repo: Repo, obj: GitObject, want: string): Promise<GitObje
   return at
 }
 
-/** `-p`: a tree as ls-tree lists it, any other object as stored. */
+/**
+ * The object a name stands for, peeled to a type, as `git cat-file <type>`
+ * reads it.
+ *
+ * @param repo the opened repository
+ * @param name the object name as typed
+ * @param want the type asked for
+ */
+async function typedObject(repo: Repo, name: string, want: string): Promise<GitObject | null> {
+  return peeled(repo, await namedObject(repo, name), want)
+}
+
+/**
+ * `-p`: a tree as ls-tree lists it, the entries the session sees at the place
+ * it was found, any other object as stored.
+ */
 async function pretty(repo: Repo, obj: GitObject): Promise<Uint8Array> {
   if (obj.type !== 'tree') return raw(repo, obj.oid)
-  const { tree } = await git.readTree({ ...repoArgs(repo), oid: obj.oid })
   return ENC.encode(
-    tree
+    (await shownItems(repo, obj.oid))
       .map((entry) => `${entry.mode.padStart(6, '0')} ${entry.type} ${entry.oid}\t${entry.path}\n`)
       .join(''),
   )
@@ -96,13 +115,24 @@ async function pretty(repo: Repo, obj: GitObject): Promise<Uint8Array> {
 /** One query mode's answer for one name, and its exit status. */
 async function query(repo: Repo, mode: string, name: string): Promise<[Uint8Array, number]> {
   if (mode === 'e' && HEX_ID.test(name)) {
+    if (!guarded(repo)) {
+      try {
+        await raw(repo, name)
+        return [new Uint8Array(), 0]
+      } catch (err) {
+        if (err instanceof Errors.NotFoundError) return [new Uint8Array(), 1]
+        throw err
+      }
+    }
+    // The session could be hiding what the id names, so only an object it is
+    // shown exists; any other is as silent as none.
     try {
-      await raw(repo, name)
-      return [new Uint8Array(), 0]
+      await namedObject(repo, name)
     } catch (err) {
-      if (err instanceof Errors.NotFoundError) return [new Uint8Array(), 1]
+      if (err instanceof GitError) return [new Uint8Array(), 1]
       throw err
     }
+    return [new Uint8Array(), 0]
   }
   const obj = await namedObject(repo, name)
   if (mode === 't') return [ENC.encode(`${obj.type}\n`), 0]
@@ -234,7 +264,7 @@ export async function catFile(
       throw new GitError(`invalid object type "${kind}"`)
     }
     const repo = await opened(ctx, fl)
-    const obj = await peeled(repo, await namedObject(repo, name), kind)
+    const obj = await typedObject(repo, name, kind)
     if (obj === null) throw new GitError(`git cat-file ${name}: bad file`)
     return [await raw(repo, obj.oid), new IOResult()]
   } catch (err) {

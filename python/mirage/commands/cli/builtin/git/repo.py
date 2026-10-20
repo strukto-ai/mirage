@@ -46,6 +46,16 @@ class Repo(BaseRepo):
             answer to puts git's ``refname is ambiguous`` warning, for
             the verb to print ahead of its own stderr; None when
             ``core.warnAmbiguousRefs`` is off or nothing collects them.
+
+    Attributes:
+        places (dict[bytes, str]): where this command found each tree
+            and blob it was shown, repository-relative (``seen``).
+        guarded (bool | None): whether a hide or a rule could cover
+            anything in the working tree for the running command, once
+            asked (``seen.guarded``).
+        sealed (dict[bytes, str]): blobs this command listed at a place a
+            rule may keep from it, each with the first such place.
+        free (set[bytes]): blobs it listed where it may read them.
     """
 
     def __init__(
@@ -62,6 +72,10 @@ class Repo(BaseRepo):
         self.location = location
         self.loop = loop
         self.ambiguous = ambiguous
+        self.places: dict[bytes, str] = {}
+        self.guarded: bool | None = None
+        self.sealed: dict[bytes, str] = {}
+        self.free: set[bytes] = set()
 
 
 async def open_repo(

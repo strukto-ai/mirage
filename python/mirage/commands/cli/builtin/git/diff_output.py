@@ -52,6 +52,7 @@ from mirage.commands.cli.builtin.git.rows import (
     deltas,
     shown_sides,
 )
+from mirage.commands.cli.builtin.git.seen import readable, shown_entries
 from mirage.commands.cli.builtin.git.summary import (
     BINARY_SNIFF,
     FileStat,
@@ -418,6 +419,10 @@ def _row_stat(repo: BaseRepo, row: Change, display: str) -> FileStat:
     """
     before = {row.path: row.old} if row.old else {}
     after = {row.path: row.new} if row.new else {}
+    # Counting lines reads both sides, as a patch does.
+    for side in (row.old, row.new):
+        if side is not None:
+            readable(repo, side[1])
     counted = diffstat(repo.object_store, before, after)
     if counted:
         return replace(counted[0], path=display)
@@ -471,7 +476,9 @@ def entries(
         obj = repo.object_store[ObjectID(tree)]
         assert isinstance(obj, Tree)
         found = {e.path: (e.mode, e.sha) for e in obj.iteritems()}
-    return limited(found, pathspecs)
+    # A commit's tree stands at the root; what the session cannot see
+    # there is no side of any change, so no patch, count or match.
+    return limited(shown_entries(repo, found), pathspecs)
 
 
 def limited(

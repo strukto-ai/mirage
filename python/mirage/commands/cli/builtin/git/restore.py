@@ -61,6 +61,7 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_object,
     unwrapped,
 )
+from mirage.commands.cli.builtin.git.seen import check_rules
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
@@ -329,6 +330,10 @@ async def restore_paths(
     )
     if worktree:
         await refuse_replaced_mounts(vfs, location.worktree, replacing)
+        # A rule refusing a file the working-tree pass writes or removes
+        # is asked here too, so its refusal leaves the index as it was.
+        for name in (*replacing, *dropped):
+            check_rules(location, name)
     if staged:
         for name in present:
             mode, sha = tree[name.encode()]
