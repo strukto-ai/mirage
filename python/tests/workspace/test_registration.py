@@ -237,7 +237,8 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
 # The mount a line runs on is picked by the words in operand slots that
 # were classified as paths, read by position: never a file an option
 # reads, even one an operand repeats, nor a word the cwd's spec left as
-# text. /a borrows grep (text operands) and find (path operands).
+# text. /a borrows grep (text operands), find and rg (path operands);
+# the builtin rg reads `/a/patterns` as its pattern, a text slot.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line, stdout",
@@ -248,13 +249,14 @@ async def test_a_borrowed_builtin_name_routes_like_a_custom_command(
             b"/b/input:hi\n['/a/patterns'] []\n",
         ),
         ("cd /a && grep hi /b/input", b"[] ['hi', '/b/input']\n"),
+        ("cd /a && rg /a/patterns /b/input", b"/a/patterns\n"),
         ("cd /a && find //b/input -print0", b"//b/input\x00"),
     ],
 )
 async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
     ws_two_mounts, line, stdout
 ):
-    for name, kind in (("grep", "str"), ("find", "path")):
+    for name, kind in (("grep", "str"), ("find", "path"), ("rg", "path")):
         ws_two_mounts.mount("/a/").register(
             Command(
                 name,
@@ -267,7 +269,7 @@ async def test_a_borrowed_name_and_the_builtin_keep_their_own_lines(
             )
         )
     await ws_two_mounts.shell(
-        "echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input"
+        "echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input"
     )
     result = await ws_two_mounts.shell(line)
     assert (result.exit_code, result.stdout) == (0, stdout)

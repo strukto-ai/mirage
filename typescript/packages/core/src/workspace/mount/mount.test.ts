@@ -615,11 +615,13 @@ it.each(['find --mode=a x', 'rg x', 'grep -f a x', 'sort -o /b/out x', 'grep --h
 // The mount a line runs on is picked by the words in operand slots that were
 // classified as paths, read by position: never a file an option reads, even
 // one an operand repeats, nor a word the cwd's spec left as text. /a borrows
-// grep (text operands) and find (path operands).
+// grep (text operands), find and rg (path operands); the builtin rg reads
+// `/a/patterns` as its pattern, a text slot.
 it.each([
   ['cd /b && grep -f /a/patterns /b/input', 'hi\n'],
   ['cd /b && grep -f /a/patterns /b/input /a/patterns', '/b/input:hi\n[["/a/patterns"],[]]'],
   ['cd /a && grep hi /b/input', '[[],["hi","/b/input"]]'],
+  ['cd /a && rg /a/patterns /b/input', '/a/patterns\n'],
   ['cd /a && find //b/input -print0', '//b/input\0'],
 ])('keeps `%s` on its own command', async (line, stdout) => {
   const ws = new Workspace(
@@ -630,6 +632,7 @@ it.each([
     for (const [name, type] of [
       ['grep', 'str'],
       ['find', 'path'],
+      ['rg', 'path'],
     ] as const) {
       ws.mount('/a/').register(
         new Command({
@@ -640,7 +643,7 @@ it.each([
         }),
       )
     }
-    await ws.shell("echo hi > /a/patterns; printf 'hi\\nno\\n' > /b/input")
+    await ws.shell("echo hi > /a/patterns; printf 'hi\\n/a/patterns\\n' > /b/input")
     const result = await ws.shell(line)
     expect([result.exitCode, result.stdoutText]).toEqual([0, stdout])
   } finally {
