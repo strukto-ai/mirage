@@ -420,6 +420,9 @@ export class MountEntry {
     // at this same point.
     const spec = init.read ?? DEFAULT_READ_SPEC
     this.read = Object.freeze({ ...spec, policy: coerceReadPolicy(spec.policy) })
+    // What the client keeps of its own (a store's search results) is served
+    // under the same policy.
+    init.vfs.accessor.govern?.(this.read)
     // Coerced so an untyped caller's bare string still matches `===`.
     this.write = coerceWritePolicy(init.write)
     this.indexStore = init.index ?? buildIndex(undefined, init.vfs.indexTtl)
@@ -1929,18 +1932,18 @@ export class MountEntry {
   }
 
   /**
-   * Drop this mount's cached listings and bodies after a write that went
-   * past the dispatcher. Both caches go, because the two hide different
-   * writes: a stale listing hides a create or a delete, a stale body an
-   * edit. The index is invalidated rather than cleared: a cleared index
-   * reads exactly like one that was never filled, so a backend whose index
-   * *is* its listing (github seeds the whole tree once) cannot tell the drop
-   * from an empty repository. Expiring keeps that distinction and the next
-   * read refetches. Mirrors Python's `MountEntry.drop_caches`.
+   * Drop what this mount keeps after a write that went past the dispatcher:
+   * its listings and bodies (`CacheManager.drop`), and the answers its client
+   * keeps of its own (`Accessor.forget`). Mirrors Python's
+   * `MountEntry.drop_caches`.
+   *
+   * @param bodies drop the bodies too; false when the registry clears the
+   *   whole file cache itself.
    */
-  async dropCaches(): Promise<void> {
-    await this.index.invalidate()
-    await this.cacheManager?.dropPrefix()
+  async dropCaches(bodies = true): Promise<void> {
+    if (this.cacheManager !== null) await this.cacheManager.drop(this.indexStore, bodies)
+    else await this.indexStore.invalidate()
+    this.vfs.accessor.forget?.()
   }
 
   /**

@@ -24,6 +24,7 @@ from mirage.version import __version__ as __version__
 # so a leaf such as the `mirage` CLI imports without loading the package.
 if TYPE_CHECKING:
     from mirage.accessor.base import Accessor
+    from mirage.accessor.responses import ResponseCache
     from mirage.cache.index import NULL_INDEX, IndexCacheStore, IndexConfig
     from mirage.commands.builtin.generic_bind import generic
     from mirage.commands.cli import (
@@ -191,6 +192,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.mount.spec": ("Mount",),
     "mirage.utils.ids": ("new_session_id", "new_workspace_id", "uuid7"),
     "mirage.accessor.base": ("Accessor",),
+    "mirage.accessor.responses": ("ResponseCache",),
     "mirage.cache.index": ("NULL_INDEX", "IndexCacheStore", "IndexConfig"),
     "mirage.commands.builtin.generic_bind": ("generic",),
     "mirage.commands.errors": ("UsageError",),
@@ -305,6 +307,7 @@ __all__ = [
     "PolicyDenied",
     "PolicyError",
     "RemoteSandbox",
+    "ResponseCache",
     "VFSName",
     "RouteContext",
     "ExecutionKind",

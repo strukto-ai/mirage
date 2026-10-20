@@ -107,8 +107,7 @@ export async function runExternal(
     if (err instanceof CommandTimeoutError) deadline?.abort()
     throw err
   } finally {
-    await runtime.settle()
-    if (!runtime.fileEffectsDispatched) await registry.invalidateAfterExternal()
+    await registry.settle(runtime)
   }
 }
 
@@ -163,8 +162,7 @@ function streamExternal(
       throw error
     } finally {
       settled = true
-      await runtime.settle()
-      if (!runtime.fileEffectsDispatched) await registry.invalidateAfterExternal()
+      await registry.settle(runtime)
     }
   }
   const close = (): Promise<void> => {

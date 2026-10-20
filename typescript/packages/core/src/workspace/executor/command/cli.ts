@@ -251,17 +251,18 @@ export interface CLIContext {
 }
 
 /**
- * Whether a write verb of this CLI leaves every mount's caches stale.
+ * Whether this CLI reaches a service past the dispatcher.
  *
- * A CLI that reaches a service writes past the dispatcher's per-path
- * invalidation, so no mount can see the write. Two roots do that: one with a
- * `configModel` (an account CLI, initialized from it) and a script root, whose
- * config is opaque by construction and whose program may reach anything. A
- * root with neither (`git`) has no service to reach; its writes go through the
+ * Its write verbs then go past the dispatcher's per-path invalidation, so the
+ * mounts its client may reach drop their caches after one
+ * (`MountRegistry.dropCaches`). Two roots do that: one with a `configModel`
+ * (an account CLI, initialized from it) and a script root, whose config is
+ * opaque by construction and whose program may reach anything. A root with
+ * neither (`git`) has no service to reach; its writes go through the
  * dispatcher, which invalidates as it goes, so a blanket drop would only cost
- * every other mount a reload.
+ * every other mount a reload. Mirrors Python's `reaches_service`.
  */
-export function dropsMountCaches(spec: CLI): boolean {
+export function reachesService(spec: CLI): boolean {
   return spec.configModel !== null || spec.script !== null
 }
 

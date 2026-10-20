@@ -16,7 +16,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { command } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { CapacityState, FileStat, FileType } from '../../types.ts'
+import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
 import {
@@ -31,7 +31,6 @@ import { ExecutionNode } from '../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
-import { dropMountCaches } from '../executor/command/run.ts'
 import { toStateDict } from '../snapshot/state.ts'
 import { Mount } from '../mount/spec.ts'
 
@@ -522,7 +521,7 @@ it('workspace close waits for VFS retirements before closing stores', async () =
   }
 })
 
-it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (kind) => {
+it.each(['every', 'one'])('unmount drains index invalidation (%s)', async (kind) => {
   const vfs = new RAMVFS()
   const ws = new Workspace({ '/data': vfs })
   await ws.resolve('/data')
@@ -535,21 +534,16 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
     resume = resolve
   })
   const index = ws.mount('/data').indexStore
-  const method = kind === 'service' ? 'invalidate' : 'clear'
-  const invalidate = index[method].bind(index)
-  await index.put(
-    '/outside-scope',
-    new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'stale' }),
-  )
-  vi.spyOn(index, method).mockImplementation(async () => {
+  const invalidate = index.invalidate.bind(index)
+  let invalidated = false
+  vi.spyOn(index, 'invalidate').mockImplementation(async () => {
     enter()
     await release
     expect(vfs.isClosed).toBe(false)
     await invalidate()
+    invalidated = true
   })
-  const manager = ws.mount('/data').cacheManager
-  if (manager === null) throw new Error('missing cache manager')
-  const updating = kind === 'service' ? dropMountCaches(ws.registry) : manager.clearIndex(index)
+  const updating = kind === 'every' ? ws.registry.dropCaches() : ws.mount('/data').dropCaches()
   let removing: Promise<void> | undefined
   try {
     await entered
@@ -564,7 +558,7 @@ it.each(['service', 'clear'])('unmount drains index invalidation (%s)', async (k
     await updating
     await removing
     expect(vfs.isClosed).toBe(true)
-    if (kind === 'clear') expect((await index.get('/outside-scope')).entry).toBeUndefined()
+    expect(invalidated).toBe(true)
   } finally {
     resume()
     await Promise.allSettled([updating, ...(removing === undefined ? [] : [removing])])

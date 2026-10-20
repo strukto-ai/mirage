@@ -12,8 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from collections.abc import Iterable
+from typing import Any
+
 import pytest
 
+from mirage.accessor.base import Accessor
+from mirage.accessor.responses import ResponseCache
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
@@ -21,7 +27,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
-from mirage.types import MountMode, PathSpec
+from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
@@ -514,3 +520,101 @@ async def test_listing_gate_propagates_any_other_oserror():
     registry, mount = _gated_registry(rec)
     with pytest.raises(OSError, match="backend down"):
         await registry._may_serve_listing(mount, "/data/d", None)
+
+
+# ── drop_caches ───────────────────────────────
+
+
+class _Answering(BaseVFS):
+    """A backend whose client keeps answers of its own."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.accessor = _AnsweringAccessor()
+
+
+class _AnsweringAccessor(Accessor):
+    def __init__(self) -> None:
+        self.answers = ResponseCache[str, int]()
+        self.asked = 0
+
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.answers,)
+
+    async def ask(self) -> int:
+        async def fetch() -> int:
+            self.asked += 1
+            return self.asked
+
+        return await self.answers.get("q", fetch)
+
+
+@pytest.mark.asyncio
+async def test_a_mounts_drop_drops_the_answers_its_client_keeps():
+    # A store's search results never pass the cache stage, so the drop
+    # after a write past the dispatcher must reach the client itself.
+    vfs = _Answering()
+    registry = MountRegistry()
+    registry.mount("/s/", vfs, MountMode.READ)
+    assert (await vfs.accessor.ask(), await vfs.accessor.ask()) == (1, 1)
+    await registry.drop_caches()
+    assert await vfs.accessor.ask() == 2
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_mount_never_serves_its_clients_kept_answers():
+    # An answer carries no token to check, so a mount that checks before
+    # serving keeps none.
+    vfs = _Answering()
+    registry = MountRegistry()
+    registry.mount(
+        "/s/", vfs, MountMode.READ, ReadSpec(policy=ReadPolicy.FRESH)
+    )
+    assert (await vfs.accessor.ask(), await vfs.accessor.ask()) == (1, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_read_in_flight_keeps_nothing_after_every_mount_drops(
+    monkeypatch,
+):
+    # The read began before the write and lands once the file cache is
+    # cleared, while an earlier mount is still dropping. Its own mount was
+    # retired with the clear, so the old bytes are handed back, not kept.
+    cache = RAMFileCacheStore()
+    registry = MountRegistry()
+    registry.attach_file_cache(cache)
+    first, second = RAMVFS(), RAMVFS()
+    first.caches_reads = second.caches_reads = True
+    earlier = registry.mount("/a/", first, MountMode.WRITE)
+    reading_mount = registry.mount("/b/", second, MountMode.WRITE)
+    assert reading_mount.cache_manager is not None
+    fetched, fetch_may_end = asyncio.Event(), asyncio.Event()
+    dropping_a, drop_may_end = asyncio.Event(), asyncio.Event()
+
+    async def old_bytes() -> bytes:
+        fetched.set()
+        await fetch_may_end.wait()
+        return b"old"
+
+    invalidate = earlier.index_store.invalidate
+
+    async def held_invalidate() -> None:
+        dropping_a.set()
+        await drop_may_end.wait()
+        await invalidate()
+
+    monkeypatch.setattr(earlier.index_store, "invalidate", held_invalidate)
+    reading = asyncio.create_task(
+        reading_mount.cache_manager.fill(
+            PathSpec.from_str_path("/b/x.txt"), old_bytes
+        )
+    )
+    await fetched.wait()
+    dropping = asyncio.create_task(registry.drop_caches())
+    await dropping_a.wait()
+    fetch_may_end.set()
+    await asyncio.sleep(0.01)
+    drop_may_end.set()
+    await dropping
+    assert await reading == b"old"
+    assert not await cache.exists("/b/x.txt")

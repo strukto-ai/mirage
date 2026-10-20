@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from qdrant_client import models
 
+from mirage.accessor.responses import ResponseCache
 from mirage.core.qdrant.payload import field_value
 from mirage.vfs.qdrant.config import QdrantConfig
 
@@ -125,7 +126,7 @@ class FakeAccessor:
     def __init__(self, config: QdrantConfig, client: FakeQdrantClient) -> None:
         self.config = config
         self._client = client
-        self.search_cache: dict = {}
+        self.searches = ResponseCache[tuple[str, str, int], list]()
         self.indexes_ensured: set[str] = set()
 
     async def client(self):

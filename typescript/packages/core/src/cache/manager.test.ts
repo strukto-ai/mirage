@@ -189,7 +189,7 @@ describe('CacheManager', () => {
     expect((await index.listDir('/a')).entries ?? null).toBeNull()
   })
 
-  it("drops this mount's and its aliases' bodies without touching a neighbour", async () => {
+  it("drops this mount's and its aliases' bodies without touching a neighbour, and expires its listings", async () => {
     const [cache, index] = await seeded()
     await cache.set('/mirror/arch/h.txt', new TextEncoder().encode('same'))
     await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
@@ -207,16 +207,19 @@ describe('CacheManager', () => {
       none,
       aliases,
     )
-    await manager.dropPrefix()
+    await manager.drop(index)
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     expect(await cache.exists('/mirror/arch/h.txt')).toBe(false)
     expect(await cache.exists('/other/keep.txt')).toBe(true)
+    // Expired, not cleared: a backend whose index is its listing can tell the
+    // drop from an empty folder.
+    expect((await index.listDir('/data/arch')).status).toBe(LookupStatus.EXPIRED)
   })
 
   it('leaves a non-caching mount alone', async () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', false)
-    await manager.dropPrefix()
+    await manager.drop(index)
     expect(await cache.exists('/data/arch/h.txt')).toBe(true)
   })
 
@@ -405,7 +408,7 @@ describe('CacheManager', () => {
     await cache.set('/a.txt', new TextEncoder().encode('x'))
     await cache.set('/sub/b.txt', new TextEncoder().encode('y'))
     const manager = new CacheManager(cache, null, '/', true)
-    await manager.dropPrefix()
+    await manager.drop(undefined)
     expect(await cache.exists('/a.txt')).toBe(false)
     expect(await cache.exists('/sub/b.txt')).toBe(false)
   })
@@ -772,17 +775,16 @@ describe('what a probe saw this command', () => {
     })
   })
 
-  // Every entry point that drops cached state: a write the command makes, a clear
-  // after native code ran (an external program, a remote runtime line), a
-  // path-less CLI mutation, and a re-list that found the file gone. Each one
+  // Every entry point that drops cached state: a write the command makes, a drop
+  // after a write past the dispatcher (native code, a remote runtime line, a
+  // path-less CLI mutation), and a re-list that found the file gone. Each one
   // means the backend may no longer match what the probe saw.
   const DROPS: [string, (manager: CacheManager, index: RAMIndexCacheStore) => Promise<void>][] = [
     ['a write', (m) => m.invalidateAfterWrite(PathSpec.fromStrPath('/data/elsewhere'))],
     ['an unlink', (m) => m.invalidateAfterUnlink(PathSpec.fromStrPath('/data/elsewhere'))],
     ['a subtree drop', (m) => m.invalidateSubtree(PathSpec.fromStrPath('/data/elsewhere'))],
     ['a removal', (m) => m.invalidateAfterRemove(PathSpec.fromStrPath('/data/elsewhere'))],
-    ['an external clear', (m, index) => m.clearIndex(index)],
-    ['a path-less drop', (m) => m.dropPrefix()],
+    ['a drop past the dispatcher', (m, index) => m.drop(index)],
     [
       'a re-list that found it gone',
       async (m, index) => {

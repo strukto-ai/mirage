@@ -69,11 +69,18 @@ async def test_close_releases_all_clients_and_caches(accessor):
     second = MagicMock()
     second.close = AsyncMock()
     accessor._clients = {1: first, 2: second}
-    accessor._cache = {"db": (100.0, ["row"])}
+    asked: list[str] = []
+
+    async def names() -> list[str]:
+        asked.append("db")
+        return ["row"]
+
+    await accessor.listings.get("db", names)
 
     await accessor.close()
 
     first.close.assert_awaited_once_with()
     second.close.assert_awaited_once_with()
     assert accessor._clients == {}
-    assert accessor._cache == {}
+    await accessor.listings.get("db", names)
+    assert asked == ["db", "db"]

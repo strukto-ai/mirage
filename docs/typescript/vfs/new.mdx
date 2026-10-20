@@ -243,6 +243,26 @@ Expose semantic or service-specific queries through a custom command that calls
 the same function with its own options. grep and rg never ask `search`; they
 use the functions below.
 
+A search never passes the file cache, so an accessor that keeps results of its
+own keeps them in a `ResponseCache` and returns it from `caches()`. Its mount
+then keeps them no longer than its read policy allows (none under `fresh`, the
+bound under `bounded`), and drops them with its other caches after a write that
+went past the dispatcher.
+
+```ts
+import { Accessor, ResponseCache } from '@struktoai/mirage-node'
+
+class JiraAccessor extends Accessor {
+  readonly searches = new ResponseCache<string, [string, string][]>()
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.searches]
+  }
+}
+```
+
+`await this.searches.get(key, fetch)` answers from the cache or asks `fetch`.
+
 ### Let grep and rg use your search
 
 grep and rg always walk, filter, order and label the files themselves. Your

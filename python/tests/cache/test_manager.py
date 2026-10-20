@@ -209,7 +209,7 @@ def test_null_index_is_tolerated():
     assert _run(_no_index_case()) is False
 
 
-async def _drop_prefix_case() -> tuple[bool, bool, bool]:
+async def _drop_case() -> tuple[bool, bool, bool, LookupStatus]:
     cache, index = _stores()
     await _seed(cache, index)
     await cache.set("/mirror/arch/h.txt", b"same\n")
@@ -217,41 +217,44 @@ async def _drop_prefix_case() -> tuple[bool, bool, bool]:
     manager = CacheManager(
         cache, index, "/data/", True, aliases=lambda: ("/mirror",)
     )
-    await manager.drop_prefix()
+    await manager.drop(index)
     return (
         await cache.exists("/data/arch/h.txt"),
         await cache.exists("/mirror/arch/h.txt"),
         await cache.exists("/other/keep.txt"),
+        (await index.list_dir("/data/arch")).status,
     )
 
 
-def test_drop_prefix_evicts_this_mount_and_its_aliases_only():
+def test_drop_evicts_this_mount_and_its_aliases_only():
     """A path-unknown mutation drops the bodies under the mount and
     every other mount of its VFS without reaching into a neighbouring
-    mount's keyspace."""
-    assert _run(_drop_prefix_case()) == (False, False, True)
+    mount's keyspace, and expires the listings rather than clearing
+    them, so a backend whose index is its listing can tell the drop
+    from an empty folder."""
+    assert _run(_drop_case()) == (False, False, True, LookupStatus.EXPIRED)
 
 
-async def _drop_prefix_local_case() -> bool:
+async def _drop_local_case() -> bool:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", False)
-    await manager.drop_prefix()
+    await manager.drop(index)
     return await cache.exists("/data/arch/h.txt")
 
 
-def test_drop_prefix_leaves_a_non_caching_mount_alone():
+def test_drop_leaves_a_non_caching_mount_alone():
     """A mount that does not cache reads owns no entries here, so the
     keys under its prefix belong to whoever put them there."""
-    assert _run(_drop_prefix_local_case()) is True
+    assert _run(_drop_local_case()) is True
 
 
-async def _drop_prefix_root_case() -> tuple[str, bool, bool]:
+async def _drop_root_case() -> tuple[str, bool, bool]:
     cache, index = _stores()
     await cache.set("/a.txt", b"x")
     await cache.set("/sub/b.txt", b"y")
     manager = CacheManager(cache, index, "/", True)
-    await manager.drop_prefix()
+    await manager.drop(index)
     return (
         manager._prefix,
         await cache.exists("/a.txt"),
@@ -259,10 +262,10 @@ async def _drop_prefix_root_case() -> tuple[str, bool, bool]:
     )
 
 
-def test_drop_prefix_reaches_every_key_on_a_root_mount():
+def test_drop_reaches_every_key_on_a_root_mount():
     """A root mount strips to the empty prefix, so the eviction argument
     is "/" and matches every key rather than nothing."""
-    prefix, a, b = _run(_drop_prefix_root_case())
+    prefix, a, b = _run(_drop_root_case())
     assert prefix == ""
     assert a is False
     assert b is False
@@ -799,12 +802,8 @@ async def _remove(manager: CacheManager, index) -> None:
     )
 
 
-async def _external(manager: CacheManager, index) -> None:
-    await manager.clear_index(index)
-
-
-async def _prefix(manager: CacheManager, index) -> None:
-    await manager.drop_prefix()
+async def _past(manager: CacheManager, index) -> None:
+    await manager.drop(index)
 
 
 async def _relisted_gone(manager: CacheManager, index) -> None:
@@ -821,14 +820,14 @@ async def _relisted_gone(manager: CacheManager, index) -> None:
     await view.set_dir("/data/arch", [])
 
 
-# Every entry point that drops cached state: a write the command makes, a clear
-# after native code ran (an external program, a remote runtime line), a
-# path-less CLI mutation, and a re-list that found the file gone. Each one
+# Every entry point that drops cached state: a write the command makes, a drop
+# after a write past the dispatcher (native code, a remote runtime line, a
+# path-less CLI mutation), and a re-list that found the file gone. Each one
 # means the backend may no longer match what the probe saw.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "drop",
-    [_write, _unlink, _subtree, _remove, _external, _prefix, _relisted_gone],
+    [_write, _unlink, _subtree, _remove, _past, _relisted_gone],
 )
 async def test_every_cache_drop_in_the_command_retires_its_probed_stats(drop):
     cache, index = _stores()

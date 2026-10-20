@@ -61,7 +61,7 @@ import {
   programTokens,
   treePathScopes,
 } from '../executor/command/routing.ts'
-import { dropsMountCaches } from '../executor/command/cli.ts'
+import { reachesService } from '../executor/command/cli.ts'
 import { walk } from '../../commands/cli/walk.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
@@ -416,7 +416,7 @@ export function unlistedService(
   if (
     ctx.tool === false ||
     install === null ||
-    !dropsMountCaches(install.cli) ||
+    !reachesService(install.cli) ||
     session.visibility.paths === null
   ) {
     return false

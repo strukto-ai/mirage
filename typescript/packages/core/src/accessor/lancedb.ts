@@ -13,17 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import { ResponseCache } from './responses.ts'
 import type { LanceDriver, LanceRow } from '../core/lancedb/types.ts'
 import type { LanceDBConfigResolved } from '../vfs/lancedb/config.ts'
 
 export class LanceDBAccessor extends Accessor {
   readonly driver: LanceDriver
   readonly config: LanceDBConfigResolved
-  readonly searchCache = new Map<string, LanceRow[]>()
+  readonly searches = new ResponseCache<string, LanceRow[]>()
 
   constructor(driver: LanceDriver, config: LanceDBConfigResolved) {
     super()
     this.driver = driver
     this.config = config
+  }
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.searches]
   }
 }

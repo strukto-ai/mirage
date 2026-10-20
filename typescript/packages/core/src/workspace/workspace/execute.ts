@@ -131,7 +131,6 @@ export interface ExecuteEnv {
   router: Router
   secretSources(): Promise<Readonly<Record<string, ResolvedSource>>>
   registerCloser(fn: () => Promise<void>): void
-  invalidateAllAfterRemote(): Promise<void>
   execute(cmd: string, options: ExecuteOptions): Promise<ExecuteResult>
 }
 
@@ -1015,11 +1014,8 @@ async function runParsedLine(
           command,
           stdin,
           effectiveSession,
-          env.registry.allMounts(),
-          env.registry.policies,
-          () => env.invalidateAllAfterRemote(),
+          env.registry,
           killed,
-          env.registry.commandLimits,
           claimantFor(rootNode, handed),
           route,
         )

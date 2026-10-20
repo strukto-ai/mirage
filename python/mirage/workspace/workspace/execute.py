@@ -886,10 +886,7 @@ async def run_prepared_line(
                     command,
                     stdin,
                     effective_session,
-                    ws.registry.mounts(),
-                    ws.registry.policies,
-                    ws.dispatcher.invalidate_all_after_remote,
-                    ws.registry.command_limits,
+                    ws.registry,
                     claimant_for(ast, handed),
                     cancel,
                     ws.router.context(

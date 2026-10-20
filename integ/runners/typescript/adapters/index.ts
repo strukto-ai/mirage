@@ -2348,10 +2348,12 @@ async function openLangfuse(target: Target): Promise<Open> {
 // targets ever need. github, notion and hf_buckets are absent on purpose:
 // github needs a live repo at construct, notion an OAuth provider, and
 // hf_buckets validates the bucket id.
-const ARG_ERROR_VFS: Record<string, () => BaseVFS> = {
+const ARG_ERROR_VFS: Record<string, () => BaseVFS | Promise<BaseVFS>> = {
   airtable: () => new AirtableVFS({ token: 't' }),
+  // Through `create`, as any host builds one: its constructor is private,
+  // and a VFS built past it has no accessor for the mount to govern.
   databricks: () =>
-    new DatabricksVolumeVFS({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
+    DatabricksVolumeVFS.create({ catalog: 'c', schema: 's', volume: 'v', rootPath: '/' }),
   discord: () => new DiscordVFS({ token: 'x' }),
   email: () =>
     new EmailVFS({
@@ -2406,7 +2408,7 @@ async function openHttp(target: Target): Promise<Open> {
 async function openArgError(target: Target): Promise<Open> {
   const mounts: Record<string, BaseVFS | [BaseVFS, MountMode]> = {}
   for (const m of target.mounts) {
-    const vfs = ARG_ERROR_VFS[m.backend]()
+    const vfs = await ARG_ERROR_VFS[m.backend]()
     mounts[m.path] = m.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })

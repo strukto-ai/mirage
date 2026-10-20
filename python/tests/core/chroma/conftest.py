@@ -6,6 +6,7 @@ import pytest
 
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.vfs_io import StubAccessor
 
 
 class FakeCollection:
@@ -133,8 +134,8 @@ async def _get_collection(collection):
     return collection
 
 
-def accessor_for(collection: FakeCollection) -> SimpleNamespace:
-    return SimpleNamespace(
+def accessor_for(collection: FakeCollection) -> StubAccessor:
+    return StubAccessor(
         config=SimpleNamespace(
             slug_field="page_slug", chunk_index_field="chunk_index"
         ),
@@ -149,7 +150,7 @@ def chroma_collection() -> FakeCollection:
 
 
 @pytest.fixture
-def chroma_accessor(chroma_collection) -> SimpleNamespace:
+def chroma_accessor(chroma_collection) -> StubAccessor:
     return accessor_for(chroma_collection)
 
 

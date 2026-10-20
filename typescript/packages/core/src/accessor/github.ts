@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
-import { HttpGitHubTransport, type GitHubTransport } from '../core/github/client.ts'
+import {
+  GITHUB_API_BASE,
+  HttpGitHubTransport,
+  type GitHubTransport,
+} from '../core/github/client.ts'
 import type { GhConfig } from '../core/github/config.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 
@@ -32,23 +36,42 @@ export class GitHubAccount extends Accessor {
     this.transport = transport ?? new HttpGitHubTransport(config)
   }
 
+  /** The REST base its calls go to: github.com's when none is set. */
+  get apiBase(): string {
+    return (this.config.baseUrl ?? GITHUB_API_BASE).replace(/\/+$/, '')
+  }
+
+  /**
+   * The account behind a peer (a gh install's, or a github mount's) on this
+   * API base; null for any other.
+   */
+  private peer(peer: Accessor): GitHubAccount | null {
+    const account = peer instanceof GitHubAccessor ? peer.account : peer
+    return account instanceof GitHubAccount && account.apiBase === this.apiBase ? account : null
+  }
+
   /**
    * Ride the transport (and its write limiter) of a peer account, a gh
    * install's or a github mount's, on the same token and API base.
    */
   override join(peers: readonly Accessor[]): void {
     for (const peer of peers) {
-      const account = peer instanceof GitHubAccessor ? peer.account : peer
-      if (
-        account instanceof GitHubAccount &&
-        account !== this &&
-        account.config.token === this.config.token &&
-        account.config.baseUrl === this.config.baseUrl
-      ) {
+      const account = this.peer(peer)
+      if (account !== null && account !== this && account.config.token === this.config.token) {
         this.transport = account.transport
         return
       }
     }
+  }
+
+  /**
+   * Whether a write through this account may change what `peer` reads: only a
+   * GitHub account or repository on the same API base, whatever token it reads
+   * with, since two tokens can reach one repository. Mirrors Python's
+   * `GitHubAccount.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return this.peer(peer) !== null
   }
 }
 

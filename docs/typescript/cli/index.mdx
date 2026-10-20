@@ -102,8 +102,11 @@ lookup; host and remote runtimes use their own executable paths.
 Credentials may be shared between a CLI and a VFS, but neither registers or
 locates the other. A CLI write uses service IDs, while file arguments resolve
 against the session's working directory and retain `PathSpec` semantics.
-After an account CLI write, Mirage expires mounted caches so later reads can
-observe the change.
+After an account CLI write, Mirage expires the caches of every mount the CLI's
+client may reach, including answers a mount's client keeps itself (a vector
+store's search results), so later reads can observe the change. A client that
+names what it reaches narrows this: `gh` reaches only GitHub mounts on its API
+base.
 
 Mount modes and path policy govern workspace file operations. A read-only
 Slack mount does **not** disable `slack send-message`; use command policy to

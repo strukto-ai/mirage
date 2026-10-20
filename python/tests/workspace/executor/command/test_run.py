@@ -14,15 +14,17 @@
 
 import pytest
 
+from mirage.accessor.base import Accessor
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor.command.run import drop_mount_caches
 
 
-async def _cli_write_case(tmp_path) -> tuple[str, str, str]:
+async def _cli_write_case(
+    tmp_path, by: Accessor | None = None
+) -> tuple[str, str, str]:
     """A CLI write mutates the service out of band, exactly as gws does
-    by file id, then every mount drops its caches."""
+    by file id, then the mounts its client may reach drop their caches."""
     (tmp_path / "one").mkdir()
     (tmp_path / "two").mkdir()
     (tmp_path / "one" / "a.txt").write_bytes(b"v1\n")
@@ -37,7 +39,9 @@ async def _cli_write_case(tmp_path) -> tuple[str, str, str]:
     (tmp_path / "one" / "a.txt").write_bytes(b"v2\n")
     (tmp_path / "one" / "new.txt").write_bytes(b"fresh\n")
     (tmp_path / "two" / "b.txt").write_bytes(b"v2\n")
-    await drop_mount_caches(ws._registry)
+    if isinstance(by, _ReachesOne):
+        by.target = one.accessor
+    await ws._registry.drop_caches(by)
     body = await (await ws.shell("cat /one/a.txt")).stdout_str()
     listing = await (await ws.shell("ls /one")).stdout_str()
     other = await (await ws.shell("cat /two/b.txt")).stdout_str()
@@ -55,8 +59,23 @@ async def test_a_cli_write_drops_bodies_as_well_as_listings(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_cli_write_drops_every_mount(tmp_path):
-    # Which mounts the CLI's service backs is not the CLI's business, so
-    # the executor says the one thing it knows: a write happened.
+async def test_a_write_by_no_named_client_drops_every_mount(tmp_path):
+    # A client that does not say which mounts it reaches may reach any.
     _body, _listing, other = await _cli_write_case(tmp_path)
     assert other == "v2\n"
+
+
+class _ReachesOne(Accessor):
+    """A client whose writes reach only the accessor it targets."""
+
+    target: Accessor | None = None
+
+    def reaches(self, peer: Accessor) -> bool:
+        return peer is self.target
+
+
+@pytest.mark.asyncio
+async def test_a_write_drops_only_the_mounts_its_client_reaches(tmp_path):
+    body, listing, other = await _cli_write_case(tmp_path, _ReachesOne())
+    assert (body, "new.txt" in listing) == ("v2\n", True)
+    assert other == "v1\n"

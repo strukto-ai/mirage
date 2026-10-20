@@ -4,6 +4,7 @@ import pytest
 
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.vfs_io import StubAccessor
 
 
 def document(
@@ -44,8 +45,8 @@ async def list_basic_documents(config):
 
 
 @pytest.fixture
-def dify_accessor() -> SimpleNamespace:
-    return SimpleNamespace(
+def dify_accessor() -> StubAccessor:
+    return StubAccessor(
         config=SimpleNamespace(
             dataset_id="dataset-1", slug_metadata_name="slug"
         )

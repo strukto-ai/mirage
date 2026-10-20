@@ -14,6 +14,7 @@
 
 import type { QdrantClient } from '@qdrant/js-client-rest'
 import { Accessor } from './base.ts'
+import { ResponseCache } from './responses.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
 import type { QdrantRow } from '../core/qdrant/types.ts'
 import type { QdrantConfigResolved } from '../vfs/qdrant/config.ts'
@@ -29,12 +30,16 @@ type QdrantClientCtor = new (opts: {
 export class QdrantAccessor extends Accessor {
   readonly config: QdrantConfigResolved
   readonly indexesEnsured = new Set<string>()
-  readonly searchCache = new Map<string, QdrantRow[]>()
+  readonly searches = new ResponseCache<string, QdrantRow[]>()
   private opened: QdrantClient | null = null
 
   constructor(config: QdrantConfigResolved) {
     super()
     this.config = config
+  }
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.searches]
   }
 
   /** The mount's client, opened on first use. */

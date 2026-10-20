@@ -261,6 +261,10 @@ macOS. Never touch your own TypeScript mountpoint synchronously.
 `workspace/record/`: keyed-record clients (disk lockfile plus rename, s3
 CAS) that sessions, the node table and metadata import, never the reverse.
 `cache/`: the read-through file cache and the index a readdir fills.
+A write past the dispatcher (native code, a runtime line whose file calls
+skip it, an account CLI) drops caches through `MountRegistry.drop_caches`,
+narrowed by the writer's `Accessor.reaches`; answers a client keeps of its
+own (search results, names) live in a `ResponseCache` its mount governs.
 `events/`: external changes as mount events. `scripts/parity/`: maintained parity baselines; generated manifests stay local. `integ/`: runners, fake services (`server/`), goldens (`truth/`),
 `targets.json`; spawn asynchronously, a fake on the same loop deadlocks a
 sync spawn.

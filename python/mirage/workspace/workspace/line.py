@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import fields
 from typing import Any
 
@@ -24,7 +23,6 @@ from mirage.io.types import ByteSource, materialize
 from mirage.policy import (
     Claimant,
     ExecuteResultContext,
-    Policies,
     post_execute_gate,
     refusal_of,
     render_deny,
@@ -34,7 +32,7 @@ from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.types import Limit, PathSpec, Producer
-from mirage.workspace.mount import MountEntry
+from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 from mirage.workspace.workspace.utils import command_name
@@ -45,10 +43,7 @@ async def run_whole_line(
     command: str,
     stdin: ByteSource | None,
     session: SessionState,
-    mounts: list[MountEntry],
-    policies: Policies,
-    invalidate: Callable[[], Awaitable[None]],
-    command_limits: Mapping[str, Limit] | None = None,
+    registry: MountRegistry,
     claimant: Claimant | None = None,
     cancel: asyncio.Event | None = None,
     route: RouteContext | None = None,
@@ -65,13 +60,9 @@ async def run_whole_line(
         command (str): the raw command line.
         stdin (ByteSource | None): bytes piped into the line.
         session (SessionState): session supplying cwd and env.
-        mounts (list[MountEntry]): mounts the line may span (every
-            mount: a whole-line runtime sees the full workspace).
-        policies (Policies): the workspace's policies.
-        invalidate (Callable[[], Awaitable[None]]): drops local read
-            caches once the line has run.
-        command_limits (Mapping[str, Limit] | None): the workspace
-            defaults, keyed by command.
+        registry (MountRegistry): the workspace's mounts, every one of
+            which the line may span (a whole-line runtime sees the full
+            workspace), its policies and its command defaults.
         claimant (Claimant | None): the line on its hand-off, where a
             ``post_execute`` approval is claimed.
         cancel (asyncio.Event | None): the run's kill channel.
@@ -82,10 +73,11 @@ async def run_whole_line(
     assert isinstance(runtime, Runtime)
     data = await materialize(stdin) if stdin is not None else None
     name = command_name(command)
+    mounts = registry.mounts()
     guard = resolve_limit(
         name,
         mounts,
-        workspace_limits=command_limits,
+        workspace_limits=registry.command_limits,
         profile_limits=session.command_limits,
     )
     timeout = guard.timeout_seconds if guard is not None else None
@@ -106,15 +98,11 @@ async def run_whole_line(
             name,
         )
     finally:
-        # The line may have written anywhere in the runtime's view of
-        # the workspace; local read caches are stale.
-        await runtime.settle()
-        if not runtime.file_effects_dispatched:
-            await invalidate()
+        await registry.settle(runtime)
     refused, bound = None, None
     if route is not None:
         refused, bound = await post_execute_gate(
-            policies,
+            registry.policies,
             ExecuteResultContext(
                 **{f.name: getattr(route, f.name) for f in fields(route)},
                 producer=Producer(

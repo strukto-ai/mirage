@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import partial
@@ -22,6 +22,7 @@ import lancedb
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import LoopClientCache
+from mirage.accessor.responses import ResponseCache
 from mirage.core.lancedb.types import LanceRow
 from mirage.vfs.lancedb.config import LanceDBConfig
 from mirage.vfs.secrets import reveal_secret
@@ -62,7 +63,7 @@ class LanceDBAccessor(Accessor):
     def __init__(self, config: LanceDBConfig) -> None:
         self.config = config
         self._connections = LoopClientCache[_Connection]("lancedb")
-        self.search_cache: dict[tuple[str, str, int], list[LanceRow]] = {}
+        self.searches = ResponseCache[tuple[str, str, int], list[LanceRow]]()
 
     async def _connection(self) -> _Connection:
         return await self._connections.get(partial(_open, self.config))
@@ -84,7 +85,10 @@ class LanceDBAccessor(Accessor):
             conn.tables[name] = tbl
         return tbl
 
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.searches,)
+
     async def close(self) -> None:
         """Close every database this accessor opened, and drop its cache."""
-        self.search_cache.clear()
+        self.forget()
         await self._connections.close()

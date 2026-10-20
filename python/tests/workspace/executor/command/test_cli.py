@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-from mirage.accessor.base import NOOPAccessor
+from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
 from mirage.commands.errors import PartialOutputError
@@ -46,8 +46,8 @@ from mirage.workspace.cli.registry import CLIRegistry
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.cli import (
     CLIContext,
-    drops_mount_caches,
     handle_cli,
+    reaches_service,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.mount.mount import MountEntry
@@ -1107,6 +1107,51 @@ async def test_an_account_cli_write_refreshes_every_mount(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_an_account_cli_write_refreshes_only_the_mounts_it_reaches(
+    tmp_path,
+):
+    # A client that says which mounts its writes can reach (a gh install
+    # reaches only github mounts) costs the others no reload.
+    root, apart = tmp_path / "svc", tmp_path / "apart"
+    for folder in (root, apart):
+        folder.mkdir()
+        (folder / "a.txt").write_bytes(b"v1\n")
+    served, other = DiskVFS(root=str(root)), DiskVFS(root=str(apart))
+    served.caches_reads = other.caches_reads = True
+    with Workspace(
+        {"/data/": served, "/apart/": other}, mode=MountMode.WRITE
+    ) as ws:
+
+        class Client(Accessor):
+            def reaches(self, peer: Accessor) -> bool:
+                return peer is served.accessor
+
+        ws.register_cli(
+            "acme",
+            CLI(
+                spec=CommandSpec(
+                    name="acme", subcommands=(CommandSpec(name="close"),)
+                ),
+                handlers={
+                    "close": CLIHandler(
+                        fn=_out_of_band_writer(root), write=True
+                    )
+                },
+                config_model=TokenConfig,
+                accessor=lambda config: Client(),
+            ),
+            {"token": "t"},
+        )
+        await ws.shell("cat /apart/a.txt")
+        (apart / "a.txt").write_bytes(b"v2\n")
+        body, listing = await _warm_then_run(ws, root, "acme close")
+        assert body == "v2\n"
+        assert "made.txt" in listing
+        kept = await ws.shell("cat /apart/a.txt")
+        assert kept.stdout == b"v1\n"
+
+
+@pytest.mark.asyncio
 async def test_an_account_cli_read_keeps_every_mount_warm(tmp_path):
     root = tmp_path / "svc"
     with _disk_workspace(root) as ws:
@@ -1151,13 +1196,13 @@ async def test_a_mount_tier_cli_write_drops_nothing(tmp_path):
         assert "made.txt" not in listing
 
 
-def test_a_service_reaching_root_drops_mount_caches():
+def test_a_root_with_a_config_model_or_a_script_reaches_a_service():
     # A script root's config is opaque, so it never carries a config
     # model, yet its program may reach a service exactly as an account
     # CLI does; only a root with neither writes through the dispatcher.
-    assert drops_mount_caches(make_install().cli)
-    assert drops_mount_caches(script_install().cli)
-    assert not drops_mount_caches(STASH)
+    assert reaches_service(make_install().cli)
+    assert reaches_service(script_install().cli)
+    assert not reaches_service(STASH)
 
 
 @pytest.mark.asyncio

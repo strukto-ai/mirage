@@ -40,6 +40,13 @@ def test_each_loop_opens_its_own_db_and_close_releases_it(monkeypatch):
     second = asyncio.run(open_items())
     assert second is not first and first.closed
     assert first.opened == second.opened == ["items"]
-    accessor.search_cache[("items", "q", 1)] = []
+    asked: list[str] = []
+
+    async def search() -> list:
+        asked.append("q")
+        return []
+
+    asyncio.run(accessor.searches.get(("items", "q", 1), search))
     asyncio.run(accessor.close())
-    assert second.closed and accessor.search_cache == {}
+    asyncio.run(accessor.searches.get(("items", "q", 1), search))
+    assert second.closed and asked == ["q", "q"]

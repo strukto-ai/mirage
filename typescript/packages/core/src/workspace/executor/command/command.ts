@@ -80,16 +80,10 @@ import {
 } from '../jobs.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
 
-import { dropsMountCaches, handleCli, handleMountCli } from './cli.ts'
+import { handleCli, handleMountCli, reachesService } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
-import {
-  dropMountCaches,
-  findStartPoints,
-  nestedShell,
-  runOnMount,
-  type RunOnMountCtx,
-} from './run.ts'
+import { findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
@@ -362,7 +356,7 @@ export async function handleCommand(
             : { processes: registry.processView(session) }),
           ...(routingDecision === undefined ? {} : { routing: routingDecision }),
         },
-        dropsMountCaches(cliInstall.cli) ? () => dropMountCaches(registry) : null,
+        reachesService(cliInstall.cli) ? () => registry.dropCaches(cliInstall.accessor) : null,
       ),
       mergeSignals(signal, context.frame.abortSignal),
     )

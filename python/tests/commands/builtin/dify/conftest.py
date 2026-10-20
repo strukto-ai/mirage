@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.fixtures.vfs_io import StubAccessor
+
 
 def document(document_id: str, name: str, slug: str, size: int = 12) -> dict:
     return {
@@ -19,5 +21,5 @@ def document(document_id: str, name: str, slug: str, size: int = 12) -> dict:
 
 
 @pytest.fixture
-def dify_accessor() -> SimpleNamespace:
-    return SimpleNamespace(config=SimpleNamespace(slug_metadata_name="slug"))
+def dify_accessor() -> StubAccessor:
+    return StubAccessor(config=SimpleNamespace(slug_metadata_name="slug"))

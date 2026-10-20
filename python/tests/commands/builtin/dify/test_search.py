@@ -12,7 +12,7 @@ from mirage.vfs.dify import DifyVFS
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from tests.fixtures.mount_commands import command_files
-from tests.fixtures.vfs_io import vfs_over
+from tests.fixtures.vfs_io import StubAccessor, vfs_over
 
 
 def document(document_id: str, name: str, slug: str | None = None) -> dict:
@@ -33,8 +33,8 @@ def document(document_id: str, name: str, slug: str | None = None) -> dict:
     }
 
 
-def accessor() -> SimpleNamespace:
-    return SimpleNamespace(config=SimpleNamespace(slug_metadata_name="slug"))
+def accessor() -> StubAccessor:
+    return StubAccessor(config=SimpleNamespace(slug_metadata_name="slug"))
 
 
 def _files() -> Files:

@@ -20,9 +20,11 @@ import type { ProcessView } from '../../process/view.ts'
 import type { SessionState } from '../session/session.ts'
 import { noMount } from '../../errors/fs.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
+import type { Accessor } from '../../accessor/base.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { WorkspaceRuntime } from '../../runtime/workspace.ts'
+import { mutationLock } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { CacheManager } from '../../cache/manager.ts'
@@ -156,13 +158,55 @@ export class MountRegistry {
   // already reaches every dispatch site, same as the runtime fields.
   readonly clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor))
 
-  /** Refetch cached data after native code may have changed the workspace. */
-  async invalidateAfterExternal(): Promise<void> {
-    await this.cacheStore?.clear()
-    for (const mount of this.allMounts()) {
-      if (mount.cacheManager !== null) await mount.cacheManager.clearIndex(mount.indexStore)
-      else await mount.use(() => mount.indexStore.clear())
+  /**
+   * Drop what a write past the dispatcher may have made stale.
+   *
+   * Native code (an external program, a remote runtime line) or an account
+   * CLI changed its service with no path the dispatcher saw, so per-path
+   * invalidation has nothing to aim at: after `gws sheets spreadsheets
+   * create` the new file has no cache entry to expire, which is exactly the
+   * case that matters. Every mount the write may have reached drops what it
+   * keeps (`MountEntry.dropCaches`). A write verb is rare next to reads, and
+   * the cost is one cold listing on a mount's next read, never a wrong
+   * answer. Mirrors Python's `MountRegistry.drop_caches`.
+   *
+   * @param by the client that wrote, whose `reaches` names the mounts it may
+   *   have changed; null for every mount.
+   */
+  async dropCaches(by: Accessor | null = null): Promise<void> {
+    const mounts = this.allMounts()
+    const reached = mounts.filter((m) => by === null || (by.reaches?.(m.vfs.accessor) ?? true))
+    const cache = this.cacheStore
+    // Every mount: one clear of the file cache, not a scan per mount.
+    const every = cache !== null && reached.length === mounts.length
+    if (every) {
+      // Under the lock a fill checks its read generation with, so a read begun
+      // before the write keeps nothing on any mount, as each mount's own drop
+      // retires and evicts in one step.
+      await mutationLock(cache, async () => {
+        for (const mount of reached) mount.cacheManager?.retire()
+        await cache.clear()
+      })
     }
+    for (const mount of reached) await mount.dropCaches(!every)
+  }
+
+  /**
+   * Land a runtime's writes when its line ends, however it ended, and drop
+   * the caches when they went past the dispatcher.
+   *
+   * A runtime serving the workspace over SFTP sent each write through the
+   * dispatcher, which invalidated that path as it went
+   * (`fileEffectsDispatched`). Any other may have written anywhere in its
+   * view of the workspace, so every mount drops its caches and the next
+   * command refetches instead of serving pre-line state: `cat /data/x`
+   * caches "old", `python3 job.py` writes "new" straight to S3 through the
+   * sandbox's own FUSE mount, and without the drop the next `cat /data/x`
+   * would serve the stale "old". Mirrors Python's `MountRegistry.settle`.
+   */
+  async settle(runtime: Runtime): Promise<void> {
+    await runtime.settle()
+    if (!runtime.fileEffectsDispatched) await this.dropCaches()
   }
 
   setReconciler(reconciler: ReadReconciler): void {

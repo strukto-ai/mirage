@@ -13,10 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -218,10 +220,13 @@ async def test_remote_line_invalidates_local_read_caches():
         stale = FileStat(
             name="stale.txt", type=FileType.FILE, fingerprint="stale"
         )
-        await mount.index_store.put("/stale.txt", stale)
+        live = datetime.now(timezone.utc) + timedelta(hours=1)
+        await mount.index_store.set_dir("/", [("stale.txt", stale)], live)
+        assert (await mount.index_store.list_dir("/")).entries is not None
         await ws.shell("python3 anything")
-        looked = await mount.index_store.get("/stale.txt")
-        assert looked.entry is None
+        # Expired, so the next stat or listing asks the backend again.
+        listed = await mount.index_store.list_dir("/")
+        assert listed.status is LookupStatus.EXPIRED
     finally:
         await ws.close()
 

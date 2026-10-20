@@ -723,14 +723,14 @@ describe('the gate reuses what routing got from the backend', () => {
   })
 
   // Native code (an external program, a remote runtime line) may have
-  // changed the mount mid-command; the clear that follows it must retire what
+  // changed the mount mid-command; the drop that follows it must retire what
   // routing saw, as a write in the command does.
-  it('asks the backend after an external clear', async () => {
+  it('asks the backend after an external drop', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
       await runInCommandScope(async () => {
         await rec.reconcileRead(mount, '/data/f.txt')
-        await ws.registry.invalidateAfterExternal()
+        await ws.registry.dropCaches()
         await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
         await rec.mayServeCached(mount, '/data/f.txt')
       })

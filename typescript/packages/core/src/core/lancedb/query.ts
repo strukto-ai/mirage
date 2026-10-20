@@ -121,10 +121,7 @@ export async function searchRows(
   query: string,
   limit: number,
 ): Promise<LanceRow[]> {
-  const key = JSON.stringify([table, query, limit])
-  const hit = accessor.searchCache.get(key)
-  if (hit !== undefined) return hit
-  const rows = await accessor.driver.search(table, query, limit)
-  accessor.searchCache.set(key, rows)
-  return rows
+  return accessor.searches.get(JSON.stringify([table, query, limit]), () =>
+    accessor.driver.search(table, query, limit),
+  )
 }

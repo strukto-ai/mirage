@@ -350,23 +350,21 @@ async def row_record(
 async def search_rows(
     accessor: QdrantAccessor, table: str, query_text: str, limit: int
 ) -> list[QdrantRow]:
-    key = (table, query_text, limit)
-    cached = accessor.search_cache.get(key)
-    if cached is not None:
-        return cached
-    client = await accessor.client()
-    response = await client.query_points(
-        collection_name=table,
-        query=models.Document(
-            text=query_text, model=accessor.config.embedding_model
-        ),
-        limit=limit,
-        with_payload=True,
-    )
-    rows: list[QdrantRow] = []
-    for point in response.points:
-        row = _point_to_row(point, accessor.config.id_field)
-        row["_score"] = point.score
-        rows.append(row)
-    accessor.search_cache[key] = rows
-    return rows
+    async def fetch() -> list[QdrantRow]:
+        client = await accessor.client()
+        response = await client.query_points(
+            collection_name=table,
+            query=models.Document(
+                text=query_text, model=accessor.config.embedding_model
+            ),
+            limit=limit,
+            with_payload=True,
+        )
+        rows: list[QdrantRow] = []
+        for point in response.points:
+            row = _point_to_row(point, accessor.config.id_field)
+            row["_score"] = point.score
+            rows.append(row)
+        return rows
+
+    return await accessor.searches.get((table, query_text, limit), fetch)

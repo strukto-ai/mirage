@@ -41,7 +41,7 @@ import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
 import type { Program, RunResult, Language } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
-import { dropsMountCaches, handleCli } from './cli.ts'
+import { handleCli, reachesService } from './cli.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
@@ -930,14 +930,14 @@ describe('cache drop on a thrown leaf', () => {
   })
 })
 
-describe('dropsMountCaches', () => {
+describe('reachesService', () => {
   it('is true for a root that reaches a service, false for the git tier', () => {
     // A script root's config is opaque, so it never carries a config model,
     // yet its program may reach a service exactly as an account CLI does;
     // only a root with neither writes through the dispatcher.
-    expect(dropsMountCaches(makeInstall().cli)).toBe(true)
+    expect(reachesService(makeInstall().cli)).toBe(true)
     expect(
-      dropsMountCaches(
+      reachesService(
         new CLI({
           spec: new CommandSpec({ name: 'pager' }),
           script: new ScriptSource("print('hi')"),
@@ -945,7 +945,7 @@ describe('dropsMountCaches', () => {
       ),
     ).toBe(true)
     expect(
-      dropsMountCaches(
+      reachesService(
         new CLI({
           spec: new CommandSpec({ name: 'tool' }),
           handlers: { '': new CLIHandler({ fn: send }) },

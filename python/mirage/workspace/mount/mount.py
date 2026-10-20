@@ -475,6 +475,9 @@ class MountEntry:
         self.read = dataclasses.replace(
             spec, policy=coerce_read_policy(spec.policy)
         )
+        # What the client keeps of its own (a store's search results) is
+        # served under the same policy.
+        vfs.accessor.govern(self.read)
         # Coerced so an embedder's bare string still matches `is`.
         self.write = coerce_write_policy(write)
         # The store this mount runs its driver under, built by the
@@ -1388,21 +1391,20 @@ class MountEntry:
                         vfs=run_ctx.vfs,
                     )
 
-    async def drop_caches(self) -> None:
-        """Drop this mount's cached listings and bodies after a write that
-        went past the dispatcher.
+    async def drop_caches(self, bodies: bool = True) -> None:
+        """Drop what this mount keeps after a write that went past the
+        dispatcher: its listings and bodies (``CacheManager.drop``), and
+        the answers its client keeps of its own (``Accessor.forget``).
 
-        Both caches go, because the two hide different writes: a stale
-        listing hides a create or a delete, a stale body an edit. The
-        index is invalidated rather than cleared: a cleared index reads
-        exactly like one that was never filled, so a backend whose index
-        *is* its listing (github seeds the whole tree once) cannot tell
-        the drop from an empty repository and reports the mount as gone.
-        Expiring keeps that distinction and the next read refetches.
+        Args:
+            bodies (bool): drop the bodies too; False when the registry
+                clears the whole file cache itself.
         """
-        await self.index.invalidate()
         if self.cache_manager is not None:
-            await self.cache_manager.drop_prefix()
+            await self.cache_manager.drop(self.index_store, bodies)
+        else:
+            await self.index_store.invalidate()
+        self.vfs.accessor.forget()
 
     def answers_at(self, name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.

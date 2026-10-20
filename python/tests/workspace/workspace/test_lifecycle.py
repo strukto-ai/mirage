@@ -53,7 +53,6 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.shared import expand_operands
-from mirage.workspace.executor.command.run import drop_mount_caches
 from mirage.workspace.mount.namespace import RAMNamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.snapshot import to_state_dict
@@ -1089,32 +1088,27 @@ async def test_unmount_drains_metadata_glob_and_its_index_writes(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["service", "clear"])
+@pytest.mark.parametrize("kind", ["every", "one"])
 async def test_unmount_drains_service_index_invalidation(monkeypatch, kind):
     vfs = RAMVFS()
     ws = Workspace({"/data": vfs})
     entered, release = asyncio.Event(), asyncio.Event()
     index = ws.mount("/data").index_store
-    method = "invalidate" if kind == "service" else "clear"
-    invalidate = getattr(index, method)
-    await index.put(
-        "/outside-scope",
-        FileStat(name="stale", type=FileType.FILE, fingerprint="stale"),
-    )
+    invalidate = index.invalidate
+    invalidated = []
 
     async def delayed_invalidate():
         entered.set()
         await release.wait()
         assert not vfs.is_closed
         await invalidate()
+        invalidated.append(True)
 
-    monkeypatch.setattr(index, method, delayed_invalidate)
-    manager = ws.mount("/data").cache_manager
-    assert manager is not None
+    monkeypatch.setattr(index, "invalidate", delayed_invalidate)
     updating = asyncio.create_task(
-        drop_mount_caches(ws._registry)
-        if kind == "service"
-        else manager.clear_index(index)
+        ws._registry.drop_caches()
+        if kind == "every"
+        else ws.mount("/data").drop_caches()
     )
     removing = None
     try:
@@ -1127,8 +1121,7 @@ async def test_unmount_drains_service_index_invalidation(monkeypatch, kind):
         await updating
         await removing
         assert vfs.is_closed
-        if kind == "clear":
-            assert (await index.get("/outside-scope")).entry is None
+        assert invalidated == [True]
     finally:
         release.set()
         await asyncio.gather(
