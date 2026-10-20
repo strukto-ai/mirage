@@ -1916,11 +1916,15 @@ export class MountEntry {
             ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
           }
         : ctx
+    // No hold past the timeout: an unmount waits on this mount's activity
+    // with no grace, so a body, or a renderer of the rows it handed over,
+    // that ignores the abort is let go rather than waited on.
     return runHandler(call(runCtx), name, limit, producer, voice, {
       scope: (result) => wrapMountStreams(result, this.activity),
       ...(writes ? { drop: () => this.dropCaches() } : {}),
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
       ...(guard !== null ? { abort: guard } : {}),
+      ...(runCtx.vfs !== undefined ? { vfs: runCtx.vfs } : {}),
     })
   }
 

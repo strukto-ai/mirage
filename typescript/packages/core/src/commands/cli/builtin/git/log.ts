@@ -13,14 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError } from './errors.ts'
 import {
+  commitDeltas,
   commitEntry,
   commitOutput,
+  commitShown,
   parseDiffFlags,
   renamesEnabled,
   separatorLine,
@@ -48,6 +50,7 @@ import {
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { splitRevisions } from './revparse.ts'
+import type { Delta, Side } from './rows.ts'
 import { checkOperands, fatal } from './util.ts'
 import { HEAD, TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
 import { Decoration } from './types.ts'
@@ -98,6 +101,8 @@ function rendered(
  * @param flags the parsed invocation
  * @param decor ref labels per commit, when the format prints any
  * @param diff the diff flags, null when no diff was asked for
+ * @param sides each shown commit's comparisons, as the session sees them,
+ *   when a diff was asked for
  */
 async function graphed(
   repo: Repo,
@@ -105,6 +110,7 @@ async function graphed(
   flags: LogFlags,
   decor: Decorations | null,
   diff: DiffFlags | null,
+  sides: ReadonlyMap<string, readonly Side[]>,
 ): Promise<string> {
   const width = repo.abbrev
   const graph = new CommitGraph((oid) => walk.interesting.has(oid), flags.firstParent)
@@ -120,7 +126,8 @@ async function graphed(
   for (const { commit, shown } of walk.steps) {
     graph.walk(commit)
     if (!shown) continue
-    const bodies = diff === null ? [] : await commitOutput(repo, commit, diff)
+    const bodies =
+      diff === null ? [] : await commitOutput(repo, commit, diff, sides.get(commit.oid) ?? [])
     const blocks: [string | null, string][] = []
     bodies.forEach((body, index) => {
       if (body !== null)
@@ -216,22 +223,34 @@ export async function log(
         await configBool(repo, 'core.quotepath', true),
       )
     }
-    if (parsed.graph) {
-      const walk = await walked(repo, starts, parsed, hidden)
-      const out = await graphed(repo, walk, parsed, decor, diffing ? diffFlags : null)
+    const walk = parsed.graph ? await walked(repo, starts, parsed, hidden) : null
+    const commits = walk === null ? await select(repo, starts, parsed, hidden) : []
+    if (!diffing) {
+      const out =
+        walk !== null
+          ? await graphed(repo, walk, parsed, decor, null, new Map())
+          : rendered(commits, parsed, repo.abbrev, decor)
       return [out === '' ? null : encodeText(out), new IOResult()]
     }
-    const commits = await select(repo, starts, parsed, hidden)
-    let out: string
-    if (diffing) {
-      const blocks: string[] = []
-      for (const commit of commits) {
-        blocks.push(await commitEntry(repo, commit, parsed, diffFlags, decor))
+    const shownCommits =
+      walk !== null ? walk.steps.filter((step) => step.shown).map((step) => step.commit) : commits
+    const [rows, spans] = await commitDeltas(repo, shownCommits, diffFlags)
+    const render = async (shown: Delta[]): Promise<ByteSource | null> => {
+      const sides = commitShown(shown, spans)
+      let out: string
+      if (walk !== null) out = await graphed(repo, walk, parsed, decor, diffFlags, sides)
+      else {
+        const blocks: string[] = []
+        for (const commit of commits) {
+          blocks.push(
+            await commitEntry(repo, commit, parsed, diffFlags, sides.get(commit.oid) ?? [], decor),
+          )
+        }
+        out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
       }
-      out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
-    } else out = rendered(commits, parsed, repo.abbrev, decor)
-    if (out === '') return [null, new IOResult()]
-    return [encodeText(out), new IOResult()]
+      return out === '' ? null : encodeText(out)
+    }
+    return [null, new IOResult({ rows: { items: rows, render } })]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

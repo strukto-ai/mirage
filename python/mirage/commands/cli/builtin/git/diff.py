@@ -42,15 +42,17 @@ from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
 )
-from mirage.commands.cli.builtin.git.pathspec import (
-    pathspec_patterns,
-    visible_entries,
-)
+from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
     merge_bases,
     range_commits,
     resolve_commit,
+)
+from mirage.commands.cli.builtin.git.rows import (
+    Delta,
+    deltas,
+    shown_sides,
 )
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import tree_entries
@@ -65,7 +67,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 
 # Deliberate divergence, verified against git 2.47.3 on a real
@@ -163,14 +165,7 @@ def _output(
         flags (DiffFlags): output options.
     """
     return render_changes(
-        repo,
-        compare(
-            repo,
-            limited(before, flags.pathspecs),
-            limited(after, flags.pathspecs),
-            flags.renames,
-        ),
-        flags,
+        repo, compare(repo, before, after, flags.renames), flags
     )
 
 
@@ -235,18 +230,23 @@ async def diff(
                 before = staged_entries(state) if old is None else old
             else:
                 before, after = old or {}, new
-        before = visible_entries(location, before)
-        after = visible_entries(location, after)
-        parsed = replace(
-            parsed,
-            pathspecs=pathspec_patterns(
-                location, start_point(fl).virtual, pathspecs
-            ),
+        patterns = pathspec_patterns(
+            location, start_point(fl).virtual, pathspecs
         )
-        body = await asyncio.to_thread(_output, repo, before, after, parsed)
+        parsed = replace(parsed, pathspecs=patterns)
+        rows = deltas(
+            location, [(limited(before, patterns), limited(after, patterns))]
+        )
     except GitError as exc:
         return fatal(exc)
-    result = IOResult(stderr=warning) if warning else IOResult()
-    if not body:
-        return None, result
-    return yield_bytes(body), result
+
+    async def render(shown: list[Delta]) -> ByteSource | None:
+        [(old_side, new_side)] = shown_sides(shown, 1)
+        body = await asyncio.to_thread(
+            _output, repo, old_side, new_side, parsed
+        )
+        return yield_bytes(body) if body else None
+
+    return None, IOResult(
+        stderr=warning if warning else None, rows=Rows(rows, render)
+    )

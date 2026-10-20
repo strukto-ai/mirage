@@ -13,19 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource, type Rows } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { branchUpstream } from './branch.ts'
-import { collect } from './changes.ts'
+import { assembled, collect, type StatusRow } from './changes.ts'
 import { GitError, NoWorkspaceError } from './errors.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import type { HeadRef, StatusEntry } from './types.ts'
+import type { HeadRef } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { fatal, startPoint } from './util.ts'
 import { repoRelative } from './pathspec.ts'
@@ -67,43 +67,50 @@ function parseFlags(fl: FlagView): StatusFlags {
 }
 
 /**
- * Status rows as a person reads them, relative to where git runs.
+ * Where a person's status report names paths from, relative to the work tree;
+ * empty for paths named from its root.
  *
  * git's human formats name paths from the invocation directory unless
  * `status.relativePaths` is false; porcelain never does. From outside the work
- * tree they stay relative to its root.
+ * tree they stay relative to its root. Mirrors Python's `relative_prefix`.
  */
-async function displayed(repo: Repo, start: string, rows: StatusEntry[]): Promise<StatusEntry[]> {
-  if (!(await configBool(repo, 'status.relativePaths', true))) return rows
-  return relativeEntries(rows, repoRelative(repo.location, start, '.'))
+async function relativePrefix(repo: Repo, start: string): Promise<string> {
+  if (!(await configBool(repo, 'status.relativePaths', true))) return ''
+  return repoRelative(repo.location, start, '.')
 }
 
 /**
- * The default status report, as a string.
+ * The default status report, as rows and their renderer.
  *
  * Split out so `commit` can print it when it has nothing to commit: git shows
  * the whole status there rather than a one-line refusal, and two renderings of
  * the same thing would drift. Its paths are relative to `start`, where git runs.
  */
-export async function renderReport(
+export async function reportRows(
   repo: Repo,
   vfs: Files,
   head: HeadRef,
   start: string,
-): Promise<string> {
+): Promise<Rows<StatusRow>> {
   const [rows, state, noCommits] = await collect(repo, vfs, UNTRACKED_NORMAL)
   const fully = await configBool(repo, 'core.quotepath', true)
   const detached = head.branch !== null ? '' : await detachedLine(repo, head)
-  return longFormat(
-    await displayed(repo, start, rows),
-    head.branch,
-    detached,
-    noCommits,
-    state.merging,
-    false,
-    fully,
-    await branchUpstream(repo, head, noCommits),
-  )
+  const upstream = await branchUpstream(repo, head, noCommits)
+  const prefix = await relativePrefix(repo, start)
+  const render = async (shown: StatusRow[]): Promise<ByteSource> =>
+    encodeText(
+      longFormat(
+        relativeEntries(await assembled(repo, shown), prefix),
+        head.branch,
+        detached,
+        noCommits,
+        state.merging,
+        false,
+        fully,
+        upstream,
+      ),
+    )
+  return { items: rows, render }
 }
 
 /**
@@ -112,7 +119,8 @@ export async function renderReport(
  * Three sources, compared pairwise: HEAD's tree against the index says what a
  * commit would record, and the index against the working tree says what it would
  * leave behind. Everything the report prints is one of those two answers, or a
- * path neither side knows about.
+ * path neither side knows about. Each path is handed over as a row, so the
+ * report names and counts only the paths the session sees.
  */
 export async function status(
   _accessor: NOOPAccessor,
@@ -131,27 +139,31 @@ export async function status(
     const head = await readHead(vfs, repo.location.gitdir)
     const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
     const fully = await configBool(repo, 'core.quotepath', true)
-    const shown = parsed.porcelain ? rows : await displayed(repo, startPoint(fl).virtual, rows)
+    const prefix = parsed.porcelain ? '' : await relativePrefix(repo, startPoint(fl).virtual)
     const upstream = await branchUpstream(repo, head, noCommits)
     const detached = head.branch !== null ? '' : await detachedLine(repo, head)
-    const body =
-      parsed.porcelain || parsed.short
-        ? shortFormat(
-            shown,
-            parsed.branch ? branchLine(head.branch, noCommits, upstream) : null,
-            fully,
-          )
-        : longFormat(
-            shown,
-            head.branch,
-            detached,
-            noCommits,
-            state.merging,
-            parsed.untracked === UNTRACKED_NO,
-            fully,
-            upstream,
-          )
-    return [encodeText(body), new IOResult()]
+    const render = async (shown: StatusRow[]): Promise<ByteSource> => {
+      const entries = relativeEntries(await assembled(repo, shown), prefix)
+      const body =
+        parsed.porcelain || parsed.short
+          ? shortFormat(
+              entries,
+              parsed.branch ? branchLine(head.branch, noCommits, upstream) : null,
+              fully,
+            )
+          : longFormat(
+              entries,
+              head.branch,
+              detached,
+              noCommits,
+              state.merging,
+              parsed.untracked === UNTRACKED_NO,
+              fully,
+              upstream,
+            )
+      return encodeText(body)
+    }
+    return [null, new IOResult({ rows: { items: rows, render } })]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

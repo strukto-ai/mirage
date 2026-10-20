@@ -27,6 +27,7 @@ import { encodeText } from '../../../shell/bytes.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
 import { joinOrAbort } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { viewOf, type Files } from '../../files.ts'
 
 /**
  * What a voice says for one failure: the bytes the handler printed before
@@ -72,6 +73,17 @@ export interface RunHandlerOpts {
   signal?: AbortSignal
   /** Aborted when the limit trips, so a runtime can kill what it spawned. */
   abort?: AbortController
+  /**
+   * Called once the answer, its rows rendered, has settled, however the
+   * caller left: a handler and its renderer may run past a timeout, so a
+   * caller keeps what they use (a CLI's client) until then.
+   */
+  settle?: () => void
+  /**
+   * The handler's files, whose session's hides filter the rows it hands
+   * over; absent filters none.
+   */
+  vfs?: Files | null
 }
 
 /**
@@ -171,13 +183,17 @@ export async function answered(
  * is worded in the caller's voice, so the rest of the line keeps running. A
  * handler that may have written past the dispatcher drops caches afterwards,
  * whether it answered, failed (in its own words too), timed out or was
- * cancelled, again when a body still running past its timeout settles, since
- * its write may land then, and again once an answer that streams has ended or
+ * cancelled, again when a body (or the renderer of the rows it handed over)
+ * still running past its timeout settles, since its write may land then, and
+ * again once an answer that streams has ended or
  * been closed, since a stream does its work as it is pulled. An answer
  * carries the producer the output limits resolve from and
  * has its stream framed so a failure while it streams is worded too; a
  * failure the runner framed carries no producer. Null is the handler
  * declining, which a mount's cascade reads as "try the next handler".
+ * Rows a handler hands over in place of stdout (`IOResult.rows`) lose those
+ * the session cannot see and are rendered here, inside the timeout, so this
+ * is the one place a command's output meets the session's hides.
  * Mirrors Python's `run_handler`.
  */
 export async function runHandler(
@@ -190,17 +206,21 @@ export async function runHandler(
 ): Promise<CommandFnResult> {
   const timeout = limit?.timeoutSeconds ?? null
   let out: CommandFnResult
+  // The rendered answer is what a caller that left abandons: a renderer that
+  // finishes late hands back output nobody reads.
+  const answer = rendered(body, opts.vfs ?? null, name)
+  if (opts.settle !== undefined) void answer.then(opts.settle, opts.settle)
   try {
-    out = await runWithTimeout(joinOrAbort(body, opts.signal), timeout, name)
+    out = await runWithTimeout(joinOrAbort(answer, opts.signal), timeout, name)
   } catch (err) {
     if (err instanceof CommandTimeoutError) opts.abort?.abort()
-    abandon(body, err, name)
+    abandon(answer, err, name)
     const drop = opts.drop
     if (drop !== undefined) {
       await drop()
       if (err instanceof CommandTimeoutError || opts.signal?.aborted === true) {
         const settle = (): Promise<void> => drop()
-        void body.then(settle, settle).catch((dropErr: unknown) => {
+        void answer.then(settle, settle).catch((dropErr: unknown) => {
           // The command already returned, so a drop that fails here (a
           // workspace torn down under it) has no stream to land on; it is
           // reported rather than left as an unhandled rejection.
@@ -241,6 +261,33 @@ export async function runHandler(
     }),
     io,
   ]
+}
+
+/**
+ * A handler's answer with the rows it handed over rendered: those the
+ * session cannot see dropped first. Mirrors Python's `_rendered`.
+ */
+async function rendered(
+  body: Promise<CommandFnResult>,
+  vfs: Files | null,
+  name: string,
+): Promise<CommandFnResult> {
+  const out = await body
+  if (out === null) return out
+  const [stdout, io] = out
+  const rows = io.rows
+  if (rows === null) return out
+  if (stdout !== null) {
+    await closeQuietly(stdout)
+    throw new Error(`${name}: hands over both rows and stdout`)
+  }
+  io.rows = null
+  let items = [...rows.items]
+  if (vfs !== null) {
+    const view = viewOf(vfs)
+    items = items.filter((row) => view.visible(row.path))
+  }
+  return [await rows.render(items), io]
 }
 
 /** Keep a deferred failure on its command, after any emitted bytes. */

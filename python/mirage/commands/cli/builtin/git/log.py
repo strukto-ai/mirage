@@ -26,8 +26,10 @@ from mirage.commands.cli.builtin.git.constants import (
 )
 from mirage.commands.cli.builtin.git.diff_output import (
     DiffFlags,
+    commit_deltas,
     commit_entry,
     commit_output,
+    commit_shown,
     parse_diff_flags,
     renames_enabled,
     separator_line,
@@ -54,13 +56,14 @@ from mirage.commands.cli.builtin.git.history import (
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import split_revisions
+from mirage.commands.cli.builtin.git.rows import Delta, Side
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
 from mirage.commands.cli.builtin.git.util import check_operands, fatal
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import yield_bytes
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 
@@ -127,6 +130,7 @@ def _graphed(
     flags: LogFlags,
     decor: Decorations | None,
     diff: DiffFlags | None,
+    sides: dict[bytes, list[Side]],
 ) -> bytes:
     """The bytes a ``--graph`` log prints, commit by commit.
 
@@ -158,6 +162,9 @@ def _graphed(
             format prints any.
         diff (DiffFlags | None): the diff flags, None when no diff was
             asked for.
+        sides (dict[bytes, list[Side]]): each shown commit's
+            comparisons, as the session sees them, when a diff was
+            asked for.
     """
     width = abbrev_for(repo)
     graph = CommitGraph(walk.interesting.__contains__, flags.first_parent)
@@ -179,7 +186,11 @@ def _graphed(
         graph.walk(commit)
         if not step.shown:
             continue
-        bodies = commit_output(repo, commit, diff) if diff is not None else []
+        bodies = (
+            commit_output(repo, commit, diff, sides[commit.id])
+            if diff is not None
+            else []
+        )
         blocks = [
             (
                 commit.parents[index].decode() if len(bodies) > 1 else None,
@@ -297,27 +308,46 @@ async def log(
                 vfs, location, b"core", b"quotepath", True
             ),
         )
-    if walk is not None:
-        out = await asyncio.to_thread(
-            _graphed,
-            repo,
-            walk,
-            parsed,
-            decor,
-            diff_flags if diffing else None,
-        )
-    elif diffing:
-        blocks = [
+    if not diffing:
+        out = (
             await asyncio.to_thread(
-                commit_entry, repo, commit, parsed, diff_flags, decor
+                _graphed, repo, walk, parsed, decor, None, {}
             )
-            for commit in commits
-        ]
-        out = (b"" if parsed.pretty.kind in TERMINATED_KINDS else b"\n").join(
-            blocks
+            if walk is not None
+            else _rendered(commits, parsed, abbrev_for(repo), decor)
         )
-    else:
-        out = _rendered(commits, parsed, abbrev_for(repo), decor)
-    if not out:
-        return None, IOResult()
-    return yield_bytes(out), IOResult()
+        return (yield_bytes(out) if out else None), IOResult()
+    shown_commits = (
+        [step.commit for step in walk.steps if step.shown]
+        if walk is not None
+        else commits
+    )
+    rows, spans = await asyncio.to_thread(
+        commit_deltas, repo, location, shown_commits, diff_flags
+    )
+
+    async def render(shown: list[Delta]) -> ByteSource | None:
+        sides = commit_shown(shown, spans)
+        if walk is not None:
+            out = await asyncio.to_thread(
+                _graphed, repo, walk, parsed, decor, diff_flags, sides
+            )
+        else:
+            blocks = [
+                await asyncio.to_thread(
+                    commit_entry,
+                    repo,
+                    commit,
+                    parsed,
+                    diff_flags,
+                    sides[commit.id],
+                    decor,
+                )
+                for commit in commits
+            ]
+            out = (
+                b"" if parsed.pretty.kind in TERMINATED_KINDS else b"\n"
+            ).join(blocks)
+        return yield_bytes(out) if out else None
+
+    return None, IOResult(rows=Rows(rows, render))

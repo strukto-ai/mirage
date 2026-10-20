@@ -592,10 +592,10 @@ async function runCli(
   const run = (ctx: Context): Promise<CommandFnResult> => {
     const abort = new AbortController()
     const body = start(ctx, abort.signal)
-    // Racing a promise does not stop its work: a body still running past
-    // its timeout keeps the install's accessor until it settles.
+    // Racing a promise does not stop its work: a body, or a renderer of the
+    // rows it handed over, still running past its timeout keeps the
+    // install's accessor until the answer settles.
     const settled = install.activity.acquire()
-    void body.then(settled, settled)
     // The leaf's `write` is the one answer: the gate hands it to policy as
     // `CommandContext.write`, and the cache reads it too, so a verb that can
     // mutate (`gh api` under any method) costs the mounts a reload rather
@@ -609,8 +609,10 @@ async function runCli(
       cliVoice(prog),
       {
         abort,
+        settle: settled,
         ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
         ...(script !== null ? { frame: false } : {}),
+        ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },
     )
   }

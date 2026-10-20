@@ -20,10 +20,12 @@ from dulwich.object_store import MemoryObjectStore
 from dulwich.objects import Blob
 
 from mirage.commands.cli.builtin.git.changes import (
+    StagedRow,
     conflict_codes,
     head_entries,
     merge,
-    stage_changes,
+    pair_renames,
+    staged_letters,
     work_changes,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index
@@ -78,6 +80,23 @@ def stat(size: int | None = 4, mode: int | None = 0o644) -> FileStat:
 
 
 EMPTY_STORE = MemoryObjectStore()
+
+
+def stage_changes(
+    store: MemoryObjectStore,
+    head: dict[bytes, tuple[int, bytes]] | None,
+    entries: dict[bytes, IndexEntry],
+    conflicts: set[bytes],
+) -> dict[str, StagedRow]:
+    """HEAD against the index with renames paired, as status reads it.
+
+    Args:
+        store (MemoryObjectStore): the object database, read for blobs.
+        head (dict | None): HEAD's tree, or None before the first commit.
+        entries (dict[bytes, IndexEntry]): the index.
+        conflicts (set[bytes]): paths left unmerged.
+    """
+    return pair_renames(store, *staged_letters(head, entries, conflicts))
 
 
 def test_an_index_path_absent_from_head_is_added():

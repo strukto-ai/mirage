@@ -12,9 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Sequence,
+)
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
 from mirage.types import PathSpec, Producer, Refusal
@@ -141,6 +147,38 @@ class PathRecord:
     values: tuple[int, ...] = ()
 
 
+class PathRow(Protocol):
+    """A row a command hands over: it names the path it shows."""
+
+    @property
+    def path(self) -> PathSpec: ...
+
+
+RowT = TypeVar("RowT", bound=PathRow)
+
+
+@dataclass(frozen=True)
+class Rows(Generic[RowT]):
+    """A command's output as rows, each naming the path it shows, and
+    the renderer that prints them.
+
+    The command boundary drops every row whose path the session hides,
+    by the rule the dispatcher refuses a call by, and renders the rest,
+    so nothing the renderer prints (a name, a count, a total, a column
+    width) stands for a hidden path, and no handler checks a hide of
+    its own. A handler hands them over on ``IOResult.rows`` with no
+    stdout; the renderer runs inside the command's timeout.
+
+    Args:
+        items (Sequence[RowT]): the rows, in the order they print.
+        render (Callable[[list[RowT]], Awaitable[ByteSource | None]]):
+            prints the rows the session sees; None prints nothing.
+    """
+
+    items: Sequence[RowT]
+    render: Callable[[list[RowT]], Awaitable[ByteSource | None]]
+
+
 @dataclass
 class OpReport:
     """The dispatcher's account of what actually ran, filled in place.
@@ -217,6 +255,10 @@ class IOResult:
             find's matches, du's files and directories, wc's rows
             without the total, in operand order. None means the command
             supplied none.
+        rows (Rows[Any] | None): the command's output before it is
+            rendered, handed over in place of stdout: the command
+            boundary drops the rows the session cannot see and renders
+            the rest. Never merged: the boundary consumes it.
         stdout (ByteSource | None): Standard output stream.
         stderr (ByteSource | None): Standard error stream.
         exit_code (int): Process exit code.
@@ -247,10 +289,12 @@ class IOResult:
         refusal: Refusal | None = None,
         records: list[PathRecord] | None = None,
         closed_stdout: ClosedPipe | None = None,
+        rows: Rows[Any] | None = None,
     ) -> None:
         self.stdout = stdout
         self.closed_stdout = closed_stdout
         self.records = records
+        self.rows = rows
         self.stderr = stderr
         self._exit_code = exit_code
         self.output: OutputState | None = None

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import dataclass
 from stat import S_IFMT, S_IFREG, S_IXUSR
 
 from dulwich.diff_tree import _similarity_score
@@ -32,7 +33,8 @@ from mirage.commands.cli.builtin.git.errors import UnhashableFileError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
-from mirage.commands.cli.builtin.git.pathspec import visible_entries
+from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
+from mirage.commands.cli.builtin.git.rows import entry_path
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.types import (
     IndexState,
@@ -53,6 +55,7 @@ DELETED = "D"
 TYPE_CHANGED = "T"
 RENAMED = "R"
 UNTRACKED = "?"
+IGNORED = "!"
 # git's own two rename knobs: a pair counts as a rename at 60% shared
 # content, and the search is abandoned entirely once the add-by-delete
 # matrix would exceed 200 by 200. Matching both is what makes mirage
@@ -250,13 +253,13 @@ def pair_renames(
     }
 
 
-def stage_changes(
-    store: BaseObjectStore,
+def staged_letters(
     head: dict[bytes, tuple[int, bytes]] | None,
     entries: dict[bytes, IndexEntry],
     conflicts: set[bytes],
-) -> dict[str, StagedRow]:
-    """Compare HEAD's tree with the index: what a commit would record.
+) -> tuple[dict[str, str], dict[str, bytes], dict[str, int]]:
+    """Compare HEAD's tree with the index: what a commit would record,
+    before an add and a delete pair into a rename.
 
     Conflicted paths are excluded rather than compared. An unmerged path
     holds no ordinary index entry, so comparing it against HEAD's tree
@@ -264,11 +267,14 @@ def stage_changes(
     the opposite of what is happening to it.
 
     Args:
-        store (BaseObjectStore): the object database, read for blobs when
-            a rename has to be scored.
         head (dict | None): HEAD's tree, or None before the first commit.
         entries (dict[bytes, IndexEntry]): the index.
         conflicts (set[bytes]): paths left unmerged.
+
+    Returns:
+        tuple: each changed path's letter, then the blob id and the
+            file-type bits of each added and deleted path, which is what
+            ``pair_renames`` takes.
     """
     tree = head or {}
     staged: dict[str, str] = {}
@@ -289,33 +295,37 @@ def stage_changes(
             staged[name] = DELETED
             shas[name] = sha
             kinds[name] = S_IFMT(mode)
-    return pair_renames(store, staged, shas, kinds)
+    return staged, shas, kinds
 
 
 def staged_state(
     repo: BaseRepo,
     entries: dict[bytes, IndexEntry],
     conflicts: set[bytes],
-    location: RepoLocation,
-) -> tuple[dict[str, StagedRow], bool]:
-    """Everything HEAD-against-index, computed off the event loop.
+) -> tuple[
+    dict[str, str],
+    dict[str, bytes],
+    dict[str, int],
+    dict[bytes, tuple[int, bytes]] | None,
+]:
+    """HEAD against the index, read off the event loop.
 
-    One function rather than two calls because both halves read objects
-    through a store that fetches over the dispatcher, so both have to sit
-    on the worker thread; splitting them would put a blocking fetch back
-    on the loop that has to serve it.
+    On the worker thread because reading HEAD's tree fetches objects
+    through a store that goes over the dispatcher, which a blocking read
+    on the loop that has to serve it would never get.
 
     Args:
         repo (BaseRepo): the opened repository.
         entries (dict[bytes, IndexEntry]): the index.
         conflicts (set[bytes]): paths left unmerged.
-        location (RepoLocation): repository and session visibility.
+
+    Returns:
+        tuple: what ``staged_letters`` returns, then HEAD's tree, None
+            when HEAD resolves to nothing yet.
     """
     head = head_entries(repo)
-    if head is not None:
-        head = visible_entries(location, head)
-    changed = stage_changes(repo.object_store, head, entries, conflicts)
-    return changed, head is None
+    staged, shas, kinds = staged_letters(head, entries, conflicts)
+    return staged, shas, kinds, head
 
 
 def conflict_codes(
@@ -548,13 +558,85 @@ def merge(
     return rows
 
 
+@dataclass(frozen=True, slots=True)
+class StatusRow:
+    """One path's status before renames pair, as the row ``status``
+    hands over.
+
+    An added and a deleted path stay two rows, so a hide drops either
+    alone and the renderer pairs only the renames the session sees.
+
+    Args:
+        path (PathSpec): where it sits in the session's tree.
+        name (str): Git's repository-relative name; a collapsed
+            untracked directory ends in ``/``.
+        index_status (str): HEAD against the index, ``?`` untracked and
+            ``!`` ignored.
+        tree_status (str): the index against the working tree.
+        end (tuple[int, bytes] | None): the file-type bits and blob id
+            of a staged add or delete, which a rename pairs by.
+        unmerged (bool): whether the two letters are a conflict code.
+    """
+
+    path: PathSpec
+    name: str
+    index_status: str
+    tree_status: str
+    end: tuple[int, bytes] | None = None
+    unmerged: bool = False
+
+
+def assembled(
+    store: BaseObjectStore, shown: list[StatusRow]
+) -> list[StatusEntry]:
+    """The status entries the rows a session sees make, renames paired.
+
+    Synchronous, for a worker thread: scoring a rename reads blobs.
+
+    Args:
+        store (BaseObjectStore): the object database, read for blobs.
+        shown (list[StatusRow]): the rows the command boundary kept.
+    """
+    staged: dict[str, str] = {}
+    shas: dict[str, bytes] = {}
+    kinds: dict[str, int] = {}
+    unstaged: dict[str, str] = {}
+    conflicts: dict[str, str] = {}
+    untracked: list[str] = []
+    ignored: list[str] = []
+    for row in shown:
+        if row.index_status == UNTRACKED:
+            untracked.append(row.name)
+        elif row.index_status == IGNORED:
+            ignored.append(row.name)
+        elif row.unmerged:
+            conflicts[row.name] = row.index_status + row.tree_status
+        else:
+            if row.index_status != UNCHANGED:
+                staged[row.name] = row.index_status
+            if row.tree_status != UNCHANGED:
+                unstaged[row.name] = row.tree_status
+            if row.end is not None:
+                kinds[row.name], shas[row.name] = row.end
+    rows = merge(
+        pair_renames(store, staged, shas, kinds),
+        unstaged,
+        conflicts,
+        untracked,
+    )
+    rows.extend(
+        StatusEntry(path, IGNORED, IGNORED) for path in sorted(ignored)
+    )
+    return rows
+
+
 async def collect(
     vfs: Files,
     repo: BaseRepo,
     location: RepoLocation,
     mode: str,
     show_ignored: bool = False,
-) -> tuple[list[StatusEntry], IndexState, bool]:
+) -> tuple[list[StatusRow], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
     Args:
@@ -562,19 +644,55 @@ async def collect(
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         mode (str): which untracked files to report.
+        show_ignored (bool): whether to report ignored files too.
     """
     state = await read_index(vfs, location.gitdir)
-    entries = visible_entries(location, state.entries)
-    conflicts = visible_entries(location, state.conflicts)
-    staged, no_commits = await asyncio.to_thread(
-        staged_state, repo, entries, set(conflicts), location
+    staged, shas, kinds, head = await asyncio.to_thread(
+        staged_state, repo, state.entries, set(state.conflicts)
     )
-    tracked = {
-        path.decode("utf-8", errors="replace")
-        for path in (set(entries) | set(conflicts))
-    }
+    # The walk collapses a directory holding nothing tracked into
+    # ``dir/``, and which directories those are is the session's view of
+    # the index: one whose only tracked file is hidden reads as
+    # untracked, as it would in a checkout of what the session sees.
+    tracked = decoded(visible_entries(location, state.entries))
+    tracked |= decoded(visible_entries(location, state.conflicts))
     found = await scan(vfs, location, tracked, mode, show_ignored)
-    unstaged = await work_changes(vfs, location.worktree, entries, found)
-    rows = merge(staged, unstaged, conflict_codes(conflicts), found.untracked)
-    rows.extend(StatusEntry(path, "!", "!") for path in sorted(found.ignored))
-    return rows, state, no_commits
+    unstaged = await work_changes(vfs, location.worktree, state.entries, found)
+    conflicts = conflict_codes(state.conflicts)
+
+    # The verdicts name a path as text with its undecodable bytes
+    # replaced; a row names the path itself, which is what a hide is
+    # written against.
+    originals = {
+        raw.decode("utf-8", errors="replace"): raw
+        for raw in (*state.entries, *state.conflicts, *(head or {}))
+    }
+
+    def path(name: str) -> PathSpec:
+        raw = originals.get(name)
+        if raw is not None:
+            return entry_path(location, raw)
+        return location.worktree.join(name.rstrip("/"))
+
+    rows = [
+        StatusRow(path(name), name, code[0], code[1], unmerged=True)
+        for name, code in conflicts.items()
+    ]
+    rows.extend(
+        StatusRow(
+            path(name),
+            name,
+            staged.get(name, UNCHANGED),
+            unstaged.get(name, UNCHANGED),
+            (kinds[name], shas[name]) if name in shas else None,
+        )
+        for name in sorted(set(staged) | set(unstaged))
+    )
+    rows.extend(
+        StatusRow(path(name), name, UNTRACKED, UNTRACKED)
+        for name in found.untracked
+    )
+    rows.extend(
+        StatusRow(path(name), name, IGNORED, IGNORED) for name in found.ignored
+    )
+    return rows, state, head is None

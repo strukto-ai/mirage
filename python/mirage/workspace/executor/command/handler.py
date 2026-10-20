@@ -35,6 +35,7 @@ from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import Limit, PathSpec, Producer
+from mirage.workspace.files import Files, view_of
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,7 @@ async def run_handler(
     drop: Callable[[], Awaitable[None]] | None = None,
     scope: Callable[[CommandOutput], CommandOutput] | None = None,
     frame: bool = True,
+    vfs: Files | None = None,
 ) -> CommandFnResult:
     """Run one handler body: a mount command's, or a CLI leaf's.
 
@@ -212,7 +214,10 @@ async def run_handler(
     output limits resolve from and has its stream framed so a failure
     while it streams is worded too; a failure the runner framed carries
     no producer. None is the handler declining, which a mount's cascade
-    reads as "try the next handler".
+    reads as "try the next handler". Rows a handler hands over in place
+    of stdout (``IOResult.rows``) lose those the session cannot see and
+    are rendered here, inside the timeout, so this is the one place a
+    command's output meets the session's hides.
 
     Args:
         body (Awaitable[CommandFnResult]): the started handler call.
@@ -228,10 +233,12 @@ async def run_handler(
             its recorder and revisions to the stream).
         frame (bool): whether to frame the answer's stream; a script
             leaf's comes back from its runtime already worded.
+        vfs (Files | None): the handler's files, whose session's hides
+            filter the rows it hands over; None filters none.
     """
     timeout = limit.timeout_seconds if limit is not None else None
     try:
-        out = await run_with_timeout(body, timeout, name)
+        out = await run_with_timeout(_rendered(body, vfs, name), timeout, name)
     except (CommandTimeoutError, asyncio.CancelledError):
         if drop is not None:
             await drop()
@@ -274,6 +281,35 @@ async def run_handler(
             await drop()
 
     return OutputStream(pulled, close), io
+
+
+async def _rendered(
+    body: Awaitable[CommandFnResult], vfs: Files | None, name: str
+) -> CommandFnResult:
+    """A handler's answer with the rows it handed over rendered: those
+    the session cannot see dropped first.
+
+    Args:
+        body (Awaitable[CommandFnResult]): the started handler call.
+        vfs (Files | None): the handler's files; None filters none.
+        name (str): the command, for a handler that hands over both.
+    """
+    out = await body
+    if out is None:
+        return out
+    stdout, io = out
+    rows = io.rows
+    if rows is None:
+        return out
+    if stdout is not None:
+        await close_quietly(stdout)
+        raise ValueError(f"{name}: hands over both rows and stdout")
+    io.rows = None
+    items = list(rows.items)
+    if vfs is not None:
+        view = view_of(vfs)
+        items = [row for row in items if view.visible(row.path)]
+    return await rows.render(items), io
 
 
 async def _framed(

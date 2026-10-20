@@ -660,20 +660,6 @@ export class NothingSpecifiedError extends GitError {
 }
 
 /**
- * `commit` with an index that matches HEAD. Printed on stdout, where the status
- * report it stands in for would have gone, and exits 1.
- */
-export class NothingToCommitError extends GitError {
-  override readonly prefix = null
-  override readonly code = 1
-  override readonly stream = 'stdout'
-
-  constructor(report: string) {
-    super(report.replace(/\n+$/, ''))
-  }
-}
-
-/**
  * `commit` with no `-m`.
  *
  * git would open an editor here. A mount has no editor to open and no terminal

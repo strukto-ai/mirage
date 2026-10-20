@@ -15,14 +15,13 @@
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
 import git from 'isomorphic-git'
 
-import { visibleEntries } from './pathspec.ts'
-
 import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
 import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK, SYMLINK_MODE } from './constants.ts'
 import { readIndex } from './index_file.ts'
 import { entryBytes } from './io.ts'
+import { visibleEntries } from './pathspec.ts'
 
 import { readBlobBytes, type Repo } from './repo.ts'
 import { resolveCommit } from './revparse.ts'
@@ -40,6 +39,7 @@ export const DELETED = 'D'
 export const TYPE_CHANGED = 'T'
 const RENAMED = 'R'
 const UNTRACKED = '?'
+const IGNORED = '!'
 // git's own two rename knobs: a pair counts as a rename at 60% shared content,
 // and the search is abandoned entirely once the add-by-delete matrix would
 // exceed 200 by 200. Matching both is what makes mirage give up exactly where
@@ -256,19 +256,21 @@ export async function pairRenames(
 }
 
 /**
- * Compare HEAD's tree with the index: what a commit would record.
+ * Compare HEAD's tree with the index: what a commit would record, before an
+ * add and a delete pair into a rename.
  *
  * Conflicted paths are excluded rather than compared. An unmerged path holds no
  * ordinary index entry, so comparing it against HEAD's tree would find the path
  * on one side only and call it deleted, which is the opposite of what is
- * happening to it.
+ * happening to it. Returns each changed path's letter, then the blob id and the
+ * kind of each added and deleted path, which is what `pairRenames` takes.
+ * Mirrors Python's `staged_letters`.
  */
-async function stageChanges(
-  repo: Repo,
+function stagedLetters(
   head: ReadonlyMap<string, TreeEntry> | null,
   entries: ReadonlyMap<string, IndexEntry>,
   conflicts: ReadonlySet<string>,
-): Promise<Map<string, StagedRow>> {
+): [Map<string, string>, Map<string, string>, Map<string, string>] {
   const tree = head ?? new Map<string, TreeEntry>()
   const staged = new Map<string, string>()
   const oids = new Map<string, string>()
@@ -289,7 +291,7 @@ async function stageChanges(
     oids.set(path, recorded.oid)
     kinds.set(path, kindOf(recorded.mode))
   }
-  return pairRenames(repo, staged, oids, kinds)
+  return [staged, oids, kinds]
 }
 
 /** The two-letter code for each unmerged path. */
@@ -485,27 +487,103 @@ function merge(
   return rows
 }
 
+/**
+ * One path's status before renames pair, as the row `status` hands over.
+ *
+ * An added and a deleted path stay two rows, so a hide drops either alone and
+ * the renderer pairs only the renames the session sees. Mirrors Python's
+ * `StatusRow`.
+ */
+export interface StatusRow {
+  /** Where it sits in the session's tree. */
+  readonly path: PathSpec
+  /** Git's repository-relative name; a collapsed untracked directory ends in `/`. */
+  readonly name: string
+  /** HEAD against the index, `?` untracked and `!` ignored. */
+  readonly indexStatus: string
+  /** The index against the working tree. */
+  readonly treeStatus: string
+  /** The kind and blob id of a staged add or delete, which a rename pairs by. */
+  readonly end: readonly [string, string] | null
+  /** Whether the two letters are a conflict code. */
+  readonly unmerged: boolean
+}
+
+/**
+ * The status entries the rows a session sees make, renames paired. Mirrors
+ * Python's `assembled`.
+ */
+export async function assembled(repo: Repo, shown: readonly StatusRow[]): Promise<StatusEntry[]> {
+  const staged = new Map<string, string>()
+  const oids = new Map<string, string>()
+  const kinds = new Map<string, string>()
+  const unstaged = new Map<string, string>()
+  const conflicts = new Map<string, string>()
+  const untracked: string[] = []
+  const ignored: string[] = []
+  for (const row of shown) {
+    if (row.indexStatus === UNTRACKED) untracked.push(row.name)
+    else if (row.indexStatus === IGNORED) ignored.push(row.name)
+    else if (row.unmerged) conflicts.set(row.name, row.indexStatus + row.treeStatus)
+    else {
+      if (row.indexStatus !== UNCHANGED) staged.set(row.name, row.indexStatus)
+      if (row.treeStatus !== UNCHANGED) unstaged.set(row.name, row.treeStatus)
+      if (row.end !== null) {
+        kinds.set(row.name, row.end[0])
+        oids.set(row.name, row.end[1])
+      }
+    }
+  }
+  const rows = merge(await pairRenames(repo, staged, oids, kinds), unstaged, conflicts, untracked)
+  for (const path of ignored.sort(compareCodePoints))
+    rows.push({ path, indexStatus: IGNORED, treeStatus: IGNORED, original: null })
+  return rows
+}
+
 /** Everything `status` reports, in one pass over the three sources. */
 export async function collect(
   repo: Repo,
   vfs: Files,
   mode: string,
   showIgnored = false,
-): Promise<[StatusEntry[], IndexState, boolean]> {
+): Promise<[StatusRow[], IndexState, boolean]> {
   const state = await readIndex(repo, vfs)
-  const allHead = await headEntries(repo)
-  const head = allHead === null ? null : visibleEntries(repo.location, allHead)
-  const entries = visibleEntries(repo.location, state.entries)
-  const conflicts = visibleEntries(repo.location, state.conflicts)
-  const staged = await stageChanges(repo, head, entries, new Set(conflicts.keys()))
-  const tracked = new Set([...entries.keys(), ...conflicts.keys()])
+  const head = await headEntries(repo)
+  const [staged, oids, kinds] = stagedLetters(head, state.entries, new Set(state.conflicts.keys()))
+  // The walk collapses a directory holding nothing tracked into `dir/`, and
+  // which directories those are is the session's view of the index: one whose
+  // only tracked file is hidden reads as untracked, as it would in a checkout
+  // of what the session sees.
+  const tracked = new Set([
+    ...visibleEntries(repo.location, state.entries).keys(),
+    ...visibleEntries(repo.location, state.conflicts).keys(),
+  ])
   const found = await scan(vfs, repo.location, tracked, mode, showIgnored)
-  const unstaged = await workChanges(repo, vfs, repo.location.worktree, entries, found)
-  const rows = merge(staged, unstaged, conflictCodes(conflicts), found.untracked)
-  rows.push(
-    ...[...found.ignored]
-      .sort(compareCodePoints)
-      .map((path) => ({ path, indexStatus: '!', treeStatus: '!', original: null })),
-  )
+  const unstaged = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
+  const at = (name: string): PathSpec => repo.location.worktree.join(name.replace(/\/+$/, ''))
+  const row = (
+    name: string,
+    indexStatus: string,
+    treeStatus: string,
+    end: readonly [string, string] | null = null,
+    unmerged = false,
+  ): StatusRow => ({ path: at(name), name, indexStatus, treeStatus, end, unmerged })
+  const rows: StatusRow[] = []
+  for (const [name, code] of conflictCodes(state.conflicts))
+    rows.push(row(name, code.charAt(0), code.charAt(1), null, true))
+  for (const name of [...new Set([...staged.keys(), ...unstaged.keys()])].sort(compareCodePoints)) {
+    const oid = oids.get(name)
+    const kind = kinds.get(name)
+    rows.push(
+      row(
+        name,
+        staged.get(name) ?? UNCHANGED,
+        unstaged.get(name) ?? UNCHANGED,
+        oid !== undefined && kind !== undefined ? [kind, oid] : null,
+      ),
+    )
+  }
+  for (const name of found.untracked) rows.push(row(name, UNTRACKED, UNTRACKED))
+  for (const name of found.ignored) rows.push(row(name, IGNORED, IGNORED))
   return [rows, state, head === null]
 }

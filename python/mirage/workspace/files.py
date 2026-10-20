@@ -255,13 +255,14 @@ class Files:
         owner = owner_prefix((m.prefix for m in self._served()), virtual)
         return None if owner is None else norm(owner)
 
-    def is_visible(self, path: str | PathSpec) -> bool:
+    def _is_visible(self, path: str | PathSpec) -> bool:
         """Whether the session sees ``path``: it is not hidden, and no
         link on it leads where the session cannot see.
 
-        The rule the dispatcher refuses a call by, for a caller holding
-        paths in data of its own (git's index, a manifest), so what it
-        prints of them honours the same hides.
+        The rule the dispatcher refuses a call by. Not a handler's: a
+        handler hands its output over as rows (``IOResult.rows``), which
+        the command boundary filters by this rule; the command helpers
+        read it as ``FilesView.visible``.
 
         Args:
             path (str | PathSpec): virtual path.
@@ -1188,9 +1189,9 @@ class FilesNamespace:
 
     The link table and the mount table as the workspace keeps them,
     hidden entries included, so it is never a handler's: a handler asks
-    ``Files`` (``is_visible``, ``mount_of``, ``submounts``), which apply
-    the session's hides, and the command helpers read ``FilesView``,
-    which applies them. The code that walks the namespace beside the
+    ``Files`` (``mount_of``, ``submounts``), which apply the session's
+    hides, and the command helpers read ``FilesView``, which applies
+    them. The code that walks the namespace beside the
     dispatcher reads it: the mount core and the file tool mapping a path
     the way the dispatcher does, the runtime's descriptors.
 
@@ -1233,7 +1234,7 @@ class FilesView:
 
     The link and mount tables are read here, beside the dispatcher that
     answers from them, and filtered by the rule it refuses a call by
-    (``Files.is_visible``), so the command helpers that walk the
+    (``visible``), so the command helpers that walk the
     namespace (``links_of``, ``mounts_of``, globs, ``find -L``, ``cp
     -L``, ``du``) read no table and filter no hide of their own: a
     hidden link, or one that leads where the session cannot see, has no
@@ -1258,6 +1259,12 @@ class FilesView:
             links, by their first segment under it.
         vis (Callable[[], Visibility | None]): the visibility of the
             session an op would run as.
+        visible (Callable[[str | PathSpec], bool]): whether the session
+            sees a path: it is not hidden, and no link on it leads where
+            the session cannot see. The rule the dispatcher refuses a call
+            by, for what a helper holds in data of its own (a link's
+            target, git's index) and the rows the command boundary
+            filters.
         follow (FollowOperands | None): the line's operand resolution a
             command's globs give their matches.
     """
@@ -1269,6 +1276,7 @@ class FilesView:
     mounts: Callable[[bool], MountView]
     owed: Callable[[str], list[str]]
     vis: Callable[[], Visibility | None]
+    visible: Callable[[str | PathSpec], bool]
     follow: FollowOperands | None
 
 
@@ -1356,7 +1364,7 @@ def view_of(files: Files) -> FilesView:
     table = files._links
 
     def link_at(virtual: str) -> FileStat | None:
-        if table is None or not files.is_visible(virtual):
+        if table is None or not files._is_visible(virtual):
             return None
         return table.link_stat_at(virtual)
 
@@ -1366,7 +1374,7 @@ def view_of(files: Files) -> FilesView:
         return [
             (path, row)
             for path, row in table.link_stats_below(directory)
-            if files.is_visible(path)
+            if files._is_visible(path)
         ]
 
     def resolve(virtual: str) -> str:
@@ -1387,5 +1395,6 @@ def view_of(files: Files) -> FilesView:
         mounts=functools.partial(_mount_view, files),
         owed=owed,
         vis=files._vis,
+        visible=files._is_visible,
         follow=files._follow,
     )

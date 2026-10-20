@@ -534,24 +534,6 @@ class NothingSpecifiedError(GitError):
         )
 
 
-class NothingToCommitError(GitError):
-    """``commit`` with an index that matches HEAD.
-
-    Printed on stdout, where the status report it stands in for would
-    have gone, and exits 1.
-
-    Args:
-        report (str): the status report to print in place of a commit.
-    """
-
-    prefix = None
-    code = 1
-    stream = "stdout"
-
-    def __init__(self, report: str) -> None:
-        super().__init__(report.rstrip("\n"))
-
-
 class MissingMessageError(GitError):
     """``commit`` with no ``-m``.
 

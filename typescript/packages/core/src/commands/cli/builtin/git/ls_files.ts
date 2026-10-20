@@ -14,7 +14,6 @@
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -27,9 +26,10 @@ import {
   UsageError,
 } from './errors.ts'
 import { readIndex } from './index_file.ts'
-import { visiblePath, pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
+import { pathspecPatterns, pathspecSelects, repoRelative } from './pathspec.ts'
 import { quotePath, relativePath } from './render.ts'
 import { configBool } from './repo.ts'
+import { entryPath, printed, type Line } from './rows.ts'
 import { opened } from './session.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { listedTree, resolveTree, TREE_MODE } from './tree.ts'
@@ -65,21 +65,18 @@ export async function lsFiles(
     }
     rows.sort((a, b) => compareCodePoints(a.path, b.path) || a.stage - b.stage)
     const nul = fl.asBool('z')
-    let out = ''
+    const out: Line[] = []
     for (const entry of rows) {
-      if (
-        !visiblePath(repo.location, entry.path) ||
-        !pathspecSelects(entry.path, patterns.length ? patterns : [prefix])
-      )
-        continue
+      if (!pathspecSelects(entry.path, patterns.length ? patterns : [prefix])) continue
       const relative = relativePath(entry.path, prefix)
       const label = nul ? relative : quotePath(relative, false, fully)
       const metadata = fl.asBool('stage')
         ? `${entry.mode.toString(8).padStart(6, '0')} ${entry.oid} ${String(entry.stage)}\t`
         : ''
-      out += metadata + label + (nul ? '\0' : '\n')
+      const text = metadata + label + (nul ? '\0' : '\n')
+      out.push({ path: entryPath(repo.location, entry.path), text })
     }
-    return [encodeText(out), new IOResult()]
+    return [null, new IOResult({ rows: { items: out, render: printed } })]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
@@ -130,15 +127,15 @@ export async function lsTree(
     const names = fl.asBool('name_only') || fl.asBool('name_status')
     const fullName = fullTree || fl.asBool('full_name')
     const terminator = nul ? '\0' : '\n'
-    const out: string[] = []
+    const out: Line[] = []
     for (const [path, mode, oid] of rows) {
-      if (!visiblePath(repo.location, path)) continue
       const relative = fullName ? path : relativePath(path, prefix)
       const label = nul ? relative : quotePath(relative, false, fully)
       const kind = mode === TREE_MODE ? 'tree' : mode === GITLINK_MODE ? 'commit' : 'blob'
-      out.push((names ? '' : `${mode} ${kind} ${oid}\t`) + label + terminator)
+      const text = (names ? '' : `${mode} ${kind} ${oid}\t`) + label + terminator
+      out.push({ path: entryPath(repo.location, path), text })
     }
-    return [encodeText(out.join('')), new IOResult()]
+    return [null, new IOResult({ rows: { items: out, render: printed } })]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err

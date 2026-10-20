@@ -213,8 +213,51 @@ For file arguments such as uploads or attachments, use `ctx`:
 whether a path is a mount root, and `vfs.submounts(path)` lists the mounts
 below a folder. A mount the session hides is listed as the nearest folder above
 it that the session sees, so a CLI that removes a folder can refuse without
-learning the hidden name. A CLI that keeps paths in its own data, as git keeps
-its index, checks `vfs.isVisible(path)` before it prints one.
+learning the hidden name.
+
+A CLI that prints paths from its own data, as git prints its index, hands its
+output over as rows instead of bytes: each row names the path it shows, and
+the command prints none of it itself. The workspace drops the rows the session
+hides, then calls the renderer with the rest, so no line, count, total or
+column width stands for a hidden path:
+
+```ts
+import {
+  IOResult,
+  PathSpec,
+  type CommandFnResult,
+  type Context,
+} from '@struktoai/mirage-node'
+import type { NOOPAccessor } from '@struktoai/mirage-core/accessor/base'
+import type { Rows } from '@struktoai/mirage-core/io/types'
+
+interface Entry {
+  readonly path: PathSpec
+  readonly size: number
+}
+
+function tracked(
+  _accessor: NOOPAccessor,
+  _paths: PathSpec[],
+  _texts: string[],
+  _ctx: Context,
+): CommandFnResult {
+  // The CLI's own record of the files it tracks.
+  const kept: [string, number][] = [['/data/a.txt', 1], ['/data/b.txt', 3]]
+  const rows: Rows<Entry> = {
+    items: kept.map(([path, size]) => ({ path: PathSpec.fromStrPath(path), size })),
+    render: (shown) => {
+      const lines = shown.map((entry) => `${entry.path.virtual} ${String(entry.size)}\n`)
+      lines.push(`${String(shown.length)} files\n`)
+      return Promise.resolve(new TextEncoder().encode(lines.join('')))
+    },
+  }
+  return [null, new IOResult({ rows })]
+}
+```
+
+The renderer runs inside the command's timeout. A handler hands over rows or
+stdout, never both.
 
 Declare file options and operands with `type: 'path'`; preserve the resulting
 `PathSpec` values when calling `ctx.vfs`. Use `PathSpec.fromStrPath(value, undefined, ctx.cwd)` for a path string from

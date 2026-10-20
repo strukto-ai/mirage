@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { isEexist } from '../../../../errors/fs.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -28,22 +28,21 @@ import {
   GitError,
   LockExistsError,
   MissingMessageError,
-  NothingToCommitError,
   NoWorkspaceError,
   PartialCommitError,
   UnmergedIndexError,
 } from './errors.ts'
 import { stageTracked } from './add.ts'
 import { commitSummary } from './diff_output.ts'
-import { visibleEntries } from './pathspec.ts'
 import { readIndex, updateIndex } from './index_file.ts'
 import { takeLock } from './io.ts'
 
 import { record } from './reflog.ts'
 import { detachHead, readHead, safeRefName, writeRef } from './refs.ts'
 import { configBool, repoArgs, type Repo } from './repo.ts'
+import { deltas, shownSides, type Delta } from './rows.ts'
 import { opened } from './session.ts'
-import { renderReport } from './status.ts'
+import { reportRows } from './status.ts'
 import { report } from './summary.ts'
 import { TREE_MODE, type TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
@@ -248,7 +247,10 @@ export async function commit(
         return held?.oid === entry.oid && held.mode === entry.mode
       })
     if (same && !fl.asBool('allow_empty')) {
-      throw new NothingToCommitError(await renderReport(repo, vfs, head, startPoint(fl).virtual))
+      // Printed on stdout, where the status report it stands in for would
+      // have gone, and exits 1.
+      const reportOf = await reportRows(repo, vfs, head, startPoint(fl).virtual)
+      return [null, new IOResult({ exitCode: 1, rows: reportOf })]
     }
     const parents =
       before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
@@ -273,20 +275,22 @@ export async function commit(
       when,
       `commit${before === null ? ROOT_NOTE : ''}: ${message.split('\n')[0] ?? ''}`,
     )
-    const body = report(
-      oid,
-      message,
-      head.branch,
-      await commitSummary(
-        repo,
-        visibleEntries(repo.location, before ?? new Map()),
-        visibleEntries(repo.location, after),
-        await configBool(repo, 'core.quotepath', true),
-      ),
-      repo.abbrev,
-      before === null,
-    )
-    return [fl.asBool('quiet') ? null : encodeText(body), new IOResult()]
+    const fully = await configBool(repo, 'core.quotepath', true)
+    if (fl.asBool('quiet')) return [null, new IOResult()]
+    const render = async (shown: Delta[]): Promise<ByteSource> => {
+      const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
+      const body = report(
+        oid,
+        message,
+        head.branch,
+        await commitSummary(repo, oldSide, newSide, fully),
+        repo.abbrev,
+        before === null,
+      )
+      return encodeText(body)
+    }
+    const rows = deltas(repo.location, [[before ?? new Map(), after]])
+    return [null, new IOResult({ rows: { items: rows, render } })]
   } catch (err) {
     if (err instanceof GitError) return fatal(err)
     throw err
