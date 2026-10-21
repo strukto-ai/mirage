@@ -20,7 +20,7 @@ import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/type
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './config.ts'
 import { RUNNING_STATE, SMOLVM_CLI_HINT, notRunningHint } from './constants.ts'
-import { type CliResult, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * A microVM the user runs as a whole-line runtime.
@@ -88,28 +88,16 @@ export class SmolvmRuntime
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const args = ['machine', 'exec', '--name', this.config.machine, '-i', '-w', cwd]
-    for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    // `--` ends the flags: the command is a trailing var arg, so a
-    // line starting with a dash would otherwise parse as one.
-    args.push('--', ...argv)
-    const result = await this.smolvm(args, stdin, signal)
+    const result = await this.smolvm(execArgs(this.head(), ['--'], env, cwd, argv), stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
+
   override async openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe('smolvm', [
-      'machine',
-      'exec',
-      '--name',
-      this.config.machine,
-      '-i',
-      '-w',
-      '/',
-      '--',
-      'sh',
-      '-c',
-      command,
-    ])
+    return openCliPipe('smolvm', execArgs(this.head(), ['--'], {}, null, ['sh', '-c', command]))
+  }
+
+  private head(): string[] {
+    return ['machine', 'exec', '--name', this.config.machine, '-i']
   }
 }
 

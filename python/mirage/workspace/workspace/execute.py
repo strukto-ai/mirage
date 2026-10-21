@@ -36,6 +36,7 @@ from mirage.policy import Deny, HandOff, Pending
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
+from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.call_stack import CallStack
@@ -269,6 +270,7 @@ async def recurse(
         try:
             tree = parser.parse(cmd)
             if input_substitution_redirect(tree) is not None:
+                context.frame.routing = routing_decision
                 evaluate = partial(
                     recurse,
                     ws,
@@ -288,7 +290,6 @@ async def recurse(
                     context,
                     None,
                     cancel,
-                    routing_decision=routing_decision,
                     handed=inner,
                     command_substitution=True,
                     execution_scope=execution_scope,
@@ -698,6 +699,9 @@ async def run_prepared_line(
     # the aliases as they are now, not those of the function running it.
     outer_view = effective_session._alias_view
     effective_session._alias_view = None
+    # A line run on its caller's evaluation (a CLI's own ``ws.shell``)
+    # routes itself; the caller's route comes back when it ends.
+    outer_routing = context.frame.routing
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -819,6 +823,9 @@ async def run_prepared_line(
                 record_status(session, io.exit_code)
                 return io
             decision = placed
+            # The walker reads it off the frame, which a child evaluation
+            # forks with it: nested lines never re-route.
+            context.frame.routing = decision
             # Bound by keyword so the walker can rebind it per node: a
             # background job's nested lines run without the caller's
             # event, as the job itself does.
@@ -831,7 +838,7 @@ async def run_prepared_line(
                 execution_scope=execution_scope,
                 job_table=job_table,
             )
-            line_runtime = ws.runtimes.whole_line(decision)
+            line_runtime = whole_line_runtime(decision.bindings)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed
@@ -960,9 +967,7 @@ async def run_prepared_line(
                     return fill_names(
                         effective_session,
                         subset,
-                        whole=guest_bound(
-                            subset, decision, ws.registry.runtime_bindings
-                        ),
+                        whole=guest_bound(subset, decision),
                         cli_env_names=cli_env_names(
                             subset, effective_session, ws.registry
                         ),
@@ -1016,7 +1021,6 @@ async def run_prepared_line(
                 context,
                 stdin,
                 cancel,
-                routing_decision=decision,
                 handed=handed,
                 sink=sink,
                 call_stack=call_stack,
@@ -1109,6 +1113,7 @@ async def run_prepared_line(
         parse_scope.release()
         scope.close()
         effective_session._alias_view = outer_view
+        context.frame.routing = outer_routing
         if is_line:
             # Every read of the line has ended, so what a read kept of the
             # aliases it changed goes with it.

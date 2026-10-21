@@ -165,14 +165,7 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
         await self._ensure_connected()
         if self._mounts is None:
             return None
-        refusal = await self._mounts.admit(self._binding)
-        if refusal is None:
-            return None
-        return RunResult(
-            stdout=b"",
-            stderr=f"{self.name}: {refusal}\n".encode(),
-            exit_code=1,
-        )
+        return await self._mounts.admit(self._binding)
 
     async def _exec_argv(
         self,
@@ -183,17 +176,15 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
     ) -> RunResult:
         raise NotImplementedError
 
-    def _serve_mounts(self, mount_type: MountType | None) -> None:
+    def _serve_mounts(self, mount_type: MountType) -> None:
         """Let the sandbox see the workspace by ``mount_type``.
 
         Args:
-            mount_type (MountType | None): ssh, fuse or both; None
-                serves nothing.
+            mount_type (MountType): ssh, fuse or both.
         """
-        if mount_type is not None:
-            self._mounts = SandboxMounts(
-                self.name, mount_type, self._setup, self.open_pipe
-            )
+        self._mounts = SandboxMounts(
+            self.name, mount_type, self._setup, self.open_pipe
+        )
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")
@@ -219,7 +210,7 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
+        return await self._exec_argv(("/bin/sh", "-c", line), stdin, env, cwd)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Start a command in the sandbox with its stdin and stdout held

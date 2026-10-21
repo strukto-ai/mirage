@@ -52,8 +52,6 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -320,7 +318,6 @@ async def handle_command(
     call_stack: CallStack | None = None,
     job_table: JobTable | None = None,
     namespace: Namespace | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     execute_fn: ExecuteLine | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -426,7 +423,7 @@ async def handle_command(
                 processes=registry.process_view(session)
                 if registry.process_view is not None
                 else None,
-                routing=routing_decision,
+                routing=context.frame.routing,
             ),
             drop_caches=(
                 functools.partial(registry.drop_caches, cli_install.accessor)
@@ -756,7 +753,6 @@ async def handle_command(
             context,
             dispatch,
             namespace,
-            routing_decision=routing_decision,
             execute_fn=execute_fn,
             follow=follow,
         )
@@ -975,7 +971,6 @@ async def handle_command(
                 context,
                 dispatch,
                 namespace,
-                routing_decision=routing_decision,
                 argv=spelled_words(parts[1:]),
                 execute_fn=execute_fn,
             ),
@@ -1014,7 +1009,6 @@ async def handle_command(
         flag_kwargs,
         stdin=stdin,
         mount=mount,
-        routing_decision=routing_decision,
         argv=spelled_words(parts[1:]),
         execute_fn=execute_fn,
         follow=follow,

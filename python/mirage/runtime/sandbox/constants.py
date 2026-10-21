@@ -12,52 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import shlex
-import uuid
-
 from mirage.runtime.types import MountType
-
-# Providers whose exec API has no stdin stream (Daytona) upload
-# piped bytes to a per-invocation file and redirect it into the line.
-STDIN_PREFIX = "/tmp/.mirage_stdin"
-
-
-def stdin_path() -> str:
-    """A unique in-sandbox path for one invocation's stdin bytes.
-
-    Unique per invocation so concurrent lines on the same runtime
-    never overwrite each other's payload.
-    """
-    return f"{STDIN_PREFIX}_{uuid.uuid4().hex}"
-
-
-def stdin_redirect(line: str, path: str) -> str:
-    """The line rewritten to read its stdin from an uploaded file.
-
-    Runs the line in a subshell with stdin redirected from ``path``,
-    removes the file afterward, and preserves the line's exit code.
-    Daytona uses this when its exec API has no stdin stream; a PTY
-    would merge streams and mangle bytes.
-
-    Known limitations, all inherent to the file transport:
-    - stdin is fully buffered and uploaded before the line starts;
-      nothing is streamed, so no interactive stdin.
-    - the bytes briefly touch the sandbox's /tmp, readable by other
-      processes in the sandbox and left behind if the exec dies
-      before the ``rm`` runs (a later line's unique path is never
-      affected).
-    - each stdin line costs two extra provider API calls (mkdir +
-      upload).
-    - the sandbox must have a POSIX sh (subshell, ``$?``, ``rm``).
-    If a provider ever adds real exec stdin, drop this for that
-    provider (docker already streams via ``docker exec -i``).
-
-    Args:
-        line (str): the raw shell line.
-        path (str): the uploaded stdin file (from stdin_path()).
-    """
-    quoted = shlex.quote(path)
-    return f"(\n{line}\n) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"
+from mirage.utils.quote import single_quote
 
 
 def sdk_install_hint(name: str) -> str:
@@ -102,12 +58,6 @@ SSHFS_OPTIONS = (
 # stdout is the SFTP stream, so its stderr cannot share the pipe.
 SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
 
-# A PTY carries a served prefix's SFTP where a provider's exec decodes
-# output as text (E2B): the terminal goes raw, so bytes pass unchanged,
-# and the marker ends the shell's own output before sshfs starts.
-PTY_MARK = b"\x01mirage-sftp\x02"
-PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
-
 SSHFS_HINT = (
     "serving the workspace into a sandbox needs sshfs there; "
     "install it in the image (apt-get install sshfs)"
@@ -117,12 +67,49 @@ PIPE_SERVER_HINT = (
     "install with: pip install mirage-ai[ssh]"
 )
 
-# Every argv a provider CLI execs runs under this POSIX sh prelude, with
-# the cwd as $1 and `-w /` on the exec. An exec's `-e` can append to the
-# image's environment rather than replace a name it already sets, and
-# `-w` can create a missing directory instead of failing. sh imports the
-# environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
-# not serve, and `exec` hands over the argv unchanged. `cd` runs without
-# CDPATH, so a relative cwd resolves from `/` and prints nothing, while
-# the program still sees the guest's own CDPATH.
+# Every argv a sandbox runs goes under this POSIX sh prelude, with the
+# cwd as $1: a provider CLI's exec passes `-w /` (exec_args), and a
+# provider whose exec takes one command line dresses it (wrap_line), so
+# no provider's own cwd is used. An exec's `-e` can append to the image's
+# environment rather than replace a name it already sets, `-w` can
+# create a missing directory, and an SDK's cwd fails a missing one its
+# own way (E2B: exit 1). sh imports the environment last-wins, `cd`
+# fails loud (126) on a cwd the sandbox does not serve, and `exec` hands
+# over the argv unchanged. `cd` runs without CDPATH, so a relative cwd
+# resolves from `/` and prints nothing, while the program still sees the
+# guest's own CDPATH. The shell is named by path, /bin/sh, since the
+# command's PATH is the session's and may hold no sh; the argv after the
+# prelude is still found on it.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
+
+
+def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
+    """The line dressed for a sandbox whose exec takes one command line
+    (ssh, e2b, daytona): cwd, env, then sh.
+
+    Such an exec has no docker-style ``-w``/``-e`` to trust: SSH's env
+    channel is AcceptEnv-gated server-side, so it silently drops names,
+    and an SDK's own cwd fails a missing directory in its own words. So
+    the working directory and the merged environment ride the command
+    itself: the prelude every sandbox runs a command under enters
+    ``cwd`` (exit 126 when the sandbox lacks it), then
+    ``env 'K=V' ... /bin/sh -c 'line'``. Every piece is single-quoted for sh,
+    so the shell the exec starts reads each as one word whatever it
+    holds; the sandbox only needs a POSIX shell at ``/bin/sh``.
+
+    Args:
+        line (str): the raw shell line.
+        env (dict[str, str]): the merged environment.
+        cwd (str): the working directory, passed through verbatim.
+    """
+    parts = [
+        "/bin/sh",
+        "-c",
+        single_quote(EXEC_PRELUDE),
+        "sh",
+        single_quote(cwd),
+    ]
+    parts += ["env"]
+    parts += [single_quote(f"{key}={value}") for key, value in env.items()]
+    parts += ["/bin/sh", "-c", single_quote(line)]
+    return " ".join(parts)

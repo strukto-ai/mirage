@@ -34,6 +34,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
+import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 /** Execute one admitted program; its surrounding shell stays in Mirage. */
@@ -42,20 +43,17 @@ export async function runExternal(
   stdin: ByteSource | null,
   session: SessionState,
   registry: MountRegistry,
-  routing?: RouteDecision<Runtime>,
+  routing: RouteDecision<Runtime>,
   signal?: AbortSignal,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
-  const bindings = routing === undefined ? registry.runtimeBindings : routing.bindings
+  const bindings = routing.bindings
   const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
   const runtime = bindings[key]
   const command = shellJoin(argv.tokens)
   if (runtime == null) {
-    const stderr = encodeText(`${argv.name}: no runtime accepted this line\n`)
-    return [
-      null,
-      new IOResult({ exitCode: 126, stderr }),
-      new ExecutionNode({ command, exitCode: 126, stderr }),
-    ]
+    const denied = admissionDenial(argv.name)
+    const stderr = await denied.materializeStderr()
+    return [null, denied, new ExecutionNode({ command, exitCode: 126, stderr })]
   }
   const guard = resolveLimit(
     argv.name,

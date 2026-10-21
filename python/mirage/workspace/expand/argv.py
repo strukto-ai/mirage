@@ -19,8 +19,6 @@ from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.policy.match import scopes_paths
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing.types import RouteDecision
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
@@ -117,7 +115,6 @@ async def expand_argv(
     registry: MountRegistry,
     namespace: Namespace | None = None,
     view: SessionView | None = None,
-    routing: RouteDecision[Runtime[Any]] | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -162,8 +159,8 @@ async def expand_argv(
     # python3` masks the function for its inner run, which is exactly
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
-    consumer = lookup(name, session, registry, routing)
-    refused = runtime_refused(name, session, registry, routing)
+    consumer = lookup(name, session, registry, context.frame.routing)
+    refused = runtime_refused(name, session, registry, context.frame.routing)
     if name not in session.functions and consumer is not Consumer.EXTERNAL:
         expanded = expanded[:consumed] + end_options_after_program(
             name, expanded[consumed:]

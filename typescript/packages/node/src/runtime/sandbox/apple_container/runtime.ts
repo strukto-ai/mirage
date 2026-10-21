@@ -16,7 +16,6 @@ import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { getCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -31,7 +30,7 @@ import {
   noContainerHint,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * Containers under Apple's `container` tool as a whole-line runtime.
@@ -47,7 +46,7 @@ import { type CliResult, openCliPipe, runCli } from '../cli.ts'
  * filesystem except what the container was given at start
  * (`--volume`). Serve the workspace inside it at the host's mount
  * prefixes, the same contract every provider in this family carries.
- * The image needs a POSIX sh, which every argv runs under (EXEC_PRELUDE).
+ * The image needs a POSIX /bin/sh, which every argv runs under (EXEC_PRELUDE).
  *
  * A line runs in its session's container (config `containers`, else
  * `container`), so one runtime can give every agent a VM of its own.
@@ -141,24 +140,18 @@ export class AppleContainerRuntime
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const container = await this.target(signal)
-    const args = ['exec', '-i', '-w', '/']
-    for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    args.push(container, 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
+    const target = [await this.target(signal)]
+    const args = execArgs(['exec', '-i'], target, env, cwd, argv)
     const result = await this.container(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
+
   override async openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe('container', [
-      'exec',
-      '-i',
-      '-w',
-      '/',
-      await this.target(),
-      'sh',
-      '-c',
-      command,
-    ])
+    const target = [await this.target()]
+    return openCliPipe(
+      'container',
+      execArgs(['exec', '-i'], target, {}, null, ['sh', '-c', command]),
+    )
   }
 }
 

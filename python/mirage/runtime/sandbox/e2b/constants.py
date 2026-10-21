@@ -12,24 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
-
-from mirage.runtime.sandbox.ssh.constants import wrap_line
-
-
-@pytest.mark.parametrize(
-    ("line", "env", "cwd", "wrapped"),
-    [
-        ("echo hi", {"A": "1"}, "/w", "cd '/w' && env 'A=1' sh -c 'echo hi'"),
-        (
-            "echo 'hi'",
-            {"M": "two words"},
-            "/a b",
-            "cd '/a b' && env 'M=two words' sh -c 'echo '\\''hi'\\'''",
-        ),
-        ("pwd", {}, "/", "cd '/' && env sh -c 'pwd'"),
-    ],
-    ids=["cwd-env-line", "hostile-values", "no-env"],
-)
-def test_wrap_line_dresses_cwd_env_and_line(line, env, cwd, wrapped):
-    assert wrap_line(line, env, cwd) == wrapped
+# A PTY carries a served prefix's SFTP where a provider's exec decodes
+# output as text (E2B): the terminal goes raw, so bytes pass unchanged,
+# and the marker ends the shell's own output before sshfs starts.
+PTY_MARK = b"\x01mirage-sftp\x02"
+PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "

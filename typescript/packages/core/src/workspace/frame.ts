@@ -27,6 +27,7 @@ export class ExecutionFrame {
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
+    if (this.routing !== undefined) child.routing = this.routing
     return child
   }
 }

@@ -77,20 +77,19 @@ class Router:
         held: Callable[[], Awaitable[bool]] | None = None,
         claimant: Claimant | None = None,
         cancel: asyncio.Event | None = None,
-    ) -> RouteDecision[Runtime[Any]] | Deny | Pending | None:
+    ) -> RouteDecision[Runtime[Any]] | Deny | Pending:
         """Resolve the routing decision for one typed line.
 
-        Returns None when nothing decides (no runtime argument, nothing
-        to consult) so dispatch falls to the static bindings, the stage's
-        Deny when a policy refuses the line, and the ledger's answer to
-        its Ask when the host refuses the line or has not answered yet.
-        A nested eval passes its typed line's decision as ``inherited``
-        and keeps it: nested lines never re-route. The runtime argument
-        is the caller's own placement, so a Route is not asked for, but
-        a coded policy's Deny or Ask still holds the line. Admission
-        comes first: a line ``held`` reports refused or waiting on a
-        question is left on the static bindings, unplaced, for the gate
-        to answer.
+        Returns the static bindings as the decision when nothing decides
+        (no runtime argument, nothing to consult), the stage's Deny when
+        a policy refuses the line, and the ledger's answer to its Ask
+        when the host refuses the line or has not answered yet. A nested
+        eval passes its typed line's decision as ``inherited`` and keeps
+        it: nested lines never re-route. The runtime argument is the
+        caller's own placement, so a Route is not asked for, but a coded
+        policy's Deny or Ask still holds the line. Admission comes
+        first: a line ``held`` reports refused or waiting on a question
+        is left unplaced, for the gate to answer.
 
         Args:
             command (str): the raw command line.
@@ -124,12 +123,8 @@ class Router:
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
         placed = None if runtime is None else self._placed(entries, runtime)
-        if placed is not None and not placing:
-            return placed
-        if placed is None and not placing:
-            return None
-        if held is not None and await held():
-            return placed
+        if not placing or (held is not None and await held()):
+            return placed if placed is not None else self._unplaced(entries)
         ctx = self.context(command, session, await judged())
         said, route = await policies.pre_execute(
             ctx, placed=placed is not None
@@ -158,7 +153,7 @@ class Router:
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
-        RouteDecision[Runtime[Any]] | Deny | Pending | None,
+        RouteDecision[Runtime[Any]] | Deny | Pending,
     ]:
         """Every ``pre_execute`` answer for a line and what they decide,
         without running it: what ``explain`` shows. An Ask reads the
@@ -178,7 +173,7 @@ class Router:
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
         if not placing:
-            return (), None
+            return (), self._unplaced(entries)
         ctx = self.context(command, session, await judged())
         answers = await policies.answers("pre_execute", ctx)
         winner = settled(answers)
@@ -227,30 +222,21 @@ class Router:
             entries (list[Runtime]): the workspace's ordered runtimes.
         """
         return RouteDecision(
-            bindings=dict(bind_commands(entries)), fallback=catch_all(entries)
+            bindings=dict(self._registry.runtime_bindings),
+            fallback=catch_all(entries),
         )
 
     def runtime_for(
-        self, command: str, decision: RouteDecision[Runtime[Any]] | None
+        self, command: str, decision: RouteDecision[Runtime[Any]]
     ) -> str:
-        """The runtime entry that serves a command under a decision (the
-        static bindings when there is none), empty when the workspace
-        runs it itself.
+        """The runtime entry that serves a command under a decision,
+        empty when the workspace runs it itself.
 
         Args:
             command (str): the command name.
-            decision (RouteDecision | None): the line's placement.
+            decision (RouteDecision): the line's placement.
         """
-        bindings = (
-            decision.bindings
-            if decision is not None
-            else self._registry.runtime_bindings
-        )
-        serving = (
-            bindings[command]
-            if command in bindings
-            else (decision.fallback if decision is not None else None)
-        )
+        serving = decision.bindings.get(command, decision.fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):
             return ""
         return serving.name

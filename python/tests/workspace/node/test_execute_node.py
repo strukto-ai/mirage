@@ -21,6 +21,8 @@ from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
 from mirage.policy import Policies
+from mirage.runtime.routing import RouteDecision
+from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
@@ -35,6 +37,9 @@ from mirage.workspace.session.session import vars_from_env
 
 
 def execute_node(dispatch, registry, *args, **kwargs):
+    context = kwargs.get("context", args[3] if len(args) > 3 else None)
+    if context is not None and context.frame.routing is None:
+        context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
     return _execute_node(
         dispatch, registry, Namespace(registry), *args, **kwargs
     )

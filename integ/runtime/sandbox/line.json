@@ -40,6 +40,44 @@
       ]
     },
     {
+      "id": "an_unserved_cwd_exits_126",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /ram",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "dash -c pwd",
+          "expect": {
+            "exit": 126,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "quoting",
       "runtimes": [
         "ssh",

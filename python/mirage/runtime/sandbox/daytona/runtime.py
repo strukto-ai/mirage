@@ -15,13 +15,10 @@
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import (
-    sdk_install_hint,
-    stdin_path,
-    stdin_redirect,
-)
+from mirage.runtime.sandbox.constants import sdk_install_hint, wrap_line
 from mirage.runtime.sandbox.daytona import sdk
 from mirage.runtime.sandbox.daytona.config import DaytonaConfig
+from mirage.runtime.sandbox.daytona.constants import stdin_path, stdin_redirect
 from mirage.runtime.types import RunResult
 
 
@@ -62,12 +59,12 @@ class DaytonaRuntime(RemoteSandbox):
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
     ) -> RunResult:
-        command = line
+        command = wrap_line(line, env, cwd)
         if stdin is not None:
             path = stdin_path()
             await self._upload(path, stdin)
-            command = stdin_redirect(line, path)
-        response = await self._sandbox.process.exec(command, cwd=cwd, env=env)
+            command = stdin_redirect(command, path)
+        response = await self._sandbox.process.exec(command)
         return RunResult(
             stdout=str(response.result).encode(),
             stderr=None,

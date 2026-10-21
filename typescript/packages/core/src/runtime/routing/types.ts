@@ -52,15 +52,15 @@ export type RoutePolicy =
 export interface RouteDecision<R extends RuntimeIdentity> {
   /**
    * Every command some entry captures, resolved for this line: the
-   * runtime it runs on, or null when its capturers all refused
-   * (admission failure, exit 126, never a silent fallback to the
-   * workspace).
+   * runtime it runs on, or null when a route to the workspace keeps the
+   * line off its only capturer, a `*` line executor (exit 126, never a
+   * silent fallback to the workspace).
    */
   bindings: Record<string, R | null>
   /**
    * Where commands no entry captures run: the catch-all workspace runtime,
-   * or null when the workspace runtime refused the line or declares
-   * captures; unbound commands then exit 126.
+   * or null when the workspace runtime declares captures; unbound commands
+   * then exit 126.
    */
   fallback: R | null
 }

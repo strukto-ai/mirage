@@ -735,6 +735,24 @@ async def test_script_runs_where_the_line_runs_its_interpreter():
 
 
 @pytest.mark.asyncio
+async def test_script_runs_where_python3_is_bound_with_no_route_policy():
+    # No policy places the line, so the static bindings do: python3
+    # binds to the second entry, which runs the script, not the first
+    # entry speaking python.
+    first, second = TierPyRuntime("first"), TierPyRuntime("second")
+    first.captures = ()
+    ws = Workspace(
+        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[first, second]
+    )
+    ws.register_cli("pager", script_install().cli)
+    result = await ws.shell("pager")
+    assert result.exit_code == 0
+    assert first.seen == []
+    assert len(second.seen) == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_script_is_refused_when_the_line_refused_its_interpreter():
     py = TierPyRuntime("first")
     _, io, node = await handle_cli(

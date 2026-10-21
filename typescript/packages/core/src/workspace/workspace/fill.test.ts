@@ -23,6 +23,7 @@ import { IOResult } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
+import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { ScriptSource, type RunResult } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
@@ -1867,23 +1868,19 @@ describe('fillEnv through execute', () => {
 })
 
 describe('guestBound', () => {
-  it('a non-vfs binding on a line word counts; vfs does not', async () => {
+  it('a non-workspace binding on a line word counts; the workspace does not', async () => {
     const parser = await getTestParser()
     const node = parser.parse('python3 -c "print()"') as unknown as TSNodeLike
     const guest = { name: 'monty' } as unknown as Runtime
-    expect(guestBound([node], null, { python3: guest })).toBe(true)
-    expect(guestBound([node], null, { python3: new WorkspaceRuntime() })).toBe(false)
-    expect(guestBound([node], null, { other: guest })).toBe(false)
-    expect(guestBound([node], null, { '*': guest })).toBe(true)
-  })
-
-  it('a decision replaces the static table', async () => {
-    const parser = await getTestParser()
-    const node = parser.parse('echo hi') as unknown as TSNodeLike
-    const guest = { name: 'monty' } as unknown as Runtime
-    const decision = { bindings: { echo: guest }, fallback: null } as never
-    expect(guestBound([node], decision, {})).toBe(true)
-    expect(guestBound([node], null, { echo: null })).toBe(false)
+    const decided = (bindings: Record<string, Runtime | null>): RouteDecision<Runtime> => ({
+      bindings,
+      fallback: null,
+    })
+    expect(guestBound([node], decided({ python3: guest }))).toBe(true)
+    expect(guestBound([node], decided({ python3: new WorkspaceRuntime() }))).toBe(false)
+    expect(guestBound([node], decided({ other: guest }))).toBe(false)
+    expect(guestBound([node], decided({ '*': guest }))).toBe(true)
+    expect(guestBound([node], decided({ python3: null }))).toBe(false)
   })
 })
 

@@ -97,15 +97,15 @@ function parseSpecFor(
  * script's language, so `runtime: monty` on a `.mjs` fails loud
  * instead of feeding JS to a python interpreter. Without a pin the
  * program runs where this line runs its language's own interpreter
- * (the tier's head word, `python3` or `node`), so a route policy or a
- * runtime's script places it as it places that command, and a line
- * every capturer refused is refused here too (126). The first entry
- * speaking the language serves when there is no line decision or the
- * workspace serves that interpreter itself (runtimeForLanguage); a
- * placement on a runtime that does not run the script's language is
- * refused like such a pin. Every other refusal names the world so the
- * fix (add or rename an entry) is visible (127). Mirrors Python's
- * `_select_runtime`.
+ * (the tier's head word, `python3` or `node`), so the runtime capturing
+ * that command, or a route policy, places it, and a line every capturer
+ * refused is refused here too (126). The first entry speaking the
+ * language serves when the workspace serves that interpreter itself, or
+ * outside a workspace line, where `routing` is absent
+ * (runtimeForLanguage); a placement on a runtime that does not run the
+ * script's language is refused like such a pin. Every other refusal names
+ * the world so the fix (add or rename an entry) is visible (127). Mirrors
+ * Python's `_select_runtime`.
  */
 function selectRuntime(
   prog: string,

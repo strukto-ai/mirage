@@ -17,8 +17,7 @@ import json
 
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
 from mirage.runtime.sandbox.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
@@ -98,30 +97,9 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
-        args = [
-            "exec",
-            self.config.sandbox,
-            "--quiet",
-            "--no-tty",
-            "-w",
-            "/",
-        ]
-        for key, value in env.items():
-            args += ["-e", f"{key}={value}"]
-        # `--` ends the flags: the command is a trailing var arg, so a
-        # line starting with a dash would otherwise parse as one.
-        # Released agents block their event loop during chdir into passive SSHFS.
-        # Defer it until the shell starts, so the agent can serve the mount pipe.
-        args += [
-            "--",
-            "sh",
-            "-c",
-            EXEC_PRELUDE,
-            "sh",
-            cwd,
-            *argv,
-        ]
-        stdout, stderr, code = await self._microsandbox(args, stdin=stdin)
+        stdout, stderr, code = await self._microsandbox(
+            exec_args(self._head(), ("--",), env, cwd, argv), stdin=stdin
+        )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
@@ -129,17 +107,14 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         await self.connect()
         return await open_cli_pipe(
             "msb",
-            [
-                "exec",
-                self.config.sandbox,
-                "--quiet",
-                "--no-tty",
-                "--stream",
-                "-w",
-                "/",
-                "--",
-                "sh",
-                "-c",
-                command,
-            ],
+            exec_args(
+                (*self._head(), "--stream"),
+                ("--",),
+                {},
+                None,
+                ("sh", "-c", command),
+            ),
         )
+
+    def _head(self) -> tuple[str, ...]:
+        return ("exec", self.config.sandbox, "--quiet", "--no-tty")

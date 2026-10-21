@@ -20,7 +20,8 @@ import { RulePolicy } from '../../../policy/rule.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import type { OutputFn, RunResult } from '../../../runtime/types.ts'
+import type { OutputFn, Program, RunResult } from '../../../runtime/types.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
@@ -85,6 +86,14 @@ class DelayedProcessProbe extends ProcessProbe {
   }
 }
 
+class InProcessPython extends PythonRuntime {
+  readonly name = 'inproc'
+
+  interpret(_engine: unknown, _program: Program, _ctx: Context): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
 async function workspace(probe: Runtime, others: Runtime[] = []): Promise<Workspace> {
   return new Workspace(
     { '/': new RAMVFS() },
@@ -108,6 +117,18 @@ describe('external program capture', () => {
       expect(probe.requests).toHaveLength(1)
       expect(probe.requests[0]?.argv).toEqual(['native-tool'])
       expect(probe.requests[0]?.stdin).toEqual(ENC.encode('GPU ready\nother\n'))
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('hands a native runtime chosen for the line the words as typed', async () => {
+    const probe = new ProcessProbe({ captures: ['python3'] })
+    const ws = await workspace(new InProcessPython(), [probe])
+    try {
+      const result = await ws.shell("python3 -c 'print(1)' arg", { runtime: 'probe' })
+      expect(result.exitCode).toBe(0)
+      expect(probe.requests[0]?.argv).toEqual(['python3', '-c', 'print(1)', 'arg'])
     } finally {
       await ws.close()
     }

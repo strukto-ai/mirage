@@ -164,12 +164,8 @@ export function lineNodes(
  * static table binds every captured command in the workspace, not this
  * line's.
  */
-export function guestBound(
-  nodes: TSNodeLike[],
-  decision: RouteDecision<Runtime> | null,
-  staticBindings: Record<string, Runtime | null>,
-): boolean {
-  const bindings = decision !== null ? decision.bindings : staticBindings
+export function guestBound(nodes: TSNodeLike[], decision: RouteDecision<Runtime>): boolean {
+  const bindings = decision.bindings
   const words = new Set<string>(['*'])
   for (const node of nodes) {
     for (const word of commandWords(node)) words.add(word)

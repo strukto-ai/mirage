@@ -61,12 +61,12 @@ class RouteDecision(Generic[_R]):
     Args:
         bindings (dict[str, _R | None]): every command some entry
             captures, resolved for this line: the runtime it runs on,
-            or None when its capturers all refused (admission failure,
-            exit 126, never a silent fallback to the workspace).
-        fallback (_R | None): where commands no entry captures
-            run: the catch-all workspace runtime, or None when the workspace
-            runtime refused the line or declares captures; unbound
-            commands then exit 126.
+            or None when a route to the workspace keeps the line off
+            its only capturer, a ``*`` line executor (exit 126, never a
+            silent fallback to the workspace).
+        fallback (_R | None): where commands no entry captures run:
+            the catch-all workspace runtime, or None when the workspace
+            runtime declares captures; unbound commands then exit 126.
     """
 
     bindings: dict[str, _R | None] = field(default_factory=dict)

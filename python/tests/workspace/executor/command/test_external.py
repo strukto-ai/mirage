@@ -30,7 +30,8 @@ from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.rule import RulePolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.types import RunResult
+from mirage.runtime.python.base import PythonRuntime
+from mirage.runtime.types import Program, RunResult
 from mirage.workspace.expand import argv as argv_module
 from mirage.workspace.lookup import SHELL_NAMES, Consumer, lookup, lookup_all
 from mirage.workspace.session import SessionState
@@ -71,6 +72,13 @@ class DelayedProcessProbe(ProcessProbe):
         except asyncio.CancelledError:
             self.cancelled = True
             raise
+
+
+class InProcessPython(PythonRuntime):
+    name = "inproc"
+
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
 @asynccontextmanager
@@ -124,6 +132,19 @@ async def test_native_argv_preserves_empty_words_and_interpreter_options():
         assert request.env["TOKEN"] == "one"
         await ws.shell("native-tool")
         assert "TOKEN" not in probe.requests[1].env
+
+
+@pytest.mark.asyncio
+async def test_a_native_runtime_chosen_for_the_line_gets_the_words_as_typed():
+    probe = ProcessProbe(captures=("python3",))
+    async with workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[InProcessPython(), probe],
+    ) as ws:
+        result = await ws.shell("python3 -c 'print(1)' arg", runtime="probe")
+        assert result.exit_code == 0
+        assert probe.requests[0].argv == ("python3", "-c", "print(1)", "arg")
 
 
 @pytest.mark.asyncio

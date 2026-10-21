@@ -19,34 +19,22 @@ if TYPE_CHECKING:
     from mirage.runtime.routing.decide import runtime_for_language
     from mirage.runtime.routing.errors import RouteError
     from mirage.runtime.routing.facts import command_nodes
-    from mirage.runtime.routing.types import (
-        RouteDecision,
-        RoutePolicy,
-        RouteVerdict,
-    )
-    from mirage.runtime.types import ScriptSource
+    from mirage.runtime.routing.types import RouteDecision, RoutePolicy
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.runtime.routing.decide": ("runtime_for_language",),
     "mirage.runtime.routing.errors": ("RouteError",),
     "mirage.runtime.routing.facts": ("command_nodes",),
-    "mirage.runtime.routing.types": (
-        "RouteDecision",
-        "RoutePolicy",
-        "RouteVerdict",
-    ),
-    "mirage.runtime.types": ("ScriptSource",),
+    "mirage.runtime.routing.types": ("RouteDecision", "RoutePolicy"),
 }
 _MODULE_OF = {
     name: module for module, names in _EXPORTS.items() for name in names
 }
 
 __all__ = [
-    "ScriptSource",
     "RouteDecision",
     "RoutePolicy",
     "RouteError",
-    "RouteVerdict",
     "command_nodes",
     "runtime_for_language",
 ]

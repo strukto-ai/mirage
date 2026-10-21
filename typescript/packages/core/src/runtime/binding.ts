@@ -14,12 +14,19 @@
 
 import type { Context } from '../commands/config.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-import { awaitsAs, callsAs, currentCaller, type Caller } from '../context/session_context.ts'
+import {
+  awaitsAs,
+  callsAs,
+  currentCaller,
+  noteRefusal,
+  type Caller,
+} from '../context/session_context.ts'
+import { POLICY_DENIED_EXIT } from '../policy/constants.ts'
 import type { OpKwargs } from '../view/types.ts'
 import { isGlob, showHead } from '../utils/hidden.ts'
 import { PathSpec } from '../types.ts'
 import type { MountResolver } from './resolver.ts'
-import type { BridgeDispatchFn, DispatchFn } from './types.ts'
+import type { BridgeDispatchFn, DispatchFn, RunResult } from './types.ts'
 import { Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 
@@ -81,6 +88,21 @@ export class WorkspaceBinding {
 
   capture(): RuntimeContext {
     return this.context === undefined ? captureBinding(this) : this.context(this)
+  }
+}
+
+/**
+ * A run the session's restrictions refuse before it starts, as admission
+ * refuses a command: bash's `<name>: Permission denied` at 126, the reason
+ * on the line's refusal record and never on stderr. `name` is the runtime,
+ * which names the refusal. Mirrors Python's `refused_run`.
+ */
+export function refusedRun(name: string, reason: string): RunResult {
+  noteRefusal({ kind: 'deny', reason, policy: '', askId: null })
+  return {
+    stdout: new Uint8Array(),
+    stderr: new TextEncoder().encode(`${name}: Permission denied\n`),
+    exitCode: POLICY_DENIED_EXIT,
   }
 }
 

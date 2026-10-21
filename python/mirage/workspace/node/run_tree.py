@@ -29,8 +29,6 @@ from mirage.policy import (
     render_deny,
 )
 from mirage.policy.types import RouteContext
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
@@ -62,7 +60,6 @@ async def run_command_tree(
     context: EvaluationContext,
     stdin: Any,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     command_substitution: bool = False,
@@ -91,9 +88,6 @@ async def run_command_tree(
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.
-        routing_decision (RouteDecision | None): the typed line's routing
-            decision, threaded to every command dispatch; None runs on
-            the static bindings.
         handed (HandOff | None): the line's hand-off, threaded to every
             command's gate.
         command_substitution (bool): capture a lone input redirect's data
@@ -118,7 +112,6 @@ async def run_command_tree(
         job_table,
         execute_fn,
         cancel=cancel,
-        routing_decision=routing_decision,
         handed=handed,
         sink=sink,
         execution_scope=execution_scope or ExecutionScope(),

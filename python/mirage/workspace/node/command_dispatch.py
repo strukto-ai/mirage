@@ -56,8 +56,6 @@ from mirage.policy import (
     resolve_producer,
 )
 from mirage.policy.types import Claimant, HandOff, SessionContext
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
@@ -172,7 +170,6 @@ async def execute_command(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
@@ -425,7 +422,6 @@ async def execute_command(
             job_table,
             seed_prefix,
             cancel,
-            routing_decision,
             handed,
             sink,
             expanded,
@@ -529,7 +525,6 @@ async def _dispatch_command_body(
     job_table,
     seed_prefix: Callable[[str], Awaitable[None]],
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     expanded: ExpandedWords | None = None,
@@ -558,7 +553,6 @@ async def _dispatch_command_body(
                 registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
-            routing=routing_decision,
         ),
     )
     if expanded is not None:
@@ -569,7 +563,7 @@ async def _dispatch_command_body(
     # Mount, CLI and external dispatch own their resolved deadlines.
     owns_deadline = (
         "/" not in argv.name
-        and lookup(argv.name, session, registry, routing_decision)
+        and lookup(argv.name, session, registry, context.frame.routing)
         in (Consumer.EXTERNAL, Consumer.MOUNT, Consumer.CLI)
     ) or argv.name in INTERPRETER_NAMES
     resolved = (
@@ -594,7 +588,6 @@ async def _dispatch_command_body(
         call_stack,
         job_table,
         cancel,
-        routing_decision,
         row=read_row(node),
         redirects=redirect_paths_for(node.id),
         runner=redirect_runner_for(node.id),
@@ -653,7 +646,6 @@ async def _run_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     row: int = 0,
     redirects: tuple[PathSpec, ...] = (),
     runner: RedirectRunner | None = None,
@@ -687,7 +679,7 @@ async def _run_argv(
     # `tar -cf out.tar /base/*` would archive a whole backend the same
     # operand typed by hand is refused for.
     refused_external = runtime_refused(
-        name, session, registry, routing_decision
+        name, session, registry, context.frame.routing
     )
     boundary = (
         list(argv.operands)
@@ -812,7 +804,6 @@ async def _run_argv(
                     call_stack,
                     job_table,
                     cancel,
-                    routing_decision,
                     row,
                     claimant.line if claimant is not None else None,
                     output,
@@ -944,7 +935,6 @@ async def _route_argv(
     call_stack,
     job_table,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision[Runtime[Any]] | None,
     row: int,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -989,11 +979,11 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=2, stderr=err),
         )
 
-    consumer = lookup(name, session, registry, routing_decision)
+    routing = context.frame.routing
+    consumer = lookup(name, session, registry, routing)
     if consumer is Consumer.EXTERNAL:
-        return await run_external(
-            argv, stdin, session, registry, routing_decision
-        )
+        assert routing is not None
+        return await run_external(argv, stdin, session, registry, routing)
 
     # ── shell builtins ──────────────────────────
     # One lookup: every executor-run builtin word maps to a handler that
@@ -1150,7 +1140,6 @@ async def _route_argv(
         call_stack,
         job_table=job_table,
         namespace=namespace,
-        routing_decision=routing_decision,
         execute_fn=execute_fn,
         handed=handed,
         sink=sink,

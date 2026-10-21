@@ -379,9 +379,13 @@ async def test_native_runtime_refused_before_running_with_hidden_files():
             "restricted", profile={"paths": {"hide": ["/data/secret"]}}
         )
         result = await ws.shell("echo should-not-run", session_id="restricted")
-        assert result.exit_code == 127
+        assert result.exit_code == 126
         assert result.stdout == b""
-        assert b"cannot enforce" in result.stderr
+        assert result.stderr == b"shell-probe: Permission denied\n"
+        assert result.refusal is not None
+        assert result.refusal.reason == (
+            "runtime cannot enforce this session's file restrictions"
+        )
 
 
 @pytest.mark.parametrize(

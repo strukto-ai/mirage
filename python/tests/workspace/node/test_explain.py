@@ -38,6 +38,7 @@ from mirage.policy.match import Outcome
 from mirage.policy.types import DryRun, Scope
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import RunResult
 from mirage.secrets import registry as secrets_registry
 from mirage.secrets.registry import register_secrets
@@ -71,7 +72,8 @@ async def _judged(
             session,
             ws._registry,
             ws._namespace,
-            whole_line=ws._runtimes.whole_line(None) is not None,
+            whole_line=whole_line_runtime(ws._registry.runtime_bindings)
+            is not None,
         )
     finally:
         reset_explaining(token)

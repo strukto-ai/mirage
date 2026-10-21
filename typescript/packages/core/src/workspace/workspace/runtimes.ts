@@ -12,16 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type RouteDecision } from '../../runtime/routing/index.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
-import { isLineExecutor, type LineExecutor } from '../../runtime/mixin.ts'
-import {
-  bindCommands,
-  buildRuntime,
-  DEFAULT_ENTRIES,
-  wholeLineRuntime,
-} from '../../runtime/table.ts'
+import { bindCommands, buildRuntime, DEFAULT_ENTRIES } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
@@ -37,8 +30,7 @@ export interface RuntimesInit {
  * command. Mirrors the Python `Runtimes` in `workspace/runtimes.py`.
  *
  * Owns the entry list and everything that reads or changes it: building
- * it from config, adding and removing entries, closing them, and
- * answering which entry takes a whole line.
+ * it from config, adding and removing entries and closing them.
  *
  * The TypeScript engines construct lazily (missing wasm surfaces at run
  * time), so defaults and explicit entries build the same way. The
@@ -48,7 +40,6 @@ export interface RuntimesInit {
  */
 export class Runtimes {
   entries: readonly Runtime[] = []
-  bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
   private readonly registry: MountRegistry
   private readonly binding: WorkspaceBinding
   private readonly retiring = new Map<Runtime, Promise<void>>()
@@ -117,27 +108,8 @@ export class Runtimes {
 
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
     this.entries = entries
-    this.bindings = bindings
     this.registry.runtimeEntries = entries
     this.registry.runtimeBindings = bindings
-    this.registry.workspaceRuntime =
-      entries.find((entry): entry is WorkspaceRuntime => entry instanceof WorkspaceRuntime) ?? null
-  }
-
-  /**
-   * The runtime taking this whole line, null for the executor.
-   *
-   * A runtime carrying LineExecutor takes the raw line when the line's
-   * resolved bindings explicitly place "*" on it;
-   * everything else walks the executor's tree. The common world has no
-   * such runtime, so this is a cheap scan.
-   */
-  wholeLine(decision: RouteDecision<Runtime> | null): (Runtime & LineExecutor) | null {
-    const candidates = this.entries.some((entry) => isLineExecutor(entry))
-    if (!candidates) return null
-    const bindings: Record<string, Runtime | null> =
-      decision !== null ? decision.bindings : this.bindings
-    return wholeLineRuntime(bindings)
   }
 }
 

@@ -62,6 +62,7 @@ import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { RouteDecision } from '../../runtime/routing/index.ts'
+import { wholeLineRuntime } from '../../runtime/table.ts'
 import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
@@ -427,6 +428,9 @@ async function runPreparedLine(
   // aliases as they are now, not those of the function running it.
   const outerView = effectiveSession.aliasView
   effectiveSession.aliasView = null
+  // A line run on its caller's evaluation (a CLI's own `ws.shell`) routes
+  // itself; the caller's route comes back when it ends.
+  const outerRouting = context.frame.routing
   try {
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status write can refuse an
@@ -522,7 +526,7 @@ async function runPreparedLine(
               env.registry.decisions.handUp(effectiveSession.sessionId, handed)
             else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
           }
-          let placed: RouteDecision<Runtime> | Deny | Pending | null
+          let placed: RouteDecision<Runtime> | Deny | Pending
           try {
             // Judged as the session the line runs in, a call's cwd and env
             // included, as Python binds it before placement; without task
@@ -555,7 +559,7 @@ async function runPreparedLine(
               new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode),
             )
           }
-          if (placed !== null && 'kind' in placed) {
+          if ('kind' in placed) {
             // A question on the line as a whole holds it for its retry
             // like one on a command.
             if (placed.kind === 'pending') {
@@ -571,7 +575,10 @@ async function runPreparedLine(
               placementRefused(placed, command),
             )
           }
-          const routingDecision: RouteDecision<Runtime> | null = placed
+          const routingDecision = placed
+          // The walker reads it off the frame, which a child evaluation
+          // forks with it: nested lines never re-route.
+          context.frame.routing = routingDecision
 
           const dispatch: DispatchFn = env.dispatcher.forSession(effectiveSession).dispatch
 
@@ -594,8 +601,8 @@ async function runPreparedLine(
             // The agent rides with the execution: an approval a nested line
             // raises is the typed line's agent's, not the workspace default's.
             // Nested lines never re-route: the evaluator's inner lines keep
-            // the typed line's decision (runtime argument, policy, or scripts).
-            if (routingDecision !== null) innerOpts.routingDecision = routingDecision
+            // the typed line's decision (runtime argument, policy, or bindings).
+            innerOpts.routingDecision = routingDecision
             // Under the hand-off the walker bound, standing at the node whose
             // text this is; outside a walk (no hand-off bound) the inner line
             // is a line of its own.
@@ -761,12 +768,10 @@ async function runPreparedLine(
             registerCloser: (fn: () => Promise<void>) => {
               env.registerCloser(fn)
             },
-            runtimeBindings: env.runtimes.bindings,
             // Alias expansion rewrites the head word and reads the result as a
             // fresh line, so it needs the same parser the line reader used. The
             // parser is already resolved by the time the tree runs.
             parser,
-            ...(routingDecision !== null ? { routingDecision } : {}),
             ...(options.signal !== undefined ? { signal: options.signal } : {}),
           }
           const deps = withHandOff(
@@ -782,6 +787,7 @@ async function runPreparedLine(
                 options,
                 rootNode,
                 deps,
+                routingDecision,
                 targetSession,
                 context,
                 stdin,
@@ -800,6 +806,8 @@ async function runPreparedLine(
     )
   } finally {
     effectiveSession.aliasView = outerView
+    if (outerRouting === undefined) delete context.frame.routing
+    else context.frame.routing = outerRouting
     if (options.record !== false) {
       // Every read of the line has ended, so what a read kept of the
       // aliases it changed goes with it.
@@ -830,6 +838,7 @@ async function runParsedLine(
   options: ExecuteOptions,
   rootNode: TSNodeLike,
   deps: ExecuteNodeDeps,
+  decision: RouteDecision<Runtime>,
   targetSession: SessionState,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -876,7 +885,7 @@ async function runParsedLine(
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, context.frame.abortSignal)
-  const lineRuntime = env.runtimes.wholeLine(deps.routingDecision ?? null)
+  const lineRuntime = wholeLineRuntime(decision.bindings)
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
   // runtime's env snapshot reads the vars. The prejudge pass leaves
@@ -912,7 +921,7 @@ async function runParsedLine(
         )
         if (served.length !== nodes.length) {
           planNodes = served
-          planWhole = guestBound(served, deps.routingDecision ?? null, env.runtimes.bindings)
+          planWhole = guestBound(served, decision)
           planCli = cliEnvNames(served, effectiveSession, env.registry)
           names =
             served.length === 0
@@ -1116,7 +1125,7 @@ async function runParsedLine(
       const nodes = lineNodes(rootNode, effectiveSession, reparse)
       const filled = await fillManaged(
         nodes,
-        guestBound(nodes, deps.routingDecision ?? null, env.runtimes.bindings),
+        guestBound(nodes, decision),
         cliEnvNames(nodes, effectiveSession, env.registry),
         true,
       )

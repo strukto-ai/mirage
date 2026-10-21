@@ -30,8 +30,6 @@ import {
 } from './config.ts'
 import { SandboxMounts } from './mounts.ts'
 
-const ENC = new TextEncoder()
-
 /**
  * The bytes piped into a run, read whole; null when nothing was.
  *
@@ -167,11 +165,11 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
+    // Served here rather than in the constructor, which runs before a
+    // subclass names itself.
+    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     await this.ensureConnected(signal)
-    const refusal = await this.mounts?.admit(this.binding, signal)
-    return refusal == null
-      ? null
-      : { stdout: new Uint8Array(), stderr: ENC.encode(`${this.name}: ${refusal}\n`), exitCode: 1 }
+    return (await this.mounts?.admit(this.binding, signal)) ?? null
   }
 
   protected execArgv(
@@ -185,7 +183,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /** Let the sandbox see the workspace by `mountType`; null serves nothing. */
-  protected serveMounts(mountType: MountType | null): void {
+  private serveMounts(mountType: MountType | null): void {
     if (mountType === null) return
     this.mounts = new SandboxMounts(
       this.name,
@@ -201,7 +199,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
-    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
       throw err
@@ -221,7 +218,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
+    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, signal)
   }
 
   /**

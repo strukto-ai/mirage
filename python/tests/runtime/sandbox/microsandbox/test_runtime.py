@@ -123,7 +123,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "-e",
                 "MARK=request",
                 "--",
-                "sh",
+                "/bin/sh",
                 "-c",
                 EXEC_PRELUDE,
                 "sh",

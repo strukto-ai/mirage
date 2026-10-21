@@ -19,7 +19,8 @@ import type { PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { PTY_MARK, PTY_RAW } from '../constants.ts'
+import { wrapLine } from '../constants.ts'
+import { PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
@@ -139,9 +140,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     const sdk = await this.ensureSdk()
     signal?.throwIfAborted()
     // Keep the startup result even if aborted in flight, so its process can be killed.
-    const handle = await this.sandbox.commands.run(line, {
-      envs: env,
-      cwd,
+    const handle = await this.sandbox.commands.run(wrapLine(line, env, cwd), {
       background: true,
       stdin: stdin !== null,
     })

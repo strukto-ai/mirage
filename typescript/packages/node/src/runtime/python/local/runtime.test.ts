@@ -505,9 +505,9 @@ it.each(RESTRICTIONS)('refuses every program under a session restriction', async
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 -c pass')
     expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-      127,
+      126,
       '',
-      "local: runtime cannot enforce this session's file restrictions\n",
+      'local: Permission denied\n',
     ])
     expect(runtime.programs).toEqual([])
     const other = await ws.session('other')

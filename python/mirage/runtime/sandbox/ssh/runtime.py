@@ -16,9 +16,9 @@ import asyncio
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
+from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
-from mirage.runtime.sandbox.ssh.constants import ASYNCSSH_HINT, wrap_line
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.utils.ssh import connect_options
 
@@ -70,7 +70,7 @@ class SSHRuntime(RemoteSandbox):
 
     async def connect(self) -> None:
         if sdk.connect is None:
-            raise ImportError(ASYNCSSH_HINT)
+            raise ImportError(sdk.ASYNCSSH_HINT)
         self._conn = await sdk.connect(**self._connect_kwargs())
 
     async def exec_line(

@@ -75,7 +75,7 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
 
     def exec_targets(self) -> list[str]:
         return [
-            args[args.index("sh") - 1]
+            args[args.index("/bin/sh") - 1]
             for args, _ in self.calls
             if args[0] == "exec"
         ]
@@ -204,12 +204,12 @@ async def test_exec_line_runs_under_the_prelude_with_stdin_and_stderr():
         "-e",
         "E=1",
         "box",
-        "sh",
+        "/bin/sh",
         "-c",
         EXEC_PRELUDE,
         "sh",
         "/root/workspace",
-        "sh",
+        "/bin/sh",
         "-c",
         "wc -l",
     ]
@@ -236,7 +236,7 @@ async def test_process_preserves_argv_and_probes_the_container_once():
             "-e",
             "E=request",
             "box",
-            "sh",
+            "/bin/sh",
             "-c",
             EXEC_PRELUDE,
             "sh",

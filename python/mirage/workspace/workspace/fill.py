@@ -164,8 +164,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
 
 def guest_bound(
     nodes: Sequence[TSNodeLike],
-    decision: RouteDecision[Runtime[Any]] | None,
-    static_bindings: Mapping[str, Runtime[Any] | None],
+    decision: RouteDecision[Runtime[Any]],
 ) -> bool:
     """Whether any of the line's commands runs on a guest runtime.
 
@@ -181,12 +180,9 @@ def guest_bound(
     Args:
         nodes (Sequence[TSNodeLike]): the line's walked set
             (``line_nodes``).
-        decision (RouteDecision | None): the line's placement decision,
-            None when only static bindings apply.
-        static_bindings (Mapping[str, Runtime | None]): the registry's
-            standing command bindings, the fallback ``whole_line`` uses.
+        decision (RouteDecision): the line's placement decision.
     """
-    bindings = decision.bindings if decision is not None else static_bindings
+    bindings = decision.bindings
     if not bindings:
         return False
     words: set[str] = {"*"}

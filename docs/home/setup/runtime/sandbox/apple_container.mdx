@@ -119,7 +119,7 @@ container exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 ## Notes
 
 - Set `container` to the name of a running container.
-- The image needs a POSIX-compatible `sh`. The session's environment wins
+- The image needs a POSIX-compatible `/bin/sh`. The session's environment wins
   over the image's. The working directory must already exist in the container.
 - Host directories reach the container only through `--volume`. A service on
   your Mac is not at `127.0.0.1` inside; Apple's

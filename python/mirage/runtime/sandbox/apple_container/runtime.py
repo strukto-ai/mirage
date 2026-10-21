@@ -27,8 +27,7 @@ from mirage.runtime.sandbox.apple_container.constants import (
     not_running_hint,
 )
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.types import RunResult, SandboxPipe
 
 
@@ -46,7 +45,8 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     host's filesystem except what the container was given at start
     (`--volume`). Serve the workspace inside it at the host's mount
     prefixes, the same contract every provider in this family carries.
-    The image needs a POSIX sh, which every argv runs under (EXEC_PRELUDE).
+    The image needs a POSIX /bin/sh, which every argv runs under
+    (EXEC_PRELUDE).
 
     A line runs in its session's container (config ``containers``,
     else ``container``), so one runtime can give every agent a VM of
@@ -140,25 +140,15 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         env: dict[str, str],
         cwd: str,
     ) -> RunResult:
-        container = await self._target()
-        args = ["exec", "-i", "-w", "/"]
-        for key, value in env.items():
-            args += ["-e", f"{key}={value}"]
-        args += [container, "sh", "-c", EXEC_PRELUDE, "sh", cwd, *argv]
-        stdout, stderr, code = await self._container(args, stdin=stdin)
+        target = (await self._target(),)
+        stdout, stderr, code = await self._container(
+            exec_args(("exec", "-i"), target, env, cwd, argv), stdin=stdin
+        )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
+        target = (await self._target(),)
         return await open_cli_pipe(
             "container",
-            [
-                "exec",
-                "-i",
-                "-w",
-                "/",
-                await self._target(),
-                "sh",
-                "-c",
-                command,
-            ],
+            exec_args(("exec", "-i"), target, {}, None, ("sh", "-c", command)),
         )

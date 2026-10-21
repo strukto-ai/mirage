@@ -17,7 +17,7 @@ import { runWithCaller } from '../context/session_context.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
-import type { WorkspaceBinding } from './binding.ts'
+import { refusedRun, type WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor, isStreamingProcess } from './mixin.ts'
 import type {
@@ -58,7 +58,7 @@ export abstract class Runtime<E = unknown> {
   /**
    * Which entry points this runtime's code has to the outside world (see
    * RuntimeReach): 'workspace' when the workspace dispatch is its only one,
-   * as the bridged engines (monty, pyodide, quickjs) and the vfs
+   * as the bridged engines (monty, pyodide, quickjs) and the workspace
    * routing marker declare, 'process' or 'remote' when the code can
    * act around that gate. The default is 'process', the no-promise
    * claim, so a custom runtime must declare a narrower reach
@@ -147,13 +147,7 @@ export abstract class Runtime<E = unknown> {
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
       if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
-        return {
-          stdout: new Uint8Array(),
-          exitCode: 127,
-          stderr: new TextEncoder().encode(
-            `${this.name}: runtime cannot enforce this session's file restrictions\n`,
-          ),
-        }
+        return refusedRun(this.name, "runtime cannot enforce this session's file restrictions")
       const engine = await this.engine()
       if (capture === undefined)
         return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output)

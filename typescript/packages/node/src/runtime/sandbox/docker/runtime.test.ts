@@ -103,12 +103,12 @@ describe('DockerRuntime', () => {
       '-e',
       'E=1',
       'cid-42',
-      'sh',
+      '/bin/sh',
       '-c',
       'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"',
       'sh',
       '/root/ws',
-      'sh',
+      '/bin/sh',
       '-c',
       'wc -l',
     ])
@@ -175,6 +175,8 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
       expect((await readFile(`${fake}.args`, 'utf8')).split('\n')).toEqual([
         'exec',
         '-i',
+        '-w',
+        '/',
         'cid-42',
         'sh',
         '-c',
@@ -246,7 +248,8 @@ function restricted(runtime: DockerRuntime, profile: SessionProfile): Workspace 
 }
 
 function ran(runtime: FakeDockerRuntime, line: string): boolean {
-  return runtime.calls.some(([args]) => args[args.length - 1] === line)
+  const words = line.split(' ')
+  return runtime.calls.some(([args]) => args.slice(-words.length).join(' ') === words.join(' '))
 }
 
 describe('DockerRuntime under session restrictions', () => {
@@ -257,8 +260,8 @@ describe('DockerRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        127,
-        "docker: runtime cannot enforce this session's file restrictions\n",
+        126,
+        'docker: Permission denied\n',
       ])
       expect(runtime.calls).toEqual([])
       expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
@@ -274,8 +277,8 @@ describe('DockerRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        1,
-        "docker: /data is not served through the dispatcher, out of reach of this session's rules\n",
+        126,
+        'docker: Permission denied\n',
       ])
       expect(ran(runtime, 'tool run')).toBe(false)
     } finally {

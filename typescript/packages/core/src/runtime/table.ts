@@ -224,7 +224,7 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
  * path a workspace-resolved line takes anyway, so there is no delegate.
  */
 export function wholeLineRuntime(
-  bindings: Record<string, Runtime | null>,
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
 ): (Runtime & LineExecutor) | null {
   const star = Object.hasOwn(bindings, '*') ? bindings['*'] : null
   if (star != null && isLineExecutor(star)) return star
@@ -236,7 +236,7 @@ export function wholeLineRuntime(
  *
  * That is the world's WorkspaceRuntime, unless it declares captures (then it
  * is an ordinary capturer and nothing is catch-all) or it is not among
- * the given entries (refused the line / omitted).
+ * the given entries.
  */
 export function catchAll(entries: readonly Runtime[]): Runtime | null {
   for (const entry of entries) {

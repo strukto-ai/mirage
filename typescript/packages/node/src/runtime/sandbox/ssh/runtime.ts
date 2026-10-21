@@ -23,7 +23,7 @@ import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/type
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
-import { wrapLine } from './constants.ts'
+import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { CliResult } from '../cli.ts'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import type { Client, ClientChannel } from 'ssh2'
@@ -72,6 +72,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     )
     await new Promise<void>((resolveFn, rejectFn) => {
       client.on('ready', () => {
+        // A mount_type's SFTP rides this connection, which stalls on
+        // Nagle as the SSH accessor's did (accessor/ssh.ts).
+        client.setNoDelay(true)
         resolveFn()
       })
       client.on('error', rejectFn)

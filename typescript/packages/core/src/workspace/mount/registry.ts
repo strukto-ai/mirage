@@ -24,7 +24,6 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import type { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { mutationLock } from '../../cache/file/io.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import type { Evicted } from '../../cache/index/config.ts'
@@ -124,10 +123,6 @@ export class MountRegistry {
   private reconciler: ReadReconciler | null = null
   private dispatchFn: DispatchFn | null = null
   private dispatchAsFn: ((owner: SessionAccess) => DispatchFn) | null = null
-  // The world's workspace runtime, set by Workspace after construction.
-  // Catch-all when its captures are empty; explicit captures make
-  // unclaimed commands an admission failure (126).
-  workspaceRuntime: WorkspaceRuntime | null = null
   // Workspace-level command -> runtime bindings (first listed capturer
   // wins), written by Runtimes beside runtimeEntries.
   runtimeBindings: Readonly<Record<string, Runtime | undefined>> = Object.create(null) as Record<
@@ -145,8 +140,8 @@ export class MountRegistry {
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user
   // policies (Workspace policies option), follow it. Registry-hosted
-  // like workspaceRuntime so the
-  // executor reaches them without new threading.
+  // like runtimeBindings so the executor reaches them without new
+  // threading.
   readonly policies = new Policies([new MountRootPolicy(this)])
   /** The approval ledger an Ask is taken to, which the policies hold
    * (`Policies.decisions`) so a session write reaches it too. */

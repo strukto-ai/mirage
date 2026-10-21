@@ -35,7 +35,8 @@ to confirm reads and writes cross the runtime boundary.
 Python modules, file modes and other language APIs come from the interpreter
 installed in the sandbox image or on the remote machine. For Sandlock, they
 come from this host's interpreter. Mirage forwards the captured program's
-arguments, input, environment and working directory; each provider's
+arguments, input, environment and working directory; a working directory
+the sandbox lacks fails the program with exit 126. Each provider's
 **Runtime behavior** table describes that boundary.
 
 File operations reach workspace mounts through the connection configured
@@ -44,6 +45,7 @@ permissions and confinement.
 
 ## The sandbox image
 
+Every sandbox needs a POSIX shell at `/bin/sh`, which starts each command.
 A sandbox that serves the mounts with its own Mirage needs `fuse3` and
 Mirage. The repository's Dockerfile builds that image from the current
 checkout, with every mountable backend:

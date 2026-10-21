@@ -16,7 +16,7 @@ import json
 
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
+from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.smolvm.config import SmolvmConfig
 from mirage.runtime.sandbox.smolvm.constants import (
     RUNNING_STATE,
@@ -89,37 +89,16 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         env: dict[str, str],
         cwd: str,
     ) -> RunResult:
-        args = [
-            "machine",
-            "exec",
-            "--name",
-            self.config.machine,
-            "-i",
-            "-w",
-            cwd,
-        ]
-        for key, value in env.items():
-            args += ["-e", f"{key}={value}"]
-        # `--` ends the flags: the command is a trailing var arg, so a
-        # line starting with a dash would otherwise parse as one.
-        args += ["--", *argv]
-        stdout, stderr, code = await self._smolvm(args, stdin=stdin)
+        stdout, stderr, code = await self._smolvm(
+            exec_args(self._head(), ("--",), env, cwd, argv), stdin=stdin
+        )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         return await open_cli_pipe(
             "smolvm",
-            [
-                "machine",
-                "exec",
-                "--name",
-                self.config.machine,
-                "-i",
-                "-w",
-                "/",
-                "--",
-                "sh",
-                "-c",
-                command,
-            ],
+            exec_args(self._head(), ("--",), {}, None, ("sh", "-c", command)),
         )
+
+    def _head(self) -> tuple[str, ...]:
+        return ("machine", "exec", "--name", self.config.machine, "-i")

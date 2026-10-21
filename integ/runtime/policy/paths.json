@@ -344,9 +344,9 @@
             "python": "print(\"must not execute\")"
           },
           "expect": {
-            "exit": 127,
+            "exit": 126,
             "stdout": "",
-            "stderr": "local: runtime cannot enforce this session's file restrictions\n"
+            "stderr": "local: Permission denied\n"
           }
         },
         {

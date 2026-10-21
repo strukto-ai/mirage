@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -118,7 +119,9 @@ async def test_exec_line_dresses_the_line_and_threads_stdin():
     runtime = FakeSSHRuntime(config={"host": "box"})
     result = await runtime.exec_line("wc -l", b"a\nb\n", {"E": "1"}, "/w")
     assert result.exit_code == 0
-    assert result.stdout == b"out:cd '/w' && env 'E=1' sh -c 'wc -l'"
+    assert (
+        result.stdout == f"out:{wrap_line('wc -l', {'E': '1'}, '/w')}".encode()
+    )
     assert result.stderr == b"warn"
     assert runtime.calls[0][1] == b"a\nb\n"
 
@@ -296,9 +299,9 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert (result.exit_code, result.stdout, result.stderr) == (
-        127,
+        126,
         b"",
-        b"ssh: runtime cannot enforce this session's file restrictions\n",
+        b"ssh: Permission denied\n",
     )
     assert runtime.calls == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0

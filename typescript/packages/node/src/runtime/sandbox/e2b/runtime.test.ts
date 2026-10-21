@@ -19,10 +19,11 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
-import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -47,6 +48,12 @@ class FakeExitError extends Error {
   }
 }
 class FakeNotFoundError extends Error {}
+
+/** The line `wrapLine` dressed, unquoted. */
+function lineOf(command: string): string {
+  const quoted = command.slice(command.lastIndexOf("sh -c '") + 'sh -c '.length)
+  return quoted.slice(1, -1).replaceAll(`'\\''`, "'")
+}
 
 class FakeHandle {
   input: Uint8Array = new Uint8Array()
@@ -90,16 +97,13 @@ class FakeHandle {
 }
 
 class FakeCommands {
-  calls: [string, Record<string, string>, string, boolean][] = []
+  calls: [string, boolean][] = []
   handles: FakeHandle[] = []
   inputError: Error | null = null
-  run(
-    command: string,
-    opts: { envs: Record<string, string>; cwd: string; background: boolean; stdin: boolean },
-  ) {
+  run(command: string, opts: { background: boolean; stdin: boolean }) {
     expect(opts.background).toBe(true)
-    this.calls.push([command, opts.envs, opts.cwd, opts.stdin])
-    const handle = new FakeHandle(command, !opts.stdin)
+    this.calls.push([command, opts.stdin])
+    const handle = new FakeHandle(lineOf(command), !opts.stdin)
     handle.inputError = this.inputError
     this.handles.push(handle)
     return Promise.resolve(handle)
@@ -250,7 +254,7 @@ describe('E2BRuntime', () => {
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
     expect(FakeSandbox.last.commands.calls).toEqual([
-      ['wc -l | cat', { E: '1' }, '/workspace', data !== null],
+      [wrapLine('wc -l | cat', { E: '1' }, '/workspace'), data !== null],
     ])
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
       eof: true,
@@ -513,8 +517,8 @@ describe('E2BRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        127,
-        "e2b: runtime cannot enforce this session's file restrictions\n",
+        126,
+        'e2b: Permission denied\n',
       ])
       expect(FakeSandbox.connected).toEqual([])
       expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
@@ -530,8 +534,8 @@ describe('E2BRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        1,
-        "e2b: /data is not served through the dispatcher, out of reach of this session's rules\n",
+        126,
+        'e2b: Permission denied\n',
       ])
       expect(runtime.lines).not.toContain('tool run')
     } finally {

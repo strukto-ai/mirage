@@ -18,6 +18,7 @@ import { tmpdir, userInfo } from 'node:os'
 import type * as Os from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
@@ -62,6 +63,7 @@ const made: FakeClient[] = []
 class FakeClient {
   opts: Record<string, unknown> | null = null
   ended = false
+  noDelay = false
   private readonly handlers = new Map<string, (...args: unknown[]) => void>()
 
   constructor() {
@@ -70,6 +72,11 @@ class FakeClient {
 
   on(event: string, fn: (...args: unknown[]) => void): this {
     this.handlers.set(event, fn)
+    return this
+  }
+
+  setNoDelay(on: boolean): this {
+    this.noDelay = on
     return this
   }
 
@@ -116,7 +123,7 @@ describe('SSHRuntime', () => {
     const runtime = new FakeSSHRuntime({ config: { host: 'box' } })
     const result = await runtime.execLine('wc -l', ENC.encode('a\nb\n'), { E: '1' }, '/w')
     expect(result.exitCode).toBe(0)
-    expect(DEC.decode(result.stdout)).toBe("out:cd '/w' && env 'E=1' sh -c 'wc -l'")
+    expect(DEC.decode(result.stdout)).toBe(`out:${wrapLine('wc -l', { E: '1' }, '/w')}`)
     expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
     const [, stdin] = runtime.calls[0] ?? ['', null]
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
@@ -134,6 +141,7 @@ describe('SSHRuntime', () => {
       readyTimeout: 5000,
       authHandler: [{ type: 'none', username: 'deploy' }],
     })
+    expect(made[made.length - 1]?.noDelay).toBe(true)
   })
 
   it('username defaults to the local user and the agent rides when no key is named', async () => {
@@ -281,9 +289,9 @@ it.each(RESTRICTIONS)(
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-        127,
+        126,
         '',
-        "ssh: runtime cannot enforce this session's file restrictions\n",
+        'ssh: Permission denied\n',
       ])
       expect(runtime.calls).toEqual([])
       const other = await ws.session('other')

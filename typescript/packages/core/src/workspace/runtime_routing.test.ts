@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { Context } from '../commands/config.ts'
+import { Command, type Context } from '../commands/config.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LanguageRuntime } from '../runtime/language.ts'
 import { WorkspaceRuntime } from '../runtime/workspace.ts'
@@ -27,7 +29,7 @@ import { ScriptSource } from '../runtime/types.ts'
 import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode, type PathSpec } from '../types.ts'
+import { MountMode, VFSName, type PathSpec } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -80,6 +82,27 @@ describe('per-line runtime argument', () => {
     const ws = await runtimeArgWorkspace()
     try {
       const io = await ws.shell('echo $(python3 -c "x")', { runtime: 'beta' })
+      expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("leaves its caller's route to a nested line", async () => {
+    const ws = await runtimeArgWorkspace()
+    try {
+      ws.registry.mountForPrefix('/').register(
+        new Command({
+          name: 'nested',
+          spec: new CommandSpec({}),
+          vfs: VFSName.RAM,
+          fn: async () => {
+            await ws.shell('echo inner')
+            return [new Uint8Array(), new IOResult()]
+          },
+        }),
+      )
+      const io = await ws.shell('nested; python3 -c "x"', { runtime: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
     } finally {
       await ws.close()
