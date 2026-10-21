@@ -141,7 +141,7 @@ langfuse = ["langfuse>=4.2.0"]
 chroma   = ["chromadb-client>=1.0.0"]
 
 # --- qdrant ---
-qdrant   = ["qdrant-client[fastembed]>=1.18.0"]
+qdrant   = ["qdrant-client>=1.18.0"]
 
 # --- openai ---
 openai      = ["openai>=3.13.0", "openai-agents>=0.21.0"]

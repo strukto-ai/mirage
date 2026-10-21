@@ -26,9 +26,6 @@
     "gslides": {
       "refreshFn": "TypeScript's delegated-refresh hook for browser PKCE and secret-proxy setups, a callback no YAML block can carry. Python's seam for a caller that owns the OAuth dance is the `access_token` provider callable, which both sides have."
     },
-    "qdrant": {
-      "embed": "TypeScript's client-side embedding seam, a callable no YAML block can carry: the JS qdrant client has no fastembed, so a caller vectorizes the search query in-process. Python embeds locally through qdrant-client[fastembed] and switches to the server with `cloud_inference`."
-    },
     "s3": {
       "httpAgentProvider": "A caller-supplied HTTP agent factory, a callable no YAML block can carry; python's aiohttp session pool is configured through the accessor.",
       "presignedUrlProvider": "The browser's authentication model: a signer callable in place of credentials. Python has no browser runtime."

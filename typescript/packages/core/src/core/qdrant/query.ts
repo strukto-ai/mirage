@@ -286,8 +286,7 @@ export async function searchRows(
     const config = accessor.config
     const client = await accessor.client()
     // A caller-supplied `embed` vectorizes the query here, and cloud inference
-    // sends the text to a cluster that embeds it. Python embeds in process
-    // when neither is set, which no JS client can.
+    // sends the text to a cluster that embeds it.
     let vector: number[] | { text: string; model: string }
     if (config.embed !== null) vector = await config.embed(query)
     else if (config.cloudInference) vector = { text: query, model: config.embeddingModel }

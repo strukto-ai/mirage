@@ -38,13 +38,14 @@ so results compose with `cat`, `wc`, and pipes (`grep`/`rg` stay lexical).
 
 The query text is turned into a vector two ways:
 
-- **Local (default):** the `qdrant-client[fastembed]` extra embeds the query in
-  process with `embedding_model` (default `sentence-transformers/all-MiniLM-L6-v2`).
+- **In process:** pass an `embed` hook (text in, vector out) and your own model
+  vectorizes the query, so a self-hosted Qdrant works.
 - **Server-side:** set `cloud_inference` to let a Qdrant Cloud (inference-enabled)
-  cluster embed the query. The TypeScript backend has no in-process model, so it
-  takes this path or a caller's `embed` hook, and refuses `search` with neither.
+  cluster embed the query with `embedding_model` (default
+  `sentence-transformers/all-MiniLM-L6-v2`).
 
-Either way the collection must already store vectors produced by the same model.
+With neither, `search` refuses the query. Either way the collection must already
+store vectors produced by the same model.
 
 ## Limits
 

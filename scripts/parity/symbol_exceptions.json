@@ -1,5 +1,5 @@
 {
-  "baseline": 3193,
+  "baseline": 3192,
  "modules": {
   "commands/builtin/generic/diff": {
    "python_only": {

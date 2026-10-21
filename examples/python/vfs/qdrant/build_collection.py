@@ -14,15 +14,11 @@
 
 import base64
 import json
+import math
+import re
 from pathlib import Path
 
-from fastembed import TextEmbedding
 from qdrant_client import QdrantClient, models
-
-# fastembed runs the ONNX export of this sentence-transformers model, and
-# it is what qdrant-client embeds `search` queries with, so the example
-# brings no model dependency of its own.
-MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # The rows both language examples seed, so the two mounts read alike.
 DATA = json.loads(
@@ -34,6 +30,43 @@ _PRODUCTS: list[dict[str, str]] = DATA["products"]
 _CHUNKS: list[dict[str, str]] = DATA["chunks"]
 
 
+# A bag of words over the corpus vocabulary stands in for a sentence
+# model: a word's first five letters are its stem, so `refund` meets
+# `refunds`, a query word the corpus never used is dropped, and the vector
+# is unit length so cosine similarity is word overlap. A real model
+# (fastembed's all-MiniLM-L6-v2, say) plugs into the same `embed` hook the
+# mount config takes.
+def _stems(text: str) -> list[str]:
+    return [word[:5] for word in re.findall(r"[^\W_]+", text.lower())]
+
+
+def _vocabulary() -> dict[str, int]:
+    vocab: dict[str, int] = {}
+    texts = [p["name"] for p in _PRODUCTS] + [c["text"] for c in _CHUNKS]
+    for text in texts:
+        for stem in _stems(text):
+            vocab.setdefault(stem, len(vocab))
+    return vocab
+
+
+_VOCAB = _vocabulary()
+
+
+def embed(text: str) -> list[float]:
+    """The unit-length bag-of-words vector of a text.
+
+    Args:
+        text (str): the text to vectorize.
+    """
+    vector = [0.0] * len(_VOCAB)
+    for stem in _stems(text):
+        index = _VOCAB.get(stem)
+        if index is not None:
+            vector[index] += 1
+    norm = math.sqrt(sum(x * x for x in vector)) or 1.0
+    return [x / norm for x in vector]
+
+
 def build_collection(
     client: QdrantClient, collection: str = "fashion"
 ) -> None:
@@ -43,9 +76,7 @@ def build_collection(
         client (QdrantClient): the client to build with.
         collection (str): the collection to create, replacing any old one.
     """
-    embedder = TextEmbedding(MODEL)
-    names = [product["name"] for product in _PRODUCTS]
-    vectors = [list(map(float, vector)) for vector in embedder.embed(names)]
+    vectors = [embed(product["name"]) for product in _PRODUCTS]
     if client.collection_exists(collection):
         client.delete_collection(collection)
     client.create_collection(
@@ -88,9 +119,7 @@ def build_lineage_collection(
         client (QdrantClient): the client to build with.
         collection (str): the collection to create, replacing any old one.
     """
-    embedder = TextEmbedding(MODEL)
-    texts = [chunk["text"] for chunk in _CHUNKS]
-    vectors = [list(map(float, vector)) for vector in embedder.embed(texts)]
+    vectors = [embed(chunk["text"]) for chunk in _CHUNKS]
     if client.collection_exists(collection):
         client.delete_collection(collection)
     client.create_collection(

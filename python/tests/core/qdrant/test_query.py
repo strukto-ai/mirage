@@ -5,6 +5,7 @@ import pytest
 from qdrant_client import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+from mirage.accessor.responses import ResponseCache
 from mirage.core.qdrant import query
 from mirage.core.qdrant.render import render_json
 from mirage.vfs.qdrant.config import QdrantConfig
@@ -206,3 +207,63 @@ async def test_group_values_spell_a_non_string_as_its_json_does(accessor):
         accessor, "animals", "kind", {"label": "1"}, 100
     )
     assert behind_one == [client.points[1].payload["kind"]]
+
+
+class _QueryClient:
+    def __init__(self) -> None:
+        self.seen: list[dict] = []
+
+    async def query_points(
+        self, collection_name, query=None, limit=10, with_payload=True
+    ):
+        self.seen.append(
+            {"query": query, "limit": limit, "with_payload": with_payload}
+        )
+        point = SimpleNamespace(id=1, payload={"name": "alpha"}, score=0.9)
+        return SimpleNamespace(points=[point])
+
+
+class _SearchAccessor:
+    def __init__(self, client: _QueryClient, **extra) -> None:
+        self.config = QdrantConfig(
+            url="http://x", collection="c", id_field="id", **extra
+        )
+        self._client = client
+        self.searches = ResponseCache[tuple[str, str, int], list]()
+
+    async def client(self):
+        return self._client
+
+
+async def _embed(text: str) -> list[float]:
+    return [float(len(text)), 0.5]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra", "sent"),
+    [
+        ({"embed": _embed}, [3.0, 0.5]),
+        (
+            {"cloud_inference": True},
+            models.Document(
+                text="dog", model="sentence-transformers/all-MiniLM-L6-v2"
+            ),
+        ),
+    ],
+    ids=["the caller-supplied vector", "the text, for the cluster to embed"],
+)
+async def test_search_sends(extra, sent):
+    client = _QueryClient()
+    accessor = _SearchAccessor(client, **extra)
+    rows = await query.search_rows(accessor, "c", "dog", 3)
+    assert client.seen == [{"query": sent, "limit": 3, "with_payload": True}]
+    assert rows == [{"id": 1, "name": "alpha", "_score": 0.9}]
+
+
+@pytest.mark.asyncio
+async def test_search_refuses_a_query_nothing_can_vectorize():
+    client = _QueryClient()
+    with pytest.raises(ValueError, match="pass embed, or set cloud_inference"):
+        await query.search_rows(_SearchAccessor(client), "c", "dog", 3)
+    assert client.seen == []
