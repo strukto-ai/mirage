@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.runtime.config import HomeConfig, RuntimeConfig, memory_limit
+from mirage.runtime.sandbox.config import SandboxConfig
 
 
 def test_coerce_none_gives_defaults():
@@ -44,6 +45,12 @@ def test_coerce_unknown_key_fails_loud():
 def test_base_config_has_no_fields():
     with pytest.raises(TypeError):
         RuntimeConfig.coerce({"home": "/anything"})
+
+
+@pytest.mark.parametrize("env", [["A=1"], {"A": 1}, {1: "a"}])
+def test_coerce_refuses_an_env_that_is_not_strings(env):
+    with pytest.raises(ValueError, match="map strings to strings"):
+        SandboxConfig.coerce({"env": env})
 
 
 @pytest.mark.parametrize(

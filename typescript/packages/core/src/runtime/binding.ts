@@ -37,8 +37,6 @@ import type { SessionState } from '../workspace/session/session.ts'
  * `Context` a command or CLI gets: its `vfs` is the session's files over
  * the binding's dispatch, so a guest's calls are the program's own. */
 export interface RuntimeContext {
-  readonly binding: WorkspaceBinding
-  readonly resolver: MountResolver
   readonly caller: Caller
   readonly ctx: Context
   readonly restrictedMounts?: readonly string[]
@@ -173,8 +171,6 @@ export function captureBinding(
   const rest: Partial<Context> = { ...views.ctx }
   delete rest.vfs
   return Object.freeze({
-    binding,
-    resolver: new CallerResolver(binding.resolver, caller),
     restrictedMounts: Object.freeze(views.restrictedMounts ?? []),
     ctx: Object.freeze({
       stdin: null,

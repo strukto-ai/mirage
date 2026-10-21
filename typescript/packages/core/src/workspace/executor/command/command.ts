@@ -355,6 +355,7 @@ export async function handleCommand(
             ? {}
             : { processes: registry.processView(session) }),
           ...(context.frame.routing === undefined ? {} : { routing: context.frame.routing }),
+          settle: (runtime) => registry.settle(runtime),
         },
         reachesService(cliInstall.cli) ? () => registry.dropCaches(cliInstall.accessor) : null,
       ),

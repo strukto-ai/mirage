@@ -19,6 +19,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 from mirage.types import PathSpec
@@ -175,8 +176,9 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
     line = Context(flags={"c": "pwd"}, cwd=work)
     await runtime.execute([], [], line, kind="line")
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
-    assert runtime.capabilities.process and runtime.capabilities.shell
-    assert runtime.capabilities.filesystem == ()
+    assert isinstance(runtime, ProcessExecutorMixin)
+    assert isinstance(runtime, LineExecutorMixin)
+    assert runtime.filesystem == ()
 
 
 @pytest.mark.asyncio

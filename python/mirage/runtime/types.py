@@ -356,14 +356,3 @@ OutputFn: TypeAlias = Callable[[bytes], Awaitable[None]]
 FilesystemOperation: TypeAlias = Literal[
     "read", "write", "list", "stat", "glob"
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeCapabilities:
-    """Execution support by runtime type, plus the separate reach guarantee."""
-
-    languages: tuple[Language, ...] = ()
-    shell: bool = False
-    process: bool = False
-    reach: RuntimeReach = "process"
-    filesystem: tuple[FilesystemOperation, ...] = ()

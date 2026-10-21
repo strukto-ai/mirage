@@ -71,14 +71,28 @@ class RuntimeConfig:
             value (RuntimeConfig | dict | None): an instance, its dict
                 form (a yaml ``config`` block), or None for the
                 defaults. Unknown keys fail loud.
+
+        Raises:
+            ValueError: an ``env`` that does not map strings to strings.
         """
         if value is None:
-            return cls()
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, RuntimeConfig):
-            value = {f.name: getattr(value, f.name) for f in fields(value)}
-        return cls(**value)
+            config = cls()
+        elif isinstance(value, cls):
+            config = value
+        else:
+            if isinstance(value, RuntimeConfig):
+                value = {f.name: getattr(value, f.name) for f in fields(value)}
+            config = cls(**value)
+        env = getattr(config, "env", None)
+        if env is not None and (
+            not isinstance(env, dict)
+            or any(
+                not isinstance(k, str) or not isinstance(v, str)
+                for k, v in env.items()
+            )
+        ):
+            raise ValueError("runtime env must map strings to strings")
+        return config
 
 
 @dataclass(frozen=True, slots=True)

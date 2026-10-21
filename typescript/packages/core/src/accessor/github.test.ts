@@ -53,3 +53,12 @@ it('an explicit github API base is the default one', () => {
   expect(gh.reaches(mount)).toBe(true)
   expect(gh.transport).toBe(account.transport)
 })
+
+it('forget drops the tree so the next listing fetches it', () => {
+  const account = new GitHubAccount({ token: 't' })
+  const mount = new GitHubAccessor({ account, owner: 'o', repo: 'r', ref: 'm', defaultBranch: 'm' })
+  mount.tree = { 'a.txt': { path: 'a.txt', type: 'blob', sha: 's', size: 1 } }
+  mount.truncated = true
+  mount.forget()
+  expect([mount.tree, mount.truncated]).toEqual([{}, false])
+})

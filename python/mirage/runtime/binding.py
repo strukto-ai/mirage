@@ -48,8 +48,6 @@ class RuntimeContext:
     ``caller`` and hands the run this ``vfs`` and ``session``.
     """
 
-    binding: WorkspaceBinding
-    resolver: MountResolver
     caller: Caller
     ctx: Context
     restricted_mounts: tuple[str, ...] = ()
@@ -196,8 +194,6 @@ def capture_binding(
             ),
         )
     return RuntimeContext(
-        binding=binding,
-        resolver=CallerResolver(binding.resolver, caller),
         caller=caller,
         ctx=ctx,
         restricted_mounts=restricted_mounts or (),

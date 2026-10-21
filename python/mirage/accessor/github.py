@@ -141,3 +141,11 @@ class GitHubAccessor(Accessor):
 
     async def close(self) -> None:
         await self.account.close()
+
+    def forget(self) -> None:
+        """Drop the tree with the mount's caches, so the next listing
+        fetches it again."""
+        super().forget()
+        self.tree = {}
+        self.tree_loaded = False
+        self.truncated = False

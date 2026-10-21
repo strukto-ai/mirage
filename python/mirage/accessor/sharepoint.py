@@ -46,8 +46,14 @@ class SharePointAccessor(SessionAccessor):
         #   site_cache["eng"] = <same id>  (internal name, from site_entries)
         #   drive_cache[(<that site id>, "Documents")] = "b!driveXYZ"
         #
-        # Entries are never evicted: a site or drive deleted and recreated
-        # under the same name keeps answering the old id for this accessor's
-        # lifetime.
+        # Entries live until the mount drops its caches (forget): a site or
+        # drive deleted and recreated under the same name answers the old
+        # id until then.
         self.site_cache: dict[str, str] = {}
         self.drive_cache: dict[tuple[str, str], str] = {}
+
+    def forget(self) -> None:
+        """Drop the site and drive ids with the mount's caches."""
+        super().forget()
+        self.site_cache.clear()
+        self.drive_cache.clear()

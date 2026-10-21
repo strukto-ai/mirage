@@ -24,6 +24,7 @@ import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
+import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { describe, expect, it } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
 import { SmolvmRuntime } from './runtime.ts'
@@ -232,7 +233,8 @@ it('preserves argv through execute and shares the shell connection', async () =>
     { kind: 'line' },
   )
   expect(runtime.calls.filter(([args]) => args[1] === 'status')).toHaveLength(1)
-  expect(runtime.capabilities).toMatchObject({ process: true, shell: true, filesystem: [] })
+  expect([isProcessExecutor(runtime), isLineExecutor(runtime)]).toEqual([true, true])
+  expect(runtime.filesystem).toEqual([])
 })
 
 it('refuses empty argv and a stopped VM before executing', async () => {

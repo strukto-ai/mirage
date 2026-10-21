@@ -18,24 +18,31 @@ import { QuickJsUnavailableError } from '../../../runtime/js/quickjs/errors.ts'
 import { MontyUnavailableError } from '../../../runtime/python/monty/errors.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
 import type { CommandRuntime, RunResult } from '../../../runtime/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 
 /**
- * Convert one interpreter outcome into a command's output pair.
+ * Convert one runtime outcome into a command's output pair.
  *
  * The single RunResult-to-IOResult mapping: empty stdout becomes null
  * (no stream), the exit code and stderr pass through. The interpreter
- * handlers and the CLI script arm both convert through here so the
- * mapping cannot drift (Python's run_output in
+ * handlers, the CLI script arm and a captured program all convert through
+ * here so the mapping cannot drift (Python's run_output in
  * commands/builtin/general/interpreter.py).
+ *
+ * @param result the runtime's outcome.
+ * @param producer what made the output, for a program run past the
+ *   workspace's own commands.
  */
-export function runOutput(result: RunResult): [Uint8Array | null, IOResult] {
+export function runOutput(
+  result: RunResult,
+  producer: Producer | null = null,
+): [Uint8Array | null, IOResult] {
   return [
     result.stdout.length > 0 ? result.stdout : null,
-    new IOResult({ exitCode: result.exitCode, stderr: result.stderr }),
+    new IOResult({ exitCode: result.exitCode, stderr: result.stderr, producer }),
   ]
 }
 

@@ -110,4 +110,11 @@ export class GitHubAccessor extends Accessor {
   get isDefaultBranch(): boolean {
     return this.ref === this.defaultBranch
   }
+
+  /** Drop the tree with the mount's caches, so the next listing fetches it again. */
+  override forget(): void {
+    super.forget?.()
+    this.tree = {}
+    this.truncated = false
+  }
 }

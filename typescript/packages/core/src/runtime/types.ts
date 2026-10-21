@@ -243,15 +243,6 @@ export type OutputFn = (chunk: Uint8Array) => Promise<void>
 /** Guest APIs for workspace files; policy and backend support still apply per operation. */
 export type FilesystemOperation = 'read' | 'write' | 'list' | 'stat' | 'glob'
 
-/** Derived execution support; reach remains a separate guarantee. */
-export interface RuntimeCapabilities {
-  readonly languages: readonly Language[]
-  readonly shell: boolean
-  readonly process: boolean
-  readonly reach: RuntimeReach
-  readonly filesystem: readonly FilesystemOperation[]
-}
-
 /**
  * A program's source: a policy program or a script CLI.
  *

@@ -565,3 +565,20 @@ async def test_a_session_restriction_refuses_every_program(tmp_path, profile):
         assert (await other.shell("python3 -c pass")).stdout == b"ran\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_program_makes_shows_in_the_next_listing(tmp_path):
+    root = str(tmp_path.resolve())
+    with Workspace(
+        {root: DiskVFS(root=root)},
+        mode=MountMode.EXEC,
+        runtimes=[LocalRuntime(), "workspace"],
+    ) as ws:
+        assert await (await ws.shell(f"ls {root}")).stdout_str() == ""
+        made = await ws.shell(
+            f"python3 -c \"open('{root}/made.txt', 'w').write('x')\""
+        )
+        assert made.exit_code == 0
+        listed = await ws.shell(f"ls {root}")
+        assert await listed.stdout_str() == "made.txt\n"

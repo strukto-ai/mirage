@@ -1358,7 +1358,7 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
     try:
         runtimes = {runtime.name: runtime for runtime in ws.runtimes()}
         for name, operations in case.get("filesystem", {}).items():
-            supported = runtimes[name].capabilities.filesystem
+            supported = runtimes[name].filesystem
             for operation, expected in operations.items():
                 if (operation in supported) != expected:
                     problems.append(

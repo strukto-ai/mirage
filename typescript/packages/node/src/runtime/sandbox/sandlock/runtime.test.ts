@@ -19,6 +19,8 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { Context } from '@struktoai/mirage-core/commands/config'
+import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { Workspace } from '../../../workspace.ts'
@@ -120,13 +122,9 @@ else {
     const runtime = buildRuntime('sandlock')
     expect(runtime).toBeInstanceOf(SandlockRuntime)
     expect(runtime.captures).toEqual(['@external'])
-    expect(runtime.capabilities).toMatchObject({
-      process: true,
-      shell: true,
-      languages: [],
-      filesystem: [],
-      reach: 'process',
-    })
+    expect([isProcessExecutor(runtime), isLineExecutor(runtime)]).toEqual([true, true])
+    expect(runtime).not.toBeInstanceOf(LanguageRuntime)
+    expect([runtime.filesystem, runtime.reach]).toEqual([[], 'process'])
     expect(() => buildRuntime('sandlock', { config: { home: 'python3' } })).toThrow('home')
   })
 
