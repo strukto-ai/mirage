@@ -1490,6 +1490,16 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
             "2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n",
             "",
         )
+        # Nor does one naming the directory by an attached -t, one whose
+        # -S suffix holds a t, or one reaching it through a link.
+        await ws.shell("echo x > /t/n && echo x > /t/s && echo x > /t/l")
+        await ws.shell("ln -s /a /a/alias")
+        for line in (
+            "mv -t/a/b /t/n",
+            "mv -S.txt /t/s /a/b",
+            "mv /t/l /a/alias/b",
+        ):
+            assert await _line(ws, line) == (0, "", ""), line
     finally:
         await ws.close()
 

@@ -1813,6 +1813,13 @@ describe('command permissions end to end', () => {
     // A move into the directory holding the mount takes nothing of it.
     expect(await line(ws, 'echo m > /t/m && mv /t/m /a/b')).toEqual([0, '', ''])
     expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n', ''])
+    // Nor does one naming the directory by an attached -t, one whose -S suffix
+    // holds a t, or one reaching it through a link.
+    await ws.shell('echo x > /t/n && echo x > /t/s && echo x > /t/l')
+    await ws.shell('ln -s /a /a/alias')
+    for (const text of ['mv -t/a/b /t/n', 'mv -S.txt /t/s /a/b', 'mv /t/l /a/alias/b']) {
+      expect(await line(ws, text)).toEqual([0, '', ''])
+    }
   })
 
   it('a command rule reaches what chmod -R walks into', async () => {

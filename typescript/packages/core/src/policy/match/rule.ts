@@ -28,6 +28,8 @@ import {
   SUBTREE_OPS,
 } from '../constants.ts'
 import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
+import { SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { lineTokens } from './allow.ts'
 import { patternMatches } from './pattern.ts'
@@ -111,23 +113,26 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 }
 
 /**
+ * The target directory an `mv` line names by option (`-t`,
+ * `--target-directory`), as its grammar reads the line, so a `-S.txt` suffix
+ * is no target; null when it names none. Mirrors Python's `_target_directory`.
+ */
+function targetDirectory(ctx: CommandContext): string | null {
+  const spec = SPECS.mv
+  if (spec === undefined) return null
+  const target = parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')).target_directory
+  return typeof target === 'string' ? target : null
+}
+
+/**
  * `mv`'s positional destination, null when the line has none: another
- * command, a single operand, or a target directory named by option (`-t`,
- * `--target-directory`), which leaves every operand a source. Read loosely: a
- * word that could name a target counts, so a doubtful line keeps its last
- * operand a source, the stricter reading. Mirrors Python's `_destination`.
+ * command, a single operand, or a target directory named by option, which
+ * leaves every operand a source. Mirrors Python's `_destination`.
  */
 function destination(ctx: CommandContext): PathSpec | null {
   const operands = operandPaths(ctx)
   if (ctx.command !== 'mv' || operands.length < 2) return null
-  for (const w of ctx.words ?? []) {
-    if (w.kind === WordKind.VALUE && w.path !== null) return null
-    if (
-      w.kind === WordKind.OPTION &&
-      (w.text.startsWith('--t') || (!w.text.startsWith('--') && w.text.includes('t')))
-    )
-      return null
-  }
+  if (targetDirectory(ctx) !== null) return null
   return operands.at(-1) ?? null
 }
 
@@ -170,14 +175,23 @@ function touches(mount: string, ctx: CommandContext): boolean {
   if (ctx.walks ?? false) return ctx.paths.some((p) => under(mount, p.virtual))
   if (!SUBTREE_COMMANDS.has(ctx.command)) return false
   // Every path the line names is taken along, a link's target included,
-  // except where mv moves things to: its destination or its -t value.
-  const targets = new Set(
-    (ctx.words ?? []).flatMap((w) =>
-      w.kind === WordKind.VALUE && w.path !== null ? [w.path.virtual] : [],
-    ),
-  )
+  // except where mv moves things to: its -t value or its destination, typed or
+  // reached through a link above it. mv never follows a last component, so a
+  // followed path keeps the operand's name: one under the destination's name
+  // that no source carries is the destination.
+  const targets = new Set<string>()
+  const target = ctx.command === 'mv' ? targetDirectory(ctx) : null
+  if (target !== null) targets.add(target)
   const dst = destination(ctx)
-  if (dst !== null) targets.add(dst.virtual)
+  if (dst !== null) {
+    const leaf = (v: string): string => v.slice(v.lastIndexOf('/') + 1)
+    const name = leaf(dst.virtual)
+    const sources = operandPaths(ctx).slice(0, -1)
+    if (sources.every((p) => leaf(p.virtual) !== name)) {
+      for (const p of ctx.paths) if (leaf(p.virtual) === name) targets.add(p.virtual)
+    }
+    targets.add(dst.virtual)
+  }
   return ctx.paths.some((p) => !targets.has(p.virtual) && under(mount, p.virtual))
 }
 

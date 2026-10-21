@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import posixpath
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
+from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.types import WordKind
 from mirage.policy.constants import (
     ASK_SECOND,
@@ -134,12 +136,25 @@ def operand_paths(ctx: CommandContext) -> list[PathSpec]:
     ]
 
 
+def _target_directory(ctx: CommandContext) -> str | None:
+    """The target directory an ``mv`` line names by option (``-t``,
+    ``--target-directory``), as its grammar reads the line, so a
+    ``-S.txt`` suffix is no target; None when it names none.
+
+    Args:
+        ctx (CommandContext): the classified command.
+    """
+    flags = parse_to_kwargs(
+        parse_command(SPECS["mv"], list(ctx.argv), ctx.cwd, "mv")
+    )
+    target = flags.get("target_directory")
+    return target if isinstance(target, str) else None
+
+
 def _destination(ctx: CommandContext) -> PathSpec | None:
     """``mv``'s positional destination, None when the line has none:
     another command, a single operand, or a target directory named by
-    option (``-t``, ``--target-directory``), which leaves every operand
-    a source. Read loosely: a word that could name a target counts, so a
-    doubtful line keeps its last operand a source, the stricter reading.
+    option, which leaves every operand a source.
 
     Args:
         ctx (CommandContext): the classified command.
@@ -147,14 +162,8 @@ def _destination(ctx: CommandContext) -> PathSpec | None:
     operands = operand_paths(ctx)
     if ctx.command != "mv" or len(operands) < 2:
         return None
-    for w in ctx.words:
-        if w.kind is WordKind.VALUE and w.path is not None:
-            return None
-        if w.kind is WordKind.OPTION and (
-            w.text.startswith("--t")
-            or (not w.text.startswith("--") and "t" in w.text)
-        ):
-            return None
+    if _target_directory(ctx) is not None:
+        return None
     return operands[-1]
 
 
@@ -212,14 +221,25 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
     if ctx.command not in SUBTREE_COMMANDS:
         return False
     # Every path the line names is taken along, a link's target included,
-    # except where mv moves things to: its destination or its -t value.
-    targets = {
-        w.path.virtual
-        for w in ctx.words
-        if w.kind is WordKind.VALUE and w.path is not None
-    }
+    # except where mv moves things to: its -t value or its destination,
+    # typed or reached through a link above it. mv never follows a last
+    # component, so a followed path keeps the operand's name: one under
+    # the destination's name that no source carries is the destination.
+    targets: set[str] = set()
+    if ctx.command == "mv":
+        target = _target_directory(ctx)
+        if target is not None:
+            targets.add(target)
     dst = _destination(ctx)
     if dst is not None:
+        name = posixpath.basename(dst.virtual)
+        sources = operand_paths(ctx)[:-1]
+        if all(posixpath.basename(p.virtual) != name for p in sources):
+            targets.update(
+                p.virtual
+                for p in ctx.paths
+                if posixpath.basename(p.virtual) == name
+            )
         targets.add(dst.virtual)
     return any(
         _under(mount, p.virtual) for p in ctx.paths if p.virtual not in targets
