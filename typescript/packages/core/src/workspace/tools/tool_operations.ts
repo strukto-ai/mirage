@@ -118,7 +118,10 @@ export const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'ls', 'grep', 'glob
 
 /**
  * Whether a session can run a command at all: its allow list allows the
- * name and no rule refuses the bare command whole. Mirrors Python's `runs`.
+ * name and no rule refuses the bare command everywhere. A rule written
+ * under one mount refuses it only on a line working inside that mount,
+ * which the shell judges line by line, so the command still runs; one
+ * written under `/` covers every line. Mirrors Python's `runs`.
  */
 export function runs(name: string, session: SessionState): boolean {
   const rules = session.commands
@@ -127,6 +130,7 @@ export function runs(name: string, session: SessionState): boolean {
   return !rules.deny.some(
     (rule) =>
       (rule.paths ?? []).length === 0 &&
+      ['', '/'].includes(rule.mount ?? '') &&
       ((rule.commands ?? []).length === 0 ||
         (rule.commands ?? []).some((p) => patternMatches(p, [name]))),
   )
