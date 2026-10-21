@@ -58,7 +58,7 @@ export abstract class Runtime<E = unknown> {
   /**
    * Which entry points this runtime's code has to the outside world (see
    * RuntimeReach): 'workspace' when the workspace dispatch is its only one,
-   * as the bridged engines (monty, pyodide, quickjs) and the vfs
+   * as the bridged engines (monty, pyodide, quickjs) and the workspace
    * routing marker declare, 'process' or 'remote' when the code can
    * act around that gate. The default is 'process', the no-promise
    * claim, so a custom runtime must declare a narrower reach

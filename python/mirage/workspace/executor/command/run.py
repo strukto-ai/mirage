@@ -82,13 +82,11 @@ def admission_denial(cmd_name: str) -> IOResult:
 
 def line_runtime_for(
     cmd_name: str,
-    registry: MountRegistry,
-    routing: RouteDecision[Runtime[Any]] | None,
+    routing: RouteDecision[Runtime[Any]],
 ) -> tuple[Runtime[Any] | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
-    With no decision, the workspace's static bindings apply. With one,
-    the command's runtime is looked up in the decision: its binding,
+    The command's runtime is looked up in the decision: its binding,
     or the decision's fallback when no entry captures it. A resolved
     WorkspaceRuntime means the executor serves the command itself (the
     workspace runtime has no interpreter entry point); None means no runtime
@@ -96,21 +94,8 @@ def line_runtime_for(
 
     Args:
         cmd_name (str): the command being dispatched.
-        registry (MountRegistry): registry holding static bindings and
-            the world's workspace runtime.
-        routing (RouteDecision | None): the typed line's decision.
+        routing (RouteDecision): the typed line's decision.
     """
-    if routing is None:
-        fallback = registry.workspace_runtime
-        restricted = (
-            isinstance(fallback, WorkspaceRuntime) and fallback.restricted
-        )
-        runtime = registry.runtime_bindings.get(cmd_name)
-        if runtime is fallback and fallback is not None:
-            return None, None
-        if runtime is None and restricted:
-            return None, admission_denial(cmd_name)
-        return runtime, None
     runtime = routing.bindings.get(cmd_name, routing.fallback)
     if runtime is None:
         return None, admission_denial(cmd_name)
@@ -239,9 +224,8 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    line_runtime, denial = line_runtime_for(
-        cmd_name, registry, routing_decision
-    )
+    assert routing_decision is not None
+    line_runtime, denial = line_runtime_for(cmd_name, routing_decision)
     if denial is not None:
         return None, denial
 

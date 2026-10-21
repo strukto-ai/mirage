@@ -13,19 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
-from mirage.runtime.mixin import LineExecutorMixin
-from mirage.runtime.routing import RouteDecision
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     NAMED,
     bind_commands,
     build_runtime,
-    whole_line_runtime,
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.mount import MountRegistry
@@ -35,8 +31,8 @@ class Runtimes:
     """The workspace's ordered runtime entries.
 
     Owns the entry list and everything that reads or changes it:
-    building it from config, adding and removing entries, closing them,
-    and answering which entry takes a whole line. Adding a runtime kind
+    building it from config, adding and removing entries and closing
+    them. Adding a runtime kind
     touches this module rather than the workspace.
 
     Args:
@@ -174,39 +170,6 @@ class Runtimes:
         self._entries = entries
         self._registry.runtime_entries = entries
         self._registry.runtime_bindings = bindings
-        self._registry.workspace_runtime = next(
-            (
-                entry
-                for entry in entries
-                if isinstance(entry, WorkspaceRuntime)
-            ),
-            None,
-        )
-
-    def whole_line(
-        self, decision: RouteDecision[Runtime[Any]] | None
-    ) -> LineExecutorMixin[Any] | None:
-        """The entry taking this whole line, None for the executor.
-
-        An entry inheriting LineExecutorMixin takes the raw line when
-        the line's resolved bindings explicitly place "*" on it; everything
-        else walks the executor's tree. The
-        common set has no such entry, so this is a cheap scan.
-
-        Args:
-            decision (RouteDecision | None): the line's decision,
-                None when only static bindings apply.
-        """
-        if not any(
-            isinstance(entry, LineExecutorMixin) for entry in self._entries
-        ):
-            return None
-        bindings: Mapping[str, Runtime[Any] | None] = (
-            decision.bindings
-            if decision is not None
-            else self._registry.runtime_bindings
-        )
-        return whole_line_runtime(bindings)
 
 
 async def _retire(entry: Runtime[Any]) -> None:

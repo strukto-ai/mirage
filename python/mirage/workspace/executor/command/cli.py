@@ -107,7 +107,7 @@ def _select_runtime(
     prog: str,
     leaf: CLI,
     entries: list[Runtime[Any]],
-    routing: RouteDecision[Runtime[Any]] | None = None,
+    routing: RouteDecision[Runtime[Any]] | None,
 ) -> tuple[LanguageRuntime[Any] | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
@@ -115,22 +115,22 @@ def _select_runtime(
     script's language, so ``runtime: monty`` on a ``.mjs`` fails loud
     instead of feeding JS to a python interpreter. Without a pin the
     program runs where this line runs its language's own interpreter
-    (the tier's head word, ``python3`` or ``node``), so a route policy
-    or a runtime's script places it as it places that command, and a
-    line every capturer refused is refused here too (126). The first
-    entry speaking the language serves when there is no line decision
-    or the workspace serves that interpreter itself
-    (runtime_for_language); a placement on a runtime that does not run
-    the script's language is refused like such a pin. Every other
-    refusal names the world so the fix (add or rename an entry) is
-    visible (127).
+    (the tier's head word, ``python3`` or ``node``), so the runtime
+    capturing that command, or a route policy, places it, and a line
+    every capturer refused is refused here too (126). The first entry
+    speaking the language serves when the workspace serves that
+    interpreter itself (runtime_for_language); a placement on a runtime
+    that does not run the script's language is refused like such a
+    pin. Every other refusal names the world so the fix (add or rename
+    an entry) is visible (127).
 
     Args:
         prog (str): display path for message attribution.
         leaf (CLI): the script-bearing node.
         entries (list[Runtime]): the workspace's ordered world.
-        routing (RouteDecision[Runtime] | None): the line's placement, None
-            outside a routed line.
+        routing (RouteDecision[Runtime] | None): the line's placement;
+            None outside a workspace line, where the first entry
+            speaking the language serves.
     """
     script = leaf.script
     if script is None:
@@ -156,11 +156,11 @@ def _select_runtime(
                 f"{script.language} scripts "
                 f"(workspace runtimes: {known})"
             )
-        heads = type(entry).captures
+        heads = type(entry).commands
         chosen = (
-            entry
-            if routing is None or not heads
-            else routing.bindings.get(heads[0], routing.fallback)
+            routing.bindings.get(heads[0], routing.fallback)
+            if routing is not None and heads
+            else entry
         )
         if chosen is None:
             return None, admission_denial(prog)
@@ -257,7 +257,7 @@ class CLIContext:
         session (SessionView | None): the session plane's live, gated
             handle; ``ctx.env`` stays the frozen process view.
         routing (RouteDecision[Runtime] | None): the line's placement, which a
-            script leaf runs its program under.
+            script leaf runs its program under; None outside a line.
     """
 
     shell: ShellFn | None = None

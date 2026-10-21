@@ -34,6 +34,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime, MontyRuntime
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.resolver import MountResolver
+from mirage.runtime.table import catch_all
 from mirage.runtime.types import Program, RunResult
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
@@ -745,7 +746,7 @@ async def test_vfs_entry_is_a_pure_routing_marker():
     # A workspace-resolved line runs on the workspace executor inline; the
     # registry entry is a marker with no line entry point to call.
     ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC)
-    fallback = ws._registry.workspace_runtime
+    fallback = catch_all(ws._runtimes.entries)
     assert fallback is not None
     assert not isinstance(fallback, LineExecutorMixin)
     result = await ws.shell("echo through-workspace")

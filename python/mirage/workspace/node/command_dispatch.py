@@ -991,6 +991,7 @@ async def _route_argv(
 
     consumer = lookup(name, session, registry, routing_decision)
     if consumer is Consumer.EXTERNAL:
+        assert routing_decision is not None
         return await run_external(
             argv, stdin, session, registry, routing_decision
         )

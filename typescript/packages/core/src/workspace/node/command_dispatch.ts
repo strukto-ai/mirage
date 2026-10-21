@@ -136,7 +136,6 @@ export async function executeCommand(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The line's parse scope; only alias expansion needs it, and each
@@ -378,7 +377,6 @@ export async function executeCommand(
       stdinIn,
       callStack,
       jobTable,
-      runtimeBindings,
       routingDecision,
       signal,
       handed,
@@ -468,7 +466,6 @@ async function runCommandBody(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision<Runtime>,
   signalIn?: AbortSignal,
   handed?: HandOff,
@@ -541,7 +538,6 @@ async function runCommandBody(
       stdin,
       callStack,
       jobTable,
-      runtimeBindings,
       routingDecision,
       signal,
       readRow(node),
@@ -604,7 +600,6 @@ async function runArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  runtimeBindings?: Record<string, Runtime>,
   routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The row the shell began reading the command on within its parse
@@ -745,7 +740,6 @@ async function runArgv(
         given,
         callStack,
         jobTable,
-        runtimeBindings,
         routingDecision,
         signal,
         row,
@@ -888,7 +882,6 @@ async function routeArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  runtimeBindings: Record<string, Runtime> | undefined,
   routingDecision: RouteDecision<Runtime> | undefined,
   signal: AbortSignal | undefined,
   row: number,
@@ -943,6 +936,7 @@ async function routeArgv(
 
   const consumer = lookup(name, session, registry, routingDecision)
   if (consumer === Consumer.EXTERNAL) {
+    if (routingDecision === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routingDecision, signal)
   }
 
@@ -1120,7 +1114,6 @@ async function routeArgv(
     stdin,
     callStack,
     jobTable,
-    runtimeBindings,
     namespace,
     routingDecision,
     executeFn,

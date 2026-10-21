@@ -48,7 +48,6 @@ export interface RunOnMountCtx {
   context: EvaluationContext
   dispatch: DispatchFn
   namespace?: Namespace
-  runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
@@ -110,27 +109,17 @@ export function admissionDenial(cmdName: string): IOResult {
 }
 
 /**
- * Resolve a command against the line's routing decision. With no
- * decision, the static bindings apply. With one, the command's runtime
- * is looked up in the decision: its binding, or the decision's
- * fallback when no entry captures it. A resolved WorkspaceRuntime means the
- * executor serves the command itself (the workspace runtime has no
- * interpreter entry point); null means no runtime accepted it: exit 126,
- * "no runtime accepted this line", like a shell refusing to exec.
+ * Resolve a command against the line's routing decision: its binding,
+ * or the decision's fallback when no entry captures it. A resolved
+ * WorkspaceRuntime means the executor serves the command itself (the
+ * workspace runtime has no interpreter entry point); null means no runtime
+ * accepted it: exit 126, "no runtime accepted this line", like a shell
+ * refusing to exec.
  */
 function lineRuntimeFor(
   cmdName: string,
-  runtimeBindings: Record<string, Runtime> | undefined,
-  fallback: Runtime | null,
-  routingDecision: RouteDecision<Runtime> | undefined,
+  routingDecision: RouteDecision<Runtime>,
 ): [Runtime | undefined, IOResult | null] {
-  if (routingDecision === undefined) {
-    const restricted = fallback instanceof WorkspaceRuntime && fallback.restricted
-    const runtime = runtimeBindings?.[cmdName]
-    if (runtime !== undefined && runtime === fallback) return [undefined, null]
-    if (runtime === undefined && restricted) return [undefined, admissionDenial(cmdName)]
-    return [runtime, null]
-  }
   const runtime = Object.hasOwn(routingDecision.bindings, cmdName)
     ? routingDecision.bindings[cmdName]
     : routingDecision.fallback
@@ -171,7 +160,7 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, context, dispatch, namespace, runtimeBindings, routingDecision } = ctx
+  const { registry, context, dispatch, namespace, routingDecision } = ctx
   const session = context.session
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
@@ -202,12 +191,8 @@ export async function runOnMount(
     mount.commandLimits.get(cmdName) ??
     ownLimit(registry.commandLimits, cmdName)
 
-  const [lineRuntime, denial] = lineRuntimeFor(
-    cmdName,
-    runtimeBindings,
-    registry.workspaceRuntime,
-    routingDecision,
-  )
+  if (routingDecision === undefined) throw new Error(`${cmdName}: run outside a routed line`)
+  const [lineRuntime, denial] = lineRuntimeFor(cmdName, routingDecision)
   if (denial !== null) return [null, denial]
 
   const signal = mergeSignals(mergeSignals(ctx.signal, ctx.context.frame.abortSignal), opts.signal)

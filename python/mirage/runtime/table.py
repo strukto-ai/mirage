@@ -211,9 +211,10 @@ def whole_line_runtime(
     """The runtime that runs this entire line, if any.
 
     Only an explicit "*" capture claims a whole line. Named captures
-    and EXTERNAL_COMMANDS execute individual commands. Vfs never matches
-    here because it carries no mixin: the workspace executor IS the
-    path a workspace-resolved line takes anyway, so there is no delegate.
+    and EXTERNAL_COMMANDS execute individual commands. The workspace
+    runtime never matches here because it carries no mixin: the
+    workspace executor IS the path a workspace-resolved line takes
+    anyway, so there is no delegate.
 
     Args:
         bindings (Mapping[str, Runtime | None]): the line's resolved
@@ -230,7 +231,7 @@ def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:
 
     That is the world's WorkspaceRuntime, unless it declares captures (then
     it is an ordinary capturer and nothing is catch-all) or it is not
-    among the given entries (refused the line / omitted).
+    among the given entries.
 
     Args:
         entries (list[Runtime]): runtime instances to search.

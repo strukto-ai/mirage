@@ -36,6 +36,7 @@ from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
+from mirage.workspace.executor.command.run import admission_denial
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
@@ -49,19 +50,18 @@ async def run_external(
     stdin: ByteSource | None,
     session: SessionState,
     registry: MountRegistry,
-    routing: RouteDecision[Runtime[Any]] | None = None,
+    routing: RouteDecision[Runtime[Any]],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage."""
-    bindings = (
-        routing.bindings if routing is not None else registry.runtime_bindings
-    )
+    bindings = routing.bindings
     runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
     if runtime is None:
-        err = encode_text(f"{argv.name}: no runtime accepted this line\n")
+        denied = admission_denial(argv.name)
+        err = await denied.materialize_stderr()
         return (
             None,
-            IOResult(exit_code=126, stderr=err),
+            denied,
             ExecutionNode(command=command, exit_code=126, stderr=err),
         )
     cwd = PathSpec.from_str_path(session.cwd)

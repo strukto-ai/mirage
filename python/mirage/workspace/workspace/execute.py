@@ -36,6 +36,7 @@ from mirage.policy import Deny, HandOff, Pending
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
+from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.call_stack import CallStack
@@ -831,7 +832,7 @@ async def run_prepared_line(
                 execution_scope=execution_scope,
                 job_table=job_table,
             )
-            line_runtime = ws.runtimes.whole_line(decision)
+            line_runtime = whole_line_runtime(decision.bindings)
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed
@@ -960,9 +961,7 @@ async def run_prepared_line(
                     return fill_names(
                         effective_session,
                         subset,
-                        whole=guest_bound(
-                            subset, decision, ws.registry.runtime_bindings
-                        ),
+                        whole=guest_bound(subset, decision),
                         cli_env_names=cli_env_names(
                             subset, effective_session, ws.registry
                         ),

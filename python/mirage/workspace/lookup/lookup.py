@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from mirage.commands.spec.compile import compile_spec
@@ -113,16 +113,14 @@ def _layers(
         name (str): expanded command name.
         session (SessionState): shell session (function table).
         registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement; None
+            outside a line, where the static bindings answer.
     """
     found = False
-    bindings = (
+    bindings: Mapping[str, Runtime[Any] | None] = (
         routing.bindings if routing is not None else registry.runtime_bindings
     )
-    bound = (
-        bindings[name]
-        if name in bindings
-        else registry.runtime_bindings.get(name)
-    )
+    bound = bindings.get(name)
     native = _is_native(bound, name)
     refused = runtime_refused(name, session, registry, routing)
     if name in SHELL_NAMES:
@@ -150,11 +148,7 @@ def _layers(
     ):
         found = True
         yield Consumer.MOUNT
-    fallback = (
-        bindings[EXTERNAL_COMMANDS]
-        if EXTERNAL_COMMANDS in bindings
-        else registry.runtime_bindings.get(EXTERNAL_COMMANDS)
-    )
+    fallback = bindings.get(EXTERNAL_COMMANDS)
     fallback_native = isinstance(
         fallback, (LineExecutorMixin, ProcessExecutorMixin)
     )

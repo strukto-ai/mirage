@@ -100,6 +100,7 @@ from mirage.runtime.binding import (
 )
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.routing import RouteDecision, RoutePolicy
+from mirage.runtime.table import whole_line_runtime
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -665,7 +666,9 @@ class Workspace:
         """
         session = self.get_session(session_id or self.default_session_id)
         ast = parse(line)
-        whole_line = self._runtimes.whole_line(None) is not None
+        whole_line = (
+            whole_line_runtime(self._registry.runtime_bindings) is not None
+        )
         judged = await explain_line(
             ast,
             session,

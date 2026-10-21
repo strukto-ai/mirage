@@ -259,7 +259,6 @@ export async function handleCommand(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
-  runtimeBindings?: Record<string, Runtime>,
   namespace?: Namespace,
   routingDecision?: RouteDecision<Runtime>,
   executeFn?: ExecuteFn,
@@ -389,7 +388,6 @@ export async function handleCommand(
     context,
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
-    ...(runtimeBindings !== undefined ? { runtimeBindings } : {}),
     ...(routingDecision !== undefined ? { routingDecision } : {}),
     ...(executeFn !== undefined ? { executeFn } : {}),
   }

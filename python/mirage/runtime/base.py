@@ -66,7 +66,7 @@ class Runtime(ABC, Generic[E]):
     captures: tuple[str, ...] = ()
     # Which entry points this runtime's code has to the outside world (see
     # RuntimeReach): "workspace" when the workspace dispatch is its only
-    # one, as the bridged engines (monty, quickjs, wasi) and the vfs
+    # one, as the bridged engines (monty, quickjs, wasi) and the workspace
     # routing marker declare, "process" or "remote" when the code can
     # act around that gate. The default is "process", the no-promise
     # claim, so a custom runtime must declare a narrower reach

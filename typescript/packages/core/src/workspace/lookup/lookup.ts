@@ -91,7 +91,8 @@ function isNative(runtime: Runtime | null | undefined, name: string): boolean {
  * costs exactly what it did before the split (a name an installed CLI
  * answers never reaches the mount lookup). A profile's allow list does
  * not narrow it: a word the list leaves out is found, and the policy gate
- * refuses it.
+ * refuses it. `routing` is the line's placement; outside a line the static
+ * bindings answer.
  */
 function* layers(
   name: string,
@@ -100,11 +101,9 @@ function* layers(
   routing?: RouteDecision<Runtime>,
 ): Generator<Consumer> {
   let found = false
-  const declared = runtimeFor(name, registry)
-  const bound =
-    routing !== undefined && Object.hasOwn(routing.bindings, name)
-      ? routing.bindings[name]
-      : declared
+  const bindings: Readonly<Record<string, Runtime | null | undefined>> =
+    routing?.bindings ?? registry.runtimeBindings
+  const bound = Object.hasOwn(bindings, name) ? bindings[name] : undefined
   const native = isNative(bound, name)
   const refused = runtimeRefused(name, session, registry, routing)
   if (SHELL_NAMES.has(name)) {
@@ -133,20 +132,14 @@ function* layers(
     found = true
     yield Consumer.MOUNT
   }
-  const fallback =
-    routing !== undefined && Object.hasOwn(routing.bindings, EXTERNAL_COMMANDS)
-      ? routing.bindings[EXTERNAL_COMMANDS]
-      : registry.runtimeBindings[EXTERNAL_COMMANDS]
+  const fallback = Object.hasOwn(bindings, EXTERNAL_COMMANDS)
+    ? bindings[EXTERNAL_COMMANDS]
+    : undefined
   const fallbackNative =
     fallback !== null &&
     fallback !== undefined &&
     (isLineExecutor(fallback) || isProcessExecutor(fallback))
-  if (
-    !found &&
-    declared === undefined &&
-    (routing === undefined || !Object.hasOwn(routing.bindings, name)) &&
-    (fallbackNative || refused)
-  ) {
+  if (!found && !Object.hasOwn(bindings, name) && (fallbackNative || refused)) {
     yield Consumer.EXTERNAL
   }
 }

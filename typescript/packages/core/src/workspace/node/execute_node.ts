@@ -157,7 +157,7 @@ type Recurse = (
  * job holds and asked again, and what it claimed went back to a hand-off
  * nothing revokes any more.
  */
-export function withHandOff(deps: ExecuteNodeDeps, handed: HandOff): ExecuteNodeDeps {
+export function withHandOff<D extends ExecuteNodeDeps>(deps: D, handed: HandOff): D {
   const inner = deps.executeFn
   const executeFn: ExecuteFn = (cmd, opts) => inner(cmd, { handed, ...opts })
   return { ...deps, handed, executeFn }
@@ -827,7 +827,6 @@ export interface ExecuteNodeDeps {
   executeFn: ExecuteFn
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
-  runtimeBindings?: Record<string, Runtime>
   routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   /**
@@ -1201,7 +1200,6 @@ async function executeNodeBody(
           stdin,
           callStack,
           jobTable,
-          deps.runtimeBindings,
           deps.routingDecision,
           deps.signal,
           deps.parser,

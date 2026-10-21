@@ -85,6 +85,7 @@ import { WritePolicyError } from '../mount/errors.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { PrefixResolver } from '../../runtime/resolver.ts'
+import { wholeLineRuntime } from '../../runtime/table.ts'
 import { ChildProcess } from '../../process/child.ts'
 import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
 import type { SpawnRequest } from '../../process/types.ts'
@@ -1163,7 +1164,7 @@ export class Workspace {
     try {
       const reparse = (text: string): TSNodeLike => parser.parse(text)
       const root = parser.parse(line)
-      const wholeLine = this.runtimeWorld.wholeLine(null) !== null
+      const wholeLine = wholeLineRuntime(this.registry.runtimeBindings) !== null
       const judged = await explainLine(
         root,
         session,
@@ -1194,7 +1195,7 @@ export class Workspace {
           reparse,
         ),
       )
-      if (placed !== null && 'kind' in placed) {
+      if ('kind' in placed) {
         const refused = placementRefused(placed, line)
         return {
           ...explainedLine(line, judged, verdicts, () => '', reparse),

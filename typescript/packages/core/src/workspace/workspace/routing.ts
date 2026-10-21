@@ -40,15 +40,15 @@ import { makeAbortError } from '../../utils/abort.ts'
  * the coded policies), then each command's first capturer. Mirrors the
  * Python `Router` in `workspace/routing.py`.
  *
- * `decide` returns null when nothing decides (no runtime argument,
- * nothing to consult) so dispatch falls to the static bindings, the
- * stage's Deny when a policy refuses the line, and the ledger's answer to
- * its Ask when the host refuses the line or has not answered yet; a
- * nested eval inherits the typed line's decision and never re-routes. The
- * runtime argument is the caller's own placement, so a Route is not asked
- * for, but a coded policy's Deny or Ask still holds the line. Admission
- * comes first: a line `held` reports refused or waiting on a question is left
- * on the static bindings, unplaced, for the gate to answer. `judged` is
+ * `decide` returns the static bindings as the decision when nothing
+ * decides (no runtime argument, nothing to consult), the stage's Deny when
+ * a policy refuses the line, and the ledger's answer to its Ask when the
+ * host refuses the line or has not answered yet; a nested eval inherits
+ * the typed line's decision and never re-routes. The runtime argument is
+ * the caller's own placement, so a Route is not asked for, but a coded
+ * policy's Deny or Ask still holds the line. Admission comes first: a line
+ * `held` reports refused or waiting on a question is left unplaced, for
+ * the gate to answer. `judged` is
  * the line pass's reading of the line (`lineJudgments`), which gives
  * `preExecute` its commands; awaited only when there is a placement to
  * consult. `claimant` is
@@ -73,14 +73,12 @@ export class Router {
     held?: () => Promise<boolean>,
     claimant: Claimant | null = null,
     signal?: AbortSignal,
-  ): Promise<RouteDecision<Runtime> | Deny | Pending | null> {
+  ): Promise<RouteDecision<Runtime> | Deny | Pending> {
     if (options.routingDecision !== undefined) return options.routingDecision
     const policies = this.registry.policies
     const placing = await policies.wantsFor('preExecute', session.sessionId)
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
-    if (placed !== null && !placing) return placed
-    if (placed === null && !placing) return null
-    if (held !== undefined && (await held())) return placed
+    if (!placing || (held !== undefined && (await held()))) return placed ?? this.unplaced()
     const ctx = this.context(command, session, await judged())
     const [said, route] = await policies.preExecute(ctx, placed !== null)
     const action =
@@ -104,10 +102,10 @@ export class Router {
     command: string,
     session: SessionState,
     judged: () => Promise<readonly [Walked, Judged[]][]>,
-  ): Promise<[readonly (Deny | Ask | Route)[], RouteDecision<Runtime> | Deny | Pending | null]> {
+  ): Promise<[readonly (Deny | Ask | Route)[], RouteDecision<Runtime> | Deny | Pending]> {
     const policies = this.registry.policies
     const placing = await policies.wantsFor('preExecute', session.sessionId)
-    if (!placing) return [[], null]
+    if (!placing) return [[], this.unplaced()]
     const ctx = this.context(command, session, await judged())
     const answers = await policies.answers('preExecute', ctx)
     let winner = settled(answers)
@@ -146,26 +144,23 @@ export class Router {
    * `Router._unplaced`.
    */
   private unplaced(): RouteDecision<Runtime> {
-    const entries = this.runtimes.entries
     return {
       bindings: Object.assign(
         Object.create(null) as Record<string, Runtime | null>,
-        bindCommands(entries),
+        this.registry.runtimeBindings,
       ),
-      fallback: catchAll(entries),
+      fallback: catchAll(this.runtimes.entries),
     }
   }
 
   /**
-   * The runtime entry that serves a command under a decision (the static
-   * bindings when there is none), empty when the workspace runs it itself.
-   * Mirrors Python's `Router.runtime_for`.
+   * The runtime entry that serves a command under a decision, empty when
+   * the workspace runs it itself. Mirrors Python's `Router.runtime_for`.
    */
-  runtimeFor(command: string, decision: RouteDecision<Runtime> | null): string {
-    const bindings: Record<string, Runtime | null> = decision?.bindings ?? this.runtimes.bindings
-    const serving = Object.hasOwn(bindings, command)
-      ? (bindings[command] ?? null)
-      : (decision?.fallback ?? null)
+  runtimeFor(command: string, decision: RouteDecision<Runtime>): string {
+    const serving = Object.hasOwn(decision.bindings, command)
+      ? (decision.bindings[command] ?? null)
+      : decision.fallback
     if (serving === null || serving instanceof WorkspaceRuntime) return ''
     return serving.name
   }
@@ -183,7 +178,7 @@ export class Router {
     return {
       bindings: Object.assign(
         Object.create(null) as Record<string, Runtime>,
-        this.runtimes.bindings,
+        this.registry.runtimeBindings,
         overlay,
       ),
       fallback: catchAll(this.runtimes.entries),

@@ -380,8 +380,11 @@ class FakePyRuntime extends LanguageRuntime {
 class TierPyRuntime extends PythonRuntime {
   seen: (Context & Program)[] = []
 
-  constructor(readonly name: string) {
-    super()
+  constructor(
+    readonly name: string,
+    captures?: readonly string[],
+  ) {
+    super(captures === undefined ? {} : { captures })
   }
 
   interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
@@ -678,6 +681,27 @@ describe('handleCli script arm', () => {
     expect(io.exitCode).toBe(0)
     expect(first.seen).toEqual([])
     expect(second.seen).toHaveLength(1)
+  })
+
+  // No policy places the line, so the static bindings do: python3 binds
+  // to the second entry, which runs the script, not the first entry
+  // speaking python.
+  it('runs where python3 is bound with no route policy', async () => {
+    const first = new TierPyRuntime('first', [])
+    const second = new TierPyRuntime('second')
+    const ws = new Workspace(
+      { '/ram/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [first, second] },
+    )
+    try {
+      ws.registerCli('pager', scriptInstall().cli)
+      const result = await ws.shell('pager')
+      expect(result.exitCode).toBe(0)
+      expect(first.seen).toEqual([])
+      expect(second.seen).toHaveLength(1)
+    } finally {
+      await ws.close()
+    }
   })
 
   it('is refused when the line refused its interpreter', async () => {
