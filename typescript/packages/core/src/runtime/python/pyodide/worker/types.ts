@@ -20,7 +20,10 @@ import type { MirageMutation } from '../fs/journal.ts'
 export type ReadOperation = 'read' | 'stat' | 'readdir' | 'readlink'
 export interface VfsRequest {
   kind: 'vfs'
-  buffer: SharedArrayBuffer
+  /** The memory a worker that shares it waits on for the answer. */
+  buffer?: SharedArrayBuffer
+  /** The request the service worker holds for a worker that shares none. */
+  id?: string
   op: ReadOperation | 'dispatch' | 'flush' | 'process'
   path: string
   args?: Parameters<BridgeDispatchFn>
@@ -45,6 +48,10 @@ export interface ExecuteRequest {
   flags: Readonly<Record<string, FlagValue>>
   timeoutSeconds?: number
   interruptBuffer?: SharedArrayBuffer
+  /** The page URL the service worker bridges file calls at, where no memory is shared. */
+  bridge?: string
+  /** The mirage-rs module the page compiled, which a browser worker's bundle leaves out. */
+  wasm?: WebAssembly.Module
 }
 export type WorkerResult =
   | { kind: 'notice'; message: string }
@@ -58,4 +65,8 @@ export interface WorkerPort {
   terminate(): void
   /** The worker's memory in bytes, its heap included; absent where nothing can read it (a browser). */
   memory?: () => Promise<number>
+  /** The page URL the service worker bridges file calls at; absent where memory is shared. */
+  bridge?: string
+  /** The mirage-rs module the worker runs on; absent where it loads its own (Node). */
+  wasm?: WebAssembly.Module
 }

@@ -55,5 +55,5 @@ const output = new URL('../src/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })
 writeFileSync(
   new URL('mirage_rs.ts', output),
-  `export default ${JSON.stringify(wasm.toString('base64'))}\n`,
+  `export default ${JSON.stringify(wasm.toString('base64'))} as string\n`,
 )

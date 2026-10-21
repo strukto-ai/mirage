@@ -10,10 +10,13 @@ const computations: Record<string, () => Promise<unknown>> = {
 interface Request {
   name: string
   args: unknown[]
+  /** The mirage-rs module the page compiled, which the browser bundle leaves out. */
+  wasm?: WebAssembly.Module
 }
 
 async function execute(request: Request): Promise<{ ok: boolean; value: unknown }> {
   try {
+    if (request.wasm !== undefined) (await import('../rs/stream.ts')).adoptModule(request.wasm)
     const load = computations[request.name]
     const fn = (await load?.()) as ((...args: unknown[]) => unknown) | undefined
     if (fn === undefined) throw new Error(`No computation named ${request.name}`)

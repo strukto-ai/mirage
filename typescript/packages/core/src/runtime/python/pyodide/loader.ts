@@ -96,21 +96,33 @@ export interface PyodideLoadOptions {
 export async function loadPyodideRuntime(
   options: PyodideLoadOptions = {},
 ): Promise<PyodideInterface> {
-  let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
-  try {
-    mod = (await import('pyodide')) as unknown as {
-      loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown>
-    }
-  } catch (err) {
-    throw new PyodideUnavailableError(
-      'python3 requires the optional `pyodide` peer dependency. Install it with `npm i pyodide`.',
-      { cause: err },
-    )
-  }
   const indexURL =
     resolveHome(options, PYODIDE_HOME_ENV) ??
     (await resolveNodeIndexURL()) ??
     (isNode() ? null : PYODIDE_CDN_URL)
+  // A browser worker starts from a blob (worker/client.ts), where a bare
+  // specifier resolves against nothing, so it loads pyodide's loader from
+  // the distribution it reads every other asset from.
+  const distribution =
+    !isNode() &&
+    typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
+      ? indexURL
+      : null
+  let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
+  try {
+    mod = (await (distribution === null
+      ? import('pyodide')
+      : import(/* @vite-ignore */ `${distribution}pyodide.mjs`))) as unknown as {
+      loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown>
+    }
+  } catch (err) {
+    throw new PyodideUnavailableError(
+      distribution === null
+        ? 'python3 requires the optional `pyodide` peer dependency. Install it with `npm i pyodide`.'
+        : `cannot load pyodide from ${distribution}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    )
+  }
   // A null-prototype jsglobals empties the guest's `js` module: `import
   // js` still resolves, but js.process, js.fetch and the rest of the host
   // globalThis are not attributes of it. pyodide's own internals capture

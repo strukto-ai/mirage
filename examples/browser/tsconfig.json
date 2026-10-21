@@ -11,5 +11,5 @@
     "types": ["vite/client", "node"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "vfs/**/*.ts", "scripts/**/*.ts", "vite.config.ts"]
+  "include": ["src/**/*.ts", "vfs/**/*.ts", "runtime/**/*.ts", "scripts/**/*.ts", "vite.config.ts"]
 }

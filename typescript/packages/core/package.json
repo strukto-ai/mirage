@@ -64,16 +64,17 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
-    "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && vitest run",
-    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && tsc --noEmit",
-    "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs"
+    "build": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && vitest run",
+    "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
+    "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-jq.mjs && node scripts/embed-worker.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
     "@pydantic/monty": "1.0.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
+    "esbuild": "^0.28.2",
     "pyodide": "^314.0.5",
     "quickjs-emscripten": "^0.32.0",
     "tree-sitter-bash": "^0.25.1",

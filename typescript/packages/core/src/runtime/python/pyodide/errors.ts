@@ -28,12 +28,12 @@ export class PyodideUnavailableError extends Error {
  *
  * Args:
  *   cause: what stopped the worker from starting, absent when the host
- *     has no shared memory to start one with.
+ *     has neither shared memory nor a service worker to reach it through.
  */
 export function noWorker(cause?: unknown): PyodideUnavailableError {
   if (cause === undefined) {
     return new PyodideUnavailableError(
-      'pyodide reaches the workspace only from its worker, which needs SharedArrayBuffer (a cross-origin isolated page)',
+      'pyodide reaches the workspace only from its worker, which needs SharedArrayBuffer (a cross-origin isolated page) or a page that pyodide-sw.js controls',
     )
   }
   return new PyodideUnavailableError(`pyodide could not start its worker: ${failureText(cause)}`, {

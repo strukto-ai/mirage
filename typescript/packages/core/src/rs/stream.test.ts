@@ -19,7 +19,8 @@ import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 import { Glob } from './glob.ts'
 import { PosixRegex } from './regex.ts'
-import { openStream } from './stream.ts'
+import { compiledModule, openStream } from './stream.ts'
+import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
 
@@ -162,4 +163,44 @@ it('foreground parameter cancellation closes the matcher before returning', asyn
     closeSpy.mockRestore()
     await ws.close()
   }
+})
+
+describe('adoptModule', () => {
+  const bundle = async (): Promise<typeof StreamModule> => {
+    vi.resetModules()
+    vi.doMock('../generated/mirage_rs.ts', () => ({ default: '' }))
+    try {
+      return await import('./stream.ts')
+    } finally {
+      vi.doUnmock('../generated/mirage_rs.ts')
+      vi.resetModules()
+    }
+  }
+  const decoded = (stream: { feed(c: Uint8Array): Uint8Array; finish(): Uint8Array }): string =>
+    new TextDecoder().decode(
+      new Uint8Array([...stream.feed(new TextEncoder().encode('aGk=')), ...stream.finish()]),
+    )
+
+  it('runs a bundle without the bytes on the module the page compiled', async () => {
+    const page = await compiledModule()
+    const worker = await bundle()
+    worker.adoptModule(page)
+    expect(await worker.compiledModule()).toBe(page)
+    const sync = worker.openStreamSync('base64', DECODE)
+    const async = await worker.openStream('base64', DECODE)
+    try {
+      expect(decoded(sync)).toBe('hi')
+      expect(decoded(async)).toBe('hi')
+    } finally {
+      sync.close()
+      async.close()
+    }
+  })
+
+  it('a bundle without the bytes has no module of its own', async () => {
+    const worker = await bundle()
+    await expect(worker.openStream('base64', DECODE)).rejects.toBeInstanceOf(
+      WebAssembly.CompileError,
+    )
+  })
 })

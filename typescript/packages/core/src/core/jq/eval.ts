@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { decodeBase64 } from '../../utils/base64.ts'
 import { toHex } from '../../utils/hex.ts'
 import * as jqWasm from 'jq-wasm'
 import { JqCompileError } from './errors.ts'
@@ -21,11 +22,15 @@ import type { JqError, JqHalt, JqOptions, JqRun, StreamReads } from './types.ts'
 // The convenience raw() cache keeps an aborted instance; own its lifecycle here.
 let instance: Promise<jqWasm.Jq> | null = null
 
+// jq-wasm would fetch jq.wasm from beside its own module, which a bundler
+// that moves that module leaves behind, so it gets the bytes core embeds.
 async function evaluator(): Promise<jqWasm.Jq> {
-  instance ??= jqWasm.loadJq().catch((error: unknown) => {
-    instance = null
-    throw error
-  })
+  instance ??= import('../../generated/jq.ts')
+    .then(({ default: wasm }) => jqWasm.loadJq({ wasmBinary: decodeBase64(wasm) }))
+    .catch((error: unknown) => {
+      instance = null
+      throw error
+    })
   return instance
 }
 

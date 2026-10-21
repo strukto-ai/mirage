@@ -104,6 +104,8 @@
     "current": "The live instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "instance": "Compiles and instantiates the module once; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "compiledSync": "Caches the embedded Wasm module for synchronous pure utilities; Python loads its native extension.",
+    "compiledModule": "Hands the compiled module to the browser workers a page starts without a copy; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
+    "adoptModule": "Runs a browser worker on the module its page compiled; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
     "open": "Shares Wasm argument allocation between asynchronous and synchronous stream openers; Python constructs the native stream directly.",
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",

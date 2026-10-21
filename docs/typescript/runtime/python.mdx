@@ -71,9 +71,34 @@ decoded strings.
 
 ### Worker and browser setup
 
-Pyodide runs in a worker with `SharedArrayBuffer`. Node has both. A browser
-page must be cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`,
-`Cross-Origin-Embedder-Policy: require-corp`), and Vite must emit ES module
+Pyodide runs in a worker, which Node needs no setup for. In a browser, the
+page needs one of two things:
+
+- **Cross-origin isolation:** the page is served with
+  `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`.
+- **Mirage's service worker**, on any other page: copy
+  `node_modules/@struktoai/mirage-browser/dist/pyodide-sw.js` to the folder
+  your site serves at its root, and register it before the first `python3`:
+
+```ts
+const container = navigator.serviceWorker
+await container.register('/pyodide-sw.js')
+if (container.controller === null) {
+  const controlled = new Promise((resolve) => {
+    container.addEventListener('controllerchange', resolve, { once: true })
+  })
+  ;(await container.ready).active?.postMessage('claim')
+  await controlled
+}
+```
+
+The service worker answers only Pyodide's file calls and lets every other
+request through. The check after `register` covers a first visit and a hard
+reload, which both leave the page uncontrolled. Service workers need HTTPS or
+`localhost`.
+
+In a browser, Pyodide itself loads from its CDN. Vite must emit ES module
 workers:
 
 ```ts
@@ -82,7 +107,7 @@ export default defineConfig({
 })
 ```
 
-Without a worker, `python3` exits 127 and says why. JSPI is not needed.
+With neither, `python3` exits 127 and says why. JSPI is not needed.
 
 ### Concurrency and timeouts
 
@@ -90,10 +115,12 @@ Without a worker, `python3` exits 127 and says why. JSPI is not needed.
   evaluations and inputs to distinct consoles; extra calls wait. Calls in one
   shell session stay ordered; give independent work its own session with
   `ws.createSession(id)` and `{ sessionId: id }`. Nested subprocesses bypass
-  the limit.
+  the limit. In a browser the limit stays 1, so commands from every session
+  take turns; a second `Workspace` runs alongside the first.
 - A timeout raises `KeyboardInterrupt` in the program, even in a busy loop.
-  That needs `SharedArrayBuffer`; without it a busy loop blocks the event loop
-  until it ends.
+  That needs `SharedArrayBuffer`. Without it, a workspace command's worker is
+  stopped instead, and a standalone run on the main thread blocks the event
+  loop until it ends.
 
 ### Sockets
 

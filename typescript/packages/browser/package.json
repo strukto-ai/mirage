@@ -52,7 +52,7 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/embed-wasm.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/embed-wasm.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/service-worker.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

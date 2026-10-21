@@ -91,8 +91,10 @@ require('node:worker_threads').parentPort.on('message', onMessage);
 `
 
 const BROWSER_WATCHDOG = `${WATCHDOG_BODY}
-self.onmessage = (event) => { onMessage(event.data); };
-self.postMessage('ready');
+self.onmessage = (event) => {
+  if (event.data.ping) self.postMessage('ready');
+  else onMessage(event.data);
+};
 `
 
 async function createNodeWatchdog(): Promise<WatchdogPort | null> {
@@ -119,8 +121,11 @@ async function createBrowserWatchdog(): Promise<WatchdogPort | null> {
   try {
     const worker = new Worker(url)
     // A nested browser worker needs its creator's event loop to finish
-    // startup. Wait for its listener before synchronous WASM can block
-    // that loop; merely constructing it can leave deadlines unarmed.
+    // startup, and until then the browser holds what this thread posts
+    // to it (Chrome holds it even past the worker's first message). Wait
+    // for its answer to a message before synchronous WASM can block that
+    // loop; a deadline posted sooner can wait behind the guest for good.
+    worker.postMessage({ ping: true })
     await new Promise<void>((resolve, reject) => {
       worker.onmessage = () => {
         worker.onmessage = null
