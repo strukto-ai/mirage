@@ -62,6 +62,8 @@ class FakeHandle {
   disconnected = false
   killed = false
   inputError: Error | null = null
+  private readonly received = deferred<undefined>()
+  private readonly closed = deferred<undefined>()
   constructor(
     readonly command: string,
     public eof: boolean,
@@ -70,23 +72,25 @@ class FakeHandle {
   sendStdin(data: Uint8Array): Promise<void> {
     if (this.inputError) return Promise.reject(this.inputError)
     this.input = new Uint8Array([...this.input, ...data])
+    this.received.resolve(undefined)
     return Promise.resolve()
   }
   closeStdin(): Promise<void> {
     this.eof = true
+    this.closed.resolve(undefined)
     return Promise.resolve()
   }
-  wait() {
+  async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
-    if (this.command === 'exit 3')
-      return Promise.reject(new FakeExitError(3, 'partial', 'boom-err'))
-    expect(this.eof).toBe(true)
-    return Promise.resolve({
-      stdout: Buffer.from(this.input).toString('hex'),
-      stderr: 'warn',
-      exitCode: 0,
-    })
+    if (this.command === 'exit 3') throw new FakeExitError(3, 'partial', 'boom-err')
+    const hex = (): string => Buffer.from(this.input).toString('hex')
+    if (this.command === 'head') {
+      await this.received.promise
+      return { stdout: hex(), stderr: '', exitCode: 0 }
+    }
+    if (!this.eof) await this.closed.promise
+    return { stdout: hex(), stderr: 'warn', exitCode: 0 }
   }
   kill(): Promise<boolean> {
     this.killed = true
@@ -298,6 +302,23 @@ describe('E2BRuntime', () => {
       payloads.map((data) => Buffer.from(data).toString('hex')),
     )
     expect(FakeSandbox.last.commands.handles.every((h) => h.disconnected)).toBe(true)
+  })
+  it('ends the line when its command exits while the input stays open', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    async function* openInput(): AsyncGenerator<Uint8Array> {
+      yield new TextEncoder().encode('one\n')
+      await new Promise<never>(() => undefined)
+    }
+    const result = await runtime.execLine('head', openInput(), {}, '/workspace')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
+      0,
+      Buffer.from('one\n').toString('hex'),
+    ])
+    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+      killed: false,
+      disconnected: true,
+    })
   })
   it('kills its command and disconnects when sending stdin fails', async () => {
     const runtime = makeRuntime()

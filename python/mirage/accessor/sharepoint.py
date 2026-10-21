@@ -48,12 +48,14 @@ class SharePointAccessor(SessionAccessor):
         #
         # Entries live until the mount drops its caches (forget): a site or
         # drive deleted and recreated under the same name answers the old
-        # id until then.
+        # id until then. forget swaps in fresh maps rather than clearing
+        # these, so a reply already on its way fills the maps its lookup
+        # started with, answers that lookup, and is not kept.
         self.site_cache: dict[str, str] = {}
         self.drive_cache: dict[tuple[str, str], str] = {}
 
     def forget(self) -> None:
         """Drop the site and drive ids with the mount's caches."""
         super().forget()
-        self.site_cache.clear()
-        self.drive_cache.clear()
+        self.site_cache = {}
+        self.drive_cache = {}

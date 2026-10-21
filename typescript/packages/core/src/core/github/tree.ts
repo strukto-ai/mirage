@@ -105,13 +105,11 @@ export function treeListing(
  */
 export function reseatTree(
   accessor: GitHubAccessor,
-  tree: GitHubTreeItem[],
+  tree: Record<string, TreeEntry>,
   truncated: boolean,
-): Record<string, TreeEntry> {
-  const current = buildTreeMap(tree)
+): void {
   accessor.truncated = truncated
-  accessor.tree = current
-  return current
+  accessor.tree = tree
 }
 
 /**
@@ -128,13 +126,17 @@ export function reseatTree(
 export async function refreshTree(
   accessor: GitHubAccessor,
 ): Promise<{ tree: Record<string, TreeEntry>; version: string | null } | null> {
+  const generation = accessor.generation
   const { tree, truncated, sha } = await fetchTree(
     accessor.account.transport,
     accessor.owner,
     accessor.repo,
     accessor.ref,
   )
-  const current = reseatTree(accessor, tree, truncated)
+  const current = buildTreeMap(tree)
+  // A drop while GitHub answered may be for the very write this tree
+  // predates, so it is handed back but not kept.
+  if (generation === accessor.generation) reseatTree(accessor, current, truncated)
   return truncated ? null : { tree: current, version: sha }
 }
 

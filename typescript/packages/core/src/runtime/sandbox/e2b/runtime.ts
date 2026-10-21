@@ -153,15 +153,15 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
       ...(output !== null ? { onStdout: (text: string) => output(ENC.encode(text)) } : {}),
     })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
-    try {
-      signal?.throwIfAborted()
+    const state = { exited: false }
+    const feed = async (): Promise<void> => {
+      if (stdin === null) return
       try {
-        if (stdin !== null) {
-          for await (const chunk of asyncChain([stdin])) {
-            if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
-          }
-          await abortable(handle.closeStdin(), signal)
+        for await (const chunk of asyncChain([stdin])) {
+          if (state.exited) return
+          if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
         }
+        if (!state.exited) await abortable(handle.closeStdin(), signal)
       } catch (error) {
         // The command may exit before the input RPC arrives. Wait for its
         // real exit status rather than reporting the missing process as I/O.
@@ -169,7 +169,22 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         // eslint-disable-next-line @typescript-eslint/no-deprecated
         if (!(error instanceof sdk.NotFoundError)) throw error
       }
-      result = await abortable(handle.wait(), signal)
+    }
+    try {
+      signal?.throwIfAborted()
+      // The command may end without reading all its input (head), so its
+      // exit, not the end of the input, ends the line: a pull still waiting
+      // on input that stays open is left to stop at its next chunk.
+      const feeding = feed()
+      feeding.catch((error: unknown) => {
+        if (state.exited) console.debug(`e2b input after the command ended: ${String(error)}`)
+      })
+      const finished = abortable(handle.wait(), signal)
+      try {
+        result = await Promise.race([finished, feeding.then(() => finished)])
+      } finally {
+        state.exited = true
+      }
       signal?.throwIfAborted()
     } catch (error) {
       if (!signal?.aborted && error instanceof sdk.CommandExitError) {

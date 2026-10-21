@@ -95,6 +95,7 @@ async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
     Args:
         accessor (SharePointAccessor): the mount's accessor.
     """
+    cache = accessor.site_cache
     entries: list[tuple[str, str]] = []
     for s in await _site_items(accessor):
         site_id = _text(s.get("id"))
@@ -103,9 +104,9 @@ async def site_entries(accessor: SharePointAccessor) -> list[tuple[str, str]]:
         if not site_id or not display:
             continue
         entries.append((display, site_id))
-        accessor.site_cache[display] = site_id
+        cache[display] = site_id
         if name:
-            accessor.site_cache[name] = site_id
+            cache[name] = site_id
     return sorted(entries, key=lambda entry: entry[0])
 
 
@@ -122,6 +123,7 @@ async def drive_entries(
         accessor (SharePointAccessor): the mount's accessor.
         site_id (str): the site whose drives to list.
     """
+    cache = accessor.drive_cache
     entries: list[tuple[str, str]] = []
     for d in await _drive_items(accessor, site_id):
         drive_id = _text(d.get("id"))
@@ -129,7 +131,7 @@ async def drive_entries(
         if not drive_id or not name:
             continue
         entries.append((name, drive_id))
-        accessor.drive_cache[(site_id, name)] = drive_id
+        cache[(site_id, name)] = drive_id
     return sorted(entries, key=lambda entry: entry[0])
 
 
@@ -140,18 +142,20 @@ async def list_drives(accessor: SharePointAccessor, site_id: str) -> list[str]:
 async def _resolve_site_id(
     accessor: SharePointAccessor, name: str
 ) -> str | None:
-    if name not in accessor.site_cache:
+    cache = accessor.site_cache
+    if name not in cache:
         await site_entries(accessor)
-    return accessor.site_cache.get(name)
+    return cache.get(name)
 
 
 async def _resolve_drive_id(
     accessor: SharePointAccessor, site_id: str, name: str
 ) -> str | None:
     key = (site_id, name)
-    if key not in accessor.drive_cache:
+    cache = accessor.drive_cache
+    if key not in cache:
         await drive_entries(accessor, site_id)
-    return accessor.drive_cache.get(key)
+    return cache.get(key)
 
 
 async def resolve(

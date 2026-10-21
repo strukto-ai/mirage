@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
-import { fetchDirTree, fetchTree } from './tree.ts'
+import { fetchDirTree, fetchTree, refreshTree } from './tree.ts'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Evicted } from '../../cache/index/config.ts'
@@ -83,6 +83,32 @@ describe('a listing', () => {
     const listing = await readdir(accessor, root('/gh'))
     expect(calls).toBe(1)
     expect(listing.seeds.get('data')?.map((row) => row.name)).toEqual(['keep.txt'])
+  })
+})
+
+// A drop while GitHub answered may be for the very write the tree predates:
+// the caller gets the tree, and the accessor does not keep it.
+describe('a tree answered after a drop', () => {
+  it('reaches its caller unkept', async () => {
+    const transport = {
+      get: () => {
+        accessor.forget()
+        return Promise.resolve({
+          tree: [{ path: 'a.txt', type: 'blob' as const, sha: 'b1', size: 1 }],
+          truncated: false,
+        })
+      },
+    } as unknown as GitHubTransport
+    const accessor: GitHubAccessor = new GitHubAccessor({
+      account: new GitHubAccount({ token: 't' }, transport),
+      owner: 'acme',
+      repo: 'proj',
+      ref: 'main',
+      defaultBranch: 'main',
+    })
+    const fetched = await refreshTree(accessor)
+    expect(Object.keys(fetched?.tree ?? {})).toEqual(['a.txt'])
+    expect(accessor.tree).toEqual({})
   })
 })
 

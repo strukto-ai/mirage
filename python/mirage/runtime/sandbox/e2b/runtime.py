@@ -145,21 +145,44 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             on_stdout=emit if output is not None else None,
             timeout=0,
         )
-        try:
+        exited = asyncio.Event()
+
+        async def feed() -> None:
             try:
+                async for chunk in async_chain(
+                    [stdin] if stdin is not None else []
+                ):
+                    if chunk:
+                        await handle.send_stdin(chunk)
                 if stdin is not None:
-                    async for chunk in async_chain([stdin]):
-                        if chunk:
-                            await handle.send_stdin(chunk)
                     await handle.close_stdin()
+            except asyncio.CancelledError:
+                if not exited.is_set():
+                    raise
+                logger.debug("e2b command ended before consuming its input")
             except sdk.NotFoundException:
                 # A command may exit before the input RPC arrives. Its exit
                 # status, including nonzero exits, still determines the result.
+                logger.debug("e2b command exited before its input arrived")
+
+        feeding = asyncio.create_task(feed())
+
+        async def reap() -> Any:
+            # The command may end without reading all its input (head), so
+            # its exit, not the end of the input, ends the line.
+            try:
                 result = await handle.wait()
-            else:
-                result = await handle.wait()
-        except sdk.CommandExitException as exc:
-            result = exc
+            except sdk.CommandExitException as exc:
+                result = exc
+            exited.set()
+            if not feeding.done():
+                feeding.cancel()
+            return result
+
+        reaping = asyncio.create_task(reap())
+        try:
+            await asyncio.gather(feeding, reaping)
+            result = reaping.result()
         except BaseException:
             try:
                 await handle.kill()
@@ -167,6 +190,10 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             raise
         finally:
+            for task in (feeding, reaping):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(feeding, reaping, return_exceptions=True)
             await handle.disconnect()
         return RunResult(
             stdout=str(result.stdout).encode() if output is None else b"",

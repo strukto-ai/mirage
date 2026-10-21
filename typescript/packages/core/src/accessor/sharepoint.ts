@@ -102,8 +102,8 @@ export class SharePointAccessor extends Accessor {
   // tenant, and a site name is only unique within a tenant. A drive name is
   // only unique within its site, so its key carries the site id. Entries
   // live until the mount drops its caches (forget).
-  readonly siteCache = new Map<string, string>()
-  readonly driveCache = new Map<string, string>()
+  siteCache = new Map<string, string>()
+  driveCache = new Map<string, string>()
 
   constructor(config: SharePointConfig) {
     super()
@@ -113,7 +113,7 @@ export class SharePointAccessor extends Accessor {
   /** Drop the site and drive ids with the mount's caches. */
   override forget(): void {
     super.forget?.()
-    this.siteCache.clear()
-    this.driveCache.clear()
+    this.siteCache = new Map()
+    this.driveCache = new Map()
   }
 }

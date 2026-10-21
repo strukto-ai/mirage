@@ -1,7 +1,7 @@
 import re
 
 import pytest
-from aioresponses import aioresponses
+from aioresponses import CallbackResult, aioresponses
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
 from mirage.core.sharepoint.resolve import resolve, site_entries
@@ -94,6 +94,30 @@ async def test_resolve_unknown_site():
         result = await resolve(_accessor(), path)
     assert result.level == "site"
     assert result.site_id is None
+
+
+# A drop while Graph answered may be for the very change the reply
+# predates: the lookup still gets its answer, and the reply is not kept.
+@pytest.mark.asyncio
+async def test_a_reply_after_the_mount_dropped_its_caches_is_not_kept():
+    accessor = _accessor()
+
+    def forget_in_flight(url, **kwargs):
+        accessor.forget()
+        return CallbackResult(
+            payload={"value": [{"id": _SITE_ID, "displayName": "Engineering"}]}
+        )
+
+    path = PathSpec(
+        vfs_path=mount_key("/sp/Engineering", "/sp"),
+        virtual="/sp/Engineering",
+        directory="/sp/Engineering",
+    )
+    with aioresponses() as m:
+        m.get(_SITES_RE, callback=forget_in_flight)
+        result = await resolve(accessor, path)
+    assert (result.level, result.site_id) == ("site", _SITE_ID)
+    assert accessor.site_cache == {}
 
 
 @pytest.mark.asyncio
