@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HiddenPaths, PathSpec } from '../../types.ts'
+import { gnuBasename } from '../../utils/path.ts'
 import {
   anchorDepth,
   classifyPaths,
@@ -28,7 +29,7 @@ import {
   SUBTREE_OPS,
 } from '../constants.ts'
 import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
-import { SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { lineTokens } from './allow.ts'
@@ -120,8 +121,8 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 function targetDirectory(ctx: CommandContext): string | null {
   const spec = SPECS.mv
   if (spec === undefined) return null
-  const target = parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')).target_directory
-  return typeof target === 'string' ? target : null
+  const fl = new FlagView(parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')), spec)
+  return fl.asStr('target_directory') ?? null
 }
 
 /**
@@ -184,11 +185,10 @@ function touches(mount: string, ctx: CommandContext): boolean {
   if (target !== null) targets.add(target)
   const dst = destination(ctx)
   if (dst !== null) {
-    const leaf = (v: string): string => v.slice(v.lastIndexOf('/') + 1)
-    const name = leaf(dst.virtual)
+    const name = gnuBasename(dst.virtual)
     const sources = operandPaths(ctx).slice(0, -1)
-    if (sources.every((p) => leaf(p.virtual) !== name)) {
-      for (const p of ctx.paths) if (leaf(p.virtual) === name) targets.add(p.virtual)
+    if (sources.every((p) => gnuBasename(p.virtual) !== name)) {
+      for (const p of ctx.paths) if (gnuBasename(p.virtual) === name) targets.add(p.virtual)
     }
     targets.add(dst.virtual)
   }

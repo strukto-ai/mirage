@@ -13,11 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-import posixpath
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import WordKind
 from mirage.policy.constants import (
     ASK_SECOND,
@@ -42,6 +42,7 @@ from mirage.utils.hidden import (
     path_covers,
     path_hidden,
 )
+from mirage.utils.path import gnu_basename
 
 
 def better_match(
@@ -144,11 +145,10 @@ def _target_directory(ctx: CommandContext) -> str | None:
     Args:
         ctx (CommandContext): the classified command.
     """
-    flags = parse_to_kwargs(
-        parse_command(SPECS["mv"], list(ctx.argv), ctx.cwd, "mv")
-    )
-    target = flags.get("target_directory")
-    return target if isinstance(target, str) else None
+    spec = SPECS["mv"]
+    parsed = parse_command(spec, list(ctx.argv), ctx.cwd, "mv")
+    fl = FlagView(parse_to_kwargs(parsed), spec=spec)
+    return fl.as_str("target_directory")
 
 
 def _destination(ctx: CommandContext) -> PathSpec | None:
@@ -232,13 +232,11 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
             targets.add(target)
     dst = _destination(ctx)
     if dst is not None:
-        name = posixpath.basename(dst.virtual)
+        name = gnu_basename(dst.virtual)
         sources = operand_paths(ctx)[:-1]
-        if all(posixpath.basename(p.virtual) != name for p in sources):
+        if all(gnu_basename(p.virtual) != name for p in sources):
             targets.update(
-                p.virtual
-                for p in ctx.paths
-                if posixpath.basename(p.virtual) == name
+                p.virtual for p in ctx.paths if gnu_basename(p.virtual) == name
             )
         targets.add(dst.virtual)
     return any(
