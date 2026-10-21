@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-openai-agents",
-  "version": "0.0.7",
+  "version": "0.0.8-alpha.1",
   "description": "Run @openai/agents against a Mirage workspace with shell, editor, file-reading tools, and a SandboxAgent client",
   "keywords": [
     "mirage",

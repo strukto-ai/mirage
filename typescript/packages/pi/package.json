@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-pi",
-  "version": "0.0.7",
+  "version": "0.0.8-alpha.1",
   "description": "Run the pi coding agent with its built-in tools wired to a Mirage workspace",
   "keywords": [
     "mirage",

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-claude-agent-sdk",
-  "version": "0.0.7",
+  "version": "0.0.8-alpha.1",
   "description": "Run @anthropic-ai/claude-agent-sdk against a Mirage workspace through an in-process MCP server of Mirage's tools",
   "keywords": [
     "mirage",
