@@ -31,8 +31,16 @@ from mirage.workspace.mount.spec import Mount
 FRESH = ReadSpec(policy=ReadPolicy.FRESH)
 
 
-def test_redis_index_config_default_key_prefix():
-    assert RedisIndexConfig().key_prefix == "mirage:index:"
+def test_a_redis_index_with_no_prefix_is_scoped_to_its_workspace():
+    assert RedisIndexConfig().key_prefix is None
+    ws = Workspace(
+        {"/m": RAMVFS()},
+        index=RedisIndexConfig(url="redis://localhost:6379/0"),
+        workspace_id="w1",
+    )
+    store = ws.mount("/m/").index_store
+    assert isinstance(store, RedisIndexCacheStore)
+    assert store._key_prefix == "mirage:index:w1:"
 
 
 def test_workspace_index_param_applies_to_mounts():

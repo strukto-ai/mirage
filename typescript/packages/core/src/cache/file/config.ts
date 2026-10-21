@@ -33,6 +33,8 @@ const CacheConfigSchema = z.object({
 
 const RedisCacheConfigSchema = CacheConfigSchema.extend({
   url: z.string().optional(),
+  // Absent scopes the keys to the workspace; a prefix shares them with
+  // every workspace that names it.
   keyPrefix: z.string().optional(),
 })
 

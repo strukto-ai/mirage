@@ -15,6 +15,7 @@
 from collections.abc import Callable
 
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
+from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.utils.clock import Clock
@@ -29,7 +30,10 @@ except ImportError:
 
 
 def build_index(
-    config: IndexConfig | None, ttl: float, clock: Clock | None = None
+    config: IndexConfig | None,
+    ttl: float,
+    clock: Clock | None = None,
+    workspace_id: str | None = None,
 ) -> IndexCacheStore:
     """The index store a mount runs its driver under.
 
@@ -46,6 +50,9 @@ def build_index(
         clock (Clock | None): the workspace's clock, which the store
             stamps and compares every expiry on; None means the system
             clock.
+        workspace_id (str | None): scopes a redis store whose config
+            names no prefix, so two workspaces on one server never read
+            each other's listings; None keeps the shared default.
     """
     if config is None:
         return RAMIndexCacheStore(ttl=ttl, clock=clock)
@@ -58,7 +65,13 @@ def build_index(
         return redis_store(
             ttl=config.ttl,
             url=config.url,
-            key_prefix=config.key_prefix,
+            key_prefix=(
+                config.key_prefix
+                if config.key_prefix is not None
+                else DEFAULT_KEY_PREFIX
+                if workspace_id is None
+                else f"{DEFAULT_KEY_PREFIX}{workspace_id}:"
+            ),
             clock=clock,
         )
     return RAMIndexCacheStore(ttl=config.ttl, clock=clock)

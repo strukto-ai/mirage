@@ -33,4 +33,6 @@ class CacheConfig(BaseModel):
 class RedisCacheConfig(CacheConfig):
     type: CacheType = CacheType.REDIS
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = "mirage:cache:"
+    # None scopes the keys to the workspace; a prefix shares them with
+    # every workspace that names it.
+    key_prefix: str | None = None

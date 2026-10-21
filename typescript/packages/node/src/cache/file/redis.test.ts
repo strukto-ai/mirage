@@ -14,6 +14,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RedisClientType } from 'redis'
+import { CacheType } from '@struktoai/mirage-core/cache/file/config'
+import { IndexType } from '@struktoai/mirage-core/cache/index/config'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { Workspace } from '../../workspace.ts'
 import { DEL_BATCH, KEY_BATCH, RedisFileCacheStore, VERSION_TTL } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -331,22 +336,27 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
   })
 
   it('sends the version script by its hash, loading it again once flushed', async () => {
-    // The body is sent once per load, not once per key.
+    // The body is sent once per load, never with each key. Counted on the
+    // store's own client, not with `INFO commandstats`: the server is shared
+    // with every other Redis test running at once, and one of them may flush
+    // the scripts too, so a second batch may load the body once more.
     const c = (await (
       cache as unknown as { cacheClient: () => Promise<unknown> }
     ).cacheClient()) as {
-      info: (section: string) => Promise<string>
+      eval: () => unknown
+      scriptLoad: () => unknown
       scriptFlush: () => Promise<unknown>
     }
-    const calls = async (name: string): Promise<number> => {
-      const found = new RegExp(`cmdstat_${name}:calls=(\\d+)`).exec(await c.info('commandstats'))
-      return Number(found?.[1] ?? 0)
-    }
     await c.scriptFlush()
-    const evals = await calls('eval')
+    const evalSpy = vi.spyOn(c, 'eval')
+    const loadSpy = vi.spyOn(c, 'scriptLoad')
     await cache.keepFingerprints({ '/a': 'v1', '/b': 'v2' })
     await cache.keepFingerprints({ '/c': 'v3' })
-    expect(await calls('eval')).toBe(evals)
+    expect(evalSpy.mock.calls.length).toBe(0)
+    expect(loadSpy.mock.calls.length).toBeGreaterThan(0)
+    expect(loadSpy.mock.calls.length).toBeLessThanOrEqual(2)
+    evalSpy.mockRestore()
+    loadSpy.mockRestore()
     expect(await cache.fingerprints(['/a', '/b', '/c'])).toEqual(['v1', 'v2', 'v3'])
   })
 
@@ -551,6 +561,42 @@ describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
       expect(await accented.get('/t/other')).toBeNull()
     } finally {
       await accented.close()
+    }
+  })
+})
+
+class CachedRAMVFS extends RAMVFS {
+  override readonly cachesReads = true
+}
+
+describe.skipIf(skip)('a workspace cache on a shared server', () => {
+  it('keeps two workspaces to their own files and listings', async () => {
+    const url = REDIS_URL ?? ''
+    const worlds = ['a', 'b'].map(
+      (name) =>
+        [
+          name,
+          new Workspace(
+            { '/data': new CachedRAMVFS() },
+            {
+              mode: MountMode.WRITE,
+              cache: { type: CacheType.REDIS, url },
+              index: { type: IndexType.REDIS, url },
+            },
+          ),
+        ] as const,
+    )
+    const dec = new TextDecoder()
+    try {
+      for (const [name, ws] of worlds)
+        await ws.shell(`echo ${name} > /data/x.txt; echo ${name} > /data/${name}.txt`)
+      for (const [name, ws] of [...worlds, ...worlds]) {
+        const listed = dec.decode((await ws.shell('ls /data')).stdout)
+        const read = dec.decode((await ws.shell('cat /data/x.txt')).stdout)
+        expect([listed, read]).toEqual([`${name}.txt\nx.txt\n`, `${name}\n`])
+      }
+    } finally {
+      for (const [, ws] of worlds) await ws.close()
     }
   })
 })

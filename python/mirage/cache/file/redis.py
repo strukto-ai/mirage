@@ -15,6 +15,7 @@
 from collections.abc import Iterable
 from importlib.resources import files
 
+from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import glob_escape, parse_limit
 from mirage.cache.invalidation import Invalidation
@@ -62,7 +63,7 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self,
         cache_limit: str | int = "512MB",
         url: str = "redis://localhost:6379/0",
-        key_prefix: str = "mirage:cache:",
+        key_prefix: str = DEFAULT_KEY_PREFIX,
         max_drain_bytes: int | None = None,
     ) -> None:
         parsed_limit = parse_limit(cache_limit)

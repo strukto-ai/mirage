@@ -16,6 +16,7 @@ import { underPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
+import { DEFAULT_KEY_PREFIX } from '@struktoai/mirage-core/cache/file/constants'
 import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
@@ -82,7 +83,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   constructor(options: RedisFileCacheOptions = {}) {
     super({
       url: options.url ?? 'redis://localhost:6379/0',
-      keyPrefix: options.keyPrefix ?? 'mirage:cache:',
+      keyPrefix: options.keyPrefix ?? DEFAULT_KEY_PREFIX,
     })
     this.limit = parseLimit(options.cacheLimit ?? '512MB')
     this.dataPrefix = `${this.keyPrefix}data:`

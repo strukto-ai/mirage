@@ -111,6 +111,9 @@ class MountRegistry:
     ) -> None:
         self.io = io if io is not None else IOConfig()
         self.clock: Clock = clock if clock is not None else SystemClock()
+        # Scopes the redis index stores this registry builds; the
+        # workspace sets it.
+        self.workspace_id: str | None = None
         self.process_view: Callable[[SessionState], ProcessView] | None = None
         # Fetches the managed names a tree a mount serves reads, once the
         # executor has picked that mount; the workspace sets it.
@@ -408,7 +411,9 @@ class MountRegistry:
         elif isinstance(vfs, DevVFS):
             store = NULL_INDEX
         elif store is None:
-            store = build_index(index, vfs.index_ttl, self.clock)
+            store = build_index(
+                index, vfs.index_ttl, self.clock, self.workspace_id
+            )
         m = MountEntry(
             norm_prefix,
             vfs,

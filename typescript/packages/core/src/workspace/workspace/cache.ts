@@ -18,6 +18,7 @@ import {
   type CacheConfig,
   type RedisCacheConfig,
 } from '../../cache/file/config.ts'
+import { DEFAULT_KEY_PREFIX } from '../../cache/file/constants.ts'
 import type { FileCache } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -53,11 +54,15 @@ export function registerFileCacheStore(type: CacheType, factory: FileCacheFactor
  * @param cacheLimit the size knob used only when no config is given.
  * @param clock the clock the RAM store ages entries on. A registered
  *   store takes none: redis expires its keys server-side.
+ * @param workspaceId scopes a redis store whose config names no prefix, so
+ *   two workspaces on one server never read each other's files; undefined
+ *   keeps the shared default.
  */
 export function buildFileCache(
   cache: CacheConfig | undefined,
   cacheLimit: string | number = '512MB',
   clock?: Clock,
+  workspaceId?: string,
 ): FileCacheStore {
   // Every CacheConfig field is optional, so a built store is
   // structurally assignable to it and would slip through to the RAM
@@ -80,7 +85,13 @@ export function buildFileCache(
           `(which registers it) or call registerFileCacheStore('${type}', ...)`,
       )
     }
-    return factory(normalized as RedisCacheConfig)
+    const redis = normalized as RedisCacheConfig
+    return factory({
+      ...redis,
+      keyPrefix:
+        redis.keyPrefix ??
+        (workspaceId === undefined ? DEFAULT_KEY_PREFIX : `${DEFAULT_KEY_PREFIX}${workspaceId}:`),
+    })
   }
   return new RAMFileCacheStore({
     limit: normalized?.limit ?? cacheLimit,
