@@ -314,6 +314,62 @@ it('reads a walked tree in one call and prints the same', async () => {
   expect(counted.listings).toBe(2)
 })
 
+// The operand's own part runs on the implicit root RAM, which answers
+// readTree, and its walk reaches the mounts below through the dispatcher's
+// listing; those answer none, so each is walked rather than refused ENOTSUP.
+it.each([
+  ['find /repo -name x.txt', '/repo/dev/x.txt\n/repo/main/x.txt\n'],
+  ['find /repo', '/repo\n/repo/dev\n/repo/dev/x.txt\n/repo/main\n/repo/main/x.txt\n'],
+  [
+    'du -a /repo',
+    '4\t/repo/dev/x.txt\n4\t/repo/dev\n4\t/repo/main/x.txt\n4\t/repo/main\n8\t/repo\n',
+  ],
+])('%s walks mounts without readTree under a synthetic directory', async (line, stdout) => {
+  const enc = new TextEncoder()
+  const mounts: Record<string, Untreed> = {}
+  for (const name of ['main', 'dev']) {
+    const vfs = new Untreed()
+    vfs.loadState({ type: 'ram', files: { '/x.txt': enc.encode('ada\n') } })
+    mounts[`/repo/${name}`] = vfs
+  }
+  const ws = new Workspace(mounts, { mode: MountMode.WRITE, shellParser: await getTestParser() })
+  try {
+    const r = await ws.shell(line)
+    const dec = new TextDecoder()
+    expect([dec.decode(r.stdout), dec.decode(r.stderr), r.exitCode]).toEqual([stdout, '', 0])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A link above the subtree leads the dispatcher onto another mount, so the
+// walk asks that mount, not the one at the path as spelled: `/repo/a/sub`
+// stands on the root RAM by name and on the mount at /data/dev by its
+// links.
+it('a walk following a link onto a mount without readTree walks it', async () => {
+  const enc = new TextEncoder()
+  const main = new Untreed()
+  main.loadState({ type: 'ram', files: { '/x.txt': enc.encode('ada\n') } })
+  const dev = new Untreed()
+  dev.loadState({ type: 'ram', dirs: ['/', '/sub'], files: {} })
+  const ws = new Workspace(
+    { '/repo/main': main, '/data/dev': dev },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('ln -s /data/dev /repo/a')
+    const r = await ws.shell('du -aL /repo')
+    const dec = new TextDecoder()
+    expect([dec.decode(r.stdout), dec.decode(r.stderr), r.exitCode]).toEqual([
+      '0\t/repo/a/sub\n0\t/repo/a\n4\t/repo/main/x.txt\n4\t/repo/main\n4\t/repo\n',
+      '',
+      0,
+    ])
+  } finally {
+    await ws.close()
+  }
+})
+
 // A run across mounts reads as served by no mount, even while a mount's scope
 // is bound (another task's: there is no task isolation), so its walk descends.
 it('walks across mounts as a run across them, even inside a mount scope', async () => {

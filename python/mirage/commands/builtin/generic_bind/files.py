@@ -31,6 +31,7 @@ from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.links import (
     crosses_mounts,
     follow_of,
+    link_location,
     links_of,
     mount_root,
     mounts_of,
@@ -62,6 +63,7 @@ from mirage.utils.glob_walk import (
     make_resolve_glob,
 )
 from mirage.utils.hidden import move_reveals
+from mirage.utils.path import CycleError
 from mirage.view.types import SessionAccess
 
 logger = logging.getLogger(__name__)
@@ -706,6 +708,19 @@ def command_files(
     links = None if crossing else links_of(ctx)
     access = None if crossing or ctx.session is None else ctx.session.access()
 
+    # Where a call that keeps its final name lands: every link above it
+    # followed, as the dispatcher follows them. A loop is left to the call.
+    def landing(virtual: str) -> str:
+        if links is None:
+            return virtual
+        try:
+            return link_location(links, virtual)
+        except CycleError as exc:
+            logger.debug(
+                "following the links above %s failed: %s", virtual, exc
+            )
+            return virtual
+
     async def exists(path: PathSpec) -> bool:
         return await _dispatched_exists(dispatch, path)
 
@@ -775,8 +790,19 @@ def command_files(
 
     # A subtree read stops at a link at the final name (ENOTDIR): it
     # cannot pass through one, so a walk that follows links lists them
-    # directory by directory instead.
+    # directory by directory instead. ``answers`` speaks for the serving
+    # mount, but a walk through the dispatcher also reaches the mounts
+    # below it and those a link above the subtree leads to, so a subtree
+    # on one that answers no read_tree (a disk mount under the root RAM)
+    # is left to be walked rather than refused with ENOTSUP.
     async def read_tree(path: PathSpec) -> Any:
+        if (
+            not crossing
+            and mounts is not None
+            and mounts.answers is not None
+            and not mounts.answers(landing(path.virtual), "read_tree")
+        ):
+            return None
         return await call("read_tree", path, nofollow=True)
 
     async def files_containing(

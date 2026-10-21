@@ -1,0 +1,38 @@
+{
+  "cases": [
+    {
+      "id": "xm_find_walks_mounts_below_the_root",
+      "seq": 701,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find / -name xm.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data2/xm.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
