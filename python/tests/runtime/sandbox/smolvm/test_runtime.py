@@ -188,9 +188,9 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert (result.exit_code, result.stdout, result.stderr) == (
-        127,
+        126,
         b"",
-        b"smolvm: runtime cannot enforce this session's file restrictions\n",
+        b"smolvm: Permission denied\n",
     )
     assert runtime.calls == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0

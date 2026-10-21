@@ -281,9 +281,9 @@ it.each(RESTRICTIONS)(
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-        127,
+        126,
         '',
-        "ssh: runtime cannot enforce this session's file restrictions\n",
+        'ssh: Permission denied\n',
       ])
       expect(runtime.calls).toEqual([])
       const other = await ws.session('other')

@@ -257,8 +257,8 @@ describe('DockerRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        127,
-        "docker: runtime cannot enforce this session's file restrictions\n",
+        126,
+        'docker: Permission denied\n',
       ])
       expect(runtime.calls).toEqual([])
       expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
@@ -274,8 +274,8 @@ describe('DockerRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        1,
-        "docker: /data is not served through the dispatcher, out of reach of this session's rules\n",
+        126,
+        'docker: Permission denied\n',
       ])
       expect(ran(runtime, 'tool run')).toBe(false)
     } finally {

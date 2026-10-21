@@ -28,7 +28,11 @@ from mirage.context import (
     get_current_session,
     reset_caller,
 )
-from mirage.runtime.binding import WorkspaceBinding, restricted_mounts_for
+from mirage.runtime.binding import (
+    WorkspaceBinding,
+    refused_run,
+    restricted_mounts_for,
+)
 from mirage.runtime.sandbox.constants import (
     MOUNT_POLL_SECONDS,
     MOUNT_WAIT_SECONDS,
@@ -187,14 +191,19 @@ class SandboxMounts:
         """SSH mode serves every workspace prefix through the host's gate."""
         return self._mount_type == "ssh"
 
-    async def admit(self, binding: WorkspaceBinding | None) -> str | None:
-        """Bring the mounts in step, then say why a line may not run.
+    async def admit(
+        self, binding: WorkspaceBinding | None
+    ) -> RunResult | None:
+        """Bring the mounts in step, then refuse a line that may not run:
+        one the session's restrictions reach past the dispatcher is
+        refused as a policy refuses it (126), one the sandbox cannot
+        serve because another session holds it fails (1).
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
 
         Returns:
-            str | None: the refusal, None when the line may run.
+            RunResult | None: the refused run, None when the line may run.
         """
         if (
             binding is None
@@ -219,7 +228,11 @@ class SandboxMounts:
             rule.commands and (rule.paths or rule.mount)
             for rule in (*rules.ask, *rules.deny)
         ):
-            return "this file transport cannot enforce program-specific path rules"
+            return refused_run(
+                self._runtime,
+                "this file transport cannot enforce program-specific path "
+                "rules",
+            )
         async with self._lock:
             served = self._session
             session = binding.get_session(current.session_id)
@@ -229,10 +242,15 @@ class SandboxMounts:
                     if served.session_id == current.session_id
                     else ""
                 )
-                return (
-                    f"this sandbox shows {earlier}session "
-                    f"{served.session_id}'s view of the workspace; give "
-                    f"session {current.session_id} a sandbox of its own"
+                return RunResult(
+                    stdout=b"",
+                    stderr=(
+                        f"{self._runtime}: this sandbox shows {earlier}"
+                        f"session {served.session_id}'s view of the "
+                        f"workspace; give session {current.session_id} a "
+                        "sandbox of its own\n"
+                    ).encode(),
+                    exit_code=1,
                 )
             every = mount_paths(binding.mount_prefixes())
             ruled = frozenset(
@@ -244,12 +262,16 @@ class SandboxMounts:
             await self._reconcile(
                 binding, binding.files, session, every, ruled
             )
-            refusal = self._refusal(ruled)
-            if self._mount_type != "fuse" and (
-                refusal is None or self._served
-            ):
+            unserved = self._unserved(ruled)
+            if self._mount_type != "fuse" and (not unserved or self._served):
                 self._session = session
-        return refusal
+        if unserved:
+            return refused_run(
+                self._runtime,
+                "a mount this session restricts is not served through the "
+                "dispatcher",
+            )
+        return None
 
     async def close(self) -> None:
         """Unmount every served prefix and end its SFTP server."""
@@ -314,17 +336,14 @@ class SandboxMounts:
             lent.discard(done)
             done.set_result(None)
 
-    def _refusal(self, ruled: frozenset[str]) -> str | None:
-        for prefix in sorted(ruled):
-            if not any(
+    def _unserved(self, ruled: frozenset[str]) -> bool:
+        return any(
+            not any(
                 prefix == p or prefix.startswith(p.rstrip("/") + "/")
                 for p in self._served
-            ):
-                return (
-                    f"{prefix} is not served through the dispatcher, out of "
-                    "reach of this session's rules"
-                )
-        return None
+            )
+            for prefix in ruled
+        )
 
     async def _reconcile(
         self,

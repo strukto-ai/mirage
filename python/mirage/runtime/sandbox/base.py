@@ -165,14 +165,7 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
         await self._ensure_connected()
         if self._mounts is None:
             return None
-        refusal = await self._mounts.admit(self._binding)
-        if refusal is None:
-            return None
-        return RunResult(
-            stdout=b"",
-            stderr=f"{self.name}: {refusal}\n".encode(),
-            exit_code=1,
-        )
+        return await self._mounts.admit(self._binding)
 
     async def _exec_argv(
         self,

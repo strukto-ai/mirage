@@ -30,8 +30,6 @@ import {
 } from './config.ts'
 import { SandboxMounts } from './mounts.ts'
 
-const ENC = new TextEncoder()
-
 /**
  * The bytes piped into a run, read whole; null when nothing was.
  *
@@ -168,10 +166,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
     await this.ensureConnected(signal)
-    const refusal = await this.mounts?.admit(this.binding, signal)
-    return refusal == null
-      ? null
-      : { stdout: new Uint8Array(), stderr: ENC.encode(`${this.name}: ${refusal}\n`), exitCode: 1 }
+    return (await this.mounts?.admit(this.binding, signal)) ?? null
   }
 
   protected execArgv(

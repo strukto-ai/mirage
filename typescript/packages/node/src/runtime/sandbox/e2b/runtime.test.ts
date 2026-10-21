@@ -513,8 +513,8 @@ describe('E2BRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        127,
-        "e2b: runtime cannot enforce this session's file restrictions\n",
+        126,
+        'e2b: Permission denied\n',
       ])
       expect(FakeSandbox.connected).toEqual([])
       expect((await (await ws.session('other')).shell('tool run')).exitCode).toBe(0)
@@ -530,8 +530,8 @@ describe('E2BRuntime under session restrictions', () => {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-        1,
-        "e2b: /data is not served through the dispatcher, out of reach of this session's rules\n",
+        126,
+        'e2b: Permission denied\n',
       ])
       expect(runtime.lines).not.toContain('tool run')
     } finally {

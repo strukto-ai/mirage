@@ -171,8 +171,8 @@ async def test_a_session_restriction_refuses_a_line_with_no_mount_type(
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert (result.exit_code, result.stderr) == (
-        127,
-        b"docker: runtime cannot enforce this session's file restrictions\n",
+        126,
+        b"docker: Permission denied\n",
     )
     assert runtime.calls == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0
@@ -189,9 +189,8 @@ async def test_a_session_restriction_refuses_a_line_on_fuse_mounts(profile):
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert (result.exit_code, result.stderr) == (
-        1,
-        b"docker: /data is not served through the dispatcher, out of reach "
-        b"of this session's rules\n",
+        126,
+        b"docker: Permission denied\n",
     )
     assert not ran(runtime, "tool run")
     await ws.close()

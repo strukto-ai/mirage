@@ -556,9 +556,9 @@ async def test_a_session_restriction_refuses_every_program(tmp_path, profile):
         agent = await ws.session("agent", profile="agent")
         result = await agent.shell("python3 -c pass")
         assert (result.exit_code, result.stdout, result.stderr) == (
-            127,
+            126,
             b"",
-            b"local: runtime cannot enforce this session's file restrictions\n",
+            b"local: Permission denied\n",
         )
         assert runtime.programs == []
         other = await ws.session("other")

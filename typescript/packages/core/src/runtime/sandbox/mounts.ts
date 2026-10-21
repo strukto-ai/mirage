@@ -24,7 +24,7 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { runDetached } from '../../utils/async_context.ts'
 import type { Files } from '../../workspace/files.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
-import { restrictedMountsFor, type WorkspaceBinding } from '../binding.ts'
+import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../binding.ts'
 import type { MountType, PipeWriter, RunResult, SandboxPipe } from '../types.ts'
 import {
   MOUNT_POLL_SECONDS,
@@ -196,12 +196,17 @@ export class SandboxMounts {
     private readonly openPipe: (command: string) => Promise<SandboxPipe>,
   ) {}
 
-  /** Bring the mounts in step, then say why a line may not run, or null when it may. */
   get fileEffectsDispatched(): boolean {
     return this.mountType === 'ssh'
   }
 
-  async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<string | null> {
+  /**
+   * Bring the mounts in step, then refuse a line that may not run: one the
+   * session's restrictions reach past the dispatcher is refused as a policy
+   * refuses it (126), one the sandbox cannot serve because another session
+   * holds it fails (1). Null when the line may run.
+   */
+  async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<RunResult | null> {
     const files = binding?.files ?? null
     const getSession = binding?.getSession ?? null
     const mountPrefixes = binding?.mountPrefixes ?? null
@@ -216,7 +221,10 @@ export class SandboxMounts {
         (rule) => (rule.commands?.length ?? 0) > 0 && ((rule.paths?.length ?? 0) > 0 || rule.mount),
       )
     )
-      return 'this file transport cannot enforce program-specific path rules'
+      return refusedRun(
+        this.runtime,
+        'this file transport cannot enforce program-specific path rules',
+      )
     if (current === null) {
       throw new Error(
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
@@ -229,21 +237,30 @@ export class SandboxMounts {
       const session = getSession(current.sessionId)
       if (served !== null && served !== session) {
         const earlier = served.sessionId === current.sessionId ? 'an earlier ' : ''
-        return (
-          `this sandbox shows ${earlier}session ${served.sessionId}'s view of the workspace; ` +
-          `give session ${current.sessionId} a sandbox of its own`
-        )
+        return {
+          stdout: new Uint8Array(),
+          stderr: new TextEncoder().encode(
+            `${this.runtime}: this sandbox shows ${earlier}session ${served.sessionId}'s view ` +
+              `of the workspace; give session ${current.sessionId} a sandbox of its own\n`,
+          ),
+          exitCode: 1,
+        }
       }
       const every = mountPaths(mountPrefixes())
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
       await this.reconcile(binding, files, session, every, ruled, signal)
-      const refusal = this.refusal(ruled)
-      if (this.mountType !== 'fuse' && (refusal === null || this.served.size > 0)) {
+      const unserved = this.unserved(ruled)
+      if (this.mountType !== 'fuse' && (!unserved || this.served.size > 0)) {
         this.session = session
       }
-      return refusal
+      return unserved
+        ? refusedRun(
+            this.runtime,
+            'a mount this session restricts is not served through the dispatcher',
+          )
+        : null
     })
   }
 
@@ -306,17 +323,13 @@ export class SandboxMounts {
     }
   }
 
-  private refusal(ruled: ReadonlySet<string>): string | null {
-    for (const prefix of [...ruled].sort(compareCodePoints)) {
-      if (
+  private unserved(ruled: ReadonlySet<string>): boolean {
+    return [...ruled].some(
+      (prefix) =>
         ![...this.served.keys()].some(
           (p) => prefix === p || prefix.startsWith(p.replace(/\/$/, '') + '/'),
-        )
-      ) {
-        return `${prefix} is not served through the dispatcher, out of reach of this session's rules`
-      }
-    }
-    return null
+        ),
+    )
   }
 
   private locked<T>(task: () => Promise<T>): Promise<T> {

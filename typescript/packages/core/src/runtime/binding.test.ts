@@ -339,9 +339,10 @@ it('refuses a native runtime before running with hidden files', async () => {
   try {
     ws.createSession('restricted', { profile: { paths: { hide: ['/data/secret'] } } })
     const result = await ws.shell('echo should-not-run', { sessionId: 'restricted' })
-    expect(result.exitCode).toBe(127)
+    expect(result.exitCode).toBe(126)
     expect(dec.decode(result.stdout)).toBe('')
-    expect(dec.decode(result.stderr)).toContain('cannot enforce')
+    expect(dec.decode(result.stderr)).toBe(`${runtime.name}: Permission denied\n`)
+    expect(result.refusal?.reason).toBe("runtime cannot enforce this session's file restrictions")
   } finally {
     await ws.close()
   }

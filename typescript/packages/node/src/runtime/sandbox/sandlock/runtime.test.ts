@@ -159,9 +159,9 @@ else {
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('tool run')
       expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-        127,
+        126,
         '',
-        "sandlock: runtime cannot enforce this session's file restrictions\n",
+        'sandlock: Permission denied\n',
       ])
       const other = await ws.session('other')
       expect((await other.shell('tool run')).exitCode).toBe(0)

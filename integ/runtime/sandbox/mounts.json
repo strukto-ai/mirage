@@ -163,9 +163,9 @@
         {
           "command": "dash -c 'cat /hostdata/f.txt'",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
+            "stderr_contains": ": Permission denied\n"
           }
         },
         {
@@ -180,9 +180,9 @@
         {
           "command": "dash -c 'cat /hostdata/f.txt'",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
+            "stderr_contains": ": Permission denied\n"
           }
         },
         {
@@ -195,9 +195,9 @@
         {
           "command": "dash -c 'cat /hostdata/f.txt'",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr_contains": "/boxdata is not served through the dispatcher, out of reach of this session's rules\n"
+            "stderr_contains": ": Permission denied\n"
           }
         }
       ]

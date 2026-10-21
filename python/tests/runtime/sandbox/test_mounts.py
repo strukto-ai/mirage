@@ -209,8 +209,8 @@ async def test_hidden_unserved_mounts_refuse_without_claiming_the_sandbox():
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
     result = await agent.shell("python3 job.py")
-    assert result.exit_code == 1
-    assert "not served through the dispatcher" in await result.stderr_str()
+    assert result.exit_code == 126
+    assert await result.stderr_str() == "fake: Permission denied\n"
     assert sandbox.pipes == []
     assert (await other.shell("python3 job.py")).exit_code == 0
     assert len(sandbox.pipes) == 2
@@ -223,7 +223,7 @@ async def test_a_refused_line_leaves_the_sandbox_free():
     ws = workspace(sandbox, hide=["/data"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
-    assert (await agent.shell("python3 job.py")).exit_code == 1
+    assert (await agent.shell("python3 job.py")).exit_code == 126
     assert (await other.shell("python3 job.py")).exit_code == 0
     await ws.close()
 
@@ -247,11 +247,8 @@ async def test_a_rule_under_a_prefix_the_sandbox_serves_refuses_the_line(
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
-    assert result.exit_code == 1
-    assert await result.stderr_str() == (
-        "fake: /data is not served through the dispatcher, out of reach of this "
-        "session's rules\n"
-    )
+    assert result.exit_code == 126
+    assert await result.stderr_str() == "fake: Permission denied\n"
     assert "python3 job.py" not in sandbox.commands
     await ws.close()
 
@@ -261,14 +258,11 @@ async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
     sandbox = FakeSandbox("fuse")
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 job.py")).exit_code == 1
+    assert (await agent.shell("python3 job.py")).exit_code == 126
     sandbox.table["/data"] = "fuse"
     result = await agent.shell("python3 job.py")
-    assert result.exit_code == 1
-    assert await result.stderr_str() == (
-        "fake: /data is not served through the dispatcher, out of reach of this "
-        "session's rules\n"
-    )
+    assert result.exit_code == 126
+    assert await result.stderr_str() == "fake: Permission denied\n"
     await ws.close()
 
 
@@ -278,7 +272,7 @@ async def test_fuse_serves_nothing_from_the_host_and_takes_any_session():
     ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
     other = await ws.session("other")
-    assert (await agent.shell("python3 job.py")).exit_code == 1
+    assert (await agent.shell("python3 job.py")).exit_code == 126
     assert (await other.shell("python3 job.py")).exit_code == 0
     assert sandbox.pipes == []
     await ws.close()
@@ -321,10 +315,11 @@ async def test_a_hidden_mount_the_sandbox_serves_refuses_the_line(mount_type):
     ws = workspace(sandbox, hide=["/data"])
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
-    assert result.exit_code == 1
-    assert await result.stderr_str() == (
-        "fake: /data is not served through the dispatcher, out of reach of this "
-        "session's rules\n"
+    assert result.exit_code == 126
+    assert await result.stderr_str() == "fake: Permission denied\n"
+    assert result.refusal is not None
+    assert result.refusal.reason == (
+        "a mount this session restricts is not served through the dispatcher"
     )
     await ws.close()
 
@@ -335,10 +330,8 @@ async def test_a_mode_cap_on_a_mount_the_sandbox_serves_refuses_the_line():
     ws = workspace(sandbox, modes={"/data/sub": "r"})
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
-    assert result.exit_code == 1
-    assert "fake: /data/sub is not served through the dispatcher" in (
-        await result.stderr_str()
-    )
+    assert result.exit_code == 126
+    assert await result.stderr_str() == "fake: Permission denied\n"
     await ws.close()
 
 
@@ -354,11 +347,8 @@ async def test_a_shown_read_only_path_on_a_sandbox_owned_mount_refuses(
             "agent", profile={"paths": {"show": {"/data/locked": "r"}}}
         )
         result = await agent.shell("python3 job.py")
-        assert result.exit_code == 1
-        assert (
-            "/data is not served through the dispatcher"
-            in await result.stderr_str()
-        )
+        assert result.exit_code == 126
+        assert await result.stderr_str() == "fake: Permission denied\n"
         assert "python3 job.py" not in sandbox.commands
     finally:
         await ws.close()

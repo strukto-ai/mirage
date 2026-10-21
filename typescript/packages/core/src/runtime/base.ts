@@ -17,7 +17,7 @@ import { runWithCaller } from '../context/session_context.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
-import type { WorkspaceBinding } from './binding.ts'
+import { refusedRun, type WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor, isStreamingProcess } from './mixin.ts'
 import type {
@@ -147,13 +147,7 @@ export abstract class Runtime<E = unknown> {
       const capture = this.binding?.capture()
       const restricted = capture?.restrictedMounts ?? []
       if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
-        return {
-          stdout: new Uint8Array(),
-          exitCode: 127,
-          stderr: new TextEncoder().encode(
-            `${this.name}: runtime cannot enforce this session's file restrictions\n`,
-          ),
-        }
+        return refusedRun(this.name, "runtime cannot enforce this session's file restrictions")
       const engine = await this.engine()
       if (capture === undefined)
         return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output)

@@ -80,9 +80,9 @@
           "command": "python - -c arg",
           "stdin": "import sys; print(sys.argv[1:])\n",
           "expect": {
-            "exit": 127,
+            "exit": 126,
             "stdout": "",
-            "stderr_contains": "cannot enforce"
+            "stderr": "local: Permission denied\n"
           }
         }
       ]

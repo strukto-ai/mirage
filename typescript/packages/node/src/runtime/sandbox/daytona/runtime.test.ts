@@ -170,9 +170,9 @@ it.each(RESTRICTIONS)('refuses every line under a session restriction', async (p
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('tool run')
     expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-      127,
+      126,
       '',
-      "daytona: runtime cannot enforce this session's file restrictions\n",
+      'daytona: Permission denied\n',
     ])
     expect(FakeClient.fetched).toEqual([])
     const other = await ws.session('other')

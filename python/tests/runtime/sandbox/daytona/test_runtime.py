@@ -167,9 +167,9 @@ async def test_a_session_restriction_refuses_every_line(profile):
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert (result.exit_code, result.stdout, result.stderr) == (
-        127,
+        126,
         b"",
-        b"daytona: runtime cannot enforce this session's file restrictions\n",
+        b"daytona: Permission denied\n",
     )
     assert FakeClient.fetched == []
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0

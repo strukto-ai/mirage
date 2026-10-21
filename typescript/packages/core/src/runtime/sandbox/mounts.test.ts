@@ -256,8 +256,8 @@ describe('SandboxMounts', () => {
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
     const result = await agent.shell('python3 job.py')
-    expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain('not served through the dispatcher')
+    expect(result.exitCode).toBe(126)
+    expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
     expect(sandbox.pipes).toEqual([])
     expect((await other.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes).toHaveLength(2)
@@ -269,7 +269,7 @@ describe('SandboxMounts', () => {
     const ws = await workspace(sandbox, ['/data'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
     expect((await other.shell('python3 job.py')).exitCode).toBe(0)
     await ws.close()
   })
@@ -290,10 +290,8 @@ describe('SandboxMounts', () => {
       const ws = await workspace(sandbox, ['/data/secret.csv'])
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
-      expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe(
-        "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
-      )
+      expect(result.exitCode).toBe(126)
+      expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
       expect(sandbox.commands).not.toContain('python3 job.py')
       await ws.close()
     },
@@ -303,13 +301,11 @@ describe('SandboxMounts', () => {
     const sandbox = new FakeSandbox('fuse')
     const ws = await workspace(sandbox, ['/data/secret.csv'])
     const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
     sandbox.table.set('/data', 'fuse')
     const result = await agent.shell('python3 job.py')
-    expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toBe(
-      "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
-    )
+    expect(result.exitCode).toBe(126)
+    expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
     await ws.close()
   })
 
@@ -318,7 +314,7 @@ describe('SandboxMounts', () => {
     const ws = await workspace(sandbox, ['/my notes/secret'])
     const agent = await ws.session('agent', { profile: 'agent' })
     const other = await ws.session('other')
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(1)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
     expect((await other.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.pipes).toEqual([])
     await ws.close()
@@ -361,10 +357,8 @@ describe('SandboxMounts', () => {
       const ws = await workspace(sandbox, ['/data'])
       const agent = await ws.session('agent', { profile: 'agent' })
       const result = await agent.shell('python3 job.py')
-      expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe(
-        "fake: /data is not served through the dispatcher, out of reach of this session's rules\n",
-      )
+      expect(result.exitCode).toBe(126)
+      expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
       await ws.close()
     },
   )
@@ -374,10 +368,8 @@ describe('SandboxMounts', () => {
     const ws = await workspace(sandbox, [], new Map([['/data/sub', { mode: MountMode.READ }]]))
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
-    expect(result.exitCode).toBe(1)
-    expect(DEC.decode(result.stderr)).toContain(
-      'fake: /data/sub is not served through the dispatcher',
-    )
+    expect(result.exitCode).toBe(126)
+    expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
     await ws.close()
   })
 
@@ -391,8 +383,8 @@ describe('SandboxMounts', () => {
           profile: { paths: { hide: [], show: [{ path: '/data/locked', mode: MountMode.READ }] } },
         })
         const result = await agent.shell('python3 job.py')
-        expect(result.exitCode).toBe(1)
-        expect(DEC.decode(result.stderr)).toContain('/data is not served through the dispatcher')
+        expect(result.exitCode).toBe(126)
+        expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
         expect(sandbox.commands).not.toContain('python3 job.py')
       } finally {
         await ws.close()
