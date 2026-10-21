@@ -64,9 +64,13 @@ describe('wrapLine', () => {
 describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
   it.each([[undefined], ['/nowhere']])('ends a run that ignores TERM (PATH %s)', async (path) => {
     const execId = crypto.randomUUID().replaceAll('-', '')
-    const program = spawn('/bin/sh', ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done'], {
-      env: { ...process.env, [EXEC_ID]: execId },
-    })
+    const program = spawn(
+      '/bin/sh',
+      ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done'],
+      {
+        env: { ...process.env, [EXEC_ID]: execId },
+      },
+    )
     const ready = new Promise<void>((resolve) => {
       program.stdout.once('data', () => {
         resolve()
