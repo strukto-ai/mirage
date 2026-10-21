@@ -193,7 +193,7 @@ export function execArgs(
   const args = [...head, '-w', '/']
   for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
   args.push(...tail)
-  if (cwd !== null) args.push('sh', '-c', EXEC_PRELUDE, 'sh', cwd)
+  if (cwd !== null) args.push('/bin/sh', '-c', EXEC_PRELUDE, 'sh', cwd)
   return [...args, ...argv]
 }
 

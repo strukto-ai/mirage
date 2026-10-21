@@ -210,7 +210,7 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        return await self._exec_argv(("sh", "-c", line), stdin, env, cwd)
+        return await self._exec_argv(("/bin/sh", "-c", line), stdin, env, cwd)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Start a command in the sandbox with its stdin and stdout held

@@ -45,7 +45,8 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     host's filesystem except what the container was given at start
     (`--volume`). Serve the workspace inside it at the host's mount
     prefixes, the same contract every provider in this family carries.
-    The image needs a POSIX sh, which every argv runs under (EXEC_PRELUDE).
+    The image needs a POSIX /bin/sh, which every argv runs under
+    (EXEC_PRELUDE).
 
     A line runs in its session's container (config ``containers``,
     else ``container``), so one runtime can give every agent a VM of

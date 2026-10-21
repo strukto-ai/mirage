@@ -136,7 +136,7 @@ describe('MicrosandboxRuntime', () => {
             '-e',
             'MARK=request',
             '--',
-            'sh',
+            '/bin/sh',
             '-c',
             EXEC_PRELUDE,
             'sh',

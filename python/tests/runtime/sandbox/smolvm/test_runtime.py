@@ -106,12 +106,12 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "-e",
         "E=1",
         "--",
-        "sh",
+        "/bin/sh",
         "-c",
         EXEC_PRELUDE,
         "sh",
         "/root/workspace",
-        "sh",
+        "/bin/sh",
         "-c",
         "wc -l",
     ]
@@ -124,12 +124,12 @@ async def test_exec_line_ends_flags_so_a_dashed_line_is_not_parsed():
     await runtime.exec_line("--version", None, {}, "/")
     args, _ = runtime.calls[-1]
     assert args[args.index("--") + 1 :] == [
-        "sh",
+        "/bin/sh",
         "-c",
         EXEC_PRELUDE,
         "sh",
         "/",
-        "sh",
+        "/bin/sh",
         "-c",
         "--version",
     ]
@@ -158,7 +158,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
             "-e",
             "E=request",
             "--",
-            "sh",
+            "/bin/sh",
             "-c",
             EXEC_PRELUDE,
             "sh",

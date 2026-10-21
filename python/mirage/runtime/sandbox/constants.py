@@ -73,11 +73,13 @@ PIPE_SERVER_HINT = (
 # no provider's own cwd is used. An exec's `-e` can append to the image's
 # environment rather than replace a name it already sets, `-w` can
 # create a missing directory, and an SDK's cwd fails a missing one its
-# own way (E2B: exit 1). sh imports the
-# environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
-# not serve, and `exec` hands over the argv unchanged. `cd` runs without
-# CDPATH, so a relative cwd resolves from `/` and prints nothing, while
-# the program still sees the guest's own CDPATH.
+# own way (E2B: exit 1). sh imports the environment last-wins, `cd`
+# fails loud (126) on a cwd the sandbox does not serve, and `exec` hands
+# over the argv unchanged. `cd` runs without CDPATH, so a relative cwd
+# resolves from `/` and prints nothing, while the program still sees the
+# guest's own CDPATH. The shell is named by path, /bin/sh, since the
+# command's PATH is the session's and may hold no sh; the argv after the
+# prelude is still found on it.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 
@@ -91,17 +93,23 @@ def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
     the working directory and the merged environment ride the command
     itself: the prelude every sandbox runs a command under enters
     ``cwd`` (exit 126 when the sandbox lacks it), then
-    ``env 'K=V' ... sh -c 'line'``. Every piece is single-quoted for sh,
+    ``env 'K=V' ... /bin/sh -c 'line'``. Every piece is single-quoted for sh,
     so the shell the exec starts reads each as one word whatever it
-    holds; the sandbox only needs a POSIX-compatible shell.
+    holds; the sandbox only needs a POSIX shell at ``/bin/sh``.
 
     Args:
         line (str): the raw shell line.
         env (dict[str, str]): the merged environment.
         cwd (str): the working directory, passed through verbatim.
     """
-    parts = ["sh", "-c", single_quote(EXEC_PRELUDE), "sh", single_quote(cwd)]
+    parts = [
+        "/bin/sh",
+        "-c",
+        single_quote(EXEC_PRELUDE),
+        "sh",
+        single_quote(cwd),
+    ]
     parts += ["env"]
     parts += [single_quote(f"{key}={value}") for key, value in env.items()]
-    parts += ["sh", "-c", single_quote(line)]
+    parts += ["/bin/sh", "-c", single_quote(line)]
     return " ".join(parts)

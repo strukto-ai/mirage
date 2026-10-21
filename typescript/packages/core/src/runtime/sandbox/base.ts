@@ -218,7 +218,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.execArgv(['sh', '-c', line], stdin, env, cwd, signal)
+    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, signal)
   }
 
   /**

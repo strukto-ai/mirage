@@ -91,7 +91,7 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
   execTargets(): string[] {
     return this.calls
       .filter(([args]) => args[0] === 'exec')
-      .map(([args]) => args[args.indexOf('sh') - 1] ?? '')
+      .map(([args]) => args[args.indexOf('/bin/sh') - 1] ?? '')
   }
 }
 
@@ -176,12 +176,12 @@ describe('AppleContainerRuntime', () => {
       '-e',
       'E=1',
       'box',
-      'sh',
+      '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',
       '/root/ws',
-      'sh',
+      '/bin/sh',
       '-c',
       'wc -l',
     ])
@@ -318,7 +318,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '-e',
       'E=request',
       'box',
-      'sh',
+      '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',

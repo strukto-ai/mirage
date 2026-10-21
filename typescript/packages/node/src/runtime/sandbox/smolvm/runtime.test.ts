@@ -128,12 +128,12 @@ describe('SmolvmRuntime', () => {
       '-e',
       'E=1',
       '--',
-      'sh',
+      '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',
       '/root/ws',
-      'sh',
+      '/bin/sh',
       '-c',
       'wc -l',
     ])
@@ -145,12 +145,12 @@ describe('SmolvmRuntime', () => {
     await runtime.execLine('--version', null, {}, '/')
     const args = runtime.calls[runtime.calls.length - 1]?.[0] ?? []
     expect(args.slice(args.indexOf('--') + 1)).toEqual([
-      'sh',
+      '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',
       '/',
-      'sh',
+      '/bin/sh',
       '-c',
       '--version',
     ])
@@ -210,7 +210,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '-e',
       'E=request',
       '--',
-      'sh',
+      '/bin/sh',
       '-c',
       EXEC_PRELUDE,
       'sh',

@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import subprocess
+
 import pytest
 
 from mirage.runtime.sandbox.constants import wrap_line
 
-PRELUDE = 'sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
+PRELUDE = '/bin/sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
 
 
 @pytest.mark.parametrize(
@@ -26,17 +28,25 @@ PRELUDE = 'sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
             "echo hi",
             {"A": "1"},
             "/w",
-            f"{PRELUDE}'/w' env 'A=1' sh -c 'echo hi'",
+            f"{PRELUDE}'/w' env 'A=1' /bin/sh -c 'echo hi'",
         ),
         (
             "echo 'hi'",
             {"M": "two words"},
             "/a b",
-            f"{PRELUDE}'/a b' env 'M=two words' sh -c 'echo '\\''hi'\\'''",
+            f"{PRELUDE}'/a b' env 'M=two words' /bin/sh -c 'echo '\\''hi'\\'''",
         ),
-        ("pwd", {}, "/", f"{PRELUDE}'/' env sh -c 'pwd'"),
+        ("pwd", {}, "/", f"{PRELUDE}'/' env /bin/sh -c 'pwd'"),
     ],
     ids=["cwd-env-line", "hostile-values", "no-env"],
 )
 def test_wrap_line_dresses_cwd_env_and_line(line, env, cwd, wrapped):
     assert wrap_line(line, env, cwd) == wrapped
+
+
+def test_a_path_without_sh_still_runs_the_line(tmp_path):
+    wrapped = wrap_line("/bin/echo ok", {"PATH": str(tmp_path)}, str(tmp_path))
+    done = subprocess.run(
+        ["/bin/sh", "-c", wrapped], capture_output=True, check=False
+    )
+    assert (done.returncode, done.stdout) == (0, b"ok\n")

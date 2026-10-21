@@ -45,6 +45,7 @@ permissions and confinement.
 
 ## The sandbox image
 
+Every sandbox needs a POSIX shell at `/bin/sh`, which starts each command.
 A sandbox that serves the mounts with its own Mirage needs `fuse3` and
 Mirage. The repository's Dockerfile builds that image from the current
 checkout, with every mountable backend:

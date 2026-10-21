@@ -54,11 +54,13 @@ export const PIPE_SERVER_HINT =
  * no provider's own cwd is used. An exec's `-e` can append to the image's
  * environment rather than replace a name it already sets, `-w` can
  * create a missing directory, and an SDK's cwd fails a missing one its
- * own way (E2B: exit 1). sh imports the
- * environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
- * not serve, and `exec` hands over the argv unchanged. `cd` runs without
- * CDPATH, so a relative cwd resolves from `/` and prints nothing, while
- * the program still sees the guest's own CDPATH.
+ * own way (E2B: exit 1). sh imports the environment last-wins, `cd`
+ * fails loud (126) on a cwd the sandbox does not serve, and `exec` hands
+ * over the argv unchanged. `cd` runs without CDPATH, so a relative cwd
+ * resolves from `/` and prints nothing, while the program still sees the
+ * guest's own CDPATH. The shell is named by path, /bin/sh, since the
+ * command's PATH is the session's and may hold no sh; the argv after the
+ * prelude is still found on it.
  */
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
@@ -71,14 +73,14 @@ export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
  * SDK's own cwd fails a missing directory in its own words. So the
  * working directory and the merged environment ride the command itself:
  * the prelude every sandbox runs a command under enters `cwd` (exit 126
- * when the sandbox lacks it), then `env 'K=V' ... sh -c 'line'`. Every
+ * when the sandbox lacks it), then `env 'K=V' ... /bin/sh -c 'line'`. Every
  * piece is single-quoted for sh, so the shell the exec starts reads each
- * as one word whatever it holds; the sandbox only needs a
- * POSIX-compatible shell.
+ * as one word whatever it holds; the sandbox only needs a POSIX shell
+ * at `/bin/sh`.
  */
 export function wrapLine(line: string, env: Record<string, string>, cwd: string): string {
-  const parts = ['sh', '-c', singleQuote(EXEC_PRELUDE), 'sh', singleQuote(cwd), 'env']
+  const parts = ['/bin/sh', '-c', singleQuote(EXEC_PRELUDE), 'sh', singleQuote(cwd), 'env']
   for (const [key, value] of Object.entries(env)) parts.push(singleQuote(`${key}=${value}`))
-  parts.push('sh', '-c', singleQuote(line))
+  parts.push('/bin/sh', '-c', singleQuote(line))
   return parts.join(' ')
 }

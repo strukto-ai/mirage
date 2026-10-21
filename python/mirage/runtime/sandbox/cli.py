@@ -238,7 +238,7 @@ def exec_args(
         args += ["-e", f"{key}={value}"]
     args += tail
     if cwd is not None:
-        args += ["sh", "-c", EXEC_PRELUDE, "sh", cwd]
+        args += ["/bin/sh", "-c", EXEC_PRELUDE, "sh", cwd]
     return [*args, *argv]
 
 

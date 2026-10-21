@@ -51,7 +51,7 @@ class FakeNotFoundError extends Error {}
 
 /** The line `wrapLine` dressed, unquoted. */
 function lineOf(command: string): string {
-  const quoted = command.slice(command.lastIndexOf(" sh -c '") + ' sh -c '.length)
+  const quoted = command.slice(command.lastIndexOf("sh -c '") + 'sh -c '.length)
   return quoted.slice(1, -1).replaceAll(`'\\''`, "'")
 }
 
