@@ -51,6 +51,19 @@
         "stdout": "",
         "stderr": "sed: -i not supported on this backend: Permission denied\n"
       }
+    },
+    {
+      "id": "qdrant_search_needs_vector",
+      "seq": 640041,
+      "targets": [
+        "qdrant"
+      ],
+      "command": "search dog /db; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "search: the query needs a vector: pass embed, or set cloud_inference for a cluster with inference\n"
+      }
     }
   ]
 }
