@@ -70,10 +70,21 @@ function retire(exports: Exports, trapped: boolean): void {
   movables.delete(exports)
 }
 
+/** The compiled module, for the page to hand the workers it starts without a copy. */
+export function compiledModule(): Promise<WebAssembly.Module> {
+  compiled ??= WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  return compiled
+}
+
+/** Run on the module the page compiled: a browser worker's bundle leaves the bytes out. */
+export function adoptModule(module: WebAssembly.Module): void {
+  compiledSync ??= module
+  compiled ??= Promise.resolve(module)
+}
+
 async function instance(): Promise<Exports> {
   if (synchronous !== undefined) return synchronous
-  compiled ??= WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
-  current ??= compiled.then((module) => {
+  current ??= compiledModule().then((module) => {
     compiledSync = module
     synchronous ??= new WebAssembly.Instance(module, {}).exports as unknown as Exports
     return synchronous

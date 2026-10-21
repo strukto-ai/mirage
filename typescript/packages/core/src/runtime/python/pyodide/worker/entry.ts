@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { WorkspaceBinding } from '../../../binding.ts'
+import { adoptModule } from '../../../../rs/stream.ts'
 import { PathSpec } from '../../../../types.ts'
 import { PrefixResolver } from '../../../resolver.ts'
 import type { BridgeDispatchFn } from '../../../types.ts'
@@ -20,7 +21,7 @@ import type { VFSEntry, VFSStat } from '../../../types.ts'
 import { PyodideRuntime } from '../runtime.ts'
 import type { FlushFailure, SyncVFS } from '../fs/types.ts'
 import { failureText } from './failure.ts'
-import { requestSync } from './transport.ts'
+import { requestOverBridge, requestSync } from './transport.ts'
 import type { ExecuteRequest, VfsRequest, WorkerMessage } from './types.ts'
 
 const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node
@@ -34,8 +35,11 @@ const post = (message: WorkerMessage): void => {
   else browser.postMessage(message)
 }
 let interrupt: Int32Array | undefined
-const call = (request: Omit<VfsRequest, 'kind' | 'buffer'>): unknown =>
-  requestSync(post, request, interrupt)
+let bridge: string | undefined
+const call = (request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>): unknown =>
+  bridge === undefined
+    ? requestSync(post, request, interrupt)
+    : requestOverBridge(post, request, bridge)
 console.warn = (...messages: unknown[]) => {
   post({ kind: 'notice', message: messages.map(String).join(' ') })
 }
@@ -67,8 +71,10 @@ async function execute(request: ExecuteRequest): Promise<void> {
   try {
     prefixes = request.prefixes
     if (runtime === null) {
+      if (request.wasm !== undefined) adoptModule(request.wasm)
       interrupt =
         request.interruptBuffer === undefined ? undefined : new Int32Array(request.interruptBuffer)
+      bridge = request.bridge
       runtime = new PyodideRuntime({ config: request.config }, sync, request.interruptBuffer)
       // No files cross to the worker: its file adapter rides the bridge the
       // main thread answers.

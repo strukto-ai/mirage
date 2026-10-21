@@ -21,10 +21,41 @@ const HEADER_BYTES = 16
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
+/** The query parameter that marks a request for the service worker bridge. */
+export const PARAM = 'mirage-pyodide'
+/** The header that carries an answer's format across the bridge. */
+export const FORMAT = 'x-mirage-pyodide-format'
+
+/** An answer as bytes and their format: 0 JSON, 1 raw bytes, 2 a JSON error. */
+async function encode(
+  operation: () => Promise<unknown>,
+): Promise<{ format: number; bytes: Uint8Array }> {
+  try {
+    const value = await operation()
+    if (value instanceof Uint8Array) return { format: 1, bytes: value }
+    return { format: 0, bytes: ENC.encode(JSON.stringify(value ?? null)) }
+  } catch (error) {
+    return {
+      format: 2,
+      bytes: ENC.encode(JSON.stringify({ message: failureText(error), code: classify(error) })),
+    }
+  }
+}
+
+function decode(format: number, bytes: Uint8Array): unknown {
+  if (format === 1) return bytes
+  const value: unknown = JSON.parse(DEC.decode(bytes))
+  if (format === 2) {
+    const error = value as { message: string; code: string | null }
+    throw Object.assign(new Error(error.message), { code: error.code })
+  }
+  return value === null ? undefined : value
+}
+
 /** Worker-only blocking half; the host always answers asynchronously. */
 export function requestSync(
   post: (message: VfsRequest) => void,
-  request: Omit<VfsRequest, 'kind' | 'buffer'>,
+  request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>,
   interrupt?: Int32Array,
 ): unknown {
   const buffer = new SharedArrayBuffer(HEADER_BYTES + CAPACITY)
@@ -54,13 +85,7 @@ export function requestSync(
     Atomics.store(cells, 0, 0)
     Atomics.notify(cells, 0)
     if (offset < output.length) continue
-    if (format === 1) return output
-    const value: unknown = JSON.parse(DEC.decode(output))
-    if (format === 2) {
-      const error = value as { message: string; code: string | null }
-      throw Object.assign(new Error(error.message), { code: error.code })
-    }
-    return value === null ? undefined : value
+    return decode(format, output)
   }
 }
 
@@ -71,21 +96,7 @@ export async function respond(
 ): Promise<void> {
   const cells = new Int32Array(buffer, 0, 4)
   const chunk = new Uint8Array(buffer, HEADER_BYTES)
-  let bytes: Uint8Array
-  let format: number
-  try {
-    const value = await operation()
-    format = value instanceof Uint8Array ? 1 : 0
-    bytes = value instanceof Uint8Array ? value : ENC.encode(JSON.stringify(value ?? null))
-  } catch (error) {
-    format = 2
-    bytes = ENC.encode(
-      JSON.stringify({
-        message: failureText(error),
-        code: classify(error),
-      }),
-    )
-  }
+  const { format, bytes } = await encode(operation)
   let offset = 0
   do {
     if (Atomics.load(cells, 0) === -1) return
@@ -102,4 +113,65 @@ export async function respond(
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
     }
   } while (offset < bytes.length)
+}
+
+/**
+ * Worker-only blocking half where no memory is shared: the request goes
+ * to the host as a message, and the worker waits on a synchronous request
+ * that the page's service worker holds until the host's answer arrives.
+ *
+ * Args:
+ *   post: sends the request to the host.
+ *   request: the call to make.
+ *   bridge: the page URL the service worker answers bridge requests at.
+ */
+export function requestOverBridge(
+  post: (message: VfsRequest) => void,
+  request: Omit<VfsRequest, 'kind' | 'buffer' | 'id'>,
+  bridge: string,
+): unknown {
+  const id = crypto.randomUUID()
+  post({ ...request, kind: 'vfs', id })
+  const xhr = new XMLHttpRequest()
+  xhr.open('GET', `${bridge}?${PARAM}=wait&id=${id}`, false)
+  xhr.responseType = 'arraybuffer'
+  xhr.send()
+  const format = xhr.getResponseHeader(FORMAT)
+  if (format === null) throw new Error(`pyodide filesystem bridge answered ${String(xhr.status)}`)
+  return decode(Number(format), new Uint8Array(xhr.response as ArrayBuffer))
+}
+
+/**
+ * Answer one bridged request: the service worker hands the answer to the
+ * worker's request waiting under `id`.
+ *
+ * Args:
+ *   bridge: the page URL the service worker answers bridge requests at.
+ *   id: the request being answered.
+ *   operation: computes the answer.
+ */
+export async function answerOverBridge(
+  bridge: string,
+  id: string,
+  operation: () => Promise<unknown>,
+): Promise<void> {
+  const { format, bytes } = await encode(operation)
+  const response = await fetch(`${bridge}?${PARAM}=answer&id=${id}`, {
+    method: 'POST',
+    body: bytes as Uint8Array<ArrayBuffer>,
+    headers: { [FORMAT]: String(format) },
+  })
+  if (!response.headers.has(FORMAT))
+    throw new Error(`pyodide filesystem bridge answered ${String(response.status)}`)
+}
+
+/**
+ * Whether the service worker controlling the page answers bridge requests.
+ *
+ * Args:
+ *   bridge: the page URL the service worker answers bridge requests at.
+ */
+export async function bridged(bridge: string): Promise<boolean> {
+  const response = await fetch(`${bridge}?${PARAM}=ping`)
+  return response.headers.has(FORMAT)
 }

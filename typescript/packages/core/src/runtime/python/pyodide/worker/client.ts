@@ -24,7 +24,8 @@ import type { RuntimeFiles } from '../../../files.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
 import { failureText } from './failure.ts'
-import { respond } from './transport.ts'
+import { compiledModule } from '../../../../rs/stream.ts'
+import { answerOverBridge, bridged, respond } from './transport.ts'
 import { GuestProcessTable } from './process.ts'
 import type {
   ExecuteRequest,
@@ -34,11 +35,25 @@ import type {
   WorkerResult,
 } from './types.ts'
 
+/**
+ * The page URL its service worker bridges file calls at, or null when no
+ * service worker controlling the page answers the bridge.
+ */
+async function serviceWorkerBridge(): Promise<string | null> {
+  const host = globalThis as {
+    navigator?: { serviceWorker?: { controller: unknown } }
+    location?: { origin: string; pathname: string }
+  }
+  if (host.navigator?.serviceWorker?.controller == null || host.location === undefined) return null
+  const bridge = host.location.origin + host.location.pathname
+  return (await bridged(bridge)) ? bridge : null
+}
+
 async function createPort(): Promise<WorkerPort | null> {
-  if (typeof SharedArrayBuffer === 'undefined') return null
   const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions
     ?.node
   if (node !== undefined) {
+    if (typeof SharedArrayBuffer === 'undefined') return null
     const { Worker } = await import('node:worker_threads')
     const url = new URL(
       import.meta.url.endsWith('.ts') ? './entry.ts' : './entry.js',
@@ -75,7 +90,15 @@ async function createPort(): Promise<WorkerPort | null> {
     }
   }
   if (typeof Worker === 'undefined') return null
-  const worker = new Worker(new URL('./entry.js', import.meta.url), { type: 'module' })
+  const bridge = typeof SharedArrayBuffer === 'undefined' ? await serviceWorkerBridge() : undefined
+  if (bridge === null) return null
+  // The worker starts from the bundle core embeds, not from a file beside
+  // this module: a bundler that moves this module (Vite's dependency
+  // pre-bundling) leaves no file where a relative URL would look.
+  const { default: source } = await import('../../../../generated/pyodide_worker.ts')
+  const wasm = await compiledModule()
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+  const worker = new Worker(url, { type: 'module' })
   return {
     post: (m) => {
       worker.postMessage(m)
@@ -87,12 +110,16 @@ async function createPort(): Promise<WorkerPort | null> {
     },
     onError: (fn) => {
       worker.onerror = (event) => {
-        fn(new Error(event.message))
+        // A script the page refuses to start carries no message.
+        fn(new Error(event.message || 'its script did not start'))
       }
     },
     terminate: () => {
       worker.terminate()
+      URL.revokeObjectURL(url)
     },
+    wasm,
+    ...(bridge !== undefined ? { bridge } : {}),
   }
 }
 
@@ -117,7 +144,10 @@ export class PyodideWorkerClient {
     reject: (error: Error) => void
   } | null = null
   private readonly buffers = new Set<SharedArrayBuffer>()
-  private readonly interruptBuffer = new SharedArrayBuffer(16)
+  // Null where no memory is shared: nothing then reaches a busy guest, and
+  // an interrupted run ends with its worker.
+  private readonly interruptBuffer =
+    typeof SharedArrayBuffer === 'undefined' ? null : new SharedArrayBuffer(16)
   private failure: Error | null = null
 
   private constructor(private readonly port: WorkerPort) {
@@ -127,7 +157,7 @@ export class PyodideWorkerClient {
         this.startup = null
         return
       }
-      if (message.kind === 'vfs') this.buffers.add(message.buffer)
+      if (message.kind === 'vfs' && message.buffer !== undefined) this.buffers.add(message.buffer)
       if (this.waiter === null) this.messages.push(message)
       else {
         const waiter = this.waiter
@@ -182,9 +212,14 @@ export class PyodideWorkerClient {
             this.fail(new PyodideMemoryError(String(cap)))
           })
         : null
-    const cells = new Int32Array(this.interruptBuffer)
-    Atomics.store(cells, 3, 0)
+    const cells = this.interruptBuffer === null ? null : new Int32Array(this.interruptBuffer)
+    if (cells !== null) Atomics.store(cells, 3, 0)
     const abort = (): void => {
+      if (cells === null) {
+        this.fail(new Error('pyodide worker interrupted'))
+        this.port.terminate()
+        return
+      }
       Atomics.store(cells, 3, 1)
       Atomics.store(cells, 1, 2)
       Atomics.store(cells, 0, 2)
@@ -192,7 +227,12 @@ export class PyodideWorkerClient {
     if (signal?.aborted) abort()
     signal?.addEventListener('abort', abort, { once: true })
     try {
-      this.port.post({ ...request, interruptBuffer: this.interruptBuffer })
+      this.port.post({
+        ...request,
+        ...(this.interruptBuffer !== null ? { interruptBuffer: this.interruptBuffer } : {}),
+        ...(this.port.bridge !== undefined ? { bridge: this.port.bridge } : {}),
+        ...(this.port.wasm !== undefined ? { wasm: this.port.wasm } : {}),
+      })
       for (;;) {
         const message = await this.nextMessage()
         if (message.kind === 'notice') {
@@ -200,13 +240,13 @@ export class PyodideWorkerClient {
           continue
         }
         if (message.kind === 'vfs') {
-          const response = respond(message.buffer, () =>
+          const response = this.answer(message, () =>
             runWithCaller(caller, () => this.operation(message, files, processes)),
           )
           responses.add(response)
           void response.then(() => {
             responses.delete(response)
-            this.buffers.delete(message.buffer)
+            if (message.buffer !== undefined) this.buffers.delete(message.buffer)
           })
           continue
         }
@@ -256,6 +296,29 @@ export class PyodideWorkerClient {
       Atomics.notify(cells, 0)
     }
     this.buffers.clear()
+  }
+
+  /**
+   * Answer one call from the worker, through the memory it shares or
+   * through the page's service worker.
+   *
+   * @param message the worker's call.
+   * @param operation computes the answer.
+   */
+  private async answer(message: VfsRequest, operation: () => Promise<unknown>): Promise<void> {
+    if (message.buffer !== undefined) {
+      await respond(message.buffer, operation)
+      return
+    }
+    try {
+      if (this.port.bridge === undefined || message.id === undefined)
+        throw new Error('pyodide worker call names no way to answer it')
+      await answerOverBridge(this.port.bridge, message.id, operation)
+    } catch (error) {
+      // An answer that cannot reach the worker leaves it waiting forever.
+      this.fail(workerFailure(error))
+      this.port.terminate()
+    }
   }
 
   private async operation(

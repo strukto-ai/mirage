@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
@@ -21,6 +22,12 @@ import { handleMongoProxy } from './scripts/mongo_proxy.ts'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(here, '../../.env.development') })
+// A service worker has to be served from the page's own origin, so the
+// pyodide page gets the one the built package ships at the root.
+const pyodideServiceWorker = resolve(
+  here,
+  'node_modules/@struktoai/mirage-browser/dist/pyodide-sw.js',
+)
 
 export default defineConfig({
   worker: { format: 'es' },
@@ -63,6 +70,7 @@ export default defineConfig({
         mongodb: resolve(here, 'vfs/mongodb/mongodb.html'),
         postgres: resolve(here, 'vfs/postgres/postgres.html'),
         redis: resolve(here, 'vfs/redis/redis.html'),
+        pyodide: resolve(here, 'runtime/pyodide/pyodide.html'),
         gdocs_pkce: resolve(here, 'vfs/gdocs/gdocs_pkce.html'),
         gdrive_pkce: resolve(here, 'vfs/gdrive/gdrive_pkce.html'),
         dropbox_pkce: resolve(here, 'vfs/dropbox/dropbox_pkce.html'),
@@ -84,6 +92,22 @@ export default defineConfig({
               res.statusCode = 500
               res.end(err instanceof Error ? err.message : String(err))
             })
+        })
+      },
+    },
+    {
+      name: 'mirage-pyodide-sw',
+      configureServer(server: ViteDevServer) {
+        server.middlewares.use('/pyodide-sw.js', (_req, res) => {
+          res.setHeader('Content-Type', 'text/javascript')
+          res.end(readFileSync(pyodideServiceWorker))
+        })
+      },
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'pyodide-sw.js',
+          source: readFileSync(pyodideServiceWorker),
         })
       },
     },

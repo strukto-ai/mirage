@@ -1,8 +1,9 @@
 import { z } from 'zod'
+import { compiledModule } from '../rs/stream.ts'
 import { abortable, makeAbortError } from '../utils/abort.ts'
 
 interface Port {
-  post(data: unknown): void
+  post(data: { name: string; args: readonly unknown[] }): void
   close(): Promise<void>
 }
 
@@ -45,10 +46,14 @@ async function createPort(
       },
     }
   }
+  // The worker starts from the bundle core embeds, not from worker_entry.js:
+  // a bundler that moves this module (Vite's dependency pre-bundling) leaves
+  // no file where a relative URL would look.
+  const { default: source } = await import('../generated/computation_worker.ts')
+  const wasm = await compiledModule()
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
   const { Worker } = globalThis
-  const worker = new Worker(new URL('./worker_entry.js', import.meta.url), {
-    type: 'module',
-  })
+  const worker = new Worker(url, { type: 'module' })
   worker.onmessage = (event: MessageEvent<unknown>) => {
     const reply = Reply.safeParse(event.data)
     if (reply.success) done(reply.data)
@@ -58,14 +63,16 @@ async function createPort(
     failed(new Error('cannot decode computation worker reply'))
   }
   worker.onerror = (event) => {
-    failed(new Error(event.message))
+    // A script the page refuses to start carries no message.
+    failed(new Error(event.message || 'computation worker did not start'))
   }
   return {
     post: (data) => {
-      worker.postMessage(data)
+      worker.postMessage({ ...data, wasm })
     },
     close: () => {
       worker.terminate()
+      URL.revokeObjectURL(url)
       return Promise.resolve()
     },
   }

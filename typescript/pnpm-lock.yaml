@@ -640,6 +640,9 @@ importers:
       e2b:
         specifier: ^2.45.0
         version: 2.45.0
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       pyodide:
         specifier: ^314.0.5
         version: 314.0.5

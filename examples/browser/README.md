@@ -2,7 +2,8 @@
 
 `@struktoai/mirage-browser` examples, laid out like `examples/typescript/`.
 `index.html` and `src/main.ts` are the multi-mount demo page, `vfs/<backend>/`
-holds one directory per backend, and `scripts/` the dev-server helpers and
+holds one directory per backend, `runtime/pyodide/` runs Pyodide on a page
+that is not cross-origin isolated, and `scripts/` the dev-server helpers and
 Playwright smoke tests. In a backend directory, an `.html` file and the
 `.ts` file of the same name are a page the dev server serves, `main.ts` runs
 the browser package under Node, and `server.ts` is the proxy a backend

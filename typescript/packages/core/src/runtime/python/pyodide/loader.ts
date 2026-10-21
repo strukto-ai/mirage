@@ -96,21 +96,37 @@ export interface PyodideLoadOptions {
 export async function loadPyodideRuntime(
   options: PyodideLoadOptions = {},
 ): Promise<PyodideInterface> {
+  const home =
+    resolveHome(options, PYODIDE_HOME_ENV) ??
+    (await resolveNodeIndexURL()) ??
+    (isNode() ? null : PYODIDE_CDN_URL)
+  // A browser worker starts from a blob (worker/client.ts), where neither
+  // a bare specifier nor a relative path resolves, so it loads pyodide's
+  // loader and every other asset from the distribution's absolute URL, a
+  // path read from the page's origin.
+  const origin =
+    !isNode() &&
+    typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
+      ? (globalThis as { location?: { origin: string } }).location?.origin
+      : undefined
+  const resolved = home === null || origin === undefined ? home : new URL(home, `${origin}/`).href
+  const indexURL = resolved === null || resolved.endsWith('/') ? resolved : `${resolved}/`
+  const distribution = origin === undefined ? null : indexURL
   let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
   try {
-    mod = (await import('pyodide')) as unknown as {
+    mod = (await (distribution === null
+      ? import('pyodide')
+      : import(/* @vite-ignore */ `${distribution}pyodide.mjs`))) as unknown as {
       loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown>
     }
   } catch (err) {
     throw new PyodideUnavailableError(
-      'python3 requires the optional `pyodide` peer dependency. Install it with `npm i pyodide`.',
+      distribution === null
+        ? 'python3 requires the optional `pyodide` peer dependency. Install it with `npm i pyodide`.'
+        : `cannot load pyodide from ${distribution}: ${err instanceof Error ? err.message : String(err)}`,
       { cause: err },
     )
   }
-  const indexURL =
-    resolveHome(options, PYODIDE_HOME_ENV) ??
-    (await resolveNodeIndexURL()) ??
-    (isNode() ? null : PYODIDE_CDN_URL)
   // A null-prototype jsglobals empties the guest's `js` module: `import
   // js` still resolves, but js.process, js.fetch and the rest of the host
   // globalThis are not attributes of it. pyodide's own internals capture

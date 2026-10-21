@@ -28,7 +28,7 @@ await waitForServer(`${base}/vfs/postgres/postgres.html`)
 let exit = 0
 try {
   const browser = await chromium.launch({
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    channel: 'chrome',
     headless: true,
   })
   try {
@@ -43,6 +43,7 @@ try {
     try {
       await page.waitForFunction(
         () => document.querySelector('#log')?.hasAttribute('data-status') ?? false,
+        undefined,
         { timeout: 120_000 },
       )
     } catch (err) {
