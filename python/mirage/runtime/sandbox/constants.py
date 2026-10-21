@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping, Sequence
+
 from mirage.runtime.types import MountType
 from mirage.utils.quote import single_quote
 
@@ -83,9 +85,9 @@ PIPE_SERVER_HINT = (
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 
-def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
-    """The line dressed for a sandbox whose exec takes one command line
-    (ssh, e2b, daytona): cwd, env, then sh.
+def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
+    """The command line for a sandbox whose exec takes one (ssh, e2b,
+    daytona): cwd, env, then the argv.
 
     Such an exec has no docker-style ``-w``/``-e`` to trust: SSH's env
     channel is AcceptEnv-gated server-side, so it silently drops names,
@@ -93,13 +95,14 @@ def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
     the working directory and the merged environment ride the command
     itself: the prelude every sandbox runs a command under enters
     ``cwd`` (exit 126 when the sandbox lacks it), then
-    ``env 'K=V' ... /bin/sh -c 'line'``. Every piece is single-quoted for sh,
-    so the shell the exec starts reads each as one word whatever it
-    holds; the sandbox only needs a POSIX shell at ``/bin/sh``.
+    ``env 'K=V' ... 'prog' 'arg'``; a shell line is the argv
+    ``/bin/sh -c line``. Every piece is single-quoted for sh, so the
+    shell the exec starts reads each as one word whatever it holds; the
+    sandbox only needs a POSIX shell at ``/bin/sh``.
 
     Args:
-        line (str): the raw shell line.
-        env (dict[str, str]): the merged environment.
+        argv (Sequence[str]): the program and its arguments.
+        env (Mapping[str, str]): the merged environment.
         cwd (str): the working directory, passed through verbatim.
     """
     parts = [
@@ -111,5 +114,5 @@ def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
     ]
     parts += ["env"]
     parts += [single_quote(f"{key}={value}") for key, value in env.items()]
-    parts += ["/bin/sh", "-c", single_quote(line)]
+    parts += [single_quote(word) for word in argv]
     return " ".join(parts)

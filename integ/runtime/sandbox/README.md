@@ -11,6 +11,7 @@ checks hides, a read-only mount and a host change through it, and that
 | --------------- | ------------------------------------------------------------------ | ------------------------------------------------ |
 | `line.json`     | echo, an exit code, an unserved cwd exits 126, quoting             | every box; quoting on ssh and e2b                |
 | `stdin.json`    | piped stdin; no input closes stdin at start; empty input           | every box; the end-of-input cases on ssh and e2b |
+| `stream.json`   | a captured program's output and input flow as it runs; `head` ends it | every box; live output on the Debian boxes       |
 | `env.json`      | config `env` reaches the line; a `PATH` with no `sh` still runs it | every box                                        |
 | `timeout.json`  | a mount limit's timeout ends the line with 124                     | every box                                        |
 | `captures.json` | only captured commands go to the box; the rest stay in mirage      | every box                                        |

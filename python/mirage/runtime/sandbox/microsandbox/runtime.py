@@ -15,7 +15,7 @@
 import asyncio
 import json
 
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
@@ -25,10 +25,11 @@ from mirage.runtime.sandbox.microsandbox.constants import (
     RUNNING_STATE,
     not_running_hint,
 )
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
-class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
+class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
     """Run programs in an existing Microsandbox guest through the msb CLI.
 
     The user starts the sandbox and serves its workspace at the same
@@ -48,10 +49,15 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         """Skip the connect-once latch: every exec probes the guest."""
 
     async def _microsandbox(
-        self, args: list[str], stdin: bytes | None = None
+        self,
+        args: list[str],
+        stdin: ByteSource | None = None,
+        output: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """Run one msb CLI invocation."""
-        return await run_cli("msb", MICROSANDBOX_CLI_HINT, args, stdin)
+        return await run_cli(
+            "msb", MICROSANDBOX_CLI_HINT, args, stdin, output=output
+        )
 
     async def connect(self) -> None:
         """Require a running sandbox before executing any commands."""
@@ -91,14 +97,17 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
-        stdin: bytes | None,
+        stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
         stdout, stderr, code = await self._microsandbox(
-            exec_args(self._head(), ("--",), env, cwd, argv), stdin=stdin
+            exec_args(self._head(), ("--",), env, cwd, argv),
+            stdin=stdin,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
@@ -112,7 +121,7 @@ class MicrosandboxRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
                 ("--",),
                 {},
                 None,
-                ("sh", "-c", command),
+                ("/bin/sh", "-c", command),
             ),
         )
 

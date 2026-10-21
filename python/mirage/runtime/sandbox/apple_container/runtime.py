@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from mirage.context import get_current_session
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.apple_container.config import AppleContainerConfig
 from mirage.runtime.sandbox.apple_container.constants import (
     APPLE_CONTAINER_CLI_HINT,
@@ -28,10 +28,11 @@ from mirage.runtime.sandbox.apple_container.constants import (
 )
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
-class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
+class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
     """Containers under Apple's `container` tool as a whole-line runtime.
 
     You start the containers yourself; mirage only connects to them and
@@ -72,7 +73,10 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         self._probe_lock = asyncio.Lock()
 
     async def _container(
-        self, args: list[str], stdin: bytes | None = None
+        self,
+        args: list[str],
+        stdin: ByteSource | None = None,
+        output: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """Run one container CLI invocation.
 
@@ -81,7 +85,7 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
             stdin (bytes | None): input delivered to the guest command.
         """
         return await run_cli(
-            "container", APPLE_CONTAINER_CLI_HINT, args, stdin
+            "container", APPLE_CONTAINER_CLI_HINT, args, stdin, output=output
         )
 
     async def connect(self) -> None:
@@ -136,13 +140,16 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
-        stdin: bytes | None,
+        stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
         target = (await self._target(),)
         stdout, stderr, code = await self._container(
-            exec_args(("exec", "-i"), target, env, cwd, argv), stdin=stdin
+            exec_args(("exec", "-i"), target, env, cwd, argv),
+            stdin=stdin,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
@@ -150,5 +157,7 @@ class AppleContainerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
         target = (await self._target(),)
         return await open_cli_pipe(
             "container",
-            exec_args(("exec", "-i"), target, {}, None, ("sh", "-c", command)),
+            exec_args(
+                ("exec", "-i"), target, {}, None, ("/bin/sh", "-c", command)
+            ),
         )

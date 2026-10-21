@@ -22,30 +22,45 @@ PRELUDE = '/bin/sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
 
 
 @pytest.mark.parametrize(
-    ("line", "env", "cwd", "wrapped"),
+    ("argv", "env", "cwd", "wrapped"),
     [
         (
-            "echo hi",
+            ("echo", "hi"),
             {"A": "1"},
             "/w",
-            f"{PRELUDE}'/w' env 'A=1' /bin/sh -c 'echo hi'",
+            f"{PRELUDE}'/w' env 'A=1' 'echo' 'hi'",
         ),
         (
-            "echo 'hi'",
+            ("/bin/sh", "-c", "echo 'hi'"),
             {"M": "two words"},
             "/a b",
-            f"{PRELUDE}'/a b' env 'M=two words' /bin/sh -c 'echo '\\''hi'\\'''",
+            f"{PRELUDE}'/a b' env 'M=two words' '/bin/sh' '-c' "
+            "'echo '\\''hi'\\'''",
         ),
-        ("pwd", {}, "/", f"{PRELUDE}'/' env /bin/sh -c 'pwd'"),
+        (("pwd",), {}, "/", f"{PRELUDE}'/' env 'pwd'"),
     ],
-    ids=["cwd-env-line", "hostile-values", "no-env"],
+    ids=["cwd-env-argv", "hostile-values", "no-env"],
 )
-def test_wrap_line_dresses_cwd_env_and_line(line, env, cwd, wrapped):
-    assert wrap_line(line, env, cwd) == wrapped
+def test_wrap_line_dresses_cwd_env_and_argv(argv, env, cwd, wrapped):
+    assert wrap_line(argv, env, cwd) == wrapped
+
+
+def test_the_wrapped_argv_reaches_the_program_unchanged(tmp_path):
+    argv = ("/bin/sh", "-c", 'printf "[%s]\\n" "$@"', "sh", "a b", "$(x)", "")
+    done = subprocess.run(
+        ["/bin/sh", "-c", wrap_line(argv, {}, str(tmp_path))],
+        capture_output=True,
+        check=False,
+    )
+    assert (done.returncode, done.stdout) == (0, b"[a b]\n[$(x)]\n[]\n")
 
 
 def test_a_path_without_sh_still_runs_the_line(tmp_path):
-    wrapped = wrap_line("/bin/echo ok", {"PATH": str(tmp_path)}, str(tmp_path))
+    wrapped = wrap_line(
+        ("/bin/sh", "-c", "/bin/echo ok"),
+        {"PATH": str(tmp_path)},
+        str(tmp_path),
+    )
     done = subprocess.run(
         ["/bin/sh", "-c", wrapped], capture_output=True, check=False
     )

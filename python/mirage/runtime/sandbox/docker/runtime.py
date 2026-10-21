@@ -13,15 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
-class DockerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
+class DockerRuntime(RemoteSandbox, PipeTransportMixin):
     """A container the user runs as a whole-line runtime.
 
     You start the container yourself; mirage only connects to it and
@@ -41,10 +42,15 @@ class DockerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     config: DockerConfig
 
     async def _docker(
-        self, args: list[str], stdin: bytes | None = None
+        self,
+        args: list[str],
+        stdin: ByteSource | None = None,
+        output: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """One docker CLI invocation; the seam tests override."""
-        return await run_cli("docker", DOCKER_CLI_HINT, args, stdin)
+        return await run_cli(
+            "docker", DOCKER_CLI_HINT, args, stdin, output=output
+        )
 
     async def connect(self) -> None:
         stdout, stderr, code = await self._docker(
@@ -67,15 +73,17 @@ class DockerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
-        stdin: bytes | None,
+        stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._docker(
             exec_args(
                 ("exec", "-i"), (self.config.container,), env, cwd, argv
             ),
             stdin=stdin,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
@@ -87,6 +95,6 @@ class DockerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
                 (self.config.container,),
                 {},
                 None,
-                ("sh", "-c", command),
+                ("/bin/sh", "-c", command),
             ),
         )

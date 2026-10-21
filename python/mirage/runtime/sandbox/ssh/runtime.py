@@ -13,25 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from typing import Any
 
+from mirage.io.stream import async_chain
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
+from mirage.runtime.sandbox.cli import STREAM_LIMIT
 from mirage.runtime.sandbox.constants import wrap_line
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 from mirage.utils.ssh import connect_options
 
+logger = logging.getLogger(__name__)
 
-class SSHRuntime(RemoteSandbox):
+
+class SSHRuntime(RemoteSandbox, PipeTransportMixin):
     """A machine reached over SSH as a whole-line runtime.
 
     You run the machine and its sshd yourself; mirage only connects
     (keys or agent, never a password) and execs lines. One connection
     opens on the first captured line and is reused; each line is one
-    exec channel with real byte stdin and separated stderr, the merged
-    environment and session cwd dressed onto the command by wrap_line,
-    because SSH exec has no docker-style ``-w``/``-e``.
+    exec channel with real byte stdin and separated stderr, streamed
+    both ways, the merged environment and session cwd dressed onto the
+    command by wrap_line, because SSH exec has no docker-style
+    ``-w``/``-e``.
 
     This is the one provider whose machine usually IS the fileserver:
     mount the same host's directory over the ssh VFS at a prefix
@@ -73,38 +81,91 @@ class SSHRuntime(RemoteSandbox):
             raise ImportError(sdk.ASYNCSSH_HINT)
         self._conn = await sdk.connect(**self._connect_kwargs())
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._ssh(
-            wrap_line(line, env, cwd), stdin
+            wrap_line(argv, env, cwd), stdin, output
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def _ssh(
-        self, command: str, stdin: bytes | None
+        self,
+        command: str,
+        stdin: ByteSource | None,
+        output: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
-        """One exec channel on the connection; the seam tests override."""
+        """One exec channel on the connection; the seam tests override.
+
+        Input is written as it is read, and closed at its end, or at once
+        when nothing is piped: a finite command waits for that EOF.
+        Output goes to ``output`` as it arrives when one is given. A line
+        abandoned to a timeout, or whose reader went away, returns now:
+        the command is signalled and its channel closed, with no wait
+        for the remote side to finish; any other failure closes the
+        channel.
+
+        Args:
+            command (str): the dressed command line.
+            stdin (ByteSource | None): the input, or None for none.
+            output (OutputFn | None): receives stdout as it arrives.
+        """
         process = await self._conn.create_process(command, encoding=None)
-        try:
-            # asyncssh's run(input=b"") leaves stdin open. Close it
-            # explicitly for every finite command, including empty or
-            # absent piped input.
-            if stdin:
-                process.stdin.write(stdin)
-            process.stdin.write_eof()
+        exited = asyncio.Event()
+
+        async def feed() -> None:
+            try:
+                async for chunk in async_chain(
+                    [stdin] if stdin is not None else []
+                ):
+                    process.stdin.write(chunk)
+                    await process.stdin.drain()
+                process.stdin.write_eof()
+            except asyncio.CancelledError:
+                if not exited.is_set():
+                    raise
+                logger.debug("ssh command ended before consuming its input")
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("ssh command closed its input")
+
+        async def read() -> bytes:
+            parts: list[bytes] = []
+            while chunk := await process.stdout.read(STREAM_LIMIT):
+                if output is None:
+                    parts.append(chunk)
+                else:
+                    await output(chunk)
+            return b"".join(parts)
+
+        feeding = asyncio.create_task(feed())
+
+        async def reap() -> Any:
             result = await process.wait(check=False)
+            exited.set()
+            if not feeding.done():
+                feeding.cancel()
+            return result
+
+        try:
+            stdout, stderr, _, result = await asyncio.gather(
+                read(), process.stderr.read(), feeding, reap()
+            )
         except asyncio.CancelledError:
-            # A line abandoned to a timeout returns now: the command is
-            # signalled and its channel closed, with no wait for the
-            # remote side to finish.
             process.kill()
             raise
         finally:
+            if not feeding.done():
+                feeding.cancel()
+            await asyncio.gather(feeding, return_exceptions=True)
             process.close()
         await process.wait_closed()
         code = result.returncode if result.returncode is not None else 1
-        return result.stdout, result.stderr, 128 - code if code < 0 else code
+        return stdout, stderr, 128 - code if code < 0 else code
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         process = await self._conn.create_process(

@@ -14,12 +14,13 @@
 
 from typing import Any
 
+from mirage.io.types import ByteSource, materialize
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import sdk_install_hint, wrap_line
 from mirage.runtime.sandbox.daytona import sdk
 from mirage.runtime.sandbox.daytona.config import DaytonaConfig
 from mirage.runtime.sandbox.daytona.constants import stdin_path, stdin_redirect
-from mirage.runtime.types import RunResult
+from mirage.runtime.types import OutputFn, RunResult
 
 
 class DaytonaRuntime(RemoteSandbox):
@@ -28,8 +29,9 @@ class DaytonaRuntime(RemoteSandbox):
     You create the sandbox yourself (dashboard, `daytona sandbox
     create`, or the SDK); mirage only connects by ``sandbox_id`` and
     execs lines. ``api_key`` falls back to DAYTONA_API_KEY. Daytona's
-    exec has no stdin and reports combined output, so piped bytes are
-    uploaded and redirected in, and stderr comes back None. close()
+    exec has no stdin and reports combined output once the command
+    ends, so piped bytes are uploaded and redirected in, stderr comes
+    back None, and a stream gets its output at the end. close()
     releases the SDK client and never touches the sandbox.
 
     Args:
@@ -56,13 +58,18 @@ class DaytonaRuntime(RemoteSandbox):
             self._client = sdk.AsyncDaytona(config)
         self._sandbox = await self._client.get(self.config.sandbox_id)
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
-        command = wrap_line(line, env, cwd)
+        command = wrap_line(argv, env, cwd)
         if stdin is not None:
             path = stdin_path()
-            await self._upload(path, stdin)
+            await self._upload(path, await materialize(stdin))
             command = stdin_redirect(command, path)
         response = await self._sandbox.process.exec(command)
         return RunResult(
@@ -83,3 +90,4 @@ class DaytonaRuntime(RemoteSandbox):
         if self._client is not None:
             await self._client.close()
             self._client = None
+        await super().close()

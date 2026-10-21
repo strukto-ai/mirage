@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { asyncChain } from '../../../io/stream.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { RemoteSandbox } from '../base.ts'
+import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerRuntime } from '../../table.ts'
-import type { PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
+import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
@@ -94,12 +97,14 @@ class PtyWriter implements PipeWriter {
  * You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
  * mirage only connects by `sandboxId` and execs lines. `apiKey` falls
  * back to E2B_API_KEY. E2B's exec reports stdout and stderr
- * separately. Piped bytes use native stdin followed by an explicit
- * EOF; no input closes stdin when the command starts. A `mountType`
- * serves the workspace over a PTY, since E2B's exec decodes output as
- * text.
+ * separately, stdout as it arrives when streamed. Piped bytes use native
+ * stdin, chunk by chunk, followed by an explicit EOF; no input closes
+ * stdin when the command starts. The SDK's own command timeout is off: a
+ * command runs until mirage's limits stop it. A `mountType` serves the
+ * workspace over a PTY, since E2B's exec decodes output as text.
  */
-export class E2BRuntime extends RemoteSandbox<E2BConfig> {
+export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTransport {
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
@@ -128,11 +133,12 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     this.sandbox = await sdk.Sandbox.connect(this.config.sandboxId, this.apiParams())
   }
 
-  override async execLine(
-    line: string,
-    stdin: Uint8Array | null,
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     signal?.throwIfAborted()
@@ -140,16 +146,20 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
     const sdk = await this.ensureSdk()
     signal?.throwIfAborted()
     // Keep the startup result even if aborted in flight, so its process can be killed.
-    const handle = await this.sandbox.commands.run(wrapLine(line, env, cwd), {
+    const handle = await this.sandbox.commands.run(wrapLine(argv, env, cwd), {
       background: true,
       stdin: stdin !== null,
+      timeoutMs: 0,
+      ...(output !== null ? { onStdout: (text: string) => output(ENC.encode(text)) } : {}),
     })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     try {
       signal?.throwIfAborted()
       try {
         if (stdin !== null) {
-          if (stdin.byteLength > 0) await abortable(handle.sendStdin(stdin), signal)
+          for await (const chunk of asyncChain([stdin])) {
+            if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
+          }
           await abortable(handle.closeStdin(), signal)
         }
       } catch (error) {
@@ -177,13 +187,13 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> {
       await handle.disconnect()
     }
     return {
-      stdout: ENC.encode(result.stdout),
+      stdout: output === null ? ENC.encode(result.stdout) : new Uint8Array(),
       stderr: ENC.encode(result.stderr),
       exitCode: result.exitCode,
     }
   }
 
-  override async openPipe(command: string): Promise<SandboxPipe> {
+  async openPipe(command: string): Promise<SandboxPipe> {
     if (this.sandbox === null) throw new Error('e2b sandbox not connected')
     const pty = this.sandbox.pty
     let feed: ReadableStreamDefaultController<Uint8Array> | null = null

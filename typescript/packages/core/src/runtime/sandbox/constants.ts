@@ -65,22 +65,30 @@ export const PIPE_SERVER_HINT =
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 /**
- * The line dressed for a sandbox whose exec takes one command line
- * (ssh, e2b, daytona): cwd, env, then sh.
+ * The command line for a sandbox whose exec takes one (ssh, e2b,
+ * daytona): cwd, env, then the argv.
  *
  * Such an exec has no docker-style `-w`/`-e` to trust: SSH's env channel
  * is AcceptEnv-gated server-side, so it silently drops names, and an
  * SDK's own cwd fails a missing directory in its own words. So the
  * working directory and the merged environment ride the command itself:
  * the prelude every sandbox runs a command under enters `cwd` (exit 126
- * when the sandbox lacks it), then `env 'K=V' ... /bin/sh -c 'line'`. Every
- * piece is single-quoted for sh, so the shell the exec starts reads each
- * as one word whatever it holds; the sandbox only needs a POSIX shell
- * at `/bin/sh`.
+ * when the sandbox lacks it), then `env 'K=V' ... 'prog' 'arg'`; a shell
+ * line is the argv `/bin/sh -c line`. Every piece is single-quoted for sh,
+ * so the shell the exec starts reads each as one word whatever it holds;
+ * the sandbox only needs a POSIX shell at `/bin/sh`.
+ *
+ * @param argv the program and its arguments.
+ * @param env the merged environment.
+ * @param cwd the working directory, passed through verbatim.
  */
-export function wrapLine(line: string, env: Record<string, string>, cwd: string): string {
+export function wrapLine(
+  argv: readonly string[],
+  env: Record<string, string>,
+  cwd: string,
+): string {
   const parts = ['/bin/sh', '-c', singleQuote(EXEC_PRELUDE), 'sh', singleQuote(cwd), 'env']
   for (const [key, value] of Object.entries(env)) parts.push(singleQuote(`${key}=${value}`))
-  parts.push('/bin/sh', '-c', singleQuote(line))
+  for (const word of argv) parts.push(singleQuote(word))
   return parts.join(' ')
 }

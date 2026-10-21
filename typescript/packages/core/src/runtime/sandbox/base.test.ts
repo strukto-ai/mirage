@@ -18,6 +18,8 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
+import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
@@ -26,6 +28,11 @@ import type { RuntimeOptions } from '../config.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+// The argv a sandbox runs, as the line the fakes answer.
+function lineOf(argv: readonly string[]): string {
+  return argv[0] === '/bin/sh' && argv[1] === '-c' ? (argv[2] ?? '') : shellJoin(argv)
+}
 
 class RecordingSandbox extends RemoteSandbox {
   readonly name = 'recbox'
@@ -49,6 +56,15 @@ class RecordingSandbox extends RemoteSandbox {
   ): Promise<RunResult> {
     this.execs.push([line, stdin, env, cwd])
     return Promise.resolve({ stdout: ENC.encode(`ran:${line}`), stderr: null, exitCode: 0 })
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    return this.execLine(lineOf(argv), stdin === null ? null : await materialize(stdin), env, cwd)
   }
 }
 

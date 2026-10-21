@@ -17,15 +17,18 @@ import { Readable } from 'node:stream'
 import { once } from 'node:events'
 import { connectOptions } from '../../../utils/ssh.ts'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
 import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { CliResult } from '../cli.ts'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
+import { asyncChain } from '@struktoai/mirage-core/io/stream'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { Client, ClientChannel } from 'ssh2'
 
 /**
@@ -34,9 +37,9 @@ import type { Client, ClientChannel } from 'ssh2'
  * You run the machine and its sshd yourself; mirage only connects
  * (keys or an agent, never a password) and execs lines. One connection opens on
  * the first captured line and is reused; each line is one exec
- * channel with real byte stdin and separated stderr, the merged
- * environment and session cwd dressed onto the command by wrapLine,
- * because SSH exec has no docker-style `-w`/`-e`.
+ * channel with real byte stdin and separated stderr, streamed both
+ * ways, the merged environment and session cwd dressed onto the command
+ * by wrapLine, because SSH exec has no docker-style `-w`/`-e`.
  *
  * This is the one provider whose machine usually IS the fileserver:
  * mount the same host's directory over the ssh VFS at a prefix
@@ -45,7 +48,8 @@ import type { Client, ClientChannel } from 'ssh2'
  * remotely. Host keys are not verified (ssh2 never does), so treat
  * the network path as trusted.
  */
-export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
+export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeTransport {
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'ssh'
   private client: Client | null = null
 
@@ -89,26 +93,33 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     this.client = client
   }
 
-  override async execLine(
-    line: string,
-    stdin: Uint8Array | null,
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.ssh(wrapLine(line, env, cwd), stdin, signal)
+    const result = await this.ssh(wrapLine(argv, env, cwd), stdin, output, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   /**
-   * One exec channel on the shared connection; the seam tests override. An
-   * abort signals the command and closes its channel, so a line abandoned
-   * to a timeout neither waits for the remote side nor leaves the channel
-   * open, which sshd counts against its sessions per connection.
+   * One exec channel on the shared connection; the seam tests override.
+   * Input is written as it is read, waiting out the channel's window, and
+   * ended at its end, or at once when nothing is piped: a finite command
+   * waits for that EOF. Output goes to `output` as it arrives when one is
+   * given, the channel paused until each chunk is taken. An abort signals
+   * the command and closes its channel, so a line abandoned to a timeout
+   * neither waits for the remote side nor leaves the channel open, which
+   * sshd counts against its sessions per connection; any other failure
+   * closes the channel.
    */
   protected ssh(
     command: string,
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
+    output: OutputFn | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
     const client = this.client
@@ -119,10 +130,17 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
           rejectFn(err)
           return
         }
-        const abort = (): void => {
-          stream.signal('KILL')
+        const state = { done: false, closed: false }
+        const fail = (error: unknown): void => {
+          if (state.done) return
+          state.done = true
+          signal?.removeEventListener('abort', abort)
           stream.close()
-          rejectFn(makeAbortError(signal))
+          rejectFn(error instanceof Error ? error : new Error(String(error)))
+        }
+        const abort = (): void => {
+          if (!state.done) stream.signal('KILL')
+          fail(makeAbortError(signal))
         }
         if (signal?.aborted === true) {
           abort()
@@ -132,7 +150,17 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
         const out: Buffer[] = []
         const errs: Buffer[] = []
         let code: number | null = null
-        stream.on('data', (chunk: Buffer) => out.push(chunk))
+        let delivering = Promise.resolve()
+        stream.on('data', (chunk: Buffer) => {
+          if (output === null) {
+            out.push(chunk)
+            return
+          }
+          stream.pause()
+          delivering = output(chunk).then(() => {
+            if (!state.done) stream.resume()
+          }, fail)
+        })
         stream.stderr.on('data', (chunk: Buffer) => errs.push(chunk))
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
@@ -142,26 +170,46 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
               : 1)
         })
         stream.on('close', () => {
-          signal?.removeEventListener('abort', abort)
-          resolveFn({
-            stdout: new Uint8Array(Buffer.concat(out)),
-            stderr: new Uint8Array(Buffer.concat(errs)),
-            code: code ?? 1,
+          state.closed = true
+          void delivering.then(() => {
+            if (state.done) return
+            state.done = true
+            signal?.removeEventListener('abort', abort)
+            resolveFn({
+              stdout: new Uint8Array(Buffer.concat(out)),
+              stderr: new Uint8Array(Buffer.concat(errs)),
+              code: code ?? 1,
+            })
           })
         })
-        stream.on('error', (streamErr: Error) => {
-          signal?.removeEventListener('abort', abort)
-          stream.close()
-          rejectFn(streamErr)
-        })
-        // No pipe still closes stdin, so a reader sees EOF immediately.
-        if (stdin !== null) stream.write(stdin)
-        stream.end()
+        stream.on('error', fail)
+        const drained = (): Promise<void> =>
+          new Promise((resolve) => {
+            const go = (): void => {
+              stream.off('drain', go)
+              stream.off('close', go)
+              resolve()
+            }
+            stream.on('drain', go)
+            stream.on('close', go)
+          })
+        void (async () => {
+          try {
+            for await (const chunk of asyncChain([stdin])) {
+              if (state.done || state.closed) return
+              if (!stream.write(chunk)) await drained()
+            }
+            if (!state.done && !state.closed) stream.end()
+          } catch (error) {
+            if (!state.done && !state.closed) fail(error)
+            else console.debug('ssh command input ended', error)
+          }
+        })()
       })
     })
   }
 
-  override openPipe(command: string): Promise<SandboxPipe> {
+  openPipe(command: string): Promise<SandboxPipe> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
     return new Promise((resolve, reject) => {

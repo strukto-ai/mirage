@@ -1,0 +1,113 @@
+{
+  "cases": [
+    {
+      "id": "stream_live_output",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "perl": {
+                "timeout_seconds": 3
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "perl -e '$|=1; print qq(first\\n); sleep 30' | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "first\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_head_returns_early",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "yes"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "yes": {
+                "timeout_seconds": 20
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "yes | head -n 2",
+          "expect": {
+            "exit": 0,
+            "stdout": "y\ny\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_stdin",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "head"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "head": {
+                "timeout_seconds": 20
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 100000000 | head -n 3",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n3\n"
+          }
+        }
+      ]
+    }
+  ]
+}

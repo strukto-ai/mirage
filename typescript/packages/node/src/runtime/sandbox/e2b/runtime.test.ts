@@ -49,9 +49,11 @@ class FakeExitError extends Error {
 }
 class FakeNotFoundError extends Error {}
 
-/** The line `wrapLine` dressed, unquoted. */
+/** The line `wrapLine` dressed, or the one word of its argv, unquoted. */
 function lineOf(command: string): string {
-  const quoted = command.slice(command.lastIndexOf("sh -c '") + 'sh -c '.length)
+  const at = command.lastIndexOf("'-c' ")
+  const quoted =
+    at < 0 ? command.slice(command.lastIndexOf(" '") + 1) : command.slice(at + "'-c' ".length)
   return quoted.slice(1, -1).replaceAll(`'\\''`, "'")
 }
 
@@ -67,7 +69,7 @@ class FakeHandle {
 
   sendStdin(data: Uint8Array): Promise<void> {
     if (this.inputError) return Promise.reject(this.inputError)
-    this.input = data
+    this.input = new Uint8Array([...this.input, ...data])
     return Promise.resolve()
   }
   closeStdin(): Promise<void> {
@@ -100,8 +102,8 @@ class FakeCommands {
   calls: [string, boolean][] = []
   handles: FakeHandle[] = []
   inputError: Error | null = null
-  run(command: string, opts: { background: boolean; stdin: boolean }) {
-    expect(opts.background).toBe(true)
+  run(command: string, opts: { background: boolean; stdin: boolean; timeoutMs?: number }) {
+    expect([opts.background, opts.timeoutMs]).toEqual([true, 0])
     this.calls.push([command, opts.stdin])
     const handle = new FakeHandle(lineOf(command), !opts.stdin)
     handle.inputError = this.inputError
@@ -254,7 +256,7 @@ describe('E2BRuntime', () => {
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
     expect(FakeSandbox.last.commands.calls).toEqual([
-      [wrapLine('wc -l | cat', { E: '1' }, '/workspace'), data !== null],
+      [wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1' }, '/workspace'), data !== null],
     ])
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
       eof: true,
@@ -467,6 +469,10 @@ describe('E2B cancellation and validation', () => {
 class MountingE2BRuntime extends FakedE2BRuntime {
   readonly table = new Map<string, string>()
   readonly lines: string[] = []
+
+  protected override execArgv(argv: readonly string[]): Promise<RunResult> {
+    return this.execLine(argv[0] === '/bin/sh' ? (argv[2] ?? '') : argv.join(' '))
+  }
 
   override execLine(line: string): Promise<RunResult> {
     this.lines.push(line)

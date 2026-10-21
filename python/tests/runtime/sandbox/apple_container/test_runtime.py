@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.table import build_runtime
@@ -41,7 +42,8 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
         self.inspect_stdout = inspect_stdout
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _container(self, args, stdin=None):
+    async def _container(self, args, stdin=None, output=None):
+        stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
             if self.inspect_stdout is not None:
@@ -68,6 +70,9 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
                 0,
             )
         script = args[-1]
+        if output is not None:
+            await output(f"out:{script}".encode())
+            return b"", b"warn", 0
         return f"out:{script}".encode(), b"warn", 0
 
     def inspected(self) -> list[str]:

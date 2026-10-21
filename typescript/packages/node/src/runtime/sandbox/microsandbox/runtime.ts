@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
 import {
@@ -35,9 +36,9 @@ import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
  */
 export class MicrosandboxRuntime
   extends RemoteSandbox<MicrosandboxConfig>
-  implements ProcessExecutor<undefined>
+  implements PipeTransport
 {
-  readonly [PROCESS_EXECUTOR] = true as const
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'microsandbox'
 
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
@@ -54,10 +55,14 @@ export class MicrosandboxRuntime
   // One msb CLI invocation.
   protected microsandbox(
     args: string[],
-    stdin: Uint8Array | null = null,
+    stdin: ByteSource | null = null,
+    output: OutputFn | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('msb', MICROSANDBOX_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
+    return runCli('msb', MICROSANDBOX_CLI_HINT, args, stdin, {
+      ...(signal !== undefined ? { signal } : {}),
+      ...(output !== null ? { output } : {}),
+    })
   }
 
   /** Require a running sandbox before executing any commands. */
@@ -80,7 +85,7 @@ export class MicrosandboxRuntime
 
   private async inspect(signal: AbortSignal): Promise<void> {
     const args = ['status', this.config.sandbox, '--format', 'json']
-    const result = await this.microsandbox(args, null, signal)
+    const result = await this.microsandbox(args, null, null, signal)
     if (result.code !== 0) {
       const detail = DECODER.decode(result.stderr).trim()
       throw new Error(`msb status failed: ${detail}`)
@@ -102,9 +107,10 @@ export class MicrosandboxRuntime
 
   protected override async execArgv(
     argv: readonly string[],
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     // Released msb can still auto-start a guest stopped after this probe.
@@ -112,15 +118,15 @@ export class MicrosandboxRuntime
     await this.connect(signal)
     signal?.throwIfAborted()
     const args = execArgs(this.head(), ['--'], env, cwd, argv)
-    const result = await this.microsandbox(args, stdin, signal)
+    const result = await this.microsandbox(args, stdin, output, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
-  override async openPipe(command: string): Promise<SandboxPipe> {
+  async openPipe(command: string): Promise<SandboxPipe> {
     await this.connect()
     return openCliPipe(
       'msb',
-      execArgs([...this.head(), '--stream'], ['--'], {}, null, ['sh', '-c', command]),
+      execArgs([...this.head(), '--stream'], ['--'], {}, null, ['/bin/sh', '-c', command]),
     )
   }
 

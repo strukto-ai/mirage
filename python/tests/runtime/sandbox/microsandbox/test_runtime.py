@@ -47,7 +47,7 @@ async def test_refuses_unusable_status_before_exec(
 ):
     calls = []
 
-    async def invoke(executable, hint, args, stdin):
+    async def invoke(executable, hint, args, stdin, output=None):
         calls.append(args)
         return status, b"", 0
 
@@ -70,7 +70,7 @@ async def test_refuses_unusable_status_before_exec(
 
 @pytest.mark.asyncio
 async def test_status_failure_preserves_cli_error(monkeypatch):
-    async def invoke(executable, hint, args, stdin):
+    async def invoke(executable, hint, args, stdin, output=None):
         return b"", b"sandbox not found", 1
 
     monkeypatch.setattr(
@@ -87,7 +87,7 @@ SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_SANDBOX")
 async def test_process_maps_the_msb_cli_contract(monkeypatch):
     calls = []
 
-    async def invoke(executable, hint, args, stdin):
+    async def invoke(executable, hint, args, stdin, output=None):
         calls.append((executable, args, stdin))
         if args[0] == "status":
             return b'{"status":"Running"}', b"", 0

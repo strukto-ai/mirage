@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import shlex
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -40,6 +41,11 @@ class RecordingSandbox(RemoteSandbox):
 
     async def connect(self) -> None:
         self.connected += 1
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output):
+        line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
+        data = await materialize(stdin) if stdin is not None else None
+        return await self.exec_line(line, data, env, cwd)
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str

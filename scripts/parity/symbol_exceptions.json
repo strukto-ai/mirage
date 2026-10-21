@@ -165,9 +165,19 @@
     "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields."
    }
   },
+  "runtime/sandbox/mixin": {
+   "python_only": {
+    "PipeTransportMixin": "Python detects the pipe transport by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
+   },
+   "typescript_only": {
+    "PIPE_TRANSPORT": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin.",
+    "PipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin.",
+    "isPipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin."
+   }
+  },
   "runtime/sandbox/cli": {
    "python_only": {
-    "_STREAM_LIMIT": "Spawning through loop.subprocess_exec, which keeps the transport that closes the pipes, means building the stream protocol with its buffer size; Node's child streams size their own.",
+    "STREAM_LIMIT": "Python's stream readers take a buffer size, the subprocess protocol's and the ssh channel's reads; Node's streams size their own.",
     "_spawn": "run_cli and open_cli_pipe share one loop.subprocess_exec spawn that keeps the transport stop_tree closes; Node's spawn hands back a ChildProcess whose streams close themselves."
    },
    "typescript_only": {

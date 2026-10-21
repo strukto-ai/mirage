@@ -13,12 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../commands/config.ts'
-import { materialize } from '../../io/types.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import { Runtime } from '../base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../mixin.ts'
-import type { MountType, RunResult, SandboxPipe } from '../types.ts'
+import {
+  LINE_EXECUTOR,
+  PROCESS_EXECUTOR,
+  STREAMING_PROCESS,
+  type LineExecutor,
+  type StreamingProcess,
+} from '../mixin.ts'
+import type { MountType, OutputFn, RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { abortable } from '../../utils/abort.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -28,16 +34,8 @@ import {
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './config.ts'
+import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
-
-/**
- * The bytes piped into a run, read whole; null when nothing was.
- *
- * @param ctx the run's context.
- */
-async function piped(ctx: Context): Promise<Uint8Array | null> {
-  return ctx.stdin === null ? null : await materialize(ctx.stdin)
-}
 
 /**
  * A runtime that executes programs in a sandbox the user runs.
@@ -52,22 +50,25 @@ async function piped(ctx: Context): Promise<Uint8Array | null> {
  * every path in a line resolve unchanged: a provider with a `mountType`
  * serves them itself (SandboxMounts), otherwise serve them inside it
  * yourself (`mirage workspace create` in the image entrypoint or by
- * hand). The whole-line entry point is LineExecutor's runLine, and there
- * is no interpreter entry point. Subclasses adapt one provider by
- * implementing connect() and execLine(), and openPipe() for a
- * `mountType`; routing and captures are inherited.
+ * hand). There is no interpreter entry point. Subclasses adapt one
+ * provider by implementing connect() and execArgv(), and PipeTransport
+ * for a `mountType`; every run derives from execArgv: a whole line runs
+ * as `/bin/sh -c`, a program from its argv, and a stream hands its
+ * output over as it comes. Routing and captures are inherited.
  * Constructed like every runtime (captures, config); config is
  * how to reach the sandbox, coerced against the provider's own key list.
  */
 export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime<undefined>
-  implements LineExecutor<undefined>
+  implements LineExecutor<undefined>, StreamingProcess<undefined>
 {
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees
   // those effects, however well isolated the sandbox itself is.
   override readonly reach = 'remote'
   readonly [LINE_EXECUTOR] = true as const
+  readonly [PROCESS_EXECUTOR] = true as const
+  readonly [STREAMING_PROCESS] = true as const
   declare config: NormalizedSandboxConfig<C>
   // Connect-once latch: the first captured line connects; later lines
   // just execute. Single-flight so concurrent first lines share one
@@ -82,9 +83,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     // collection fields are always present (env).
     const config = this.config as C
     this.config = { ...config, env: { ...config.env } }
-    const mountType = checkMountType('sandbox', config.mountType)
-    if (mountType !== null && this.openPipe === RemoteSandbox.prototype.openPipe)
-      throw new Error('sandbox: mountType needs a pipe transport')
+    checkMountType('sandbox', config.mountType)
   }
 
   override get fileEffectsDispatched(): boolean {
@@ -116,80 +115,76 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param ctx the line in `flags.c`, the bytes piped into it, the session
    *   environment and working directory, the signal that stops it.
    */
-  async runLine(
+  runLine(
     _engine: undefined,
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
   ): Promise<RunResult> {
-    const refusal = await this.prepare(ctx.signal)
-    if (refusal !== null) return refusal
     const line = ctx.flags.c
-    return this.execLine(
-      typeof line === 'string' ? line : '',
-      await piped(ctx),
-      { ...this.config.env, ...ctx.env },
-      ctx.cwd.virtual,
-      ctx.signal,
-    )
+    return this.runArgv(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx, null)
   }
 
-  /**
-   * Run an argv in the sandbox, connecting once, for a subclass that
-   * declares the argv capability (`ProcessExecutor`).
-   *
-   * @param _engine none; a sandbox keeps its own connection.
-   * @param _paths unused; argv is words.
-   * @param texts the argv, program first.
-   * @param ctx the run's context.
-   */
-  async runProcess(
+  runProcess(
     _engine: undefined,
     _paths: PathSpec[],
     texts: string[],
     ctx: Context,
   ): Promise<RunResult> {
-    const refusal = await this.prepare(ctx.signal)
-    if (refusal !== null) return refusal
-    return this.execArgv(
-      texts,
-      await piped(ctx),
-      { ...this.config.env, ...ctx.env },
-      ctx.cwd.virtual,
-      ctx.signal,
-    )
+    return this.runArgv(texts, ctx, null)
+  }
+
+  runStream(
+    _engine: undefined,
+    _paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn,
+  ): Promise<RunResult> {
+    return this.runArgv(texts, ctx, output)
   }
 
   override async settle(): Promise<void> {
     await this.mounts?.sync()
   }
 
-  private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
+  /**
+   * Connect once, bring the served mounts in step, then run.
+   *
+   * @param argv the program and its arguments.
+   * @param ctx the run's stdin, environment, cwd and signal.
+   * @param output receives stdout as it arrives.
+   */
+  private async runArgv(
+    argv: readonly string[],
+    ctx: Context,
+    output: OutputFn | null,
+  ): Promise<RunResult> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
-    await this.ensureConnected(signal)
-    return (await this.mounts?.admit(this.binding, signal)) ?? null
-  }
-
-  protected execArgv(
-    _argv: readonly string[],
-    _stdin: Uint8Array | null,
-    _env: Record<string, string>,
-    _cwd: string,
-    _signal?: AbortSignal,
-  ): Promise<RunResult> {
-    return Promise.reject(new Error(`${this.name}: argv execution is unsupported`))
+    await this.ensureConnected(ctx.signal)
+    const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
+    if (refusal !== null) return refusal
+    return this.execArgv(
+      argv,
+      ctx.stdin,
+      { ...this.config.env, ...ctx.env },
+      ctx.cwd.virtual,
+      output,
+      ctx.signal,
+    )
   }
 
   /** Let the sandbox see the workspace by `mountType`; null serves nothing. */
   private serveMounts(mountType: MountType | null): void {
     if (mountType === null) return
+    if (!isPipeTransport(this)) throw new Error(`${this.name}: mountType needs a pipe transport`)
     this.mounts = new SandboxMounts(
       this.name,
       mountType,
       (line, signal) => this.execLine(line, null, { ...this.config.env }, '/', signal),
-      (command) => this.openPipe(command),
+      this.openPipe.bind(this),
     )
   }
 
@@ -210,27 +205,48 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   /** Attach to the user's live sandbox, failing loud if absent. */
   abstract connect(): Promise<void>
 
-  /** Execute one shell line inside the sandbox. */
+  /**
+   * Execute one argv inside the sandbox: the provider's transport.
+   *
+   * @param argv the program and its arguments.
+   * @param stdin the input, read as the program consumes it; null for none.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param output receives stdout as it arrives, which the result then
+   *   leaves out; null, or a transport that cannot stream, returns it whole.
+   * @param signal stops the program.
+   */
+  protected abstract execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult>
+
+  /**
+   * Execute one shell line inside the sandbox, as `/bin/sh -c`.
+   *
+   * @param line the raw shell line.
+   * @param stdin bytes piped into the line.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param signal stops the line.
+   */
   execLine(
     line: string,
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, signal)
-  }
-
-  /**
-   * Start a command in the sandbox with its stdin and stdout held open,
-   * byte for byte, for a `mountType`'s SFTP.
-   */
-  openPipe(_command: string): Promise<SandboxPipe> {
-    return Promise.reject(new Error(`${this.name}: this sandbox holds no pipe open`))
+    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, signal)
   }
 
   /** Unmount what the sandbox was served; the sandbox itself is the user's. */
   override async close(): Promise<void> {
     await this.mounts?.close()
+    await super.close()
   }
 }

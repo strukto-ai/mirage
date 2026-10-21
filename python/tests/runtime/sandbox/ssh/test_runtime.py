@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
 from mirage.vfs.ssh import SSHVFS, SSHConfig
@@ -34,8 +35,12 @@ class FakeSSHRuntime(SSHRuntime):
         super().__init__(**options)
         self.calls: list[tuple[str, bytes | None]] = []
 
-    async def _ssh(self, command, stdin):
-        self.calls.append((command, stdin))
+    async def _ssh(self, command, stdin, output=None):
+        data = await materialize(stdin) if stdin is not None else None
+        self.calls.append((command, data))
+        if output is not None:
+            await output(f"out:{command}".encode())
+            return b"", b"warn", 0
         return f"out:{command}".encode(), b"warn", 0
 
 
@@ -119,9 +124,8 @@ async def test_exec_line_dresses_the_line_and_threads_stdin():
     runtime = FakeSSHRuntime(config={"host": "box"})
     result = await runtime.exec_line("wc -l", b"a\nb\n", {"E": "1"}, "/w")
     assert result.exit_code == 0
-    assert (
-        result.stdout == f"out:{wrap_line('wc -l', {'E': '1'}, '/w')}".encode()
-    )
+    wrapped = wrap_line(("/bin/sh", "-c", "wc -l"), {"E": "1"}, "/w")
+    assert result.stdout == f"out:{wrapped}".encode()
     assert result.stderr == b"warn"
     assert runtime.calls[0][1] == b"a\nb\n"
 
@@ -174,6 +178,17 @@ async def test_real_ssh_stdin_always_reaches_eof(data):
             await runtime.close()
 
 
+class HungOutput:
+    """A remote stream that ends only once its command does."""
+
+    def __init__(self, done: asyncio.Event) -> None:
+        self.done = done
+
+    async def read(self, n: int = -1) -> bytes:
+        await self.done.wait()
+        return b""
+
+
 class HungProcess:
     """A remote command that runs until something kills it."""
 
@@ -181,6 +196,10 @@ class HungProcess:
         self.stdin = self
         self.calls: list[str] = []
         self.done = asyncio.Event()
+        self.stdout = self.stderr = HungOutput(self.done)
+
+    async def drain(self) -> None:
+        return None
 
     def write(self, data: bytes) -> None:
         self.calls.append("write")
@@ -237,6 +256,10 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
 
 class LostProcess(HungProcess):
     """A remote command whose connection drops mid-wait."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.done.set()
 
     async def wait(self, check: bool = False) -> None:
         raise ConnectionResetError("connection lost")

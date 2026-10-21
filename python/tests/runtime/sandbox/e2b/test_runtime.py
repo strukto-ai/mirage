@@ -22,6 +22,7 @@ from e2b import CommandExitException, NotFoundException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
@@ -84,8 +85,8 @@ class FakeCommands:
         self.handles = []
         self.input_error = None
 
-    async def run(self, command, *, background, stdin):
-        assert background is True
+    async def run(self, command, *, background, stdin, on_stdout, timeout):
+        assert (background, timeout) == (True, 0)
         self.calls.append((command, stdin))
         handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
@@ -181,7 +182,9 @@ async def test_native_stdin_eof_and_command_are_preserved(data):
     sandbox = FakeSandbox.last
     assert sandbox.commands.calls == [
         (
-            wrap_line("wc -l | cat", {"E": "1"}, "/workspace"),
+            wrap_line(
+                ("/bin/sh", "-c", "wc -l | cat"), {"E": "1"}, "/workspace"
+            ),
             data is not None,
         )
     ]
@@ -328,6 +331,11 @@ class MountingE2BRuntime(E2BRuntime):
         super().__init__(**options)
         self.table: dict[str, str] = {}
         self.lines: list[str] = []
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output):
+        line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
+        data = await materialize(stdin) if stdin is not None else None
+        return await self.exec_line(line, data, env, cwd)
 
     async def exec_line(self, line, stdin, env, cwd):
         self.lines.append(line)

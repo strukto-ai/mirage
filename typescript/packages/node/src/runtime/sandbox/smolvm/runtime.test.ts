@@ -22,6 +22,8 @@ import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { describe, expect, it } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
 import { SmolvmRuntime } from './runtime.ts'
@@ -41,10 +43,12 @@ class FakeSmolvmRuntime extends SmolvmRuntime {
   statusStdout: string | null = null
   readonly calls: [string[], Uint8Array | null][] = []
 
-  protected override smolvm(
+  protected override async smolvm(
     args: string[],
-    stdin: Uint8Array | null = null,
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
   ): Promise<SmolvmResult> {
+    const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[1] === 'status') {
       if (this.statusStdout !== null) {
@@ -68,11 +72,13 @@ class FakeSmolvmRuntime extends SmolvmRuntime {
       })
     }
     const script = args[args.length - 1] ?? ''
-    return Promise.resolve({
-      stdout: ENC.encode(`out:${script}`),
+    const stdout = ENC.encode(`out:${script}`)
+    if (output !== null) await output(stdout)
+    return {
+      stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
       code: 0,
-    })
+    }
   }
 }
 

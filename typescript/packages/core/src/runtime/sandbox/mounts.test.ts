@@ -25,8 +25,11 @@ import { Limit, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { ProfileMount } from '../../policy/profile.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
-import type { MountType, RunResult, SandboxPipe } from '../types.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
+import { shellJoin } from '../../shell/join.ts'
+import type { MountType, OutputFn, RunResult, SandboxPipe } from '../types.ts'
 import { RemoteSandbox } from './base.ts'
+import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import { SSHFS_OPTIONS } from './constants.ts'
 import { mountTable, registerPipeServer, topPrefixes, type PipeServer } from './mounts.ts'
 
@@ -38,7 +41,13 @@ function words(command: string): string[] {
   return [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
 }
 
-class FakeSandbox extends RemoteSandbox {
+// The argv a sandbox runs, as the line the fakes answer.
+function lineOf(argv: readonly string[]): string {
+  return argv[0] === '/bin/sh' && argv[1] === '-c' ? (argv[2] ?? '') : shellJoin(argv)
+}
+
+class FakeSandbox extends RemoteSandbox implements PipeTransport {
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'fake'
   readonly table = new Map<string, string>()
   readonly commands: string[] = []
@@ -62,9 +71,21 @@ class FakeSandbox extends RemoteSandbox {
     return Promise.resolve()
   }
 
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    _output: OutputFn | null,
+    signal?: AbortSignal,
+  ): Promise<RunResult> {
+    const data = stdin === null ? null : await materialize(stdin)
+    return this.execLine(lineOf(argv), data, env, cwd, signal)
+  }
+
   override execLine(
     line: string,
-    _stdin?: Uint8Array | null,
+    _stdin?: ByteSource | null,
     _env?: Record<string, string>,
     _cwd?: string,
     signal?: AbortSignal,
@@ -97,7 +118,7 @@ class FakeSandbox extends RemoteSandbox {
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
-  override openPipe(command: string): Promise<SandboxPipe> {
+  openPipe(command: string): Promise<SandboxPipe> {
     this.pipes.push(command)
     const prefix = words(command)[6] ?? ''
     if (this.sshfsMounts) this.table.set(prefix, 'fuse.sshfs')
@@ -559,7 +580,7 @@ describe('SandboxMounts', () => {
     class UnavailableSandbox extends FakeSandbox {
       override execLine(
         line: string,
-        stdin: Uint8Array | null,
+        stdin: ByteSource | null,
         env: Record<string, string>,
         cwd: string,
       ) {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { stdinPath, stdinRedirect } from './constants.ts'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
@@ -31,9 +32,10 @@ const ENC = new TextEncoder()
  * You create the sandbox yourself (dashboard, `daytona sandbox
  * create`, or the SDK); mirage only connects by `sandboxId` and execs
  * lines. `apiKey` falls back to DAYTONA_API_KEY. Daytona's exec has
- * no stdin and reports combined output, so piped bytes are uploaded
- * and redirected in, and stderr comes back null. close() releases the
- * SDK client and never touches the sandbox.
+ * no stdin and reports combined output once the command ends, so piped
+ * bytes are uploaded and redirected in, stderr comes back null, and a
+ * stream gets its output at the end. close() releases the SDK client and
+ * never touches the sandbox.
  */
 export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   readonly name = 'daytona'
@@ -60,17 +62,17 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     this.sandbox = await this.client.get(this.config.sandboxId)
   }
 
-  override async execLine(
-    line: string,
-    stdin: Uint8Array | null,
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
-    let command = wrapLine(line, env, cwd)
+    let command = wrapLine(argv, env, cwd)
     if (stdin !== null) {
       const path = stdinPath()
-      await this.upload(path, stdin)
+      await this.upload(path, await materialize(stdin))
       command = stdinRedirect(command, path)
     }
     const response = await this.sandbox.process.executeCommand(command)
@@ -96,6 +98,7 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
       await this.client[Symbol.asyncDispose]()
       this.client = null
     }
+    await super.close()
   }
 }
 

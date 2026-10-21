@@ -143,9 +143,11 @@ def _stream_external(
     io.output = state = OutputState()
     node = ExecutionNode(command=shlex.join(argv.tokens), exit_code=0)
     task: asyncio.Task[None] | None = None
+    settled = False
     closing: asyncio.Task[None] | None = None
 
     async def execute() -> None:
+        nonlocal settled
         try:
             result = await run_with_timeout(
                 _execute_program(
@@ -168,12 +170,13 @@ def _stream_external(
             pipe.end(exc)
             raise
         finally:
+            settled = True
             await registry.settle(runtime)
 
     async def finalize() -> None:
         pipe.close_reader()
         if task is not None:
-            if not task.done():
+            if not task.done() and not settled:
                 task.cancel()
             try:
                 await task

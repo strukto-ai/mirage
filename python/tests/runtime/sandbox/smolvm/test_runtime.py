@@ -18,6 +18,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 from mirage.types import PathSpec
@@ -37,7 +38,8 @@ class FakeSmolvmRuntime(SmolvmRuntime):
         self.status_stdout = status_stdout
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _smolvm(self, args, stdin=None):
+    async def _smolvm(self, args, stdin=None, output=None):
+        stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[1] == "status":
             if self.status_stdout is not None:
@@ -50,6 +52,9 @@ class FakeSmolvmRuntime(SmolvmRuntime):
                 0,
             )
         script = args[-1]
+        if output is not None:
+            await output(f"out:{script}".encode())
+            return b"", b"warn", 0
         return f"out:{script}".encode(), b"warn", 0
 
 
