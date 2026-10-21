@@ -63,7 +63,7 @@ describe('the pyodide service worker', () => {
     const first = serviceWorker()
     first.install()
     expect(first.skips).toBe(1)
-    const update = serviceWorker({})
+    const update = serviceWorker(true)
     update.install()
     expect(update.skips).toBe(0)
   })

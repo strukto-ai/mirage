@@ -97,8 +97,9 @@ The service worker answers only Pyodide's file calls and lets every other
 request through. The check after `register` covers a first visit and a hard
 reload, which both leave the page uncontrolled. Service workers need HTTPS or
 `localhost`. A site that already has a service worker adds the bridge to it
-instead: call `importScripts('/pyodide-sw.js')` at the top of that worker and
-register it in place of `/pyodide-sw.js`.
+instead: call `importScripts('/pyodide-sw.js')` at the top of that worker
+(`import '/pyodide-sw.js'` in a module worker) and register it in place of
+`/pyodide-sw.js`.
 
 With neither, `python3` exits 127 and says why. JSPI is not needed.
 

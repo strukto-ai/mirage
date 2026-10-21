@@ -13,8 +13,11 @@ export interface ServiceWorker {
   readonly skips: number
 }
 
-/** The pyodide service worker, run against a scope that hands it events the way a browser does. */
-export function serviceWorker(active: object | null = null): ServiceWorker {
+/**
+ * The pyodide service worker, run against a scope that hands it events the
+ * way a browser does; `updating` gives it an older version already active.
+ */
+export function serviceWorker(updating = false): ServiceWorker {
   const listeners = new Map<string, Listener>()
   let claims = 0
   let skips = 0
@@ -22,7 +25,7 @@ export function serviceWorker(active: object | null = null): ServiceWorker {
     addEventListener: (type: string, listener: Listener) => {
       listeners.set(type, listener)
     },
-    registration: { active },
+    registration: { active: updating ? {} : null },
     skipWaiting: () => {
       skips += 1
       return Promise.resolve()
