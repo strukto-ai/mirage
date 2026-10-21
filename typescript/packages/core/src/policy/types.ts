@@ -948,15 +948,10 @@ export interface VfsExplanation extends Explanation {
  * The dispatcher binds the admitted command's gate to the session
  * context for the command's run, and the commands tier reads it there,
  * so the tier that enforces the rules never imports the tier that
- * states them. `scoped` is whether a path rule in force reads this
- * command's paths at all, or a coded or scripted preVfs policy speaks
- * for its session; a native walk (a backend's own find or du)
- * yields to the guarded readdir walk while it is set, so each entry
- * passes the gate. `check` throws when a rule in force refuses the entry
- * for the running command and returns when the command may touch it.
+ * states them. `check` throws when a rule in force refuses the entry for
+ * the running command and returns when the command may touch it.
  */
 export interface EntryGate {
-  readonly scoped: boolean
   /**
    * The ask rules this line runs under a grant for. Read by the
    * dispatcher, which sees the same entries from below and would otherwise
@@ -974,7 +969,7 @@ export interface EntryGate {
   check(virtual: string): void
   /** Whether anything at or under this path could be refused for the
    * running command, so a native walk there gives way to the guarded one;
-   * per operand, unlike `scoped`. */
+   * asked per operand. */
   scopes(virtual: string): boolean
   /**
    * The reason a rule in force refuses this entry for the running command,

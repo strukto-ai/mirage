@@ -1177,11 +1177,6 @@ class EntryGate(Protocol):
     the tier that states them.
 
     Args:
-        scoped (bool): whether a path rule in force reads this command's
-            paths at all, or a coded or scripted pre_vfs policy speaks
-            for its session; a native walk (a backend's own find or du)
-            yields to the guarded readdir walk while it is set, so each
-            entry passes the gate.
         granted (tuple[CommandRule, ...]): the ask rules this line runs
             under a grant for. Read by the dispatcher, which sees the same
             entries from below and would otherwise re-derive a verdict
@@ -1194,9 +1189,6 @@ class EntryGate(Protocol):
     """
 
     @property
-    def scoped(self) -> bool: ...
-
-    @property
     def granted(self) -> tuple[CommandRule, ...]: ...
 
     @property
@@ -1205,7 +1197,7 @@ class EntryGate(Protocol):
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
         the running command, so a native walk there gives way to the
-        guarded one; per operand, unlike ``scoped``.
+        guarded one; asked per operand.
 
         Args:
             virtual (str): absolute virtual path of a walk's start point.

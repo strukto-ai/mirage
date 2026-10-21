@@ -305,7 +305,6 @@ describe('the admission gate on the fallback storage', () => {
 
   function entryGate(scoped: boolean, granted: readonly CommandRule[], refuse: string): EntryGate {
     return {
-      scoped,
       scopes: () => scoped,
       granted,
       judged: new Set<string>(),
@@ -343,7 +342,7 @@ describe('the admission gate on the fallback storage', () => {
     live.check('/fine')
     expect(live.refusal('/b/secret')).toBe('refused')
     expect(live.refusal('/fine')).toBeNull()
-    expect(live.scoped).toBe(true)
+    expect(live.scopes('/anywhere')).toBe(true)
     expect(live.granted).toEqual([ruleShared])
     expect(getAdmission()).toBeNull()
   })

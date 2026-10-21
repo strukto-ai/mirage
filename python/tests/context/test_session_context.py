@@ -182,8 +182,7 @@ def test_the_boundary_reads_the_bound_sessions_visibility():
 class _Gate:
     judged: frozenset[str] = frozenset()
 
-    def __init__(self, scoped: bool, refused: str = "") -> None:
-        self.scoped = scoped
+    def __init__(self, refused: str = "") -> None:
         self.refused = refused
         self.asked: list[str] = []
 
@@ -201,12 +200,12 @@ def test_the_admission_binding_is_scoped_to_one_command():
     )
 
     assert get_admission() is None
-    outer = _Gate(scoped=True)
+    outer = _Gate()
     token = set_admission(outer)
     try:
         assert get_admission() is outer
         # A nested line binds its own and hands the outer one back.
-        inner = _Gate(scoped=False)
+        inner = _Gate()
         inner_token = set_admission(inner)
         try:
             assert get_admission() is inner

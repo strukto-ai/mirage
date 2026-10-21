@@ -177,6 +177,10 @@ export class Admitted implements EntryGate {
   readonly ctx: CommandContext
   readonly judged: ReadonlySet<string>
   readonly granted: readonly CommandRule[]
+  /**
+   * Whether a path or mount rule in force reads this command's paths, so a
+   * command whose runtime walks on its own is refused (`admitWords`).
+   */
   readonly scoped: boolean
 
   constructor(init: {
