@@ -34,7 +34,7 @@ import {
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './config.ts'
-import { EXEC_ID, reapLine } from './constants.ts'
+import { EXEC_ID, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
 import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
 
@@ -183,16 +183,28 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     }
   }
 
-  /** Stop what a cancelled run left in the box (`EXEC_ID`). */
+  /**
+   * Stop what a cancelled run left in the box (`EXEC_ID`), for at most
+   * `REAP_WAIT_SECONDS`: a box that stopped answering would otherwise hold
+   * the cancel.
+   */
   private async reap(execId: string): Promise<void> {
+    const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
     try {
-      await this.execArgv(
-        ['/bin/sh', '-c', reapLine(execId)],
-        null,
-        { ...this.config.env },
-        '/',
-        null,
+      const done = await abortable(
+        this.execArgv(
+          ['/bin/sh', '-c', reapLine(execId)],
+          null,
+          { ...this.config.env },
+          '/',
+          null,
+          signal,
+        ),
+        signal,
       )
+      if (done.exitCode !== 0) {
+        console.debug(`${this.name}: run ${execId} not stopped: exit ${String(done.exitCode)}`)
+      }
     } catch (error) {
       console.debug(`${this.name}: run ${execId} not stopped: ${String(error)}`)
     }

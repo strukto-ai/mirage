@@ -21,7 +21,7 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
-import { EXEC_ID, reapLine } from './constants.ts'
+import { EXEC_ID, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
@@ -253,6 +253,55 @@ describe('RemoteSandbox', () => {
     expect(execId).not.toBe('')
     expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId)])
     expect(box.execs[1]?.[2]).not.toHaveProperty(EXEC_ID)
+  })
+
+  it('holds a cancel only so long when the box stops answering', async () => {
+    class DeadBox extends RecordingSandbox {
+      protected override async execArgv(
+        argv: readonly string[],
+        stdin: ByteSource | null,
+        env: Record<string, string>,
+        cwd: string,
+        _output?: unknown,
+        signal?: AbortSignal,
+      ): Promise<RunResult> {
+        await super.execArgv(argv, stdin, env, cwd)
+        if (lineOf(argv) !== 'yes') return new Promise<RunResult>(() => undefined)
+        return new Promise<RunResult>((_, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('execute aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      }
+    }
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const wait = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => timeout(10))
+    try {
+      const box = new DeadBox({ captures: ['yes'] })
+      const abort = new AbortController()
+      const ctx = {
+        stdin: null,
+        flags: { c: 'yes' },
+        env: {},
+        cwd: PathSpec.fromStrPath('/'),
+        signal: abort.signal,
+      }
+      const run = box.runLine(undefined, [], [], ctx)
+      const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
+      await vi.waitFor(() => {
+        expect(box.execs).toHaveLength(1)
+      })
+      abort.abort()
+      await rejected
+      expect(box.execs).toHaveLength(2)
+      expect(wait).toHaveBeenCalledWith(REAP_WAIT_SECONDS * 1000)
+    } finally {
+      wait.mockRestore()
+    }
   })
 
   it('line output caps truncate with a notice', async () => {

@@ -220,6 +220,30 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
 
 
 @pytest.mark.asyncio
+async def test_a_box_that_stops_answering_holds_a_cancel_only_so_long(
+    monkeypatch,
+):
+    class DeadBox(RecordingSandbox):
+        async def exec_line(
+            self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        ) -> RunResult:
+            await super().exec_line(line, stdin, env, cwd)
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    monkeypatch.setattr("mirage.runtime.sandbox.base.REAP_WAIT_SECONDS", 0.01)
+    box = DeadBox(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+    task = asyncio.create_task(box.run_line(None, [], [], ctx))
+    while not box.execs:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 5)
+    assert len(box.execs) == 2
+
+
+@pytest.mark.asyncio
 async def test_line_output_caps_truncate_with_notice():
     class ChattyBox(RecordingSandbox):
         async def exec_line(

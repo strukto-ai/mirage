@@ -24,7 +24,11 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
-from mirage.runtime.sandbox.constants import EXEC_ID, reap_line
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    REAP_WAIT_SECONDS,
+    reap_line,
+)
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
@@ -192,22 +196,33 @@ class RemoteSandbox(
             raise
 
     async def _reap(self, exec_id: str) -> None:
-        """Stop what a cancelled run left in the box (``EXEC_ID``).
+        """Stop what a cancelled run left in the box (``EXEC_ID``), for
+        at most ``REAP_WAIT_SECONDS``: a box that stopped answering would
+        otherwise hold the cancel.
 
         Args:
             exec_id (str): the run's id.
         """
         try:
-            await self._exec_argv(
-                ("/bin/sh", "-c", reap_line(exec_id)),
-                None,
-                dict(self.config.env),
-                "/",
-                None,
-            )
+            async with asyncio.timeout(REAP_WAIT_SECONDS):
+                done = await self._exec_argv(
+                    ("/bin/sh", "-c", reap_line(exec_id)),
+                    None,
+                    dict(self.config.env),
+                    "/",
+                    None,
+                )
         except Exception:
             logger.debug(
                 "%s: run %s not stopped", self.name, exec_id, exc_info=True
+            )
+            return
+        if done.exit_code != 0:
+            logger.debug(
+                "%s: run %s not stopped: exit %d",
+                self.name,
+                exec_id,
+                done.exit_code,
             )
 
     async def _setup(self, line: str) -> RunResult:

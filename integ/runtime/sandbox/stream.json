@@ -104,6 +104,36 @@
       ]
     },
     {
+      "id": "stream_cut_short_stops_a_program_that_ignores_term",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "t=$RANDOM$RANDOM; perl -e '$SIG{TERM} = \"IGNORE\"; $| = 1; print \"$ARGV[0]\\n\" while 1' \"$t\" stubborn | head -n 1 >/dev/null; perl -e 'my $t = shift; select undef, undef, undef, 0.5; for (glob \"/proc/[0-9]*/cmdline\") { open my $f, \"<\", $_ or next; my $c = <$f>; print \"left\\n\" if defined $c && index($c, \"\\0$t\\0stubborn\\0\") >= 0 }' \"$t\"",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "stream_stdin",
       "runtimes": [
         "docker",
