@@ -22,6 +22,7 @@ from e2b import CommandExitException, NotFoundException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -83,10 +84,10 @@ class FakeCommands:
         self.handles = []
         self.input_error = None
 
-    async def run(self, command, *, envs, cwd, background, stdin):
+    async def run(self, command, *, background, stdin):
         assert background is True
-        self.calls.append((command, envs, cwd, stdin))
-        handle = FakeHandle(command, stdin)
+        self.calls.append((command, stdin))
+        handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
         self.handles.append(handle)
         return handle
@@ -179,7 +180,10 @@ async def test_native_stdin_eof_and_command_are_preserved(data):
     assert result.stderr == b"warn"
     sandbox = FakeSandbox.last
     assert sandbox.commands.calls == [
-        ("wc -l | cat", {"E": "1"}, "/workspace", data is not None)
+        (
+            wrap_line("wc -l | cat", {"E": "1"}, "/workspace"),
+            data is not None,
+        )
     ]
     handle = sandbox.commands.handles[0]
     assert handle.eof and handle.disconnected and not handle.killed

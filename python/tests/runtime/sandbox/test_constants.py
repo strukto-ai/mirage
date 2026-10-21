@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.runtime.sandbox.ssh.constants import wrap_line
+from mirage.runtime.sandbox.constants import wrap_line
 
 PRELUDE = 'sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
 

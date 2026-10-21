@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinRedirect } from './constants.ts'
+import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -133,10 +134,9 @@ describe('DaytonaRuntime', () => {
     expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
     expect(DEC.decode(sandbox.fs.files.get(path ?? ''))).toBe('a\nb\n')
     const [command, cwd, env] = sandbox.process.calls[0] ?? ['', undefined, undefined]
-    expect(command).toBe(stdinRedirect('wc -l', path ?? ''))
+    expect(command).toBe(stdinRedirect(wrapLine('wc -l', { E: '1' }, '/workspace'), path ?? ''))
     expect(command).toContain(`rm -f ${path ?? ''}`)
-    expect(cwd).toBe('/workspace')
-    expect(env).toEqual({ E: '1' })
+    expect([cwd, env]).toEqual([undefined, undefined])
   })
 
   it('close releases the client, never the sandbox', async () => {

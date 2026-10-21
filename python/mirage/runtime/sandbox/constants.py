@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.runtime.types import MountType
+from mirage.utils.quote import single_quote
 
 
 def sdk_install_hint(name: str) -> str:
@@ -67,12 +68,40 @@ PIPE_SERVER_HINT = (
 )
 
 # Every argv a sandbox runs goes under this POSIX sh prelude, with the
-# cwd as $1: a provider CLI's exec passes `-w /` (exec_args), and ssh
-# dresses its line with it (wrap_line). An exec's `-e` can append to the
-# image's environment rather than replace a name it already sets, and
-# `-w` can create a missing directory instead of failing. sh imports the
+# cwd as $1: a provider CLI's exec passes `-w /` (exec_args), and a
+# provider whose exec takes one command line dresses it (wrap_line), so
+# no provider's own cwd is used. An exec's `-e` can append to the image's
+# environment rather than replace a name it already sets, `-w` can
+# create a missing directory, and an SDK's cwd fails a missing one its
+# own way (E2B: exit 1). sh imports the
 # environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
 # not serve, and `exec` hands over the argv unchanged. `cd` runs without
 # CDPATH, so a relative cwd resolves from `/` and prints nothing, while
 # the program still sees the guest's own CDPATH.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
+
+
+def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
+    """The line dressed for a sandbox whose exec takes one command line
+    (ssh, e2b, daytona): cwd, env, then sh.
+
+    Such an exec has no docker-style ``-w``/``-e`` to trust: SSH's env
+    channel is AcceptEnv-gated server-side, so it silently drops names,
+    and an SDK's own cwd fails a missing directory in its own words. So
+    the working directory and the merged environment ride the command
+    itself: the prelude every sandbox runs a command under enters
+    ``cwd`` (exit 126 when the sandbox lacks it), then
+    ``env 'K=V' ... sh -c 'line'``. Every piece is single-quoted for sh,
+    so the shell the exec starts reads each as one word whatever it
+    holds; the sandbox only needs a POSIX-compatible shell.
+
+    Args:
+        line (str): the raw shell line.
+        env (dict[str, str]): the merged environment.
+        cwd (str): the working directory, passed through verbatim.
+    """
+    parts = ["sh", "-c", single_quote(EXEC_PRELUDE), "sh", single_quote(cwd)]
+    parts += ["env"]
+    parts += [single_quote(f"{key}={value}") for key, value in env.items()]
+    parts += ["sh", "-c", single_quote(line)]
+    return " ".join(parts)

@@ -15,6 +15,7 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.daytona import DaytonaRuntime, sdk
 from mirage.runtime.sandbox.daytona.constants import stdin_redirect
 
@@ -124,10 +125,10 @@ async def test_exec_line_redirects_stdin_through_a_file():
     assert path.startswith("/tmp/.mirage_stdin_")
     assert sandbox.fs.files[path] == b"a\nb\n"
     command, cwd, env = sandbox.process.calls[0]
-    assert command == stdin_redirect("wc -l", path)
+    wrapped = wrap_line("wc -l", {"E": "1"}, "/workspace")
+    assert command == stdin_redirect(wrapped, path)
     assert f"rm -f {path}" in command
-    assert cwd == "/workspace"
-    assert env == {"E": "1"}
+    assert (cwd, env) == (None, None)
 
 
 @pytest.mark.asyncio

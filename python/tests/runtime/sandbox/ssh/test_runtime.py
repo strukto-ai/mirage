@@ -20,8 +20,8 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
-from mirage.runtime.sandbox.ssh.constants import wrap_line
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 

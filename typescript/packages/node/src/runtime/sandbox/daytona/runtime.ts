@@ -15,6 +15,7 @@
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { stdinPath, stdinRedirect } from './constants.ts'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
+import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -66,13 +67,13 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
     cwd: string,
   ): Promise<RunResult> {
     if (this.sandbox === null) throw new Error('daytona sandbox not connected')
-    let command = line
+    let command = wrapLine(line, env, cwd)
     if (stdin !== null) {
       const path = stdinPath()
       await this.upload(path, stdin)
-      command = stdinRedirect(line, path)
+      command = stdinRedirect(command, path)
     }
-    const response = await this.sandbox.process.executeCommand(command, cwd, env)
+    const response = await this.sandbox.process.executeCommand(command)
     return {
       stdout: ENC.encode(response.result),
       stderr: null,

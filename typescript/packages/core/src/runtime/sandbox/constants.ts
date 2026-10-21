@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { singleQuote } from '../../utils/quote.ts'
 import type { MountType } from '../types.ts'
 
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
@@ -48,13 +49,36 @@ export const PIPE_SERVER_HINT =
 
 /**
  * Every argv a sandbox runs goes under this POSIX sh prelude, with the
- * cwd as $1: a provider CLI's exec passes `-w /` (`execArgs`), and ssh
- * dresses its line with it (`wrapLine`). An exec's `-e` can append to the
- * image's environment rather than replace a name it already sets, and
- * `-w` can create a missing directory instead of failing. sh imports the
+ * cwd as $1: a provider CLI's exec passes `-w /` (`execArgs`), and a
+ * provider whose exec takes one command line dresses it (`wrapLine`), so
+ * no provider's own cwd is used. An exec's `-e` can append to the image's
+ * environment rather than replace a name it already sets, `-w` can
+ * create a missing directory, and an SDK's cwd fails a missing one its
+ * own way (E2B: exit 1). sh imports the
  * environment last-wins, `cd` fails loud (126) on a cwd the sandbox does
  * not serve, and `exec` hands over the argv unchanged. `cd` runs without
  * CDPATH, so a relative cwd resolves from `/` and prints nothing, while
  * the program still sees the guest's own CDPATH.
  */
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
+
+/**
+ * The line dressed for a sandbox whose exec takes one command line
+ * (ssh, e2b, daytona): cwd, env, then sh.
+ *
+ * Such an exec has no docker-style `-w`/`-e` to trust: SSH's env channel
+ * is AcceptEnv-gated server-side, so it silently drops names, and an
+ * SDK's own cwd fails a missing directory in its own words. So the
+ * working directory and the merged environment ride the command itself:
+ * the prelude every sandbox runs a command under enters `cwd` (exit 126
+ * when the sandbox lacks it), then `env 'K=V' ... sh -c 'line'`. Every
+ * piece is single-quoted for sh, so the shell the exec starts reads each
+ * as one word whatever it holds; the sandbox only needs a
+ * POSIX-compatible shell.
+ */
+export function wrapLine(line: string, env: Record<string, string>, cwd: string): string {
+  const parts = ['sh', '-c', singleQuote(EXEC_PRELUDE), 'sh', singleQuote(cwd), 'env']
+  for (const [key, value] of Object.entries(env)) parts.push(singleQuote(`${key}=${value}`))
+  parts.push('sh', '-c', singleQuote(line))
+  return parts.join(' ')
+}
