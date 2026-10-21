@@ -74,6 +74,23 @@ The [`Session`](#session) every call below runs as. It creates the session when 
 session = await ws.session("agent")
 ```
 
+### ws.set_profile, ws.set_session_profile
+
+```python
+ws.set_profile(name, profile) -> None
+await ws.set_session_profile(session_id, profile) -> SessionState
+```
+
+Change the rules after the workspace is built. `set_profile` defines a profile name or replaces what it means; a document no session could run under raises `PolicyError` and leaves the table as it was. A live session keeps its rules until `set_session_profile` moves it. Given a name, the session runs that profile's current definition and keeps the name, which `whoami` and the profile's policy programs read; its working directory, variables and history stay. `None` picks the workspace default, and a document passed directly runs without a name.
+
+```python
+ws.set_profile(
+    "user",
+    {"commands": {"allow": ["ls", "cat"]}, "paths": {"hide": ["/data/secret"]}},
+)
+await ws.set_session_profile("agent", "user")
+```
+
 ### ws.list_sessions, ws.close_session
 
 ```python
