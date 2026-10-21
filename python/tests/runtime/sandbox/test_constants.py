@@ -76,10 +76,17 @@ def test_a_path_without_sh_still_runs_the_line(tmp_path):
 def test_the_stop_line_ends_a_run_that_ignores_term(path):
     exec_id = uuid.uuid4().hex
     program = subprocess.Popen(
-        ["/bin/sh", "-c", 'trap "" TERM; while :; do sleep 1; done'],
+        [
+            "/bin/sh",
+            "-c",
+            'trap "" TERM; echo ready; while :; do sleep 1; done',
+        ],
         env={**os.environ, EXEC_ID: exec_id},
+        stdout=subprocess.PIPE,
     )
+    assert program.stdout is not None
     try:
+        assert program.stdout.readline() == b"ready\n"
         done = subprocess.run(
             ["/bin/sh", "-c", reap_line(exec_id)],
             env=dict(os.environ) if path is None else {"PATH": path},
@@ -91,3 +98,4 @@ def test_the_stop_line_ends_a_run_that_ignores_term(path):
     finally:
         if program.poll() is None:
             program.kill()
+        program.stdout.close()
