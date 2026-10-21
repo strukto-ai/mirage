@@ -38,8 +38,6 @@ from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import decode_text
@@ -995,7 +993,6 @@ async def execute_node(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
@@ -1029,7 +1026,6 @@ async def execute_node(
                 stdin,
                 call_stack,
                 cancel,
-                routing_decision,
                 sink,
                 handed,
                 execution_scope,
@@ -1048,7 +1044,6 @@ async def execute_node(
         stdin,
         call_stack,
         cancel,
-        routing_decision,
         sink,
         handed,
         execution_scope,
@@ -1117,7 +1112,6 @@ async def _execute_node(
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
     cancel: asyncio.Event | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     sink: JobConsole | None = None,
     handed: HandOff | None = None,
     execution_scope: ExecutionScope | None = None,
@@ -1183,7 +1177,6 @@ async def _execute_node(
         job_table,
         execute_fn,
         cancel=cancel,
-        routing_decision=routing_decision,
         handed=handed,
         execution_scope=execution_scope,
     )
@@ -1310,7 +1303,6 @@ async def _execute_node(
                     cs,
                     job_table,
                     cancel=cancel,
-                    routing_decision=routing_decision,
                     handed=handed,
                     sink=sink,
                     expanded=expanded,
@@ -1406,7 +1398,6 @@ async def _execute_node(
             sub_table,
             execute_fn,
             cancel=cancel,
-            routing_decision=routing_decision,
             handed=handed,
         )
         child = child_context(context)

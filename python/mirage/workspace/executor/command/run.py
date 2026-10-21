@@ -170,7 +170,6 @@ async def run_on_mount(
     stdin: ByteSource | None = None,
     resolve_hint: PathSpec | None = None,
     mount: MountEntry | None = None,
-    routing_decision: RouteDecision[Runtime[Any]] | None = None,
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
     follow: FollowOperands | None = None,
@@ -224,8 +223,9 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    assert routing_decision is not None
-    line_runtime, denial = line_runtime_for(cmd_name, routing_decision)
+    routing = context.frame.routing
+    assert routing is not None
+    line_runtime, denial = line_runtime_for(cmd_name, routing)
     if denial is not None:
         return None, denial
 

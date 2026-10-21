@@ -56,6 +56,16 @@ import { makeAbortError } from '../../utils/abort.ts'
  * claimed there like a command's: kept for the retry of a line still
  * waiting on another question, spent when the line ends.
  */
+// The line's decision rides its evaluation's frame, which the walker
+// reads per command and a child evaluation forks with it: nested lines
+// never re-route. Declared here, where the decision is made, so the
+// frame's module imports no runtime.
+declare module '../frame.ts' {
+  interface ExecutionFrame {
+    routing?: RouteDecision<Runtime>
+  }
+}
+
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes

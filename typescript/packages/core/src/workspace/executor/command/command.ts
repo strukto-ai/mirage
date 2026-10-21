@@ -44,8 +44,6 @@ import { MountCommandUnsupported, type MountRegistry } from '../../mount/registr
 import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, dereferences, lookup, runsAs } from '../../lookup/index.ts'
 import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
-import { type Runtime } from '../../../runtime/base.ts'
-import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import { type SessionState, sessionEntry } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -260,7 +258,6 @@ export async function handleCommand(
   callStack: CallStack | null = null,
   jobTable: JobTable | null = null,
   namespace?: Namespace,
-  routingDecision?: RouteDecision<Runtime>,
   executeFn?: ExecuteFn,
   handed: HandOff | null = null,
   signal?: AbortSignal,
@@ -357,7 +354,7 @@ export async function handleCommand(
           ...(registry.processView === undefined
             ? {}
             : { processes: registry.processView(session) }),
-          ...(routingDecision === undefined ? {} : { routing: routingDecision }),
+          ...(context.frame.routing === undefined ? {} : { routing: context.frame.routing }),
         },
         reachesService(cliInstall.cli) ? () => registry.dropCaches(cliInstall.accessor) : null,
       ),
@@ -388,7 +385,6 @@ export async function handleCommand(
     context,
     dispatch,
     ...(namespace !== undefined ? { namespace } : {}),
-    ...(routingDecision !== undefined ? { routingDecision } : {}),
     ...(executeFn !== undefined ? { executeFn } : {}),
   }
 

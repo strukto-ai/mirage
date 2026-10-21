@@ -30,8 +30,6 @@ import {
   isProgramInvocation,
   redirectPathsFor,
 } from '../../context/session_context.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { guardDispatch } from '../abort.ts'
 import { mergeSignals } from '../../utils/abort.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
@@ -136,7 +134,6 @@ export async function executeCommand(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The line's parse scope; only alias expansion needs it, and each
   // expansion parses in a fork released when it ends. Absent means an
@@ -377,7 +374,6 @@ export async function executeCommand(
       stdinIn,
       callStack,
       jobTable,
-      routingDecision,
       signal,
       handed,
       seedPrefix,
@@ -466,7 +462,6 @@ async function runCommandBody(
   stdinIn: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  routingDecision?: RouteDecision<Runtime>,
   signalIn?: AbortSignal,
   handed?: HandOff,
   seedPrefix?: (command: string) => Promise<void>,
@@ -498,7 +493,6 @@ async function runCommandBody(
       registry,
       namespace.sessionLinks(session),
       sessionView(session, registry.policies, context.frame.diagnostics),
-      routingDecision,
     ),
   )
   if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]
@@ -506,7 +500,7 @@ async function runCommandBody(
   // Limits resolve against the expanded name, so `$CMD`-style
   // invocations get their real command's policy.
   // Mount, CLI and external dispatch own their resolved deadlines.
-  const consumer = lookup(argv.name, session, registry, routingDecision)
+  const consumer = lookup(argv.name, session, registry, context.frame.routing)
   const ownsDeadline =
     !argv.name.includes('/') &&
     (consumer === Consumer.EXTERNAL ||
@@ -538,7 +532,6 @@ async function runCommandBody(
       stdin,
       callStack,
       jobTable,
-      routingDecision,
       signal,
       readRow(node),
       redirectPathsFor(node),
@@ -600,7 +593,6 @@ async function runArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  routingDecision?: RouteDecision<Runtime>,
   signal?: AbortSignal,
   // The row the shell began reading the command on within its parse
   // (`readRow`), which only `alias`, `unalias` and `shopt` read: the
@@ -633,7 +625,7 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const refusedExternal = runtimeRefused(name, session, registry, routingDecision)
+  const refusedExternal = runtimeRefused(name, session, registry, context.frame.routing)
   const boundary = refusedExternal
     ? [...argv.operands]
     : await expandBoundaryGlobs(
@@ -740,7 +732,6 @@ async function runArgv(
         given,
         callStack,
         jobTable,
-        routingDecision,
         signal,
         row,
         claimant?.line ?? null,
@@ -882,7 +873,6 @@ async function routeArgv(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   jobTable: JobTable | null,
-  routingDecision: RouteDecision<Runtime> | undefined,
   signal: AbortSignal | undefined,
   row: number,
   handed: HandOff | null,
@@ -934,10 +924,11 @@ async function routeArgv(
     ]
   }
 
-  const consumer = lookup(name, session, registry, routingDecision)
+  const routing = context.frame.routing
+  const consumer = lookup(name, session, registry, routing)
   if (consumer === Consumer.EXTERNAL) {
-    if (routingDecision === undefined) throw new Error(`${name}: run outside a routed line`)
-    return runExternal(argv, stdin, session, registry, routingDecision, signal)
+    if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
+    return runExternal(argv, stdin, session, registry, routing, signal)
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to
@@ -1115,7 +1106,6 @@ async function routeArgv(
     callStack,
     jobTable,
     namespace,
-    routingDecision,
     executeFn,
     handed ?? null,
     signal,

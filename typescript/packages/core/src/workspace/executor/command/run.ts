@@ -48,7 +48,6 @@ export interface RunOnMountCtx {
   context: EvaluationContext
   dispatch: DispatchFn
   namespace?: Namespace
-  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   executeFn?: ExecuteFn
   // The line's operand resolution, for the command's globs.
@@ -160,7 +159,7 @@ export async function runOnMount(
   flagKwargs: Flags,
   opts: RunOnMountOpts = {},
 ): Promise<[ByteSource | null, IOResult]> {
-  const { registry, context, dispatch, namespace, routingDecision } = ctx
+  const { registry, context, dispatch, namespace } = ctx
   const session = context.session
   const hint = opts.resolveHint ?? null
   let mount = opts.mount ?? null
@@ -191,8 +190,9 @@ export async function runOnMount(
     mount.commandLimits.get(cmdName) ??
     ownLimit(registry.commandLimits, cmdName)
 
-  if (routingDecision === undefined) throw new Error(`${cmdName}: run outside a routed line`)
-  const [lineRuntime, denial] = lineRuntimeFor(cmdName, routingDecision)
+  const routing = context.frame.routing
+  if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
+  const [lineRuntime, denial] = lineRuntimeFor(cmdName, routing)
   if (denial !== null) return [null, denial]
 
   const signal = mergeSignals(mergeSignals(ctx.signal, ctx.context.frame.abortSignal), opts.signal)

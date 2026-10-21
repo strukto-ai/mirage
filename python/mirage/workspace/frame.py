@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mirage.shell.types import TSNodeLike
 
 if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
+    from mirage.runtime.base import Runtime
+    from mirage.runtime.routing import RouteDecision
     from mirage.shell.console import JobConsole
 
 
@@ -31,9 +33,11 @@ class ExecutionFrame:
     process_sub: (
         Callable[[TSNodeLike, ProcessSubLine], Awaitable[str]] | None
     ) = None
+    routing: RouteDecision[Runtime[Any]] | None = None
 
     def fork(self) -> ExecutionFrame:
-        """A child evaluation's frame, which starts empty.
+        """A child evaluation's frame, which starts empty but for the
+        line's routing decision: nested lines never re-route.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
@@ -41,4 +45,4 @@ class ExecutionFrame:
         Args:
             None
         """
-        return ExecutionFrame()
+        return ExecutionFrame(routing=self.routing)

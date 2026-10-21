@@ -573,6 +573,9 @@ async function runPreparedLine(
             )
           }
           const routingDecision = placed
+          // The walker reads it off the frame, which a child evaluation
+          // forks with it: nested lines never re-route.
+          context.frame.routing = routingDecision
 
           const dispatch: DispatchFn = env.dispatcher.forSession(effectiveSession).dispatch
 
@@ -751,7 +754,7 @@ async function runPreparedLine(
             }
           }
 
-          const lineDeps: ExecuteNodeDeps & { routingDecision: RouteDecision<Runtime> } = {
+          const lineDeps: ExecuteNodeDeps = {
             dispatch,
             registry: env.registry,
             namespace: env.namespace,
@@ -766,7 +769,6 @@ async function runPreparedLine(
             // fresh line, so it needs the same parser the line reader used. The
             // parser is already resolved by the time the tree runs.
             parser,
-            routingDecision,
             ...(options.signal !== undefined ? { signal: options.signal } : {}),
           }
           const deps = withHandOff(
@@ -782,6 +784,7 @@ async function runPreparedLine(
                 options,
                 rootNode,
                 deps,
+                routingDecision,
                 targetSession,
                 context,
                 stdin,
@@ -829,7 +832,8 @@ async function runParsedLine(
   command: string,
   options: ExecuteOptions,
   rootNode: TSNodeLike,
-  deps: ExecuteNodeDeps & { routingDecision: RouteDecision<Runtime> },
+  deps: ExecuteNodeDeps,
+  decision: RouteDecision<Runtime>,
   targetSession: SessionState,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -876,7 +880,7 @@ async function runParsedLine(
   // for the tree: a question put to a host has to answer to both, and
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, context.frame.abortSignal)
-  const lineRuntime = wholeLineRuntime(deps.routingDecision.bindings)
+  const lineRuntime = wholeLineRuntime(decision.bindings)
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
   // runtime's env snapshot reads the vars. The prejudge pass leaves
@@ -912,7 +916,7 @@ async function runParsedLine(
         )
         if (served.length !== nodes.length) {
           planNodes = served
-          planWhole = guestBound(served, deps.routingDecision)
+          planWhole = guestBound(served, decision)
           planCli = cliEnvNames(served, effectiveSession, env.registry)
           names =
             served.length === 0
@@ -1116,7 +1120,7 @@ async function runParsedLine(
       const nodes = lineNodes(rootNode, effectiveSession, reparse)
       const filled = await fillManaged(
         nodes,
-        guestBound(nodes, deps.routingDecision),
+        guestBound(nodes, decision),
         cliEnvNames(nodes, effectiveSession, env.registry),
         true,
       )

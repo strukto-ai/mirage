@@ -24,8 +24,6 @@ import { MountRegistry } from '../../mount/registry.ts'
 import { SessionState } from '../../session/session.ts'
 import type { ExecuteNodeFn } from './types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { Runtime } from '../../../runtime/base.ts'
-import type { RouteDecision } from '../../../runtime/routing/index.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -41,10 +39,11 @@ class StubVFS extends BaseVFS {
   }
 }
 
-// The decision a line no policy placed, on a world of the workspace alone.
-const WORKSPACE_SERVES: RouteDecision<Runtime> = {
-  bindings: {},
-  fallback: new WorkspaceRuntime(),
+// An evaluation on the decision a line no policy placed, on a world of
+// the workspace alone.
+function routed(context: EvaluationContext): EvaluationContext {
+  context.frame.routing = { bindings: {}, fallback: new WorkspaceRuntime() }
+  return context
 }
 
 const NEVER_EXECUTE: ExecuteNodeFn = () => {
@@ -99,12 +98,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       NEVER_DISPATCH,
       reg,
       ['cat', PathSpec.fromStrPath('/ram/x')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      null,
-      undefined,
-      WORKSPACE_SERVES,
+      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
     expect(io.exitCode).toBe(0)
     expect(exec.exitCode).toBe(0)
@@ -139,12 +133,7 @@ describe('handleCommand — dispatches to mount that has the command', () => {
       NEVER_DISPATCH,
       reg,
       ['head', '-n', '5', PathSpec.fromStrPath('/ram/x')],
-      new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      null,
-      null,
-      null,
-      undefined,
-      WORKSPACE_SERVES,
+      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
     )
     expect(seenFlags.n).toBe('5')
   })

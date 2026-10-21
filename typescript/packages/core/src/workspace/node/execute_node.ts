@@ -30,8 +30,6 @@ import {
 } from '../../context/session_context.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessSupervisor } from '../../process/supervisor.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import type { RouteDecision } from '../../runtime/routing/index.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
@@ -157,7 +155,7 @@ type Recurse = (
  * job holds and asked again, and what it claimed went back to a hand-off
  * nothing revokes any more.
  */
-export function withHandOff<D extends ExecuteNodeDeps>(deps: D, handed: HandOff): D {
+export function withHandOff(deps: ExecuteNodeDeps, handed: HandOff): ExecuteNodeDeps {
   const inner = deps.executeFn
   const executeFn: ExecuteFn = (cmd, opts) => inner(cmd, { handed, ...opts })
   return { ...deps, handed, executeFn }
@@ -827,7 +825,6 @@ export interface ExecuteNodeDeps {
   executeFn: ExecuteFn
   workspaceId: string
   registerCloser: (fn: () => Promise<void>) => void
-  routingDecision?: RouteDecision<Runtime>
   signal?: AbortSignal
   /**
    * The hand-off this subtree runs on, carried to every command's gate
@@ -1200,7 +1197,6 @@ async function executeNodeBody(
           stdin,
           callStack,
           jobTable,
-          deps.routingDecision,
           deps.signal,
           deps.parser,
           deps.handed,

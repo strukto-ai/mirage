@@ -37,9 +37,9 @@ from mirage.workspace.session.session import vars_from_env
 
 
 def execute_node(dispatch, registry, *args, **kwargs):
-    kwargs.setdefault(
-        "routing_decision", RouteDecision(fallback=WorkspaceRuntime())
-    )
+    context = kwargs.get("context", args[3] if len(args) > 3 else None)
+    if context is not None and context.frame.routing is None:
+        context.frame.routing = RouteDecision(fallback=WorkspaceRuntime())
     return _execute_node(
         dispatch, registry, Namespace(registry), *args, **kwargs
     )

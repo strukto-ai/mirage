@@ -270,6 +270,7 @@ async def recurse(
         try:
             tree = parser.parse(cmd)
             if input_substitution_redirect(tree) is not None:
+                context.frame.routing = routing_decision
                 evaluate = partial(
                     recurse,
                     ws,
@@ -289,7 +290,6 @@ async def recurse(
                     context,
                     None,
                     cancel,
-                    routing_decision=routing_decision,
                     handed=inner,
                     command_substitution=True,
                     execution_scope=execution_scope,
@@ -820,6 +820,9 @@ async def run_prepared_line(
                 record_status(session, io.exit_code)
                 return io
             decision = placed
+            # The walker reads it off the frame, which a child evaluation
+            # forks with it: nested lines never re-route.
+            context.frame.routing = decision
             # Bound by keyword so the walker can rebind it per node: a
             # background job's nested lines run without the caller's
             # event, as the job itself does.
@@ -1015,7 +1018,6 @@ async def run_prepared_line(
                 context,
                 stdin,
                 cancel,
-                routing_decision=decision,
                 handed=handed,
                 sink=sink,
                 call_stack=call_stack,
