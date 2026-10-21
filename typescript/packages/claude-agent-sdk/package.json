@@ -1,0 +1,62 @@
+{
+  "name": "@struktoai/mirage-claude-agent-sdk",
+  "version": "0.0.8-alpha.1",
+  "description": "Run @anthropic-ai/claude-agent-sdk against a Mirage workspace through an in-process MCP server of Mirage's tools",
+  "keywords": [
+    "mirage",
+    "claude-agent-sdk",
+    "claude-code",
+    "ai-agents",
+    "virtual-filesystem"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/claude-agent-sdk"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.20 || ^24.12 || >=25"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-core": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.233"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.233",
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@struktoai/mirage-node": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

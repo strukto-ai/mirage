@@ -4,7 +4,6 @@
 '@struktoai/mirage-browser': minor
 '@struktoai/mirage-cli': minor
 '@struktoai/mirage-server': minor
-'@struktoai/mirage-agents': minor
 '@struktoai/mirage-dsh': minor
 ---
 

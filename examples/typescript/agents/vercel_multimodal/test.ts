@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mirageTools } from '@struktoai/mirage-agents/vercel'
+import { mirageTools } from '@struktoai/mirage-vercel'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { openai } from '@ai-sdk/openai'
 import { generateText, stepCountIs } from 'ai'

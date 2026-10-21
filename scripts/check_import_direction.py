@@ -34,8 +34,8 @@ EXCEPTIONS = ROOT / "scripts" / "parity" / "import_exceptions.json"
 LOW = ("accessor", "cache", "core", "utils", "view", "vfs")
 HIGH = ("commands", "workspace")
 
-# The packages that share core's layout; cli, server and agents sit
-# above all of it.
+# The packages that share core's layout; cli, server and the agent
+# adapters sit above all of it.
 TS_PACKAGES = ("core", "node", "browser")
 
 # A command reaches files only through ctx.vfs. To a command a VFS object

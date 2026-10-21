@@ -133,6 +133,8 @@ jobs:
             "openai:mirage.agents.openai_agents"
             "agno:mirage.agents.agno"
             "deepagents:mirage.agents.langchain"
+            "claude-agent-sdk:mirage.agents.claude_agent_sdk"
+            "claude-managed-agents:mirage.agents.claude_managed_agents.tools"
           )
           failed=()
           for entry in "${entries[@]}"; do

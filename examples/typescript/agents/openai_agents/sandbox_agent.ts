@@ -18,7 +18,7 @@ import { dirname, resolve } from 'node:path'
 import { run } from '@openai/agents'
 import { Capabilities, SandboxAgent } from '@openai/agents/sandbox'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-agents/openai_agents'
+import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-openai-agents'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-import { miragePlugin } from '@struktoai/mirage-agents/opencode'
+import { miragePlugin } from '@struktoai/mirage-opencode/plugin'
 
 async function makeWs(sessionID: string): Promise<Workspace> {
   const ram = new RAMVFS()

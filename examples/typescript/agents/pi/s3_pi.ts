@@ -29,7 +29,7 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent'
-import { mirageExtension } from '@struktoai/mirage-agents/pi'
+import { mirageExtension } from '@struktoai/mirage-pi'
 import { configurePiModel } from './config.ts'
 
 loadEnv({

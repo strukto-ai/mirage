@@ -33,7 +33,7 @@ import {
   type LinearConfig,
   type SlackConfig,
 } from '@struktoai/mirage-node'
-import { MirageSandboxClient } from '@struktoai/mirage-agents/openai_agents'
+import { MirageSandboxClient } from '@struktoai/mirage-openai-agents'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

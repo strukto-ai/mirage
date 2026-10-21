@@ -20,7 +20,13 @@ SERVER_PKG = "@struktoai/mirage-server"
 # One new import in one leaf module puts it all back.
 HEAVY = (
     "@struktoai/mirage-node",
-    "@struktoai/mirage-agents",
+    "@struktoai/mirage-openai-agents",
+    "@struktoai/mirage-langchain",
+    "@struktoai/mirage-pi",
+    "@struktoai/mirage-vercel",
+    "@struktoai/mirage-mastra",
+    "@struktoai/mirage-claude-agent-sdk",
+    "@struktoai/mirage-claude-managed-agents",
     "fastify",
     "@fastify/",
     "jose",

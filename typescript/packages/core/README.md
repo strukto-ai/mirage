@@ -164,7 +164,8 @@ in Mirage can resolve straight to a credential held in one of them.
 ### Python
 
 ```bash
-uv add mirage-ai    # installs the `mirage` library and the `mirage` CLI binary
+uv add mirage-ai              # installs the `mirage` library and the `mirage` CLI binary
+uv add 'mirage-ai[openai]'    # OpenAI Agents adapter; each agent framework is an extra
 ```
 
 ### TypeScript
@@ -172,7 +173,7 @@ uv add mirage-ai    # installs the `mirage` library and the `mirage` CLI binary
 ```bash
 npm install @struktoai/mirage-node      # Node.js servers and CLIs
 npm install @struktoai/mirage-browser   # browser / edge runtimes
-npm install @struktoai/mirage-agents    # OpenAI / Vercel AI / LangChain / Mastra adapters
+npm install @struktoai/mirage-vercel    # Vercel AI adapter; each agent framework has its own package
 ```
 
 Both runtime packages pull in `@struktoai/mirage-core` automatically.

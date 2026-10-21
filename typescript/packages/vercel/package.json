@@ -1,0 +1,59 @@
+{
+  "name": "@struktoai/mirage-vercel",
+  "version": "0.0.8-alpha.1",
+  "description": "Mirage workspace tools for the Vercel AI SDK",
+  "keywords": [
+    "mirage",
+    "vercel-ai-sdk",
+    "ai-agents",
+    "virtual-filesystem"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/vercel"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.20 || ^24.12 || >=25"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "ai": "^7.0.66"
+  },
+  "devDependencies": {
+    "@struktoai/mirage-node": "workspace:*",
+    "@types/node": "^22.0.0",
+    "ai": "^7.0.66",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

@@ -40,10 +40,10 @@ Your program holds the workspace and hands it to the framework.
 
 Mirage's seven tools are the session's [`session.tools`](/typescript/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. A session gets the ones its [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it (`session.tools.names()`), so an agent is never offered a tool every call of which would be refused.
 
-Each framework is a subpath of `@struktoai/mirage-agents`, such as `@struktoai/mirage-agents/vercel`, so a bundle carries only what it imports.
+Each framework is its own package: `@struktoai/mirage-vercel`, `@struktoai/mirage-mastra`, `@struktoai/mirage-claude-agent-sdk`, `@struktoai/mirage-openai-agents` or `@struktoai/mirage-langchain`.
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node
+pnpm add @struktoai/mirage-vercel @struktoai/mirage-node
 ```
 
 When the framework supports browsers, use `@struktoai/mirage-browser` in place of `@struktoai/mirage-node`.

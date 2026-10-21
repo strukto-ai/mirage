@@ -1,6 +1,6 @@
 ---
 title: Mastra
-description: Wire mirage tools into a Mastra Agent via the @struktoai/mirage-agents/mastra adapter.
+description: Wire mirage tools into a Mastra Agent via @struktoai/mirage-mastra.
 icon: /images/mastra-logo.svg
 ---
 
@@ -13,7 +13,7 @@ icon: /images/mastra-logo.svg
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mastra/core
+pnpm add @struktoai/mirage-mastra @struktoai/mirage-node @mastra/core
 ```
 
 ## Usage
@@ -21,8 +21,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @mastra/core
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { Agent } from '@mastra/core/agent'
-import { mirageTools } from '@struktoai/mirage-agents/mastra'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
+import { buildSystemPrompt, mirageTools } from '@struktoai/mirage-mastra'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -48,6 +47,7 @@ console.log(result.text)
 | Symbol | Purpose |
 | --- | --- |
 | `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each a Mastra `createTool()` with the id `mirage-<tool>`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
+| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
 
 ## Examples
 

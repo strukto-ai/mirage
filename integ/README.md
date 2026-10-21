@@ -245,7 +245,7 @@ and math precision cases. The following paths select
 additional jobs:
 
 Shared TypeScript fixtures under `packages/*/tests/` and the
-`packages/agents/src/openai_agents/` adapter remain covered by the whole-host
+`packages/openai-agents/` adapter remain covered by the whole-host
 TypeScript filters. Integration runners import some of those fixtures.
 Formatting and stream unit tests consolidated under `commands/builtin/utils/`
 remain covered by the same whole-host filters on both hosts.

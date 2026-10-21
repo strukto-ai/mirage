@@ -1,0 +1,61 @@
+{
+  "name": "@struktoai/mirage-pi",
+  "version": "0.0.8-alpha.1",
+  "description": "Run the pi coding agent with its built-in tools wired to a Mirage workspace",
+  "keywords": [
+    "mirage",
+    "pi-coding-agent",
+    "ai-agents",
+    "virtual-filesystem"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/pi"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.20 || ^24.12 || >=25"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-core": "workspace:*",
+    "picomatch": "^4.0.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.2 || ^1.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@struktoai/mirage-node": "workspace:*",
+    "@types/node": "^22.0.0",
+    "@types/picomatch": "^4.0.3",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

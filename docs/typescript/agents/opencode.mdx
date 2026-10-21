@@ -55,17 +55,17 @@ Stale-write protection is enabled by default and isolated per OpenCode session. 
 
 ## Custom plugin
 
-Use `@struktoai/mirage-agents/opencode` directly when the workspace is constructed in code rather than YAML:
+Use `@struktoai/mirage-opencode/plugin` directly when the workspace is constructed in code rather than YAML:
 
 ```bash
-bun add @struktoai/mirage-agents @struktoai/mirage-node @opencode-ai/plugin
+bun add @struktoai/mirage-opencode @struktoai/mirage-node @opencode-ai/plugin
 ```
 
 Create `.opencode/plugins/mirage.ts`:
 
 ```ts .opencode/plugins/mirage.ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
-import { miragePlugin } from '@struktoai/mirage-agents/opencode'
+import { miragePlugin } from '@struktoai/mirage-opencode/plugin'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -77,8 +77,8 @@ Add the dependencies to `.opencode/package.json`:
 ```json .opencode/package.json
 {
   "dependencies": {
-    "@struktoai/mirage-agents": "*",
     "@struktoai/mirage-node": "*",
+    "@struktoai/mirage-opencode": "*",
     "@opencode-ai/plugin": "*"
   }
 }

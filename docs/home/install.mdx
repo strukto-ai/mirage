@@ -21,6 +21,7 @@ uv add mirage-ai
 ```
 
 This installs both the `mirage` library and the `mirage` CLI binary.
+Each agent framework adapter is an extra, such as `uv add 'mirage-ai[openai]'`.
 
 ## TypeScript
 
@@ -29,7 +30,7 @@ Pick the package that matches your runtime — `@struktoai/mirage-core` is auto-
 ```bash
 npm install @struktoai/mirage-node      # Node.js servers and CLIs
 npm install @struktoai/mirage-browser   # browser / edge runtimes
-npm install @struktoai/mirage-agents    # OpenAI / Vercel AI / LangChain / Mastra adapters
+npm install @struktoai/mirage-vercel    # Vercel AI adapter; each agent framework has its own package
 ```
 
 ## CLI

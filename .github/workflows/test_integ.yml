@@ -75,8 +75,8 @@ jobs:
             # Rust cut/tr streams and both host adapters use these filters.
             # Git's remaining TypeScript diff_format helpers use the TS
             # filter; shell diff uses the shared Rust engine on both hosts.
-            # Shared fixtures under packages/*/tests and the openai_agents
-            # adapter stay covered by the whole TypeScript filters. Some
+            # Shared fixtures under packages/*/tests and the openai-agents
+            # package stay covered by the whole TypeScript filters. Some
             # integration runners import those fixtures, so keep them covered.
             # Formatting and stream tests consolidated under builtin/utils
             # remain in the same whole-host filters on both hosts.
@@ -445,12 +445,12 @@ jobs:
 
       # Built here rather than downloaded from the bootstrap job: waiting for
       # that job held this one, among the last to finish, back by a minute
-      # and a half, and the five packages every step here imports build in
+      # and a half, and the four packages every step here imports build in
       # under one. The lifecycle and policy corpora take the VFS call
       # table from mirage-server.
-      - name: Build mirage-core, mirage-node, mirage-browser, mirage-agents and mirage-server
+      - name: Build mirage-core, mirage-node, mirage-browser and mirage-server
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser --filter @struktoai/mirage-agents --filter @struktoai/mirage-server build
+        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser --filter @struktoai/mirage-server build
 
       - name: Wait for Nextcloud and tune it for the battery
         uses: ./.github/actions/nextcloud-tune

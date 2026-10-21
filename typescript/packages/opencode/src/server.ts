@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Plugin, PluginModule, PluginOptions } from '@opencode-ai/plugin'
-import { mirageTools } from '@struktoai/mirage-agents/opencode'
+import { mirageTools } from './plugin.ts'
 import { buildWorkspaceFromConfig, resolveWorkspaceConfig } from '@struktoai/mirage-server'
 
 export interface MirageOpenCodePluginOptions {

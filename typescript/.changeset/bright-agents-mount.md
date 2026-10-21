@@ -1,5 +1,4 @@
 ---
-'@struktoai/mirage-agents': minor
 '@struktoai/mirage-cli': minor
 ---
 

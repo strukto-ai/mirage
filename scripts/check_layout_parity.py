@@ -27,15 +27,22 @@ PY_ROOT = ROOT / "python" / "mirage"
 # core/node/browser are three runtime halves of one namespace -- CLAUDE.md
 # puts node-only code in `node` and browser-only code in `browser`, so their
 # module sets are unioned against the same python directory. cli, server and
-# agents are their own npm packages whose python twins are subpackages of
-# `mirage`, which is why they need a prefix rather than an empty one.
+# each agent adapter are their own npm packages whose python twins are
+# subpackages of `mirage`, which is why they need a prefix rather than an
+# empty one.
 TS_PACKAGES = {
     "core": "",
     "node": "",
     "browser": "",
     "cli": "cli",
     "server": "server",
-    "agents": "agents",
+    "openai-agents": "agents/openai_agents",
+    "langchain": "agents/langchain",
+    "pi": "agents/pi",
+    "vercel": "agents/vercel",
+    "mastra": "agents/mastra",
+    "claude-agent-sdk": "agents/claude_agent_sdk",
+    "claude-managed-agents": "agents/claude_managed_agents",
 }
 
 EXCEPTIONS = ROOT / "scripts" / "parity" / "layout_exceptions.json"

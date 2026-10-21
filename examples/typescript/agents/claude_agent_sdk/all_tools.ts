@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { buildOptions } from '@struktoai/mirage-agents/claude-agent-sdk'
+import { buildOptions } from '@struktoai/mirage-claude-agent-sdk'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

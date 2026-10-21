@@ -1,0 +1,62 @@
+{
+  "name": "@struktoai/mirage-openai-agents",
+  "version": "0.0.8-alpha.1",
+  "description": "Run @openai/agents against a Mirage workspace with shell, editor, file-reading tools, and a SandboxAgent client",
+  "keywords": [
+    "mirage",
+    "openai-agents",
+    "ai-agents",
+    "virtual-filesystem"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/openai-agents"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": "^22.20 || ^24.12 || >=25"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@struktoai/mirage-core": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@openai/agents": "^0.18.0",
+    "@openai/agents-core": "^0.18.0"
+  },
+  "devDependencies": {
+    "@openai/agents": "^0.18.0",
+    "@openai/agents-core": "^0.18.0",
+    "@struktoai/mirage-node": "workspace:*",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.11"
+  }
+}

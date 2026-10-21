@@ -1,6 +1,6 @@
 ---
 title: Vercel AI SDK
-description: Wire mirage tools into the Vercel AI SDK via the @struktoai/mirage-agents/vercel adapter.
+description: Wire mirage tools into the Vercel AI SDK via @struktoai/mirage-vercel.
 icon: triangle
 iconType: solid
 ---
@@ -9,14 +9,14 @@ The [Vercel AI SDK](https://sdk.vercel.ai) (`ai`) drives tool-calling agents aro
 
 ## Install
 
-`@struktoai/mirage-agents/vercel` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
+`@struktoai/mirage-vercel` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
 
 <CodeGroup>
 ```bash Node
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node ai @ai-sdk/openai
+pnpm add @struktoai/mirage-vercel @struktoai/mirage-node ai @ai-sdk/openai
 ```
 ```bash Browser
-pnpm add @struktoai/mirage-agents @struktoai/mirage-browser ai @ai-sdk/openai
+pnpm add @struktoai/mirage-vercel @struktoai/mirage-browser ai @ai-sdk/openai
 ```
 </CodeGroup>
 
@@ -26,8 +26,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-browser ai @ai-sdk/openai
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { generateText, stepCountIs } from 'ai'
 import { openai } from '@ai-sdk/openai'
-import { mirageTools } from '@struktoai/mirage-agents/vercel'
-import { buildSystemPrompt } from '@struktoai/mirage-agents/openai_agents'
+import { buildSystemPrompt, mirageTools } from '@struktoai/mirage-vercel'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -51,6 +50,7 @@ console.log(text)
 | Symbol | Purpose |
 | --- | --- |
 | `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each an `ai` `tool()` to spread into `tools`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
+| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
 
 `read` uses AI SDK 7's `toModelOutput`: text files come back as numbered lines, PDFs and supported images become file content parts, and other binary formats return a metadata note.
 

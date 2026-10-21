@@ -10,7 +10,7 @@ import {
   MirageShellExecutor,
   mirageReadFileTool,
   mirageTools,
-} from '@struktoai/mirage-agents/openai_agents'
+} from '@struktoai/mirage-openai-agents'
 
 export function configureOpenAIExample(ws: Workspace, defaultModel: string) {
   const baseURL = process.env.OPENAI_BASE_URL?.trim() ?? ''

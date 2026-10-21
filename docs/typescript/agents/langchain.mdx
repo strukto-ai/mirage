@@ -13,7 +13,7 @@ icon: /images/langchain-logo.svg
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node deepagents @langchain/anthropic
+pnpm add @struktoai/mirage-langchain @struktoai/mirage-node deepagents @langchain/anthropic
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ import {
   LangchainWorkspace,
   buildSystemPrompt,
   extractText,
-} from '@struktoai/mirage-agents/langchain'
+} from '@struktoai/mirage-langchain'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
