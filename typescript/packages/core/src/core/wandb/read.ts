@@ -1,4 +1,4 @@
-import { concat } from '../../utils/bytes.ts'
+import { materialize } from '../../io/types.ts'
 import type { WandbAccessor } from '../../accessor/wandb.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
@@ -55,9 +55,5 @@ export async function* readStream(
   }
 }
 export async function read(accessor: WandbAccessor, path: PathSpec): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of readStream(accessor, path)) {
-    chunks.push(chunk)
-  }
-  return concat(chunks)
+  return materialize(readStream(accessor, path))
 }

@@ -14,7 +14,6 @@
 
 from collections.abc import Iterable, Mapping
 
-from mirage.io.types import PathRecord
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -292,22 +291,6 @@ def path_visible(vis: Visibility | None, virtual: str) -> bool:
         ):
             return True
     return False
-
-
-def visible_records(
-    vis: Visibility | None, records: Iterable[PathRecord]
-) -> list[PathRecord]:
-    """The records whose path the session leaves visible.
-
-    A command's output is rendered from its records after this, so a row,
-    a count or a total never stands for a hidden file.
-
-    Args:
-        vis (Visibility | None): the session's visibility, None for an
-            unrestricted session.
-        records (Iterable[PathRecord]): what the command found.
-    """
-    return [r for r in records if path_visible(vis, r.path.virtual)]
 
 
 def shown_mode(

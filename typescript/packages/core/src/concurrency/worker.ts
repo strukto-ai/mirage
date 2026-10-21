@@ -174,16 +174,3 @@ export class Worker {
     )
   }
 }
-
-export async function runIsolated<T>(
-  name: string,
-  args: readonly unknown[],
-  signal?: AbortSignal,
-): Promise<T> {
-  const worker = new Worker()
-  try {
-    return await worker.call<T>(name, args, signal)
-  } finally {
-    await worker.close()
-  }
-}

@@ -25,6 +25,7 @@ from mirage.core.mongodb._schema_json import (
 from mirage.core.mongodb.readdir import database_guard, entity_guard
 from mirage.core.mongodb.scope import detect_scope
 from mirage.core.mongodb.stream import read_stream, render_doc
+from mirage.io.types import materialize
 from mirage.types import FileStat, PathSpec
 
 
@@ -35,10 +36,7 @@ async def _read_documents(
     entry: FileStat | None,
     parent: FileStat | None,
 ) -> bytes:
-    chunks: list[bytes] = []
-    async for chunk in read_stream(accessor, path):
-        chunks.append(chunk)
-    return b"".join(chunks)
+    return await materialize(read_stream(accessor, path))
 
 
 async def _read_schema_json(

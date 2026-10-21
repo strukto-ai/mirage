@@ -16,7 +16,39 @@ import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { materialize } from '../../../io/types.ts'
-import { isStdin, operandLabel, stdinStat, stdinStream, streamOutput } from './stream.ts'
+import { asyncChain, yieldBytes } from '../../../io/stream.ts'
+import {
+  isStdin,
+  operandLabel,
+  readStdinAsync,
+  resolveSource,
+  stdinStat,
+  stdinStream,
+  streamOutput,
+} from './stream.ts'
+
+it.each([null, new Uint8Array(), new TextEncoder().encode('input')])(
+  'preserves absent and empty stdin (%s)',
+  async (data) => {
+    expect(await readStdinAsync(data)).toBe(data)
+    const parts: Uint8Array[] = []
+    for await (const part of resolveSource(data)) parts.push(part)
+    expect(parts).toEqual([data ?? new Uint8Array()])
+  },
+)
+
+it('drains multiple stdin chunks', async () => {
+  const encode = new TextEncoder()
+  const source = asyncChain([encode.encode('hel'), encode.encode('lo')])
+  expect(await readStdinAsync(source)).toEqual(encode.encode('hello'))
+})
+
+it('preserves the producer identity when resolving stdin', async () => {
+  const data = new TextEncoder().encode('input')
+  const source = yieldBytes(data)
+  expect(resolveSource(source)).toBe(source)
+  expect(await readStdinAsync(source)).toEqual(data)
+})
 
 function operand(raw: string, virtual: string): PathSpec {
   return new PathSpec({

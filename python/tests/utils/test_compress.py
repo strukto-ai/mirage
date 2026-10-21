@@ -22,24 +22,27 @@ from mirage.io import yield_budget
 from mirage.io.stream import yield_bytes
 from mirage.io.types import materialize
 from mirage.utils.compress import (
-    GZIP_CHUNK_SIZE,
-    GZIP_CRC,
-    GZIP_LENGTH,
     GzipDataError,
-    GzipDecoder,
     gunzip_stream,
     gzip_compress_stream,
 )
 
+pytestmark = pytest.mark.asyncio
 
-def gunzip_partial(
+GZIP_CHUNK_SIZE = 65536
+GZIP_CRC = "\ngzip: {}: invalid compressed data--crc error"
+GZIP_LENGTH = "\ngzip: {}: invalid compressed data--length error"
+
+
+async def gunzip_partial(
     data: bytes, passthrough: bool = False
 ) -> tuple[bytes, GzipDataError | None]:
-    decoder = GzipDecoder(passthrough=passthrough)
     parts: list[bytes] = []
     try:
-        parts.extend(decoder.feed(data))
-        parts.extend(decoder.finish())
+        async for part in gunzip_stream(
+            yield_bytes(data), passthrough=passthrough
+        ):
+            parts.append(part)
     except GzipDataError as exc:
         return b"".join(parts), exc
     return b"".join(parts), None
@@ -68,7 +71,6 @@ class FailingCloseSource:
         raise OSError("cleanup failure")
 
 
-@pytest.mark.asyncio
 async def test_cleanup_failure_preserves_the_gzip_failure_and_closes_once():
     source = FailingCloseSource()
     with pytest.raises(GzipDataError, match="not in gzip format"):
@@ -76,8 +78,8 @@ async def test_cleanup_failure_preserves_the_gzip_failure_and_closes_once():
     assert source.closed == 1
 
 
-def test_every_member_decompresses():
-    assert gunzip_partial(HELLO + HELLO) == (b"hello\nhello\n", None)
+async def test_every_member_decompresses():
+    assert (await gunzip_partial(HELLO + HELLO)) == (b"hello\nhello\n", None)
 
 
 @pytest.mark.parametrize(
@@ -116,21 +118,21 @@ def test_every_member_decompresses():
         ),
     ],
 )
-def test_refusals_carry_gzips_reason_and_severity(data, reason, fatal):
+async def test_refusals_carry_gzips_reason_and_severity(data, reason, fatal):
     # gzip 1.13: no header, or a header gzip does not support, is
     # reported and skipped, while a short, truncated or corrupt input
     # ends the run. Only the header refusals come without gzip's leading
     # newline.
-    _, failure = gunzip_partial(data)
+    _, failure = await gunzip_partial(data)
     assert (failure.render("f"), failure.fatal) == (reason, fatal)
 
 
-def test_optional_header_fields_are_skipped():
+async def test_optional_header_fields_are_skipped():
     flags = 0x02 | 0x04 | 0x08 | 0x10
     head = HELLO[:3] + bytes([flags]) + HELLO[4:10]
     head += b"\x03\x00abc" + b"name\0" + b"comment\0"
     head += (zlib.crc32(head) & 0xFFFF).to_bytes(2, "little")
-    assert gunzip_partial(head + HELLO[10:]) == (b"hello\n", None)
+    assert (await gunzip_partial(head + HELLO[10:])) == (b"hello\n", None)
 
 
 @pytest.mark.parametrize(
@@ -141,24 +143,21 @@ def test_optional_header_fields_are_skipped():
         (HELLO[-8:-4] + b"\0" * 4, (GZIP_LENGTH,)),
     ],
 )
-@pytest.mark.asyncio
 async def test_trailer_mismatch_follows_the_inflated_bytes(trailer, reasons):
     # gzip 1.13 writes what it inflated, then names each mismatch.
 
-    async def source():
-        yield HELLO[:-8] + trailer + HELLO
-
-    decoded = gunzip_stream(source())
+    decoded = gunzip_stream(yield_bytes(HELLO[:-8] + trailer + HELLO))
     assert await anext(decoded) == b"hello\n"
     with pytest.raises(GzipDataError) as exc:
         await anext(decoded)
     assert (exc.value.reasons, exc.value.fatal) == (reasons, True)
 
 
-def test_trailer_mismatch_only_skips_the_input_under_test():
-    decoder = GzipDecoder(test=True)
+async def test_trailer_mismatch_only_skips_the_input_under_test():
     with pytest.raises(GzipDataError) as exc:
-        list(decoder.feed(HELLO[:-8] + b"\0" * 8))
+        await materialize(
+            gunzip_stream(yield_bytes(HELLO[:-8] + b"\0" * 8), test=True)
+        )
     assert not exc.value.fatal
 
 
@@ -170,10 +169,12 @@ def test_trailer_mismatch_only_skips_the_input_under_test():
         (HELLO + HELLO[:-3], b"hello\nhello\n", True),
     ],
 )
-def test_partial_keeps_what_gzip_wrote_before_it_stopped(data, decoded, keeps):
-    out, failure = gunzip_partial(data)
+async def test_partial_keeps_what_gzip_wrote_before_it_stopped(
+    data, decoded, keeps
+):
+    out, failure = await gunzip_partial(data)
     assert (out, failure.keeps_output) == (decoded, keeps)
-    assert gunzip_partial(HELLO) == (b"hello\n", None)
+    assert (await gunzip_partial(HELLO)) == (b"hello\n", None)
 
 
 @pytest.mark.parametrize(
@@ -185,12 +186,13 @@ def test_partial_keeps_what_gzip_wrote_before_it_stopped(data, decoded, keeps):
         (HELLO + b"junk", True),
     ],
 )
-def test_a_later_members_refusal_keeps_the_members_before_it(data, keeps):
-    _, failure = gunzip_partial(data)
+async def test_a_later_members_refusal_keeps_the_members_before_it(
+    data, keeps
+):
+    _, failure = await gunzip_partial(data)
     assert (failure.fatal, failure.keeps_output) == (False, keeps)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("width", [1, 7, 65536])
 async def test_member_headers_trailers_and_padding_across_chunks(width):
     data = HELLO + HELLO + b"\0\0"
@@ -202,7 +204,6 @@ async def test_member_headers_trailers_and_padding_across_chunks(width):
     assert await materialize(gunzip_stream(source())) == b"hello\nhello\n"
 
 
-@pytest.mark.asyncio
 async def test_expansion_yields_bounded_chunks_before_reading_more_input():
     archive = gzip.compress(b"x" * (GZIP_CHUNK_SIZE * 20))
     reads = []
@@ -226,7 +227,6 @@ async def test_expansion_yields_bounded_chunks_before_reading_more_input():
     assert closed == [True]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("data", [b"not gzip", HELLO[:-8] + b"\0" * 8])
 async def test_decode_failure_awaits_source_cleanup(data):
     closing, release, closed = (asyncio.Event() for _ in range(3))
@@ -256,12 +256,8 @@ async def test_decode_failure_awaits_source_cleanup(data):
         await compressed.aclose()
 
 
-@pytest.mark.asyncio
 async def test_trailing_warning_follows_valid_output():
-    async def source():
-        yield HELLO + b"junk"
-
-    decoded = gunzip_stream(source())
+    decoded = gunzip_stream(yield_bytes(HELLO + b"junk"))
     assert await anext(decoded) == b"hello\n"
     with pytest.raises(GzipDataError) as exc:
         await anext(decoded)
@@ -269,9 +265,9 @@ async def test_trailing_warning_follows_valid_output():
     assert not exc.value.fatal
 
 
-def test_large_member_preserves_buffered_output():
+async def test_large_member_preserves_buffered_output():
     data = b"x" * (GZIP_CHUNK_SIZE * 20 + 13)
-    assert gunzip_partial(gzip.compress(data)) == (data, None)
+    assert (await gunzip_partial(gzip.compress(data))) == (data, None)
 
 
 @pytest.mark.parametrize(
@@ -286,99 +282,102 @@ def test_large_member_preserves_buffered_output():
     ],
 )
 @pytest.mark.parametrize("width", [1, 7, 65536])
-def test_eof_distinguishes_complete_bodies_from_partial_ones(
+async def test_eof_distinguishes_complete_bodies_from_partial_ones(
     data, keeps, width
 ):
-    decoder = GzipDecoder()
-    for offset in range(0, len(data), width):
-        list(decoder.feed(data[offset : offset + width]))
+    exhausted = False
+
+    async def source():
+        nonlocal exhausted
+        for offset in range(0, len(data), width):
+            yield data[offset : offset + width]
+        exhausted = True
+
     with pytest.raises(GzipDataError) as exc:
-        list(decoder.finish())
+        await materialize(gunzip_stream(source()))
+    assert exhausted
     assert exc.value.fatal
     assert exc.value.keeps_output is keeps
 
 
 @pytest.mark.parametrize("width", [1, 7, 65536])
 @pytest.mark.parametrize("fields", [b"\0\0\0\0", b"\x03\0abcname\0comment\0"])
-def test_optional_fields_and_header_crc_across_chunks(width, fields):
+async def test_optional_fields_and_header_crc_across_chunks(width, fields):
     head = HELLO[:3] + b"\x1e" + HELLO[4:10] + fields
     member = (
         head + (zlib.crc32(head) & 0xFFFF).to_bytes(2, "little") + HELLO[10:]
     )
-    decoder = GzipDecoder()
     data = member + member
-    output = []
-    for offset in range(0, len(data), width):
-        output.extend(decoder.feed(data[offset : offset + width]))
-    list(decoder.finish())
-    assert b"".join(output) == b"hello\nhello\n"
+
+    async def source():
+        for offset in range(0, len(data), width):
+            yield data[offset : offset + width]
+
+    assert await materialize(gunzip_stream(source())) == b"hello\nhello\n"
 
 
 @pytest.mark.parametrize("flag", [0x04, 0x08, 0x10, 0x02])
 @pytest.mark.parametrize("prefix", [b"", HELLO])
-def test_eof_in_consumed_optional_fields_is_still_fatal(flag, prefix):
-    decoder = GzipDecoder()
+async def test_eof_in_consumed_optional_fields_is_still_fatal(flag, prefix):
     head = HELLO[:3] + bytes([flag]) + HELLO[4:10]
     extra = b"\xff\xffabc" if flag == 0x04 else b""
-    list(decoder.feed(prefix + head + extra))
     with pytest.raises(GzipDataError) as exc:
-        list(decoder.finish())
+        await materialize(gunzip_stream(yield_bytes(prefix + head + extra)))
     assert exc.value.fatal
     assert exc.value.keeps_output is bool(prefix)
 
 
 @pytest.mark.parametrize("flag", [0x08, 0x10])
 @pytest.mark.parametrize("terminated", [False, True])
-def test_long_header_fields_use_bounded_memory(flag, terminated):
-    decoder = GzipDecoder()
+async def test_long_header_fields_use_bounded_memory(flag, terminated):
     head = HELLO[:3] + bytes([flag | 0x02]) + HELLO[4:10]
-    list(decoder.feed(head))
-    crc = zlib.crc32(head)
     chunk = b"x" * GZIP_CHUNK_SIZE
-    for _ in range(128):
-        assert list(decoder.feed(chunk)) == []
-        crc = zlib.crc32(chunk, crc)
+
+    async def source():
+        yield head
+        crc = zlib.crc32(head)
+        for _ in range(128):
+            yield chunk
+            crc = zlib.crc32(chunk, crc)
+        if terminated:
+            crc = zlib.crc32(b"\0", crc) & 0xFFFF
+            yield b"\0" + crc.to_bytes(2, "little") + HELLO[10:]
+
+    decoded = gunzip_stream(source())
     if terminated:
-        crc = zlib.crc32(b"\0", crc) & 0xFFFF
-        tail = b"\0" + crc.to_bytes(2, "little") + HELLO[10:]
-        assert b"".join(decoder.feed(tail)) == b"hello\n"
-        list(decoder.finish())
+        assert await materialize(decoded) == b"hello\n"
     else:
         with pytest.raises(GzipDataError, match="unexpected end of file"):
-            list(decoder.finish())
+            await materialize(decoded)
 
 
-@pytest.mark.asyncio
 async def test_named_gzip_header_moves_the_truncation_boundary():
     named = await materialize(
         gzip_compress_stream(yield_bytes(b"hello\nworld\n"), -1, name="a.txt")
     )
     assert named[3] & 8
     assert named[10:16] == b"a.txt\0"
-    data, failure = gunzip_partial(named[:20])
+    data, failure = await gunzip_partial(named[:20])
     assert data == b"hel"
     assert failure is not None
-    assert gunzip_partial(named) == (b"hello\nworld\n", None)
+    assert (await gunzip_partial(named)) == (b"hello\nworld\n", None)
     unnamed = await materialize(
         gzip_compress_stream(yield_bytes(b"hello\nworld\n"), -1)
     )
-    assert gunzip_partial(unnamed[:20])[0] == b"hello\nwor"
+    assert (await gunzip_partial(unnamed[:20]))[0] == b"hello\nwor"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("level", [-1, 1, 9])
 async def test_gzip_stream_bounds_incompressible_output(level):
     data = random.Random(42).randbytes(512 * 1024)
 
-    async def source():
-        yield data
-
-    parts = [part async for part in gzip_compress_stream(source(), level)]
+    parts = [
+        part async for part in gzip_compress_stream(yield_bytes(data), level)
+    ]
     assert max(map(len, parts)) <= 16384
     assert gzip.decompress(b"".join(parts)) == data
 
 
-@pytest.mark.asyncio
 async def test_gzip_stream_produces_output_before_eof_and_closes_its_source():
     closed = []
 
@@ -395,7 +394,6 @@ async def test_gzip_stream_produces_output_before_eof_and_closes_its_source():
     assert closed == [True]
 
 
-@pytest.mark.asyncio
 async def test_output_only_draining_yields_to_cancellation_and_closes_source(
     monkeypatch,
 ):

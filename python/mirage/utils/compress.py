@@ -81,9 +81,6 @@ class GzipDataError(ValueError):
 
 
 GZIP_MAGIC = b"\x1f\x8b"
-GZIP_CHUNK_SIZE = 65536
-GZIP_CRC = "\ngzip: {}: invalid compressed data--crc error"
-GZIP_LENGTH = "\ngzip: {}: invalid compressed data--length error"
 
 
 class GzipFailure(BaseModel):
@@ -114,49 +111,6 @@ def _output(stream: OpenStream, data: bytes) -> Iterator[bytes]:
         yield data
     if failure is not None:
         raise failure
-
-
-def _push(stream: OpenStream, data: bytes) -> Iterator[bytes]:
-    for offset in range(0, len(data), CHUNK_SIZE):
-        yield from _output(
-            stream, stream.feed(data[offset : offset + CHUNK_SIZE])
-        )
-        while stream.busy():
-            yield from _output(stream, stream.drain())
-
-
-class GzipDecoder:
-    """Checked gzip decoding through the shared bounded compression stream.
-
-    Args:
-        test (bool): whether trailer failures only skip the input.
-        passthrough (bool): whether non-gzip boundary input is copied.
-    """
-
-    def __init__(self, test: bool = False, passthrough: bool = False) -> None:
-        self._stream = open_stream(
-            "compress",
-            {
-                "operation": "decode",
-                "format": "gzip",
-                "test": test,
-                "passthrough": passthrough,
-            },
-        )
-
-    def feed(self, data: bytes) -> Iterator[bytes]:
-        """Decode bounded pieces of the next input chunk.
-
-        Args:
-            data (bytes): compressed input.
-        """
-        return _push(self._stream, data)
-
-    def finish(self) -> Iterator[bytes]:
-        """Check the end of the final member."""
-        yield from _output(self._stream, self._stream.finish())
-        while self._stream.busy():
-            yield from _output(self._stream, self._stream.drain())
 
 
 async def _codec_stream(

@@ -231,7 +231,10 @@ No per-verb allowlist is needed. The mirrored `commands/builtin/general/bc/`
 wrappers use these same whole-host filters, and `rust/` selects both hosts
 for their shared evaluator. The shared Rust diff engine, mirrored `rs/diff_*`
 adapters, workspace-owned pools and worker lifecycle use these same whole-host
-filters. `integ/unix/diff/shared_engine.json` pins byte preservation, explicit
+filters. The remaining TypeScript `commands/builtin/diff_format.ts` helpers
+serve Git's opcode matching and grouping (Python uses `difflib`); they stay
+under the TypeScript filter after removing the obsolete host diff formatters.
+`integ/unix/diff/shared_engine.json` pins byte preservation, explicit
 comparison status, ignore flags, missing final newlines and ed dot output.
 Diff uses Similar Myers matching, so repeated-line alignment and unified hunk
 grouping can differ from GNU while retaining valid edit scripts. Ignore-case
@@ -244,6 +247,8 @@ additional jobs:
 Shared TypeScript fixtures under `packages/*/tests/` and the
 `packages/agents/src/openai_agents/` adapter remain covered by the whole-host
 TypeScript filters. Integration runners import some of those fixtures.
+Formatting and stream unit tests consolidated under `commands/builtin/utils/`
+remain covered by the same whole-host filters on both hosts.
 
 | Changed                                                                                                              | Also sets                         |
 | -------------------------------------------------------------------------------------------------------------------- | --------------------------------- |

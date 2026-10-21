@@ -151,17 +151,3 @@ class Worker:
         ):
             self._closing = asyncio.create_task(self._stop())
         await settle(self._closing)
-
-
-async def run_isolated(fn: Callable[..., T], *args: Any) -> T:
-    """Run one pure computation with cancellation and no surviving child.
-
-    Args:
-        fn (Callable): a module-level function.
-        args (Any): serializable computation inputs.
-    """
-    worker = Worker()
-    try:
-        return await worker.call(fn, *args)
-    finally:
-        await worker.close()

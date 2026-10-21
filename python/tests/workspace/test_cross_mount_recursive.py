@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
+import pytest
 
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import run_text
+
+pytestmark = pytest.mark.asyncio
 
 
 def _make_ws():
@@ -34,17 +37,9 @@ def _make_ws():
     return ws, src, dst
 
 
-def _run(ws, cmd):
-    async def _inner():
-        io = await ws.shell(cmd)
-        return await io.stdout_str(), await io.stderr_str(), io.exit_code
-
-    return asyncio.run(_inner())
-
-
-def test_cp_recursive_copies_tree():
+async def test_cp_recursive_copies_tree():
     ws, _src, dst = _make_ws()
-    _out, _err, code = _run(ws, "cp -r /a/dir /b/copied")
+    code, _out, _err = await run_text(ws, "cp -r /a/dir /b/copied")
     assert code == 0
     assert dst._store.files["/copied/a.txt"] == b"aaa\n"
     assert dst._store.files["/copied/sub/b.txt"] == b"bbb\n"
@@ -52,27 +47,27 @@ def test_cp_recursive_copies_tree():
     assert "/copied/empty" in dst._store.dirs
 
 
-def test_cp_recursive_into_existing_dir():
+async def test_cp_recursive_into_existing_dir():
     ws, _src, dst = _make_ws()
     dst._store.dirs.add("/into")
-    _out, _err, code = _run(ws, "cp -r /a/dir /b/into")
+    code, _out, _err = await run_text(ws, "cp -r /a/dir /b/into")
     assert code == 0
     assert dst._store.files["/into/dir/a.txt"] == b"aaa\n"
     assert dst._store.files["/into/dir/sub/b.txt"] == b"bbb\n"
 
 
-def test_cp_directory_without_recursive_fails():
+async def test_cp_directory_without_recursive_fails():
     ws, _src, dst = _make_ws()
-    _out, err, code = _run(ws, "cp /a/dir /b/copied")
+    code, _out, err = await run_text(ws, "cp /a/dir /b/copied")
     assert code == 1
     assert "omitting directory" in err
     assert "/copied" not in dst._store.dirs
     assert not any(k.startswith("/copied") for k in dst._store.files)
 
 
-def test_mv_recursive_moves_tree_and_removes_source():
+async def test_mv_recursive_moves_tree_and_removes_source():
     ws, src, dst = _make_ws()
-    _out, _err, code = _run(ws, "mv /a/dir /b/moved")
+    code, _out, _err = await run_text(ws, "mv /a/dir /b/moved")
     assert code == 0
     assert dst._store.files["/moved/a.txt"] == b"aaa\n"
     assert dst._store.files["/moved/sub/b.txt"] == b"bbb\n"
@@ -81,13 +76,13 @@ def test_mv_recursive_moves_tree_and_removes_source():
     assert "/dir/sub/b.txt" not in src._store.files
 
 
-def test_cp_recursive_no_clobber_skips_existing():
+async def test_cp_recursive_no_clobber_skips_existing():
     # /b/into exists, so `cp -r /a/dir /b/into` maps to /b/into/dir. Pre-seed
     # that mapped tree with an existing a.txt so -n must skip it.
     ws, _src, dst = _make_ws()
     dst._store.dirs.update({"/into", "/into/dir"})
     dst._store.files["/into/dir/a.txt"] = b"keep\n"
-    _out, _err, code = _run(ws, "cp -rn /a/dir /b/into")
+    code, _out, _err = await run_text(ws, "cp -rn /a/dir /b/into")
     assert code == 0
     assert dst._store.files["/into/dir/a.txt"] == b"keep\n"
     assert dst._store.files["/into/dir/sub/b.txt"] == b"bbb\n"
