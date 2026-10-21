@@ -715,7 +715,10 @@ def command_files(
             return virtual
         try:
             return link_location(links, virtual)
-        except CycleError:
+        except CycleError as exc:
+            logger.debug(
+                "following the links above %s failed: %s", virtual, exc
+            )
             return virtual
 
     async def exists(path: PathSpec) -> bool:

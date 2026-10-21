@@ -520,6 +520,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       return linkLocation(links, virtual)
     } catch (err) {
       if (!(err instanceof CycleError)) throw err
+      console.debug(`following the links above ${virtual} failed: ${String(err)}`)
       return virtual
     }
   }
