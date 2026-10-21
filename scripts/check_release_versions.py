@@ -7,8 +7,7 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-# The npm packages a release builds and publishes; opencode is not
-# published yet.
+# The npm packages a release builds and publishes.
 NPM_PACKAGES = (
     "browser",
     "claude-agent-sdk",
@@ -20,6 +19,7 @@ NPM_PACKAGES = (
     "mastra",
     "node",
     "openai-agents",
+    "opencode",
     "pi",
     "server",
     "vercel",
