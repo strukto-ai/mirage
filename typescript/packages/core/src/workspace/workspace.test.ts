@@ -1220,6 +1220,23 @@ it('setProfile refuses before the table changes', async () => {
   }
 })
 
+it('setProfile keeps any name as an entry through a copy', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  const copies: Workspace[] = []
+  try {
+    expect(() => ws.createSession('t', { profile: 'toString' })).toThrow(PolicyError)
+    ws.setProfile('__proto__', { paths: { hide: ['/data/secret'] } })
+    copies.push(await ws.copy())
+    for (const each of [ws, ...copies]) {
+      expect(Object.keys(each.profiles)).toEqual(['__proto__'])
+      expect(each.profiles.__proto__).toEqual({ paths: { hide: ['/data/secret'] } })
+    }
+  } finally {
+    for (const each of copies) await each.close()
+    await ws.close()
+  }
+})
+
 it('unmount drains metadata globs and their index writes', async () => {
   let enter = (): void => undefined
   let resume = (): void => undefined

@@ -249,7 +249,9 @@ export class Workspace {
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
   private readonly scriptPolicy: ScriptPolicy
-  private readonly profilesInternal: Record<string, SessionProfile> = {}
+  // No prototype, so every name is an own entry: `__proto__` is stored
+  // rather than reparenting the table, and `toString` resolves to nothing.
+  private readonly profilesInternal = Object.create(null) as Record<string, SessionProfile>
   /** The profile table's default. */
   readonly defaultProfileName: string | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
