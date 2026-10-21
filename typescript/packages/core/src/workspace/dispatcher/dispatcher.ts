@@ -20,7 +20,7 @@ import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions, setCached } from '../../cache/file/io.ts'
 import { drainBudget, type FileCache } from '../../cache/file/mixin.ts'
 import { type KeyHold, KeyLock } from '../../cache/lock.ts'
-import { CacheManager } from '../../cache/manager.ts'
+import type { CacheManager } from '../../cache/manager.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
   dispatchStat,
@@ -88,6 +88,7 @@ import {
   type CapacityResult,
   CapacityState,
   DEFAULT_READ_TTL,
+  FileChangeKind,
   FileStat,
   FileType,
   MountMode,
@@ -2183,9 +2184,10 @@ export class Dispatcher {
 
   /** Drop content without losing the conditional-write baseline. */
   private async invalidateStream(mount: MountEntry, path: PathSpec): Promise<void> {
-    const manager = this.managerFor(mount)
+    const manager = mount.cacheManager
+    if (manager === null) return
     const version = await manager.readVersion(path)
-    await this.invalidateAfterWriteByPath(path.virtual, null, false)
+    await manager.invalidate(path, FileChangeKind.UPDATE)
     if (version !== null) await manager.keepVersion(path, version)
   }
 
@@ -2216,7 +2218,7 @@ export class Dispatcher {
     const record = recordOf(records, WRITE_FINGERPRINT_OPS, call.path.virtual)
     let fingerprint = record?.fingerprint ?? null
     if (!(sent instanceof Uint8Array)) {
-      if (fingerprint !== null) await this.managerFor(mount).keepVersion(call.path, fingerprint)
+      if (fingerprint !== null) await mount.cacheManager?.keepVersion(call.path, fingerprint)
       return
     }
     let data: Uint8Array = sent.slice()
@@ -2524,26 +2526,26 @@ export class Dispatcher {
     // A copy reads its path, so only its destination changes: the copy is a
     // new file there, or a new tree.
     if (COPY_OPS.has(name) && dst !== null) {
-      await this.invalidateAfterWriteByPath(dst.virtual, null, true, false, row)
+      await this.changed(dst.virtual, FileChangeKind.CREATE, row)
       if (name === 'dir_copy') await this.settleTreeCopy(p, dst)
       return
     }
     // rename(2) moves a file without touching its times, which the node
-    // table carries to the new name below.
-    await this.invalidateAfterWriteByPath(
+    // table carries to the new name below. rm_r takes everything below with
+    // it: the cached bodies and listings, and the links and overlays only the
+    // node table holds there.
+    await this.changed(
       p.virtual,
-      observed,
-      !opened && name !== 'rename',
-      removes,
+      name === 'rm_r'
+        ? FileChangeKind.UNKNOWN
+        : removes
+          ? FileChangeKind.DELETE
+          : FileChangeKind.CREATE,
       name === 'rename' ? null : row,
+      { observed, times: !opened && name !== 'rename' },
     )
-    for (const [, other] of others) await this.invalidateAfterWriteByPath(other.virtual)
-    if (name === 'rm_r') {
-      // Everything below went with it: the cached bodies and listings, and
-      // the links and overlays only the node table holds there.
-      await this.invalidateTreeByPath(p.virtual)
-      await this.namespace.purgeUnder(p.virtual)
-    }
+    for (const [, other] of others) await this.changed(other.virtual, FileChangeKind.UPDATE)
+    if (name === 'rm_r') await this.namespace.purgeUnder(p.virtual)
     if (removes) {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as
@@ -2566,8 +2568,16 @@ export class Dispatcher {
       }
     }
     if (name === 'rename' && dst !== null) {
-      await this.invalidateAfterRenameByPath(p.virtual, dst.virtual)
-      if (row !== null) await this.keepCreated(dst.virtual, row)
+      // A rename re-anchors the whole subtree under its source, so what was
+      // cached one level down under either name is stale, not just the two
+      // paths and their parents: left there, a moved directory's old name
+      // answered `stat` and `ls` from its cached children.
+      for (const moved of [p, dst]) {
+        await this.changed(moved.virtual, FileChangeKind.UNKNOWN, null, { times: false })
+      }
+      if (row !== null) {
+        await this.changed(dst.virtual, FileChangeKind.CREATE, row, { times: false })
+      }
       // rename(2) replaces the destination, so a node the table holds
       // at that name does not survive the move. A link left there
       // shadowed the file that had just landed: the listing showed the
@@ -2642,12 +2652,14 @@ export class Dispatcher {
         const path = rstripSlash(target.virtual) || '/'
         const mount = this.namespace.tryMountFor(path)
         if (mount === null || taken(target, mount)) continue
+        const kept: [CacheManager, PathSpec, string | null][] = []
         for (const [owner, alias] of this.aliases(mount, path)) {
-          const manager = this.managerFor(owner)
+          if (owner.cacheManager === null) continue
           const spec = PathSpec.fromStrPath(alias)
-          const version = await manager.readVersion(spec)
-          await manager.invalidateSubtree(alias)
-          await manager.invalidateAncestors(alias)
+          kept.push([owner.cacheManager, spec, await owner.cacheManager.readVersion(spec)])
+        }
+        await this.changed(path, FileChangeKind.UNKNOWN, null, { times: false })
+        for (const [manager, spec, version] of kept) {
           if (version !== null && version !== '') await manager.keepVersion(spec, version)
         }
       } catch (err) {
@@ -2663,7 +2675,7 @@ export class Dispatcher {
         const mount = this.namespace.tryMountFor(key)
         if (mount === null || taken(target, mount)) continue
         for (const [owner, alias] of this.aliases(mount, key)) {
-          await this.managerFor(owner).keepVersion(PathSpec.fromStrPath(alias), version)
+          await owner.cacheManager?.keepVersion(PathSpec.fromStrPath(alias), version)
         }
       } catch (err) {
         console.debug(`keeping ${key} after a refusal: ${String(err)}`)
@@ -2685,7 +2697,7 @@ export class Dispatcher {
     const base = rstripSlash(src.virtual)
     const landing = rstripSlash(dst.virtual)
     for (const virtual of await this.entriesBelow(mount, src.virtual)) {
-      await this.invalidateAfterWriteByPath(landing + virtual.slice(base.length))
+      await this.changed(landing + virtual.slice(base.length), FileChangeKind.CREATE)
     }
   }
 
@@ -2833,11 +2845,9 @@ export class Dispatcher {
       return result
     } finally {
       if (write) {
-        await this.invalidateAfterWriteByPath(
+        await this.changed(
           spec.virtual,
-          null,
-          true,
-          name === 'unlink' || name === 'rmdir',
+          name === 'unlink' || name === 'rmdir' ? FileChangeKind.DELETE : FileChangeKind.UPDATE,
         )
       }
     }
@@ -3478,7 +3488,7 @@ export class Dispatcher {
     )
     if (applied.length > 0) {
       await this.namespace.dropAttrs(p.virtual, applied)
-      await this.invalidateAfterWriteByPath(p.virtual, null, false)
+      await this.changed(p.virtual, FileChangeKind.UPDATE, null, { times: false })
     } else {
       // A backend that applied nothing may not have looked for the path.
       await this.xattrTarget(mount, p)
@@ -3518,103 +3528,38 @@ export class Dispatcher {
   }
 
   /**
-   * The cache manager that owns a mount's listings and bodies.
+   * Drop what a change to `rawPath` made stale above the store.
    *
-   * One manager for both halves, as Python's invalidate_after_write does: it
-   * is what knows the file cache is keyed mount-absolute while the index may
-   * not be, and evicting the index inline here spelled the key the other way
-   * and missed.
+   * The mount's caches take it under every mount of its store
+   * (`CacheManager.invalidate`); a removal through the dispatcher knows
+   * nothing was below the name, so its index is not asked. The overlay times
+   * a content write moves go too, under each name: `observed` is the epoch
+   * seconds of a content write to record, null for a removal, and `times`
+   * false keeps them, for a change that moved no times. `row` is a CREATE's
+   * new entry, kept in its parent's listing; null drops that entry. Mirrors
+   * Python's Dispatcher._changed.
    */
-  private managerFor(mount: MountEntry): CacheManager {
-    return (
-      mount.cacheManager ??
-      new CacheManager(this.cache, mount.indexStore, mount.prefix, mount.vfs.cachesReads)
-    )
-  }
-
-  /**
-   * Drop what a write to `rawPath` made stale above the store. `observed` is
-   * the epoch seconds of a content write to record, null for a removal;
-   * `times` false keeps the overlay times, for an open that wrote nothing;
-   * `removed` drops the path's own listing too, for an unlink or rmdir, as
-   * a core's removal drops it. Mirrors Python's
-   * Dispatcher.invalidate_after_write.
-   */
-  async invalidateAfterWriteByPath(
+  private async changed(
     rawPath: string,
-    observed: number | null = null,
-    times = true,
-    removed = false,
-    created: FileStat | null = null,
+    kind: FileChangeKind,
+    row: FileStat | null = null,
+    options: { observed?: number | null; times?: boolean } = {},
   ): Promise<void> {
-    // Directory writes (mkdir/rmdir via tree copies) arrive with a
-    // trailing slash; normalize so the parent computation below does not
-    // invalidate the written directory itself instead of its parent
-    // (Python normalizes the same way via PathSpec.mount_path).
+    // Directory writes (mkdir/rmdir via tree copies) arrive with a trailing
+    // slash; normalize so the parent computation does not invalidate the
+    // written directory itself instead of its parent (Python normalizes the
+    // same way via PathSpec.mount_path).
     const path = rstripSlash(rawPath) || '/'
     const mount = this.namespace.tryMountFor(path)
     if (mount === null) return
-    for (const [owner, name] of this.aliases(mount, path)) {
-      if (times) await this.namespace.clearTimes(name, observed)
-      const manager = this.managerFor(owner)
-      if (removed) await manager.invalidateAfterUnlink(name)
-      else if (created !== null) await manager.keepCreated(name, created)
-      else await manager.invalidateAfterWrite(name)
-      await manager.invalidateAncestors(name)
+    if (options.times ?? true) {
+      for (const [, name] of this.aliases(mount, path)) {
+        await this.namespace.clearTimes(name, options.observed ?? null)
+      }
     }
-  }
-
-  /**
-   * Keep a moved entry's stat where its new parent's listing names it, under
-   * every mount of its store. Mirrors Python's Dispatcher._keep_created.
-   */
-  private async keepCreated(rawPath: string, row: FileStat): Promise<void> {
-    const path = rstripSlash(rawPath) || '/'
-    const mount = this.namespace.tryMountFor(path)
-    if (mount === null) return
-    for (const [owner, name] of this.aliases(mount, path)) {
-      await this.managerFor(owner).keepCreated(name, row)
-    }
-  }
-
-  /**
-   * Drop everything cached below both ends of a rename.
-   *
-   * A rename re-anchors the whole subtree under its source, so the listings
-   * and bodies cached one level down under either name are stale, not just the
-   * two paths and their parents. Evicting only those left a moved directory's
-   * old name answering `stat` and `ls` from its cached children, so the next
-   * rename onto that name saw a directory that was no longer there.
-   */
-  /**
-   * Drop everything cached at and below `path`, and its parents' listings,
-   * under every mount of its store. Mirrors Python's
-   * Dispatcher._invalidate_tree.
-   */
-  private async invalidateTreeByPath(rawPath: string): Promise<void> {
-    const path = rstripSlash(rawPath) || '/'
-    const mount = this.namespace.tryMountFor(path)
-    if (mount === null) return
-    for (const [owner, name] of this.aliases(mount, path)) {
-      const manager = this.managerFor(owner)
-      await manager.invalidateSubtree(name)
-      await manager.invalidateAncestors(name)
-    }
-  }
-
-  async invalidateAfterRenameByPath(source: string, dst: string): Promise<void> {
-    const from = rstripSlash(source) || '/'
-    const to = rstripSlash(dst) || '/'
-    const mount = this.namespace.tryMountFor(from)
-    if (mount === null) return
-    for (const [owner, src] of this.aliases(mount, from)) {
-      await this.managerFor(owner).invalidateSubtree(src)
-    }
-    for (const [owner, dst] of this.aliases(mount, to)) {
-      const manager = this.managerFor(owner)
-      await manager.invalidateSubtree(dst)
-      await manager.invalidateAncestors(dst)
-    }
+    await mount.cacheManager?.invalidate(path, kind, row, {
+      leaf: kind === FileChangeKind.DELETE,
+    })
   }
 
   /**

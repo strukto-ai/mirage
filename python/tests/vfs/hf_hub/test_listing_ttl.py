@@ -100,6 +100,7 @@ async def test_ls_answers_from_the_refill_it_just_made():
         store = expired_on_arrival()
         ws = _ws(vfs)
         ws.mount("/m").index_store = store
+        ws._registry._attach_manager(ws.mount("/m"))
         try:
             assert ws._registry.mount_for("/m/d").index_store is store
             assert await _out(ws, "ls /m/d") == b"b.txt\n"

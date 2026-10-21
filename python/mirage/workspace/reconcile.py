@@ -22,6 +22,7 @@ from mirage.cache.index.ram import ListingCheckStore
 from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.types import (
+    FileChangeKind,
     FileStat,
     FileType,
     ListingVersion,
@@ -406,7 +407,7 @@ class Reconciler:
         ) or await mount.index.holds_subtree(path)
         if row is None or (folder and row.type is not FileType.DIRECTORY):
             await mount.index.report_gone([Evicted(path, folder=folder)])
-            await manager.invalidate_after_remove(spec)
+            await manager.invalidate(spec, FileChangeKind.DELETE)
             return
         held = await self._cache.exists(path)
         vouched = (
@@ -427,7 +428,7 @@ class Reconciler:
             await mount.index.invalidate_entry(path)
             return
         version = await manager.read_version(spec)
-        await manager.invalidate_after_write(spec)
+        await manager.invalidate(spec, FileChangeKind.UPDATE)
         if version is not None:
             await manager.keep_version(spec, version)
 

@@ -19,13 +19,14 @@ import { publishRead } from './context.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 
-import { DEFAULT_READ_TTL, FileStat, FileType, PathSpec } from '../types.ts'
+import { DEFAULT_READ_TTL, FileChangeKind, FileStat, FileType, PathSpec } from '../types.ts'
 import { mutationLock } from './file/io.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { LookupStatus } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { RedisIndexCacheStore } from './index/redis.ts'
+import type { IndexCacheStore } from './index/store.ts'
 import { runInCommandScope } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { CacheManager } from './manager.ts'
@@ -54,6 +55,19 @@ async function seeded(): Promise<[RAMFileCacheStore, RAMIndexCacheStore]> {
   return [cache, index]
 }
 
+function scoped(manager: CacheManager): IndexCacheStore {
+  const view = manager.scopeIndex()
+  if (view === null) throw new Error('the manager holds no index')
+  return view
+}
+
+// The lock-held view a caller inside `mutation` gets.
+function locked(manager: CacheManager): IndexCacheStore {
+  const view = (manager as unknown as { lockedIndex(): IndexCacheStore | null }).lockedIndex()
+  if (view === null) throw new Error('the manager holds no index')
+  return view
+}
+
 function file(name: string): FileStat {
   return new FileStat({ name, type: FileType.FILE, fingerprint: name })
 }
@@ -64,7 +78,7 @@ describe('CacheManager', () => {
   it('write evicts file entry and parent listing', async () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', true)
-    await manager.invalidateAfterWrite('/arch/h.txt')
+    await manager.invalidate('/arch/h.txt', FileChangeKind.UPDATE)
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     const listing = await index.listDir('/data/arch')
     expect(listing.entries ?? null).toBeNull()
@@ -82,7 +96,7 @@ describe('CacheManager', () => {
       { version: 'v1' },
     )
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.invalidateAfterWrite('/dir/a')
+    await manager.invalidate('/dir/a', FileChangeKind.UPDATE)
     expect((await index.get('/data/dir/a')).entry ?? null).toBeNull()
     expect((await index.get('/data/dir/b')).entry).toEqual(file('b'))
     expect((await index.listDir('/data/dir')).partialEntries).toEqual(['/data/dir/b'])
@@ -98,7 +112,7 @@ describe('CacheManager', () => {
       ['keep', sibling],
     ])
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.invalidateAncestors('/dir/new/a')
+    await manager.invalidate('/dir/new/a', FileChangeKind.UPDATE)
     expect((await index.get('/data/dir')).entry ?? null).toBeNull()
     expect((await index.get('/data/keep')).entry).toEqual(sibling)
     expect((await index.listDir('/data')).partialEntries).toEqual(['/data/keep'])
@@ -110,7 +124,7 @@ describe('CacheManager', () => {
     const index = new RAMIndexCacheStore({ ttl: 86400 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     const row = new FileStat({ name: 'new.txt', type: FileType.FILE, size: 1 })
-    await manager.keepCreated('/new.txt', row)
+    await manager.invalidate('/new.txt', FileChangeKind.CREATE, row)
     const listing = await index.listDir('/data')
     expect(listing.partialEntries).toEqual(['/data/new.txt'])
     const expiry = (index as unknown as { expiry: Map<string, number> }).expiry.get('/data') ?? 0
@@ -123,7 +137,11 @@ describe('CacheManager', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     await index.setDir('/data', [['N', new FileStat({ name: 'N', type: FileType.FILE, size: 1 })]])
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.keepCreated('/n', new FileStat({ name: 'N', type: FileType.FILE, size: 2 }))
+    await manager.invalidate(
+      '/n',
+      FileChangeKind.CREATE,
+      new FileStat({ name: 'N', type: FileType.FILE, size: 2 }),
+    )
     expect((await index.listDir('/data')).entries ?? null).toBeNull()
     expect((await index.get('/data/n')).entry ?? null).toBeNull()
   })
@@ -131,7 +149,7 @@ describe('CacheManager', () => {
   it('unlink evicts file entry, listing, and index entry', async () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', true)
-    await manager.invalidateAfterUnlink('/arch/h.txt')
+    await manager.invalidate('/arch/h.txt', FileChangeKind.DELETE, null, { leaf: true })
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     const listing = await index.listDir('/data/arch')
     expect(listing.entries ?? null).toBeNull()
@@ -142,7 +160,7 @@ describe('CacheManager', () => {
   it('local mount keeps file cache but invalidates index', async () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', false)
-    await manager.invalidateAfterWrite('/arch/h.txt')
+    await manager.invalidate('/arch/h.txt', FileChangeKind.UPDATE)
     expect(await cache.exists('/data/arch/h.txt')).toBe(true)
     const listing = await index.listDir('/data/arch')
     expect(listing.entries ?? null).toBeNull()
@@ -156,7 +174,7 @@ describe('CacheManager', () => {
       directory: '/data/arch',
       vfsPath: mountKey('/data/arch/h.txt', '/data'),
     })
-    await manager.invalidateAfterWrite(spec)
+    await manager.invalidate(spec, FileChangeKind.UPDATE)
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
   })
 
@@ -164,28 +182,27 @@ describe('CacheManager', () => {
     const cache = new RAMFileCacheStore()
     await cache.set('/data/a.txt', new TextEncoder().encode('x'))
     const manager = new CacheManager(cache, null, '/data/', true)
-    await manager.invalidateAfterWrite('/a.txt')
+    await manager.invalidate('/a.txt', FileChangeKind.UPDATE)
     expect(await cache.exists('/data/a.txt')).toBe(false)
   })
 
-  it('invalidateAncestors walks up to the mount root', async () => {
+  it('drops every listing up to the mount root', async () => {
     // One put materializes every missing level of the key, so every listing
     // above the written file gained an entry.
     const index = new RAMIndexCacheStore({ ttl: 600 })
     for (const dir of ['/data', '/data/a', '/data/a/b']) await index.setDir(dir, [])
     const manager = new CacheManager(null, index, '/data/', true)
-    await manager.invalidateAncestors(PathSpec.fromStrPath('/a/b/c.txt'))
+    await manager.invalidate(PathSpec.fromStrPath('/a/b/c.txt'), FileChangeKind.UPDATE)
     expect((await index.listDir('/data')).entries ?? null).toBeNull()
     expect((await index.listDir('/data/a')).entries ?? null).toBeNull()
-    // The immediate parent is invalidateAfterWrite's job, not this one.
-    expect((await index.listDir('/data/a/b')).entries ?? null).not.toBeNull()
+    expect((await index.listDir('/data/a/b')).entries ?? null).toBeNull()
   })
 
-  it('invalidateAncestors reaches the root listing', async () => {
+  it('reaches the root listing', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     for (const dir of ['/', '/a']) await index.setDir(dir, [])
     const manager = new CacheManager(null, index, '/', true)
-    await manager.invalidateAncestors(PathSpec.fromStrPath('/a/b/c.txt'))
+    await manager.invalidate(PathSpec.fromStrPath('/a/b/c.txt'), FileChangeKind.UPDATE)
     expect((await index.listDir('/')).entries ?? null).toBeNull()
     expect((await index.listDir('/a')).entries ?? null).toBeNull()
   })
@@ -194,7 +211,7 @@ describe('CacheManager', () => {
     const [cache, index] = await seeded()
     await cache.set('/mirror/arch/h.txt', new TextEncoder().encode('same'))
     await cache.set('/other/keep.txt', new TextEncoder().encode('safe'))
-    const aliases = (): string[] => ['/mirror']
+    const aliases = (): CacheManager[] => [new CacheManager(cache, index, '/mirror/', true)]
     const none = undefined
     const manager = new CacheManager(
       cache,
@@ -208,7 +225,7 @@ describe('CacheManager', () => {
       none,
       aliases,
     )
-    await manager.drop(index)
+    await manager.drop()
     expect(await cache.exists('/data/arch/h.txt')).toBe(false)
     expect(await cache.exists('/mirror/arch/h.txt')).toBe(false)
     expect(await cache.exists('/other/keep.txt')).toBe(true)
@@ -220,11 +237,11 @@ describe('CacheManager', () => {
   it('leaves a non-caching mount alone', async () => {
     const [cache, index] = await seeded()
     const manager = new CacheManager(cache, index, '/data/', false)
-    await manager.drop(index)
+    await manager.drop()
     expect(await cache.exists('/data/arch/h.txt')).toBe(true)
   })
 
-  it('invalidateSubtree drops nested bodies and listings', async () => {
+  it('drops nested bodies and listings for an UNKNOWN change', async () => {
     const cache = new RAMFileCacheStore()
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
@@ -234,7 +251,7 @@ describe('CacheManager', () => {
     await index.setDir('/data/chan/day/files', [['a.png', entry]])
     await index.setDir('/data/chan', [['day', entry]])
     const manager = new CacheManager(cache, index, '/data/', true)
-    await manager.invalidateSubtree(PathSpec.fromStrPath('/chan/day'))
+    await manager.invalidate(PathSpec.fromStrPath('/chan/day'), FileChangeKind.UNKNOWN)
     expect(await cache.exists('/data/chan/day/files/a.png')).toBe(false)
     expect((await index.listDir('/data/chan/day')).entries).toBeUndefined()
     expect((await index.listDir('/data/chan/day/files')).entries).toBeUndefined()
@@ -247,7 +264,7 @@ describe('CacheManager', () => {
     const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
     await index.setDir('/data/chan/day/files', [['a.png', entry]])
     const manager = new CacheManager(cache, index, '/data/', true)
-    await manager.invalidateAfterWrite(PathSpec.fromStrPath('/chan/day'))
+    await manager.invalidate(PathSpec.fromStrPath('/chan/day'), FileChangeKind.UPDATE)
     expect((await index.listDir('/data/chan/day/files')).entries).toEqual([
       '/data/chan/day/files/a.png',
     ])
@@ -274,7 +291,7 @@ describe('CacheManager', () => {
           await index.setDir('/data/dirx', [['y', file('y')]])
           await index.setDir('/data', [['other', file('other')]])
           const manager = new CacheManager(cache, index, '/data/', cache !== null)
-          await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/dir'))
+          await manager.invalidate(PathSpec.fromStrPath('/data/dir'), FileChangeKind.DELETE)
           expect((await index.listDir('/data/dir/sub')).status).toBe(LookupStatus.NOT_FOUND)
           expect((await index.listDir('/data')).entries).toBeUndefined()
           expect((await index.listDir('/data/dirx')).entries).toEqual(['/data/dirx/y'])
@@ -315,15 +332,14 @@ describe('CacheManager', () => {
     const evict = vi.spyOn(cache, 'evictPrefix')
     const drop = vi.spyOn(index, 'invalidatePrefix')
     const probe = vi.spyOn(index, 'holdsSubtree')
-    await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))
+    await manager.invalidate(PathSpec.fromStrPath('/data/d/f'), FileChangeKind.DELETE)
     expect(await cache.exists('/data/d/f')).toBe(false)
     expect(await cache.exists('/data/d/g')).toBe(true)
     expect(await cache.exists('/data/e/h')).toBe(true)
-    expect((await index.listDir('/data')).entries).toEqual(['/data/d', '/data/e'])
+    expect((await index.listDir('/data')).partialEntries).toEqual(['/data/e'])
     expect(
       Object.fromEntries([...(await index.entries())].map(([key, row]) => [key, row.type])),
     ).toEqual({
-      '/data/d': FileType.DIRECTORY,
       '/data/e': FileType.DIRECTORY,
       '/data/d/g': FileType.FILE,
       '/data/e/h': FileType.FILE,
@@ -346,9 +362,9 @@ describe('CacheManager', () => {
       const error = new Error('registry recovery failed')
       vi.spyOn(index, method).mockRejectedValue(error)
       const manager = new CacheManager(cache, index, '/data/', true)
-      await expect(manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))).rejects.toBe(
-        error,
-      )
+      await expect(
+        manager.invalidate(PathSpec.fromStrPath('/data/d/f'), FileChangeKind.DELETE),
+      ).rejects.toBe(error)
       expect(await cache.exists('/data/d/f')).toBe(false)
       for (const directory of ['/data/d', '/data/d/f']) {
         expect((await index.listDir(directory)).entries).toBeUndefined()
@@ -366,7 +382,7 @@ describe('CacheManager', () => {
     else probe.mockResolvedValue(false)
     const cleanupError = new Error('listing cleanup failed')
     const cleanup = vi.spyOn(index, 'invalidateDir').mockRejectedValue(cleanupError)
-    const result = manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/d/f'))
+    const result = manager.invalidate(PathSpec.fromStrPath('/data/d/f'), FileChangeKind.DELETE)
     if (probeFails) {
       await expect(result).rejects.toBeInstanceOf(AggregateError)
       await expect(result).rejects.toHaveProperty('errors', [0, cleanupError])
@@ -384,7 +400,7 @@ describe('CacheManager', () => {
     await cache.set('/data/dir', new TextEncoder().encode('d'))
     await cache.set('/data/dir/f', new TextEncoder().encode('f'))
     const manager = new CacheManager(cache, null, '/data/', true)
-    await manager.invalidateAfterRemove(PathSpec.fromStrPath('/data/dir'))
+    await manager.invalidate(PathSpec.fromStrPath('/data/dir'), FileChangeKind.DELETE)
     expect(await cache.exists('/data/dir')).toBe(false)
     expect(await cache.exists('/data/dir/f')).toBe(true)
   })
@@ -398,7 +414,9 @@ describe('CacheManager', () => {
     const entry = new FileStat({ name: 'f', type: FileType.FILE, fingerprint: '1' })
     await index.setDir('/d/day', [['chat.jsonl', entry]])
     const manager = new CacheManager(cache, index, '/d/', true)
-    await manager.invalidateAfterUnlink(PathSpec.fromStrPath('/day'))
+    await manager.invalidate(PathSpec.fromStrPath('/day'), FileChangeKind.DELETE, null, {
+      leaf: true,
+    })
     expect((await index.listDir('/d/day')).entries).toBeUndefined()
   })
 
@@ -409,7 +427,7 @@ describe('CacheManager', () => {
     await cache.set('/a.txt', new TextEncoder().encode('x'))
     await cache.set('/sub/b.txt', new TextEncoder().encode('y'))
     const manager = new CacheManager(cache, null, '/', true)
-    await manager.drop(undefined)
+    await manager.drop()
     expect(await cache.exists('/a.txt')).toBe(false)
     expect(await cache.exists('/sub/b.txt')).toBe(false)
   })
@@ -462,63 +480,36 @@ function settleWithin(work: Promise<unknown>, ms: number): Promise<'done' | 'pen
 }
 
 describe('CacheManager index views', () => {
-  it('shares one view per store', () => {
-    const manager = new CacheManager(new RAMFileCacheStore(), null, '/data', true)
-    const a = new RAMIndexCacheStore()
-    expect(manager.scopeIndex(a)).toBe(manager.scopeIndex(a))
-  })
-
-  it('builds a new view when the store is replaced', async () => {
-    const manager = new CacheManager(new RAMFileCacheStore(), null, '/data', true)
-    const a = new RAMIndexCacheStore()
-    const b = new RAMIndexCacheStore()
-    manager.scopeIndex(a)
-    const view = manager.scopeIndex(b)
-    expect((view as IndexView).store).toBe(b)
-    await view.setDir('/data', [
-      ['x', new FileStat({ name: 'x', type: FileType.FILE, fingerprint: 'x' })],
-    ])
-    expect((await b.listDir('/data')).entries).toEqual(['/data/x'])
-    expect((await a.listDir('/data')).entries).toBeUndefined()
-  })
-
-  it('hands back a view it is given, whatever it has memoized', () => {
-    const cache = new RAMFileCacheStore()
-    const manager = new CacheManager(cache, null, '/data', true)
-    manager.scopeIndex(new RAMIndexCacheStore())
-    const other = new IndexView(new RAMIndexCacheStore(), cache, '/data', () => true)
-    expect(manager.scopeIndex(other)).toBe(other)
+  it('shares one view', () => {
+    const manager = new CacheManager(
+      new RAMFileCacheStore(),
+      new RAMIndexCacheStore(),
+      '/data',
+      true,
+    )
+    expect(manager.scopeIndex()).toBe(manager.scopeIndex())
   })
 
   it('hands back the raw store without a file cache', () => {
     const a = new RAMIndexCacheStore()
-    const manager = new CacheManager(null, null, '/data', true)
-    expect(manager.scopeIndex(a)).toBe(a)
-  })
-
-  it('refuses to build a lock-held view over a view', () => {
-    const cache = new RAMFileCacheStore()
-    const manager = new CacheManager(cache, null, '/data', true)
-    const view = new IndexView(new RAMIndexCacheStore(), cache, '/data', () => true)
-    expect(typeof manager.scopeIndexLocked).toBe('function')
-    expect(() => manager.scopeIndexLocked(view)).toThrow()
+    const manager = new CacheManager(null, a, '/data', true)
+    expect(manager.scopeIndex()).toBe(a)
   })
 
   it('hands back the raw store for a lock-held scope without a file cache', () => {
     const a = new RAMIndexCacheStore()
-    const manager = new CacheManager(null, null, '/data', true)
-    expect(manager.scopeIndexLocked(a)).toBe(a)
+    const manager = new CacheManager(null, a, '/data', true)
+    expect(locked(manager)).toBe(a)
   })
 
   it('never memoizes a lock-held view or shares the memo slot', async () => {
     const cache = new RAMFileCacheStore()
-    const manager = new CacheManager(cache, null, '/data', true)
-    const a = new RAMIndexCacheStore()
-    const locked = manager.scopeIndexLocked(a)
-    expect(locked).toBeInstanceOf(IndexView)
-    expect(manager.scopeIndexLocked(a)).not.toBe(locked)
-    const shared = manager.scopeIndex(a)
-    expect(shared).not.toBe(locked)
+    const manager = new CacheManager(cache, new RAMIndexCacheStore(), '/data', true)
+    const view = locked(manager)
+    expect(view).toBeInstanceOf(IndexView)
+    expect(locked(manager)).not.toBe(view)
+    const shared = scoped(manager)
+    expect(shared).not.toBe(view)
     let release = (): void => undefined
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -543,7 +534,7 @@ describe('what a mount has listed since a command started', () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
     await runInCommandScope(async () => {
-      await manager.scopeIndexLocked(index).setDir('/data', [])
+      await locked(manager).setDir('/data', [])
       expect(manager.listingTrusted('/data')).toBe(true)
       expect(manager.listingTrusted('/data/other')).toBe(false)
     })
@@ -567,7 +558,7 @@ describe('what a mount has listed since a command started', () => {
       const note = async (): Promise<void> => {
         ready()
         await releasePromise
-        await manager.scopeIndex(index).setDir('/data', [])
+        await scoped(manager).setDir('/data', [])
       }
       const produce = (): Promise<void> => (producer === 'none' ? note() : runInCommandScope(note))
       const early = producer === 'later' ? null : produce()
@@ -584,20 +575,10 @@ describe('what a mount has listed since a command started', () => {
   it('does not count a write before the command', async () => {
     const index = new RAMIndexCacheStore({ ttl: 600 })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.scopeIndex(index).setDir('/data', [])
+    await scoped(manager).setDir('/data', [])
     await runInCommandScope(() => {
       expect(manager.listingTrusted('/data')).toBe(false)
       return Promise.resolve()
-    })
-  })
-
-  it('forgets what the old store was written when the store is replaced', async () => {
-    const index = new RAMIndexCacheStore({ ttl: 600 })
-    const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await runInCommandScope(async () => {
-      await manager.scopeIndex(index).setDir('/data', [])
-      manager.scopeIndex(new RAMIndexCacheStore({ ttl: 600 }))
-      expect(manager.listingTrusted('/data')).toBe(false)
     })
   })
 })
@@ -607,24 +588,9 @@ describe('which listings a mount trusts', () => {
     const clock = new ManualClock()
     const index = new RAMIndexCacheStore({ ttl: 600, clock })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.scopeIndex(index).setDir('/data', [])
+    await scoped(manager).setDir('/data', [])
     expect(manager.listingTrusted('/data')).toBe(true)
     expect(manager.listingTrusted('/data/other')).toBe(false)
-    clock.advance(LISTING_TRUST_WINDOW)
-    expect(manager.listingTrusted('/data')).toBe(false)
-  })
-
-  it('times the window of a replaced store on its own clock', async () => {
-    const clock = new ManualClock()
-    const manager = new CacheManager(
-      new RAMFileCacheStore(),
-      new RAMIndexCacheStore({ ttl: 600, clock: new ManualClock() }),
-      '/data/',
-      true,
-    )
-    const replacement = new RAMIndexCacheStore({ ttl: 600, clock })
-    await manager.scopeIndex(replacement).setDir('/data', [])
-    expect(manager.listingTrusted('/data')).toBe(true)
     clock.advance(LISTING_TRUST_WINDOW)
     expect(manager.listingTrusted('/data')).toBe(false)
   })
@@ -635,10 +601,10 @@ describe('which listings a mount trusts', () => {
     const clock = new ManualClock()
     const index = new RAMIndexCacheStore({ ttl: 600, clock })
     const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
-    await manager.scopeIndex(index).setDir('/data', [])
+    await scoped(manager).setDir('/data', [])
     await runInCommandScope(async () => {
       expect(manager.listingTrusted('/data')).toBe(false)
-      await manager.scopeIndex(index).setDir('/data', [])
+      await scoped(manager).setDir('/data', [])
       clock.advance(LISTING_TRUST_WINDOW * 10)
       expect(manager.listingTrusted('/data')).toBe(true)
     })
@@ -787,16 +753,31 @@ describe('what a probe saw this command', () => {
   // after a write past the dispatcher (native code, a remote runtime line, a
   // path-less CLI mutation), and a re-list that found the file gone. Each one
   // means the backend may no longer match what the probe saw.
-  const DROPS: [string, (manager: CacheManager, index: RAMIndexCacheStore) => Promise<void>][] = [
-    ['a write', (m) => m.invalidateAfterWrite(PathSpec.fromStrPath('/data/elsewhere'))],
-    ['an unlink', (m) => m.invalidateAfterUnlink(PathSpec.fromStrPath('/data/elsewhere'))],
-    ['a subtree drop', (m) => m.invalidateSubtree(PathSpec.fromStrPath('/data/elsewhere'))],
-    ['a removal', (m) => m.invalidateAfterRemove(PathSpec.fromStrPath('/data/elsewhere'))],
-    ['a drop past the dispatcher', (m, index) => m.drop(index)],
+  const DROPS: [string, (manager: CacheManager) => Promise<void>][] = [
+    [
+      'a write',
+      (m) => m.invalidate(PathSpec.fromStrPath('/data/elsewhere'), FileChangeKind.UPDATE),
+    ],
+    [
+      'an unlink',
+      (m) =>
+        m.invalidate(PathSpec.fromStrPath('/data/elsewhere'), FileChangeKind.DELETE, null, {
+          leaf: true,
+        }),
+    ],
+    [
+      'a subtree drop',
+      (m) => m.invalidate(PathSpec.fromStrPath('/data/elsewhere'), FileChangeKind.UNKNOWN),
+    ],
+    [
+      'a removal',
+      (m) => m.invalidate(PathSpec.fromStrPath('/data/elsewhere'), FileChangeKind.DELETE),
+    ],
+    ['a drop past the dispatcher', (m) => m.drop()],
     [
       'a re-list that found it gone',
-      async (m, index) => {
-        const view = m.scopeIndex(index)
+      async (m) => {
+        const view = scoped(m)
         await view.setDir('/data/arch', [
           ['h.txt', new FileStat({ name: 'h.txt', type: FileType.FILE, fingerprint: 'h' })],
         ])
@@ -811,7 +792,7 @@ describe('what a probe saw this command', () => {
       await runInCommandScope(async () => {
         manager.noteProbed(path, probed())
         expect(manager.probedStat(path)).not.toBeNull()
-        await drop(manager, index)
+        await drop(manager)
         expect(manager.probedStat(path)).toBeNull()
       })
     })
@@ -877,7 +858,7 @@ it.each(['none', 'write', 'replace', 'unmount'])(
         confirmed,
       )
       await Promise.resolve()
-      if (interference === 'write') await manager.invalidateAfterWrite('/data/a')
+      if (interference === 'write') await manager.invalidate('/data/a', FileChangeKind.UPDATE)
       else if (interference === 'replace')
         await index.put('/data/a', old.with({ fingerprint: 'newer' }))
       else if (interference === 'unmount') owns = false
@@ -908,7 +889,7 @@ it.each(['replace', 'delete'])(
     const interfere = () =>
       peer.mutation(async () => {
         interferences++
-        const view = peer.scopeIndexLocked(index)
+        const view = locked(peer)
         if (interference === 'replace') await view.put(path.virtual, latest)
         else await view.invalidateEntry(path.virtual)
       })
@@ -1051,8 +1032,7 @@ it.each(['/data', '/nested/data'])('evicts ancestors under repeated mount %s', a
     directory,
     vfsPath: `${directory.slice(prefix.length + 1)}/b.txt`,
   })
-  await manager.invalidateAfterWrite(path)
-  await manager.invalidateAncestors(path)
+  await manager.invalidate(path, FileChangeKind.UPDATE)
   for (const ancestor of ancestors) expect((await index.listDir(ancestor)).entries).toBeUndefined()
   expect((await index.listDir(`${prefix}/unrelated`)).entries).toBeDefined()
 })

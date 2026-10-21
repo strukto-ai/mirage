@@ -87,6 +87,7 @@ import {
   type SetAttrFields,
   type WalkProbe,
   DEFAULT_READ_SPEC,
+  FileChangeKind,
   FileStat,
   WritePolicy,
   FileType,
@@ -464,7 +465,7 @@ export class MountEntry {
 
   /** Metadata access bound to this mount's ownership. */
   get index(): IndexCacheStore {
-    return this.cacheManager?.scopeIndex(this.indexStore) ?? this.indexStore
+    return this.cacheManager?.scopeIndex() ?? this.indexStore
   }
 
   /** Finish deferred mount preparation before any backend or cache read. */
@@ -1514,7 +1515,7 @@ export class MountEntry {
           },
           readVersion: (path) => manager.readVersion(path),
           readVersions: (paths) => manager.readVersions(paths),
-          drop: (path) => manager.invalidateAfterWrite(path),
+          drop: (path) => manager.invalidate(path, FileChangeKind.UPDATE),
           keep: (path, version) => manager.keepVersion(path, version),
         },
       }
@@ -1943,7 +1944,7 @@ export class MountEntry {
    *   whole file cache itself.
    */
   async dropCaches(bodies = true): Promise<void> {
-    if (this.cacheManager !== null) await this.cacheManager.drop(this.indexStore, bodies)
+    if (this.cacheManager !== null) await this.cacheManager.drop(bodies)
     else await this.indexStore.invalidate()
     this.vfs.accessor.forget?.()
   }

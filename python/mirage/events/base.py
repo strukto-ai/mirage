@@ -15,22 +15,8 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol
 
+from mirage.cache.manager import CacheManager
 from mirage.types import Delta, FileEvent, PathSpec
-
-
-class CacheInvalidator(Protocol):
-    """Mutation-side cache eviction a mount exposes to the hub.
-
-    ``mirage.cache.manager.CacheManager`` satisfies this structurally.
-    """
-
-    async def invalidate_after_write(self, path: PathSpec) -> None: ...
-
-    async def invalidate_after_remove(self, path: PathSpec) -> None: ...
-
-    async def invalidate_subtree(self, path: PathSpec) -> None: ...
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None: ...
 
 
 class EventMount(Protocol):
@@ -46,7 +32,7 @@ class EventMount(Protocol):
     def prefix(self) -> str: ...
 
     @property
-    def cache_manager(self) -> CacheInvalidator | None: ...
+    def cache_manager(self) -> CacheManager | None: ...
 
 
 class EventRegistry(Protocol):

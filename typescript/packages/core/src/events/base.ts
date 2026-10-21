@@ -12,18 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CacheManager } from '../cache/manager.ts'
 import type { Delta, FileEvent, PathSpec } from '../types.ts'
-
-export interface CacheInvalidator {
-  invalidateAfterWrite(path: PathSpec): Promise<void>
-  invalidateAfterRemove(path: PathSpec): Promise<void>
-  invalidateSubtree(path: PathSpec): Promise<void>
-  invalidateAncestors(path: PathSpec): Promise<void>
-}
 
 export interface EventMount {
   readonly prefix: string
-  readonly cacheManager: CacheInvalidator | null
+  readonly cacheManager: Pick<CacheManager, 'invalidate'> | null
 }
 
 // The raising lookup: a subscribed path or change event outside every mount

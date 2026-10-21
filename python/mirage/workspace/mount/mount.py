@@ -92,6 +92,7 @@ from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
+    FileChangeKind,
     FileStat,
     FileType,
     Limit,
@@ -546,11 +547,10 @@ class MountEntry:
 
     @property
     def index(self) -> IndexCacheStore:
-        index = self.index_store
         return (
-            self.cache_manager.scope_index(index)
+            self.cache_manager.scope_index()
             if self.cache_manager
-            else index
+            else self.index_store
         )
 
     async def ensure_ready(self) -> None:
@@ -1031,7 +1031,7 @@ class MountEntry:
             conditions=write_conditions(self.vfs),
             read_version=manager.read_version,
             read_versions=manager.read_versions,
-            drop=manager.invalidate_after_write,
+            drop=lambda path: manager.invalidate(path, FileChangeKind.UPDATE),
             keep=manager.keep_version,
         )
 
@@ -1409,7 +1409,7 @@ class MountEntry:
                 clears the whole file cache itself.
         """
         if self.cache_manager is not None:
-            await self.cache_manager.drop(self.index_store, bodies)
+            await self.cache_manager.drop(bodies)
         else:
             await self.index_store.invalidate()
         self.vfs.accessor.forget()

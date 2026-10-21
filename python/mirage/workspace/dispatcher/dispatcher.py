@@ -97,6 +97,7 @@ from mirage.types import (
     CacheFacts,
     CapacityResult,
     CapacityState,
+    FileChangeKind,
     FileStat,
     FileType,
     MountMode,
@@ -2383,9 +2384,11 @@ class Dispatcher:
             mount (MountEntry): destination mount.
             path (PathSpec): destination.
         """
-        manager = self._manager_for(mount)
+        manager = mount.cache_manager
+        if manager is None:
+            return
         version = await manager.read_version(path)
-        await self.invalidate_after_write(mount, path, times=False)
+        await manager.invalidate(path, FileChangeKind.UPDATE)
         if version is not None:
             await manager.keep_version(path, version)
 
@@ -2449,10 +2452,8 @@ class Dispatcher:
             record.fingerprint or None if record is not None else None
         )
         if not isinstance(data, bytes):
-            if fingerprint is not None:
-                await self._manager_for(mount).keep_version(
-                    call.path, fingerprint
-                )
+            if fingerprint is not None and mount.cache_manager is not None:
+                await mount.cache_manager.keep_version(call.path, fingerprint)
             return
         if call.name == "append":
             if before is None:
@@ -2697,27 +2698,29 @@ class Dispatcher:
         row = created if isinstance(created, FileStat) else None
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
         if name in COPY_OPS and isinstance(dst, PathSpec):
-            await self.invalidate_after_write(mount, dst, created=row)
+            await self._changed(mount, dst, FileChangeKind.CREATE, row)
             if name == "dir_copy":
                 await self._settle_tree_copy(mount, path, dst)
             return
         # rename(2) moves a file without touching its times, which the
-        # node table carries to the new name below.
-        await self.invalidate_after_write(
+        # node table carries to the new name below. rm_r takes everything
+        # below with it: the cached bodies and listings, and the links and
+        # overlays only the node table holds there.
+        await self._changed(
             mount,
             path,
+            FileChangeKind.UNKNOWN
+            if name == "rm_r"
+            else FileChangeKind.DELETE
+            if name in ("unlink", "rmdir")
+            else FileChangeKind.CREATE,
+            None if name == "rename" else row,
             observed=observed,
             times=not opened and name != "rename",
-            removed=name in ("unlink", "rmdir", "rm_r"),
-            created=None if name == "rename" else row,
         )
         for _, other in _operands(name, kwargs):
-            await self.invalidate_after_write(mount, other)
+            await self._changed(mount, other, FileChangeKind.UPDATE)
         if name == "rm_r":
-            # Everything below went with it: the cached bodies and
-            # listings, and the links and overlays only the node table
-            # holds there.
-            await self._invalidate_tree(mount, path)
             await self._namespace.purge_under(path.virtual)
         if name in ("unlink", "rmdir", "rm_r"):
             # The name no longer holds that file, so what was set on
@@ -2743,9 +2746,23 @@ class Dispatcher:
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
-            await self.invalidate_after_rename(mount, path, kwargs["dst"])
+            # A rename re-anchors the whole subtree under its source, so
+            # what was cached one level down under either name is stale,
+            # not just the two paths and their parents: left there, a
+            # moved directory's old name answered ``stat`` and ``ls`` from
+            # its cached children.
+            for moved in (path, kwargs["dst"]):
+                await self._changed(
+                    mount, moved, FileChangeKind.UNKNOWN, times=False
+                )
             if row is not None:
-                await self._keep_created(mount, kwargs["dst"], row)
+                await self._changed(
+                    mount,
+                    kwargs["dst"],
+                    FileChangeKind.CREATE,
+                    row,
+                    times=False,
+                )
             # rename(2) replaces the destination, so a node the
             # table holds at that name does not survive the move.
             # A link left there shadowed the file that had just
@@ -2807,11 +2824,19 @@ class Dispatcher:
         names.extend(other for _, other in _operands(name, kwargs))
         for target in names:
             try:
-                for owner, alias in self._aliases(mount, target):
-                    manager = self._manager_for(owner)
-                    version = await manager.read_version(alias)
-                    await manager.invalidate_subtree(alias)
-                    await manager.invalidate_ancestors(alias)
+                kept = [
+                    (owner.cache_manager, alias)
+                    for owner, alias in self._aliases(mount, target)
+                    if owner.cache_manager is not None
+                ]
+                versions = [
+                    await manager.read_version(alias)
+                    for manager, alias in kept
+                ]
+                await self._changed(
+                    mount, target, FileChangeKind.UNKNOWN, times=False
+                )
+                for (manager, alias), version in zip(kept, versions):
                     if version:
                         await manager.keep_version(alias, version)
             except Exception as exc:
@@ -2828,7 +2853,8 @@ class Dispatcher:
             try:
                 spec = PathSpec.from_str_path(key)
                 for owner, alias in self._aliases(mount, spec):
-                    await self._manager_for(owner).keep_version(alias, version)
+                    if owner.cache_manager is not None:
+                        await owner.cache_manager.keep_version(alias, version)
             except Exception as exc:
                 logger.debug("keeping %s after a refusal: %s", key, exc)
 
@@ -2851,8 +2877,10 @@ class Dispatcher:
         base = src.virtual.rstrip("/")
         landing = dst.virtual.rstrip("/")
         for virtual in await self._entries_below(mount, src.virtual):
-            await self.invalidate_after_write(
-                mount, PathSpec.from_str_path(landing + virtual[len(base) :])
+            await self._changed(
+                mount,
+                PathSpec.from_str_path(landing + virtual[len(base) :]),
+                FileChangeKind.CREATE,
             )
 
     async def _entries_below(self, mount: MountEntry, root: str) -> list[str]:
@@ -2958,9 +2986,7 @@ class Dispatcher:
         channel = _MountChannel(
             mount,
             self._boundary(mount, caller),
-            functools.partial(
-                self.invalidate_after_write, mount, removed=True
-            ),
+            lambda spec: self._changed(mount, spec, FileChangeKind.DELETE),
             rule_gate,
         )
         try:
@@ -3584,7 +3610,9 @@ class Dispatcher:
         ]
         if applied:
             await self._namespace.drop_attrs(path.virtual, applied)
-            await self.invalidate_after_write(mount, path, times=False)
+            await self._changed(
+                mount, path, FileChangeKind.UPDATE, times=False
+            )
         else:
             await self._xattr_target(mount, path, vis)
         if residual:
@@ -3669,112 +3697,43 @@ class Dispatcher:
 
         return facts
 
-    def _manager_for(self, mount: MountEntry) -> CacheManager:
-        """The cache manager that owns a mount's listings and bodies.
-
-        Args:
-            mount (MountEntry): the mount that was written.
-        """
-        manager = mount.cache_manager
-        if manager is None:
-            manager = CacheManager(
-                self._cache,
-                mount.index_store,
-                mount.prefix,
-                mount.vfs.caches_reads,
-            )
-        return manager
-
-    async def invalidate_after_write(
+    async def _changed(
         self,
         mount: MountEntry,
         path: PathSpec,
+        kind: FileChangeKind,
+        row: FileStat | None = None,
+        *,
         observed: float | None = None,
         times: bool = True,
-        removed: bool = False,
-        created: FileStat | None = None,
     ) -> None:
-        """Drop what a write to ``path`` made stale above the store.
+        """Drop what a change to ``path`` made stale above the store.
+
+        The mount's caches take it under every mount of its store
+        (``CacheManager.invalidate``); a removal through the dispatcher
+        knows nothing was below the name, so its index is not asked. The
+        overlay times a content write moves go too, under each name.
 
         Args:
-            mount (MountEntry): the mount the write ran on.
-            path (PathSpec): the path it wrote.
+            mount (MountEntry): the mount the change ran on.
+            path (PathSpec): the path it changed.
+            kind (FileChangeKind): what happened, which decides the reach.
+            row (FileStat | None): a CREATE's new entry, kept in its
+                parent's listing; None drops that entry.
             observed (float | None): epoch seconds of a content write to
                 record, None for a removal.
             times (bool): drop the overlay times a content write moves;
-                False for an open that wrote nothing.
-            removed (bool): the write removed ``path`` (unlink, rmdir),
-                so its own listing goes too, as a core's removal drops it.
-            created (FileStat | None): the stat of what the write made at
-                ``path``, kept in its parent's listing instead of
-                dropping that listing; None to drop it.
+                False for a change that moved no times.
         """
-        for owner, name in self._aliases(mount, path):
-            if times:
+        if times:
+            for _, name in self._aliases(mount, path):
                 await self._namespace.clear_times(
                     name.virtual, observed=observed
                 )
-            manager = self._manager_for(owner)
-            if removed:
-                await manager.invalidate_after_unlink(name)
-            elif created is not None:
-                await manager.keep_created(name, created)
-            else:
-                await manager.invalidate_after_write(name)
-            await manager.invalidate_ancestors(name)
-
-    async def _keep_created(
-        self, mount: MountEntry, path: PathSpec, row: FileStat
-    ) -> None:
-        """Keep a moved entry's stat where its new parent's listing names
-        it, under every mount of its store.
-
-        Args:
-            mount (MountEntry): the mount the move ran on.
-            path (PathSpec): where the entry landed.
-            row (FileStat): its stat there.
-        """
-        for owner, name in self._aliases(mount, path):
-            await self._manager_for(owner).keep_created(name, row)
-
-    async def _invalidate_tree(
-        self, mount: MountEntry, path: PathSpec
-    ) -> None:
-        """Drop everything cached at and below ``path``, and its parents'
-        listings, under every mount of its store.
-
-        Args:
-            mount (MountEntry): the mount the tree was changed through.
-            path (PathSpec): the tree's root.
-        """
-        for owner, name in self._aliases(mount, path):
-            manager = self._manager_for(owner)
-            await manager.invalidate_subtree(name)
-            await manager.invalidate_ancestors(name)
-
-    async def invalidate_after_rename(
-        self, mount: MountEntry, source: PathSpec, dst: PathSpec
-    ) -> None:
-        """Drop everything cached below both ends of a rename.
-
-        A rename re-anchors the whole subtree under its source, so the
-        listings and bodies cached one level down under either name
-        are stale, not just the two paths and their parents. Evicting
-        only those left a moved directory's old name answering ``stat``
-        and ``ls`` from its cached children, so the next rename onto
-        that name saw a directory that was no longer there.
-
-        Args:
-            mount (MountEntry): the mount the rename ran on.
-            source (PathSpec): the name the subtree left.
-            dst (PathSpec): the name it now lives under.
-        """
-        for owner, src in self._aliases(mount, source):
-            await self._manager_for(owner).invalidate_subtree(src)
-        for owner, to in self._aliases(mount, dst):
-            manager = self._manager_for(owner)
-            await manager.invalidate_subtree(to)
-            await manager.invalidate_ancestors(to)
+        if mount.cache_manager is not None:
+            await mount.cache_manager.invalidate(
+                path, kind, row, leaf=kind is FileChangeKind.DELETE
+            )
 
     def _aliases(
         self, mount: MountEntry, path: PathSpec

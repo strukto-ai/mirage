@@ -1587,10 +1587,6 @@ export class Workspace {
     return result
   }
 
-  async invalidateAfterWriteByPath(path: string): Promise<void> {
-    await this.dispatcher.invalidateAfterWriteByPath(path)
-  }
-
   /**
    * The declared source instances, built once.
    *

@@ -96,11 +96,11 @@ async def _evicted(mount: str, child: str, kind: FileChangeKind) -> bool:
     manager = CacheManager(cache, index, f"{mount}/", True)
     path = _spec(mount, child)
     if kind is FileChangeKind.DELETE:
-        await manager.invalidate_after_unlink(path)
+        await manager.invalidate(path, FileChangeKind.DELETE, leaf=True)
     elif kind is FileChangeKind.UNKNOWN:
-        await manager.invalidate_subtree(path)
+        await manager.invalidate(path, FileChangeKind.UNKNOWN)
     else:
-        await manager.invalidate_after_write(path)
+        await manager.invalidate(path, FileChangeKind.UPDATE)
     return (await index.list_dir(f"{mount}/{child}")).entries is None
 
 
@@ -118,12 +118,13 @@ async def _parent_evicted(mount: str, child: str) -> bool:
     entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir(f"{mount}/{child}", [("leaf.txt", entry)])
     manager = CacheManager(cache, index, f"{mount}/", True)
-    await manager.invalidate_after_write(
+    await manager.invalidate(
         PathSpec(
             virtual=f"{mount}/{child}/leaf.txt",
             directory=f"{mount}/{child}",
             vfs_path=f"{child}/leaf.txt",
-        )
+        ),
+        FileChangeKind.UPDATE,
     )
     return (await index.list_dir(f"{mount}/{child}")).entries is None
 
@@ -139,7 +140,7 @@ async def _subtree_evicted(mount: str, child: str) -> bool:
     entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir(f"{mount}/{child}/nested", [("leaf.txt", entry)])
     manager = CacheManager(cache, index, f"{mount}/", True)
-    await manager.invalidate_subtree(_spec(mount, child))
+    await manager.invalidate(_spec(mount, child), FileChangeKind.UNKNOWN)
     return (await index.list_dir(f"{mount}/{child}/nested")).entries is None
 
 

@@ -164,6 +164,8 @@ async def test_added_alias_shares_the_first_mount_index():
         alias = ws.add_mount("/b", ram, read=FRESH, index=IndexConfig(ttl=0))
         assert alias.index_store is ws.mount("/a/").index_store
         assert alias.read.policy is ReadPolicy.FRESH
-        assert ws.mount("/a/").cache_manager._aliases() == ("/b",)
+        assert ws.mount("/a/").cache_manager._aliases() == (
+            alias.cache_manager,
+        )
     finally:
         await ws.close()

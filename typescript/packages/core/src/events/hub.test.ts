@@ -4,32 +4,18 @@ import { LookupStatus } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import { CacheManager } from '../cache/manager.ts'
 import { FileChangeKind, FileEvent, PathSpec, FileStat, FileType } from '../types.ts'
-import type { CacheInvalidator, EventMount, EventRegistry } from './base.ts'
+import type { EventMount, EventRegistry } from './base.ts'
 import { RAMEventQueue } from './queue/ram.ts'
 import { EventHub } from './hub.ts'
 
 const TIMESTAMP = new Date(0)
 
-class RecordingCache implements CacheInvalidator {
+class RecordingCache implements Pick<CacheManager, 'invalidate'> {
   readonly log: string[] = []
 
-  invalidateAfterWrite(path: PathSpec): Promise<void> {
-    this.log.push(`write:${path.virtual}:${path.vfsPath}`)
-    return Promise.resolve()
-  }
-
-  invalidateAfterRemove(path: PathSpec): Promise<void> {
-    this.log.push(`remove:${path.virtual}:${path.vfsPath}`)
-    return Promise.resolve()
-  }
-
-  invalidateSubtree(path: PathSpec): Promise<void> {
-    this.log.push(`subtree:${path.virtual}:${path.vfsPath}`)
-    return Promise.resolve()
-  }
-
-  invalidateAncestors(path: PathSpec): Promise<void> {
-    this.log.push(`ancestors:${path.virtual}:${path.vfsPath}`)
+  invalidate(path: string | PathSpec, kind: FileChangeKind): Promise<void> {
+    if (!(path instanceof PathSpec)) throw new Error('the hub hands a framed path')
+    this.log.push(`${kind}:${path.virtual}:${path.vfsPath}`)
     return Promise.resolve()
   }
 }
@@ -86,7 +72,7 @@ function moved(from: string, to: string): FileEvent {
 }
 
 describe('EventHub', () => {
-  it('invalidates the path and ancestors before delivery', async () => {
+  it('invalidates the path before delivery', async () => {
     const cache = new RecordingCache()
     const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: cache }))
     const pending = await begin(hub, '/nc')
@@ -94,10 +80,7 @@ describe('EventHub', () => {
     const delivered = await pending.next
     if (delivered.done === true) throw new Error('events ended before delivery')
     expect(delivered.value.path.vfsPath).toBe('data/sub/x.txt')
-    expect(cache.log).toEqual([
-      'write:/nc/data/sub/x.txt:data/sub/x.txt',
-      'ancestors:/nc/data/sub/x.txt:data/sub/x.txt',
-    ])
+    expect(cache.log).toEqual(['create:/nc/data/sub/x.txt:data/sub/x.txt'])
     await hub.close()
   })
 
@@ -124,18 +107,18 @@ describe('EventHub', () => {
     await hub.close()
   })
 
-  it('routes a DELETE through removal', async () => {
-    const cache = new RecordingCache()
-    const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: cache }))
-    const pending = await begin(hub, '/nc')
-    await hub.notify(change(FileChangeKind.DELETE, '/nc/data/x.txt'))
-    await pending.next
-    expect(cache.log).toEqual([
-      'remove:/nc/data/x.txt:data/x.txt',
-      'ancestors:/nc/data/x.txt:data/x.txt',
-    ])
-    await hub.close()
-  })
+  it.each([FileChangeKind.DELETE, FileChangeKind.UNKNOWN, FileChangeKind.UPDATE])(
+    'hands a %s to the manager',
+    async (kind) => {
+      const cache = new RecordingCache()
+      const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: cache }))
+      const pending = await begin(hub, '/nc')
+      await hub.notify(change(kind, '/nc/data/day'))
+      await pending.next
+      expect(cache.log).toEqual([`${kind}:/nc/data/day:data/day`])
+      await hub.close()
+    },
+  )
 
   it('cleans ancestors without delivery after a removal probe fails', async () => {
     const cache = new RAMFileCacheStore()
@@ -165,53 +148,21 @@ describe('EventHub', () => {
     expect((await pending.next).done).toBe(true)
   })
 
-  it.each([false, true])(
-    'preserves ancestor cleanup failures without delivery when removal fails: %s',
-    async (removalFails) => {
-      const manager = new RecordingCache()
-      const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: manager }))
-      const pending = await begin(hub, '/nc')
-      const removal = vi.spyOn(manager, 'invalidateAfterRemove')
-      if (removalFails) removal.mockRejectedValue(0)
-      const cleanupError = new Error('ancestor cleanup failed')
-      const cleanup = vi.spyOn(manager, 'invalidateAncestors').mockRejectedValue(cleanupError)
-      const pushed = vi.spyOn(RAMEventQueue.prototype, 'push')
-      try {
-        const result = hub.notify(change(FileChangeKind.DELETE, '/nc/data/f'))
-        if (removalFails) {
-          await expect(result).rejects.toBeInstanceOf(AggregateError)
-          await expect(result).rejects.toHaveProperty('errors', [0, cleanupError])
-        } else {
-          await expect(result).rejects.toBe(cleanupError)
-        }
-        expect(cleanup).toHaveBeenCalledTimes(1)
-        expect(pushed).not.toHaveBeenCalled()
-      } finally {
-        pushed.mockRestore()
-        await hub.close()
-      }
-      expect((await pending.next).done).toBe(true)
-    },
-  )
-
-  it('takes the subtree for an UNKNOWN change', async () => {
-    const cache = new RecordingCache()
-    const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: cache }))
+  it('delivers nothing when invalidation fails', async () => {
+    const manager = new RecordingCache()
+    const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: manager }))
     const pending = await begin(hub, '/nc')
-    await hub.notify(change(FileChangeKind.UNKNOWN, '/nc/data/day'))
-    await pending.next
-    expect(cache.log).toEqual(['subtree:/nc/data/day:data/day', 'ancestors:/nc/data/day:data/day'])
-    await hub.close()
-  })
-
-  it('does not reach into the subtree for an UPDATE', async () => {
-    const cache = new RecordingCache()
-    const hub = new EventHub(new FakeRegistry({ prefix: '/nc/', cacheManager: cache }))
-    const pending = await begin(hub, '/nc')
-    await hub.notify(change(FileChangeKind.UPDATE, '/nc/data/day'))
-    await pending.next
-    expect(cache.log).toEqual(['write:/nc/data/day:data/day', 'ancestors:/nc/data/day:data/day'])
-    await hub.close()
+    const error = new Error('invalidation failed')
+    vi.spyOn(manager, 'invalidate').mockRejectedValue(error)
+    const pushed = vi.spyOn(RAMEventQueue.prototype, 'push')
+    try {
+      await expect(hub.notify(change(FileChangeKind.DELETE, '/nc/data/f'))).rejects.toBe(error)
+      expect(pushed).not.toHaveBeenCalled()
+    } finally {
+      pushed.mockRestore()
+      await hub.close()
+    }
+    expect((await pending.next).done).toBe(true)
   })
 
   it('invalidates both sides of a move', async () => {
@@ -227,8 +178,10 @@ describe('EventHub', () => {
       }),
     )
     await pending.next
-    expect(cache.log).toContain('remove:/nc/old/original.txt:old/original.txt')
-    expect(cache.log).toContain('ancestors:/nc/old/original.txt:old/original.txt')
+    expect(cache.log).toEqual([
+      'move:/nc/data/new.txt:data/new.txt',
+      'delete:/nc/old/original.txt:old/original.txt',
+    ])
     await hub.close()
   })
 

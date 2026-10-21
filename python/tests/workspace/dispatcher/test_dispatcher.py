@@ -998,13 +998,13 @@ async def test_ops_rmdir_cascade_invalidates_each_remnant(monkeypatch):
     assert io.exit_code == 0, io.stderr
     sess = ws.create_session("rev", profile={"paths": {"hide": ["/a/d/sec"]}})
     recorded: list[str] = []
-    real = Dispatcher.invalidate_after_write
+    real = Dispatcher._changed
 
-    async def spy(self, mount, path, **kwargs):
+    async def spy(self, mount, path, kind, *args, **kwargs):
         recorded.append(path.virtual)
-        await real(self, mount, path, **kwargs)
+        await real(self, mount, path, kind, *args, **kwargs)
 
-    monkeypatch.setattr(Dispatcher, "invalidate_after_write", spy)
+    monkeypatch.setattr(Dispatcher, "_changed", spy)
     token = set_current_session(sess)
     try:
         await ws.vfs.rmdir("/a/d")

@@ -296,7 +296,7 @@ export class MountRegistry {
       () =>
         this.allMounts()
           .filter((entry) => entry !== m && entry.vfs === m.vfs)
-          .map((entry) => entry.prefix.replace(/\/$/, '')),
+          .flatMap((entry) => (entry.cacheManager === null ? [] : [entry.cacheManager])),
     )
   }
 
@@ -471,7 +471,7 @@ export class MountRegistry {
       },
       this.mountList,
     )
-    if (this.cacheStore !== null) this.attachManager(m)
+    this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
     this.rowCache = null

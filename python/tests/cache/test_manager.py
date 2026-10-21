@@ -36,13 +36,15 @@ from mirage.observe.context import (
     active_records,
 )
 from mirage.observe.record import OpRecord, RecordIndex
-from mirage.types import DEFAULT_READ_TTL, FileStat, FileType, PathSpec
+from mirage.types import (
+    DEFAULT_READ_TTL,
+    FileChangeKind,
+    FileStat,
+    FileType,
+    PathSpec,
+)
 from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mount_key
-
-
-def _owns_all(_key: str) -> bool:
-    return True
 
 
 def _run(coro):
@@ -74,7 +76,9 @@ async def _write_case() -> tuple[bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_write(PathSpec.from_str_path("/arch/h.txt"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/arch/h.txt"), FileChangeKind.UPDATE
+    )
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
     return cached, listing.entries is not None
@@ -93,7 +97,9 @@ async def test_a_created_row_lives_no_longer_than_the_read_limit():
     index = RAMIndexCacheStore(ttl=86400)
     manager = CacheManager(RAMFileCacheStore(), index, "/data/", True)
     row = FileStat(name="new.txt", type=FileType.FILE, size=1)
-    await manager.keep_created(PathSpec.from_str_path("/new.txt"), row)
+    await manager.invalidate(
+        PathSpec.from_str_path("/new.txt"), FileChangeKind.CREATE, row
+    )
     listing = await index.list_dir("/data")
     assert listing.partial_entries == ["/data/new.txt"]
     lifetime = index._expiry["/data"] - datetime.now(timezone.utc)
@@ -109,7 +115,9 @@ async def test_a_created_row_naming_another_file_lists_the_parent_again():
     await index.set_dir("/data", [("N", old)])
     manager = CacheManager(RAMFileCacheStore(), index, "/data/", True)
     row = FileStat(name="N", type=FileType.FILE, size=2)
-    await manager.keep_created(PathSpec.from_str_path("/n"), row)
+    await manager.invalidate(
+        PathSpec.from_str_path("/n"), FileChangeKind.CREATE, row
+    )
     assert (await index.list_dir("/data")).entries is None
     assert (await index.get("/data/n")).entry is None
 
@@ -118,8 +126,8 @@ async def _unlink_case() -> tuple[bool, bool, FileStat | None]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_unlink(
-        PathSpec.from_str_path("/arch/h.txt")
+    await manager.invalidate(
+        PathSpec.from_str_path("/arch/h.txt"), FileChangeKind.DELETE, leaf=True
     )
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
@@ -138,7 +146,9 @@ async def _local_case() -> tuple[bool, bool]:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", False)
-    await manager.invalidate_after_write(PathSpec.from_str_path("/arch/h.txt"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/arch/h.txt"), FileChangeKind.UPDATE
+    )
     cached = await cache.exists("/data/arch/h.txt")
     listing = await index.list_dir("/data/arch")
     return cached, listing.entries is not None
@@ -159,7 +169,7 @@ async def _pathspec_case() -> bool:
         virtual="/data/arch/h.txt",
         directory="/data/arch",
     )
-    await manager.invalidate_after_write(spec)
+    await manager.invalidate(spec, FileChangeKind.UPDATE)
     return await cache.exists("/data/arch/h.txt")
 
 
@@ -206,7 +216,9 @@ async def _no_index_case() -> bool:
     cache, _ = _stores()
     await cache.set("/data/a.txt", b"x")
     manager = CacheManager(cache, NULL_INDEX, "/data/", True)
-    await manager.invalidate_after_write(PathSpec.from_str_path("/a.txt"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/a.txt"), FileChangeKind.UPDATE
+    )
     return await cache.exists("/data/a.txt")
 
 
@@ -220,9 +232,13 @@ async def _drop_case() -> tuple[bool, bool, bool, LookupStatus]:
     await cache.set("/mirror/arch/h.txt", b"same\n")
     await cache.set("/other/keep.txt", b"safe\n")
     manager = CacheManager(
-        cache, index, "/data/", True, aliases=lambda: ("/mirror",)
+        cache,
+        index,
+        "/data/",
+        True,
+        aliases=lambda: (CacheManager(cache, index, "/mirror/", True),),
     )
-    await manager.drop(index)
+    await manager.drop()
     return (
         await cache.exists("/data/arch/h.txt"),
         await cache.exists("/mirror/arch/h.txt"),
@@ -244,7 +260,7 @@ async def _drop_local_case() -> bool:
     cache, index = _stores()
     await _seed(cache, index)
     manager = CacheManager(cache, index, "/data/", False)
-    await manager.drop(index)
+    await manager.drop()
     return await cache.exists("/data/arch/h.txt")
 
 
@@ -259,7 +275,7 @@ async def _drop_root_case() -> tuple[str, bool, bool]:
     await cache.set("/a.txt", b"x")
     await cache.set("/sub/b.txt", b"y")
     manager = CacheManager(cache, index, "/", True)
-    await manager.drop(index)
+    await manager.drop()
     return (
         manager._prefix,
         await cache.exists("/a.txt"),
@@ -281,7 +297,9 @@ async def _ancestors_case() -> tuple[bool, bool, bool]:
     for directory in ("/data", "/data/a", "/data/a/b"):
         await index.set_dir(directory, [])
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_ancestors(PathSpec.from_str_path("/a/b/c.txt"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/a/b/c.txt"), FileChangeKind.UPDATE
+    )
     return (
         (await index.list_dir("/data")).entries is not None,
         (await index.list_dir("/data/a")).entries is not None,
@@ -289,14 +307,10 @@ async def _ancestors_case() -> tuple[bool, bool, bool]:
     )
 
 
-def test_invalidate_ancestors_walks_up_to_the_mount_root():
+def test_a_change_drops_every_listing_up_to_the_mount_root():
     """One put materializes every missing level of the key, so every
     listing above the written file gained an entry."""
-    root, a, ab = _run(_ancestors_case())
-    assert root is False
-    assert a is False
-    # The immediate parent is invalidate_after_write's job, not this one.
-    assert ab is True
+    assert _run(_ancestors_case()) == (False, False, False)
 
 
 async def _ancestors_root_mount_case() -> tuple[bool, bool]:
@@ -304,14 +318,16 @@ async def _ancestors_root_mount_case() -> tuple[bool, bool]:
     for directory in ("/", "/a"):
         await index.set_dir(directory, [])
     manager = CacheManager(cache, index, "/", True)
-    await manager.invalidate_ancestors(PathSpec.from_str_path("/a/b/c.txt"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/a/b/c.txt"), FileChangeKind.UPDATE
+    )
     return (
         (await index.list_dir("/")).entries is not None,
         (await index.list_dir("/a")).entries is not None,
     )
 
 
-def test_invalidate_ancestors_reaches_the_root_listing():
+def test_a_change_reaches_the_root_listing():
     root, a = _run(_ancestors_root_mount_case())
     assert root is False
     assert a is False
@@ -326,7 +342,9 @@ async def _subtree_case() -> tuple[bool, bool, bool, bool]:
     await index.set_dir("/data/chan/day/files", [("a.png", entry)])
     await index.set_dir("/data/chan", [("day", entry)])
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_subtree(PathSpec.from_str_path("/chan/day"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/chan/day"), FileChangeKind.UNKNOWN
+    )
     return (
         await cache.exists("/data/chan/day/files/a.png"),
         (await index.list_dir("/data/chan/day")).entries is not None,
@@ -335,7 +353,7 @@ async def _subtree_case() -> tuple[bool, bool, bool, bool]:
     )
 
 
-def test_invalidate_subtree_drops_nested_bodies_and_listings():
+def test_an_unknown_change_drops_nested_bodies_and_listings():
     body, own, nested, parent = _run(_subtree_case())
     assert body is False
     assert own is False
@@ -348,7 +366,9 @@ async def _write_leaves_subtree_case() -> bool:
     entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/data/chan/day/files", [("a.png", entry)])
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_write(PathSpec.from_str_path("/chan/day"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/chan/day"), FileChangeKind.UPDATE
+    )
     return (await index.list_dir("/data/chan/day/files")).entries is not None
 
 
@@ -374,8 +394,8 @@ async def test_removing_a_folder_drops_what_is_cached_beneath_it(kind):
         await index.set_dir("/data/dirx", [("y", _entry("y"))])
         await index.set_dir("/data", [("other", _entry("other"))])
         manager = CacheManager(cache, index, "/data/", cache is not None)
-        await manager.invalidate_after_remove(
-            PathSpec.from_str_path("/data/dir")
+        await manager.invalidate(
+            PathSpec.from_str_path("/data/dir"), FileChangeKind.DELETE
         )
         assert (
             await index.list_dir("/data/dir/sub")
@@ -418,15 +438,14 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
             index, "holds_subtree", wraps=index.holds_subtree
         ) as probe,
     ):
-        await manager.invalidate_after_remove(
-            PathSpec.from_str_path("/data/d/f")
+        await manager.invalidate(
+            PathSpec.from_str_path("/data/d/f"), FileChangeKind.DELETE
         )
     assert await cache.exists("/data/d/f") is False
     assert await cache.exists("/data/d/g") is True
     assert await cache.exists("/data/e/h") is True
-    assert (await index.list_dir("/data")).entries == ["/data/d", "/data/e"]
+    assert (await index.list_dir("/data")).partial_entries == ["/data/e"]
     assert {key: row.type for key, row in (await index.entries()).items()} == {
-        "/data/d": FileType.DIRECTORY,
         "/data/e": FileType.DIRECTORY,
         "/data/d/g": FileType.FILE,
         "/data/e/h": FileType.FILE,
@@ -450,8 +469,8 @@ async def test_a_failed_removal_still_drops_the_body_and_listings(stage):
     manager = CacheManager(cache, index, "/data/", True)
     with patch.object(index, method, AsyncMock(side_effect=error)):
         with pytest.raises(RuntimeError) as caught:
-            await manager.invalidate_after_remove(
-                PathSpec.from_str_path("/data/d/f")
+            await manager.invalidate(
+                PathSpec.from_str_path("/data/d/f"), FileChangeKind.DELETE
             )
     assert caught.value is error
     assert await cache.exists("/data/d/f") is False
@@ -464,7 +483,9 @@ async def _prefix_lookalike_case() -> bool:
     entry = FileStat(name="f", type=FileType.FILE, fingerprint="1")
     await index.set_dir("/d/day", [("chat.jsonl", entry)])
     manager = CacheManager(cache, index, "/d/", True)
-    await manager.invalidate_after_unlink(PathSpec.from_str_path("/day"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/day"), FileChangeKind.DELETE, leaf=True
+    )
     return (await index.list_dir("/d/day")).entries is not None
 
 
@@ -499,64 +520,32 @@ async def _waits_for_the_lock(cache: RAMFileCacheStore, view) -> bool:
 async def test_scope_index_is_one_view_per_store():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    assert manager.scope_index(index) is manager.scope_index(index)
-
-
-@pytest.mark.asyncio
-async def test_scope_index_follows_a_replaced_store():
-    cache, index = _stores()
-    replaced = RAMIndexCacheStore(ttl=600)
-    manager = CacheManager(cache, index, "/data/", True)
-    first = manager.scope_index(index)
-    second = manager.scope_index(replaced)
-    await second.set_dir("/data", [("a", _entry())])
-    assert second is not first
-    assert (await replaced.list_dir("/data")).entries == ["/data/a"]
-    assert (await index.list_dir("/data")).entries is None
-
-
-@pytest.mark.asyncio
-async def test_scope_index_hands_back_a_view_even_while_it_holds_another():
-    cache, index = _stores()
-    manager = CacheManager(cache, index, "/data/", True)
-    manager.scope_index(index)
-    view = IndexView(RAMIndexCacheStore(), cache, "/data", _owns_all)
-    assert manager.scope_index(view) is view
+    assert manager.scope_index() is manager.scope_index()
 
 
 @pytest.mark.asyncio
 async def test_scope_index_without_a_file_cache_is_the_raw_store():
     _, index = _stores()
     manager = CacheManager(None, index, "/data/", True)
-    assert manager.scope_index(index) is index
-    assert manager.scope_index(index) is index
+    assert manager.scope_index() is index
 
 
 @pytest.mark.asyncio
-async def test_scope_index_locked_refuses_a_view():
-    cache, index = _stores()
-    manager = CacheManager(cache, index, "/data/", True)
-    view = IndexView(index, cache, "/data", _owns_all)
-    with pytest.raises(ValueError):
-        manager.scope_index_locked(view)
-
-
-@pytest.mark.asyncio
-async def test_scope_index_locked_without_a_file_cache_is_the_raw_store():
+async def test_the_locked_index_without_a_file_cache_is_the_raw_store():
     _, index = _stores()
     manager = CacheManager(None, index, "/data/", True)
-    assert manager.scope_index_locked(index) is index
+    assert manager._locked_index() is index
 
 
 @pytest.mark.asyncio
-async def test_scope_index_locked_is_never_memoized_nor_shared():
+async def test_the_locked_index_is_never_memoized_nor_shared():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    locked = manager.scope_index_locked(index)
+    locked = manager._locked_index()
     assert isinstance(locked, IndexView)
-    assert locked is not manager.scope_index_locked(index)
-    assert locked is not manager.scope_index(index)
-    assert await _waits_for_the_lock(cache, manager.scope_index(index))
+    assert locked is not manager._locked_index()
+    assert locked is not manager.scope_index()
+    assert await _waits_for_the_lock(cache, manager.scope_index())
 
 
 @pytest.mark.asyncio
@@ -566,7 +555,7 @@ async def test_a_write_through_the_locked_view_counts_for_the_shared_one():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
     async with command_scope():
-        await manager.scope_index_locked(index).set_dir("/data", [])
+        await manager._locked_index().set_dir("/data", [])
         assert manager.listing_trusted("/data") is True
         assert manager.listing_trusted("/data/other") is False
 
@@ -575,7 +564,7 @@ async def test_a_write_through_the_locked_view_counts_for_the_shared_one():
 async def test_a_write_before_the_command_does_not_count():
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.scope_index(index).set_dir("/data", [])
+    await manager.scope_index().set_dir("/data", [])
     async with command_scope():
         assert manager.listing_trusted("/data") is False
 
@@ -592,7 +581,7 @@ async def test_a_listing_another_command_fetched_is_not_this_ones(producer):
     async def note():
         ready.set()
         await release.wait()
-        await manager.scope_index(index).set_dir("/data", [])
+        await manager.scope_index().set_dir("/data", [])
 
     async def produce():
         if producer == "none":
@@ -612,37 +601,16 @@ async def test_a_listing_another_command_fetched_is_not_this_ones(producer):
         assert manager.listed_this_command("/data") is False
 
 
-@pytest.mark.asyncio
-async def test_a_replaced_store_forgets_what_the_old_one_was_written():
-    cache, index = _stores()
-    manager = CacheManager(cache, index, "/data/", True)
-    async with command_scope():
-        await manager.scope_index(index).set_dir("/data", [])
-        manager.scope_index(RAMIndexCacheStore(ttl=600))
-        assert manager.listing_trusted("/data") is False
-
-
 @pytest.fixture
 def clock() -> ManualClock:
     return ManualClock(start=100.0)
 
 
 @pytest.mark.asyncio
-async def test_a_replaced_store_times_its_window_on_its_own_clock(clock):
-    cache, index = _stores()
-    manager = CacheManager(cache, index, "/data/", True)
-    replacement = RAMIndexCacheStore(ttl=600, clock=clock)
-    await manager.scope_index(replacement).set_dir("/data", [])
-    assert manager.listing_trusted("/data") is True
-    clock.advance(LISTING_TRUST_WINDOW)
-    assert manager.listing_trusted("/data") is False
-
-
-@pytest.mark.asyncio
 async def test_outside_a_command_a_listing_is_trusted_for_the_window(clock):
     cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.scope_index(index).set_dir("/data", [])
+    await manager.scope_index().set_dir("/data", [])
     clock.advance(LISTING_TRUST_WINDOW - 0.01)
     assert manager.listing_trusted("/data") is True
     assert manager.listing_trusted("/data/other") is False
@@ -656,11 +624,11 @@ async def test_inside_a_command_the_window_does_not_apply(clock):
     # the next one: the window is only for reads that belong to no command.
     cache, index = _stores(clock)
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.scope_index(index).set_dir("/data", [])
+    await manager.scope_index().set_dir("/data", [])
     clock.advance(0.01)
     async with command_scope():
         assert manager.listing_trusted("/data") is False
-        await manager.scope_index(index).set_dir("/data", [])
+        await manager.scope_index().set_dir("/data", [])
         clock.advance(LISTING_TRUST_WINDOW * 10)
         assert manager.listing_trusted("/data") is True
 
@@ -787,33 +755,37 @@ async def test_a_probe_outside_a_command_is_never_served():
 
 
 async def _write(manager: CacheManager, index) -> None:
-    await manager.invalidate_after_write(
-        PathSpec.from_str_path("/data/elsewhere")
+    await manager.invalidate(
+        PathSpec.from_str_path("/data/elsewhere"), FileChangeKind.UPDATE
     )
 
 
 async def _unlink(manager: CacheManager, index) -> None:
-    await manager.invalidate_after_unlink(
-        PathSpec.from_str_path("/data/elsewhere")
+    await manager.invalidate(
+        PathSpec.from_str_path("/data/elsewhere"),
+        FileChangeKind.DELETE,
+        leaf=True,
     )
 
 
 async def _subtree(manager: CacheManager, index) -> None:
-    await manager.invalidate_subtree(PathSpec.from_str_path("/data/elsewhere"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/data/elsewhere"), FileChangeKind.UNKNOWN
+    )
 
 
 async def _remove(manager: CacheManager, index) -> None:
-    await manager.invalidate_after_remove(
-        PathSpec.from_str_path("/data/elsewhere")
+    await manager.invalidate(
+        PathSpec.from_str_path("/data/elsewhere"), FileChangeKind.DELETE
     )
 
 
 async def _past(manager: CacheManager, index) -> None:
-    await manager.drop(index)
+    await manager.drop()
 
 
 async def _relisted_gone(manager: CacheManager, index) -> None:
-    view = manager.scope_index(index)
+    view = manager.scope_index()
     await view.set_dir(
         "/data/arch",
         [
@@ -955,8 +927,8 @@ async def test_retained_fallback_row_is_fenced(interference):
         await asyncio.sleep(0)
         assert not pending.done()
         if interference == "write":
-            await manager.invalidate_after_write(
-                PathSpec.from_str_path("/data/a")
+            await manager.invalidate(
+                PathSpec.from_str_path("/data/a"), FileChangeKind.UPDATE
             )
         elif interference == "replace":
             await index.put(
@@ -995,7 +967,7 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
         nonlocal interferences
         interferences += 1
         async with peer.mutation():
-            view = peer.scope_index_locked(index)
+            view = peer._locked_index()
             if interference == "replace":
                 await view.put(path.virtual, latest)
             else:
@@ -1173,8 +1145,7 @@ async def _repeated_mount_case(prefix: str) -> None:
         virtual=directory + "/b.txt",
         directory=directory,
     )
-    await manager.invalidate_after_write(path)
-    await manager.invalidate_ancestors(path)
+    await manager.invalidate(path, FileChangeKind.UPDATE)
     for ancestor in ancestors:
         assert (await index.list_dir(ancestor)).entries is None
     assert (await index.list_dir(prefix + "/unrelated")).entries is not None
@@ -1192,7 +1163,9 @@ async def test_write_preserves_sibling_rows_without_listing_trust():
     b = FileStat(name="b", type=FileType.FILE)
     await index.set_dir("/data/dir", [("a", a), ("b", b)], version="v1")
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_after_write(PathSpec.from_str_path("/dir/a"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/dir/a"), FileChangeKind.UPDATE
+    )
     assert (await index.get("/data/dir/a")).entry is None
     assert (await index.get("/data/dir/b")).entry == b
     assert (await index.list_dir("/data/dir")).partial_entries == [
@@ -1208,7 +1181,9 @@ async def test_ancestor_mutation_preserves_unrelated_branches():
     sibling = FileStat(name="keep", type=FileType.DIRECTORY)
     await index.set_dir("/data", [("dir", branch), ("keep", sibling)])
     manager = CacheManager(cache, index, "/data/", True)
-    await manager.invalidate_ancestors(PathSpec.from_str_path("/dir/new/a"))
+    await manager.invalidate(
+        PathSpec.from_str_path("/dir/new/a"), FileChangeKind.UPDATE
+    )
     assert (await index.get("/data/dir")).entry is None
     assert (await index.get("/data/keep")).entry == sibling
     assert (await index.list_dir("/data")).partial_entries == ["/data/keep"]

@@ -79,6 +79,7 @@ async function wsOf(
   )
   if (index !== null) {
     ;(w.registry.mountFor('/gh') as { indexStore: IndexCacheStore }).indexStore = index
+    w.registry.attachFileCache(w.cache)
   }
   opened.push(w)
   return w

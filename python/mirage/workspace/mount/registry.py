@@ -349,9 +349,11 @@ class MountRegistry:
                 e.prefix.rstrip("/") for e in self.descendant_mounts(m.prefix)
             ),
             aliases=lambda: tuple(
-                e.prefix.rstrip("/")
+                e.cache_manager
                 for e in self._mounts
-                if e is not m and e.vfs is m.vfs
+                if e is not m
+                and e.vfs is m.vfs
+                and e.cache_manager is not None
             ),
         )
 
@@ -434,8 +436,7 @@ class MountRegistry:
         # handed, which are user commands and win.
         m._register_builtins(backend_commands(vfs))
         m.register_commands(vfs.commands())
-        if self._file_cache is not None:
-            self._attach_manager(m)
+        self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
         self._rows = None
