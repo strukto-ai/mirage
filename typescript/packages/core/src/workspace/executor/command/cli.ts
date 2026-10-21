@@ -180,6 +180,7 @@ function missing(message: string): IOResult {
  * @param timeout the limit, which an engine that blocks its event loop
  *   must interrupt itself at.
  * @param signal aborted when the limit trips.
+ * @param settle settles the runtime once the program ends, however it ends.
  */
 async function scriptOutput(
   config: unknown,
@@ -189,6 +190,7 @@ async function scriptOutput(
   prog: string,
   timeout: number | null,
   signal: AbortSignal,
+  settle: ((runtime: Runtime) => Promise<void>) | undefined,
 ): Promise<[Uint8Array | null, IOResult]> {
   const env: Record<string, string> = { ...ctx.env }
   if (config !== null && config !== undefined) {
@@ -218,6 +220,8 @@ async function scriptOutput(
     // interpreter command answers for the same runtime.
     if (!runtimeUnavailable(err)) throw err
     return [null, missing(`${prog}: ${err.message}`)]
+  } finally {
+    await settle?.(runtime)
   }
   return runOutput(result)
 }
@@ -248,6 +252,11 @@ export interface CLIContext {
   processes?: ProcessView
   /** The line's placement, which a script leaf runs its program under. */
   routing?: RouteDecision<Runtime>
+  /**
+   * Lands what a script leaf's runtime holds and drops the caches its
+   * program may have gone past; absent outside a workspace.
+   */
+  settle?: (runtime: Runtime) => Promise<void>
 }
 
 /**
@@ -575,7 +584,7 @@ async function runCli(
       ]
     }
     start = (ctx, signal) =>
-      scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal)
+      scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal, context.settle)
   } else {
     const fn = binding.fn
     if (fn === null) {

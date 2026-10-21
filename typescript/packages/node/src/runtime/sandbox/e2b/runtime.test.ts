@@ -23,7 +23,7 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/co
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -49,9 +49,11 @@ class FakeExitError extends Error {
 }
 class FakeNotFoundError extends Error {}
 
-/** The line `wrapLine` dressed, unquoted. */
+/** The line `wrapLine` dressed, or the one word of its argv, unquoted. */
 function lineOf(command: string): string {
-  const quoted = command.slice(command.lastIndexOf("sh -c '") + 'sh -c '.length)
+  const at = command.lastIndexOf("'-c' ")
+  const quoted =
+    at < 0 ? command.slice(command.lastIndexOf(" '") + 1) : command.slice(at + "'-c' ".length)
   return quoted.slice(1, -1).replaceAll(`'\\''`, "'")
 }
 
@@ -60,6 +62,8 @@ class FakeHandle {
   disconnected = false
   killed = false
   inputError: Error | null = null
+  private readonly received = deferred<undefined>()
+  private readonly closed = deferred<undefined>()
   constructor(
     readonly command: string,
     public eof: boolean,
@@ -67,24 +71,26 @@ class FakeHandle {
 
   sendStdin(data: Uint8Array): Promise<void> {
     if (this.inputError) return Promise.reject(this.inputError)
-    this.input = data
+    this.input = new Uint8Array([...this.input, ...data])
+    this.received.resolve(undefined)
     return Promise.resolve()
   }
   closeStdin(): Promise<void> {
     this.eof = true
+    this.closed.resolve(undefined)
     return Promise.resolve()
   }
-  wait() {
+  async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
-    if (this.command === 'exit 3')
-      return Promise.reject(new FakeExitError(3, 'partial', 'boom-err'))
-    expect(this.eof).toBe(true)
-    return Promise.resolve({
-      stdout: Buffer.from(this.input).toString('hex'),
-      stderr: 'warn',
-      exitCode: 0,
-    })
+    if (this.command === 'exit 3') throw new FakeExitError(3, 'partial', 'boom-err')
+    const hex = (): string => Buffer.from(this.input).toString('hex')
+    if (this.command === 'head') {
+      await this.received.promise
+      return { stdout: hex(), stderr: '', exitCode: 0 }
+    }
+    if (!this.eof) await this.closed.promise
+    return { stdout: hex(), stderr: 'warn', exitCode: 0 }
   }
   kill(): Promise<boolean> {
     this.killed = true
@@ -100,8 +106,8 @@ class FakeCommands {
   calls: [string, boolean][] = []
   handles: FakeHandle[] = []
   inputError: Error | null = null
-  run(command: string, opts: { background: boolean; stdin: boolean }) {
-    expect(opts.background).toBe(true)
+  run(command: string, opts: { background: boolean; stdin: boolean; timeoutMs?: number }) {
+    expect([opts.background, opts.timeoutMs]).toEqual([true, 0])
     this.calls.push([command, opts.stdin])
     const handle = new FakeHandle(lineOf(command), !opts.stdin)
     handle.inputError = this.inputError
@@ -186,6 +192,7 @@ function makeRuntime() {
 
 beforeEach(() => {
   FakeSandbox.connected = []
+  FakeSandbox.last = new FakeSandbox()
   vi.restoreAllMocks()
 })
 
@@ -248,13 +255,17 @@ describe('E2BRuntime', () => {
     new TextEncoder().encode('a\nb\n'),
     Uint8Array.from({ length: 256 }, (_, i) => i),
   ])('preserves native input, EOF and the command: %s', async (data) => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
     const runtime = makeRuntime()
     const result = await runLine(runtime, 'wc -l | cat', data, '/workspace', { env: { E: '1' } })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
     expect(FakeSandbox.last.commands.calls).toEqual([
-      [wrapLine('wc -l | cat', { E: '1' }, '/workspace'), data !== null],
+      [
+        wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [EXEC_ID]: 'runid' }, '/workspace'),
+        data !== null,
+      ],
     ])
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
       eof: true,
@@ -296,6 +307,23 @@ describe('E2BRuntime', () => {
       payloads.map((data) => Buffer.from(data).toString('hex')),
     )
     expect(FakeSandbox.last.commands.handles.every((h) => h.disconnected)).toBe(true)
+  })
+  it('ends the line when its command exits while the input stays open', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    async function* openInput(): AsyncGenerator<Uint8Array> {
+      yield new TextEncoder().encode('one\n')
+      await new Promise<never>(() => undefined)
+    }
+    const result = await runtime.execLine('head', openInput(), {}, '/workspace')
+    expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
+      0,
+      Buffer.from('one\n').toString('hex'),
+    ])
+    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+      killed: false,
+      disconnected: true,
+    })
   })
   it('kills its command and disconnects when sending stdin fails', async () => {
     const runtime = makeRuntime()
@@ -467,6 +495,10 @@ describe('E2B cancellation and validation', () => {
 class MountingE2BRuntime extends FakedE2BRuntime {
   readonly table = new Map<string, string>()
   readonly lines: string[] = []
+
+  protected override execArgv(argv: readonly string[]): Promise<RunResult> {
+    return this.execLine(argv[0] === '/bin/sh' ? (argv[2] ?? '') : argv.join(' '))
+  }
 
   override execLine(line: string): Promise<RunResult> {
     this.lines.push(line)

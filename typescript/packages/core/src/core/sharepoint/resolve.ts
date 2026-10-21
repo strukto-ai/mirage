@@ -86,6 +86,7 @@ async function driveItems(
  *   accessor: the mount's accessor.
  */
 export async function siteEntries(accessor: SharePointAccessor): Promise<[string, string][]> {
+  const cache = accessor.siteCache
   const entries: [string, string][] = []
   for (const site of await siteItems(accessor)) {
     const id = text(site.id)
@@ -93,8 +94,8 @@ export async function siteEntries(accessor: SharePointAccessor): Promise<[string
     const display = text(site.displayName) || name
     if (id === '' || display === '') continue
     entries.push([display, id])
-    accessor.siteCache.set(display, id)
-    if (name !== '') accessor.siteCache.set(name, id)
+    cache.set(display, id)
+    if (name !== '') cache.set(name, id)
   }
   return entries.sort((left, right) => compareCodePoints(left[0], right[0]))
 }
@@ -114,13 +115,14 @@ export async function driveEntries(
   accessor: SharePointAccessor,
   siteId: string,
 ): Promise<[string, string][]> {
+  const cache = accessor.driveCache
   const entries: [string, string][] = []
   for (const drive of await driveItems(accessor, siteId)) {
     const id = text(drive.id)
     const name = text(drive.name)
     if (id === '' || name === '') continue
     entries.push([name, id])
-    accessor.driveCache.set(driveKey(siteId, name), id)
+    cache.set(driveKey(siteId, name), id)
   }
   return entries.sort((left, right) => compareCodePoints(left[0], right[0]))
 }
@@ -130,8 +132,9 @@ export async function listDrives(accessor: SharePointAccessor, siteId: string): 
 }
 
 async function resolveSiteId(accessor: SharePointAccessor, name: string): Promise<string | null> {
-  if (!accessor.siteCache.has(name)) await siteEntries(accessor)
-  return accessor.siteCache.get(name) ?? null
+  const cache = accessor.siteCache
+  if (!cache.has(name)) await siteEntries(accessor)
+  return cache.get(name) ?? null
 }
 
 async function resolveDriveId(
@@ -140,8 +143,9 @@ async function resolveDriveId(
   name: string,
 ): Promise<string | null> {
   const key = driveKey(siteId, name)
-  if (!accessor.driveCache.has(key)) await driveEntries(accessor, siteId)
-  return accessor.driveCache.get(key) ?? null
+  const cache = accessor.driveCache
+  if (!cache.has(key)) await driveEntries(accessor, siteId)
+  return cache.get(key) ?? null
 }
 
 /**

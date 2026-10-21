@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IndexType, type IndexConfig, type RedisIndexConfig } from './config.ts'
+import { DEFAULT_KEY_PREFIX } from './constants.ts'
 import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import type { IndexCacheStore } from './store.ts'
@@ -30,11 +31,15 @@ import type { Clock } from '../../utils/clock.ts'
  * @param config the configured store, or undefined for a RAM store at the driver's TTL
  * @param ttl the driver's `indexTtl`, read when `config` is undefined
  * @param clock the clock the store's listings expire on; undefined means the real one
+ * @param workspaceId scopes a redis store whose config names no prefix, so
+ *   two workspaces on one server never read each other's listings; undefined
+ *   keeps the shared default
  */
 export function buildIndex(
   config: IndexConfig | undefined,
   ttl: number,
   clock?: Clock,
+  workspaceId?: string,
 ): IndexCacheStore {
   const timed = clock === undefined ? {} : { clock }
   if (config === undefined) return new RAMIndexCacheStore({ ttl, ...timed })
@@ -44,7 +49,9 @@ export function buildIndex(
       ttl: redis.ttl ?? 600,
       ...timed,
       ...(redis.url !== undefined ? { url: redis.url } : {}),
-      ...(redis.keyPrefix !== undefined ? { keyPrefix: redis.keyPrefix } : {}),
+      keyPrefix:
+        redis.keyPrefix ??
+        (workspaceId === undefined ? DEFAULT_KEY_PREFIX : `${DEFAULT_KEY_PREFIX}${workspaceId}:`),
     })
   }
   return new RAMIndexCacheStore({ ttl: config.ttl ?? 600, ...timed })

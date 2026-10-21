@@ -297,6 +297,7 @@ class Workspace:
         self._workspace_id = (
             workspace_id if workspace_id is not None else new_workspace_id()
         )
+        self._registry.workspace_id = self._workspace_id
         # A minted default session id is provisional: attaching to a
         # workspace whose discovery record already names one adopts the
         # stored pointer instead (see WorkspaceMeta).
@@ -314,7 +315,7 @@ class Workspace:
         self._owns_state_store = stores.owned
         self._state_store = stores.state_store
         self._cache: FileCacheMixin = build_file_cache(
-            cache, cache_limit, self._clock
+            cache, cache_limit, self._clock, self._workspace_id
         )
         self._index_config = index
         self._closed = False
@@ -1853,7 +1854,7 @@ class Workspace:
             profile=profile,
             clock=clock,
         )
-        install_fingerprints(
+        await install_fingerprints(
             ws._registry,
             ws._cache,
             ws._drift,

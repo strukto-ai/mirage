@@ -1,0 +1,174 @@
+{
+  "cases": [
+    {
+      "id": "stream_live_output",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "perl": {
+                "timeout_seconds": 3
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "perl -e '$|=1; print qq(first\\n); sleep 30' | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "first\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_head_returns_early",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "yes"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "yes": {
+                "timeout_seconds": 20
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "yes | head -n 2",
+          "expect": {
+            "exit": 0,
+            "stdout": "y\ny\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_cut_short_leaves_nothing_running",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "yes",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "t=$RANDOM$RANDOM; yes \"$t\" | head -n 1 >/dev/null; perl -e 'select undef, undef, undef, 0.5; for (glob \"/proc/[0-9]*/cmdline\") { open my $f, \"<\", $_ or next; my $c = <$f>; print \"left\\n\" if defined $c && $c eq \"yes\\0$ARGV[0]\\0\" }' \"$t\"",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_cut_short_stops_a_program_that_ignores_term",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "t=$RANDOM$RANDOM; perl -e '$SIG{TERM} = \"IGNORE\"; $| = 1; print \"$ARGV[0]\\n\" while 1' \"$t\" stubborn | head -n 1 >/dev/null; perl -e 'my $t = shift; select undef, undef, undef, 0.5; for (glob \"/proc/[0-9]*/cmdline\") { open my $f, \"<\", $_ or next; my $c = <$f>; print \"left\\n\" if defined $c && index($c, \"\\0$t\\0stubborn\\0\") >= 0 }' \"$t\"",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stream_stdin",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "head"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "limits": {
+              "head": {
+                "timeout_seconds": 20
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 100000000 | head -n 3",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n2\n3\n"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import type { ExecutionKind, OutputFn, RunResult } from '../../../runtime/types.
 import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
+import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { IOResult, OutputState, materialize, type ByteSource } from '../../../io/types.ts'
@@ -84,17 +85,14 @@ export async function runExternal(
   }
   try {
     const result = await runWithTimeout(execute(), timeout, argv.name)
+    const [stdout, io] = runOutput(result, {
+      command: argv.name,
+      declared: null,
+      prefixes: registry.allMounts().map((mount) => mount.prefix),
+    })
     return [
-      result.stdout,
-      new IOResult({
-        exitCode: result.exitCode,
-        stderr: result.stderr,
-        producer: {
-          command: argv.name,
-          declared: null,
-          prefixes: registry.allMounts().map((mount) => mount.prefix),
-        },
-      }),
+      stdout,
+      io,
       new ExecutionNode({
         command,
         exitCode: result.exitCode,

@@ -17,10 +17,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import type { SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { describe, expect, it } from 'vitest'
 import { Workspace } from '../../../workspace.ts'
 import type { DockerConfig } from './config.ts'
@@ -39,10 +40,12 @@ class FakeDockerRuntime extends DockerRuntime {
   running = true
   readonly calls: [string[], Uint8Array | null][] = []
 
-  protected override docker(
+  protected override async docker(
     args: string[],
-    stdin: Uint8Array | null = null,
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
   ): Promise<DockerResult> {
+    const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
       return Promise.resolve({
@@ -52,11 +55,13 @@ class FakeDockerRuntime extends DockerRuntime {
       })
     }
     const script = args[args.length - 1] ?? ''
-    return Promise.resolve({
-      stdout: ENC.encode(`out:${script}`),
+    const stdout = ENC.encode(`out:${script}`)
+    if (output !== null) await output(stdout)
+    return {
+      stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
       code: 0,
-    })
+    }
   }
 }
 
@@ -178,7 +183,7 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
         '-w',
         '/',
         'cid-42',
-        'sh',
+        '/bin/sh',
         '-c',
         'exec sshfs x y',
         '',
@@ -203,11 +208,13 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
 class MountingDockerRuntime extends FakeDockerRuntime {
   readonly table = new Map<string, string>()
 
-  protected override docker(
+  protected override async docker(
     args: string[],
-    stdin: Uint8Array | null = null,
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
   ): Promise<DockerResult> {
-    if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, stdin)
+    if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, source, output)
+    const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     const rows = [...this.table].map(([p, t]) => `src ${p} ${t} rw 0 0\n`).join('')
     return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), code: 0 })

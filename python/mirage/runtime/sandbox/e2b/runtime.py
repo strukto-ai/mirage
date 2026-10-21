@@ -17,12 +17,15 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.io.stream import async_chain
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import sdk_install_hint, wrap_line
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)
 
@@ -89,16 +92,18 @@ class PtyWriter:
                 return
 
 
-class E2BRuntime(RemoteSandbox):
+class E2BRuntime(RemoteSandbox, PipeTransportMixin):
     """An E2B sandbox the user runs as a whole-line runtime.
 
     You create the sandbox yourself (`e2b sandbox spawn` or the SDK);
     mirage only connects by ``sandbox_id`` and execs lines.
     ``api_key`` falls back to E2B_API_KEY. E2B's exec reports stdout
-    and stderr separately. Piped bytes use native stdin followed by
-    an explicit EOF; no input closes stdin when the command starts.
-    A ``mount_type`` serves the workspace over a PTY, since E2B's exec
-    decodes output as text.
+    and stderr separately, stdout as it arrives when streamed. Piped
+    bytes use native stdin, chunk by chunk, followed by an explicit EOF;
+    no input closes stdin when the command starts. The SDK's own
+    command timeout is off: a command runs until mirage's limits stop
+    it. A ``mount_type`` serves the workspace over a PTY, since E2B's
+    exec decodes output as text.
 
     Args:
         captures (Sequence[str] | None): commands routed to this runtime.
@@ -121,28 +126,63 @@ class E2BRuntime(RemoteSandbox):
             self.config.sandbox_id, **self._api_params()
         )
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
+        async def emit(text: str) -> None:
+            assert output is not None
+            await output(text.encode())
+
         handle = await self._sandbox.commands.run(
-            wrap_line(line, env, cwd),
+            wrap_line(argv, env, cwd),
             background=True,
             stdin=stdin is not None,
+            on_stdout=emit if output is not None else None,
+            timeout=0,
         )
-        try:
+        exited = asyncio.Event()
+
+        async def feed() -> None:
             try:
+                async for chunk in async_chain(
+                    [stdin] if stdin is not None else []
+                ):
+                    if chunk:
+                        await handle.send_stdin(chunk)
                 if stdin is not None:
-                    if stdin:
-                        await handle.send_stdin(stdin)
                     await handle.close_stdin()
+            except asyncio.CancelledError:
+                if not exited.is_set():
+                    raise
+                logger.debug("e2b command ended before consuming its input")
             except sdk.NotFoundException:
                 # A command may exit before the input RPC arrives. Its exit
                 # status, including nonzero exits, still determines the result.
+                logger.debug("e2b command exited before its input arrived")
+
+        feeding = asyncio.create_task(feed())
+
+        async def reap() -> Any:
+            # The command may end without reading all its input (head), so
+            # its exit, not the end of the input, ends the line.
+            try:
                 result = await handle.wait()
-            else:
-                result = await handle.wait()
-        except sdk.CommandExitException as exc:
-            result = exc
+            except sdk.CommandExitException as exc:
+                result = exc
+            exited.set()
+            if not feeding.done():
+                feeding.cancel()
+            return result
+
+        reaping = asyncio.create_task(reap())
+        try:
+            await asyncio.gather(feeding, reaping)
+            result = reaping.result()
         except BaseException:
             try:
                 await handle.kill()
@@ -150,9 +190,13 @@ class E2BRuntime(RemoteSandbox):
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             raise
         finally:
+            for task in (feeding, reaping):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(feeding, reaping, return_exceptions=True)
             await handle.disconnect()
         return RunResult(
-            stdout=str(result.stdout).encode(),
+            stdout=str(result.stdout).encode() if output is None else b"",
             stderr=str(result.stderr).encode(),
             exit_code=int(result.exit_code),
         )

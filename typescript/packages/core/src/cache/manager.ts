@@ -15,7 +15,7 @@
 import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
-import { DEFAULT_READ_TTL, type FileStat, PathSpec } from '../types.ts'
+import { DEFAULT_READ_TTL, FileChangeKind, type FileStat, PathSpec } from '../types.ts'
 import { type Clock, SystemClock } from '../utils/clock.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -42,7 +42,7 @@ import { mutationLock, latestFingerprint } from './file/io.ts'
 export class CacheManager {
   private readonly fileCache: FileCache | null
   private readonly index: IndexCacheStore | null
-  private clock: Clock
+  private readonly clock: Clock
   private readonly prefix: string
   private readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
@@ -63,7 +63,6 @@ export class CacheManager {
   private readonly refused = new Map<string, [string, number]>()
   // The newest check in flight per key, with its tick and send time.
   private readonly checking = new Map<string, [number, number, Promise<string | null>]>()
-  private checkEpoch = 0
   private checkBound = CHECKED_LIMIT
 
   constructor(
@@ -80,9 +79,9 @@ export class CacheManager {
     // cached listing; undefined serves them all.
     private readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>,
     private readonly excludedPrefixes: () => readonly string[] = () => [],
-    // The prefixes of the other live mounts of this mount's VFS, whose cached
-    // bodies are the same files under other names.
-    private readonly aliases: () => readonly string[] = () => [],
+    // The managers of the other live mounts of this mount's VFS, whose caches
+    // hold the same files under other names.
+    private readonly aliases: () => readonly CacheManager[] = () => [],
   ) {
     this.fileCache = fileCache
     this.index = index
@@ -121,17 +120,16 @@ export class CacheManager {
    * mount sits beneath it, since keys are compared by prefix; a refetch is
    * the safe direction to be wrong in. Mirrors Python's `CacheManager.drop`.
    *
-   * @param index the VFS's own index.
    * @param bodies drop the bodies too; false when the caller clears the whole
    *   file cache itself.
    */
-  drop(index: IndexCacheStore | undefined, bodies = true): Promise<void> {
+  drop(bodies = true): Promise<void> {
     return this.mutation(async () => {
       this.retire()
-      if (this.ownsPath(this.prefix || '/')) await index?.invalidate()
+      if (this.ownsPath(this.prefix || '/')) await this.index?.invalidate()
       if (!bodies || !this.cachesReads || this.fileCache === null) return
-      for (const prefix of [this.prefix, ...this.aliases()]) {
-        await this.fileCache.evictPrefix(prefix + '/')
+      for (const manager of [this, ...this.aliases()]) {
+        await this.fileCache.remove(manager.prefix || '/', { subtree: true })
       }
     })
   }
@@ -158,27 +156,20 @@ export class CacheManager {
   }
 
   /**
-   * Bind backend metadata writes to this mount's lifetime.
+   * This mount's index, its backend metadata writes bound to the mount's
+   * lifetime; null when the mount has none.
    *
-   * Reuse the view because refill locks are keyed by index identity.
+   * The view is reused because refill locks are keyed by index identity.
    */
-  scopeIndex(index: IndexCacheStore): IndexCacheStore {
-    if (this.fileCache === null || index instanceof IndexView) return index
-    if (this.view?.store !== index) {
-      // The notes describe the old store; a first view keeps them.
-      if (this.view !== null) {
-        this.written.clear()
-        this.forgetChecks()
-      }
-      this.clock = index.clock
-      this.view = new IndexView(
-        index,
-        this.fileCache,
-        this.prefix || '/',
-        this.ownsPath,
-        this.viewOptions(),
-      )
-    }
+  scopeIndex(): IndexCacheStore | null {
+    if (this.fileCache === null || this.index === null) return this.index
+    this.view ??= new IndexView(
+      this.index,
+      this.fileCache,
+      this.prefix || '/',
+      this.ownsPath,
+      this.viewOptions(),
+    )
     return this.view
   }
 
@@ -260,16 +251,6 @@ export class CacheManager {
     this.checkBound = Math.max(CHECKED_LIMIT, 2 * this.checked.size)
   }
 
-  // The versions were checked against listings of the old store, so none of
-  // them says anything about the new one. The first view has no old store,
-  // and a check may be what builds it.
-  private forgetChecks(): void {
-    this.checked.clear()
-    this.refused.clear()
-    this.checking.clear()
-    this.checkEpoch += 1
-  }
-
   /**
    * Whether a version check is recent enough to answer for the caller.
    *
@@ -323,11 +304,10 @@ export class CacheManager {
   private sendCheck(key: string, check: () => Promise<string | null>): Promise<string | null> {
     const sentTick = tick()
     const sentAt = this.millis()
-    const epoch = this.checkEpoch
     const answer = check().then((version) => {
       const checked = this.checked.get(key)
       // An older check that lands late never replaces a newer one.
-      if (version !== null && epoch === this.checkEpoch && (checked?.[1] ?? 0) < sentTick) {
+      if (version !== null && (checked?.[1] ?? 0) < sentTick) {
         if (checked === undefined && this.checked.size >= this.checkBound) this.pruneChecks()
         this.checked.set(key, [version, sentTick, sentAt])
       }
@@ -407,23 +387,21 @@ export class CacheManager {
   ): Promise<void> {
     const key = this.cacheKey(path)
     return this.mutation(async () => {
-      if (generation !== this.readGeneration || !this.ownsPath(key) || this.index === null) return
-      await this.scopeIndexLocked(this.index).replaceIfUnchanged(key, predecessor, entry)
+      const index = this.lockedIndex()
+      if (generation !== this.readGeneration || !this.ownsPath(key) || index === null) return
+      await index.replaceIfUnchanged(key, predecessor, entry)
     })
   }
 
   /**
-   * A view for a caller already inside `withMutation`.
+   * A view for a caller already inside `mutation`.
    *
    * Never share or retain it beyond that hold. A distinct refill lock
    * avoids lock inversion with readers of the shared view.
    */
-  scopeIndexLocked(index: IndexCacheStore): IndexCacheStore {
-    if (this.fileCache === null) return index
-    if (index instanceof IndexView) {
-      throw new Error('scopeIndexLocked needs a raw store; a view would take the lock again')
-    }
-    return new IndexView(index, this.fileCache, this.prefix || '/', this.ownsPath, {
+  private lockedIndex(): IndexCacheStore | null {
+    if (this.fileCache === null || this.index === null) return this.index
+    return new IndexView(this.index, this.fileCache, this.prefix || '/', this.ownsPath, {
       locked: true,
       ...this.viewOptions(true),
     })
@@ -465,10 +443,13 @@ export class CacheManager {
    * Mirrors Python `CacheManager._cache_key`.
    */
   private cacheKey(path: string | PathSpec): string {
-    const virtual = path instanceof PathSpec ? path.virtual : path
-    const relative = mountKey(virtual, this.prefix)
-    if (relative === '') return this.prefix === '' ? '/' : this.prefix
-    return `${this.prefix}/${relative}`
+    return this.name(mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix))
+  }
+
+  /** The cache key of a mount-relative `key` (no leading slash) under this mount. */
+  private name(key: string): string {
+    if (key === '') return this.prefix === '' ? '/' : this.prefix
+    return `${this.prefix}/${key}`
   }
 
   /** The file cache this manager may read `key` from, if any. */
@@ -552,16 +533,17 @@ export class CacheManager {
     const key = this.cacheKey(path)
     const [data, facts] = await captureRead(key, fetch)
     if (!(data instanceof Uint8Array)) return data
-    const cache = this.readableCache(key)
-    if (cache !== null) {
-      await this.keepRead(cache, key, data, generation, keep, () =>
+    await this.keep(
+      key,
+      data,
+      () =>
         facts.length > 0
           ? facts.every((fp) => fp === facts[0])
             ? (facts[0] ?? null)
             : null
           : latestFingerprint(records?.slice(start), key),
-      )
-    }
+      this.admits(generation, keep),
+    )
     return data
   }
 
@@ -608,33 +590,67 @@ export class CacheManager {
       yield chunk
     }
     if (chunks !== null) {
-      await this.keepRead(cache, key, concat(chunks), generation, keep, () =>
-        latestFingerprint(records, key),
+      await this.keep(
+        key,
+        concat(chunks),
+        () => latestFingerprint(records, key),
+        this.admits(generation, keep),
       )
     }
   }
 
-  /** Store a cold read's bytes unless something since made them stale. */
-  private async keepRead(
-    cache: FileCache,
+  // A cold read's last say: no write landed since it began, and `keep` agrees.
+  private admits(generation: number, keep: (() => boolean) | undefined): () => boolean {
+    return () => generation === this.readGeneration && (keep === undefined || keep())
+  }
+
+  /**
+   * Keep a write's bytes for the next read, as a read keeps its own.
+   * `fingerprint` is the token the write's backend answered, null when it
+   * vouched for none. Mirrors Python's `keep_written`.
+   */
+  async keepWritten(path: PathSpec, data: Uint8Array, fingerprint: string | null): Promise<void> {
+    await this.keep(
+      this.cacheKey(path),
+      data,
+      () => fingerprint,
+      () => true,
+    )
+  }
+
+  /**
+   * Store bytes a read or a write settled on, unless they went stale.
+   *
+   * The one way bytes enter the file cache. The checks run under the cache's
+   * mutation lock, so a name this mount stopped owning or caching keeps
+   * nothing, nor do bytes `admit` refuses. Bytes over the whole cache limit
+   * would evict every warm entry, so the copy held for the key, now stale,
+   * goes instead; a store that refuses the bytes (out of memory, a value over
+   * its size limit) costs only the next read a fetch, so the refusal is
+   * logged, never thrown, and the stale copy goes too. Mirrors Python's
+   * `_keep`.
+   */
+  private async keep(
     key: string,
     data: Uint8Array,
-    generation: number,
-    keep: (() => boolean) | undefined,
     token: () => string | null,
+    admit: () => boolean,
   ): Promise<void> {
-    if (data.byteLength > cache.cacheLimit) return
+    const cache = this.fileCache
+    if (cache === null) return
     await mutationLock(cache, async () => {
-      if (
-        this.ownsPath(key) &&
-        generation === this.readGeneration &&
-        (keep === undefined || keep())
-      ) {
+      if (!(this.cachesReads && this.ownsPath(key) && admit())) return
+      try {
+        if (data.byteLength > cache.cacheLimit) await cache.remove(key)
+        else await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`cache fill refused for ${key}: ${msg}`)
         try {
-          await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          console.warn(`cache fill refused for ${key}: ${msg}`)
+          await cache.remove(key)
+        } catch (dropErr) {
+          const why = dropErr instanceof Error ? dropErr.message : String(dropErr)
+          console.warn(`stale copy not dropped for ${key}: ${why}`)
         }
       }
     })
@@ -667,91 +683,117 @@ export class CacheManager {
     return cache !== null && (await cache.exists(key))
   }
 
-  /** Invalidate caches after a write to `path`; only `virtual` is read. */
-  async invalidateAfterWrite(path: string | PathSpec): Promise<void> {
-    const key = await this.invalidatePath(path)
-    await this.invalidateParent(key)
+  /**
+   * Drop what a change at `path` made stale, under every name its store has
+   * here.
+   *
+   * One store mounted at several prefixes holds one file under each, so the
+   * change lands under every name a live mount of it owns. The kind decides
+   * how far down it reaches:
+   *
+   * - CREATE, UPDATE, and MOVE at its landing: the body, and the path's entry
+   *   in its parent's listing. A CREATE that answered its new entry's stat
+   *   (`row`) keeps that entry where the parent's listing names it instead, so
+   *   a listing of the parent and the next level of a nested create need no
+   *   request; a row naming another file (a store that matches names without
+   *   case wrote the one it holds) proves nothing, so the parent is listed
+   *   again.
+   * - DELETE: the body, the path's own listing and its parent entry, and what
+   *   is cached beneath it when a listing at or under it is still cached. That
+   *   probe is for a remover that cannot say it removed a folder (a notified
+   *   DELETE, the vacated side of a MOVE): a folder's nested listings and
+   *   bodies were cached under keys of their own, while a plain file must not
+   *   pay a subtree drop, which on a Redis file cache scans the whole keyspace.
+   *   A remover that knows nothing was below (`leaf`: unlink, rmdir) skips it.
+   *   A folder with no listing cached at or under it keeps the bodies cached
+   *   beneath it until their ttl.
+   * - UNKNOWN: everything cached at and below the path, as a push notification
+   *   that names only a folder, a recursive delete or a directory rename needs.
+   *
+   * Then the path's ancestors drop their entries in their parents' listings: a
+   * keyed store materializes every missing level of a key in one put, so those
+   * listings gained entries too. Each affected listing becomes partial and
+   * keeps its unaffected siblings. Every change retires this mount's in-flight
+   * reads and probe answers. Mirrors Python's `CacheManager.invalidate`.
+   *
+   * @param path the changed path; only `virtual` is read.
+   * @param kind what happened, which decides the reach.
+   * @param row a CREATE's new entry, kept in its parent's listing; null drops
+   *   that entry.
+   * @param options.leaf a DELETE whose remover knows nothing was below the path.
+   */
+  async invalidate(
+    path: string | PathSpec,
+    kind: FileChangeKind,
+    row: FileStat | null = null,
+    options: { leaf?: boolean } = {},
+  ): Promise<void> {
+    const key = mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix)
+    for (const manager of [this, ...this.aliases()]) {
+      const name = manager.name(key)
+      if (manager === this || manager.ownsPath(name)) {
+        await manager.invalidateKey(name, kind, row, options.leaf === true)
+      }
+    }
   }
 
-  /**
-   * Settle a create that answered its new entry's stat. The entry is kept
-   * where its parent's listing names it, so a listing of the parent and the
-   * next level of a nested create need no request: what `invalidateAfterWrite`
-   * drops for a re-list is the one name the create added. A row naming another
-   * file (a store that matches names without case wrote the one it holds)
-   * proves nothing about the path, so the parent is listed again. Mirrors
-   * Python's `keep_created`.
-   */
-  async keepCreated(path: string | PathSpec, row: FileStat): Promise<void> {
-    const key = await this.invalidatePath(path)
-    if (row.name !== key.slice(key.lastIndexOf('/') + 1)) {
-      await this.invalidateParent(key)
-      return
+  // The ancestors go even when the path's own invalidation fails; a failure of
+  // both throws both.
+  private async invalidateKey(
+    key: string,
+    kind: FileChangeKind,
+    row: FileStat | null,
+    leaf: boolean,
+  ): Promise<void> {
+    try {
+      await this.invalidateOwn(key, kind, row, leaf)
+    } catch (error) {
+      try {
+        await this.invalidateAncestors(key)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], 'invalidation and ancestor cleanup failed')
+      }
+      throw error
     }
-    if (this.index !== null) {
-      await this.index.addEntry(
+    await this.invalidateAncestors(key)
+  }
+
+  private async invalidateOwn(
+    key: string,
+    kind: FileChangeKind,
+    row: FileStat | null,
+    leaf: boolean,
+  ): Promise<void> {
+    this.retire()
+    if (this.cachesReads && this.fileCache !== null) await this.fileCache.remove(key)
+    if (kind === FileChangeKind.UNKNOWN) {
+      await this.dropBelow(key)
+      await this.invalidateRemoved(key)
+    } else if (kind === FileChangeKind.DELETE) {
+      await this.removed(key, leaf)
+    } else if (
+      kind === FileChangeKind.CREATE &&
+      row !== null &&
+      row.name === key.slice(key.lastIndexOf('/') + 1)
+    ) {
+      await this.index?.addEntry(
         key,
         row,
         new Date(this.index.clock.now() * 1000 + this.readTtl * 1000),
       )
+    } else {
+      await this.index?.invalidateEntry(key)
     }
   }
 
-  /** Invalidate caches after a deletion of `path`; only `virtual` is read. */
-  async invalidateAfterUnlink(path: string | PathSpec): Promise<void> {
-    const key = await this.invalidatePath(path)
-    await this.invalidateRemoved(key)
-  }
-
-  /**
-   * Drop `path` and everything cached beneath it.
-   *
-   * Two callers, one shape. A push notification often says only which folder
-   * moved, and a recursive delete or a directory rename takes a whole tree
-   * with it; either way the listings and bodies below the path were cached
-   * independently, so evicting the path and its parent leaves stale entries
-   * one level down. The cheaper `invalidateAfterWrite` cannot be widened to do
-   * this, because it also runs on every ordinary write, where a file has no
-   * subtree to drop.
-   *
-   * Mirrors Python `CacheManager.invalidate_subtree`.
-   */
-  async invalidateSubtree(path: string | PathSpec): Promise<void> {
-    const key = await this.invalidatePath(path)
-    await this.dropBelow(key)
-    await this.invalidateRemoved(key)
-  }
-
-  /**
-   * Invalidate caches after `path` was removed, folder or file.
-   *
-   * For a remover that cannot say which it removed: a notified DELETE, or the
-   * vacated side of a MOVE, names a path and nothing more. A folder needs what
-   * was cached beneath it dropped, since each nested listing and body was
-   * cached under its own key. Every removal retires this manager's reads. The
-   * subtree drop additionally invalidates the file store's pending fills and,
-   * on a Redis file cache, scans the whole keyspace, which a plain file must
-   * not pay on every event. So the index is asked whether a listing
-   * is still cached at the path or under it, and only then does the subtree go;
-   * otherwise this is `invalidateAfterUnlink`.
-   *
-   * The body goes before the index is asked, so an index that cannot answer
-   * still leaves the removed file unserved. The own and parent
-   * invalidations are attempted even if the probe or subtree drop fails; failures
-   * remain visible to the caller. A folder with no listing cached at
-   * or under it keeps any bodies cached beneath it until their ttl: nothing
-   * there was listed, or every such listing was evicted since. Invalidating
-   * an entry preserves unaffected siblings and leaves its parent listing
-   * partial. Those retained listings still count as cached subtrees, even
-   * when empty. Without an index no listing is known, so a removal reads as
-   * a file and bodies beneath it stay until their ttl.
-   *
-   * Mirrors Python `CacheManager.invalidate_after_remove`.
-   */
-  async invalidateAfterRemove(path: string | PathSpec): Promise<void> {
-    const key = await this.invalidatePath(path)
+  // The body went before the index is asked, so an index that cannot answer
+  // still leaves the removed file unserved; the own and parent invalidations
+  // run even when the probe or the subtree drop fails.
+  private async removed(key: string, leaf: boolean): Promise<void> {
     try {
-      if (this.index !== null && (await this.index.holdsSubtree(key))) await this.dropBelow(key)
+      if (!leaf && this.index !== null && (await this.index.holdsSubtree(key))) {
+        await this.dropBelow(key)
+      }
     } catch (error) {
       try {
         await this.invalidateRemoved(key)
@@ -763,48 +805,23 @@ export class CacheManager {
     await this.invalidateRemoved(key)
   }
 
-  /**
-   * Invalidate ancestor entries above `path`'s parent.
-   *
-   * `invalidateAfterWrite` refreshes the immediate parent only. A keyed store
-   * materializes every missing level of a key in a single put, so the listings
-   * further up gained entries too and would keep serving the pre-write view
-   * until the index TTL expires. A backend with real directories cannot gain a
-   * level that way. Each affected listing becomes partial and retains its
-   * unaffected siblings.
-   */
-  async invalidateAncestors(path: string | PathSpec): Promise<void> {
-    if (this.index === null) return
-    const key = this.cacheKey(path)
+  private async invalidateAncestors(key: string): Promise<void> {
     let parent = key.slice(0, Math.max(key.lastIndexOf('/'), 0))
-    while (parent !== '' && parent !== this.prefix) {
+    while (this.index !== null && parent !== '' && parent !== this.prefix) {
       await this.index.invalidateEntry(parent)
       parent = parent.slice(0, Math.max(parent.lastIndexOf('/'), 0))
     }
   }
 
-  private async invalidatePath(path: string | PathSpec): Promise<string> {
-    this.retire()
-    const key = this.cacheKey(path)
-    if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.remove(key)
-    }
-    return key
-  }
-
   private async invalidateRemoved(key: string): Promise<void> {
     await this.evictDir(key)
-    await this.invalidateParent(key)
+    await this.index?.invalidateEntry(key)
   }
 
   private async dropBelow(key: string): Promise<void> {
     if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.evictPrefix(rstripSlash(key) + '/', this.excludedPrefixes())
+      await this.fileCache.remove(key, { subtree: true, excluded: this.excludedPrefixes() })
     }
     if (this.index !== null) await this.index.invalidatePrefix(key, this.excludedPrefixes())
-  }
-
-  private async invalidateParent(key: string): Promise<void> {
-    if (this.index !== null) await this.index.invalidateEntry(key)
   }
 }

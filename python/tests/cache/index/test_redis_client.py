@@ -22,7 +22,7 @@ from mirage.cache.index.constants import (
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.manager import CacheManager
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileChangeKind, FileStat, FileType, PathSpec
 from mirage.workspace.mount.listing import stored_stat
 
 
@@ -1354,8 +1354,8 @@ async def test_authoritative_add_fences_captured_directory_generation(
     original = writer._eval_complete
 
     async def publish_after_write(script, keys, args):
-        await CacheManager(None, peer, "/dir/", True).keep_created(
-            PathSpec.from_str_path("/a"), new
+        await CacheManager(None, peer, "/dir/", True).invalidate(
+            PathSpec.from_str_path("/a"), FileChangeKind.CREATE, new
         )
         assert (await peer.get("/dir/a")).entry == new
         return await original(script, keys, args)
@@ -1432,8 +1432,10 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
                     else [("a", old), ("b", new)]
                 )
                 if publication == "add":
-                    await CacheManager(None, peer, "/dir/", True).keep_created(
-                        PathSpec.from_str_path(f"/{peer_name}"), new
+                    await CacheManager(None, peer, "/dir/", True).invalidate(
+                        PathSpec.from_str_path(f"/{peer_name}"),
+                        FileChangeKind.CREATE,
+                        new,
                     )
                 elif publication == "partial":
                     await peer.set_partial_dir("/dir", rows)
@@ -1458,8 +1460,8 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
 
     with monkeypatch.context() as patch:
         patch.setattr(client, "pipeline", delayed_pipeline)
-        await CacheManager(None, writer, "/dir/", True).keep_created(
-            PathSpec.from_str_path("/a"), old
+        await CacheManager(None, writer, "/dir/", True).invalidate(
+            PathSpec.from_str_path("/a"), FileChangeKind.CREATE, old
         )
     assert inserted
     assert (await writer.get(f"/dir/{peer_name}")).entry == new

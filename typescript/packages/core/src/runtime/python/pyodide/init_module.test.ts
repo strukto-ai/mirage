@@ -22,10 +22,9 @@ function interpret(
 
 describe('PyodideRuntime host initializer', () => {
   it('declares process reach only when a host initializer is configured', () => {
-    expect(new PyodideRuntime().capabilities.reach).toBe('workspace')
+    expect(new PyodideRuntime().reach).toBe('workspace')
     const rt = new PyodideRuntime({ config: { initModule: 'file:///trusted/init.mjs' } })
     expect(rt.reach).toBe('process')
-    expect(rt.capabilities.reach).toBe('process')
   })
 
   it('initializes before bootstrap and disposes after every command', async () => {

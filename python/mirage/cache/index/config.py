@@ -17,7 +17,6 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
 
-from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
 from mirage.types import FileStat
 
 
@@ -88,4 +87,6 @@ class IndexConfig(BaseModel):
 class RedisIndexConfig(IndexConfig):
     type: IndexType = IndexType.REDIS
     url: str = "redis://localhost:6379/0"
-    key_prefix: str = DEFAULT_KEY_PREFIX
+    # None scopes the keys to the workspace; a prefix shares them with
+    # every workspace that names it.
+    key_prefix: str | None = None

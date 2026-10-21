@@ -87,6 +87,9 @@ export class GitHubAccessor extends Accessor {
   // listing, so it is as fresh as the last one.
   truncated: boolean
   tree: Record<string, TreeEntry>
+  // Bumped by forget, so a tree GitHub answered before the drop is handed
+  // back to its caller but not reseated.
+  generation = 0
 
   constructor(opts: {
     account: GitHubAccount
@@ -109,5 +112,13 @@ export class GitHubAccessor extends Accessor {
 
   get isDefaultBranch(): boolean {
     return this.ref === this.defaultBranch
+  }
+
+  /** Drop the tree with the mount's caches, so the next listing fetches it again. */
+  override forget(): void {
+    super.forget?.()
+    this.generation += 1
+    this.tree = {}
+    this.truncated = false
   }
 }

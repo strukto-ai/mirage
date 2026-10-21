@@ -302,3 +302,8 @@ async def run_on_mount(
             exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),
         )
+    finally:
+        # The interpreter's program may have written past the dispatcher,
+        # as a captured program may.
+        if line_runtime is not None:
+            await registry.settle(line_runtime)

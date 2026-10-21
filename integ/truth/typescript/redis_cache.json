@@ -28,7 +28,7 @@
     "  matches same fp: true",
     "  matches other fp: false",
     "",
-    "--- multiGet ---",
+    "--- get, hit or miss ---",
     "  /data/hello.txt: 22 bytes",
     "  /data/new.bin: 3 bytes",
     "  /data/missing: MISS",

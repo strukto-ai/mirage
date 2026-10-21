@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { underPath } from '@struktoai/mirage-core/utils/key_prefix'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
+import { DEFAULT_KEY_PREFIX } from '@struktoai/mirage-core/cache/file/constants'
 import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
@@ -82,7 +84,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   constructor(options: RedisFileCacheOptions = {}) {
     super({
       url: options.url ?? 'redis://localhost:6379/0',
-      keyPrefix: options.keyPrefix ?? 'mirage:cache:',
+      keyPrefix: options.keyPrefix ?? DEFAULT_KEY_PREFIX,
     })
     this.limit = parseLimit(options.cacheLimit ?? '512MB')
     this.dataPrefix = `${this.keyPrefix}data:`
@@ -185,17 +187,21 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     }
   }
 
-  async remove(key: string): Promise<void> {
+  async remove(
+    key: string,
+    options: { subtree?: boolean; excluded?: readonly string[] } = {},
+  ): Promise<void> {
     this.invalidation.invalidate(key)
     const c = await this.cacheClient()
     const pipe = c.multi()
     pipe.del(this.dataKey(key))
     pipe.del(this.metaKey(key))
     await pipe.exec()
-  }
-  async fingerprint(key: string): Promise<string | null> {
-    const c = await this.cacheClient()
-    return await c.get(this.metaKey(key))
+    if (options.subtree !== true) return
+    const prefix = rstripSlash(key) + '/'
+    const excluded = options.excluded ?? []
+    this.invalidation.invalidatePrefix(prefix, excluded)
+    await this.dropMatching(prefix, excluded)
   }
 
   async fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
@@ -265,11 +271,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     return (await c.ttl(this.dataKey(key))) === -1
   }
 
-  async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
-    this.invalidation.invalidatePrefix(prefix, excluded)
-    await this.dropMatching(prefix, excluded)
-  }
-
   /**
    * Delete the data and meta keys of every entry under `prefix`.
    *
@@ -328,23 +329,9 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     return false
   }
 
-  evictPaths(_paths: Iterable<string>): void {
-    // No-op: the redis cache holds nothing restored from a snapshot
-    // (only RAM caches are repopulated at load), and the load path is
-    // sync so a redis delete cannot be awaited here. To drop live
-    // redis-cached entries, call `remove(key)` per path from an async
-    // context. Mirrors Python `RedisFileCacheStore.evict_paths`.
-  }
-
   async clear(): Promise<void> {
     this.invalidation.invalidateAll()
     await this.dropMatching('')
-  }
-
-  async multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]> {
-    const out: (Uint8Array | null)[] = []
-    for (const k of keys) out.push(await this.get(k))
-    return out
   }
 }
 

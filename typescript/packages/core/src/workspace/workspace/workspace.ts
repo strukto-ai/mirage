@@ -276,7 +276,8 @@ export class Workspace {
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
     // Before the mounts: the write verdict asks whether the cache keeps anything.
     this.clock = options.clock ?? new SystemClock()
-    this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock)
+    this.wsId = options.workspaceId ?? newWorkspaceId()
+    this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
       write: this.writeDefault,
@@ -295,6 +296,7 @@ export class Workspace {
         indexes: normalized.indexes,
         defaultWrite: this.writeDefault,
         writes: normalized.write,
+        workspaceId: this.wsId,
       },
       this.io,
       this.clock,
@@ -302,7 +304,6 @@ export class Workspace {
     this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
-    this.wsId = options.workspaceId ?? newWorkspaceId()
     this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
@@ -1421,8 +1422,8 @@ export class Workspace {
   protected installDriftState(
     state: WorkspaceStateDict,
     policy: DriftPolicy = DriftPolicy.STRICT,
-  ): void {
-    installDriftState(this.registry, this.cache, this.drift, state, policy)
+  ): Promise<void> {
+    return installDriftState(this.registry, this.cache, this.drift, state, policy)
   }
 
   /**
@@ -1584,10 +1585,6 @@ export class Workspace {
     const result = this.registry.resolve(path)
     await this.registry.mountFor(path).ensureReady()
     return result
-  }
-
-  async invalidateAfterWriteByPath(path: string): Promise<void> {
-    await this.dispatcher.invalidateAfterWriteByPath(path)
   }
 
   /**
@@ -1971,7 +1968,7 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
-    ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     return ws
   }
 

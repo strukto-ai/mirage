@@ -111,6 +111,9 @@ class MountRegistry:
     ) -> None:
         self.io = io if io is not None else IOConfig()
         self.clock: Clock = clock if clock is not None else SystemClock()
+        # Scopes the redis index stores this registry builds; the
+        # workspace sets it.
+        self.workspace_id: str | None = None
         self.process_view: Callable[[SessionState], ProcessView] | None = None
         # Fetches the managed names a tree a mount serves reads, once the
         # executor has picked that mount; the workspace sets it.
@@ -346,9 +349,11 @@ class MountRegistry:
                 e.prefix.rstrip("/") for e in self.descendant_mounts(m.prefix)
             ),
             aliases=lambda: tuple(
-                e.prefix.rstrip("/")
+                e.cache_manager
                 for e in self._mounts
-                if e is not m and e.vfs is m.vfs
+                if e is not m
+                and e.vfs is m.vfs
+                and e.cache_manager is not None
             ),
         )
 
@@ -408,7 +413,9 @@ class MountRegistry:
         elif isinstance(vfs, DevVFS):
             store = NULL_INDEX
         elif store is None:
-            store = build_index(index, vfs.index_ttl, self.clock)
+            store = build_index(
+                index, vfs.index_ttl, self.clock, self.workspace_id
+            )
         m = MountEntry(
             norm_prefix,
             vfs,
@@ -429,8 +436,7 @@ class MountRegistry:
         # handed, which are user commands and win.
         m._register_builtins(backend_commands(vfs))
         m.register_commands(vfs.commands())
-        if self._file_cache is not None:
-            self._attach_manager(m)
+        self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
         self._rows = None

@@ -16,6 +16,7 @@ import pytest
 
 from mirage import Workspace
 from mirage.commands.cli.builtin.gh import GH
+from mirage.core.github.tree_entry import TreeEntry
 from mirage.vfs.github import GitHubConfig, GitHubVFS
 from mirage.vfs.ram import RAMVFS
 
@@ -68,3 +69,17 @@ async def test_an_explicit_github_api_base_is_the_default_one():
     assert gh.reaches(vfs.accessor)
     assert gh.pool is vfs.accessor.account.pool
     await ws.close()
+
+
+def test_forget_drops_the_tree_so_the_next_listing_fetches_it():
+    accessor = GitHubVFS(GitHubConfig(token="t", owner="o", repo="r")).accessor
+    accessor.tree = {
+        "a.txt": TreeEntry(path="a.txt", type="blob", sha="s", size=1)
+    }
+    accessor.tree_loaded = accessor.truncated = True
+    accessor.forget()
+    assert (accessor.tree, accessor.tree_loaded, accessor.truncated) == (
+        {},
+        False,
+        False,
+    )

@@ -33,6 +33,7 @@ from mirage.core.github.tree import (
     fetch_dir_tree,
     fetch_tree,
     point_row,
+    refresh_tree,
     tree_rows,
 )
 from mirage.core.github.tree_entry import TreeEntry
@@ -244,6 +245,30 @@ async def test_a_pinned_mount_reads_its_ref_and_never_asks_for_the_branch(
     await ensure_tree(accessor)
     assert mock_tree_get.await_args.kwargs["ref"] == "release-2"
     mock_repo_get.assert_not_awaited()
+
+
+# A drop while GitHub answered may be for the very write the tree predates:
+# the caller gets the tree, and the accessor does not keep it.
+@pytest.mark.asyncio
+@patch("mirage.core.github.tree.github_get")
+async def test_a_tree_answered_after_a_drop_reaches_its_caller_unkept(
+    mock_tree_get, account
+):
+    accessor = GitHubAccessor(account, "acme", "proj", "main")
+
+    async def answer(*args, **kwargs):
+        accessor.forget()
+        return {
+            "truncated": False,
+            "tree": [
+                {"path": "a.txt", "type": "blob", "sha": "b1", "size": 1}
+            ],
+        }
+
+    mock_tree_get.side_effect = answer
+    fetched = await refresh_tree(accessor)
+    assert fetched is not None and list(fetched[0]) == ["a.txt"]
+    assert (accessor.tree, accessor.tree_loaded) == ({}, False)
 
 
 def _served_accessor(gh: FakeGitHub, ref: str = "main") -> GitHubAccessor:

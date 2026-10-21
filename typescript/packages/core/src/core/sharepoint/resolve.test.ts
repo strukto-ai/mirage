@@ -68,6 +68,19 @@ describe('SharePoint resolution', () => {
     expect(await resolve(accessor(config), path)).toMatchObject(expected)
   })
 
+  // A drop while Graph answered may be for the very change the reply
+  // predates: the lookup still gets its answer, and the reply is not kept.
+  it('keeps no reply that lands after the mount dropped its caches', async () => {
+    const sp = accessor()
+    vi.stubGlobal('fetch', () => {
+      sp.forget()
+      return Promise.resolve(new Response(JSON.stringify({ value: [TEAM] }), { status: 200 }))
+    })
+    const path = PathSpec.fromStrPath('/sp/Team', 'Team')
+    expect(await resolve(sp, path)).toMatchObject({ level: 'site', siteId: 'site-id' })
+    expect(sp.siteCache.size).toBe(0)
+  })
+
   it('looks a site up once, then answers from the cache', async () => {
     const fetchMock = graph([TEAM])
     const sp = accessor()

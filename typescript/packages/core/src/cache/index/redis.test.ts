@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType } from '../../types.ts'
+import { FileChangeKind, FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IndexDirectorySchema, LookupStatus } from './config.ts'
 import { CacheManager } from '../manager.ts'
@@ -861,7 +861,11 @@ ${script}`,
     const run = client.eval.bind(client)
     const peer = new RedisIndexCacheStore({ client: await redis(), keyPrefix: prefix })
     const spy = vi.spyOn(client, 'eval').mockImplementationOnce(async (script, options) => {
-      await new CacheManager(null, peer, '/snapshot/', true).keepCreated('/a', next)
+      await new CacheManager(null, peer, '/snapshot/', true).invalidate(
+        '/a',
+        FileChangeKind.CREATE,
+        next,
+      )
       expect((await peer.get('/snapshot/a')).entry).toEqual(next)
       return run(script, options)
     })
@@ -946,7 +950,11 @@ ${script}`,
                     ['b', next],
                   ]
             if (publication === 'add') {
-              await new CacheManager(null, peer, '/dir/', true).keepCreated(`/${peerName}`, next)
+              await new CacheManager(null, peer, '/dir/', true).invalidate(
+                `/${peerName}`,
+                FileChangeKind.CREATE,
+                next,
+              )
             } else if (publication === 'partial') {
               await peer.setPartialDir('/dir', rows)
             } else if (publication === 'seed') {
@@ -968,7 +976,11 @@ ${script}`,
         return pipe
       })
       try {
-        await new CacheManager(null, store, '/dir/', true).keepCreated('/a', old)
+        await new CacheManager(null, store, '/dir/', true).invalidate(
+          '/a',
+          FileChangeKind.CREATE,
+          old,
+        )
       } finally {
         spy.mockRestore()
         await peer.close()

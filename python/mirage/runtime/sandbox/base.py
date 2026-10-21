@@ -13,35 +13,37 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
+import uuid
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
-from mirage.io.types import materialize
+from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    REAP_WAIT_SECONDS,
+    reap_line,
+)
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
-    MountType,
+    OutputFn,
     RunResult,
     RuntimeReach,
-    SandboxPipe,
 )
 from mirage.types import PathSpec
 
-
-async def _piped(ctx: Context) -> bytes | None:
-    """The bytes piped into a run, read whole; None when nothing was.
-
-    Args:
-        ctx (Context): the run's context.
-    """
-    return await materialize(ctx.stdin) if ctx.stdin is not None else None
+logger = logging.getLogger(__name__)
 
 
-class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
+class RemoteSandbox(
+    Runtime[None], LineExecutorMixin[None], StreamingProcessMixin[None]
+):
     """A runtime that executes programs in a sandbox the user runs.
 
     Captures default to unresolved program names. An explicit "*"
@@ -54,13 +56,14 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
     and every path in a line resolve unchanged: a provider with a
     ``mount_type`` serves them itself (SandboxMounts), otherwise serve
     them inside it yourself (``mirage workspace create`` in the image
-    entrypoint or by hand). The whole-line entry point is
-    LineExecutorMixin's run_line, and there is no interpreter entry
-    point. Subclasses adapt one provider by implementing connect() and
-    exec_line(), and open_pipe() for a ``mount_type``; routing and
-    captures are inherited. Constructed like every runtime (captures,
-    config); config is how to reach the sandbox, coerced through the
-    provider's own config class.
+    entrypoint or by hand). There is no interpreter entry point.
+    Subclasses adapt one provider by implementing connect() and
+    _exec_argv(), and PipeTransportMixin for a ``mount_type``; every
+    run derives from _exec_argv: a whole line runs as ``/bin/sh -c``,
+    a program from its argv, and a stream hands its output over as it
+    comes. Routing and captures are inherited. Constructed like every
+    runtime (captures, config); config is how to reach the sandbox,
+    coerced through the provider's own config class.
     """
 
     # Lines execute on the provider's machine and act on that
@@ -86,11 +89,16 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
         self._mounts: SandboxMounts | None = None
         check_mount_type(self.name, self.config.mount_type)
         if self.config.mount_type is not None:
-            if type(self).open_pipe is RemoteSandbox.open_pipe:
+            if not isinstance(self, PipeTransportMixin):
                 raise ValueError(
                     f"{self.name}: mount_type needs a pipe transport"
                 )
-            self._serve_mounts(self.config.mount_type)
+            self._mounts = SandboxMounts(
+                self.name,
+                self.config.mount_type,
+                self._setup,
+                self.open_pipe,
+            )
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -129,15 +137,11 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
             ctx (Context): the line in ``flags["c"]``, the bytes piped
                 into it, the session environment and working directory.
         """
-        refusal = await self._prepare()
-        if refusal is not None:
-            return refusal
         line = ctx.flags.get("c")
-        return await self.exec_line(
-            line if isinstance(line, str) else "",
-            await _piped(ctx),
-            {**self.config.env, **(ctx.env or {})},
-            ctx.cwd.virtual,
+        return await self._run_argv(
+            ("/bin/sh", "-c", line if isinstance(line, str) else ""),
+            ctx,
+            None,
         )
 
     async def run_process(
@@ -147,44 +151,79 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
         texts: list[str],
         ctx: Context,
     ) -> RunResult:
-        refusal = await self._prepare()
-        if refusal is not None:
-            return refusal
-        return await self._exec_argv(
-            tuple(texts),
-            await _piped(ctx),
-            {**self.config.env, **(ctx.env or {})},
-            ctx.cwd.virtual,
-        )
+        return await self._run_argv(tuple(texts), ctx, None)
+
+    async def run_stream(
+        self,
+        engine: None,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn,
+    ) -> RunResult:
+        return await self._run_argv(tuple(texts), ctx, output)
 
     async def settle(self) -> None:
         if self._mounts is not None:
             await self._mounts.sync()
 
-    async def _prepare(self) -> RunResult | None:
-        await self._ensure_connected()
-        if self._mounts is None:
-            return None
-        return await self._mounts.admit(self._binding)
-
-    async def _exec_argv(
-        self,
-        argv: tuple[str, ...],
-        stdin: bytes | None,
-        env: dict[str, str],
-        cwd: str,
+    async def _run_argv(
+        self, argv: tuple[str, ...], ctx: Context, output: OutputFn | None
     ) -> RunResult:
-        raise NotImplementedError
-
-    def _serve_mounts(self, mount_type: MountType) -> None:
-        """Let the sandbox see the workspace by ``mount_type``.
+        """Connect once, bring the served mounts in step, then run.
 
         Args:
-            mount_type (MountType): ssh, fuse or both.
+            argv (tuple[str, ...]): the program and its arguments.
+            ctx (Context): the run's stdin, environment and cwd.
+            output (OutputFn | None): receives stdout as it arrives.
         """
-        self._mounts = SandboxMounts(
-            self.name, mount_type, self._setup, self.open_pipe
-        )
+        await self._ensure_connected()
+        if self._mounts is not None:
+            refusal = await self._mounts.admit(self._binding)
+            if refusal is not None:
+                return refusal
+        exec_id = uuid.uuid4().hex
+        try:
+            return await self._exec_argv(
+                argv,
+                ctx.stdin,
+                {**self.config.env, **(ctx.env or {}), EXEC_ID: exec_id},
+                ctx.cwd.virtual,
+                output,
+            )
+        except asyncio.CancelledError:
+            await asyncio.shield(self._reap(exec_id))
+            raise
+
+    async def _reap(self, exec_id: str) -> None:
+        """Stop what a cancelled run left in the box (``EXEC_ID``), for
+        at most ``REAP_WAIT_SECONDS``: a box that stopped answering would
+        otherwise hold the cancel.
+
+        Args:
+            exec_id (str): the run's id.
+        """
+        try:
+            async with asyncio.timeout(REAP_WAIT_SECONDS):
+                done = await self._exec_argv(
+                    ("/bin/sh", "-c", reap_line(exec_id)),
+                    None,
+                    dict(self.config.env),
+                    "/",
+                    None,
+                )
+        except Exception:
+            logger.debug(
+                "%s: run %s not stopped", self.name, exec_id, exc_info=True
+            )
+            return
+        if done.exit_code != 0:
+            logger.debug(
+                "%s: run %s not stopped: exit %d",
+                self.name,
+                exec_id,
+                done.exit_code,
+            )
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")
@@ -199,27 +238,46 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
         """Attach to the user's live sandbox, failing loud if absent."""
         raise NotImplementedError
 
-    async def exec_line(
-        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
-        """Execute one shell line inside the sandbox.
+        """Execute one argv inside the sandbox: the provider's transport.
+
+        Args:
+            argv (tuple[str, ...]): the program and its arguments.
+            stdin (ByteSource | None): the input, read as the program
+                consumes it; None for none.
+            env (dict[str, str]): the merged environment.
+            cwd (str): the working directory, passed through verbatim.
+            output (OutputFn | None): receives stdout as it arrives,
+                which the result then leaves out; None, or a transport
+                that cannot stream, returns it whole.
+        """
+        raise NotImplementedError
+
+    async def exec_line(
+        self,
+        line: str,
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+    ) -> RunResult:
+        """Execute one shell line inside the sandbox, as ``/bin/sh -c``.
 
         Args:
             line (str): the raw shell line.
-            stdin (bytes | None): bytes piped into the line.
+            stdin (ByteSource | None): bytes piped into the line.
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        return await self._exec_argv(("/bin/sh", "-c", line), stdin, env, cwd)
-
-    async def open_pipe(self, command: str) -> SandboxPipe:
-        """Start a command in the sandbox with its stdin and stdout held
-        open, byte for byte, for a ``mount_type``'s SFTP.
-
-        Args:
-            command (str): the shell command.
-        """
-        raise NotImplementedError
+        return await self._exec_argv(
+            ("/bin/sh", "-c", line), stdin, env, cwd, None
+        )
 
     async def close(self) -> None:
         """Unmount what the sandbox was served; the sandbox is the user's."""

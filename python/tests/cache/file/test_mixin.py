@@ -49,18 +49,6 @@ class TestGetSet:
         assert entry.fingerprint == "etag-123"
 
 
-class TestMulti:
-    @pytest.mark.asyncio
-    async def test_multi_get(self):
-        cache = RAMFileCacheStore(cache_limit="1MB")
-        await cache.set("/a", b"aaa")
-        await cache.set("/b", b"bbb")
-        results = await cache.multi_get(["/a", "/missing", "/b"])
-        assert results[0] == b"aaa"
-        assert results[1] is None
-        assert results[2] == b"bbb"
-
-
 class TestExistsRemoveClear:
     @pytest.mark.asyncio
     async def test_exists(self):

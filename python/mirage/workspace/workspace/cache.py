@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.utils.clock import Clock
@@ -34,6 +35,7 @@ def build_file_cache(
     cache: CacheConfig | None,
     cache_limit: str | int,
     clock: Clock | None = None,
+    workspace_id: str | None = None,
 ) -> FileCacheMixin:
     """Build the workspace's file cache from its config.
 
@@ -45,6 +47,9 @@ def build_file_cache(
         clock (Clock | None): the workspace's clock, handed to the RAM
             store, which ages its entries itself. The redis store expires
             keys server-side and reads no time.
+        workspace_id (str | None): scopes a redis store whose config
+            names no prefix, so two workspaces on one server never read
+            each other's files; None keeps the shared default.
 
     Raises:
         ImportError: a Redis cache was asked for without the extra.
@@ -58,7 +63,13 @@ def build_file_cache(
         return RedisFileCacheStore(
             cache_limit=cache.limit,
             url=cache.url,
-            key_prefix=cache.key_prefix,
+            key_prefix=(
+                cache.key_prefix
+                if cache.key_prefix is not None
+                else DEFAULT_KEY_PREFIX
+                if workspace_id is None
+                else f"{DEFAULT_KEY_PREFIX}{workspace_id}:"
+            ),
             max_drain_bytes=cache.max_drain_bytes,
         )
     limit = cache.limit if cache is not None else cache_limit

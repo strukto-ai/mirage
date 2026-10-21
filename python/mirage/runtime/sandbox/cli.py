@@ -39,7 +39,7 @@ Children = dict[
 ]
 
 # What a pipe's reader buffers, as asyncio.create_subprocess_exec sets it.
-_STREAM_LIMIT = 2**16
+STREAM_LIMIT = 2**16
 
 
 async def run_cli(
@@ -126,7 +126,7 @@ async def run_cli(
     async def read_stdout() -> bytes:
         parts: list[bytes] = []
         assert process.stdout is not None
-        while chunk := await process.stdout.read(_STREAM_LIMIT):
+        while chunk := await process.stdout.read(STREAM_LIMIT):
             if output is None:
                 parts.append(chunk)
             else:
@@ -190,7 +190,7 @@ async def _spawn(
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.subprocess_exec(
         lambda: asyncio.subprocess.SubprocessStreamProtocol(
-            limit=_STREAM_LIMIT, loop=loop
+            limit=STREAM_LIMIT, loop=loop
         ),
         executable,
         *args,
@@ -349,7 +349,7 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
     async def keep_tail() -> None:
         assert child.stderr is not None
         try:
-            while chunk := await child.stderr.read(_STREAM_LIMIT):
+            while chunk := await child.stderr.read(STREAM_LIMIT):
                 said.extend(chunk)
                 del said[:-PIPE_DIAGNOSTIC_BYTES]
         except Exception:

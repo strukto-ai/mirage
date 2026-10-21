@@ -25,9 +25,11 @@ from mirage.context import (
     get_current_session,
     line_running,
 )
+from mirage.io.types import materialize
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import SSHFS_OPTIONS
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import mount_table, top_prefixes
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.types import Limit
@@ -60,14 +62,15 @@ class Drain:
         return None
 
 
-class FakeSandbox(RemoteSandbox):
+class FakeSandbox(RemoteSandbox, PipeTransportMixin):
     """A sandbox that answers its mount table and takes sshfs pipes."""
 
     name = "fake"
 
     def __init__(self, mount_type, own=(), sshfs=True, sshfs_mounts=True):
-        super().__init__(captures=["python3"])
-        self._serve_mounts(mount_type)
+        super().__init__(
+            captures=["python3"], config={"mount_type": mount_type}
+        )
         self.table = {prefix: "tmpfs" for prefix in own}
         self.sshfs = sshfs
         self.sshfs_mounts = sshfs_mounts
@@ -79,6 +82,11 @@ class FakeSandbox(RemoteSandbox):
 
     async def connect(self) -> None:
         return None
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output):
+        line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
+        data = await materialize(stdin) if stdin is not None else None
+        return await self.exec_line(line, data, env, cwd)
 
     async def exec_line(self, line, stdin, env, cwd):
         self.commands.append(line)

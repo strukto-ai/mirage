@@ -192,6 +192,7 @@ async def _script_output(
     script: ScriptSource,
     runtime: LanguageRuntime[Any],
     prog: str,
+    settle: Callable[[Runtime[Any]], Awaitable[None]] | None,
 ) -> CommandOutput:
     """Render the invocation onto the selected runtime as one ``-c`` run.
 
@@ -209,6 +210,8 @@ async def _script_output(
         script (ScriptSource): the install's embedded program.
         runtime (Runtime): the selected interpreter entry.
         prog (str): the installed head word, the program's own name.
+        settle (Callable | None): settles the runtime once the program
+            ends, however it ends.
     """
     env = dict(ctx.env or {})
     if config is not None:
@@ -218,20 +221,24 @@ async def _script_output(
     flags: dict[str, FlagValue] = {"c": script.source, "script_cli": True}
     if script.module:
         flags["module"] = True
-    result = await runtime.execute(
-        [],
-        list(ctx.argv),
-        replace(
-            ctx,
-            flags=flags,
-            env=env,
-            spec=(
-                replace(ctx.spec, name=prog)
-                if ctx.spec is not None
-                else CommandSpec(name=prog)
+    try:
+        result = await runtime.execute(
+            [],
+            list(ctx.argv),
+            replace(
+                ctx,
+                flags=flags,
+                env=env,
+                spec=(
+                    replace(ctx.spec, name=prog)
+                    if ctx.spec is not None
+                    else CommandSpec(name=prog)
+                ),
             ),
-        ),
-    )
+        )
+    finally:
+        if settle is not None:
+            await settle(runtime)
     return run_output(result)
 
 
@@ -258,6 +265,9 @@ class CLIContext:
             handle; ``ctx.env`` stays the frozen process view.
         routing (RouteDecision[Runtime] | None): the line's placement, which a
             script leaf runs its program under; None outside a line.
+        settle (Callable | None): lands what a script leaf's runtime
+            holds and drops the caches its program may have gone past;
+            None outside a workspace.
     """
 
     shell: ShellFn | None = None
@@ -267,6 +277,7 @@ class CLIContext:
     session: SessionView | None = None
     processes: ProcessView | None = None
     routing: RouteDecision[Runtime[Any]] | None = None
+    settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
 
 
 def reaches_service(spec: CLI) -> bool:
@@ -695,7 +706,12 @@ async def _run_cli(
         if install.cli.script is not None:
             assert runtime is not None
             body = _script_output(
-                install.config, ctx, install.cli.script, runtime, prog
+                install.config,
+                ctx,
+                install.cli.script,
+                runtime,
+                prog,
+                context.settle,
             )
         else:
             assert binding.fn is not None

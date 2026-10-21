@@ -79,8 +79,7 @@ function runtimeFor(name: string, registry: MountRegistry): Runtime | undefined 
 function isNative(runtime: Runtime | null | undefined, name: string): boolean {
   if (runtime == null || !(isLineExecutor(runtime) || isProcessExecutor(runtime))) return false
   if (!(runtime instanceof LanguageRuntime)) return true
-  const own = (runtime.constructor as { readonly commands?: readonly string[] }).commands ?? []
-  return !own.includes(name)
+  return !(runtime.constructor as typeof LanguageRuntime).commands.includes(name)
 }
 
 /**

@@ -101,11 +101,14 @@ export interface RegistryPlacements {
   defaultWrite?: WritePolicy
   /** Each mount's own write policy, keyed by raw prefix. */
   writes?: Record<string, WritePolicy>
+  /** Scopes the redis index stores this registry builds. */
+  workspaceId?: string
 }
 
 export class MountRegistry {
   diff?: DiffComputer
   private readonly indexConfig: IndexConfig | undefined
+  private readonly workspaceId: string | undefined
   processView?: (session: SessionState) => ProcessView
   // Fetches the managed names a tree a mount serves reads, once the executor
   // has picked that mount; the workspace sets it.
@@ -293,7 +296,7 @@ export class MountRegistry {
       () =>
         this.allMounts()
           .filter((entry) => entry !== m && entry.vfs === m.vfs)
-          .map((entry) => entry.prefix.replace(/\/$/, '')),
+          .flatMap((entry) => (entry.cacheManager === null ? [] : [entry.cacheManager])),
     )
   }
 
@@ -308,6 +311,7 @@ export class MountRegistry {
     private readonly clock: Clock = new SystemClock(),
   ) {
     this.indexConfig = placements.index
+    this.workspaceId = placements.workspaceId
     const list: MountEntry[] = []
     const seen = new Set<string>()
     const overrides: Record<string, MountMode> = {}
@@ -420,7 +424,7 @@ export class MountRegistry {
     ) {
       return new DevIndex()
     }
-    return buildIndex(config ?? this.indexConfig, vfs.indexTtl, this.clock)
+    return buildIndex(config ?? this.indexConfig, vfs.indexTtl, this.clock, this.workspaceId)
   }
 
   /** A removed VFS instance cannot start a second lifecycle. */
@@ -467,7 +471,7 @@ export class MountRegistry {
       },
       this.mountList,
     )
-    if (this.cacheStore !== null) this.attachManager(m)
+    this.attachManager(m)
     this.mountList.push(m)
     this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
     this.rowCache = null

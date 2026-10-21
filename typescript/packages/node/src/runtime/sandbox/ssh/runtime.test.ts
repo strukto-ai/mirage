@@ -19,6 +19,8 @@ import type * as Os from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
@@ -48,13 +50,19 @@ class FakeSSHRuntime extends SSHRuntime {
     return Promise.resolve()
   }
 
-  protected override ssh(command: string, stdin: Uint8Array | null): Promise<SshResult> {
-    this.calls.push([command, stdin])
-    return Promise.resolve({
-      stdout: ENC.encode(`out:${command}`),
+  protected override async ssh(
+    command: string,
+    stdin: ByteSource | null,
+    output: OutputFn | null = null,
+  ): Promise<SshResult> {
+    this.calls.push([command, stdin === null ? null : await materialize(stdin)])
+    const stdout = ENC.encode(`out:${command}`)
+    if (output !== null) await output(stdout)
+    return {
+      stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
       code: 0,
-    })
+    }
   }
 }
 
@@ -123,7 +131,9 @@ describe('SSHRuntime', () => {
     const runtime = new FakeSSHRuntime({ config: { host: 'box' } })
     const result = await runtime.execLine('wc -l', ENC.encode('a\nb\n'), { E: '1' }, '/w')
     expect(result.exitCode).toBe(0)
-    expect(DEC.decode(result.stdout)).toBe(`out:${wrapLine('wc -l', { E: '1' }, '/w')}`)
+    expect(DEC.decode(result.stdout)).toBe(
+      `out:${wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/w')}`,
+    )
     expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('warn')
     const [, stdin] = runtime.calls[0] ?? ['', null]
     expect(DEC.decode(stdin ?? new Uint8Array())).toBe('a\nb\n')
@@ -228,7 +238,7 @@ class HungRuntime extends SSHRuntime {
   }
 
   line(command: string, signal: AbortSignal): Promise<unknown> {
-    return this.ssh(command, null, signal)
+    return this.ssh(command, null, null, signal)
   }
 }
 

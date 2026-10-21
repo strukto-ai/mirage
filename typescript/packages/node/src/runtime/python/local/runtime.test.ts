@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { Context } from '@struktoai/mirage-core/commands/config'
@@ -476,6 +476,26 @@ it.each(["yes | perl -ne 'print; exit'", 'perl -e \'$|=1; print "y\\n" while 1\'
     }
   },
   5000,
+)
+
+it.skipIf(process.platform === 'win32')(
+  'shows a file the program makes in the next listing',
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'mirage-local-')))
+    const ws = new Workspace(
+      { [root]: new DiskVFS({ root }) },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+    )
+    try {
+      expect(DEC.decode((await ws.shell(`ls ${root}`)).stdout)).toBe('')
+      const made = await ws.shell(`python3 -c "open('${root}/made.txt', 'w').write('x')"`)
+      expect(made.exitCode).toBe(0)
+      expect(DEC.decode((await ws.shell(`ls ${root}`)).stdout)).toBe('made.txt\n')
+    } finally {
+      await ws.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  },
 )
 
 // A local runtime that records the programs it would run.

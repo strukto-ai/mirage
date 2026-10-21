@@ -27,17 +27,8 @@ class FakeCacheManager:
     def __init__(self, log):
         self._log = log
 
-    async def invalidate_after_write(self, path):
-        self._log.append(f"inv:{path.virtual}")
-
-    async def invalidate_after_remove(self, path):
-        self._log.append(f"inv-remove:{path.virtual}")
-
-    async def invalidate_subtree(self, path):
-        self._log.append(f"inv-subtree:{path.virtual}")
-
-    async def invalidate_ancestors(self, path):
-        self._log.append(f"inv-ancestors:{path.virtual}")
+    async def invalidate(self, path, kind):
+        self._log.append(f"{kind}:{path.virtual}")
 
 
 class PlainVFS:
@@ -105,11 +96,7 @@ async def test_notify_invalidate_before_deliver():
     await hub.notify(_change(FileChangeKind.CREATE, "/nc/data/x.txt"))
     await asyncio.wait_for(task, timeout=2)
     log.append("deliver")
-    assert log == [
-        "inv:/nc/data/x.txt",
-        "inv-ancestors:/nc/data/x.txt",
-        "deliver",
-    ]
+    assert log == ["create:/nc/data/x.txt", "deliver"]
     await agen.aclose()
     await hub.close()
 
@@ -148,37 +135,17 @@ async def test_a_nested_create_drops_every_listing_to_the_mount_root():
 
 
 @pytest.mark.asyncio
-async def test_notify_delete_routes_to_remove():
+@pytest.mark.parametrize(
+    "kind",
+    [FileChangeKind.DELETE, FileChangeKind.UNKNOWN, FileChangeKind.UPDATE],
+)
+async def test_notify_hands_its_kind_to_the_manager(kind):
     log: list[str] = []
     hub = _hub(log=log)
     agen, task = await _start_blocked_events(hub)
-    await hub.notify(_change(FileChangeKind.DELETE, "/nc/data/x.txt"))
+    await hub.notify(_change(kind, "/nc/data/day"))
     await asyncio.wait_for(task, timeout=2)
-    assert log == ["inv-remove:/nc/data/x.txt", "inv-ancestors:/nc/data/x.txt"]
-    await agen.aclose()
-    await hub.close()
-
-
-@pytest.mark.asyncio
-async def test_notify_unknown_routes_to_subtree():
-    log: list[str] = []
-    hub = _hub(log=log)
-    agen, task = await _start_blocked_events(hub)
-    await hub.notify(_change(FileChangeKind.UNKNOWN, "/nc/data/day"))
-    await asyncio.wait_for(task, timeout=2)
-    assert log == ["inv-subtree:/nc/data/day", "inv-ancestors:/nc/data/day"]
-    await agen.aclose()
-    await hub.close()
-
-
-@pytest.mark.asyncio
-async def test_notify_update_does_not_reach_the_subtree():
-    log: list[str] = []
-    hub = _hub(log=log)
-    agen, task = await _start_blocked_events(hub)
-    await hub.notify(_change(FileChangeKind.UPDATE, "/nc/data/day"))
-    await asyncio.wait_for(task, timeout=2)
-    assert log == ["inv:/nc/data/day", "inv-ancestors:/nc/data/day"]
+    assert log == [f"{kind}:/nc/data/day"]
     await agen.aclose()
     await hub.close()
 
@@ -188,14 +155,8 @@ async def test_notify_reframes_vfs_path():
     seen: list[str] = []
 
     class RecordingManager:
-        async def invalidate_after_write(self, path):
+        async def invalidate(self, path, kind):
             seen.append(path.vfs_path)
-
-        async def invalidate_after_remove(self, path):
-            seen.append(path.vfs_path)
-
-        async def invalidate_ancestors(self, path):
-            return None
 
     entry = FakeMountEntry(
         prefix="/nc/", vfs=PlainVFS(), cache_manager=RecordingManager()
@@ -211,9 +172,8 @@ async def test_notify_reframes_vfs_path():
 
 @pytest.mark.asyncio
 async def test_notify_move_evicts_both_sides():
-    # The vacated old path must be evicted as a removal (plus its
-    # ancestors), or a consumer could cat the old path and get stale
-    # cached bytes.
+    # The vacated old path must be evicted as a removal, or a consumer
+    # could cat the old path and get stale cached bytes.
     log: list[str] = []
     hub = _hub(log=log)
     agen, task = await _start_blocked_events(hub)
@@ -225,12 +185,7 @@ async def test_notify_move_evicts_both_sides():
     )
     await hub.notify(move)
     await asyncio.wait_for(task, timeout=2)
-    assert log == [
-        "inv:/nc/data/new.txt",
-        "inv-ancestors:/nc/data/new.txt",
-        "inv-remove:/nc/old/orig.txt",
-        "inv-ancestors:/nc/old/orig.txt",
-    ]
+    assert log == ["move:/nc/data/new.txt", "delete:/nc/old/orig.txt"]
     await agen.aclose()
     await hub.close()
 
@@ -574,16 +529,17 @@ async def test_delete_stream_drops_only_retained_subtrees(paths, expected):
         await index.set_dir("/x/t/s1", [("f", _row("f"))])
         await cache.set("/x/t/s1/f", b"f")
         with (
-            patch.object(
-                cache, "evict_prefix", wraps=cache.evict_prefix
-            ) as evict,
+            patch.object(cache, "remove", wraps=cache.remove) as evict,
             patch.object(
                 index, "invalidate_prefix", wraps=index.invalidate_prefix
             ) as drop,
         ):
             for path in paths:
                 await hub.notify(_change(FileChangeKind.DELETE, path))
-        assert evict.call_count == expected
+        assert (
+            sum(bool(c.kwargs.get("subtree")) for c in evict.call_args_list)
+            == expected
+        )
         assert drop.call_count == expected
         assert (await index.list_dir("/x/t")).status == LookupStatus.NOT_FOUND
         assert (

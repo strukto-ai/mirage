@@ -21,6 +21,8 @@ import pytest
 
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
 from mirage.runtime.table import build_runtime
 from mirage.types import PathSpec
@@ -96,10 +98,10 @@ def test_registry_declares_process_and_shell_without_language_or_workspace_fs():
     runtime = build_runtime("sandlock")
     assert isinstance(runtime, SandlockRuntime)
     assert runtime.captures == ("@external",)
-    assert runtime.capabilities.process and runtime.capabilities.shell
-    assert runtime.capabilities.languages == ()
-    assert runtime.capabilities.filesystem == ()
-    assert runtime.capabilities.reach == "process"
+    assert isinstance(runtime, ProcessExecutorMixin)
+    assert isinstance(runtime, LineExecutorMixin)
+    assert not isinstance(runtime, LanguageRuntime)
+    assert (runtime.filesystem, runtime.reach) == ((), "process")
     with pytest.raises(TypeError, match="home"):
         SandlockRuntime(config={"home": "python3"})
 

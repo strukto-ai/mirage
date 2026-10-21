@@ -138,6 +138,18 @@ class GitHubAccessor(Accessor):
         # once an index was wired.
         self.tree_loaded: bool = tree is not None
         self.truncated = truncated
+        # Bumped by forget, so a tree GitHub answered before the drop is
+        # handed back to its caller but not reseated.
+        self.generation = 0
 
     async def close(self) -> None:
         await self.account.close()
+
+    def forget(self) -> None:
+        """Drop the tree with the mount's caches, so the next listing
+        fetches it again."""
+        super().forget()
+        self.generation += 1
+        self.tree = {}
+        self.tree_loaded = False
+        self.truncated = False

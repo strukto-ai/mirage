@@ -43,7 +43,7 @@ from mirage.runtime.binding import WorkspaceBinding, capture_binding
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.resolver import PrefixResolver
@@ -60,6 +60,11 @@ class Probe(LanguageRuntime):
     def __init__(self):
         super().__init__()
         self.contexts = []
+        self.bound = None
+
+    def bind(self, binding):
+        super().bind(binding)
+        self.bound = binding
 
     async def interpret(self, engine, program, ctx):
         self.contexts.append(ctx)
@@ -91,12 +96,11 @@ async def test_execute_capabilities_and_refusals():
     code = Context(flags={"c": "hello"})
     shell = Context(flags={"c": "echo hello"}, cwd=work, stdin=b"!")
     language, native = Probe(), ShellProbe()
-    assert language.capabilities.languages == ("python",)
-    assert language.capabilities.reach == "workspace"
-    assert not language.capabilities.shell
-    assert native.capabilities.shell and not native.capabilities.process
-    assert language.capabilities.filesystem == ()
-    assert native.capabilities.filesystem == ()
+    assert (language.language, language.reach) == ("python", "workspace")
+    assert not isinstance(language, LineExecutorMixin)
+    assert isinstance(native, LineExecutorMixin)
+    assert not isinstance(native, ProcessExecutorMixin)
+    assert language.filesystem == native.filesystem == ()
     assert (await language.execute([], [], code)).stdout == b"hello"
     line = await native.execute([], [], shell, kind="line")
     assert line.stdout == b"echo hello:/work!"
@@ -165,7 +169,10 @@ async def test_callbacks_retain_session_and_gate_after_capture():
 
 @pytest.mark.asyncio
 async def test_context_keeps_namespace_live_and_matches_native_projection():
-    with Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC) as ws:
+    probe = Probe()
+    with Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe, "workspace"]
+    ) as ws:
         await ws.shell("echo shared > /data/a; chmod 600 /data/a")
         context = ws.runtime_context()
         await ws.shell("ln -s /data/a /data/link")
@@ -175,9 +182,14 @@ async def test_context_keeps_namespace_live_and_matches_native_projection():
             calls_as(context.caller, links.resolve)("/data/link") == "/data/a"
         )
         ws.add_mount("/data/nested", RAMVFS(), mode=MountMode.EXEC)
-        assert context.resolver.owner_of("/data/nested/a") == "/data/nested/"
+        assert (
+            calls_as(context.caller, probe.bound.resolver.owner_of)(
+                "/data/nested/a"
+            )
+            == "/data/nested/"
+        )
         vfs = calls_as(context.caller, RuntimeFiles.of)(
-            context.ctx, context.binding
+            context.ctx, probe.bound
         )
         mount = MountCore(ws.vfs)
         # Call the sync adapter on a worker to keep its serving loop free.
@@ -244,7 +256,7 @@ async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
         pytest.importorskip("pydantic_monty")
         runtime = MontyRuntime()
     expected = ("read", "write", "list", "stat")
-    assert runtime.capabilities.filesystem == (
+    assert runtime.filesystem == (
         (*expected, "glob") if name == "wasi" else expected
     )
     with Workspace(

@@ -68,58 +68,6 @@ export function latestFingerprint(
 }
 
 /**
- * Keep `data` for `path` under the mutation lock. The facts are read under
- * the lock, so a mount that stopped owning the path, or stopped caching it,
- * keeps nothing. `fingerprint` is the backend's token for the bytes, null
- * when it vouched for none. Mirrors Python's `set_cached`.
- */
-export async function setCached(
-  cache: FileCache,
-  path: string,
-  data: Uint8Array,
-  fingerprint: string | null,
-  cacheFacts: (path: string) => CacheFacts,
-): Promise<void> {
-  await mutationLock(cache, async () => {
-    const facts = cacheFacts(path)
-    if (!facts.cacheable) return
-    if (data.byteLength > cache.cacheLimit) {
-      // Bytes over the whole cache limit would evict every warm entry.
-      await cache.remove(path)
-      return
-    }
-    await store(cache, path, data, fingerprint, facts.ttl)
-  })
-}
-
-/**
- * Store bytes the line settled on, never failing the line for it: the read
- * or write behind them already happened, and a store that refuses the fill
- * (out of memory, a value over its size limit) costs the next read a fetch,
- * so it is logged and the stale entry dropped. Mirrors Python's `_store`.
- */
-async function store(
-  cache: FileCache,
-  path: string,
-  data: Uint8Array,
-  fingerprint: string | null,
-  ttl: number | null,
-): Promise<void> {
-  try {
-    await cache.set(path, data, { fingerprint, ttl })
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`cache fill refused for ${path}: ${msg}`)
-    try {
-      await cache.remove(path)
-    } catch (dropErr) {
-      const why = dropErr instanceof Error ? dropErr.message : String(dropErr)
-      console.warn(`stale copy not dropped for ${path}: ${why}`)
-    }
-  }
-}
-
-/**
  * Keep the version each path last had on the line, on conditional mounts. A
  * read that fills no cache (`grep`, `head`) or a write that keeps no bytes
  * (`>>`, a resize, a cross-mount `cp`) still names the version it saw, and

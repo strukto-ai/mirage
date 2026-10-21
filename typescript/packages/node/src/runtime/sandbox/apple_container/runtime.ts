@@ -14,10 +14,11 @@
 
 import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { getCurrentSession } from '@struktoai/mirage-core/context/session_context'
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
   APPLE_CONTAINER_CONFIG_KEYS,
@@ -54,9 +55,9 @@ import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
  */
 export class AppleContainerRuntime
   extends RemoteSandbox<AppleContainerConfig>
-  implements ProcessExecutor<undefined>
+  implements PipeTransport
 {
-  readonly [PROCESS_EXECUTOR] = true as const
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'apple_container'
   private readonly probes = new Map<string, Promise<void>>()
 
@@ -68,16 +69,14 @@ export class AppleContainerRuntime
   /** Run one container CLI invocation; the seam tests override. */
   protected container(
     args: string[],
-    stdin: Uint8Array | null = null,
+    stdin: ByteSource | null = null,
+    output: OutputFn | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli(
-      'container',
-      APPLE_CONTAINER_CLI_HINT,
-      args,
-      stdin,
-      signal !== undefined ? { signal } : {},
-    )
+    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, {
+      ...(signal !== undefined ? { signal } : {}),
+      ...(output !== null ? { output } : {}),
+    })
   }
 
   /**
@@ -135,22 +134,23 @@ export class AppleContainerRuntime
 
   protected override async execArgv(
     argv: readonly string[],
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const target = [await this.target(signal)]
     const args = execArgs(['exec', '-i'], target, env, cwd, argv)
-    const result = await this.container(args, stdin, signal)
+    const result = await this.container(args, stdin, output, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
-  override async openPipe(command: string): Promise<SandboxPipe> {
+  async openPipe(command: string): Promise<SandboxPipe> {
     const target = [await this.target()]
     return openCliPipe(
       'container',
-      execArgs(['exec', '-i'], target, {}, null, ['sh', '-c', command]),
+      execArgs(['exec', '-i'], target, {}, null, ['/bin/sh', '-c', command]),
     )
   }
 }

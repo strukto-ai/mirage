@@ -24,7 +24,6 @@ import type {
   ExecutionKind,
   FilesystemOperation,
   OutputFn,
-  RuntimeCapabilities,
   RunResult,
   RuntimeReach,
 } from './types.ts'
@@ -101,16 +100,6 @@ export abstract class Runtime<E = unknown> {
    */
   settle(): Promise<void> {
     return Promise.resolve()
-  }
-
-  get capabilities(): RuntimeCapabilities {
-    return {
-      languages: [],
-      shell: isLineExecutor(this),
-      process: isProcessExecutor(this),
-      reach: this.reach,
-      filesystem: [...this.filesystem],
-    }
   }
 
   /** Attach workspace services; a runtime instance belongs to one workspace. */

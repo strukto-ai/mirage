@@ -38,7 +38,7 @@ from mirage.cache.index.view import IndexView
 from mirage.io.stream import close_quietly
 from mirage.observe.context import active_recorder, line_version
 from mirage.observe.record import OpRecord
-from mirage.types import DEFAULT_READ_TTL, FileStat, PathSpec
+from mirage.types import DEFAULT_READ_TTL, FileChangeKind, FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class CacheManager:
         may_serve_listing: Callable[[str, str | None], Awaitable[bool]]
         | None = None,
         excluded_prefixes: Callable[[], tuple[str, ...]] = tuple,
-        aliases: Callable[[], tuple[str, ...]] = tuple,
+        aliases: Callable[[], tuple["CacheManager", ...]] = tuple,
     ) -> None:
         """Args:
         file_cache (FileCacheMixin | None): Workspace file cache
@@ -96,9 +96,9 @@ class CacheManager:
             cached listing; None serves them all.
         excluded_prefixes (Callable[[], tuple[str, ...]]): live nested
             mount roots protected from recursive deletion.
-        aliases (Callable[[], tuple[str, ...]]): the prefixes of the
-            other live mounts of this mount's VFS, whose cached bodies
-            are the same files under other names.
+        aliases (Callable[[], tuple[CacheManager, ...]]): the managers
+            of the other live mounts of this mount's VFS, whose caches
+            hold the same files under other names.
         """
         self._file_cache = file_cache
         self._index = index
@@ -117,7 +117,6 @@ class CacheManager:
         self._checking: dict[
             str, tuple[int, float, asyncio.Task[str | None]]
         ] = {}
-        self._check_epoch = 0
         self._check_bound = CHECKED_LIMIT
         self._probed: dict[str, tuple[int, int, FileStat]] = {}
         self._probe_bound = PROBED_LIMIT
@@ -133,7 +132,7 @@ class CacheManager:
         async with mutation_lock(self._file_cache):
             yield
 
-    async def drop(self, index: IndexCacheStore, bodies: bool = True) -> None:
+    async def drop(self, bodies: bool = True) -> None:
         """Drop this mount's listings and bodies, path unspecified.
 
         For a write that went past the dispatcher, so nothing here can say
@@ -156,36 +155,31 @@ class CacheManager:
         direction to be wrong in.
 
         Args:
-            index (IndexCacheStore): the VFS's own index.
             bodies (bool): drop the bodies too; False when the caller
                 clears the whole file cache itself.
         """
         async with self.mutation():
             self.retire()
             if self._owns_path(self._prefix or "/"):
-                await index.invalidate()
+                await self._index.invalidate()
             if bodies and self._caches_reads and self._file_cache is not None:
-                for prefix in (self._prefix, *self._aliases()):
-                    await self._file_cache.evict_prefix(prefix + "/")
+                for manager in (self, *self._aliases()):
+                    await self._file_cache.remove(
+                        manager._prefix or "/", subtree=True
+                    )
 
-    def scope_index(self, index: IndexCacheStore) -> IndexCacheStore:
-        """Bind backend metadata writes to this mount's lifetime.
+    def scope_index(self) -> IndexCacheStore:
+        """This mount's index, its backend metadata writes bound to the
+        mount's lifetime.
 
-        Reuse the view because refill locks are keyed by index identity.
-
-        Args:
-            index (IndexCacheStore): the VFS's own index.
+        The view is reused because refill locks are keyed by index
+        identity.
         """
-        if self._file_cache is None or isinstance(index, IndexView):
-            return index
-        if self._view is None or self._view.store is not index:
-            # The notes describe the old store; a first view keeps them.
-            if self._view is not None:
-                self._written.clear()
-                self._forget_checks()
-            self._clock = index.clock
+        if self._file_cache is None:
+            return self._index
+        if self._view is None:
             self._view = IndexView(
-                index,
+                self._index,
                 self._file_cache,
                 self._prefix,
                 self._owns_path,
@@ -294,15 +288,6 @@ class CacheManager:
         }
         self._check_bound = max(CHECKED_LIMIT, 2 * len(self._checked))
 
-    def _forget_checks(self) -> None:
-        # The versions were checked against listings of the old store, so
-        # none of them says anything about the new one. The first view has
-        # no old store, and a check may be what builds it.
-        self._checked.clear()
-        self._refused.clear()
-        self._checking.clear()
-        self._check_epoch += 1
-
     def _sent_recently(self, sent_tick: int, sent_at: float) -> bool:
         """Whether a version check is recent enough to answer for the caller.
 
@@ -366,7 +351,6 @@ class CacheManager:
     ) -> tuple[int, float, asyncio.Task[str | None]]:
         sent_tick = tick()
         sent_at = self._clock.monotonic()
-        epoch = self._check_epoch
 
         async def run() -> str | None:
             version = await check()
@@ -374,10 +358,8 @@ class CacheManager:
             # Recorded here rather than by a waiter, so the answer lands
             # even when every waiter was cancelled; an older check that
             # lands late never replaces a newer one.
-            if (
-                version is not None
-                and epoch == self._check_epoch
-                and (checked is None or checked[1] < sent_tick)
+            if version is not None and (
+                checked is None or checked[1] < sent_tick
             ):
                 if checked is None and len(self._checked) >= self._check_bound:
                     self._prune_checks()
@@ -482,32 +464,20 @@ class CacheManager:
         async with self.mutation():
             if generation != self._read_generation or not self._owns_path(key):
                 return
-            await self.scope_index_locked(self._index).replace_if_unchanged(
+            await self._locked_index().replace_if_unchanged(
                 key, predecessor, entry
             )
 
-    def scope_index_locked(self, index: IndexCacheStore) -> IndexCacheStore:
+    def _locked_index(self) -> IndexCacheStore:
         """A view for a caller already inside ``mutation()``.
 
         Never share or retain it beyond that hold. A distinct refill lock
         avoids lock inversion with readers of the shared view.
-
-        Args:
-            index (IndexCacheStore): the VFS's own index, never a view.
-
-        Raises:
-            ValueError: ``index`` is already a view, which would take the
-                lock again.
         """
         if self._file_cache is None:
-            return index
-        if isinstance(index, IndexView):
-            raise ValueError(
-                "scope_index_locked needs a raw store; a view "
-                "would take the lock again"
-            )
+            return self._index
         return IndexView(
-            index,
+            self._index,
             self._file_cache,
             self._prefix,
             self._owns_path,
@@ -560,7 +530,14 @@ class CacheManager:
         Args:
             path (PathSpec): Path to key; only ``virtual`` is read.
         """
-        key = mount_key(path.virtual, self._prefix)
+        return self._name(mount_key(path.virtual, self._prefix))
+
+    def _name(self, key: str) -> str:
+        """The cache key of a mount-relative ``key`` under this mount.
+
+        Args:
+            key (str): the path below the mount, without a leading slash.
+        """
         return f"{self._prefix}/{key}" if key else self._prefix or "/"
 
     def _readable_cache(self, key: str) -> FileCacheMixin | None:
@@ -664,19 +641,15 @@ class CacheManager:
         data, facts = await capture_read(key, fetch)
         if not isinstance(data, bytes):
             return data
-        cache = self._readable_cache(key)
-        if cache is not None:
 
-            def token() -> str | None:
-                if facts:
-                    same = all(fp == facts[0] for fp in facts)
-                    return facts[0] if same else None
-                records = (
-                    recorder.sink[start:] if recorder is not None else None
-                )
-                return latest_fingerprint(records, key)
+        def token() -> str | None:
+            if facts:
+                same = all(fp == facts[0] for fp in facts)
+                return facts[0] if same else None
+            records = recorder.sink[start:] if recorder is not None else None
+            return latest_fingerprint(records, key)
 
-            await self._keep_read(cache, key, data, generation, keep, token)
+        await self._keep(key, data, token, self._admits(generation, keep))
         return data
 
     def fill_stream(
@@ -732,49 +705,86 @@ class CacheManager:
         finally:
             await close_quietly(source)
         if chunks is not None:
-            await self._keep_read(
-                cache,
+            await self._keep(
                 key,
                 b"".join(chunks),
-                generation,
-                keep,
                 lambda: latest_fingerprint(records, key),
+                self._admits(generation, keep),
             )
 
-    async def _keep_read(
-        self,
-        cache: FileCacheMixin,
-        key: str,
-        data: bytes,
-        generation: int,
-        keep: Callable[[], bool] | None,
-        token: Callable[[], str | None],
-    ) -> None:
-        """Store a cold read's bytes unless something since made them stale.
+    def _admits(
+        self, generation: int, keep: Callable[[], bool] | None
+    ) -> Callable[[], bool]:
+        """A cold read's last say: no write landed since it began, and
+        ``keep`` agrees.
 
         Args:
-            cache (FileCacheMixin): the cache to fill.
-            key (str): the path's cache key.
-            data (bytes): the bytes read.
             generation (int): the read generation the read began in.
-            keep (Callable[[], bool] | None): the last say on keeping.
-            token (Callable[[], str | None]): the token labelling them.
+            keep (Callable[[], bool] | None): the caller's last say.
         """
-        if len(data) > cache.cache_limit:
+        return lambda: (
+            generation == self._read_generation and (keep is None or keep())
+        )
+
+    async def keep_written(
+        self, path: PathSpec, data: bytes, fingerprint: str | None
+    ) -> None:
+        """Keep a write's bytes for the next read, as a read keeps its own.
+
+        Args:
+            path (PathSpec): the path written.
+            data (bytes): the bytes the file now holds.
+            fingerprint (str | None): the token the write's backend
+                answered, None when it vouched for none.
+        """
+        await self._keep(
+            self._cache_key(path), data, lambda: fingerprint, lambda: True
+        )
+
+    async def _keep(
+        self,
+        key: str,
+        data: bytes,
+        token: Callable[[], str | None],
+        admit: Callable[[], bool],
+    ) -> None:
+        """Store bytes a read or a write settled on, unless they went stale.
+
+        The one way bytes enter the file cache. The checks run under the
+        cache's mutation lock, so a name this mount stopped owning or
+        caching keeps nothing, nor do bytes ``admit`` refuses. Bytes over
+        the whole cache limit would evict every warm entry, so the copy
+        held for the key, now stale, goes instead; a store that refuses
+        the bytes (out of memory, a value over its size limit) costs only
+        the next read a fetch, so the refusal is logged, never raised, and
+        the stale copy goes too.
+
+        Args:
+            key (str): the cache key.
+            data (bytes): the bytes to keep.
+            token (Callable[[], str | None]): their backend token.
+            admit (Callable[[], bool]): the last say, asked under the lock.
+        """
+        cache = self._file_cache
+        if cache is None:
             return
         async with mutation_lock(cache):
-            if (
-                self._owns_path(key)
-                and generation == self._read_generation
-                and (keep is None or keep())
-            ):
-                try:
+            if not (self._caches_reads and self._owns_path(key) and admit()):
+                return
+            try:
+                if len(data) > cache.cache_limit:
+                    await cache.remove(key)
+                else:
                     await cache.set(
                         key, data, fingerprint=token(), ttl=self._read_ttl
                     )
+            except Exception:
+                logger.warning("cache fill refused for %s", key, exc_info=True)
+                try:
+                    await cache.remove(key)
                 except Exception:
                     logger.warning(
-                        "cache fill refused for %s", key, exc_info=True
+                        "stale copy not dropped for %s", key, exc_info=True
                     )
 
     async def cached_size(self, path: PathSpec) -> int | None:
@@ -807,147 +817,111 @@ class CacheManager:
         cache = self._readable_cache(key)
         return cache is not None and await cache.exists(key)
 
-    async def invalidate_after_write(self, path: PathSpec) -> None:
-        """Invalidate caches after a write to ``path``.
+    async def invalidate(
+        self,
+        path: PathSpec,
+        kind: FileChangeKind,
+        row: FileStat | None = None,
+        *,
+        leaf: bool = False,
+    ) -> None:
+        """Drop what a change at ``path`` made stale, under every name its
+        store has here.
+
+        One store mounted at several prefixes holds one file under each,
+        so the change lands under every name a live mount of it owns. The
+        kind decides how far down it reaches:
+
+        - CREATE, UPDATE, and MOVE at its landing: the body, and the
+          path's entry in its parent's listing. A CREATE that answered
+          its new entry's stat (``row``) keeps that entry where the
+          parent's listing names it instead, so a listing of the parent
+          and the next level of a nested create need no request; a row
+          naming another file (a store that matches names without case
+          wrote the one it holds) proves nothing, so the parent is
+          listed again.
+        - DELETE: the body, the path's own listing and its parent entry,
+          and what is cached beneath it when a listing at or under it is
+          still cached. That probe is for a remover that cannot say it
+          removed a folder (a notified DELETE, the vacated side of a
+          MOVE): a folder's nested listings and bodies were cached under
+          keys of their own, while a plain file must not pay a subtree
+          drop, which on a Redis file cache scans the whole keyspace. A
+          remover that knows nothing was below (``leaf``: unlink, rmdir)
+          skips it. A folder with no listing cached at or under it keeps
+          the bodies cached beneath it until their ttl.
+        - UNKNOWN: everything cached at and below the path, as a push
+          notification that names only a folder, a recursive delete or a
+          directory rename needs.
+
+        Then the path's ancestors drop their entries in their parents'
+        listings: a keyed store materializes every missing level of a key
+        in one put, so those listings gained entries too. Each affected
+        listing becomes partial and keeps its unaffected siblings. Every
+        change retires this mount's in-flight reads and probe answers.
 
         Args:
-            path (PathSpec): Path that was written; only ``virtual`` is
-                read.
+            path (PathSpec): the changed path; only ``virtual`` is read.
+            kind (FileChangeKind): what happened, which decides the reach.
+            row (FileStat | None): a CREATE's new entry, kept in its
+                parent's listing; None drops that entry.
+            leaf (bool): a DELETE whose remover knows nothing was below
+                the path.
         """
-        key = await self._invalidate_path(path)
-        await self._invalidate_parent(key)
+        key = mount_key(path.virtual, self._prefix)
+        for manager in (self, *self._aliases()):
+            name = manager._name(key)
+            if manager is self or manager._owns_path(name):
+                await manager._invalidate(name, kind, row, leaf)
 
-    async def keep_created(self, path: PathSpec, row: FileStat) -> None:
-        """Settle a create that answered its new entry's stat.
-
-        The entry is kept where its parent's listing names it, so a
-        listing of the parent and the next level of a nested create need
-        no request: what ``invalidate_after_write`` drops for a re-list
-        is the one name the create added. A row naming another file (a
-        store that matches names without case wrote the one it holds)
-        proves nothing about the path, so the parent is listed again.
-
-        Args:
-            path (PathSpec): the created path; only ``virtual`` is read.
-            row (FileStat): the backend's stat of it.
-        """
-        key = await self._invalidate_path(path)
-        if row.name != key.rsplit("/", 1)[-1]:
-            await self._invalidate_parent(key)
-            return
-        deadline = (
-            None
-            if self._read_ttl is None
-            else datetime.fromtimestamp(self._index.clock.now(), timezone.utc)
-            + timedelta(seconds=self._read_ttl)
-        )
-        await self._index.add_entry(key, row, deadline)
-
-    async def invalidate_after_unlink(self, path: PathSpec) -> None:
-        """Invalidate caches after a deletion of ``path``.
-
-        Args:
-            path (PathSpec): Path that was removed; only ``virtual`` is
-                read.
-        """
-        key = await self._invalidate_path(path)
-        await self._invalidate_removed(key)
-
-    async def invalidate_subtree(self, path: PathSpec) -> None:
-        """Drop ``path`` and everything cached beneath it.
-
-        Two callers, one shape. A push notification often says only
-        which folder moved, and a recursive delete or a directory
-        rename takes a whole tree with it; either way the listings and
-        bodies below the path were cached independently, so evicting
-        the path and its parent leaves stale entries one level down.
-        The cheaper ``invalidate_after_write`` cannot be widened to do
-        this, because it also runs on every ordinary write, where a
-        file has no subtree to drop.
-
-        Args:
-            path (PathSpec): Root of the stale subtree; only ``virtual``
-                is read.
-        """
-        key = await self._invalidate_path(path)
-        await self._drop_below(key)
-        await self._invalidate_removed(key)
-
-    async def invalidate_after_remove(self, path: PathSpec) -> None:
-        """Invalidate caches after ``path`` was removed, folder or file.
-
-        For a remover that cannot say which it removed: a notified
-        DELETE, or the vacated side of a MOVE, names a path and nothing
-        more. A folder needs what was cached beneath it dropped, since
-        each nested listing and body was cached under its own key.
-        Every removal retires this manager's reads. The subtree drop
-        additionally invalidates the file store's pending fills and,
-        on a Redis file cache, scans the whole keyspace, which a plain
-        file must not pay on every event. So the index is asked whether a
-        listing is still cached at the path or under it, and only then
-        does the subtree go; otherwise this is
-        ``invalidate_after_unlink``.
-
-        The body goes before the index is asked, so an index that
-        cannot answer still leaves the removed file unserved. The own
-        and parent invalidations are attempted even if the probe or
-        subtree drop fails; failures remain visible to the caller. A folder
-        with no listing cached at or under it keeps any bodies cached
-        beneath it until their ttl: nothing there was listed, or every
-        such listing was evicted since. Invalidating an entry preserves
-        unaffected siblings and leaves its parent listing partial. Those
-        retained listings still count as cached subtrees, even when empty.
-        A store that never caches holds no listing, so a removal on it
-        reads as a file.
-
-        Args:
-            path (PathSpec): Path that was removed; only ``virtual`` is
-                read.
-        """
-        key = await self._invalidate_path(path)
+    async def _invalidate(
+        self,
+        key: str,
+        kind: FileChangeKind,
+        row: FileStat | None,
+        leaf: bool,
+    ) -> None:
         try:
-            if await self._index.holds_subtree(key):
+            self.retire()
+            if self._caches_reads and self._file_cache is not None:
+                await self._file_cache.remove(key)
+            if kind is FileChangeKind.UNKNOWN:
                 await self._drop_below(key)
+                await self._invalidate_removed(key)
+            elif kind is FileChangeKind.DELETE:
+                try:
+                    if not leaf and await self._index.holds_subtree(key):
+                        await self._drop_below(key)
+                finally:
+                    await self._invalidate_removed(key)
+            elif (
+                kind is FileChangeKind.CREATE
+                and row is not None
+                and row.name == key.rsplit("/", 1)[-1]
+            ):
+                deadline = (
+                    None
+                    if self._read_ttl is None
+                    else datetime.fromtimestamp(
+                        self._index.clock.now(), timezone.utc
+                    )
+                    + timedelta(seconds=self._read_ttl)
+                )
+                await self._index.add_entry(key, row, deadline)
+            else:
+                await self._index.invalidate_entry(key)
         finally:
-            await self._invalidate_removed(key)
-
-    async def invalidate_ancestors(self, path: PathSpec) -> None:
-        """Invalidate ancestor entries above ``path``'s parent.
-
-        ``invalidate_after_write`` refreshes the immediate parent only. A
-        keyed store materializes every missing level of a key in a single
-        put, so the listings further up gained entries too and would keep
-        serving the pre-write view until the index TTL expires. A backend
-        with real directories cannot gain a level that way. Each affected
-        listing becomes partial and retains its unaffected siblings.
-
-        Args:
-            path (PathSpec): Path that was mutated; only ``virtual`` is
-                read.
-        """
-        parent = self._cache_key(path).rsplit("/", 1)[0]
-        while parent and parent != self._prefix:
-            await self._index.invalidate_entry(parent)
-            parent = parent.rsplit("/", 1)[0]
-
-    async def _invalidate_path(self, path: PathSpec) -> str:
-        self.retire()
-        key = self._cache_key(path)
-        if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.remove(key)
-        return key
+            parent = key.rsplit("/", 1)[0]
+            while parent and parent != self._prefix:
+                await self._index.invalidate_entry(parent)
+                parent = parent.rsplit("/", 1)[0]
 
     async def _invalidate_removed(self, key: str) -> None:
         await self._evict_dir(key)
-        await self._invalidate_parent(key)
+        await self._index.invalidate_entry(key)
 
     async def _drop_below(self, key: str) -> None:
         excluded = self._excluded_prefixes()
         if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.evict_prefix(
-                key.rstrip("/") + "/", excluded=excluded
-            )
+            await self._file_cache.remove(key, subtree=True, excluded=excluded)
         await self._index.invalidate_prefix(key, excluded=excluded)
-
-    async def _invalidate_parent(self, key: str) -> None:
-        await self._index.invalidate_entry(key)

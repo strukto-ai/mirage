@@ -424,6 +424,7 @@ async def handle_command(
                 if registry.process_view is not None
                 else None,
                 routing=context.frame.routing,
+                settle=registry.settle,
             ),
             drop_caches=(
                 functools.partial(registry.drop_caches, cli_install.accessor)

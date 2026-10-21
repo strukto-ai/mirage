@@ -359,7 +359,7 @@ class TestFreshStat:
             await ws.cache.remove("/data/f.txt")
             await ws.cache.keep_fingerprints({"/data/f.txt": "v1"})
             await ws.vfs.stat("/data/f.txt", fresh=True)
-            assert await ws.cache.fingerprint("/data/f.txt") == "v1"
+            assert (await ws.cache.fingerprints(["/data/f.txt"]))[0] == "v1"
         finally:
             await ws.close()
 
@@ -450,7 +450,9 @@ class TestFreshStat:
             outer._store.files["/d"] = b"file"
             row = await ws.vfs.stat("/data/d", fresh=True)
             assert row.type is FileType.FILE
-            assert await ws.cache.fingerprint("/data/d/inner/f.txt") == "v1"
+            assert (await ws.cache.fingerprints(["/data/d/inner/f.txt"]))[
+                0
+            ] == "v1"
         finally:
             await ws.close()
 
@@ -496,7 +498,7 @@ class TestFreshStat:
             manager.keep_version = slow_keep
             row = await ws.vfs.stat("/data/f.txt", fresh=True)
             assert row.size == 3
-            assert await ws.cache.fingerprint("/data/f.txt") == "v1"
+            assert (await ws.cache.fingerprints(["/data/f.txt"]))[0] == "v1"
         finally:
             await ws.close()
 

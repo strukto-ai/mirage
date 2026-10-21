@@ -100,13 +100,20 @@ export class SharePointAccessor extends Accessor {
   // resolving a path does not call /sites and /drives on every op. They live
   // on the accessor, not the module: one accessor is one mount is one
   // tenant, and a site name is only unique within a tenant. A drive name is
-  // only unique within its site, so its key carries the site id. Entries are
-  // never evicted.
-  readonly siteCache = new Map<string, string>()
-  readonly driveCache = new Map<string, string>()
+  // only unique within its site, so its key carries the site id. Entries
+  // live until the mount drops its caches (forget).
+  siteCache = new Map<string, string>()
+  driveCache = new Map<string, string>()
 
   constructor(config: SharePointConfig) {
     super()
     this.config = resolveSharePointConfig(config)
+  }
+
+  /** Drop the site and drive ids with the mount's caches. */
+  override forget(): void {
+    super.forget?.()
+    this.siteCache = new Map()
+    this.driveCache = new Map()
   }
 }

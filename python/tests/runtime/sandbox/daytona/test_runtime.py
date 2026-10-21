@@ -125,7 +125,7 @@ async def test_exec_line_redirects_stdin_through_a_file():
     assert path.startswith("/tmp/.mirage_stdin_")
     assert sandbox.fs.files[path] == b"a\nb\n"
     command, cwd, env = sandbox.process.calls[0]
-    wrapped = wrap_line("wc -l", {"E": "1"}, "/workspace")
+    wrapped = wrap_line(("/bin/sh", "-c", "wc -l"), {"E": "1"}, "/workspace")
     assert command == stdin_redirect(wrapped, path)
     assert f"rm -f {path}" in command
     assert (cwd, env) == (None, None)

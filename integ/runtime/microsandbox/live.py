@@ -389,10 +389,11 @@ async def host_pids(marker):
 
 
 class FullInspect(MicrosandboxRuntime):
-    async def _microsandbox(self, args, stdin=None):
+    async def _microsandbox(self, args, stdin=None, output=None):
         return await super()._microsandbox(
             ["inspect", *args[1:]] if args[0] == "status" else args,
             stdin,
+            output,
         )
 
 

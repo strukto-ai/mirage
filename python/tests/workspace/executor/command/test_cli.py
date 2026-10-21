@@ -910,6 +910,35 @@ async def test_script_limit_bounds_the_run():
     assert sleepy.cancelled
 
 
+@pytest.mark.asyncio
+async def test_script_settles_its_runtime_however_the_program_ends():
+    settled = []
+
+    async def settle(runtime):
+        settled.append(runtime)
+
+    py, sleepy = FakePyRuntime(), SleepingRuntime()
+    await handle_cli(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(entries=[py], settle=settle),
+    )
+    spec = CLI(
+        spec=CommandSpec(name="pager"),
+        handlers={"": CLIHandler(limit=Limit(timeout_seconds=0.05))},
+        script=ScriptSource("print('hi')"),
+    )
+    with pytest.raises(CommandTimeoutError):
+        await handle_cli(
+            CLIInstall(name="pager", cli=spec, config=None),
+            ["pager"],
+            SessionState("t"),
+            context=CLIContext(entries=[sleepy], settle=settle),
+        )
+    assert settled == [py, sleepy]
+
+
 def test_env_fills_an_option_the_line_omitted():
     spec = CommandSpec(arguments=(Argument("--version", env="X_VERSION"),))
     parsed = parse_flags([], spec, "x", "/", env={"X_VERSION": "9"})

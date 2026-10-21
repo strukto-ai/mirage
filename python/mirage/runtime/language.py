@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import abstractmethod
-from dataclasses import replace
 from typing import ClassVar
 
 from mirage.commands.config import Context
@@ -24,7 +23,6 @@ from mirage.runtime.types import (
     Language,
     Program,
     RunResult,
-    RuntimeCapabilities,
 )
 from mirage.types import PathSpec
 
@@ -54,10 +52,6 @@ class LanguageRuntime(Runtime[E]):
     commands: ClassVar[tuple[str, ...]] = ()
     # What this interpreter calls itself where no file names the program.
     argv0_rules: ClassVar[Argv0Rules] = Argv0Rules()
-
-    @property
-    def capabilities(self) -> RuntimeCapabilities:
-        return replace(super().capabilities, languages=(self.language,))
 
     async def run(
         self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context

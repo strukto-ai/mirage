@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
-
 from mirage.types import PathSpec
 
 
@@ -50,31 +48,44 @@ class FileCacheMixin:
     ) -> None:
         raise NotImplementedError
 
-    async def remove(self, key: str) -> None:
+    async def remove(
+        self,
+        key: str,
+        *,
+        subtree: bool = False,
+        excluded: tuple[str, ...] = (),
+    ) -> None:
+        """Drop ``key``'s entry, and with ``subtree`` every entry below it.
+
+        The subtree is for a change that reaches below a name: a folder
+        removed or renamed, a mount taken down, or a mutation that names no
+        path (an account CLI writing to its service by id) and so can say
+        only which mount's keys went stale. Stores that own their keyspace
+        remotely push the filter down rather than enumerating.
+
+        Args:
+            key (str): the cache key; "/" with ``subtree`` is every key.
+            subtree (bool): drop every entry below ``key`` too.
+            excluded (tuple[str, ...]): nested mount roots whose entries
+                stay.
+        """
         raise NotImplementedError
 
     async def exists(self, key: str | PathSpec) -> bool:
         raise NotImplementedError
 
-    async def fingerprint(self, key: str) -> str | None:
-        """The backend token the cached copy of ``key`` was stored with.
+    async def fingerprints(self, keys: list[str]) -> list[str | None]:
+        """The backend token each key's cached copy was stored with, in key
+        order.
 
         The version a conditional write sends. An entry past its bound
         still answers where the store keeps it: the token stays true for
         the bytes that were read, which is all a write's condition says.
 
         Args:
-            key (str): the cache key.
-        """
-        raise NotImplementedError
-
-    async def fingerprints(self, keys: list[str]) -> list[str | None]:
-        """``fingerprint`` for many keys, in key order.
-
-        Args:
             keys (list[str]): the cache keys.
         """
-        return [await self.fingerprint(key) for key in keys]
+        raise NotImplementedError
 
     async def keep_fingerprints(self, fingerprints: dict[str, str]) -> None:
         """Keep each key's fingerprint where its bytes are not kept.
@@ -115,42 +126,8 @@ class FileCacheMixin:
     async def clear(self) -> None:
         raise NotImplementedError
 
-    async def evict_prefix(
-        self, prefix: str, *, excluded: tuple[str, ...] = ()
-    ) -> None:
-        """Drop every cached entry whose key starts with ``prefix``.
-
-        The path-unknown counterpart to :meth:`remove`: a mutation that
-        names no path (an account CLI writing to its service by id)
-        cannot say which entries went stale, only which mount's keyspace
-        did. Stores that own their keyspace remotely push the filter
-        down rather than enumerating.
-
-        Args:
-            prefix (str): Cache-key prefix to drop, normally a mount
-                prefix ending in "/".
-            excluded (tuple[str, ...]): nested mount roots to preserve.
-        """
-        raise NotImplementedError
-
     async def close(self) -> None:
         """Release connections held by the cache backend."""
-
-    def evict_paths(self, paths: Iterable[str]) -> None:
-        """Synchronously evict the given keys from the cache.
-
-        Load-time helper invoked from ``Workspace.load`` (sync) to drop
-        snapshot-restored bytes for paths the caller wants to re-fetch
-        live. Backends whose state cannot be mutated synchronously
-        (e.g. Redis) override this as a no-op.
-
-        Args:
-            paths (Iterable[str]): Cache keys to drop.
-        """
-        raise NotImplementedError
-
-    async def multi_get(self, keys: list[str]) -> list[bytes | None]:
-        return [await self.get(k) for k in keys]
 
     @property
     def cache_size(self) -> int | None:

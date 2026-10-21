@@ -35,7 +35,6 @@ from mirage.runtime.types import (
     FilesystemOperation,
     OutputFn,
     RunResult,
-    RuntimeCapabilities,
     RuntimeReach,
 )
 from mirage.types import PathSpec
@@ -108,15 +107,6 @@ class Runtime(ABC, Generic[E]):
         if captures is not None:
             self.captures = tuple(captures)
         self.config = self.config_cls.coerce(config)
-        env = getattr(self.config, "env", None)
-        if env is not None and (
-            not isinstance(env, dict)
-            or any(
-                not isinstance(k, str) or not isinstance(v, str)
-                for k, v in env.items()
-            )
-        ):
-            raise ValueError("runtime env must map strings to strings")
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -132,15 +122,6 @@ class Runtime(ABC, Generic[E]):
         what its servers hold.
         """
         return None
-
-    @property
-    def capabilities(self) -> RuntimeCapabilities:
-        return RuntimeCapabilities(
-            process=isinstance(self, ProcessExecutorMixin),
-            shell=isinstance(self, LineExecutorMixin),
-            reach=self.reach,
-            filesystem=self.filesystem,
-        )
 
     def bind(self, binding: WorkspaceBinding) -> None:
         """Bind this instance to one workspace."""

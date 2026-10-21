@@ -19,6 +19,7 @@ import shlex
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.io.types import materialize
 from mirage.runtime.sandbox import cli
 from mirage.runtime.sandbox.docker import DockerRuntime
 from mirage.runtime.types import SandboxPipe
@@ -30,11 +31,15 @@ class FakeDockerRuntime(DockerRuntime):
         self.running = running
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _docker(self, args, stdin=None):
+    async def _docker(self, args, stdin=None, output=None):
+        stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
             return (b"true\n" if self.running else b"false\n"), b"", 0
         script = args[-1]
+        if output is not None:
+            await output(f"out:{script}".encode())
+            return b"", b"warn", 0
         return f"out:{script}".encode(), b"warn", 0
 
 
@@ -114,7 +119,7 @@ async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
             "-w",
             "/",
             "cid-42",
-            "sh",
+            "/bin/sh",
             "-c",
             "exec sshfs x y",
         )
@@ -132,14 +137,14 @@ class MountingDockerRuntime(FakeDockerRuntime):
         super().__init__(**options)
         self.table: dict[str, str] = {}
 
-    async def _docker(self, args, stdin=None):
+    async def _docker(self, args, stdin=None, output=None):
         if args[-1] == "cat /proc/mounts":
             self.calls.append((list(args), stdin))
             rows = "".join(
                 f"src {p} {t} rw 0 0\n" for p, t in self.table.items()
             )
             return rows.encode(), b"", 0
-        return await super()._docker(args, stdin)
+        return await super()._docker(args, stdin, output)
 
     async def open_pipe(self, command):
         self.table[shlex.split(command)[6]] = "fuse.sshfs"

@@ -264,5 +264,9 @@ export async function runOnMount(
         stderr: formatFsError(cmdName, err, paths),
       }),
     ]
+  } finally {
+    // The interpreter's program may have written past the dispatcher, as a
+    // captured program may.
+    if (lineRuntime !== undefined) await registry.settle(lineRuntime)
   }
 }

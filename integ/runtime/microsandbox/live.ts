@@ -23,6 +23,8 @@ import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
 import { MicrosandboxRuntime, MountMode, PathSpec, RAMVFS, Workspace } from '@struktoai/mirage-node'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 
 const sandbox = process.env.MIRAGE_E2E_SANDBOX!
@@ -340,12 +342,14 @@ async function within<T>(operation: Promise<T>, ms: number): Promise<T> {
 class FullInspect extends MicrosandboxRuntime {
   protected override microsandbox(
     args: string[],
-    stdin: Uint8Array | null = null,
+    stdin: ByteSource | null = null,
+    output: OutputFn | null = null,
     signal?: AbortSignal,
   ) {
     return super.microsandbox(
       args[0] === 'status' ? ['inspect', ...args.slice(1)] : args,
       stdin,
+      output,
       signal,
     )
   }

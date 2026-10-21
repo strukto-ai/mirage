@@ -360,11 +360,15 @@ async def refresh_tree(
         reseated since; None when GitHub truncated it, which then names
         only some paths.
     """
+    generation = accessor.generation
     ref = await ensure_ref(accessor)
     tree, truncated, head = await fetch_tree(
         accessor.account, accessor.owner, accessor.repo, ref
     )
-    reseat_tree(accessor, tree, truncated)
+    # A drop while GitHub answered may be for the very write this tree
+    # predates, so it is handed back but not kept.
+    if generation == accessor.generation:
+        reseat_tree(accessor, tree, truncated)
     return None if truncated else (tree, head)
 
 

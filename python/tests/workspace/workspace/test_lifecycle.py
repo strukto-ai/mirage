@@ -373,15 +373,15 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
     entered = asyncio.Event()
     release = asyncio.Event()
     store = cache if cache_kind == "file" else ws.mount("/data").index_store
-    method = "evict_prefix" if cache_kind == "file" else "invalidate_prefix"
+    method = "remove" if cache_kind == "file" else "invalidate_prefix"
     evict = getattr(store, method)
 
-    async def blocked_evict(prefix):
+    async def blocked_evict(prefix, **kwargs):
         entered.set()
         await release.wait()
         if fail_eviction:
             raise RuntimeError("cache unavailable")
-        await evict(prefix)
+        await evict(prefix, **kwargs)
 
     monkeypatch.setattr(store, method, blocked_evict)
     await cache.set("/data", b"root")

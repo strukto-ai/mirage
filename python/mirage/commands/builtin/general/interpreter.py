@@ -17,23 +17,28 @@ from typing import Any
 from mirage.io.types import CommandOutput, IOResult
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import CommandRuntime, RunResult
-from mirage.types import PathSpec
+from mirage.types import PathSpec, Producer
 
 
-def run_output(result: RunResult) -> CommandOutput:
-    """Convert one interpreter outcome into a command's output shape.
+def run_output(
+    result: RunResult, producer: Producer | None = None
+) -> CommandOutput:
+    """Convert one runtime outcome into a command's output shape.
 
     The single RunResult-to-IOResult mapping: empty stdout becomes
     None (no stream), the exit code and stderr pass through. The
-    interpreter commands and the CLI script arm both convert through
-    here so the mapping cannot drift.
+    interpreter commands, the CLI script arm and a captured program
+    all convert through here so the mapping cannot drift.
 
     Args:
-        result (RunResult): the interpreter execution outcome.
+        result (RunResult): the runtime's outcome.
+        producer (Producer | None): what made the output, for a
+            program run past the workspace's own commands.
     """
     return result.stdout if result.stdout else None, IOResult(
         exit_code=result.exit_code,
         stderr=result.stderr,
+        producer=producer,
     )
 
 

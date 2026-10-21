@@ -82,7 +82,6 @@ if TYPE_CHECKING:
         FilesystemOperation,
         Program,
         RunResult,
-        RuntimeCapabilities,
     )
     from mirage.secrets.registry import known_sources, register_secrets
     from mirage.types import (
@@ -227,7 +226,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "Program",
         "RunResult",
         "ExecutionKind",
-        "RuntimeCapabilities",
         "FilesystemOperation",
     ),
     "mirage.secrets.registry": ("known_sources", "register_secrets"),
@@ -312,7 +310,6 @@ __all__ = [
     "RouteContext",
     "ExecutionKind",
     "RuntimeContext",
-    "RuntimeCapabilities",
     "FilesystemOperation",
     "WorkspaceBinding",
     "UnsupportedExecutionError",

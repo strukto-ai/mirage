@@ -71,7 +71,7 @@ describe.each(CASES)('mount %s holding %s', (mount, child) => {
     const [cache, index] = stores()
     await index.setDir(`${mount}/${child}`, [['leaf.txt', entry()]])
     const manager = new CacheManager(cache, index, `${mount}/`, true)
-    await manager.invalidateAfterUnlink(spec(mount, child))
+    await manager.invalidate(spec(mount, child), FileChangeKind.DELETE, null, { leaf: true })
     expect((await index.listDir(`${mount}/${child}`)).entries).toBeUndefined()
   })
 
@@ -80,12 +80,13 @@ describe.each(CASES)('mount %s holding %s', (mount, child) => {
     await index.setDir(`${mount}/${child}`, [['leaf.txt', entry()]])
     const manager = new CacheManager(cache, index, `${mount}/`, true)
     const virtual = `${mount}/${child}/leaf.txt`
-    await manager.invalidateAfterWrite(
+    await manager.invalidate(
       new PathSpec({
         virtual,
         directory: `${mount}/${child}`,
         vfsPath: `${child}/leaf.txt`,
       }),
+      FileChangeKind.UPDATE,
     )
     expect((await index.listDir(`${mount}/${child}`)).entries).toBeUndefined()
   })
@@ -94,7 +95,7 @@ describe.each(CASES)('mount %s holding %s', (mount, child) => {
     const [cache, index] = stores()
     await index.setDir(`${mount}/${child}/nested`, [['leaf.txt', entry()]])
     const manager = new CacheManager(cache, index, `${mount}/`, true)
-    await manager.invalidateSubtree(spec(mount, child))
+    await manager.invalidate(spec(mount, child), FileChangeKind.UNKNOWN)
     expect((await index.listDir(`${mount}/${child}/nested`)).entries).toBeUndefined()
   })
 })

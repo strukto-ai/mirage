@@ -75,6 +75,7 @@ def _ws(vfs, index=None, clock: ManualClock | None = None) -> Workspace:
     )
     if index is not None:
         ws.mount("/m").index_store = index
+        ws._registry._attach_manager(ws.mount("/m"))
     return ws
 
 

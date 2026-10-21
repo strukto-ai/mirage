@@ -18,12 +18,12 @@ import { read as githubRead } from '../core/github/read.ts'
 import { stat as githubStat } from '../core/github/stat.ts'
 import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
 import { ManualClock } from '../utils/clock.ts'
-import { ListingCheckStore, RAMIndexCacheStore } from '../cache/index/ram.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
+import { ListingCheckStore } from '../cache/index/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import {
   type ReadSpec,
   DEFAULT_READ_TTL,
+  FileChangeKind,
   FileStat,
   FileType,
   MountMode,
@@ -556,7 +556,7 @@ it('batches overlapping folders and protects nested mounts', async () => {
       await ws.namespace.setAttrs(path, { mode: 0o600 })
     }
     await ws.namespace.symlink('/data/tree/link', '/data/target', 1)
-    const evict = vi.spyOn(ws.cache, 'evictPrefix')
+    const evict = vi.spyOn(ws.cache, 'remove')
     await ws.mount('/data').index.reportGone([
       { path: '/data/tree/sub', folder: true },
       { path: '/data/tree/sub/old', folder: false },
@@ -565,8 +565,12 @@ it('batches overlapping folders and protects nested mounts', async () => {
       { path: '/data/tree2', folder: true },
       { path: '/data/tree/nested/keep', folder: false },
     ])
-    expect(evict).toHaveBeenCalledTimes(2)
-    expect(evict.mock.calls.map(([path]) => path).sort()).toEqual(['/data/tree/', '/data/tree2/'])
+    expect(
+      evict.mock.calls
+        .filter(([, options]) => options?.subtree === true)
+        .map(([path]) => path)
+        .sort(),
+    ).toEqual(['/data/tree', '/data/tree2'])
     for (const path of removed) {
       expect(await ws.cache.exists(path)).toBe(false)
       expect(ws.namespace.metaFor(path)).toBeNull()
@@ -598,7 +602,10 @@ it('a write in the command sends the next probe to the backend', async () => {
       await rec.reconcileRead(mount, '/data/f.txt')
       expect(mount.cacheManager?.probedStat(spec)?.size).toBe(2)
       resource.store.files.delete('/f.txt')
-      await mount.cacheManager?.invalidateAfterWrite(PathSpec.fromStrPath('/data/g.txt'))
+      await mount.cacheManager?.invalidate(
+        PathSpec.fromStrPath('/data/g.txt'),
+        FileChangeKind.UPDATE,
+      )
       await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
       await expect(rec.mayServeCached(mount, '/data/f.txt')).rejects.toMatchObject({
         code: 'ENOENT',
@@ -638,7 +645,10 @@ describe('the gate reuses what the operand probe got from the backend', () => {
       await runInCommandScope(async () => {
         const probing = rec.reconcileRead(mount, '/data/f.txt')
         await capturedPromise
-        await mount.cacheManager?.invalidateAfterWrite(PathSpec.fromStrPath('/data/g.txt'))
+        await mount.cacheManager?.invalidate(
+          PathSpec.fromStrPath('/data/g.txt'),
+          FileChangeKind.UPDATE,
+        )
         fingerprint = 'fp2'
         release()
         await probing
@@ -712,7 +722,10 @@ describe('the gate reuses what the operand probe got from the backend', () => {
     try {
       await runInCommandScope(async () => {
         await rec.reconcileRead(mount, '/data/f.txt')
-        await mount.cacheManager?.invalidateAfterWrite(PathSpec.fromStrPath('/data/g.txt'))
+        await mount.cacheManager?.invalidate(
+          PathSpec.fromStrPath('/data/g.txt'),
+          FileChangeKind.UPDATE,
+        )
         await rec.mayServeCached(mount, '/data/f.txt')
       })
       expect(calls()).toBe(2)
@@ -1007,22 +1020,6 @@ describe('the listing version gate', () => {
       },
       clock,
     )
-  })
-
-  it('forgets its checks when the store changes', async () => {
-    const vfs = new VersionedVFS('mount')
-    await withVersioned(vfs, async ({ mount }) => {
-      await store(mount, '/m/a', 'v1')
-      await runInCommandScope(async () => {
-        expect((await mount.index.listDir('/m/a')).entries).toEqual([])
-        expect(vfs.stats).toEqual(['/m'])
-        const replacement = new RAMIndexCacheStore({ ttl: 600 })
-        await replacement.setDir('/m/a', [], null, { version: 'v1' })
-        ;(mount as { indexStore: IndexCacheStore }).indexStore = replacement
-        expect((await mount.index.listDir('/m/a')).entries).toEqual([])
-      })
-      expect(vfs.stats).toEqual(['/m', '/m'])
-    })
   })
 })
 

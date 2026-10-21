@@ -16,13 +16,15 @@ import asyncio
 import io
 import shlex
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 from e2b import CommandExitException, NotFoundException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.constants import wrap_line
+from mirage.io.types import materialize
+from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -50,15 +52,19 @@ class FakeHandle:
         self.disconnected = False
         self.killed = False
         self.waiting = asyncio.Event()
+        self.received = asyncio.Event()
+        self.closed = asyncio.Event()
         self.input_error = None
 
     async def send_stdin(self, data):
         if self.input_error is not None:
             raise self.input_error
         self.input.extend(data)
+        self.received.set()
 
     async def close_stdin(self):
         self.eof = True
+        self.closed.set()
 
     async def wait(self):
         self.waiting.set()
@@ -68,7 +74,11 @@ class FakeHandle:
             raise CommandExitException(
                 stderr="boom-err", stdout="partial", exit_code=3, error=None
             )
-        assert self.eof
+        if self.command == "head":
+            await self.received.wait()
+            return FakeResult(self.input.hex(), "", 0)
+        if not self.eof:
+            await self.closed.wait()
         return FakeResult(self.input.hex(), "warn", 0)
 
     async def kill(self):
@@ -84,8 +94,8 @@ class FakeCommands:
         self.handles = []
         self.input_error = None
 
-    async def run(self, command, *, background, stdin):
-        assert background is True
+    async def run(self, command, *, background, stdin, on_stdout, timeout):
+        assert (background, timeout) == (True, 0)
         self.calls.append((command, stdin))
         handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
@@ -172,7 +182,11 @@ def test_sandbox_id_is_required():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("data", [None, b"", b"a\nb\n", bytes(range(256))])
-async def test_native_stdin_eof_and_command_are_preserved(data):
+async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run"),
+    )
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     result = await _line(runtime, "wc -l | cat", data, {"E": "1"})
     assert result.exit_code == 0
@@ -181,7 +195,11 @@ async def test_native_stdin_eof_and_command_are_preserved(data):
     sandbox = FakeSandbox.last
     assert sandbox.commands.calls == [
         (
-            wrap_line("wc -l | cat", {"E": "1"}, "/workspace"),
+            wrap_line(
+                ("/bin/sh", "-c", "wc -l | cat"),
+                {"E": "1", EXEC_ID: "run"},
+                "/workspace",
+            ),
             data is not None,
         )
     ]
@@ -206,6 +224,23 @@ async def test_nonzero_exit_preserves_output_even_when_stdin_loses_exit_race(
         b"partial",
         b"boom-err",
     )
+    handle = FakeSandbox.last.commands.handles[0]
+    assert handle.disconnected and not handle.killed
+
+
+@pytest.mark.asyncio
+async def test_a_command_that_exits_ends_the_line_while_its_input_stays_open():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+
+    async def open_input():
+        yield b"one\n"
+        await asyncio.Event().wait()
+
+    result = await asyncio.wait_for(
+        runtime.exec_line("head", open_input(), {}, "/workspace"), 5
+    )
+    assert (result.exit_code, result.stdout) == (0, b"one\n".hex().encode())
     handle = FakeSandbox.last.commands.handles[0]
     assert handle.disconnected and not handle.killed
 
@@ -328,6 +363,11 @@ class MountingE2BRuntime(E2BRuntime):
         super().__init__(**options)
         self.table: dict[str, str] = {}
         self.lines: list[str] = []
+
+    async def _exec_argv(self, argv, stdin, env, cwd, output):
+        line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
+        data = await materialize(stdin) if stdin is not None else None
+        return await self.exec_line(line, data, env, cwd)
 
     async def exec_line(self, line, stdin, env, cwd):
         self.lines.append(line)

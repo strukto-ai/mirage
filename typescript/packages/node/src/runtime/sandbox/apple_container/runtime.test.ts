@@ -21,8 +21,11 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
-import { describe, expect, it } from 'vitest'
+import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
+import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import { describe, expect, it, vi } from 'vitest'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerRuntime } from './runtime.ts'
 import { Workspace } from '../../../workspace.ts'
@@ -42,10 +45,12 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
   inspectStdout: string | null = null
   readonly calls: [string[], Uint8Array | null][] = []
 
-  protected override container(
+  protected override async container(
     args: string[],
-    stdin: Uint8Array | null = null,
+    source: ByteSource | null = null,
+    output: OutputFn | null = null,
   ): Promise<ContainerResult> {
+    const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
       if (this.inspectStdout !== null) {
@@ -77,11 +82,13 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
       })
     }
     const script = args[args.length - 1] ?? ''
-    return Promise.resolve({
-      stdout: ENC.encode(`out:${script}`),
+    const stdout = ENC.encode(`out:${script}`)
+    if (output !== null) await output(stdout)
+    return {
+      stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
       code: 0,
-    })
+    }
   }
 
   inspected(): string[] {
@@ -299,6 +306,7 @@ describe.skipIf(process.platform === 'win32')('EXEC_PRELUDE', () => {
 })
 
 it('preserves argv through execute and shares the shell connection', async () => {
+  vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
   const runtime = makeRuntime({ config: { container: 'box', env: { E: 'config' } } })
   const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
   const stdin = ENC.encode('input')
@@ -317,6 +325,8 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '/',
       '-e',
       'E=request',
+      '-e',
+      `${EXEC_ID}=runid`,
       'box',
       '/bin/sh',
       '-c',
@@ -334,7 +344,8 @@ it('preserves argv through execute and shares the shell connection', async () =>
     { kind: 'line' },
   )
   expect(runtime.inspected()).toEqual(['box'])
-  expect(runtime.capabilities).toMatchObject({ process: true, shell: true, filesystem: [] })
+  expect([isProcessExecutor(runtime), isLineExecutor(runtime)]).toEqual([true, true])
+  expect(runtime.filesystem).toEqual([])
 })
 
 it('refuses empty argv and a stopped container before executing', async () => {

@@ -869,6 +869,32 @@ describe('handleCli script arm', () => {
     expect(sleepy.seen[0]?.timeoutSeconds).toBe(0.05)
     expect(sleepy.seen[0]?.signal?.aborted).toBe(true)
   })
+
+  it('settles its runtime however the program ends', async () => {
+    const settled: Runtime[] = []
+    const settle = (runtime: Runtime): Promise<void> => {
+      settled.push(runtime)
+      return Promise.resolve()
+    }
+    const py = new FakePyRuntime(),
+      sleepy = new SleepingRuntime()
+    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+      entries: [py],
+      settle,
+    })
+    const spec = new CLI({
+      spec: new CommandSpec({ name: 'pager' }),
+      handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.05 }) }) },
+      script: new ScriptSource("print('hi')"),
+    })
+    await expect(
+      handleCli(installOf('pager', spec), ['pager'], new SessionState({ sessionId: 't' }), null, {
+        entries: [sleepy],
+        settle,
+      }),
+    ).rejects.toThrow(/pager: timed out/)
+    expect(settled).toEqual([py, sleepy])
+  })
 })
 
 describe('a leaf that fails after printing', () => {

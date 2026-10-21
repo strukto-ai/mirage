@@ -25,10 +25,17 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.cache.index.config import Evicted, IndexConfig, RedisIndexConfig
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
-from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
+from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.scope import command_scope
 from mirage.errors.fs import enotsup
-from mirage.types import FileStat, FileType, PathSpec, ReadPolicy, ReadSpec
+from mirage.types import (
+    FileChangeKind,
+    FileStat,
+    FileType,
+    PathSpec,
+    ReadPolicy,
+    ReadSpec,
+)
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -659,9 +666,7 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
             await ws.cache.set(path, b"data")
             await ws.namespace.set_attrs(path, mode=0o600)
         await ws.namespace.symlink("/data/tree/link", "/data/target", 1)
-        with patch.object(
-            ws.cache, "evict_prefix", wraps=ws.cache.evict_prefix
-        ) as evict:
+        with patch.object(ws.cache, "remove", wraps=ws.cache.remove) as evict:
             await ws.mount("/data").index.report_gone(
                 [
                     Evicted("/data/tree/sub", folder=True),
@@ -672,11 +677,15 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
                     Evicted("/data/tree/nested/keep", folder=False),
                 ]
             )
-        assert evict.call_count == 2
-        assert {call.args[0] for call in evict.call_args_list} == {
-            "/data/tree/",
-            "/data/tree2/",
-        }
+        assert {
+            call.args[0]
+            for call in evict.call_args_list
+            if call.kwargs.get("subtree")
+        } == {"/data/tree", "/data/tree2"}
+        assert (
+            sum(bool(c.kwargs.get("subtree")) for c in evict.call_args_list)
+            == 2
+        )
         for path in removed:
             assert not await ws.cache.exists(path)
             assert ws.namespace.meta_for(path) is None
@@ -708,8 +717,8 @@ async def test_a_write_in_the_command_sends_the_next_probe_to_the_backend():
             probed = mount.cache_manager.probed_stat(spec)
             assert probed is not None and probed.size == 2
             del resource._store.files["/f.txt"]
-            await mount.cache_manager.invalidate_after_write(
-                PathSpec.from_str_path("/data/g.txt")
+            await mount.cache_manager.invalidate(
+                PathSpec.from_str_path("/data/g.txt"), FileChangeKind.UPDATE
             )
             await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
             with pytest.raises(FileNotFoundError):
@@ -779,8 +788,8 @@ async def test_a_write_during_a_probe_prevents_reusing_its_answer():
                 rec.reconcile_read(mount, "/data/f.txt")
             )
             await captured.wait()
-            await mount.cache_manager.invalidate_after_write(
-                PathSpec.from_str_path("/data/g.txt")
+            await mount.cache_manager.invalidate(
+                PathSpec.from_str_path("/data/g.txt"), FileChangeKind.UPDATE
             )
             stat.fingerprint = "fp2"
             release.set()
@@ -818,8 +827,8 @@ async def test_the_gate_asks_the_backend_after_a_write_in_the_command():
     try:
         async with command_scope():
             await rec.reconcile_read(mount, "/data/f.txt")
-            await mount.cache_manager.invalidate_after_write(
-                PathSpec.from_str_path("/data/g.txt")
+            await mount.cache_manager.invalidate(
+                PathSpec.from_str_path("/data/g.txt"), FileChangeKind.UPDATE
             )
             await rec.may_serve_cached(mount, "/data/f.txt")
         assert stat.calls == 2
@@ -1096,21 +1105,6 @@ async def test_listing_gate_outside_a_command_reuses_a_check_for_the_window():
         assert vfs.stats == ["/m"]
         clock.advance(LISTING_TRUST_WINDOW)
         assert await rec.may_serve_listing(mount, "/m/a", "v1") is True
-        assert vfs.stats == ["/m", "/m"]
-
-
-@pytest.mark.asyncio
-async def test_listing_gate_forgets_its_checks_when_the_store_changes():
-    async with _versioned() as (vfs, mount, rec):
-        await _store(mount, "/m/a", "v1")
-        async with command_scope():
-            served = await mount.index.list_dir("/m/a")
-            assert served.entries == []
-            assert vfs.stats == ["/m"]
-            replacement = RAMIndexCacheStore(ttl=600)
-            await replacement.set_dir("/m/a", [], version="v1")
-            mount.index_store = replacement
-            assert (await mount.index.list_dir("/m/a")).entries == []
         assert vfs.stats == ["/m", "/m"]
 
 

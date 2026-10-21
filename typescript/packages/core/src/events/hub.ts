@@ -59,41 +59,17 @@ export class EventHub implements EventRuntime {
   }
 
   /**
-   * Invalidate a changed path, its affected subtree and ancestor entries.
+   * Invalidate a changed path before its event is delivered.
    *
-   * The chain itself is the cache manager's to walk, not this class's: it
-   * already walks one for the keyed stores that materialize a missing level on
-   * write, and a second walk here would be the same rule kept in two places
-   * with two stopping conditions to keep in step.
-   *
-   * How far down the eviction reaches is the change's kind. UNKNOWN means
-   * precision was lost and everything under the path must be re-inventoried,
-   * which is what a push notification that can name only a scope reports
-   * (IMAP IDLE says a mailbox changed, not which message), so it takes the
-   * subtree. A DELETE names a path but not whether it was a folder, so it is a
-   * removal: the path alone, plus whatever is cached beneath it when a listing
-   * at or under it is still cached (a disk watcher's `mv dir` or a feed naming
-   * only a folder). Every other kind names a path and evicts that path alone.
+   * An external change is often the only signal mirage gets, so its mount's
+   * cache takes it as a write is taken (`CacheManager.invalidate`): the kind
+   * decides how far down it reaches, UNKNOWN taking the subtree a push that
+   * names only a scope reports (IMAP IDLE says a mailbox changed, not which
+   * message), and every ancestor's entry goes too, since a nested create or
+   * delete implies levels appeared or vanished with it.
    */
   private async evict(mount: EventMount, path: PathSpec, kind: FileChangeKind): Promise<void> {
-    const manager = mount.cacheManager
-    if (manager === null) return
-    try {
-      if (kind === FileChangeKind.DELETE) await manager.invalidateAfterRemove(path)
-      else if (kind === FileChangeKind.UNKNOWN) await manager.invalidateSubtree(path)
-      else await manager.invalidateAfterWrite(path)
-    } catch (error) {
-      try {
-        await manager.invalidateAncestors(path)
-      } catch (cleanupError) {
-        throw new AggregateError(
-          [error, cleanupError],
-          'event invalidation and ancestor cleanup failed',
-        )
-      }
-      throw error
-    }
-    await manager.invalidateAncestors(path)
+    await mount.cacheManager?.invalidate(path, kind)
   }
 
   private async invalidate(mount: EventMount, change: FileEvent): Promise<void> {

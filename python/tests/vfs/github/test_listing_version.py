@@ -84,6 +84,7 @@ def _ws(
     )
     if index is not None:
         ws.mount("/gh").index_store = index
+        ws._registry._attach_manager(ws.mount("/gh"))
     return ws
 
 

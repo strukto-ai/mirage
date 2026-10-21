@@ -267,8 +267,7 @@ async def clear_mount_cache(
         await clear_indices()
         return
     async with mutation_lock(cache):
-        await cache.remove(prefix.rstrip("/"))
-        await cache.evict_prefix(prefix)
+        await cache.remove(prefix.rstrip("/") or "/", subtree=True)
         await clear_indices()
 
 

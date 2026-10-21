@@ -21,32 +21,24 @@ export interface FileCache {
     data: Uint8Array,
     options?: { fingerprint?: string | null; ttl?: number | null },
   ): Promise<void>
-  remove(key: string): Promise<void>
-  // The path-unknown counterpart to remove(): a mutation that names no
-  // path (an account CLI writing to its service by id) cannot say which
-  // entries went stale, only which mount's keyspace did. Stores that own
-  // their keyspace remotely push the filter down rather than enumerating.
-  evictPrefix(prefix: string, excluded?: readonly string[]): Promise<void>
   /**
-   * Drop the given keys, synchronously.
+   * Drop `key`'s entry, and with `subtree` every entry below it but those
+   * under an `excluded` nested mount root.
    *
-   * The load-time counterpart to {@link FileCache.remove}: `fromState`
-   * is sync, so it cannot await a per-path removal — and a fire-and-
-   * forget `void remove(...)` would let a read issued right after load
-   * be served the very snapshot bytes the caller asked to bypass (and
-   * would surface a rejection as an unhandled one). Stores whose state
-   * cannot be mutated synchronously (redis) implement this as a
-   * documented no-op. Mirrors Python `FileCacheMixin.evict_paths`.
+   * The subtree is for a change that reaches below a name: a folder removed
+   * or renamed, a mount taken down, or a mutation that names no path (an
+   * account CLI writing to its service by id) and so can say only which
+   * mount's keys went stale. Stores that own their keyspace remotely push the
+   * filter down rather than enumerating. `'/'` with `subtree` is every key.
    */
-  evictPaths(paths: Iterable<string>): void
+  remove(key: string, options?: { subtree?: boolean; excluded?: readonly string[] }): Promise<void>
   exists(key: string | PathSpec): Promise<boolean>
   /**
-   * The backend token the cached copy of `key` was stored with: the version
-   * a conditional write sends. An entry past its bound still answers where
-   * the store keeps it, since the token stays true for the bytes read.
+   * The backend token each key's cached copy was stored with, in key order:
+   * the version a conditional write sends. An entry past its bound still
+   * answers where the store keeps it, since the token stays true for the
+   * bytes read.
    */
-  fingerprint(key: string): Promise<string | null>
-  /** `fingerprint` for many keys, in key order. */
   fingerprints(keys: readonly string[]): Promise<(string | null)[]>
   /**
    * Keep each key's version where its bytes are not kept. With no entry the
@@ -72,7 +64,6 @@ export interface FileCache {
    */
   isUnbounded(key: string): Promise<boolean>
   clear(): Promise<void>
-  multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]>
   // Cached bytes / entry count; null (or absent) for stores that don't
   // track them client-side (e.g. redis owns its own keyspace).
   readonly cacheSize: number | null

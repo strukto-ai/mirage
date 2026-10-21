@@ -19,10 +19,16 @@ class RefusingStore(RAMFileCacheStore):
     ) -> None:
         raise ConnectionError("OOM command not allowed")
 
-    async def remove(self, key: str) -> None:
+    async def remove(
+        self,
+        key: str,
+        *,
+        subtree: bool = False,
+        excluded: tuple[str, ...] = (),
+    ) -> None:
         if self._down:
             raise ConnectionError("connection refused")
-        await super().remove(key)
+        await super().remove(key, subtree=subtree, excluded=excluded)
 
 
 @pytest.fixture

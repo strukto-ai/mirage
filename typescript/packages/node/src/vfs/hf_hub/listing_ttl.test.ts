@@ -133,6 +133,7 @@ describe('hf_hub refill answers its own caller', () => {
     const vfs = await vfsOf(fake)
     const w = ws(vfs)
     Object.defineProperty(w.mount('/m'), 'indexStore', { value: new ExpiredOnArrival() })
+    w.registry.attachFileCache(w.cache)
     try {
       expect(await out(w, 'ls /m/sub')).toBe(OLD_LS)
     } finally {

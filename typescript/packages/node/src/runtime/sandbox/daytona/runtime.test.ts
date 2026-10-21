@@ -134,7 +134,9 @@ describe('DaytonaRuntime', () => {
     expect(path).toMatch(/^\/tmp\/\.mirage_stdin_/)
     expect(DEC.decode(sandbox.fs.files.get(path ?? ''))).toBe('a\nb\n')
     const [command, cwd, env] = sandbox.process.calls[0] ?? ['', undefined, undefined]
-    expect(command).toBe(stdinRedirect(wrapLine('wc -l', { E: '1' }, '/workspace'), path ?? ''))
+    expect(command).toBe(
+      stdinRedirect(wrapLine(['/bin/sh', '-c', 'wc -l'], { E: '1' }, '/workspace'), path ?? ''),
+    )
     expect(command).toContain(`rm -f ${path ?? ''}`)
     expect([cwd, env]).toEqual([undefined, undefined])
   })

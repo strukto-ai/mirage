@@ -19,6 +19,7 @@ import {
   SUBTREE_RETRACT_OPS,
   type OpRecord,
 } from '../../observe/record.ts'
+import type { FileCache } from '../../cache/file/mixin.ts'
 import type { FileStat } from '../../types.ts'
 import { DriftPolicy } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -132,21 +133,18 @@ export class DriftQueue {
  * Idempotent: clears queued state before installing. Called from
  * `Workspace.fromState`.
  */
-export function installDriftState(
+export async function installDriftState(
   registry: RegistryLike,
-  cache: { evictPaths(paths: Iterable<string>): void },
+  cache: Pick<FileCache, 'remove'>,
   drift: DriftQueue,
   state: { fingerprints?: FingerprintEntry[]; live_only_mounts?: string[] },
   policy: DriftPolicy,
-): void {
+): Promise<void> {
   drift.clear()
   const entries = state.fingerprints ?? []
   if (entries.length === 0) return
   if (policy === DriftPolicy.OFF) {
-    // Synchronously: this function returns into a sync `fromState`, so
-    // a fire-and-forget `remove()` would let the very next read be
-    // served the snapshot bytes OFF exists to bypass.
-    cache.evictPaths(entries.map((e) => e.path))
+    for (const e of entries) await cache.remove(e.path)
     return
   }
   for (const e of entries) {

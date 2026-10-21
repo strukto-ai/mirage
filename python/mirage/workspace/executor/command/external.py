@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
 
+from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import Context
 from mirage.context.session_context import current_caller, with_caller
@@ -103,16 +104,15 @@ async def run_external(
         )
     finally:
         await registry.settle(runtime)
-    io = IOResult(
-        exit_code=result.exit_code,
-        stderr=result.stderr or b"",
-        producer=Producer(
+    stdout, io = run_output(
+        result,
+        Producer(
             command=argv.name,
             prefixes=tuple(m.prefix for m in registry.mounts()),
         ),
     )
     return (
-        result.stdout,
+        stdout,
         io,
         ExecutionNode(
             command=command,
@@ -143,9 +143,11 @@ def _stream_external(
     io.output = state = OutputState()
     node = ExecutionNode(command=shlex.join(argv.tokens), exit_code=0)
     task: asyncio.Task[None] | None = None
+    settled = False
     closing: asyncio.Task[None] | None = None
 
     async def execute() -> None:
+        nonlocal settled
         try:
             result = await run_with_timeout(
                 _execute_program(
@@ -168,12 +170,13 @@ def _stream_external(
             pipe.end(exc)
             raise
         finally:
+            settled = True
             await registry.settle(runtime)
 
     async def finalize() -> None:
         pipe.close_reader()
         if task is not None:
-            if not task.done():
+            if not task.done() and not settled:
                 task.cancel()
             try:
                 await task

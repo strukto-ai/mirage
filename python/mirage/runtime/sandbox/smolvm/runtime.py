@@ -14,19 +14,20 @@
 
 import json
 
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
+from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.smolvm.config import SmolvmConfig
 from mirage.runtime.sandbox.smolvm.constants import (
     RUNNING_STATE,
     SMOLVM_CLI_HINT,
     not_running_hint,
 )
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
-class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
+class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
     """A microVM the user runs as a whole-line runtime.
 
     You start the machine yourself; mirage only connects to it and
@@ -51,10 +52,15 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     config: SmolvmConfig
 
     async def _smolvm(
-        self, args: list[str], stdin: bytes | None = None
+        self,
+        args: list[str],
+        stdin: ByteSource | None = None,
+        output: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """One smolvm CLI invocation; the seam tests override."""
-        return await run_cli("smolvm", SMOLVM_CLI_HINT, args, stdin)
+        return await run_cli(
+            "smolvm", SMOLVM_CLI_HINT, args, stdin, output=output
+        )
 
     async def connect(self) -> None:
         """Probe the machine, refusing any state that cannot take a line.
@@ -85,19 +91,24 @@ class SmolvmRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     async def _exec_argv(
         self,
         argv: tuple[str, ...],
-        stdin: bytes | None,
+        stdin: ByteSource | None,
         env: dict[str, str],
         cwd: str,
+        output: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._smolvm(
-            exec_args(self._head(), ("--",), env, cwd, argv), stdin=stdin
+            exec_args(self._head(), ("--",), env, cwd, argv),
+            stdin=stdin,
+            output=output,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         return await open_cli_pipe(
             "smolvm",
-            exec_args(self._head(), ("--",), {}, None, ("sh", "-c", command)),
+            exec_args(
+                self._head(), ("--",), {}, None, ("/bin/sh", "-c", command)
+            ),
         )
 
     def _head(self) -> tuple[str, ...]:

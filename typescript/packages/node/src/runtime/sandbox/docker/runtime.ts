@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
@@ -32,11 +33,8 @@ import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
  * the merged environment, the session cwd, real stdin, and separated
  * stderr.
  */
-export class DockerRuntime
-  extends RemoteSandbox<DockerConfig>
-  implements ProcessExecutor<undefined>
-{
-  readonly [PROCESS_EXECUTOR] = true as const
+export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTransport {
+  readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'docker'
 
   constructor(options: RuntimeOptions<DockerConfig> = {}) {
@@ -47,10 +45,14 @@ export class DockerRuntime
   // One docker CLI invocation; the seam tests override.
   protected docker(
     args: string[],
-    stdin: Uint8Array | null = null,
+    stdin: ByteSource | null = null,
+    output: OutputFn | null = null,
     signal?: AbortSignal,
   ): Promise<CliResult> {
-    return runCli('docker', DOCKER_CLI_HINT, args, stdin, signal !== undefined ? { signal } : {})
+    return runCli('docker', DOCKER_CLI_HINT, args, stdin, {
+      ...(signal !== undefined ? { signal } : {}),
+      ...(output !== null ? { output } : {}),
+    })
   }
 
   async connect(): Promise<void> {
@@ -70,20 +72,21 @@ export class DockerRuntime
 
   protected override async execArgv(
     argv: readonly string[],
-    stdin: Uint8Array | null,
+    stdin: ByteSource | null,
     env: Record<string, string>,
     cwd: string,
+    output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
-    const result = await this.docker(args, stdin, signal)
+    const result = await this.docker(args, stdin, output, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
-  override openPipe(command: string): Promise<SandboxPipe> {
+  openPipe(command: string): Promise<SandboxPipe> {
     return openCliPipe(
       'docker',
-      execArgs(['exec', '-i'], [this.config.container], {}, null, ['sh', '-c', command]),
+      execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
     )
   }
 }

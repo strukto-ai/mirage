@@ -16,7 +16,7 @@ import type { Context } from '../commands/config.ts'
 import type { PathSpec } from '../types.ts'
 import { Runtime } from './base.ts'
 import { type Argv0Rules, resolveProgram } from './source.ts'
-import type { Program, RunResult, Language, RuntimeCapabilities } from './types.ts'
+import type { Program, RunResult, Language } from './types.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.
@@ -44,10 +44,6 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
   abstract readonly language: Language
   /** What this interpreter calls itself where no file names the program. */
   readonly argv0Rules: Argv0Rules = {}
-
-  override get capabilities(): RuntimeCapabilities {
-    return { ...super.capabilities, languages: [this.language] }
-  }
 
   /**
    * Resolve the program from the operands, then interpret it.

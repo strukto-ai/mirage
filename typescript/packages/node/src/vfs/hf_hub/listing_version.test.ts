@@ -82,6 +82,7 @@ function wsOf(vfs: BaseVFS, index: IndexCacheStore | null = null, clock?: Manual
   )
   if (index !== null) {
     ;(w.registry.mountFor('/m') as { indexStore: IndexCacheStore }).indexStore = index
+    w.registry.attachFileCache(w.cache)
   }
   workspaces.push(w)
   return w

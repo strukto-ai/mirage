@@ -18,7 +18,14 @@ import type { FileCache } from '../cache/file/mixin.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { callNames, declaredCalls } from '../vfs/call.ts'
 import { Effect, Target } from '../vfs/types.ts'
-import { FileStat, FileType, ListingVersion, PathSpec, ReadPolicy } from '../types.ts'
+import {
+  FileChangeKind,
+  FileStat,
+  FileType,
+  ListingVersion,
+  PathSpec,
+  ReadPolicy,
+} from '../types.ts'
 import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -336,7 +343,7 @@ export class Reconciler {
     const folder = stored?.type === FileType.DIRECTORY || (await mount.index.holdsSubtree(path))
     if (row === null || (folder && row.type !== FileType.DIRECTORY)) {
       await mount.index.reportGone([{ path, folder }])
-      await manager.invalidateAfterRemove(path)
+      await manager.invalidate(path, FileChangeKind.DELETE)
       return
     }
     const held = await this.cache.exists(path)
@@ -352,7 +359,7 @@ export class Reconciler {
     }
     const spec = PathSpec.fromStrPath(path)
     const version = await manager.readVersion(spec)
-    await manager.invalidateAfterWrite(spec)
+    await manager.invalidate(spec, FileChangeKind.UPDATE)
     if (version !== null) await manager.keepVersion(spec, version)
   }
 
@@ -364,8 +371,7 @@ export class Reconciler {
     for (const path of paths) {
       const parents = [...ancestors(path), ...(path === '/' ? [] : ['/'])]
       if (parents.some((parent) => folders.has(parent))) continue
-      await this.cache.remove(path)
-      if (folders.has(path)) await this.cache.evictPrefix(rstripSlash(path) + '/', excluded)
+      await this.cache.remove(path, { subtree: folders.has(path), excluded })
     }
     if (paths.size > 0) await this.namespace.dropOverlaysUnder([...paths], excluded)
   }

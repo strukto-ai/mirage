@@ -1271,7 +1271,7 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
     for (const [name, operations] of Object.entries(testCase.filesystem ?? {})) {
       const runtime = ws.runtimes().find((entry) => entry.name === name)
       if (runtime === undefined) throw new Error(`Missing runtime ${name}`)
-      const supported = new Set<string>(runtime.capabilities.filesystem)
+      const supported = new Set<string>(runtime.filesystem)
       for (const [operation, expected] of Object.entries(operations)) {
         if (supported.has(operation) !== expected)
           problems.push(

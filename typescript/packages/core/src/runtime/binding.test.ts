@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
 import type { WorkspaceBinding, RuntimeContext } from './binding.ts'
 import { LanguageRuntime } from './language.ts'
-import { LINE_EXECUTOR } from './mixin.ts'
+import { LINE_EXECUTOR, isLineExecutor, isProcessExecutor } from './mixin.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import type { DispatchFn, ExecutionKind, Program, RunResult } from './types.ts'
 import { RuntimeFiles } from './files.ts'
@@ -53,6 +53,11 @@ class Probe extends LanguageRuntime {
   readonly language = 'python' as const
   override readonly reach = 'workspace' as const
   readonly contexts: Context[] = []
+  bound: WorkspaceBinding | null = null
+  override bind(binding: WorkspaceBinding): void {
+    super.bind(binding)
+    this.bound = binding
+  }
   interpret(_engine: unknown, program: Program, ctx: Context): Promise<RunResult> {
     this.contexts.push(ctx)
     return Promise.resolve({ stdout: enc.encode(program.code), stderr: null, exitCode: 0 })
@@ -126,7 +131,7 @@ describe('execution bindings', () => {
     }
   })
 
-  it('declares capabilities and refuses unsupported kinds', async () => {
+  it('declares its kinds and refuses unsupported ones', async () => {
     const language = new Probe(),
       native = new ShellProbe()
     const work = PathSpec.fromStrPath('/work')
@@ -138,13 +143,10 @@ describe('execution bindings', () => {
       'line',
     ]
     const process: Request = [['echo', 'hello'], context({ cwd: work }), 'process']
-    expect(language.capabilities.languages).toEqual(['python'])
-    expect(language.capabilities.reach).toBe('workspace')
-    expect(language.capabilities.shell).toBe(false)
-    expect(native.capabilities.shell).toBe(true)
-    expect(native.capabilities.process).toBe(false)
-    expect(language.capabilities.filesystem).toEqual([])
-    expect(native.capabilities.filesystem).toEqual([])
+    expect([language.language, language.reach]).toEqual(['python', 'workspace'])
+    expect(isLineExecutor(language)).toBe(false)
+    expect([isLineExecutor(native), isProcessExecutor(native)]).toEqual([true, false])
+    expect([language.filesystem, native.filesystem]).toEqual([[], []])
     const execute = (runtime: Runtime, [texts, ctx, kind]: Request) =>
       runtime.execute([], texts, ctx, { kind })
     expect(dec.decode((await execute(language, code)).stdout)).toBe('hello')
@@ -193,17 +195,19 @@ describe('execution bindings', () => {
   })
 
   it('projects live mounts, namespace links, and attributes through the binding', async () => {
-    const ws = await world()
+    const probe = new Probe()
+    const ws = await world([probe])
     try {
       await ws.shell('echo shared > /data/a; chmod 600 /data/a')
       const context = ws.runtimeContext()
       await ws.shell('ln -s /data/a /data/link')
       expect(required(linkView(context.ctx.vfs)).resolve('/data/link')).toBe('/data/a')
       ws.addMount('/data/nested', new RAMVFS(), MountMode.EXEC)
-      expect(context.resolver.ownerOf('/data/nested/a')).toBe('/data/nested/')
-      const vfs = required(
-        callsAs(context.caller, () => RuntimeFiles.of(context.ctx, context.binding))(),
+      const binding = required(probe.bound)
+      expect(callsAs(context.caller, () => binding.resolver.ownerOf('/data/nested/a'))()).toBe(
+        '/data/nested/',
       )
+      const vfs = required(callsAs(context.caller, () => RuntimeFiles.of(context.ctx, binding))())
       expect(dec.decode(await vfs.read('/data/link'))).toBe('shared\n')
       expect((await vfs.stat('/data/a')).mode & 0o777).toBe(0o600)
     } finally {
@@ -235,9 +239,7 @@ it.each([
   async (_name, create) => {
     const runtime = create()
     const expected = ['read', 'write', 'list', 'stat']
-    expect(runtime.capabilities.filesystem).toEqual(
-      _name === 'pyodide' ? [...expected, 'glob'] : expected,
-    )
+    expect(runtime.filesystem).toEqual(_name === 'pyodide' ? [...expected, 'glob'] : expected)
     const ws = await world([runtime])
     try {
       await ws.shell('echo shared > /data/file; ln -s /data/file /data/link')

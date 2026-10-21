@@ -226,7 +226,7 @@ it.each([
   const tokens: (string | null)[] = []
   const original = destination.writeStream.bind(destination)
   vi.spyOn(destination, 'writeStream').mockImplementation(async (path, data) => {
-    tokens.push(await ws.cache.fingerprint(path.virtual))
+    tokens.push((await ws.cache.fingerprints([path.virtual]))[0] ?? null)
     expect(await ws.cache.exists(path.virtual)).toBe(false)
     await original(path, data)
     record('write', path.virtual, destination.name, 3, startOp(), { fingerprint: 'v2' })
@@ -246,7 +246,7 @@ it.each([
     expect(tokens).toEqual(['v1'])
     const cached = await ws.cache.get('/dst/f')
     expect(cached === null ? null : new TextDecoder().decode(cached)).toBe(kept)
-    expect(await ws.cache.fingerprint('/dst/f')).toBe('v2')
+    expect((await ws.cache.fingerprints(['/dst/f']))[0]).toBe('v2')
   } finally {
     await ws.close()
   }
@@ -2134,7 +2134,7 @@ describe('dispatch runs writers to one path one at a time', () => {
       await ws.cache.keepFingerprints({ '/data/e/f': 'seen' })
       store.release()
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(await ws.cache.fingerprint('/data/e/f')).toBe('seen')
+      expect((await ws.cache.fingerprints(['/data/e/f']))[0]).toBe('seen')
     } finally {
       store.release()
       await ws.close()
@@ -2176,7 +2176,7 @@ describe('dispatch runs writers to one path one at a time', () => {
       ).rejects.toThrow()
       release()
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(await ws.cache.fingerprint('/data/d/f')).toBe('refused')
+      expect((await ws.cache.fingerprints(['/data/d/f']))[0]).toBe('refused')
     } finally {
       release()
       await ws.close()

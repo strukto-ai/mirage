@@ -311,7 +311,7 @@ describe('listedThisCommand on the fallback storage', () => {
       markChecked()
     })
     const b = runInCommandScope(async () => {
-      await manager.scopeIndex(index).setDir('/data', [])
+      await manager.scopeIndex()?.setDir('/data', [])
       markListed()
       await checked
     })
@@ -327,7 +327,7 @@ describe('listedThisCommand on the fallback storage', () => {
       const index = new RAMIndexCacheStore({ ttl: 600 })
       const manager = new CacheManager(new RAMFileCacheStore(), index, '/data/', true)
       await runInCommandScope(async () => {
-        await manager.scopeIndex(index).setDir('/data', [])
+        await manager.scopeIndex()?.setDir('/data', [])
         const check = (): boolean => manager.listedThisCommand('/data')
         const mine = replayed
           ? await runWithCaller(currentCaller(), () => Promise.resolve(check()))

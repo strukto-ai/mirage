@@ -115,29 +115,16 @@ class EventHub:
     async def _evict(
         self, entry: EventMount, path: PathSpec, kind: FileChangeKind
     ) -> None:
-        """Invalidate a changed path, its affected subtree and ancestor entries.
+        """Invalidate a changed path before its event is delivered.
 
-        The whole ancestor chain is invalidated, not just the path: an
-        external change is often the only signal mirage gets, and a
-        nested create/delete implies intermediate directories appeared
-        or vanished with it, so every cached listing up to the mount
-        root may be stale (a consumer forwarding only file events from
-        a Nextcloud webhook hits exactly this). The chain itself is the
-        cache manager's to walk, not this class's: it already walks one
-        for the keyed stores that materialize a missing level on write,
-        and a second walk here would be the same rule kept in two places
-        with two stopping conditions to keep in step.
-
-        How far down the eviction reaches is the change's kind. UNKNOWN
-        means precision was lost and everything under the path must be
-        re-inventoried, which is what a push notification that can name
-        only a scope reports (IMAP IDLE says a mailbox changed, not
-        which message), so it takes the subtree. A DELETE names a path
-        but not whether it was a folder, so it is a removal: the path
-        alone, plus whatever is cached beneath it when a listing at or
-        under it is still cached (a disk watcher's ``mv dir`` or a feed
-        naming only a folder). Every other kind names a path and evicts
-        that path alone.
+        An external change is often the only signal mirage gets, so its
+        mount's cache takes it as a write is taken
+        (``CacheManager.invalidate``): the kind decides how far down it
+        reaches, UNKNOWN taking the subtree a push that names only a scope
+        reports (IMAP IDLE says a mailbox changed, not which message), and
+        every ancestor's entry goes too, since a nested create or delete
+        implies levels appeared or vanished with it (a consumer forwarding
+        only file events from a Nextcloud webhook hits exactly this).
 
         Args:
             entry (EventMount): Mount owning the path.
@@ -145,17 +132,8 @@ class EventHub:
             kind (FileChangeKind): What happened, which decides reach.
         """
         manager = entry.cache_manager
-        if manager is None:
-            return
-        try:
-            if kind is FileChangeKind.DELETE:
-                await manager.invalidate_after_remove(path)
-            elif kind is FileChangeKind.UNKNOWN:
-                await manager.invalidate_subtree(path)
-            else:
-                await manager.invalidate_after_write(path)
-        finally:
-            await manager.invalidate_ancestors(path)
+        if manager is not None:
+            await manager.invalidate(path, kind)
 
     async def _invalidate(self, entry: EventMount, change: FileEvent) -> None:
         """Evict cache for one change before it is delivered.

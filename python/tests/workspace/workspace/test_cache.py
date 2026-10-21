@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
-from mirage.cache.file.config import CacheConfig
+from mirage import RAMVFS, MountMode, Workspace
+from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.index.config import RedisIndexConfig
 from mirage.utils.clock import ManualClock
 from mirage.workspace.workspace.cache import build_file_cache
 
@@ -38,3 +42,35 @@ async def test_a_cache_config_does_not_lose_the_clock():
     await cache.set("/f.txt", b"hello", ttl=10)
     clock.advance(10)
     assert await cache.exists("/f.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_two_workspaces_on_one_redis_keep_their_own_files():
+    url = os.environ.get("REDIS_URL")
+    if not url:
+        pytest.skip("REDIS_URL not set")
+    worlds = []
+    for name in ("a", "b"):
+        vfs = RAMVFS()
+        vfs.caches_reads = True
+        ws = Workspace(
+            {"/data": vfs},
+            mode=MountMode.WRITE,
+            cache=RedisCacheConfig(url=url),
+            index=RedisIndexConfig(url=url),
+        )
+        await ws.shell(
+            f"echo {name} > /data/x.txt; echo {name} > /data/{name}.txt"
+        )
+        worlds.append((name, ws))
+    try:
+        for name, ws in worlds * 2:
+            listed = await ws.shell("ls /data")
+            read = await ws.shell("cat /data/x.txt")
+            assert (await listed.stdout_str(), await read.stdout_str()) == (
+                f"{name}.txt\nx.txt\n",
+                f"{name}\n",
+            )
+    finally:
+        for _, ws in worlds:
+            await ws.close()

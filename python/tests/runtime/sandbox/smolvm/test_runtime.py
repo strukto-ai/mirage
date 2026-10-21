@@ -13,12 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.io.types import materialize
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 from mirage.types import PathSpec
 
@@ -37,7 +40,8 @@ class FakeSmolvmRuntime(SmolvmRuntime):
         self.status_stdout = status_stdout
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _smolvm(self, args, stdin=None):
+    async def _smolvm(self, args, stdin=None, output=None):
+        stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[1] == "status":
             if self.status_stdout is not None:
@@ -50,6 +54,9 @@ class FakeSmolvmRuntime(SmolvmRuntime):
                 0,
             )
         script = args[-1]
+        if output is not None:
+            await output(f"out:{script}".encode())
+            return b"", b"warn", 0
         return f"out:{script}".encode(), b"warn", 0
 
 
@@ -136,7 +143,13 @@ async def test_exec_line_ends_flags_so_a_dashed_line_is_not_parsed():
 
 
 @pytest.mark.asyncio
-async def test_process_preserves_argv_and_shares_the_shell_connection():
+async def test_process_preserves_argv_and_shares_the_shell_connection(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run"),
+    )
     runtime = FakeSmolvmRuntime(
         config={"machine": "vm", "env": {"E": "config"}}
     )
@@ -157,6 +170,8 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
             "/",
             "-e",
             "E=request",
+            "-e",
+            f"{EXEC_ID}=run",
             "--",
             "/bin/sh",
             "-c",
@@ -170,8 +185,9 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
     line = Context(flags={"c": "pwd"}, cwd=work)
     await runtime.execute([], [], line, kind="line")
     assert sum(args[1] == "status" for args, _ in runtime.calls) == 1
-    assert runtime.capabilities.process and runtime.capabilities.shell
-    assert runtime.capabilities.filesystem == ()
+    assert isinstance(runtime, ProcessExecutorMixin)
+    assert isinstance(runtime, LineExecutorMixin)
+    assert runtime.filesystem == ()
 
 
 @pytest.mark.asyncio
