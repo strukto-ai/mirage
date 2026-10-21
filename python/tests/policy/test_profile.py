@@ -1503,7 +1503,9 @@ async def test_a_command_rule_reaches_what_chmod_r_walks_into():
         },
     )
     try:
-        await ws.shell("mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/secret")
+        await ws.shell(
+            "mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/secret"
+        )
         assert await _line(ws, "chmod -R 700 /a/b") == (
             1,
             "",

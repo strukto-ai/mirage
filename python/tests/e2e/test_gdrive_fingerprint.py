@@ -137,11 +137,11 @@ async def test_a_native_gdoc_under_fresh_renders_once_until_it_changes():
 async def test_a_warm_gdrive_read_costs_one_walk_per_probe(path, listings):
     """Cost is the contract, and the operand probe is the cost.
 
-    A warm named operand is probed at the command's first lookup of it, with a fresh index, so the
-    probe walks the parent listings: one per level. The command's own stat
-    and the gate both reuse that answer for the rest of the command instead
-    of asking again. More means one of them reached the backend again; zero
-    downloads is the other half.
+    A warm named operand is probed at the command's first lookup of it,
+    with a fresh index, so the probe walks the parent listings: one per
+    level. The command's own stat and the gate both reuse that answer for
+    the rest of the command instead of asking again. More means one of
+    them reached the backend again; zero downloads is the other half.
     """
     fake = FakeGDrive()
     fake.add_file(path, b"v1")

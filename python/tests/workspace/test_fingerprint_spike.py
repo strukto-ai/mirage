@@ -547,14 +547,14 @@ def test_ram_cannot_declare_fresh():
 
 
 def test_an_operand_probe_failure_never_takes_the_line():
-    """Routing runs before any handler, so a raise there loses the line.
+    """A lookup must be answered, so a raise in its probe loses nothing.
 
-    ``reconcile_read`` probes a warm named operand at the command's first lookup of it. If that
-    probe raised, there would be no command yet to report it: the whole
-    line fails, later ``;`` stages included, with no operand named. The
-    probe is best-effort instead. The entry is dropped and the command
-    reads the backend itself, so ``ls`` lists and ``cat`` prints current
-    bytes, and the stage after the ``;`` still runs.
+    ``reconcile_read`` probes a warm named operand at the command's first
+    lookup of it. If that probe raised, the lookup would fail with an
+    error that names no operand, and the line with it. The probe is
+    best-effort instead. The entry is dropped and the command reads the
+    backend itself, so ``ls`` lists and ``cat`` prints current bytes, and
+    the stage after the ``;`` still runs.
     """
     objects = {"a.txt": b"v1\n"}
     session, ws = _always_mount(objects)

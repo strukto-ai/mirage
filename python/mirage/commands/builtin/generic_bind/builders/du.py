@@ -401,11 +401,7 @@ async def du(
     )
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
-    bound = (
-        mount_view(ctx.vfs)
-        if fl.as_bool("one_file_system")
-        else None
-    )
+    bound = mount_view(ctx.vfs) if fl.as_bool("one_file_system") else None
 
     async def listing(path: PathSpec) -> list[str]:
         entries = await files.readdir(path)
