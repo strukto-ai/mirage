@@ -294,7 +294,7 @@ describe('walkers and subtree readers', () => {
 
   // tar -c (dashless too), zip -r and cp -r or -a read below their operands
   // but stop at a mount boundary, so they read subtrees without walking
-  // mounts.
+  // mounts; a walk kept to one mount still reads its subtree.
   it.each([
     [['tar', '-cf', '/out.tar', '/data'], true],
     [['tar', 'cf', '/out.tar', '/data'], true],
@@ -307,6 +307,10 @@ describe('walkers and subtree readers', () => {
     [['cp', '--recur', '/data', '/copy'], true],
     [['cp', '/data/a', '/copy'], false],
     [['grep', '-r', 'x', '/data'], true],
+    [['du', '-x', '/data'], true],
+    [['tree', '-x', '/data'], true],
+    [['rg', '--one-file-system', 'x', '/data'], true],
+    [['ls', '-l', '/data'], false],
   ] as const)('reads %j as reading below: %s', (words, reads) => {
     expect(readsBelow(words)).toBe(reads)
   })
@@ -325,8 +329,10 @@ describe('changesFiles', () => {
     [['iconv', '-o', '/data/b', '/data/a'], true],
     [['uniq', '/data/a'], false],
     [['uniq', '/data/a', '/data/b'], true],
+    [['uniq', '/data/pair.*'], true],
     [['xxd', '/data/a'], false],
     [['xxd', '-r', '/data/a', '/data/b'], true],
+    [['xxd', '/data/x?'], true],
     [['tee'], false],
     [['tee', '/data/a'], true],
     [['mktemp', '-u'], false],

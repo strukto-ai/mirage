@@ -1765,8 +1765,9 @@ describe('command permissions end to end', () => {
     // A line working outside /a/b/c still reaches entries inside it: cp -r
     // and chmod -R walk in, and the child's rule refuses each entry there.
     // mv takes the directory holding the child along whole, so the rule
-    // speaks on the line, as a path rule does on a subtree operand. du -x
-    // keeps to its operand's mount and never meets the child.
+    // speaks on the line, as a path rule does on a subtree operand; a move
+    // into that directory takes nothing of the child. du -x keeps to its
+    // operand's mount and never meets the child.
     const parser = await getTestParser()
     const ws = new Workspace(
       { '/a': new RAMVFS(), '/a/b/c': new RAMVFS(), '/t': new RAMVFS() },
@@ -1803,7 +1804,9 @@ describe('command permissions end to end', () => {
       '',
       'mv: Permission denied\npolicy denied: boxed\n',
     ])
-    expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b\n', ''])
+    // A move into the directory holding the mount takes nothing of it.
+    expect(await line(ws, 'echo m > /t/m && mv /t/m /a/b')).toEqual([0, '', ''])
+    expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n', ''])
   })
 
   it('a command rule reaches what chmod -R walks into', async () => {

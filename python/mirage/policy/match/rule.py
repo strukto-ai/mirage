@@ -185,8 +185,15 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
         return True
     if any(_under(p.virtual, mount) for p in ctx.paths):
         return True
-    holds = ctx.walks or ctx.command in SUBTREE_COMMANDS
-    return holds and any(_under(mount, p.virtual) for p in ctx.paths)
+    if ctx.walks:
+        return any(_under(mount, p.virtual) for p in ctx.paths)
+    if ctx.command not in SUBTREE_COMMANDS:
+        return False
+    # mv's destination takes nothing along; only what it moves does.
+    taken = operand_paths(ctx)
+    if ctx.command == "mv" and len(taken) > 1:
+        taken.pop()
+    return any(_under(mount, p.virtual) for p in taken)
 
 
 def rule_applies(rule: CommandRule, ctx: CommandContext) -> bool:

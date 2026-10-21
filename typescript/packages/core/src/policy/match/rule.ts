@@ -145,8 +145,12 @@ function under(path: string, root: string): boolean {
 function touches(mount: string, ctx: CommandContext): boolean {
   if (under(ctx.cwd, mount)) return true
   if (ctx.paths.some((p) => under(p.virtual, mount))) return true
-  const holds = (ctx.walks ?? false) || SUBTREE_COMMANDS.has(ctx.command)
-  return holds && ctx.paths.some((p) => under(mount, p.virtual))
+  if (ctx.walks ?? false) return ctx.paths.some((p) => under(mount, p.virtual))
+  if (!SUBTREE_COMMANDS.has(ctx.command)) return false
+  // mv's destination takes nothing along; only what it moves does.
+  const taken = operandPaths(ctx)
+  if (ctx.command === 'mv' && taken.length > 1) taken.pop()
+  return taken.some((p) => under(mount, p.virtual))
 }
 
 /**

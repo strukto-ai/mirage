@@ -220,12 +220,17 @@ def test_walkers_are_read_off_the_parsed_line(words, walks):
         (["cp", "--recur", "/data", "/copy"], True),
         (["cp", "/data/a", "/copy"], False),
         (["grep", "-r", "x", "/data"], True),
+        (["du", "-x", "/data"], True),
+        (["tree", "-x", "/data"], True),
+        (["rg", "--one-file-system", "x", "/data"], True),
+        (["ls", "-l", "/data"], False),
     ],
 )
 def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
     # tar -c (dashless too), zip -r and cp -r or -a read below their
     # operands but stop at a mount boundary, so they read subtrees
-    # without walking mounts.
+    # without walking mounts; a walk kept to one mount still reads its
+    # subtree.
     assert _reads_subtrees(words) is reads
 
 
@@ -241,8 +246,10 @@ def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
         (["iconv", "-o", "/data/b", "/data/a"], True),
         (["uniq", "/data/a"], False),
         (["uniq", "/data/a", "/data/b"], True),
+        (["uniq", "/data/pair.*"], True),
         (["xxd", "/data/a"], False),
         (["xxd", "-r", "/data/a", "/data/b"], True),
+        (["xxd", "/data/x?"], True),
         (["tee"], False),
         (["tee", "/data/a"], True),
         (["mktemp", "-u"], False),

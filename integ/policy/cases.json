@@ -171,7 +171,8 @@
     {"op": "exec", "session": "agent", "command": "cp -r /a/b /t/cp; find /t/cp", "expect": {"value": {"exit_code": 0, "stdout": "/t/cp\n/t/cp/c\n/t/cp/f\n", "stderr": "cp: cannot access '/a/b/c': Permission denied\n", "refusal": "boxed"}}},
     {"op": "exec", "session": "agent", "command": "chmod -R 700 /a/b; stat -c %a /a/b/c/secret", "expect": {"value": {"exit_code": 0, "stdout": "644\n", "stderr": "chmod: /a/b/c: Permission denied\nchmod: cannot read directory '/a/b/c': Permission denied\n", "refusal": "boxed"}}},
     {"op": "exec", "session": "agent", "command": "mv /a/b /t/mv", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mv: Permission denied\n", "refusal": "boxed"}}},
-    {"op": "exec", "session": "agent", "command": "du -x -a /a/b", "expect": {"value": {"exit_code": 0, "stdout": "2\t/a/b/f\n2\t/a/b\n", "stderr": "", "refusal": null}}}
+    {"op": "exec", "session": "agent", "command": "du -x -a /a/b", "expect": {"value": {"exit_code": 0, "stdout": "2\t/a/b/f\n2\t/a/b\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo m > /t/m && mv /t/m /a/b && cat /a/b/m", "expect": {"value": {"exit_code": 0, "stdout": "m\n", "stderr": "", "refusal": null}}}
    ]
   },
   {

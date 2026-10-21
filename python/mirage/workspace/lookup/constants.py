@@ -25,6 +25,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
 from mirage.types import LsLinkMode, PathSpec
+from mirage.utils.hidden import is_glob
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -452,9 +453,11 @@ def walks_mounts(name: str, flags: Mapping[str, FlagValue]) -> bool:
 
 
 def reads_subtrees(name: str, flags: Mapping[str, FlagValue]) -> bool:
-    """Whether a command reads below the paths its words name: the
-    walkers above, plus the subtree readers that stop at a mount
-    boundary (``tar -c``, ``zip -r``, ``cp -r``, ``cp -a``).
+    """Whether a command reads below the paths its words name: every
+    walk, whether or not it crosses into the mounts below (``du -x``,
+    ``rg --one-file-system`` read their own mount's subtree), plus the
+    subtree readers that stop at a mount boundary (``tar -c``,
+    ``zip -r``, ``cp -r``, ``cp -a``).
 
     What the whole-line gate reads: a runtime does its own walking where
     no entry gate follows, so a path rule that scopes such a command
@@ -465,8 +468,11 @@ def reads_subtrees(name: str, flags: Mapping[str, FlagValue]) -> bool:
         flags (Mapping[str, FlagValue]): the parsed flags
             (``line_flags``).
     """
-    if walks_mounts(name, flags):
+    runs = EXEC_WRAPPERS.get(name, (name,))[0]
+    if runs in ("find", "du", "tree", "rg"):
         return True
+    if runs in ("grep", "ls"):
+        return walks_mounts(runs, flags)
     if name not in ("tar", "zip", "cp"):
         return False
     fl = FlagView(flags, spec=SPECS[name])
@@ -500,7 +506,8 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
     """Whether this run of a builtin may change files, read off its
     words: the narrowing of a builtin's declared ``write`` that its
     options make. ``sort -o``, ``shuf -o`` and ``iconv -o`` write their
-    output file and ``uniq`` and ``xxd`` their second operand; ``sed``
+    output file and ``uniq`` and ``xxd`` their second operand, which a
+    pattern operand may name; ``sed``
     writes under ``-i``, a ``w`` file in its script or a script file
     (unread here, so assumed to); ``tar`` writes to create or extract,
     not to list or to extract to stdout; ``unzip`` writes unless it
@@ -527,7 +534,8 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
     if name == "iconv":
         return fl.raw("o") is not None
     if name in ("uniq", "xxd"):
-        return operands > 1
+        # A pattern the backend expands may name the output file too.
+        return operands > 1 or any(is_glob(p) for p in parsed.paths())
     if name == "tee":
         return operands > 0
     if name == "mktemp":

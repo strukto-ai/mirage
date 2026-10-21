@@ -23,6 +23,7 @@ import { compileSpec } from '../../commands/spec/compile.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
 import type { LsLinkMode, PathSpec } from '../../types.ts'
+import { isGlob } from '../../utils/hidden.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -259,15 +260,19 @@ export function walksMounts(name: string, bag: Record<string, FlagValue>): boole
 }
 
 /**
- * Whether a command reads below the paths its words name: the walkers
- * above, plus the subtree readers that stop at a mount boundary (`tar -c`,
- * `zip -r`, `cp -r`, `cp -a`). What the whole-line gate reads: a runtime
- * does its own walking where no entry gate follows, so a path rule that
- * scopes such a command refuses the captured line instead of running it
- * unguarded. Mirrors Python's reads_subtrees.
+ * Whether a command reads below the paths its words name: every walk,
+ * whether or not it crosses into the mounts below (`du -x`,
+ * `rg --one-file-system` read their own mount's subtree), plus the subtree
+ * readers that stop at a mount boundary (`tar -c`, `zip -r`, `cp -r`,
+ * `cp -a`). What the whole-line gate reads: a runtime does its own walking
+ * where no entry gate follows, so a path rule that scopes such a command
+ * refuses the captured line instead of running it unguarded. Mirrors
+ * Python's reads_subtrees.
  */
 export function readsSubtrees(name: string, bag: Record<string, FlagValue>): boolean {
-  if (walksMounts(name, bag)) return true
+  const runs = EXEC_WRAPPERS.get(name)?.[0] ?? name
+  if (['find', 'du', 'tree', 'rg'].includes(runs)) return true
+  if (runs === 'grep' || runs === 'ls') return walksMounts(runs, bag)
   if (!['tar', 'zip', 'cp'].includes(name)) return false
   const fl = new FlagView(bag, SPECS[name])
   if (name === 'tar') return fl.asBool('create')
@@ -295,7 +300,7 @@ const NARROWED_WRITES: ReadonlySet<string> = new Set([
  * Whether this run of a builtin may change files, read off its words: the
  * narrowing of a builtin's declared `write` that its options make. `sort
  * -o`, `shuf -o` and `iconv -o` write their output file and `uniq` and
- * `xxd` their second operand; `sed` writes under `-i`, a `w` file in its
+ * `xxd` their second operand, which a pattern operand may name; `sed` writes under `-i`, a `w` file in its
  * script or a script file (unread here, so assumed to); `tar` writes to
  * create or extract, not to list or to extract to stdout; `unzip` writes
  * unless it lists, tests or pipes; `gzip` and `gunzip` write a file operand
@@ -319,7 +324,8 @@ export function changesFiles(name: string, words: readonly (string | PathSpec)[]
       return fl.raw('o') !== undefined
     case 'uniq':
     case 'xxd':
-      return operands > 1
+      // A pattern the backend expands may name the output file too.
+      return operands > 1 || parsed.paths().some((p) => isGlob(p))
     case 'tee':
       return operands > 0
     case 'mktemp':

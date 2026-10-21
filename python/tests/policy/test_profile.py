@@ -1419,8 +1419,9 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
     # A line working outside /a/b/c still reaches entries inside it: cp -r
     # and chmod -R walk in, and the child's rule refuses each entry there.
     # mv takes the directory holding the child along whole, so the rule
-    # speaks on the line, as a path rule does on a subtree operand. du -x
-    # keeps to its operand's mount and never meets the child.
+    # speaks on the line, as a path rule does on a subtree operand; a move
+    # into that directory takes nothing of the child. du -x keeps to its
+    # operand's mount and never meets the child.
     ws = Workspace(
         {
             "/a/": (RAMVFS(), MountMode.WRITE),
@@ -1469,9 +1470,15 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
             "",
             "mv: Permission denied\npolicy denied: boxed\n",
         )
+        # A move into the directory holding the mount takes nothing of it.
+        assert await _line(ws, "echo m > /t/m && mv /t/m /a/b") == (
+            0,
+            "",
+            "",
+        )
         assert await _line(ws, "du -x -a /a/b") == (
             0,
-            "2\t/a/b/f\n2\t/a/b\n",
+            "2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n",
             "",
         )
     finally:
