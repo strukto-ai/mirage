@@ -1112,6 +1112,226 @@
         "stdout": "0 -9223372036854775808\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "brace_extreme_positive_distance_max",
+      "seq": 17600229,
+      "command": "echo {9223372036854775807..0..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..0..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_full_span",
+      "seq": 17600230,
+      "command": "echo {-9223372036854775808..9223372036854775807..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{-9223372036854775808..9223372036854775807..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_descending_rejected_boundary",
+      "seq": 17600231,
+      "command": "echo {9223372036854775807..1..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..1..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_descending_accepted_boundary",
+      "seq": 17600232,
+      "command": "echo {9223372036854775807..2..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "9223372036854775807\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_shifted_descending_rejected",
+      "seq": 17600233,
+      "command": "echo {9223372036854775806..0..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775806..0..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_shifted_descending_accepted",
+      "seq": 17600234,
+      "command": "echo {9223372036854775805..0..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "9223372036854775805\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_ascending_rejected_boundary",
+      "seq": 17600235,
+      "command": "echo {-9223372036854775808..-2..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{-9223372036854775808..-2..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_ascending_accepted_boundary",
+      "seq": 17600236,
+      "command": "echo {-9223372036854775808..-3..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "-9223372036854775808\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_shifted_ascending_rejected",
+      "seq": 17600237,
+      "command": "echo {-9223372036854775807..-1..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{-9223372036854775807..-1..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_shifted_ascending_accepted",
+      "seq": 17600238,
+      "command": "echo {-9223372036854775807..-2..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "-9223372036854775807\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_positive_ascending",
+      "seq": 17600239,
+      "command": "echo {0..9223372036854775807..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 9223372036854775807\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_negative_descending",
+      "seq": 17600240,
+      "command": "echo {0..-9223372036854775808..-9223372036854775808}",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 -9223372036854775808\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_minimum_step_rejected",
+      "seq": 17600241,
+      "command": "echo {9223372036854775807..0..-9223372036854775808}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..0..-9223372036854775808}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_minimum_step_equal",
+      "seq": 17600242,
+      "command": "echo {9223372036854775807..9223372036854775807..-9223372036854775808}",
+      "expect": {
+        "exit": 0,
+        "stdout": "9223372036854775807\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_small_descending_huge_step",
+      "seq": 17600243,
+      "command": "echo {9..1..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_negative_descending_huge_step",
+      "seq": 17600244,
+      "command": "echo {-9..-10..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "-9\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_negative_step_rejected",
+      "seq": 17600245,
+      "command": "echo {9223372036854775807..0..-9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..0..-9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_plus_endpoint_rejected",
+      "seq": 17600246,
+      "command": "echo {+9223372036854775807..+0..+9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{+9223372036854775807..+0..+9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_padded_endpoint_rejected",
+      "seq": 17600247,
+      "command": "echo {09223372036854775807..00..9223372036854775807}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{09223372036854775807..00..9223372036854775807}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_adjacent_alternative",
+      "seq": 17600248,
+      "command": "echo pre{9223372036854775807..0..9223372036854775807}post{a,b}",
+      "expect": {
+        "exit": 0,
+        "stdout": "pre{9223372036854775807..0..9223372036854775807}posta pre{9223372036854775807..0..9223372036854775807}postb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_nested_alternative",
+      "seq": 17600249,
+      "command": "echo {{9223372036854775807..0..9223372036854775807},ok}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..0..9223372036854775807} ok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "brace_extreme_lower_step_rejected",
+      "seq": 17600250,
+      "command": "echo {9223372036854775807..1..4611686018427387903}",
+      "expect": {
+        "exit": 0,
+        "stdout": "{9223372036854775807..1..4611686018427387903}\n",
+        "stderr": ""
+      }
     }
   ],
   "targets": [
