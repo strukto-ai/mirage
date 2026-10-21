@@ -42,7 +42,7 @@ export class Boundary {
     call: VfsCall,
     path: PathSpec,
     write: boolean,
-    access: { checkHidden?: boolean; final?: boolean; gate?: EntryGate | null } = {},
+    access: { final?: boolean; gate?: EntryGate | null } = {},
     issuer?: symbol,
   ): Promise<void> {
     await preVfsGate(this.policies, call, path, write, this.prefix, this.sessionId, issuer, {

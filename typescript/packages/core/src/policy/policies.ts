@@ -27,7 +27,6 @@ import { commandRecords } from '../observe/context.ts'
 import { fsErrorLine } from '../errors/render.ts'
 import { Limit, type PathSpec, type Refusal } from '../types.ts'
 import type { Policy } from './base.ts'
-import { HiddenPathsPolicy } from './builtin/hidden_paths.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
@@ -46,7 +45,6 @@ import {
   type CommandResultContext,
   type Deny,
   type ExecuteResultContext,
-  type Hide,
   type VfsContext,
   type VfsResultContext,
   type Pending,
@@ -226,16 +224,14 @@ async function explainedOp(
 
 /**
  * Fire preVfs at the dispatcher; a Deny becomes a PolicyDenied (EACCES),
- * or the built-in's own error (ENOENT for a hide, EROFS for a mode).
+ * or the built-in's own error (EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
  * FUSE, and the warm cache all pass through it. A running line's own I/O,
  * and a method's own read, meet the hides, path rules and mount mode alone;
  * a method's write is refused. `access` carries the
  * owning mount's mode (unset at an entry point that judges it itself), whether
- * the op creates the path or mutates below it, `checkHidden` false only
- * for an entry point that has already answered the hides itself, and the
- * approval ledger. An Ask is a question only where no line is running and
+ * the op creates the path or mutates below it, and the approval ledger. An Ask is a question only where no line is running and
  * the entry point holds the ledger (a file tool, the host's facade): the ledger
  * answers it from a standing grant or records it, and an unanswered one
  * refuses with the ask id on the record. Inside a line an Ask refuses
@@ -270,13 +266,12 @@ export async function preVfsGate(
   sessionId = '',
   issuer?: symbol,
   access: Pick<VfsContext, 'mode' | 'access' | 'gate'> & {
-    checkHidden?: boolean
     decisions?: Decisions | null
     final?: boolean
     caller?: Caller
   } = {},
 ): Promise<void> {
-  const { checkHidden = true, decisions = null, final = true, caller, ...context } = access
+  const { decisions = null, final = true, caller, ...context } = access
   const ctx: VfsContext = {
     call,
     path,
@@ -290,29 +285,21 @@ export async function preVfsGate(
   const trace = caller === undefined ? explaining() : caller.explaining
   const line = caller === undefined ? lineRunning() : caller.refusals !== null
   if (Array.isArray(trace)) {
-    const decide = async (): Promise<VfsExplanation | null> =>
-      checkHidden && (await apart(() => policies.hides(ctx)))
-        ? null
-        : apart(() => explainedOp(policies, ctx, decisions, line))
+    const decide = (): Promise<VfsExplanation> =>
+      apart(() => explainedOp(policies, ctx, decisions, line))
     // Without task isolation the binding would reach other tasks' ops; there
     // the mark rides a deciding method's own files and program instead.
     const noted = await (asyncContextIsolatesTasks
       ? runExplaining(DryRun.DECIDING, decide)
       : decide())
-    if (noted === null) throw new Explained()
     trace.push(noted)
     if (final || noted.error !== '') throw new Explained()
     return
   }
   const deciding = trace === DryRun.DECIDING
   if (deciding && write) throw erofs(path)
-  if (!(policies.wants('preVfs') || checkHidden || (write && context.mode !== undefined))) {
-    return
-  }
-  const answer: Hide | Deny | Ask | null = await apart(() =>
-    policies.preVfs(ctx, checkHidden, line || deciding),
-  )
-  if (answer?.kind === 'hide') throw answer.error
+  if (!(policies.wants('preVfs') || (write && context.mode !== undefined))) return
+  const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, line || deciding))
   await refuseOp(ctx, answer, line ? null : decisions, caller)
 }
 
@@ -491,7 +478,6 @@ export async function preSessionGate(
  */
 export class Policies {
   private readonly policies: Policy[]
-  private readonly hidden = new HiddenPathsPolicy()
   private readonly mode: Policy = new MountModePolicy()
   private placement: Policy | null = null
   private wanted: ReadonlySet<Method> = new Set()
@@ -781,31 +767,16 @@ export class Policies {
     return [action, route]
   }
 
-  /** Whether the built-in hides answer the op as absent, before any policy is asked. */
-  async hides(ctx: VfsContext): Promise<boolean> {
-    return (await this.hidden.preVfs(ctx)) !== null
-  }
-
   /**
    * Fire preVfs across the policies; the first Deny wins, else the first
-   * Ask, which the entry point decides how to put. The built-in
-   * hides answer before every policy, with a Hide that outranks whatever
-   * a policy would say, so a refusal never tells a session a hidden name
-   * exists; the built-in mount mode answers after them. Both hold
-   * whether or not any policy overrides the method; `checkHidden` false
-   * only for an entry point that has already answered the hides itself,
-   * and `rulesOnly` asks the profile's path rules alone, for an op a
-   * running command makes.
+   * Ask, which the entry point decides how to put. A hidden path never
+   * gets here: the dispatcher's walk answers it as absent first (`sees`),
+   * so a refusal never tells a session a hidden name exists. The built-in
+   * mount mode answers after the policies, whether or not any policy
+   * overrides the method; `rulesOnly` asks the profile's path rules alone,
+   * for an op a running command makes.
    */
-  async preVfs(
-    ctx: VfsContext,
-    checkHidden = true,
-    rulesOnly = false,
-  ): Promise<Hide | Deny | Ask | null> {
-    if (checkHidden) {
-      const hidden = await this.hidden.preVfs(ctx)
-      if (hidden !== null) return hidden
-    }
+  async preVfs(ctx: VfsContext, rulesOnly = false): Promise<Deny | Ask | null> {
     const [action] = await this.fire('preVfs', ctx, false, rulesOnly)
     return action
   }

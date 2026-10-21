@@ -156,6 +156,7 @@ from mirage.workspace.dispatcher.constants import (
     STAMP_WRITE_OPS,
     XATTR_OPS,
 )
+from mirage.workspace.dispatcher.reader import sees
 from mirage.workspace.dispatcher.stream import (
     _LentPayload,
     _memory_answered,
@@ -520,9 +521,7 @@ class _MountChannel:
     async def unlink(self, spec: PathSpec) -> None:
         if self.rule_gate is not None:
             self.rule_gate.check(spec.virtual)
-        await self.boundary.admit(
-            CALLS["unlink"], spec, True, check_hidden=False
-        )
+        await self.boundary.admit(CALLS["unlink"], spec, True)
         try:
             await self.mount.call("unlink", spec.virtual)
         finally:
@@ -531,9 +530,7 @@ class _MountChannel:
     async def rmdir(self, spec: PathSpec) -> None:
         if self.rule_gate is not None:
             self.rule_gate.check(spec.virtual)
-        await self.boundary.admit(
-            CALLS["rmdir"], spec, True, check_hidden=False
-        )
+        await self.boundary.admit(CALLS["rmdir"], spec, True)
         try:
             await self.mount.call("rmdir", spec.virtual)
         finally:
@@ -1044,10 +1041,7 @@ class Dispatcher:
         # A name the caller cannot see, or one whose walk crosses hidden
         # space, stays missing: probing past it, to its link's target,
         # would tell that it is there.
-        vis = caller.visibility
-        if not path_visible(vis, path.virtual) or leads_hidden(
-            vis, path.virtual, self._namespace.symlink_targets()
-        ):
+        if not sees(caller.visibility, self._namespace, path.virtual):
             return False
         prober = dataclasses.replace(caller, rule_gate=None)
         # A read follows a final link, so the kind is its target's, as
@@ -1949,10 +1943,8 @@ class Dispatcher:
             ).admit(mark._replace(creates=True), call.dst, True)
         for _, other in _operands(call.name, call.kwargs):
             await boundary.admit(mark, other, call.write)
-        links = self._namespace.symlink_targets()
         if call.name == "rmdir" and any(
-            path_visible(call.vis, link)
-            and not leads_hidden(call.vis, link, links)
+            sees(call.vis, self._namespace, link)
             for link, _ in self._namespace.link_stats_below(call.path.virtual)
         ):
             raise enotempty(call.path.virtual)
@@ -2564,12 +2556,10 @@ class Dispatcher:
             return result
         named = _answer_paths(result)
         if named is not None:
-            links = self._namespace.symlink_targets()
             return type(result)(
                 item
                 for item, virtual in zip(result, named)
-                if path_visible(call.vis, virtual)
-                and not leads_hidden(call.vis, virtual, links)
+                if sees(call.vis, self._namespace, virtual)
             )
         if hidden_under(call.vis, call.path.virtual):
             raise walk_declined(str(mount.vfs.name), call.name, call.path)
@@ -2730,14 +2720,12 @@ class Dispatcher:
                 # serial order (a link synthesizes its parents), and
                 # the purge taking the directory's hidden nodes must
                 # not take it too.
-                links = self._namespace.symlink_targets()
                 arrived = frozenset(
                     link
                     for link, _ in self._namespace.link_stats_below(
                         path.virtual
                     )
-                    if path_visible(vis, link)
-                    and not leads_hidden(vis, link, links)
+                    if sees(vis, self._namespace, link)
                 )
                 await self._namespace.purge_under(path.virtual, keep=arrived)
         if name == "rename" and isinstance(kwargs.get("dst"), PathSpec):
@@ -3000,12 +2988,10 @@ class Dispatcher:
         # visible remnant, and the purge also drops the attr overlays
         # of paths the cascade just destroyed, as ``rm`` does.
         base = path.virtual.rstrip("/") + "/"
-        links = self._namespace.symlink_targets()
-        links_below = [p for p in links if p.startswith(base)]
-        if any(
-            path_visible(vis, p) and not leads_hidden(vis, p, links)
-            for p in links_below
-        ):
+        links_below = [
+            p for p in self._namespace.symlink_targets() if p.startswith(base)
+        ]
+        if any(sees(vis, self._namespace, p) for p in links_below):
             raise refusal
         await self._namespace.purge_under(path.virtual)
 
@@ -3403,7 +3389,8 @@ class Dispatcher:
         """Run one read op for a probe, or None when it found nothing.
 
         The probe reads on the caller's behalf but not at its request, so
-        it passes the same admission gate the op would at the dispatcher: a
+        it meets what the op would at the dispatcher: a path the caller
+        cannot see answers as the walk answers it (``sees``), and a
         policy that denies ``stat`` must not be reachable through a
         readlink. That refusal is raised, not swallowed, because only the
         caller knows what to answer when a channel goes dark.
@@ -3416,6 +3403,13 @@ class Dispatcher:
         """
         if not mount.answers_at(name, path.virtual):
             return None
+        if not sees(caller.visibility, self._namespace, path.virtual):
+            raise hidden_refusal(
+                caller.visibility,
+                path.virtual,
+                False,
+                self._namespace.symlink_targets(),
+            )
         boundary = self._boundary(mount, caller)
         await boundary.admit(CALLS[name], path, False)
         try:

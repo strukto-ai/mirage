@@ -3233,3 +3233,64 @@ async def test_streamed_writes_never_reread_or_reopen_their_output(
         assert all(streamed.count(path) <= 1 for path in expected)
     finally:
         await ws.close()
+
+
+class _SealedReads(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual == "/data/secret":
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_hide_answers_before_any_policy_and_leaves_no_record():
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[_SealedReads()]
+    )
+    try:
+        await ws.shell("echo s > /data/secret")
+        ws.create_session(
+            "veiled", profile={"paths": {"hide": ["/data/secret"]}}
+        )
+        with pytest.raises(FileNotFoundError) as hidden:
+            await ws.vfs.read("/data/secret", session_id="veiled")
+        assert getattr(hidden.value, "refusal", None) is None
+        with pytest.raises(PermissionError) as denied:
+            await ws.vfs.read("/data/secret")
+        refusal = getattr(denied.value, "refusal", None)
+        assert refusal is not None and refusal.reason == "sealed"
+    finally:
+        await ws.close()
+
+
+class _Listening(Policy):
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.asked.append(ctx.path.virtual)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_probe_of_a_hidden_path_answers_as_absent_before_any_policy():
+    # A probe reads on the caller's behalf: a path the caller cannot see
+    # is absent to it, as the walk answers, and neither a policy nor the
+    # backend hears of it.
+    listening = _Listening()
+    dispatcher, _ = _dispatcher(Policies([listening]))
+    dispatcher._namespace.symlink_targets = MagicMock(return_value={})
+    mount = dispatcher._namespace.try_mount_for.return_value
+    mount.answers_at = MagicMock(return_value=True)
+    caller = Caller(
+        session=SessionState(
+            session_id="agent",
+            visibility=Visibility(paths=HiddenPaths(paths=("/data/hid",))),
+        )
+    )
+    with pytest.raises(FileNotFoundError):
+        await dispatcher._probe_read(
+            "stat", mount, _path("/data/hid/x"), caller
+        )
+    assert listening.asked == []
+    mount.call.assert_not_called()

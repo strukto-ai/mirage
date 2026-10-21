@@ -36,7 +36,6 @@ from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.observe.context import command_records
 from mirage.policy.base import Policy
-from mirage.policy.builtin.hidden_paths import HiddenPathsPolicy
 from mirage.policy.builtin.mount_mode import MountModePolicy
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.constants import POLICY_DENIED_EXIT
@@ -54,7 +53,6 @@ from mirage.policy.types import (
     Deny,
     DryRun,
     ExecuteResultContext,
-    Hide,
     Outcome,
     Pending,
     PolicyCaller,
@@ -210,7 +208,6 @@ async def pre_vfs_gate(
     session_id: str = "",
     *,
     mode: MountMode | None = None,
-    check_hidden: bool = True,
     decisions: Decisions | None = None,
     final: bool = True,
     caller: Caller | None = None,
@@ -240,8 +237,6 @@ async def pre_vfs_gate(
             unbound host view.
         mode (MountMode | None): the owning mount's mode, judged by the
             mount-mode built-in; None at an entry point that judges it itself.
-        check_hidden (bool): False only for an entry point that has already
-            answered the hides itself.
         decisions (Decisions | None): the approval ledger, None at an
             entry point that cannot ask.
         final (bool): the op's last gate; False for a rename's source,
@@ -273,18 +268,9 @@ async def pre_vfs_gate(
     if isinstance(trace, list):
         token = set_explaining(DryRun.DECIDING)
         try:
-            hidden = check_hidden and await _apart(policies.hides(ctx))
-            noted = (
-                None
-                if hidden
-                else await _apart(
-                    _explained_op(policies, ctx, decisions, line)
-                )
-            )
+            noted = await _apart(_explained_op(policies, ctx, decisions, line))
         finally:
             reset_explaining(token)
-        if noted is None:
-            raise Explained()
         trace.append(noted)
         if final or noted.error:
             raise Explained()
@@ -292,19 +278,9 @@ async def pre_vfs_gate(
     deciding = trace is DryRun.DECIDING
     if deciding and write:
         raise erofs(path.virtual)
-    if not (
-        policies.wants("pre_vfs")
-        or check_hidden
-        or (write and mode is not None)
-    ):
+    if not (policies.wants("pre_vfs") or (write and mode is not None)):
         return
-    answer = await _apart(
-        policies.pre_vfs(
-            ctx, check_hidden=check_hidden, rules_only=line or deciding
-        )
-    )
-    if isinstance(answer, Hide):
-        raise answer.error
+    answer = await _apart(policies.pre_vfs(ctx, rules_only=line or deciding))
     await _refuse_op(ctx, answer, None if line else decisions, caller)
 
 
@@ -649,7 +625,6 @@ class Policies:
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
         self._rescan()
-        self._hidden = HiddenPathsPolicy()
         self._mode = MountModePolicy()
         self.decisions = Decisions()
         self.views: (
@@ -934,8 +909,9 @@ class Policies:
 
         With ``every`` no answer stops the loop, so a Deny does not hide
         the answers after it; without it the answers end at the first
-        Deny, as the entry point's do. The built-in hides never answer here,
-        since a hide never surfaces; the built-in placement answers first
+        Deny, as the entry point's do. A hide never answers here, since
+        the walk answers a hidden path before any policy; the built-in
+        placement answers first
         at ``pre_execute`` and the built-in mount mode last at
         ``pre_vfs``, as they do at the entry point.
 
@@ -993,43 +969,26 @@ class Policies:
             return route, None
         return action, route
 
-    async def hides(self, ctx: VfsContext) -> bool:
-        """Whether the built-in hides answer the op as absent, before any
-        policy is asked.
-
-        Args:
-            ctx (VfsContext): the op about to run.
-        """
-        return await self._hidden.pre_vfs(ctx) is not None
-
     async def pre_vfs(
         self,
         ctx: VfsContext,
         *,
-        check_hidden: bool = True,
         rules_only: bool = False,
-    ) -> Hide | Deny | Ask | None:
+    ) -> Deny | Ask | None:
         """Fire pre_vfs across the policies; first Deny wins, else the
         first Ask, which the entry point decides how to put.
 
-        The built-in hides answer before every policy, with a Hide that
-        outranks whatever a policy would say, so a refusal never tells a
-        session a hidden name exists; the built-in mount mode answers
-        after them. Both hold whether or not any policy overrides the
-        method.
+        A hidden path never gets here: the dispatcher's walk answers it as
+        absent first (``sees``), so a refusal never tells a session a
+        hidden name exists. The built-in mount mode answers after the
+        policies, whether or not any policy overrides the method.
 
         Args:
             ctx (VfsContext): the op about to run.
-            check_hidden (bool): False only for an entry point that has already
-                answered the hides itself.
             rules_only (bool): ask the profile's path rules alone, for an
-                op a running command makes; hides and the mount mode
-                answer either way.
+                op a running command makes; the mount mode answers either
+                way.
         """
-        if check_hidden:
-            hidden = await self._hidden.pre_vfs(ctx)
-            if hidden is not None:
-                return hidden
         action, _, _ = await self._fire("pre_vfs", ctx, rules_only=rules_only)
         return action
 

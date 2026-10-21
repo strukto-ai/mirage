@@ -106,7 +106,8 @@ class Hide:
     refusal: no reason, no ``refusal`` record, no explain line. The
     entry point raises ``error`` as the terminal would for a missing name
     (ENOENT, or EACCES for a create landing in a visible directory). The
-    built-in hide answers it; no coded method returns one.
+    dispatcher's walk answers a hidden path itself (``sees``), before
+    any policy is asked; no policy method returns one.
 
     Args:
         error (OSError): what the entry point raises.

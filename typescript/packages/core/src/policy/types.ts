@@ -83,9 +83,10 @@ export interface Deny {
  * nothing left to allow, refuse or ask about. Never rendered as a
  * refusal: no reason, no `refusal` record, no explain line. The entry point
  * throws `error` as the terminal would for a missing name (ENOENT, or
- * EACCES for a create landing in a visible directory). The built-in hide
- * answers it; no coded method returns one. `kind` is the wire
- * discriminant shared with Python.
+ * EACCES for a create landing in a visible directory). The dispatcher's
+ * walk answers a hidden path itself (`sees`), before any policy is asked;
+ * no policy method returns one. `kind` is the wire discriminant shared
+ * with Python.
  */
 export interface Hide {
   kind: 'hide'

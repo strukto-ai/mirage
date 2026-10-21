@@ -57,7 +57,6 @@ class Boundary:
         path: PathSpec,
         write: bool,
         *,
-        check_hidden: bool = True,
         final: bool = True,
     ) -> None:
         await pre_vfs_gate(
@@ -68,7 +67,6 @@ class Boundary:
             self.prefix,
             self.session_id,
             mode=self.mode,
-            check_hidden=check_hidden,
             decisions=self.decisions,
             final=final,
             caller=self.caller,
