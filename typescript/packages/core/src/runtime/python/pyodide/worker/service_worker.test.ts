@@ -58,4 +58,13 @@ describe('the pyodide service worker', () => {
     sw.message('other')
     expect(sw.claims).toBe(2)
   })
+
+  it('takes over at once when first installed, and an update waits for the pages it would take', () => {
+    const first = serviceWorker()
+    first.install()
+    expect(first.skips).toBe(1)
+    const update = serviceWorker({})
+    update.install()
+    expect(update.skips).toBe(0)
+  })
 })

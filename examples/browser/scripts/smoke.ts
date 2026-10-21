@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   let exit = 0
   try {
     const browser = await chromium.launch({
-      executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      channel: 'chrome',
       headless: true,
     })
     try {
@@ -82,6 +82,7 @@ async function main(): Promise<void> {
       try {
         await page.waitForFunction(
           () => document.querySelector('#log')?.textContent?.includes('done.') ?? false,
+          undefined,
           { timeout: 300_000 },
         )
         text = await page.locator('#log').innerText()

@@ -96,18 +96,22 @@ export interface PyodideLoadOptions {
 export async function loadPyodideRuntime(
   options: PyodideLoadOptions = {},
 ): Promise<PyodideInterface> {
-  const indexURL =
+  const home =
     resolveHome(options, PYODIDE_HOME_ENV) ??
     (await resolveNodeIndexURL()) ??
     (isNode() ? null : PYODIDE_CDN_URL)
-  // A browser worker starts from a blob (worker/client.ts), where a bare
-  // specifier resolves against nothing, so it loads pyodide's loader from
-  // the distribution it reads every other asset from.
-  const distribution =
+  // A browser worker starts from a blob (worker/client.ts), where neither
+  // a bare specifier nor a relative path resolves, so it loads pyodide's
+  // loader and every other asset from the distribution's absolute URL, a
+  // path read from the page's origin.
+  const origin =
     !isNode() &&
     typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
-      ? indexURL
-      : null
+      ? (globalThis as { location?: { origin: string } }).location?.origin
+      : undefined
+  const resolved = home === null || origin === undefined ? home : new URL(home, `${origin}/`).href
+  const indexURL = resolved === null || resolved.endsWith('/') ? resolved : `${resolved}/`
+  const distribution = origin === undefined ? null : indexURL
   let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
   try {
     mod = (await (distribution === null

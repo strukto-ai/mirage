@@ -20,7 +20,9 @@ import { FORMAT, PARAM } from './transport.ts'
  * request until the host posts the answer under the same id, whichever
  * arrives first; every other request passes through untouched. It claims
  * the page when it activates, and again when the page asks (a hard reload
- * leaves a page uncontrolled).
+ * leaves a page uncontrolled). An update waits until no page uses the
+ * version it replaces: a call that version holds would never meet an
+ * answer the page posts to its successor.
  */
 export const SCRIPT = `const PARAM = ${JSON.stringify(PARAM)}
 const FORMAT = ${JSON.stringify(FORMAT)}
@@ -40,7 +42,7 @@ function slot(id) {
 }
 
 self.addEventListener('install', () => {
-  self.skipWaiting()
+  if (self.registration.active === null) self.skipWaiting()
 })
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim())
