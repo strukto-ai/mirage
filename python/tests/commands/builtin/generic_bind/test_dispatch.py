@@ -293,3 +293,39 @@ async def test_a_walk_reads_the_tree_in_one_call_and_prints_the_same():
     assert counted.trees > 0
     # find -maxdepth 1 and tree -L 1 each list their one level.
     assert counted.listings == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,stdout",
+    [
+        ("find /repo -name x.txt", b"/repo/dev/x.txt\n/repo/main/x.txt\n"),
+        (
+            "find /repo",
+            b"/repo\n/repo/dev\n/repo/dev/x.txt\n/repo/main\n/repo/main/x.txt\n",
+        ),
+        (
+            "du -a /repo",
+            b"4\t/repo/dev/x.txt\n4\t/repo/dev\n4\t/repo/main/x.txt\n"
+            b"4\t/repo/main\n8\t/repo\n",
+        ),
+    ],
+)
+async def test_a_walk_reaches_mounts_without_read_tree_under_a_synthetic_dir(
+    line, stdout
+):
+    # The operand's own part runs on the implicit root RAM, which answers
+    # read_tree, and its walk reaches the mounts below through the
+    # dispatcher's listing; those answer none, so each is walked rather
+    # than refused ENOTSUP.
+    mounts = {}
+    for name in ("main", "dev"):
+        vfs = _Untreed()
+        vfs.load_state({"files": {"/x.txt": b"ada\n"}})
+        mounts[f"/repo/{name}/"] = vfs
+    ws = Workspace(mounts, mode=MountMode.WRITE)
+    try:
+        r = await ws.shell(line)
+        assert (r.stdout, r.stderr or b"", r.exit_code) == (stdout, b"", 0)
+    finally:
+        await ws.close()

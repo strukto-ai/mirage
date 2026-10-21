@@ -775,8 +775,19 @@ def command_files(
 
     # A subtree read stops at a link at the final name (ENOTDIR): it
     # cannot pass through one, so a walk that follows links lists them
-    # directory by directory instead.
+    # directory by directory instead. ``answers`` speaks for the serving
+    # mount, but a walk through the dispatcher also reaches the mounts
+    # below it, so a subtree on one that answers no read_tree (a disk
+    # mount under the root RAM) is left to be walked rather than refused
+    # with ENOTSUP.
     async def read_tree(path: PathSpec) -> Any:
+        if (
+            not crossing
+            and mounts is not None
+            and mounts.answers is not None
+            and not mounts.answers(path.virtual, "read_tree")
+        ):
+            return None
         return await call("read_tree", path, nofollow=True)
 
     async def files_containing(

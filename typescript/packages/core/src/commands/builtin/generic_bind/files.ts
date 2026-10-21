@@ -567,10 +567,14 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     ),
     // A subtree read stops at a link at the final name (ENOTDIR): it cannot
     // pass through one, so a walk that follows links lists them directory by
-    // directory instead.
-    readTree: guard(
-      async (path: PathSpec) =>
-        (await call('read_tree', path, [], { nofollow: true })) as Map<string, FileStat> | null,
+    // directory instead. `answers` speaks for the serving mount, but a walk
+    // through the dispatcher also reaches the mounts below it, so a subtree
+    // on one that answers no read_tree (a disk mount under the root RAM) is
+    // left to be walked rather than refused with ENOTSUP.
+    readTree: guard(async (path: PathSpec) =>
+      !crossing && mounts !== undefined && !mounts.answers(path.virtual, 'read_tree')
+        ? null
+        : ((await call('read_tree', path, [], { nofollow: true })) as Map<string, FileStat> | null),
     ),
     filesContaining: async (path, text, opts) =>
       (await call('files_containing', path, [text], {
