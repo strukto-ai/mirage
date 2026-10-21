@@ -15,6 +15,7 @@
 import json
 import os
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,7 +24,7 @@ from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.table import build_runtime
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -223,7 +224,13 @@ async def test_exec_line_runs_under_the_prelude_with_stdin_and_stderr():
 
 
 @pytest.mark.asyncio
-async def test_process_preserves_argv_and_probes_the_container_once():
+async def test_process_preserves_argv_and_probes_the_container_once(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run"),
+    )
     runtime = FakeAppleContainerRuntime(
         config={"container": "box", "env": {"E": "config"}}
     )
@@ -241,6 +248,8 @@ async def test_process_preserves_argv_and_probes_the_container_once():
             "/",
             "-e",
             "E=request",
+            "-e",
+            f"{EXEC_ID}=run",
             "box",
             "/bin/sh",
             "-c",

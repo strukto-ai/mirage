@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
@@ -21,6 +21,7 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
+import { EXEC_ID, reapLine } from './constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
@@ -204,6 +205,54 @@ describe('RemoteSandbox', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  // A run cancelled midway (head closed its pipe, a timeout) may leave its
+  // program running in the box, so every process it started is stopped by
+  // the run's id, with one more exec that carries no id of its own.
+  it('stops what a cancelled run left in the box', async () => {
+    class StuckBox extends RecordingSandbox {
+      protected override async execArgv(
+        argv: readonly string[],
+        stdin: ByteSource | null,
+        env: Record<string, string>,
+        cwd: string,
+        _output?: unknown,
+        signal?: AbortSignal,
+      ): Promise<RunResult> {
+        const result = await super.execArgv(argv, stdin, env, cwd)
+        if (lineOf(argv) !== 'yes') return result
+        return new Promise<RunResult>((_, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('execute aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      }
+    }
+    const box = new StuckBox({ captures: ['yes'] })
+    const abort = new AbortController()
+    const ctx = {
+      stdin: null,
+      flags: { c: 'yes' },
+      env: {},
+      cwd: PathSpec.fromStrPath('/'),
+      signal: abort.signal,
+    }
+    const run = box.runLine(undefined, [], [], ctx)
+    const rejected = expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => {
+      expect(box.execs).toHaveLength(1)
+    })
+    abort.abort()
+    await rejected
+    const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
+    expect(execId).not.toBe('')
+    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId)])
+    expect(box.execs[1]?.[2]).not.toHaveProperty(EXEC_ID)
   })
 
   it('line output caps truncate with a notice', async () => {

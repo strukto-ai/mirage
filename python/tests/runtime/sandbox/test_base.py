@@ -26,6 +26,7 @@ from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
+from mirage.runtime.sandbox.constants import EXEC_ID, reap_line
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 
@@ -189,6 +190,33 @@ async def test_line_timeout_answers_124():
         assert b"timed out" in await materialize(io.stderr)
     finally:
         await ws.close()
+
+
+# A run cancelled midway (head closed its pipe, a timeout) may leave its
+# program running in the box, so every process it started is stopped by
+# the run's id, with one more exec that carries no id of its own.
+@pytest.mark.asyncio
+async def test_a_cancelled_run_stops_what_it_left_in_the_box():
+    class StuckBox(RecordingSandbox):
+        async def exec_line(
+            self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        ) -> RunResult:
+            result = await super().exec_line(line, stdin, env, cwd)
+            if line == "yes":
+                await asyncio.Event().wait()
+            return result
+
+    box = StuckBox(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+    task = asyncio.create_task(box.run_line(None, [], [], ctx))
+    while not box.execs:
+        await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    exec_id = box.exec_envs[0][EXEC_ID]
+    assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id)]
+    assert EXEC_ID not in box.exec_envs[1]
 
 
 @pytest.mark.asyncio

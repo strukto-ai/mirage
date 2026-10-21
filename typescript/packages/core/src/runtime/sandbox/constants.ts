@@ -65,6 +65,16 @@ export const PIPE_SERVER_HINT =
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 /**
+ * Every process a run starts in a sandbox carries this variable, set to the
+ * run's own id, so a run cancelled midway can be stopped in the box:
+ * stopping the client that started it does not reach the box everywhere
+ * (`docker exec` has no kill, and the daemon keeps draining the program's
+ * output, so a `yes` cut short by `head` would spin on). The id rides the
+ * environment because every process of a pipeline inherits it.
+ */
+export const EXEC_ID = 'MIRAGE_EXEC_ID'
+
+/**
  * The command line for a sandbox whose exec takes one (ssh, e2b,
  * daytona): cwd, env, then the argv.
  *
@@ -91,4 +101,20 @@ export function wrapLine(
   for (const [key, value] of Object.entries(env)) parts.push(singleQuote(`${key}=${value}`))
   for (const word of argv) parts.push(singleQuote(word))
   return parts.join(' ')
+}
+
+/**
+ * The shell line that stops every process of the run `execId`: TERM to each
+ * process whose environment holds the run's id, found through `/proc`, so
+ * it needs only a POSIX shell and grep.
+ *
+ * @param execId the run's id, as `EXEC_ID` carries it.
+ */
+export function reapLine(execId: string): string {
+  const mark = singleQuote(`${EXEC_ID}=${execId}`)
+  return (
+    'for p in /proc/[0-9]*; do ' +
+    `grep -qs ${mark} "$p/environ" && kill -TERM "\${p#/proc/}" 2>/dev/null; ` +
+    'done; true'
+  )
 }

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
+import uuid
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -22,6 +24,7 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
+from mirage.runtime.sandbox.constants import EXEC_ID, reap_line
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
@@ -30,6 +33,8 @@ from mirage.runtime.types import (
     RuntimeReach,
 )
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteSandbox(
@@ -173,13 +178,37 @@ class RemoteSandbox(
             refusal = await self._mounts.admit(self._binding)
             if refusal is not None:
                 return refusal
-        return await self._exec_argv(
-            argv,
-            ctx.stdin,
-            {**self.config.env, **(ctx.env or {})},
-            ctx.cwd.virtual,
-            output,
-        )
+        exec_id = uuid.uuid4().hex
+        try:
+            return await self._exec_argv(
+                argv,
+                ctx.stdin,
+                {**self.config.env, **(ctx.env or {}), EXEC_ID: exec_id},
+                ctx.cwd.virtual,
+                output,
+            )
+        except asyncio.CancelledError:
+            await asyncio.shield(self._reap(exec_id))
+            raise
+
+    async def _reap(self, exec_id: str) -> None:
+        """Stop what a cancelled run left in the box (``EXEC_ID``).
+
+        Args:
+            exec_id (str): the run's id.
+        """
+        try:
+            await self._exec_argv(
+                ("/bin/sh", "-c", reap_line(exec_id)),
+                None,
+                dict(self.config.env),
+                "/",
+                None,
+            )
+        except Exception:
+            logger.debug(
+                "%s: run %s not stopped", self.name, exec_id, exc_info=True
+            )
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")

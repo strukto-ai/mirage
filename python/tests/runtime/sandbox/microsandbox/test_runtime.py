@@ -14,12 +14,13 @@
 
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 from mirage.runtime.table import build_runtime
 from mirage.types import PathSpec
@@ -85,6 +86,10 @@ SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_SANDBOX")
 
 @pytest.mark.asyncio
 async def test_process_maps_the_msb_cli_contract(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run"),
+    )
     calls = []
 
     async def invoke(executable, hint, args, stdin, output=None):
@@ -122,6 +127,8 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "/",
                 "-e",
                 "MARK=request",
+                "-e",
+                f"{EXEC_ID}=run",
                 "--",
                 "/bin/sh",
                 "-c",

@@ -34,6 +34,7 @@ import {
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './config.ts'
+import { EXEC_ID, reapLine } from './constants.ts'
 import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
 
@@ -166,14 +167,35 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     await this.ensureConnected(ctx.signal)
     const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
-    return this.execArgv(
-      argv,
-      ctx.stdin,
-      { ...this.config.env, ...ctx.env },
-      ctx.cwd.virtual,
-      output,
-      ctx.signal,
-    )
+    const execId = crypto.randomUUID().replaceAll('-', '')
+    try {
+      return await this.execArgv(
+        argv,
+        ctx.stdin,
+        { ...this.config.env, ...ctx.env, [EXEC_ID]: execId },
+        ctx.cwd.virtual,
+        output,
+        ctx.signal,
+      )
+    } catch (error) {
+      if (ctx.signal?.aborted === true) await this.reap(execId)
+      throw error
+    }
+  }
+
+  /** Stop what a cancelled run left in the box (`EXEC_ID`). */
+  private async reap(execId: string): Promise<void> {
+    try {
+      await this.execArgv(
+        ['/bin/sh', '-c', reapLine(execId)],
+        null,
+        { ...this.config.env },
+        '/',
+        null,
+      )
+    } catch (error) {
+      console.debug(`${this.name}: run ${execId} not stopped: ${String(error)}`)
+    }
   }
 
   /** Let the sandbox see the workspace by `mountType`; null serves nothing. */

@@ -73,6 +73,37 @@
       ]
     },
     {
+      "id": "stream_cut_short_leaves_nothing_running",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "apple_container"
+      ],
+      "entry": {
+        "captures": [
+          "yes",
+          "perl"
+        ]
+      },
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "t=$RANDOM$RANDOM; yes \"$t\" | head -n 1 >/dev/null; perl -e 'select undef, undef, undef, 0.5; for (glob \"/proc/[0-9]*/cmdline\") { open my $f, \"<\", $_ or next; my $c = <$f>; print \"left\\n\" if defined $c && $c eq \"yes\\0$ARGV[0]\\0\" }' \"$t\"",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "stream_stdin",
       "runtimes": [
         "docker",

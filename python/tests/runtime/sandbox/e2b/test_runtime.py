@@ -16,6 +16,7 @@ import asyncio
 import io
 import shlex
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 from e2b import CommandExitException, NotFoundException
@@ -23,7 +24,7 @@ from e2b import CommandExitException, NotFoundException
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
-from mirage.runtime.sandbox.constants import wrap_line
+from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -181,7 +182,11 @@ def test_sandbox_id_is_required():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("data", [None, b"", b"a\nb\n", bytes(range(256))])
-async def test_native_stdin_eof_and_command_are_preserved(data):
+async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.uuid.uuid4",
+        lambda: SimpleNamespace(hex="run"),
+    )
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     result = await _line(runtime, "wc -l | cat", data, {"E": "1"})
     assert result.exit_code == 0
@@ -191,7 +196,9 @@ async def test_native_stdin_eof_and_command_are_preserved(data):
     assert sandbox.commands.calls == [
         (
             wrap_line(
-                ("/bin/sh", "-c", "wc -l | cat"), {"E": "1"}, "/workspace"
+                ("/bin/sh", "-c", "wc -l | cat"),
+                {"E": "1", EXEC_ID: "run"},
+                "/workspace",
             ),
             data is not None,
         )

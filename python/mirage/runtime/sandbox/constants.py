@@ -84,6 +84,14 @@ PIPE_SERVER_HINT = (
 # prelude is still found on it.
 EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
+# Every process a run starts in a sandbox carries this variable, set to
+# the run's own id, so a run cancelled midway can be stopped in the box:
+# stopping the client that started it does not reach the box everywhere
+# (`docker exec` has no kill, and the daemon keeps draining the
+# program's output, so a `yes` cut short by `head` would spin on). The id
+# rides the environment because every process of a pipeline inherits it.
+EXEC_ID = "MIRAGE_EXEC_ID"
+
 
 def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
     """The command line for a sandbox whose exec takes one (ssh, e2b,
@@ -116,3 +124,20 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
     parts += [single_quote(f"{key}={value}") for key, value in env.items()]
     parts += [single_quote(word) for word in argv]
     return " ".join(parts)
+
+
+def reap_line(exec_id: str) -> str:
+    """The shell line that stops every process of the run ``exec_id``.
+
+    It sends TERM to each process whose environment holds the run's id,
+    found through ``/proc``, so it needs only a POSIX shell and grep.
+
+    Args:
+        exec_id (str): the run's id, as ``EXEC_ID`` carries it.
+    """
+    mark = single_quote(f"{EXEC_ID}={exec_id}")
+    return (
+        "for p in /proc/[0-9]*; do "
+        f'grep -qs {mark} "$p/environ" && kill -TERM "${{p#/proc/}}" 2>/dev/null; '
+        "done; true"
+    )

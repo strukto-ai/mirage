@@ -23,7 +23,7 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/co
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -192,6 +192,7 @@ function makeRuntime() {
 
 beforeEach(() => {
   FakeSandbox.connected = []
+  FakeSandbox.last = new FakeSandbox()
   vi.restoreAllMocks()
 })
 
@@ -254,13 +255,17 @@ describe('E2BRuntime', () => {
     new TextEncoder().encode('a\nb\n'),
     Uint8Array.from({ length: 256 }, (_, i) => i),
   ])('preserves native input, EOF and the command: %s', async (data) => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
     const runtime = makeRuntime()
     const result = await runLine(runtime, 'wc -l | cat', data, '/workspace', { env: { E: '1' } })
     expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe(Buffer.from(data ?? []).toString('hex'))
     expect(DEC.decode(result.stderr)).toBe('warn')
     expect(FakeSandbox.last.commands.calls).toEqual([
-      [wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1' }, '/workspace'), data !== null],
+      [
+        wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [EXEC_ID]: 'runid' }, '/workspace'),
+        data !== null,
+      ],
     ])
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
       eof: true,

@@ -17,7 +17,7 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { MicrosandboxRuntime } from './runtime.ts'
 import * as cli from '../cli.ts'
 
@@ -94,6 +94,7 @@ describe('MicrosandboxRuntime', () => {
   })
 
   it('maps process requests to the msb CLI contract', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
     const invoke = vi.spyOn(cli, 'runCli').mockImplementation((_exe, _hint, args) => {
       if (args[0] === 'status')
         return Promise.resolve({
@@ -135,6 +136,8 @@ describe('MicrosandboxRuntime', () => {
             '/',
             '-e',
             'MARK=request',
+            '-e',
+            `${EXEC_ID}=runid`,
             '--',
             '/bin/sh',
             '-c',

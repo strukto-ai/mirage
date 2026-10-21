@@ -21,11 +21,11 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AppleContainerConfig } from './config.ts'
 import { AppleContainerRuntime } from './runtime.ts'
 import { Workspace } from '../../../workspace.ts'
@@ -306,6 +306,7 @@ describe.skipIf(process.platform === 'win32')('EXEC_PRELUDE', () => {
 })
 
 it('preserves argv through execute and shares the shell connection', async () => {
+  vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
   const runtime = makeRuntime({ config: { container: 'box', env: { E: 'config' } } })
   const argv = ['node', 'a b', '$(echo literal)', '', '--flag'] as const
   const stdin = ENC.encode('input')
@@ -324,6 +325,8 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '/',
       '-e',
       'E=request',
+      '-e',
+      `${EXEC_ID}=runid`,
       'box',
       '/bin/sh',
       '-c',
