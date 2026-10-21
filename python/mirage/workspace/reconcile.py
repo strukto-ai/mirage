@@ -448,11 +448,9 @@ class Reconciler:
         for path in paths:
             parents = ancestors(path) + (["/"] if path != "/" else [])
             if folders.isdisjoint(parents):
-                await self._cache.remove(path)
-                if path in folders:
-                    await self._cache.evict_prefix(
-                        path.rstrip("/") + "/", excluded=excluded
-                    )
+                await self._cache.remove(
+                    path, subtree=path in folders, excluded=excluded
+                )
         if paths:
             await self._namespace.drop_overlays_under(
                 list(paths), excluded=excluded

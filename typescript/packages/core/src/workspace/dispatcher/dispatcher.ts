@@ -2179,7 +2179,7 @@ export class Dispatcher {
     if (call.name !== 'append' || !factsOf(mount).cacheable) return null
     const kept = await this.cache.get(call.path.virtual)
     if (kept === null) return null
-    return [kept, await this.cache.fingerprint(call.path.virtual)]
+    return [kept, (await this.cache.fingerprints([call.path.virtual]))[0] ?? null]
   }
 
   /** Drop content without losing the conditional-write baseline. */

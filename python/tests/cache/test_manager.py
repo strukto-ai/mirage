@@ -430,7 +430,7 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
     await index.set_dir("/data/e", [("h", _entry("h"))])
     manager = CacheManager(cache, index, "/data/", True)
     with (
-        patch.object(cache, "evict_prefix", wraps=cache.evict_prefix) as evict,
+        patch.object(cache, "remove", wraps=cache.remove) as evict,
         patch.object(
             index, "invalidate_prefix", wraps=index.invalidate_prefix
         ) as drop,
@@ -452,7 +452,7 @@ async def test_removing_a_file_does_unlink_work_and_nothing_more():
     }
     assert (await index.list_dir("/data/d")).entries is None
     assert (await index.list_dir("/data/e")).entries == ["/data/e/h"]
-    assert evict.call_count == 0
+    assert not any(c.kwargs.get("subtree") for c in evict.call_args_list)
     assert drop.call_count == 0
     assert probe.call_count == 1
 

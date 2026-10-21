@@ -126,8 +126,7 @@ async function clearMountCache(
   }
   if (cache === null) return clearIndices()
   await mutationLock(cache, async () => {
-    await cache.remove(prefix.slice(0, -1))
-    await cache.evictPrefix(prefix)
+    await cache.remove(prefix.slice(0, -1) || '/', { subtree: true })
     await clearIndices()
   })
 }

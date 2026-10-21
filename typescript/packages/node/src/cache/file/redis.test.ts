@@ -54,7 +54,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     await cache.close()
   })
 
-  it('prefix eviction preserves nested mount roots and descendants', async () => {
+  it('a subtree removal preserves nested mount roots and descendants', async () => {
     const value = new TextEncoder().encode('value')
     for (const key of [
       '/data/sub/old',
@@ -64,7 +64,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     ]) {
       await cache.set(key, value)
     }
-    await cache.evictPrefix('/data/sub/', ['/data/sub/nested'])
+    await cache.remove('/data/sub', { subtree: true, excluded: ['/data/sub/nested'] })
     expect(await cache.get('/data/sub/nested')).toEqual(value)
     expect(await cache.get('/data/sub/nested/file')).toEqual(value)
     expect(await cache.get('/data/sub/old')).toBeNull()
@@ -89,18 +89,17 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
       // removed -- measured, not assumed.
       for (const invalidate of [
         () => cache.clear(),
-        () => cache.remove('pending'),
-        () => cache.evictPrefix('pend'),
+        () => cache.remove('pend/ing'),
+        () => cache.remove('pend', { subtree: true }),
       ]) {
         const real = cache.cacheClient.bind(cache)
         let release!: () => void
         const gate = new Promise<void>((resolve) => {
           release = resolve
         })
-        // One-shot: only the writer is held. `clear`, `remove` and
-        // `evictPrefix` reach for the same client, so a gate that held
-        // every call would deadlock the invalidation instead of ordering
-        // it.
+        // One-shot: only the writer is held. `clear` and `remove` reach
+        // for the same client, so a gate that held every call would
+        // deadlock the invalidation instead of ordering it.
         let held = false
         cache.cacheClient = async (): Promise<RedisClientType> => {
           if (!held) {
@@ -115,22 +114,22 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
         // check. Releasing first is what makes this racy and vacuous.
         const fill =
           method === 'keepFingerprints'
-            ? cache.keepFingerprints({ pending: 'v1' })
-            : cache[method]('pending', new Uint8Array([1, 2, 3]))
+            ? cache.keepFingerprints({ 'pend/ing': 'v1' })
+            : cache[method]('pend/ing', new Uint8Array([1, 2, 3]))
         await invalidate()
         release()
         cache.cacheClient = real
         await fill
-        expect(await cache.get('pending')).toBeNull()
-        expect(await cache.fingerprint('pending')).toBeNull()
-        await cache.remove('pending')
+        expect(await cache.get('pend/ing')).toBeNull()
+        expect((await cache.fingerprints(['pend/ing']))[0]).toBeNull()
+        await cache.remove('pend/ing')
       }
     },
   )
 
-  it('a set of an unrelated key survives a prefix eviction while it awaited the client', async () => {
+  it('a set of an unrelated key survives a subtree removal while it awaited the client', async () => {
     // The scoped twin of the case above: the writer is held inside the
-    // gated client while evictPrefix runs to completion, so a store-wide
+    // gated client while a subtree removal runs to completion, so a store-wide
     // retirement would discard it even though nothing under its key went.
     const real = cache.cacheClient.bind(cache)
     let release!: () => void
@@ -147,7 +146,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     }
     const data = new Uint8Array([1, 2, 3])
     const fill = cache.set('other', data)
-    await cache.evictPrefix('pend')
+    await cache.remove('pend', { subtree: true })
     release()
     cache.cacheClient = real
     await fill
@@ -244,16 +243,6 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.get('k')).toBeNull()
   })
 
-  it('multiGet returns [bytes|null] in order', async () => {
-    await cache.set('a', new Uint8Array([1]))
-    await cache.set('c', new Uint8Array([3]))
-    const out = await cache.multiGet(['a', 'b', 'c'])
-    expect(out).toHaveLength(3)
-    expect(out[0]).toEqual(new Uint8Array([1]))
-    expect(out[1]).toBeNull()
-    expect(out[2]).toEqual(new Uint8Array([3]))
-  })
-
   it('isFresh matches fingerprint', async () => {
     const data = new Uint8Array([1, 1, 1])
     const fp = 'etag-1-1-1'
@@ -282,7 +271,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.exists('/a')).toBe(false)
     expect(await cache.get('/a')).toBeNull()
     expect(await cache.isFresh('/a', 'v1')).toBe(false)
-    expect(await cache.fingerprint('/a')).toBe('v1')
+    expect((await cache.fingerprints(['/a']))[0]).toBe('v1')
     await cache.set('/a', new TextEncoder().encode('read'), { fingerprint: 'v1' })
     expect(new TextDecoder().decode((await cache.get('/a')) ?? new Uint8Array())).toBe('read')
   })
@@ -363,9 +352,9 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
   it('never replaces bytes written since with a version', async () => {
     await cache.set('/a', new TextEncoder().encode('theirs'), { fingerprint: 'v2' })
     await cache.keepFingerprints({ '/a': 'v1' })
-    expect(await cache.fingerprint('/a')).toBe('v2')
+    expect((await cache.fingerprints(['/a']))[0]).toBe('v2')
     await cache.remove('/a')
-    expect(await cache.fingerprint('/a')).toBeNull()
+    expect((await cache.fingerprints(['/a']))[0]).toBeNull()
   })
 
   it('answers fingerprints for each key in order', async () => {
@@ -377,7 +366,7 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
 
 // The two prefix-wide drops, each over everything under `/t/`.
 const PREFIX_DROPS = [
-  ['evictPrefix', (c: RedisFileCacheStore) => c.evictPrefix('/t/')],
+  ['removeSubtree', (c: RedisFileCacheStore) => c.remove('/t', { subtree: true })],
   ['clear', (c: RedisFileCacheStore) => c.clear()],
 ] as const
 
@@ -487,14 +476,17 @@ describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
     await cache.set('/t/sub/nested/kept', x, { fingerprint: 'etag' })
     const c = await cache.cacheClient()
     const pipelines = spyPipelines(c)
-    await cache.evictPrefix('/t/sub/', ['/t/sub/nested'])
+    await cache.remove('/t/sub', { subtree: true, excluded: ['/t/sub/nested'] })
     // Deleted page by page, each page in DELs of at most DEL_BATCH keys:
     // one DEL of N keys blocks the server for all N at once, and N bodies
-    // may each be large. A page goes out as one pipeline, one round trip.
-    const sizes = pipelines.flat()
-    expect(pipelines.length).toBeGreaterThanOrEqual(3)
+    // may each be large. A page goes out as one pipeline, one round trip,
+    // after the one that drops the key's own entry.
+    const [own, ...pages] = pipelines
+    const sizes = pages.flat()
+    expect(own).toHaveLength(2)
+    expect(pages.length).toBeGreaterThanOrEqual(3)
     expect(Math.max(...sizes)).toBeLessThanOrEqual(DEL_BATCH)
-    expect(pipelines.some((pipe) => pipe.length > 1)).toBe(true)
+    expect(pages.some((pipe) => pipe.length > 1)).toBe(true)
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(5000)
     expect(await keysMatching(c, `${prefix}[dm][ae]ta:*`)).toEqual(
       [
@@ -556,7 +548,7 @@ describe.skipIf(skip)('RedisFileCacheStore prefix drops', () => {
     try {
       await accented.set('/t/café/f', x)
       await accented.set('/t/other', x)
-      await accented.evictPrefix('/t/', ['/t/café'])
+      await accented.remove('/t', { subtree: true, excluded: ['/t/café'] })
       expect(await accented.get('/t/café/f')).toEqual(x)
       expect(await accented.get('/t/other')).toBeNull()
     } finally {

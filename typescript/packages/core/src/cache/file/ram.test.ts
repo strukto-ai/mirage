@@ -99,36 +99,26 @@ describe('RAMFileCacheStore', () => {
     expect(await c.get('/a')).toBeNull()
   })
 
-  it('evictPrefix drops only matching keys', async () => {
+  it('a subtree removal drops only the keys below', async () => {
     const c = new RAMFileCacheStore({ limit: 1024 })
     await c.set('/data/a.txt', encode('a'))
     await c.set('/data/sub/b.txt', encode('bb'))
     await c.set('/other/c.txt', encode('ccc'))
-    await c.evictPrefix('/data/')
+    await c.set('/database/d.txt', encode('d'))
+    await c.remove('/data', { subtree: true })
+    expect(await c.exists('/database/d.txt')).toBe(true)
     expect(await c.exists('/data/a.txt')).toBe(false)
     expect(await c.exists('/data/sub/b.txt')).toBe(false)
     expect(await c.exists('/other/c.txt')).toBe(true)
   })
 
-  it('evictPrefix reclaims the evicted bytes', async () => {
+  it('a subtree removal reclaims the evicted bytes', async () => {
     const c = new RAMFileCacheStore({ limit: 1024 })
     await c.set('/data/a.txt', encode('12345'))
     await c.set('/other/c.txt', encode('xy'))
-    await c.evictPrefix('/data/')
+    await c.remove('/data', { subtree: true })
     expect(c.cacheSize).toBe(2)
     expect(c.cacheEntries).toBe(1)
-  })
-
-  it('evictPaths drops the named keys synchronously', async () => {
-    const c = new RAMFileCacheStore({ limit: 1024 })
-    await c.set('/d/a.txt', encode('12345'))
-    await c.set('/d/b.txt', encode('xy'))
-    // No await on the eviction itself: the snapshot load path is sync,
-    // which is the whole reason this seam exists beside remove().
-    c.evictPaths(['/d/a.txt', '/d/missing.txt'])
-    expect(c.cacheSize).toBe(2)
-    expect(c.cacheEntries).toBe(1)
-    expect(await c.get('/d/a.txt')).toBeNull()
   })
 })
 
@@ -165,27 +155,27 @@ describe('RAMFileCacheStore: a writer waiting on the lock', () => {
     const pending = cache.keepFingerprints({ '/large': 'v1' })
     await cache.clear()
     await pending
-    expect(await cache.fingerprint('/large')).toBeNull()
+    expect((await cache.fingerprints(['/large']))[0]).toBeNull()
   })
 
-  it('a set parked when a covering prefix is evicted is discarded', async () => {
+  it('a set parked when a covering subtree is removed is discarded', async () => {
     // The fill has no entry yet, so only its registration in
-    // `invalidation.enter` lets evictPrefix name it; the redis suite used
-    // to be the only place this was exercised in TypeScript.
+    // `invalidation.enter` lets the subtree removal name it; the redis
+    // suite used to be the only place this was exercised in TypeScript.
     const cache = new RAMFileCacheStore()
-    const pending = cache.set('/large', new Uint8Array([0x78]))
-    await cache.evictPrefix('/lar')
+    const pending = cache.set('/d/large', new Uint8Array([0x78]))
+    await cache.remove('/d', { subtree: true })
     await pending
-    expect(await cache.get('/large')).toBeNull()
+    expect(await cache.get('/d/large')).toBeNull()
   })
 
-  it('a set of an unrelated key survives a prefix eviction elsewhere', async () => {
+  it('a set of an unrelated key survives a subtree removal elsewhere', async () => {
     // `rm -r /a` or `mv /a ...` must not throw away a fill of another
     // key that is waiting its turn.
     const cache = new RAMFileCacheStore()
     const data = new Uint8Array([0x78])
     const fill = cache.set('/b', data)
-    await cache.evictPrefix('/a/')
+    await cache.remove('/a', { subtree: true })
     await fill
     expect(await cache.get('/b')).toEqual(data)
   })
@@ -265,7 +255,7 @@ describe('a version kept without bytes', () => {
     expect(await c.get('/a')).toBeNull()
     expect(await c.isFresh('/a', 'v1')).toBe(false)
     expect(await c.isUnbounded('/a')).toBe(false)
-    expect(await c.fingerprint('/a')).toBe('v1')
+    expect((await c.fingerprints(['/a']))[0]).toBe('v1')
     await c.set('/a', encode('read'), { fingerprint: 'v1' })
     expect(decode(await c.get('/a'))).toBe('read')
   })
@@ -275,7 +265,7 @@ describe('a version kept without bytes', () => {
     const c = new RAMFileCacheStore()
     await c.set('/a', encode('old'), { fingerprint: 'v1', ttl: 0 })
     await c.keepFingerprints({ '/a': 'v2' })
-    expect(await c.fingerprint('/a')).toBe('v2')
+    expect((await c.fingerprints(['/a']))[0]).toBe('v2')
     expect(await c.get('/a')).toBeNull()
     // The old bytes leave the store with their entry, not outside the limit.
     expect(
@@ -294,9 +284,9 @@ describe('a version kept without bytes', () => {
     await c.set('/a', encode('theirs'), { fingerprint: 'v2' })
     await c.keepFingerprints({ '/a': 'v1' })
     expect(decode(await c.get('/a'))).toBe('theirs')
-    expect(await c.fingerprint('/a')).toBe('v2')
+    expect((await c.fingerprints(['/a']))[0]).toBe('v2')
     await c.remove('/a')
-    expect(await c.fingerprint('/a')).toBeNull()
+    expect((await c.fingerprints(['/a']))[0]).toBeNull()
   })
 
   it('keeps a version an expiry leaves within the limit', async () => {
@@ -321,9 +311,9 @@ describe('a version kept without bytes', () => {
     if (kept) await c.keepFingerprints({ '/a': 'v1' })
     clock.advance(10)
     expect(await c.exists('/a')).toBe(false)
-    expect(await c.fingerprint('/a')).toBe('v1')
+    expect((await c.fingerprints(['/a']))[0]).toBe('v1')
     expect(await c.get('/a')).toBeNull()
-    expect(await c.fingerprint('/a')).toBe(kept ? 'v1' : null)
+    expect((await c.fingerprints(['/a']))[0]).toBe(kept ? 'v1' : null)
   })
 
   it('serves an entry at ttl-1 and expires it at ttl', async () => {

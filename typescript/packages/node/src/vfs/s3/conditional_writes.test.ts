@@ -859,7 +859,7 @@ describe('conditional writes on an S3 mount', () => {
     // leaves no token behind.
     expect((await run(ws, 'head -c 1 /s3/g'))[0]).toBe(0)
     expect(await ws.cache.exists('/s3/g')).toBe(false)
-    expect(await ws.cache.fingerprint('/s3/g')).toBeNull()
+    expect((await ws.cache.fingerprints(['/s3/g']))[0]).toBeNull()
   })
 
   it('conditions only the writes to the conditional mount', async () => {

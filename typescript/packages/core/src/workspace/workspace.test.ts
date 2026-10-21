@@ -539,18 +539,14 @@ describe('Workspace custom cache option', () => {
       if (this.store.has(key)) return Promise.resolve(false)
       return this.set(key, data).then(() => true)
     }
-    remove(key: string): Promise<void> {
+    remove(key: string, options: { subtree?: boolean } = {}): Promise<void> {
       this.store.delete(key)
-      return Promise.resolve()
-    }
-    evictPrefix(prefix: string): Promise<void> {
-      for (const key of [...this.store.keys()]) {
-        if (key.startsWith(prefix)) this.store.delete(key)
+      for (const below of [...this.store.keys()]) {
+        if (options.subtree === true && below.startsWith(key.replace(/\/$/, '') + '/')) {
+          this.store.delete(below)
+        }
       }
       return Promise.resolve()
-    }
-    evictPaths(paths: Iterable<string>): void {
-      for (const key of paths) this.store.delete(key)
     }
     override exists(key: string | PathSpec): Promise<boolean> {
       const k = typeof key === 'string' ? key : key.mountPath
@@ -562,9 +558,6 @@ describe('Workspace custom cache option', () => {
     fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
       return Promise.resolve(keys.map(() => null))
     }
-    fingerprint(): Promise<string | null> {
-      return Promise.resolve(null)
-    }
     isFresh(): Promise<boolean> {
       return Promise.resolve(false)
     }
@@ -574,9 +567,6 @@ describe('Workspace custom cache option', () => {
     clear(): Promise<void> {
       this.store.clear()
       return Promise.resolve()
-    }
-    multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]> {
-      return Promise.resolve(keys.map((k) => this.store.get(k) ?? null))
     }
   }
 
@@ -677,16 +667,23 @@ describe('Workspace.unmount', () => {
       const release = new Promise<void>((resolve) => {
         resume = resolve
       })
-      const evict =
-        store === 'file' ? cache.evictPrefix.bind(cache) : index.invalidatePrefix.bind(index)
-      const spy =
-        store === 'file' ? vi.spyOn(cache, 'evictPrefix') : vi.spyOn(index, 'invalidatePrefix')
-      spy.mockImplementationOnce(async (prefix) => {
+      const blocked = async (evict: () => Promise<void>): Promise<void> => {
         enter()
         await release
         if (fails) throw new Error('cache unavailable')
-        await evict(prefix)
-      })
+        await evict()
+      }
+      if (store === 'file') {
+        const evict = cache.remove.bind(cache)
+        vi.spyOn(cache, 'remove').mockImplementationOnce((key, options) =>
+          blocked(() => evict(key, options)),
+        )
+      } else {
+        const evict = index.invalidatePrefix.bind(index)
+        vi.spyOn(index, 'invalidatePrefix').mockImplementationOnce((key, excluded) =>
+          blocked(() => evict(key, excluded)),
+        )
+      }
       const bytes = new TextEncoder()
       await cache.set('/data', bytes.encode('root'))
       await cache.set('/data/file', bytes.encode('old'))

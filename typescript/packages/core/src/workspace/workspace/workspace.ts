@@ -1422,8 +1422,8 @@ export class Workspace {
   protected installDriftState(
     state: WorkspaceStateDict,
     policy: DriftPolicy = DriftPolicy.STRICT,
-  ): void {
-    installDriftState(this.registry, this.cache, this.drift, state, policy)
+  ): Promise<void> {
+    return installDriftState(this.registry, this.cache, this.drift, state, policy)
   }
 
   /**
@@ -1968,7 +1968,7 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
-    ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
     return ws
   }
 

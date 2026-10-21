@@ -261,10 +261,12 @@ describe('EventHub', () => {
         await index.setDir('/x/t', [['s1', row('s1', 'folder')]])
         await index.setDir('/x/t/s1', [['f', row('f')]])
         await cache.set('/x/t/s1/f', new TextEncoder().encode('f'))
-        const evict = vi.spyOn(cache, 'evictPrefix')
+        const evict = vi.spyOn(cache, 'remove')
         const drop = vi.spyOn(index, 'invalidatePrefix')
         for (const path of paths) await hub.notify(change(FileChangeKind.DELETE, path))
-        expect(evict).toHaveBeenCalledTimes(expected)
+        expect(evict.mock.calls.filter(([, options]) => options?.subtree === true)).toHaveLength(
+          expected,
+        )
         expect(drop).toHaveBeenCalledTimes(expected)
         expect((await index.listDir('/x/t')).status).toBe(LookupStatus.NOT_FOUND)
         expect((await index.listDir('/x/t/s1')).status).toBe(LookupStatus.NOT_FOUND)

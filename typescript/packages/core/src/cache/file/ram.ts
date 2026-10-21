@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { underPath } from '../../utils/key_prefix.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { type Clock, SystemClock } from '../../utils/clock.ts'
@@ -147,25 +148,11 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     await this.evict()
   }
 
-  async evictPrefix(prefix: string, excluded: readonly string[] = []): Promise<void> {
-    // Before the removals below: a fill in flight under the prefix has no
-    // entry yet, so only its registration can name it.
-    this.invalidation.invalidatePrefix(prefix, excluded)
-    const keys = [...this.entries.keys()].filter(
-      (k) => k.startsWith(prefix) && !excluded.some((boundary) => underPath(k, boundary)),
-    )
-    for (const key of keys) await this.remove(key)
-  }
-
-  evictPaths(paths: Iterable<string>): void {
-    for (const key of paths) {
-      this.invalidation.invalidate(key)
-      this.dropEntry(key)
-    }
-  }
-
-  remove(key: string): Promise<void> {
-    return this.lock.withLock(key, () => {
+  async remove(
+    key: string,
+    options: { subtree?: boolean; excluded?: readonly string[] } = {},
+  ): Promise<void> {
+    await this.lock.withLock(key, () => {
       // Advanced here, when the removal takes effect, not when it was
       // called: a writer queued behind it took its stamp before this ran,
       // and only a later invalidation tells it its bytes predate the
@@ -176,9 +163,16 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
       this.lock.discard(key)
       return Promise.resolve()
     })
-  }
-  fingerprint(key: string): Promise<string | null> {
-    return Promise.resolve(this.entries.get(key)?.fingerprint ?? null)
+    if (options.subtree !== true) return
+    const prefix = rstripSlash(key) + '/'
+    const excluded = options.excluded ?? []
+    // Before the removals below: a fill in flight under the prefix has no
+    // entry yet, so only its registration can name it.
+    this.invalidation.invalidatePrefix(prefix, excluded)
+    const keys = [...this.entries.keys()].filter(
+      (k) => k.startsWith(prefix) && !excluded.some((boundary) => underPath(k, boundary)),
+    )
+    for (const below of keys) await this.remove(below)
   }
   fingerprints(keys: readonly string[]): Promise<(string | null)[]> {
     return Promise.resolve(keys.map((key) => this.entries.get(key)?.fingerprint ?? null))
@@ -264,12 +258,6 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     this.size = 0
     this.lock.clear()
     return Promise.resolve()
-  }
-
-  async multiGet(keys: readonly string[]): Promise<(Uint8Array | null)[]> {
-    const out: (Uint8Array | null)[] = []
-    for (const k of keys) out.push(await this.get(k))
-    return out
   }
 
   private async evict(): Promise<void> {

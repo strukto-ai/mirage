@@ -44,13 +44,11 @@ async function main(): Promise<void> {
   console.log(`  matches same fp: ${String(await cache.isFresh('/data/hello.txt', fp))}`)
   console.log(`  matches other fp: ${String(await cache.isFresh('/data/hello.txt', 'abc'))}`)
 
-  console.log('\n--- multiGet ---')
+  console.log('\n--- get, hit or miss ---')
   await cache.set('/data/new.bin', new Uint8Array([1, 2, 3]))
-  const keys = ['/data/hello.txt', '/data/new.bin', '/data/missing']
-  const results = await cache.multiGet(keys)
-  for (let i = 0; i < keys.length; i++) {
-    const r = results[i]
-    console.log(`  ${keys[i]}: ${r === null ? 'MISS' : `${String(r.byteLength)} bytes`}`)
+  for (const key of ['/data/hello.txt', '/data/new.bin', '/data/missing']) {
+    const r = await cache.get(key)
+    console.log(`  ${key}: ${r === null ? 'MISS' : `${String(r.byteLength)} bytes`}`)
   }
 
   console.log('\n--- ttl expiry ---')

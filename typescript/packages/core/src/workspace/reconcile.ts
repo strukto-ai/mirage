@@ -371,8 +371,7 @@ export class Reconciler {
     for (const path of paths) {
       const parents = [...ancestors(path), ...(path === '/' ? [] : ['/'])]
       if (parents.some((parent) => folders.has(parent))) continue
-      await this.cache.remove(path)
-      if (folders.has(path)) await this.cache.evictPrefix(rstripSlash(path) + '/', excluded)
+      await this.cache.remove(path, { subtree: folders.has(path), excluded })
     }
     if (paths.size > 0) await this.namespace.dropOverlaysUnder([...paths], excluded)
   }

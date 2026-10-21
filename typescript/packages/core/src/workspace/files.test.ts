@@ -387,7 +387,7 @@ describe('fresh stat', () => {
       await ws.cache.remove('/data/f.txt')
       await ws.cache.keepFingerprints({ '/data/f.txt': 'v1' })
       await ws.vfs.stat('/data/f.txt', undefined, { fresh: true })
-      expect(await ws.cache.fingerprint('/data/f.txt')).toBe('v1')
+      expect((await ws.cache.fingerprints(['/data/f.txt']))[0]).toBe('v1')
     } finally {
       await ws.close()
     }
@@ -486,7 +486,7 @@ describe('fresh stat', () => {
       outer.store.files.set('/d', new TextEncoder().encode('file'))
       const row = await ws.vfs.stat('/data/d', undefined, { fresh: true })
       expect(row.type).toBe(FileType.FILE)
-      expect(await ws.cache.fingerprint('/data/d/inner/f.txt')).toBe('v1')
+      expect((await ws.cache.fingerprints(['/data/d/inner/f.txt']))[0]).toBe('v1')
     } finally {
       await ws.close()
     }
@@ -528,7 +528,7 @@ describe('fresh stat', () => {
       }
       const row = await ws.vfs.stat('/data/f.txt', undefined, { fresh: true })
       expect(row.size).toBe(3)
-      expect(await ws.cache.fingerprint('/data/f.txt')).toBe('v1')
+      expect((await ws.cache.fingerprints(['/data/f.txt']))[0]).toBe('v1')
     } finally {
       await ws.close()
     }

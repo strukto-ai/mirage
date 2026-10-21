@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
 from importlib.resources import files
 
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
@@ -127,12 +126,22 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         finally:
             self._invalidation.leave(key)
 
-    async def remove(self, key: str) -> None:
+    async def remove(
+        self,
+        key: str,
+        *,
+        subtree: bool = False,
+        excluded: tuple[str, ...] = (),
+    ) -> None:
         self._invalidation.invalidate(key)
         pipe = self._cache_client.pipeline()
         pipe.delete(self._data_key(key))
         pipe.delete(self._meta_key(key))
         await pipe.execute()
+        if subtree:
+            prefix = key.rstrip("/") + "/"
+            self._invalidation.invalidate_prefix(prefix, excluded)
+            await self._drop_matching(prefix, excluded)
 
     async def exists(self, key: str | PathSpec) -> bool:
         """Whether the cache holds an entry for ``key``.
@@ -144,9 +153,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         """
         name = key if isinstance(key, str) else key.mount_path
         return bool(await self._cache_client.exists(self._data_key(name)))
-
-    async def fingerprint(self, key: str) -> str | None:
-        return _text(await self._cache_client.get(self._meta_key(key)))
 
     async def fingerprints(self, keys: list[str]) -> list[str | None]:
         out: list[str | None] = []
@@ -205,12 +211,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self._invalidation.invalidate_all()
         await self._drop_matching("")
 
-    async def evict_prefix(
-        self, prefix: str, *, excluded: tuple[str, ...] = ()
-    ) -> None:
-        self._invalidation.invalidate_prefix(prefix, excluded)
-        await self._drop_matching(prefix, excluded)
-
     async def _drop_matching(
         self, prefix: str, excluded: tuple[str, ...] = ()
     ) -> None:
@@ -266,14 +266,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
 
     async def close(self) -> None:
         await self._store.close()
-
-    def evict_paths(self, paths: Iterable[str]) -> None:
-        # No-op: Redis cache holds nothing restored from the snapshot
-        # (only RAM caches are repopulated by _restore_cache), and the
-        # snapshot load path is sync so we cannot await redis deletes
-        # here. If a caller needs to drop live Redis-cached entries, use
-        # await self.remove(key) per path from an async context.
-        pass
 
     @property
     def cache_size(self) -> int | None:

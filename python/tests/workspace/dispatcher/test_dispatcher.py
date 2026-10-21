@@ -3097,7 +3097,7 @@ async def test_a_streamed_write_keeps_what_fits_the_drain_budget(
     original = destination.write_stream
 
     async def write(path, data, *, atomic=False):
-        tokens.append(await ws.cache.fingerprint(path.virtual))
+        tokens.append((await ws.cache.fingerprints([path.virtual]))[0])
         assert not await ws.cache.exists(path.virtual)
         await original(path, data, atomic=atomic)
         record("write", path.virtual, "ram", 3, start_op(), fingerprint="v2")
@@ -3109,7 +3109,7 @@ async def test_a_streamed_write_keeps_what_fits_the_drain_budget(
         await ws.vfs.write("/dst/f", yield_bytes(b"new"))
         assert tokens == ["v1"]
         assert await ws.cache.get("/dst/f") == kept
-        assert await ws.cache.fingerprint("/dst/f") == "v2"
+        assert (await ws.cache.fingerprints(["/dst/f"]))[0] == "v2"
     finally:
         await ws.close()
 

@@ -1854,7 +1854,7 @@ class Workspace:
             profile=profile,
             clock=clock,
         )
-        install_fingerprints(
+        await install_fingerprints(
             ws._registry,
             ws._cache,
             ws._drift,

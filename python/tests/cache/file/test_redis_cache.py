@@ -204,7 +204,9 @@ async def test_prefix_eviction_preserves_nested_mount(cache):
         "/data/sub/nested2",
     ):
         await cache.set(key, b"value")
-    await cache.evict_prefix("/data/sub/", excluded=("/data/sub/nested",))
+    await cache.remove(
+        "/data/sub", subtree=True, excluded=("/data/sub/nested",)
+    )
     assert await cache.get("/data/sub/nested") == b"value"
     assert await cache.get("/data/sub/nested/file") == b"value"
     assert await cache.get("/data/sub/old") is None
@@ -212,7 +214,7 @@ async def test_prefix_eviction_preserves_nested_mount(cache):
 
 
 async def _evict_t(cache) -> None:
-    await cache.evict_prefix("/t/")
+    await cache.remove("/t", subtree=True)
 
 
 async def _clear(cache) -> None:
@@ -220,7 +222,7 @@ async def _clear(cache) -> None:
 
 
 _PREFIX_DROPS = pytest.mark.parametrize(
-    "drop", [_evict_t, _clear], ids=["evict_prefix", "clear"]
+    "drop", [_evict_t, _clear], ids=["remove_subtree", "clear"]
 )
 
 
@@ -335,14 +337,17 @@ async def test_a_prefix_drop_spanning_pages_takes_data_and_meta_and_nothing_else
     await cache.set("/t/subway", b"keep", fingerprint="etag")
     await cache.set("/t/sub/nested/kept", b"keep", fingerprint="etag")
     pipelines = _spy_pipelines(cache._cache_client)
-    await cache.evict_prefix("/t/sub/", excluded=("/t/sub/nested",))
+    await cache.remove("/t/sub", subtree=True, excluded=("/t/sub/nested",))
     # Deleted page by page, each page in DELs of at most DEL_BATCH keys:
     # one DEL of N keys blocks the server for all N at once, and N bodies
-    # may each be large. A page goes out as one pipeline, one round trip.
-    sizes = [n for pipe in pipelines for n in pipe]
-    assert len(pipelines) >= 3
+    # may each be large. A page goes out as one pipeline, one round trip,
+    # after the one that drops the key's own entry.
+    own, *pages = pipelines
+    sizes = [n for pipe in pages for n in pipe]
+    assert own == [1, 1]
+    assert len(pages) >= 3
     assert max(sizes) <= DEL_BATCH
-    assert any(len(pipe) > 1 for pipe in pipelines)
+    assert any(len(pipe) > 1 for pipe in pages)
     assert sum(sizes) == 5000
     assert await _cached_keys(cache) == sorted(
         [
@@ -414,7 +419,7 @@ async def test_a_prefix_drop_under_non_ascii_names(redis_prefix):
     try:
         await accented.set("/t/café/f", b"x")
         await accented.set("/t/other", b"x")
-        await accented.evict_prefix("/t/", excluded=("/t/café",))
+        await accented.remove("/t", subtree=True, excluded=("/t/café",))
         assert await accented.get("/t/café/f") == b"x"
         assert await accented.get("/t/other") is None
     finally:
@@ -428,7 +433,7 @@ async def test_a_version_kept_without_bytes_is_never_read(cache):
     assert not await cache.exists("/a")
     assert await cache.get("/a") is None
     assert not await cache.is_fresh("/a", "v1")
-    assert await cache.fingerprint("/a") == "v1"
+    assert (await cache.fingerprints(["/a"]))[0] == "v1"
     await cache.set("/a", b"read", fingerprint="v1")
     assert await cache.get("/a") == b"read"
 
@@ -494,9 +499,9 @@ async def test_a_version_never_replaces_bytes_written_since(cache):
     await cache.set("/a", b"theirs", fingerprint="v2")
     await cache.keep_fingerprints({"/a": "v1"})
     assert await cache.get("/a") == b"theirs"
-    assert await cache.fingerprint("/a") == "v2"
+    assert (await cache.fingerprints(["/a"]))[0] == "v2"
     await cache.remove("/a")
-    assert await cache.fingerprint("/a") is None
+    assert (await cache.fingerprints(["/a"]))[0] is None
 
 
 def test_the_two_version_lua_copies_are_byte_identical():

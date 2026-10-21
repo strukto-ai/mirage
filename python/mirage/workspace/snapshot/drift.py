@@ -271,7 +271,7 @@ def capture_fingerprints(
     return list(out.values())
 
 
-def install_fingerprints(
+async def install_fingerprints(
     registry: MountRegistry,
     cache: FileCacheMixin,
     drift: DriftQueue,
@@ -281,11 +281,8 @@ def install_fingerprints(
     """Install snapshot fingerprints/revisions onto a reconstructed workspace.
 
     Revisions pin replay reads to exact backend versions; bare
-    fingerprints queue an eager drift check. OFF drops the restored RAM
-    cache entries for fingerprinted paths so reads serve current state;
-    a Redis cache is never restored from a snapshot (``_restore_cache``
-    skips it), so its ``evict_paths`` is a documented no-op and there
-    is nothing to drop.
+    fingerprints queue an eager drift check. OFF drops the restored
+    cache entries for fingerprinted paths so reads serve current state.
 
     Args:
         registry (MountRegistry): the reconstructed workspace's mounts.
@@ -296,10 +293,8 @@ def install_fingerprints(
             drops the restored cache entries.
     """
     if drift_policy == DriftPolicy.OFF:
-        if fingerprint_entries:
-            cache.evict_paths(
-                f[FingerprintKey.PATH] for f in fingerprint_entries
-            )
+        for f in fingerprint_entries:
+            await cache.remove(f[FingerprintKey.PATH])
         return
     for f in fingerprint_entries:
         path = f[FingerprintKey.PATH]

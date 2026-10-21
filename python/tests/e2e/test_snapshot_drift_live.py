@@ -218,7 +218,7 @@ def test_live_pin_records_agent_version_not_snapshot_time_version(tmp_path):
         asyncio.run(src.snapshot(snap))
 
         dst = Workspace.load(snap, mounts=_override())
-        dst._cache.evict_paths([probe])
+        asyncio.run(dst._cache.remove(probe))
         result = asyncio.run(dst.shell(f"cat {probe}"))
         assert result.stdout == b"v1\n", (
             f"snapshot pinned the wrong VersionId; served {result.stdout!r} "
@@ -260,7 +260,7 @@ def test_live_version_pin_serves_original_on_versioned_bucket(tmp_path):
         client.put_object(Bucket=LIVE_BUCKET, Key=key, Body=b"mutated\n")
 
         dst = Workspace.load(snap, mounts=_override())
-        dst._cache.evict_paths([probe])
+        asyncio.run(dst._cache.remove(probe))
         result = asyncio.run(dst.shell(f"cat {probe}"))
         assert result.stdout == b"original\n", (
             "pinned read should serve the recorded version, "

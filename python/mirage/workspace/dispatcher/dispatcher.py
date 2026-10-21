@@ -2407,7 +2407,7 @@ class Dispatcher:
         kept = await self._cache.get(call.path.virtual)
         if kept is None:
             return None
-        return kept, await self._cache.fingerprint(call.path.virtual)
+        return kept, (await self._cache.fingerprints([call.path.virtual]))[0]
 
     async def _keep_written(
         self,

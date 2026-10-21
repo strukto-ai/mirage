@@ -14,7 +14,6 @@
 
 import asyncio
 from collections import OrderedDict
-from collections.abc import Iterable
 
 from mirage.cache.file.entry import CacheEntry, Holds
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
@@ -112,7 +111,13 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             self._invalidation.leave(key)
         await self._evict()
 
-    async def remove(self, key: str) -> None:
+    async def remove(
+        self,
+        key: str,
+        *,
+        subtree: bool = False,
+        excluded: tuple[str, ...] = (),
+    ) -> None:
         async with self._lock_for(key):
             # Advanced here, when the removal takes effect, not when it
             # was called: a writer queued behind it took its stamp before
@@ -122,6 +127,19 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             self._invalidation.invalidate(key)
             self._drop_entry(key)
         self._discard_lock(key)
+        if not subtree:
+            return
+        prefix = key.rstrip("/") + "/"
+        # Before the removals below: a fill in flight under the prefix has
+        # no entry yet, so only its registration can name it.
+        self._invalidation.invalidate_prefix(prefix, excluded)
+        for below in [
+            k
+            for k in list(self._entries)
+            if k.startswith(prefix)
+            and not any(under_path(k, p) for p in excluded)
+        ]:
+            await self.remove(below)
 
     async def exists(self, key: str | PathSpec) -> bool:
         """Whether the cache holds a live entry for ``key``.
@@ -140,9 +158,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             and not entry.is_expired(self._seconds())
         )
 
-    async def fingerprint(self, key: str) -> str | None:
-        entry = self._entries.get(key)
-        return entry.fingerprint if entry is not None else None
+    async def fingerprints(self, keys: list[str]) -> list[str | None]:
+        entries = [self._entries.get(key) for key in keys]
+        return [e.fingerprint if e is not None else None for e in entries]
 
     async def keep_fingerprints(self, fingerprints: dict[str, str]) -> None:
         for key, fingerprint in fingerprints.items():
@@ -205,25 +223,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             self._store.files.clear()
             self._cache_size = 0
             self._clear_locks()
-
-    async def evict_prefix(
-        self, prefix: str, *, excluded: tuple[str, ...] = ()
-    ) -> None:
-        # Before the removals below: a fill in flight under the prefix has
-        # no entry yet, so only its registration can name it.
-        self._invalidation.invalidate_prefix(prefix, excluded)
-        for key in [
-            k
-            for k in list(self._entries)
-            if k.startswith(prefix)
-            and not any(under_path(k, p) for p in excluded)
-        ]:
-            await self.remove(key)
-
-    def evict_paths(self, paths: Iterable[str]) -> None:
-        for key in paths:
-            self._invalidation.invalidate(key)
-            self._drop_entry(key)
 
     def _drop_entry(self, key: str) -> None:
         entry = self._entries.pop(key, None)

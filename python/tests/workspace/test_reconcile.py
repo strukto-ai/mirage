@@ -666,9 +666,7 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
             await ws.cache.set(path, b"data")
             await ws.namespace.set_attrs(path, mode=0o600)
         await ws.namespace.symlink("/data/tree/link", "/data/target", 1)
-        with patch.object(
-            ws.cache, "evict_prefix", wraps=ws.cache.evict_prefix
-        ) as evict:
+        with patch.object(ws.cache, "remove", wraps=ws.cache.remove) as evict:
             await ws.mount("/data").index.report_gone(
                 [
                     Evicted("/data/tree/sub", folder=True),
@@ -679,11 +677,15 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
                     Evicted("/data/tree/nested/keep", folder=False),
                 ]
             )
-        assert evict.call_count == 2
-        assert {call.args[0] for call in evict.call_args_list} == {
-            "/data/tree/",
-            "/data/tree2/",
-        }
+        assert {
+            call.args[0]
+            for call in evict.call_args_list
+            if call.kwargs.get("subtree")
+        } == {"/data/tree", "/data/tree2"}
+        assert (
+            sum(bool(c.kwargs.get("subtree")) for c in evict.call_args_list)
+            == 2
+        )
         for path in removed:
             assert not await ws.cache.exists(path)
             assert ws.namespace.meta_for(path) is None

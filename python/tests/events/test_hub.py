@@ -529,16 +529,17 @@ async def test_delete_stream_drops_only_retained_subtrees(paths, expected):
         await index.set_dir("/x/t/s1", [("f", _row("f"))])
         await cache.set("/x/t/s1/f", b"f")
         with (
-            patch.object(
-                cache, "evict_prefix", wraps=cache.evict_prefix
-            ) as evict,
+            patch.object(cache, "remove", wraps=cache.remove) as evict,
             patch.object(
                 index, "invalidate_prefix", wraps=index.invalidate_prefix
             ) as drop,
         ):
             for path in paths:
                 await hub.notify(_change(FileChangeKind.DELETE, path))
-        assert evict.call_count == expected
+        assert (
+            sum(bool(c.kwargs.get("subtree")) for c in evict.call_args_list)
+            == expected
+        )
         assert drop.call_count == expected
         assert (await index.list_dir("/x/t")).status == LookupStatus.NOT_FOUND
         assert (

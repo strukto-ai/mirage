@@ -86,25 +86,27 @@ async def test_locks_cleaned_after_eviction():
 
 
 @pytest.mark.asyncio
-async def test_evict_prefix_drops_only_matching_keys():
+async def test_a_subtree_removal_drops_only_the_keys_below():
     cache = RAMFileCacheStore()
     await cache.set("/data/a.txt", b"a")
     await cache.set("/data/sub/b.txt", b"bb")
     await cache.set("/other/c.txt", b"ccc")
-    await cache.evict_prefix("/data/")
+    await cache.set("/database/d.txt", b"d")
+    await cache.remove("/data", subtree=True)
+    assert await cache.exists("/database/d.txt") is True
     assert await cache.exists("/data/a.txt") is False
     assert await cache.exists("/data/sub/b.txt") is False
     assert await cache.exists("/other/c.txt") is True
 
 
 @pytest.mark.asyncio
-async def test_evict_prefix_reclaims_the_evicted_bytes():
-    """Eviction runs through remove(), so the LRU accounting stays
+async def test_a_subtree_removal_reclaims_the_evicted_bytes():
+    """Each key below goes through remove(), so the LRU accounting stays
     truthful instead of leaking the dropped entries' sizes."""
     cache = RAMFileCacheStore()
     await cache.set("/data/a.txt", b"12345")
     await cache.set("/other/c.txt", b"xy")
-    await cache.evict_prefix("/data/")
+    await cache.remove("/data", subtree=True)
     assert cache.cache_size == 2
     assert cache.cache_entries == 1
 
@@ -162,25 +164,25 @@ async def test_clear_while_a_writer_is_parked_discards_its_write(operation):
         lock.release()
     await asyncio.gather(pending, clearing)
     assert await cache.get("/large") is None
-    assert await cache.fingerprint("/large") is None
+    assert (await cache.fingerprints(["/large"]))[0] is None
     assert cache.cache_size == 0
 
 
 @pytest.mark.asyncio
-async def test_evict_prefix_while_a_writer_is_parked_discards_its_write():
+async def test_a_subtree_removal_while_a_writer_is_parked_discards_its_write():
     cache = RAMFileCacheStore()
-    lock = cache._lock_for("/large")
+    lock = cache._lock_for("/d/large")
     await lock.acquire()
-    pending = asyncio.create_task(cache.set("/large", b"x"))
+    pending = asyncio.create_task(cache.set("/d/large", b"x"))
     evicting: asyncio.Task[None] | None = None
     try:
         await asyncio.sleep(0.01)
-        evicting = asyncio.create_task(cache.evict_prefix("/lar"))
+        evicting = asyncio.create_task(cache.remove("/d", subtree=True))
         await asyncio.sleep(0.01)
     finally:
         lock.release()
     await asyncio.gather(pending, evicting)
-    assert await cache.get("/large") is None
+    assert await cache.get("/d/large") is None
 
 
 @pytest.mark.asyncio
@@ -237,7 +239,7 @@ async def test_a_parked_fill_survives_a_prefix_eviction_elsewhere():
     fill = asyncio.create_task(cache.set("/b", b"x"))
     try:
         await asyncio.sleep(0.01)
-        await cache.evict_prefix("/a/")
+        await cache.remove("/a", subtree=True)
     finally:
         lock.release()
     await fill
@@ -394,7 +396,7 @@ async def test_a_version_kept_without_bytes_is_never_read():
     assert await cache.get("/a") is None
     assert not await cache.is_fresh("/a", "v1")
     assert not await cache.is_unbounded("/a")
-    assert await cache.fingerprint("/a") == "v1"
+    assert (await cache.fingerprints(["/a"]))[0] == "v1"
     await cache.set("/a", b"read", fingerprint="v1")
     assert await cache.get("/a") == b"read"
 
@@ -405,9 +407,9 @@ async def test_a_version_never_replaces_bytes_written_since():
     await cache.set("/a", b"theirs", fingerprint="v2")
     await cache.keep_fingerprints({"/a": "v1"})
     assert await cache.get("/a") == b"theirs"
-    assert await cache.fingerprint("/a") == "v2"
+    assert (await cache.fingerprints(["/a"]))[0] == "v2"
     await cache.remove("/a")
-    assert await cache.fingerprint("/a") is None
+    assert (await cache.fingerprints(["/a"]))[0] is None
 
 
 @pytest.mark.asyncio
@@ -416,7 +418,7 @@ async def test_a_version_replaces_bytes_past_their_bound():
     cache = RAMFileCacheStore()
     await cache.set("/a", b"old", fingerprint="v1", ttl=0)
     await cache.keep_fingerprints({"/a": "v2"})
-    assert await cache.fingerprint("/a") == "v2"
+    assert (await cache.fingerprints(["/a"]))[0] == "v2"
     assert await cache.get("/a") is None
     # The old bytes leave the store with their entry, not outside the limit.
     assert "/a" not in cache._store.files
@@ -453,9 +455,9 @@ async def test_an_expired_entry_still_answers_its_version(kept):
         await cache.keep_fingerprints({"/a": "v1"})
     clock.advance(10)
     assert not await cache.exists("/a")
-    assert await cache.fingerprint("/a") == "v1"
+    assert (await cache.fingerprints(["/a"]))[0] == "v1"
     assert await cache.get("/a") is None
-    assert await cache.fingerprint("/a") == ("v1" if kept else None)
+    assert (await cache.fingerprints(["/a"]))[0] == ("v1" if kept else None)
     assert "/a" not in cache._store.files
 
 
@@ -479,8 +481,8 @@ async def test_a_version_replaces_bytes_the_clock_expired():
     cache = RAMFileCacheStore(cache_limit="1MB", clock=clock)
     await cache.set("/a", b"old", fingerprint="v1", ttl=5)
     await cache.keep_fingerprints({"/a": "v2"})
-    assert await cache.fingerprint("/a") == "v1"
+    assert (await cache.fingerprints(["/a"]))[0] == "v1"
     clock.advance(5)
     await cache.keep_fingerprints({"/a": "v2"})
-    assert await cache.fingerprint("/a") == "v2"
+    assert (await cache.fingerprints(["/a"]))[0] == "v2"
     assert await cache.get("/a") is None

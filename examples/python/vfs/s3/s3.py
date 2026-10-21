@@ -693,7 +693,7 @@ async def main():
             mounts={"/s3/": S3VFS(config)},
             drift_policy=DriftPolicy.STRICT,
         )
-        loaded._cache.evict_paths([probe])
+        await loaded._cache.remove(probe)
         try:
             r = await loaded.shell(f"cat {probe}")
             served = (await r.stdout_str()).strip()

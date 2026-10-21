@@ -556,7 +556,7 @@ it('batches overlapping folders and protects nested mounts', async () => {
       await ws.namespace.setAttrs(path, { mode: 0o600 })
     }
     await ws.namespace.symlink('/data/tree/link', '/data/target', 1)
-    const evict = vi.spyOn(ws.cache, 'evictPrefix')
+    const evict = vi.spyOn(ws.cache, 'remove')
     await ws.mount('/data').index.reportGone([
       { path: '/data/tree/sub', folder: true },
       { path: '/data/tree/sub/old', folder: false },
@@ -565,8 +565,12 @@ it('batches overlapping folders and protects nested mounts', async () => {
       { path: '/data/tree2', folder: true },
       { path: '/data/tree/nested/keep', folder: false },
     ])
-    expect(evict).toHaveBeenCalledTimes(2)
-    expect(evict.mock.calls.map(([path]) => path).sort()).toEqual(['/data/tree/', '/data/tree2/'])
+    expect(
+      evict.mock.calls
+        .filter(([, options]) => options?.subtree === true)
+        .map(([path]) => path)
+        .sort(),
+    ).toEqual(['/data/tree', '/data/tree2'])
     for (const path of removed) {
       expect(await ws.cache.exists(path)).toBe(false)
       expect(ws.namespace.metaFor(path)).toBeNull()

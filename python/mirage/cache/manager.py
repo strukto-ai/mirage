@@ -164,7 +164,9 @@ class CacheManager:
                 await self._index.invalidate()
             if bodies and self._caches_reads and self._file_cache is not None:
                 for manager in (self, *self._aliases()):
-                    await self._file_cache.evict_prefix(manager._prefix + "/")
+                    await self._file_cache.remove(
+                        manager._prefix or "/", subtree=True
+                    )
 
     def scope_index(self) -> IndexCacheStore:
         """This mount's index, its backend metadata writes bound to the
@@ -888,7 +890,5 @@ class CacheManager:
     async def _drop_below(self, key: str) -> None:
         excluded = self._excluded_prefixes()
         if self._caches_reads and self._file_cache is not None:
-            await self._file_cache.evict_prefix(
-                key.rstrip("/") + "/", excluded=excluded
-            )
+            await self._file_cache.remove(key, subtree=True, excluded=excluded)
         await self._index.invalidate_prefix(key, excluded=excluded)

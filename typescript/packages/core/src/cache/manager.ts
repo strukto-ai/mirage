@@ -129,7 +129,7 @@ export class CacheManager {
       if (this.ownsPath(this.prefix || '/')) await this.index?.invalidate()
       if (!bodies || !this.cachesReads || this.fileCache === null) return
       for (const manager of [this, ...this.aliases()]) {
-        await this.fileCache.evictPrefix(manager.prefix + '/')
+        await this.fileCache.remove(manager.prefix || '/', { subtree: true })
       }
     })
   }
@@ -785,7 +785,7 @@ export class CacheManager {
 
   private async dropBelow(key: string): Promise<void> {
     if (this.cachesReads && this.fileCache !== null) {
-      await this.fileCache.evictPrefix(rstripSlash(key) + '/', this.excludedPrefixes())
+      await this.fileCache.remove(key, { subtree: true, excluded: this.excludedPrefixes() })
     }
     if (this.index !== null) await this.index.invalidatePrefix(key, this.excludedPrefixes())
   }

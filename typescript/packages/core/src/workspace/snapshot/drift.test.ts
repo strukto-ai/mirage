@@ -498,17 +498,16 @@ describe('checkDrift', () => {
 })
 
 describe('installDriftState under DriftPolicy.OFF', () => {
-  it('evicts the snapshot bytes before it returns', () => {
-    // fromState is sync, so a fire-and-forget remove() would let the
-    // very next read be served the bytes OFF exists to bypass.
+  it('evicts the snapshot bytes before it returns', async () => {
     const evicted: string[] = []
     const cache = {
-      evictPaths: (paths: Iterable<string>): void => {
-        evicted.push(...paths)
+      remove: (key: string): Promise<void> => {
+        evicted.push(key)
+        return Promise.resolve()
       },
     }
     const drift = new DriftQueue()
-    installDriftState(
+    await installDriftState(
       { tryMountFor: () => null, allMounts: () => [] },
       cache,
       drift,

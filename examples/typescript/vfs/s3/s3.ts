@@ -568,7 +568,7 @@ async function driftAndPin(): Promise<void> {
       { driftPolicy: DriftPolicy.STRICT },
       { '/s3/': new S3VFS(config) },
     )
-    loaded.cache.evictPaths([probe])
+    await loaded.cache.remove(probe)
     try {
       const served = (await loaded.shell(`cat ${probe}`)).stdoutText.trim()
       const pinnedOk = s.revision !== null && served === 'original'
