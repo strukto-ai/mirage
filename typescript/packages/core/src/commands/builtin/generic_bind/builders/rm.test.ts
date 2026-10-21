@@ -56,6 +56,7 @@ function files(removed?: string[]): Files {
       {
         prefix: '/',
         kind: 'fake',
+        mode: MountMode.WRITE,
         calls: new Set(removed === undefined ? [] : ['unlink', 'rm_r']),
       },
     ],

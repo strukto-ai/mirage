@@ -616,6 +616,9 @@ export class MountRegistry {
       return {
         prefix: mount.prefix,
         kind: vfs.name,
+        get mode() {
+          return mount.mode
+        },
         visible: (sessionId: string | null) => mount.visible === null || mount.visible(sessionId),
         maxDuEntries: vfs.maxDuEntries,
         calls: mount.calls,

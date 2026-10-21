@@ -915,6 +915,7 @@
    "typescript_only": {
     "callerFilesOf": "TypeScript has no package-private: Files assigns it from its static block so withCaller reaches the private forCaller.",
     "operandsOfFiles": "TypeScript has no package-private: Files assigns it from its static block so operandsOf reaches the private follow; Python's operands_of reads it directly.",
+    "pathModeOfFiles": "TypeScript has no package-private: Files assigns it from its static block so pathMode reaches the private bind and reader; Python's path_mode reads them directly.",
     "readerOfFiles": "TypeScript has no package-private: Files assigns it from its static block so readerOf reaches the private reader; Python's reader_of calls it directly.",
     "withCaller": "The door to the private forCaller for the file tool and explain.vfs; Python's task context carries the caller instead, so it has no counterpart."
    }

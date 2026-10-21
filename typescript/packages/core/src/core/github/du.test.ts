@@ -57,7 +57,15 @@ async function runDu(
       read_tree: (p) => tree(accessor, p),
     },
     {},
-    [{ prefix: '/', kind: 'github', maxDuEntries: null, calls: new Set(['read_tree']) }],
+    [
+      {
+        prefix: '/',
+        kind: 'github',
+        mode: MountMode.WRITE,
+        maxDuEntries: null,
+        calls: new Set(['read_tree']),
+      },
+    ],
   )
   const result = await runWithMountGate('/', MountMode.WRITE, async () =>
     BUILDER.fn(accessor, [PathSpec.fromStrPath(operand)], [], {

@@ -18,13 +18,14 @@ import type { OpRecord } from '../observe/record.ts'
 import { finishRecord, record, type RecordingState, startOp } from '../observe/context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
-import { FileType, PathSpec } from '../types.ts'
+import { FileType, type MountMode, PathSpec } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import {
   type Caller,
   type CallerDispatchFn,
   callsAs,
   currentCaller,
+  effectivePathMode,
   getCurrentSession,
   runWithCaller,
   sessionVisibility,
@@ -56,9 +57,10 @@ export interface FilesOptions {
 }
 
 // TypeScript has no package-private: the class assigns these from its static
-// block, where its private members are in reach, and `readerOf`, `operandsOf`
-// and `withCaller` are the doors through them.
+// block, where its private members are in reach, and `readerOf`, `operandsOf`,
+// `pathMode` and `withCaller` are the doors through them.
 let readerOfFiles: (files: Files) => NamespaceReader
+let pathModeOfFiles: (files: Files, path: string, follow: boolean) => Promise<MountMode | null>
 let operandsOfFiles: (files: Files) => FollowOperands | null
 let callerFilesOf: (files: Files, changes: Partial<Caller>) => Files
 
@@ -133,6 +135,18 @@ async function* recorded(
 export class Files {
   static {
     readerOfFiles = (files) => files.reader()
+    pathModeOfFiles = (files, path, follow) => {
+      const mode = (bound: SessionAccess | null): Promise<MountMode | null> => {
+        const reader = files.reader()
+        const virtual = follow ? reader.follow(path) : reader.followParent(path)
+        const owner = reader.owner(virtual)
+        if (owner === null) return Promise.resolve(null)
+        return Promise.resolve(
+          effectivePathMode(virtual, owner.prefix, owner.mode, bound ?? undefined),
+        )
+      }
+      return files.bind === null ? mode(null) : files.bind(files.sessionId, mode)
+    }
     operandsOfFiles = (files) => files.follow
     callerFilesOf = (files, changes) => files.forCaller(changes)
   }
@@ -797,6 +811,17 @@ export class WorkspaceFiles extends Files {
  */
 export function readerOf(files: Files): NamespaceReader {
   return readerOfFiles(files)
+}
+
+/**
+ * The mode a write at `path` meets, for the session `files` runs as
+ * (`effectivePathMode`): asked under the binding its ops run under, so a
+ * default session's profile counts, at the path a link leads to, where the
+ * write lands, unless `follow` is off. Null where no mount owns it. Mirrors
+ * Python's `path_mode`.
+ */
+export function pathMode(files: Files, path: string, follow = true): Promise<MountMode | null> {
+  return pathModeOfFiles(files, path, follow)
 }
 
 /**
