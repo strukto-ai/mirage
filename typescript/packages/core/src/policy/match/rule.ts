@@ -140,11 +140,13 @@ function under(path: string, root: string): boolean {
 // (`grep -r x /scratch` enters `/scratch/child`: the fan-out reruns the
 // traversal inside each descendant mount and no admission fires again
 // there, so the ancestor operand is the one place the mount's rule can
-// speak).
+// speak) or takes that directory along whole (`mv /scratch /done`,
+// `rm -r /scratch`), as a path rule judges a subtree operand.
 function touches(mount: string, ctx: CommandContext): boolean {
   if (under(ctx.cwd, mount)) return true
   if (ctx.paths.some((p) => under(p.virtual, mount))) return true
-  return (ctx.walks ?? false) && ctx.paths.some((p) => under(mount, p.virtual))
+  const holds = (ctx.walks ?? false) || SUBTREE_COMMANDS.has(ctx.command)
+  return holds && ctx.paths.some((p) => under(mount, p.virtual))
 }
 
 /**
@@ -357,9 +359,12 @@ export function ruleScope(rule: CommandRule): HiddenPaths | null {
  * its operands: the rule names the line (its command patterns against
  * the line's tokens, none meaning every command) and its paths hold the
  * entry. A rule with no paths spoke about the whole line at admission
- * and has nothing to add at an entry; the directory holding a scope is
- * not in it, so a listing still shows a refused entry's name, which is
- * what deny means: present, and refused.
+ * and has nothing to add at an entry, except a mount's: its mount holds
+ * the entry, since a line that works outside the mount still reaches
+ * entries inside it (`cp -r`, `chmod -R`, a runtime's `open`) where no
+ * admission asked its rule. The directory holding a scope is not in it,
+ * so a listing still shows a refused entry's name, which is what deny
+ * means: present, and refused.
  */
 export function matchIo(
   rule: CommandRule,
@@ -367,9 +372,11 @@ export function matchIo(
   tokens: readonly string[],
   virtual: string,
 ): boolean {
-  if (scope === null) return false
+  const mount = rule.mount ?? ''
+  if (scope === null && mount === '') return false
   const commands = rule.commands ?? []
   if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) return false
+  if (scope === null) return under(virtual, mount)
   return pathHidden(scope, virtual)
 }
 
@@ -406,8 +413,8 @@ export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
 
 /**
  * Whether a rule in force could reach an entry at or under this path for
- * the running line: the rule names the line and its paths could cover
- * something in the subtree. What a native walk asks before it trusts the
+ * the running line: the rule names the line and its paths, or a mount
+ * rule's mount, could cover something in the subtree. What a native walk asks before it trusts the
  * raw tree, per operand the way a hide is: a rule on `/repo/.env` leaves
  * `find /s3` its native op.
  */
@@ -419,10 +426,13 @@ export function ioReach(
   if (rules === null) return false
   for (const rule of [...rules.deny, ...rules.ask]) {
     const scope = ruleScope(rule)
-    if (scope === null) continue
+    const mount = rule.mount ?? ''
+    if (scope === null && mount === '') continue
     const commands = rule.commands ?? []
     if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) continue
-    if (hidesIntersect(scope, virtual)) return true
+    if (scope === null) {
+      if (under(mount, virtual) || under(virtual, mount)) return true
+    } else if (hidesIntersect(scope, virtual)) return true
   }
   return false
 }

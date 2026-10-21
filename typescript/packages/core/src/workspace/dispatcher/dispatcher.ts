@@ -536,6 +536,25 @@ function spelledUnder(call: Call, entries: string[]): string[] {
 }
 
 /**
+ * Whether a lookup is of a path the running command's line names. Under
+ * `read: fresh` such a path is checked against the backend the first time the
+ * command looks it up (`Reconciler.reconcileRead`), whatever it asks first
+ * (`ls` lists its operand before it stats it): a metadata command reads no
+ * bytes, so the cache gate never checks its operand, and a copy the backend
+ * replaced would stay cached. The answer is kept for the command, so its later
+ * lookups and the cache gate reuse it. The entries a walk reaches are left to
+ * their listings. A lookup meets no rule (`METADATA_OPS`), so the command's
+ * gate rides on its caller rather than on the call. Mirrors Python's `_names`.
+ */
+function names(call: Call, caller: Caller | null): boolean {
+  return (
+    (call.name === 'stat' || call.name === 'readdir' || call.name === 'exists') &&
+    !call.fresh &&
+    caller?.ruleGate?.judged.has(rstripSlash(call.path.virtual) || '/') === true
+  )
+}
+
+/**
  * What the freshness probe of the running command got from the backend for a
  * stat's path, null when it asked nothing. Under `read: fresh` the probe
  * already asked the backend about the command's operand; asking again resolves
@@ -2098,6 +2117,7 @@ export class Dispatcher {
           throw err
         }
       } else {
+        if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
         result = answered ?? (await run(fullKwargs))
         if (call.fresh) {

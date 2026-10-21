@@ -45,7 +45,6 @@ from mirage.types import (
     Limit,
     MountMode,
     PathSpec,
-    ReadPolicy,
     ReadSpec,
     WritePolicy,
 )
@@ -69,8 +68,6 @@ class ReadReconciler(Protocol):
     keeps the dependency pointing down: ``reconcile`` imports the mount
     layer, not the other way round. The Reconciler satisfies it structurally.
     """
-
-    async def reconcile_read(self, mount: MountEntry, path: str) -> None: ...
 
     async def on_gone(
         self, gone: list[Evicted], excluded: tuple[str, ...] = ()
@@ -685,10 +682,10 @@ class MountRegistry:
         Resolution order:
         1. First PathSpec path (or cwd) → mount_for(path)
         2. If mount lacks the command → mount_for_command(cmd_name)
-        3. For a read-only command on a caching backend under `fresh`
-           consistency, evict stale entries from the hidden file cache so
-           the in-place read-through serves fresh bytes. The command always
-           stays on its real mount; the cache is never a mount.
+
+        The command always stays on its real mount; the cache is never a
+        mount. Its operands meet backend truth at the dispatcher, the
+        first time it stats or reads them.
 
         Args:
             cmd_name (str): command name.
@@ -708,24 +705,6 @@ class MountRegistry:
             return None
 
         await mount.ensure_ready()
-        resolved = mount.resolve_command(cmd_name)
-        # A read-only command stays on its real mount. Its content reads go
-        # through the dispatcher, which revalidates a warm entry itself; its
-        # stat and listing calls reach the backend past it, so this is where
-        # they reconcile against backend truth: the shared Reconciler evicts
-        # a stale cache entry and GCs an orphaned overlay when the backend
-        # reports the path gone.
-        if (
-            self._reconciler is not None
-            and path_scopes
-            and resolved is not None
-            and not resolved.write
-            and mount.vfs.caches_reads
-            and mount.read.policy is ReadPolicy.FRESH
-        ):
-            for scope in path_scopes:
-                await self._reconciler.reconcile_read(mount, scope.virtual)
-
         return mount
 
     @property

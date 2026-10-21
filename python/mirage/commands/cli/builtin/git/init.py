@@ -10,7 +10,6 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     InitReadOnlyError,
     NoWorkingDirectoryError,
-    NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.io import (
     ensure_dir,
@@ -20,7 +19,7 @@ from mirage.commands.cli.builtin.git.io import (
     write_once,
 )
 from mirage.commands.cli.builtin.git.refs import valid_ref_name
-from mirage.commands.cli.builtin.git.util import fatal, start_point
+from mirage.commands.cli.builtin.git.util import require_vfs, start_point
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import FsCondition
@@ -96,75 +95,66 @@ async def init(
         ctx (Context): the line's context, with the initialization flags.
     """
     fl = FlagView(ctx.flags)
+    vfs = require_vfs(ctx)
+    start = start_point(fl)
+    here = await stat_of(vfs, start)
+    if here is None or here.type is not FileType.DIRECTORY:
+        raise NoWorkingDirectoryError(
+            start.raw_path,
+            FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
+        )
+    target = PathSpec.from_str_path(texts[0] if texts else ".", cwd=start)
+    if target.walk_error == "ENOENT":
+        raise CannotMkdirError(target.raw_path, "No such file or directory")
+    bare = fl.as_bool("bare")
+    gitdir = named_gitdir(fl, texts)
+    branch = fl.as_str("initial_branch", DEFAULT_BRANCH)
+    # The ref rules alone: unlike a branch made later, the first one
+    # may be named HEAD or start with a dash (pinned against git
+    # 2.47.3 and 2.50.1).
+    if not valid_ref_name(f"refs/heads/{branch}"):
+        raise GitError(f"invalid initial branch name: '{branch}'")
+    info = await stat_of(vfs, gitdir)
+    if info is not None and (
+        info.type is not FileType.DIRECTORY
+        or await read_optional(vfs, gitdir.join("HEAD")) is not None
+    ):
+        location = await discover(
+            vfs,
+            target,
+            gitdir,
+            worktree if (worktree := fl.as_path("work_tree")) else None,
+        )
+        gitdir = location.commondir
+    existing = await read_optional(vfs, gitdir.join("HEAD")) is not None
+    made = bool(texts) and await stat_of(vfs, target) is None
+    contents = (
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
+        f"\tbare = {'true' if bare else 'false'}\n"
+    )
+    settings = gitdir.join("config")
     try:
-        if ctx.vfs is None:
-            raise NoWorkspaceError()
-        vfs = ctx.vfs
-        start = start_point(fl)
-        here = await stat_of(vfs, start)
-        if here is None or here.type is not FileType.DIRECTORY:
-            raise NoWorkingDirectoryError(
-                start.raw_path,
-                FsCondition.ENOENT if here is None else FsCondition.ENOTDIR,
-            )
-        target = PathSpec.from_str_path(texts[0] if texts else ".", cwd=start)
-        if target.walk_error == "ENOENT":
-            raise CannotMkdirError(
-                target.raw_path, "No such file or directory"
-            )
-        bare = fl.as_bool("bare")
-        gitdir = named_gitdir(fl, texts)
-        branch = fl.as_str("initial_branch", DEFAULT_BRANCH)
-        # The ref rules alone: unlike a branch made later, the first one
-        # may be named HEAD or start with a dash (pinned against git
-        # 2.47.3 and 2.50.1).
-        if not valid_ref_name(f"refs/heads/{branch}"):
-            raise GitError(f"invalid initial branch name: '{branch}'")
-        info = await stat_of(vfs, gitdir)
-        if info is not None and (
-            info.type is not FileType.DIRECTORY
-            or await read_optional(vfs, gitdir.join("HEAD")) is not None
-        ):
-            location = await discover(
-                vfs,
-                target,
-                gitdir,
-                worktree if (worktree := fl.as_path("work_tree")) else None,
-            )
-            gitdir = location.commondir
-        existing = await read_optional(vfs, gitdir.join("HEAD")) is not None
-        made = bool(texts) and await stat_of(vfs, target) is None
-        contents = (
-            "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
-            f"\tbare = {'true' if bare else 'false'}\n"
-        )
-        settings = gitdir.join("config")
-        try:
-            await lay_out(vfs, gitdir, branch, contents)
-            if existing:
-                await take_lock(vfs, settings)
-        except OSError as exc:
-            locked = exc.filename == f"{settings.virtual}.lock"
-            if locked and exc.errno == errno.EEXIST:
-                raise ConfigLockError(
-                    settings.virtual, FsCondition.EEXIST
-                ) from exc
-            if exc.errno != errno.EROFS:
-                raise
-            if made:
-                raise CannotMkdirError(texts[0]) from exc
-            if locked:
-                raise ConfigLockError(
-                    settings.virtual, FsCondition.EROFS
-                ) from exc
-            raise InitReadOnlyError(exc.filename or gitdir.virtual) from exc
-        action = "Reinitialized existing" if existing else "Initialized empty"
-        text = f"{action} Git repository in {gitdir.virtual}/\n"
-        warning = ""
-        if existing and fl.as_str("initial_branch"):
-            warning = f"warning: re-init: ignored --initial-branch={branch}\n"
-        return b"" if fl.as_bool("quiet") else text.encode(), IOResult(
-            stderr=warning.encode()
-        )
-    except GitError as exc:
-        return fatal(exc)
+        await lay_out(vfs, gitdir, branch, contents)
+        if existing:
+            await take_lock(vfs, settings)
+    except OSError as exc:
+        locked = exc.filename == f"{settings.virtual}.lock"
+        if locked and exc.errno == errno.EEXIST:
+            raise ConfigLockError(
+                settings.virtual, FsCondition.EEXIST
+            ) from exc
+        if exc.errno != errno.EROFS:
+            raise
+        if made:
+            raise CannotMkdirError(texts[0]) from exc
+        if locked:
+            raise ConfigLockError(settings.virtual, FsCondition.EROFS) from exc
+        raise InitReadOnlyError(exc.filename or gitdir.virtual) from exc
+    action = "Reinitialized existing" if existing else "Initialized empty"
+    text = f"{action} Git repository in {gitdir.virtual}/\n"
+    warning = ""
+    if existing and fl.as_str("initial_branch"):
+        warning = f"warning: re-init: ignored --initial-branch={branch}\n"
+    return b"" if fl.as_bool("quiet") else text.encode(), IOResult(
+        stderr=warning.encode()
+    )

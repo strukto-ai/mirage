@@ -141,7 +141,7 @@ def test_always_reads_a_written_path_from_cache():
 
     assert served == b"hello\n"
     # One, not ">= 1", counted over the read alone (tee probes its output
-    # before it writes): the routing reconcile, whose answer cat's own
+    # before it writes): the operand probe, whose answer cat's own
     # operand stat and the gate reuse. Its TypeScript twin asserts the same
     # exact number.
     assert client.calls["head_object"] == 1, (

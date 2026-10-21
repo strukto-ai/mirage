@@ -21,12 +21,14 @@ import { IOResult } from '../../../../io/types.ts'
 import {
   type GitError,
   BadConfigValueError,
+  NotAWorkTreeError,
   UnrecognizedArgumentError,
   UsageError,
 } from './errors.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage } from '../../refusal.ts'
 
 import { PathSpec } from '../../../../types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 
 const ROOT = '/'
 export const STDOUT = 'stdout'
@@ -262,6 +264,16 @@ export function offendingSwitch(text: string, known: ReadonlySet<string> | undef
     if (!known.has(letter)) return `-${letter}`
   }
   return text
+}
+
+/**
+ * The session's files, which every verb reads and writes through. Only a leaf
+ * called directly, outside a workspace, has none; git words that the way it
+ * words a bare repository. Mirrors Python's `require_vfs`.
+ */
+export function requireVfs(ctx: Context): Files {
+  if (ctx.vfs === undefined) throw new NotAWorkTreeError()
+  return ctx.vfs
 }
 
 /**

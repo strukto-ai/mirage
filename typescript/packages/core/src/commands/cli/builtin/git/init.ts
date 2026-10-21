@@ -11,14 +11,13 @@ import {
   ConfigLockError,
   GitError,
   InitReadOnlyError,
-  NoWorkspaceError,
   NoWorkingDirectoryError,
 } from './errors.ts'
 import { ensureDir, readOptional, statOf, takeLock, writeFile } from './io.ts'
 import { DEFAULT_BRANCH } from './constants.ts'
 import { validRefName } from './refs.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { fatal, startPoint } from './util.ts'
+import { startPoint, requireVfs } from './util.ts'
 
 /** Write a new git directory's skeleton, keeping what is there. */
 export async function layOut(
@@ -70,65 +69,59 @@ export async function init(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    if (ctx.vfs === undefined) throw new NoWorkspaceError()
-    const vfs = ctx.vfs
-    const start = startPoint(fl)
-    const here = await statOf(vfs, start)
-    if (here?.type !== FileType.DIRECTORY)
-      throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
-    const target = PathSpec.fromStrPath(texts[0] ?? '.', undefined, start)
-    if (target.walkError === 'ENOENT')
-      throw new CannotMkdirError(target.rawPath, 'No such file or directory')
-    const bare = fl.asBool('bare')
-    let gitdir = namedGitdir(fl, texts)
-    const branch = fl.asStr('initial_branch', DEFAULT_BRANCH)
-    // The ref rules alone: unlike a branch made later, the first one may be
-    // named HEAD or start with a dash (pinned against git 2.47.3 and 2.50.1).
-    if (!validRefName(`refs/heads/${branch}`))
-      throw new GitError(`invalid initial branch name: '${branch}'`)
-    const info = await statOf(vfs, gitdir)
-    if (
-      info !== null &&
-      (info.type !== FileType.DIRECTORY || (await readOptional(vfs, gitdir.join('HEAD'))) !== null)
-    ) {
-      const location = await discover(vfs, target, gitdir, fl.asPath('work_tree') ?? null)
-      gitdir = location.commondir
-    }
-    const existing = (await readOptional(vfs, gitdir.join('HEAD'))) !== null
-    const [typed] = texts
-    const made = typed !== undefined && (await statOf(vfs, target)) === null
-    const settings = gitdir.join('config')
-    try {
-      await layOut(
-        vfs,
-        gitdir,
-        branch,
-        `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
-      )
-      if (existing) await takeLock(vfs, settings)
-    } catch (err) {
-      const path = (err as { virtualPath?: string }).virtualPath
-      const locked = path === `${settings.virtual}.lock`
-      if (locked && isEexist(err)) throw new ConfigLockError(settings.virtual, 'EEXIST')
-      if (!isErofs(err)) throw err
-      if (made) throw new CannotMkdirError(typed)
-      if (locked) throw new ConfigLockError(settings.virtual, 'EROFS')
-      throw new InitReadOnlyError(path ?? gitdir.virtual)
-    }
-    const text = existing
-      ? `Reinitialized existing Git repository in ${gitdir.virtual}/\n`
-      : `Initialized empty Git repository in ${gitdir.virtual}/\n`
-    const warning =
-      existing && fl.asStr('initial_branch')
-        ? `warning: re-init: ignored --initial-branch=${branch}\n`
-        : ''
-    return [
-      new TextEncoder().encode(fl.asBool('quiet') ? '' : text),
-      new IOResult({ stderr: new TextEncoder().encode(warning) }),
-    ]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  const start = startPoint(fl)
+  const here = await statOf(vfs, start)
+  if (here?.type !== FileType.DIRECTORY)
+    throw new NoWorkingDirectoryError(start.rawPath, here === null ? 'ENOENT' : 'ENOTDIR')
+  const target = PathSpec.fromStrPath(texts[0] ?? '.', undefined, start)
+  if (target.walkError === 'ENOENT')
+    throw new CannotMkdirError(target.rawPath, 'No such file or directory')
+  const bare = fl.asBool('bare')
+  let gitdir = namedGitdir(fl, texts)
+  const branch = fl.asStr('initial_branch', DEFAULT_BRANCH)
+  // The ref rules alone: unlike a branch made later, the first one may be
+  // named HEAD or start with a dash (pinned against git 2.47.3 and 2.50.1).
+  if (!validRefName(`refs/heads/${branch}`))
+    throw new GitError(`invalid initial branch name: '${branch}'`)
+  const info = await statOf(vfs, gitdir)
+  if (
+    info !== null &&
+    (info.type !== FileType.DIRECTORY || (await readOptional(vfs, gitdir.join('HEAD'))) !== null)
+  ) {
+    const location = await discover(vfs, target, gitdir, fl.asPath('work_tree') ?? null)
+    gitdir = location.commondir
   }
+  const existing = (await readOptional(vfs, gitdir.join('HEAD'))) !== null
+  const [typed] = texts
+  const made = typed !== undefined && (await statOf(vfs, target)) === null
+  const settings = gitdir.join('config')
+  try {
+    await layOut(
+      vfs,
+      gitdir,
+      branch,
+      `[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = ${bare ? 'true' : 'false'}\n`,
+    )
+    if (existing) await takeLock(vfs, settings)
+  } catch (err) {
+    const path = (err as { virtualPath?: string }).virtualPath
+    const locked = path === `${settings.virtual}.lock`
+    if (locked && isEexist(err)) throw new ConfigLockError(settings.virtual, 'EEXIST')
+    if (!isErofs(err)) throw err
+    if (made) throw new CannotMkdirError(typed)
+    if (locked) throw new ConfigLockError(settings.virtual, 'EROFS')
+    throw new InitReadOnlyError(path ?? gitdir.virtual)
+  }
+  const text = existing
+    ? `Reinitialized existing Git repository in ${gitdir.virtual}/\n`
+    : `Initialized empty Git repository in ${gitdir.virtual}/\n`
+  const warning =
+    existing && fl.asStr('initial_branch')
+      ? `warning: re-init: ignored --initial-branch=${branch}\n`
+      : ''
+  return [
+    new TextEncoder().encode(fl.asBool('quiet') ? '' : text),
+    new IOResult({ stderr: new TextEncoder().encode(warning) }),
+  ]
 }

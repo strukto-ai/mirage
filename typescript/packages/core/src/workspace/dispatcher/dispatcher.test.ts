@@ -1731,6 +1731,7 @@ function refusing(refused: string) {
     gate: {
       scoped: true,
       granted: [],
+      judged: new Set<string>(),
       check: (virtual: string): void => {
         asked.push(virtual)
         if (virtual === refused) throw new Error(`sealed ${virtual}`)

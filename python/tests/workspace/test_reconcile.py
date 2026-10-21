@@ -690,7 +690,7 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
 
 @pytest.mark.asyncio
 async def test_a_write_in_the_command_sends_the_next_probe_to_the_backend():
-    # The gate reuses what routing got from the backend; a write in the same
+    # The gate reuses what the operand probe got from the backend; a write in the same
     # command retires that answer, so the next probe asks again and sees a
     # deletion the remembered stat would have hidden.
     resource = RAMVFS()
@@ -749,7 +749,7 @@ async def _gated(fingerprint: str = "fp1"):
 @pytest.mark.asyncio
 async def test_the_gate_reuses_the_routing_probes_answer():
     # Routing and the gate share the command: the gate compares the cache
-    # against what routing got from the backend instead of asking again.
+    # against what the operand probe got from the backend instead of asking again.
     ws, mount, stat, rec = await _gated()
     try:
         async with command_scope():
@@ -831,7 +831,7 @@ async def test_the_gate_asks_the_backend_after_a_write_in_the_command():
 async def test_the_gate_asks_the_backend_after_an_external_drop():
     # Native code (an external program, a remote runtime line) may have
     # changed the mount mid-command; the drop that follows it must retire
-    # what routing saw, as a write in the command does.
+    # what the operand probe saw, as a write in the command does.
     ws, mount, stat, rec = await _gated()
     try:
         async with command_scope():

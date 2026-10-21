@@ -32,7 +32,6 @@ from mirage.commands.cli.builtin.git.errors import (
     InvalidTagNameError,
     ListModeOnlyError,
     MissingTagMessageError,
-    NoWorkspaceError,
     RefDeleteReadOnlyError,
     RefLockError,
     RefReadOnlyError,
@@ -78,7 +77,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     verb_usage,
 )
 from mirage.commands.config import Context
@@ -228,161 +227,146 @@ async def tag(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     words = filter_words(ctx)
     operands = without_filter_values(texts, words)
     filtered = bool(words)
     fl = FlagView(ctx.flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, operands)
-        flags = parse_flags(fl)
-        if flags.listing and flags.delete:
-            raise IncompatibleOptionsError("-l", "-d")
-        # -a, -m and -f create a tag, so a line that lists or deletes
-        # instead has nothing for them to do: git prints its usage and
-        # exits 129, where the same line without them lists or deletes
-        # and exits 0. No operand at all is a listing, which is why it
-        # counts here too.
-        creating = flags.annotate or flags.force
-        reading = (
-            flags.listing
-            or flags.delete
-            or flags.lines is not None
-            or filtered
-            or not operands
+    check_switches(ctx, operands)
+    flags = parse_flags(fl)
+    if flags.listing and flags.delete:
+        raise IncompatibleOptionsError("-l", "-d")
+    # -a, -m and -f create a tag, so a line that lists or deletes
+    # instead has nothing for them to do: git prints its usage and
+    # exits 129, where the same line without them lists or deletes
+    # and exits 0. No operand at all is a listing, which is why it
+    # counts here too.
+    creating = flags.annotate or flags.force
+    reading = (
+        flags.listing
+        or flags.delete
+        or flags.lines is not None
+        or filtered
+        or not operands
+    )
+    if creating and reading:
+        raise UsageError("", verb_usage(ctx))
+    # After the two usage refusals above, which git reaches first:
+    # ``-l -d -n1`` is the incompatible pair and ``-d -f -n1`` the
+    # usage, both exiting 129, where ``-d -n1`` alone dies here.
+    if flags.delete and flags.lines is not None:
+        raise ListModeOnlyError()
+    list_only = list_mode_option(words) if flags.delete else None
+    if list_only is not None:
+        raise ListModeOnlyError(list_only)
+    repo, location = await opened(ctx, fl)
+    cfg = await read_config(vfs, location)
+    keys = sort_keys(fl, configured_sort(cfg, b"tag"))
+    filt = await asyncio.to_thread(ref_filter, repo, words)
+    known = repo.refs.allkeys()
+    if flags.delete:
+        out: list[str] = []
+        err: list[str] = []
+        doomed: list[tuple[str, Ref]] = []
+        for name in operands:
+            ref = Ref(f"{TAG_PREFIX}{name}".encode())
+            if ref not in known:
+                err.append(f"error: {TagNotFoundError(name)}\n")
+                continue
+            doomed.append((name, ref))
+        # Every deletion on the line is one ref transaction, and a
+        # name given twice makes two updates for one ref, which the
+        # transaction refuses before applying any of them: the whole
+        # line deletes nothing. A name that is not there never
+        # reaches the transaction, so ``-d nosuch nosuch`` is two
+        # ordinary reports rather than this refusal.
+        seen = Counter(ref for _name, ref in doomed)
+        repeated = sorted(ref for ref, count in seen.items() if count > 1)
+        if repeated:
+            blamed = RefUpdateConflictError(repeated[0].decode())
+            err.append(f"error: {blamed}\n")
+            return None, IOResult(exit_code=1, stderr="".join(err).encode())
+        for name, ref in doomed:
+            sha = repo.refs[ref]
+            await delete_ref(vfs, location.commondir, ref.decode())
+            out.append(
+                f"Deleted tag '{name}' (was {short(sha, abbrev_for(repo))})\n"
+            )
+        return yield_bytes("".join(out).encode()), IOResult(
+            exit_code=1 if err else 0, stderr="".join(err).encode()
         )
-        if creating and reading:
-            raise UsageError("", verb_usage(ctx))
-        # After the two usage refusals above, which git reaches first:
-        # ``-l -d -n1`` is the incompatible pair and ``-d -f -n1`` the
-        # usage, both exiting 129, where ``-d -n1`` alone dies here.
-        if flags.delete and flags.lines is not None:
-            raise ListModeOnlyError()
-        list_only = list_mode_option(words) if flags.delete else None
-        if list_only is not None:
-            raise ListModeOnlyError(list_only)
-        repo, location = await opened(ctx, fl)
-        cfg = await read_config(vfs, location)
-        keys = sort_keys(fl, configured_sort(cfg, b"tag"))
-        filt = await asyncio.to_thread(ref_filter, repo, words)
-        known = repo.refs.allkeys()
-        if flags.delete:
-            out: list[str] = []
-            err: list[str] = []
-            doomed: list[tuple[str, Ref]] = []
-            for name in operands:
-                ref = Ref(f"{TAG_PREFIX}{name}".encode())
-                if ref not in known:
-                    err.append(f"error: {TagNotFoundError(name)}\n")
-                    continue
-                doomed.append((name, ref))
-            # Every deletion on the line is one ref transaction, and a
-            # name given twice makes two updates for one ref, which the
-            # transaction refuses before applying any of them: the whole
-            # line deletes nothing. A name that is not there never
-            # reaches the transaction, so ``-d nosuch nosuch`` is two
-            # ordinary reports rather than this refusal.
-            seen = Counter(ref for _name, ref in doomed)
-            repeated = sorted(ref for ref, count in seen.items() if count > 1)
-            if repeated:
-                blamed = RefUpdateConflictError(repeated[0].decode())
-                err.append(f"error: {blamed}\n")
-                return None, IOResult(
-                    exit_code=1, stderr="".join(err).encode()
-                )
-            for name, ref in doomed:
-                sha = repo.refs[ref]
-                await delete_ref(vfs, location.commondir, ref.decode())
-                out.append(
-                    f"Deleted tag '{name}' "
-                    f"(was {short(sha, abbrev_for(repo))})\n"
-                )
-            return yield_bytes("".join(out).encode()), IOResult(
-                exit_code=1 if err else 0, stderr="".join(err).encode()
+    if flags.listing or flags.lines is not None or filtered or not operands:
+        # git reads a -n count while building the format it lists
+        # with, so a count below -1 is refused as the format's own
+        # (after both usage refusals above, and in a repository
+        # holding no tags), and --format drops -n altogether.
+        template = fl.as_str("format")
+        if template is None:
+            template = (
+                lines_format(flags.lines) if flags.lines else NAME_FORMAT
             )
-        if (
-            flags.listing
-            or flags.lines is not None
-            or filtered
-            or not operands
-        ):
-            # git reads a -n count while building the format it lists
-            # with, so a count below -1 is refused as the format's own
-            # (after both usage refusals above, and in a repository
-            # holding no tags), and --format drops -n altogether.
-            template = fl.as_str("format")
-            if template is None:
-                template = (
-                    lines_format(flags.lines) if flags.lines else NAME_FORMAT
-                )
-            fmt = listing_format(template)
-            icase = fl.as_bool("ignore_case")
+        fmt = listing_format(template)
+        icase = fl.as_bool("ignore_case")
 
-            def wanted(name: str) -> bool:
-                return name.startswith(TAG_PREFIX) and match_short(
-                    name, operands, icase
-                )
+        def wanted(name: str) -> bool:
+            return name.startswith(TAG_PREFIX) and match_short(
+                name, operands, icase
+            )
 
-            items, ref_ctx, errors = await ref_listing(
-                repo,
-                cfg,
-                used_fields(fmt, keys or ()),
-                wanted,
-                filt,
-                date_clock(ctx.env),
-            )
-            rows, stopped = format_refs(
-                fmt,
-                items,
-                ref_ctx,
-                keys,
-                omit_empty=fl.as_bool("omit_empty"),
-                icase=icase,
-                stream=(keys is None or not sorts_named(fl))
-                and (
-                    filt is None
-                    or (filt.merged is None and filt.no_merged is None)
-                ),
-            )
-            return listing_result(rows, errors, stopped)
-        if len(operands) > 2:
-            raise TooManyArgumentsError()
-        name = operands[0]
-        if not valid_ref_name(name):
-            raise InvalidTagNameError(name)
-        ref = Ref(f"{TAG_PREFIX}{name}".encode())
-        if ref in known and not flags.force:
-            raise TagExistsError(name)
-        if flags.annotate and flags.message is None:
-            raise MissingTagMessageError()
-        target = resolve_target(
-            repo, operands[1] if len(operands) > 1 else HEAD
+        items, ref_ctx, errors = await ref_listing(
+            repo,
+            cfg,
+            used_fields(fmt, keys or ()),
+            wanted,
+            filt,
+            date_clock(ctx.env),
         )
-        if flags.annotate:
-            written = await asyncio.to_thread(
-                build_tag,
-                repo,
-                name,
-                target,
-                flags.message or "",
-                identity(fl, ctx.session),
-                int(time.time()),
-            )
-            pointed = written.id
-        else:
-            pointed = target.id
-        was = repo.refs[ref] if ref in known else None
-        # After the object is built, which is git's order: an annotated
-        # tag whose ref cannot be locked has already been written to the
-        # database and is left there unreferenced.
-        held = blocking_ref(known, ref.decode())
-        if held is not None:
-            raise RefLockError(ref.decode(), held)
-        await write_ref(vfs, location.commondir, ref.decode(), pointed)
-    except GitError as exc:
-        return fatal(exc)
+        rows, stopped = format_refs(
+            fmt,
+            items,
+            ref_ctx,
+            keys,
+            omit_empty=fl.as_bool("omit_empty"),
+            icase=icase,
+            stream=(keys is None or not sorts_named(fl))
+            and (
+                filt is None
+                or (filt.merged is None and filt.no_merged is None)
+            ),
+        )
+        return listing_result(rows, errors, stopped)
+    if len(operands) > 2:
+        raise TooManyArgumentsError()
+    name = operands[0]
+    if not valid_ref_name(name):
+        raise InvalidTagNameError(name)
+    ref = Ref(f"{TAG_PREFIX}{name}".encode())
+    if ref in known and not flags.force:
+        raise TagExistsError(name)
+    if flags.annotate and flags.message is None:
+        raise MissingTagMessageError()
+    target = resolve_target(repo, operands[1] if len(operands) > 1 else HEAD)
+    if flags.annotate:
+        written = await asyncio.to_thread(
+            build_tag,
+            repo,
+            name,
+            target,
+            flags.message or "",
+            identity(fl, ctx.session),
+            int(time.time()),
+        )
+        pointed = written.id
+    else:
+        pointed = target.id
+    was = repo.refs[ref] if ref in known else None
+    # After the object is built, which is git's order: an annotated
+    # tag whose ref cannot be locked has already been written to the
+    # database and is left there unreferenced.
+    held = blocking_ref(known, ref.decode())
+    if held is not None:
+        raise RefLockError(ref.decode(), held)
+    await write_ref(vfs, location.commondir, ref.decode(), pointed)
     if was is None:
         return None, IOResult()
     return yield_bytes(

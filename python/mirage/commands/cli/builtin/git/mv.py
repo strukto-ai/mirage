@@ -18,11 +18,9 @@ from dataclasses import dataclass
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
-    GitError,
     MoveOverlapError,
     MoveRefusedError,
     NotADirectoryDestinationError,
-    NoWorkspaceError,
     RenameFailedError,
     UsageError,
 )
@@ -42,7 +40,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import IndexState, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
     verb_usage,
 )
@@ -452,48 +450,42 @@ async def mv(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     fl = FlagView(ctx.flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        flags = parse_flags(fl)
-        if len(texts) < 2:
-            raise UsageError("", verb_usage(ctx))
-        repo, location = await opened(ctx, fl, work_tree=True)
-        state = await read_index(vfs, location.gitdir)
-        conflicted = decoded(state.conflicts)
-        # An unmerged path holds no ordinary entry, so a tracked set
-        # built from the entries alone would call it untracked and let
-        # a directory holding one move with its stages left behind.
-        tracked = decoded(state.entries) | conflicted
-        moves = await plan(
-            vfs,
-            location,
-            start_point(fl).virtual,
-            texts,
-            tracked,
-            conflicted,
-            flags,
+    check_switches(ctx, texts)
+    flags = parse_flags(fl)
+    if len(texts) < 2:
+        raise UsageError("", verb_usage(ctx))
+    repo, location = await opened(ctx, fl, work_tree=True)
+    state = await read_index(vfs, location.gitdir)
+    conflicted = decoded(state.conflicts)
+    # An unmerged path holds no ordinary entry, so a tracked set
+    # built from the entries alone would call it untracked and let
+    # a directory holding one move with its stages left behind.
+    tracked = decoded(state.entries) | conflicted
+    moves = await plan(
+        vfs,
+        location,
+        start_point(fl).virtual,
+        texts,
+        tracked,
+        conflicted,
+        flags,
+    )
+    lines: list[str] = []
+    if flags.dry_run:
+        lines.extend(
+            f"Checking rename of '{move.source}' to '{move.destination}'"
+            for move in moves
         )
-        lines: list[str] = []
-        if flags.dry_run:
-            lines.extend(
-                f"Checking rename of '{move.source}' to '{move.destination}'"
-                for move in moves
-            )
-        if flags.verbose:
-            lines.extend(
-                f"Renaming {move.source} to {move.destination}"
-                for move in moves
-            )
-        if not flags.dry_run:
-            for move in moves:
-                await apply(vfs, location, state, move, flags.force)
-            await write_index(vfs, location.gitdir, state)
-    except GitError as exc:
-        return fatal(exc)
+    if flags.verbose:
+        lines.extend(
+            f"Renaming {move.source} to {move.destination}" for move in moves
+        )
+    if not flags.dry_run:
+        for move in moves:
+            await apply(vfs, location, state, move, flags.force)
+        await write_index(vfs, location.gitdir, state)
     if not lines:
         return None, IOResult()
     return yield_bytes(

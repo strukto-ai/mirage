@@ -581,7 +581,7 @@ it('batches overlapping folders and protects nested mounts', async () => {
   }
 })
 
-// The gate reuses what routing got from the backend; a write in the same
+// The gate reuses what the operand probe got from the backend; a write in the same
 // command retires that answer, so the next probe asks again and sees a
 // deletion the remembered stat would have hidden.
 it('a write in the command sends the next probe to the backend', async () => {
@@ -609,7 +609,7 @@ it('a write in the command sends the next probe to the backend', async () => {
   }
 })
 
-describe('the gate reuses what routing got from the backend', () => {
+describe('the gate reuses what the operand probe got from the backend', () => {
   it('does not reuse an answer when a write completed during the probe', async () => {
     const ws = await wsWithOverlay()
     let captured = (): void => undefined
@@ -674,8 +674,8 @@ describe('the gate reuses what routing got from the backend', () => {
   }
 
   // Routing and the gate share the command: the gate compares the cache
-  // against what routing got from the backend instead of asking again.
-  it('reuses the routing probe', async () => {
+  // against what the operand probe got from the backend instead of asking again.
+  it('reuses the operand probe', async () => {
     const { ws, mount, rec, calls } = await gated()
     try {
       await runInCommandScope(async () => {

@@ -31,7 +31,7 @@ import {
 } from './ref_list.ts'
 import { opened } from './session.ts'
 import { QuoteStyle, RefKind } from './types.ts'
-import { checkSwitches, fatal } from './util.ts'
+import { checkSwitches } from './util.ts'
 
 const DEFAULT_FORMAT = '%(objectname) %(objecttype)\t%(refname)'
 const QUOTE_OPTIONS: readonly (readonly [string, QuoteStyle])[] = [
@@ -67,54 +67,49 @@ export async function forEachRef(
   const fl = new FlagView(ctx.flags)
   const words = filterWords(ctx)
   const operands = withoutFilterValues(texts, words)
-  try {
-    checkSwitches(ctx, operands)
-    const repo = await opened(ctx, fl)
-    const filter = await refFilter(repo, words)
-    const count = fl.asInt('count') ?? 0
-    if (count < 0) throw new FormatUsageError(`invalid --count argument: \`${String(count)}'`)
-    const template = fl.asStr('format')
-    const fmt = parseFormat(template ?? DEFAULT_FORMAT, quoteStyle(fl))
-    const keys = sortKeys(fl, ['refname'])
-    const icase = fl.asBool('ignore_case')
-    let patterns: readonly string[] = operands
-    if (fl.asBool('stdin')) {
-      if (operands.length) throw new GitError('unknown arguments supplied with --stdin')
-      const data = await readStdinAsync(ctx.stdin)
-      const lines = new TextDecoder().decode(data ?? new Uint8Array()).split('\n')
-      if (lines.at(-1) === '') lines.pop()
-      patterns = lines.map((line) => line.replace(/\r$/, ''))
-    }
-    const roots = fl.asBool('include_root_refs')
-    const excludes = fl.asList('exclude')
-    const wanted = (name: string): boolean =>
-      (name.startsWith('refs/') || (roots && isRootRef(name))) &&
-      matchAsPath(name, patterns, icase) &&
-      !(excludes.length && matchAsPath(name, excludes, icase))
-    const [listed, refCtx, errors] = await refListing(
-      repo,
-      usedFields(fmt, keys ?? []),
-      wanted,
-      filter,
-      dateClock(ctx.env),
-      roots,
-    )
-    const items = roots
-      ? listed.map((item) =>
-          item.kind === RefKind.DETACHED ? { ...item, kind: RefKind.ROOT } : item,
-        )
-      : listed
-    const [out, stopped] = formatRefs(fmt, items, refCtx, keys, {
-      count,
-      omitEmpty: fl.asBool('omit_empty'),
-      icase,
-      stream:
-        (keys === null || !sortsNamed(fl)) &&
-        (filter === null || (filter.merged === null && filter.noMerged === null)),
-    })
-    return listingResult(out, errors, stopped)
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkSwitches(ctx, operands)
+  const repo = await opened(ctx, fl)
+  const filter = await refFilter(repo, words)
+  const count = fl.asInt('count') ?? 0
+  if (count < 0) throw new FormatUsageError(`invalid --count argument: \`${String(count)}'`)
+  const template = fl.asStr('format')
+  const fmt = parseFormat(template ?? DEFAULT_FORMAT, quoteStyle(fl))
+  const keys = sortKeys(fl, ['refname'])
+  const icase = fl.asBool('ignore_case')
+  let patterns: readonly string[] = operands
+  if (fl.asBool('stdin')) {
+    if (operands.length) throw new GitError('unknown arguments supplied with --stdin')
+    const data = await readStdinAsync(ctx.stdin)
+    const lines = new TextDecoder().decode(data ?? new Uint8Array()).split('\n')
+    if (lines.at(-1) === '') lines.pop()
+    patterns = lines.map((line) => line.replace(/\r$/, ''))
   }
+  const roots = fl.asBool('include_root_refs')
+  const excludes = fl.asList('exclude')
+  const wanted = (name: string): boolean =>
+    (name.startsWith('refs/') || (roots && isRootRef(name))) &&
+    matchAsPath(name, patterns, icase) &&
+    !(excludes.length && matchAsPath(name, excludes, icase))
+  const [listed, refCtx, errors] = await refListing(
+    repo,
+    usedFields(fmt, keys ?? []),
+    wanted,
+    filter,
+    dateClock(ctx.env),
+    roots,
+  )
+  const items = roots
+    ? listed.map((item) =>
+        item.kind === RefKind.DETACHED ? { ...item, kind: RefKind.ROOT } : item,
+      )
+    : listed
+  const [out, stopped] = formatRefs(fmt, items, refCtx, keys, {
+    count,
+    omitEmpty: fl.asBool('omit_empty'),
+    icase,
+    stream:
+      (keys === null || !sortsNamed(fl)) &&
+      (filter === null || (filter.merged === null && filter.noMerged === null)),
+  })
+  return listingResult(out, errors, stopped)
 }

@@ -22,7 +22,7 @@ from mirage.commands.cli.builtin.git.changes import (
     assembled,
     collect,
 )
-from mirage.commands.cli.builtin.git.errors import GitError, NoWorkspaceError
+from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.pathspec import repo_relative
 from mirage.commands.cli.builtin.git.ref_list import detached_line
 from mirage.commands.cli.builtin.git.refs import read_head
@@ -35,7 +35,7 @@ from mirage.commands.cli.builtin.git.render import (
 from mirage.commands.cli.builtin.git.repo import Repo, config_bool
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import HeadRef, RepoLocation
-from mirage.commands.cli.builtin.git.util import fatal, start_point
+from mirage.commands.cli.builtin.git.util import require_vfs, start_point
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
     UNTRACKED_NO,
@@ -187,34 +187,29 @@ async def status(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        parsed = parse_flags(fl)
-        repo, location = await opened(ctx, fl, work_tree=True)
-        head = await read_head(vfs, location.gitdir)
-        rows, state, no_commits = await collect(
-            vfs,
-            repo,
-            location,
-            parsed.untracked,
-            parsed.ignored,
-        )
-        fully = await config_bool(vfs, location, b"core", b"quotepath", True)
-        prefix = (
-            ""
-            if parsed.porcelain
-            else await relative_prefix(vfs, location, start_point(fl).virtual)
-        )
-        upstream = await branch_upstream(repo, head, no_commits)
-        detached = (
-            "" if head.branch is not None else await detached_line(repo, head)
-        )
-    except GitError as exc:
-        return fatal(exc)
+    parsed = parse_flags(fl)
+    repo, location = await opened(ctx, fl, work_tree=True)
+    head = await read_head(vfs, location.gitdir)
+    rows, state, no_commits = await collect(
+        vfs,
+        repo,
+        location,
+        parsed.untracked,
+        parsed.ignored,
+    )
+    fully = await config_bool(vfs, location, b"core", b"quotepath", True)
+    prefix = (
+        ""
+        if parsed.porcelain
+        else await relative_prefix(vfs, location, start_point(fl).virtual)
+    )
+    upstream = await branch_upstream(repo, head, no_commits)
+    detached = (
+        "" if head.branch is not None else await detached_line(repo, head)
+    )
 
     async def render(shown: list[StatusRow]) -> ByteSource:
         entries = relative_entries(

@@ -17,7 +17,6 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { GitError } from './errors.ts'
 import {
   COMBINED_MODE,
   commitDeltas,
@@ -54,7 +53,7 @@ import {
 import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { Delta, Side } from './rows.ts'
-import { checkOperands, fatal } from './util.ts'
+import { checkOperands } from './util.ts'
 import { HEAD, TEMPLATE_KINDS, TERMINATED_KINDS } from './constants.ts'
 import { Decoration } from './types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -257,82 +256,77 @@ export async function log(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkOperands(ctx, texts)
-    const flags = parseFlags(fl, ctx.env)
-    const repo = await opened(ctx, fl)
-    const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
-    const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)
-    const parsed = { ...flags, mailmap, useMailmap: mapped, decorate, pathspecs }
-    const [starts, hidden] = await startingPoints(repo, revisions, parsed, dashed)
-    const decor = await decorations(repo, parsed.decorate)
-    let diffFlags = parseDiffFlags(fl, false)
-    // The pickaxe searches the diff, renames paired, whether or not any of it is
-    // printed, which is how `-S -m` comes to name the parent each printed entry
-    // matched against.
-    const diffing =
-      parsed.pickaxe !== null ||
-      diffFlags.patch ||
-      diffFlags.stat ||
-      diffFlags.nameOnly ||
-      diffFlags.nameStatus ||
-      diffFlags.numstat ||
-      diffFlags.shortstat ||
-      diffFlags.summary ||
-      diffFlags.raw
-    if (diffing) {
-      diffFlags = parseDiffFlags(
-        fl,
-        false,
-        'off',
-        true,
-        await renamesEnabled(repo),
-        await configBool(repo, 'core.quotepath', true),
-      )
-    }
-    diffFlags = { ...diffFlags, pickaxe: parsed.pickaxe, pathspecs }
-    const walk = await walked(repo, starts, parsed, hidden, diffFlags)
-    const commits = inPrintOrder(walk, parsed)
-    const boundary = new Set(walk.boundary.map((commit) => commit.oid))
-    if (!diffing) {
-      const out = parsed.graph
-        ? await graphed(repo, walk, parsed, decor, null, new Map())
-        : rendered(commits, parsed, repo.abbrev, decor, boundary, walk.parents)
-      return [out === '' ? null : encodeText(out), new IOResult()]
-    }
-    const shownCommits = parsed.graph
-      ? [...walk.steps.filter((step) => step.shown).map((step) => step.commit), ...walk.boundary]
-      : commits
-    const [rows, spans] = await commitDeltas(repo, shownCommits, diffFlags)
-    // A commit whose summary is empty still gets the blank line under its
-    // header, as `show` gives one, though not under oneline (git 2.47.3).
-    const summary = diffFlags.summary && !diffFlags.noPatch && parsed.pretty.kind !== 'oneline'
-    const render = async (shown: Delta[]): Promise<ByteSource | null> => {
-      const sides = commitShown(shown, spans)
-      let out: string
-      if (parsed.graph) out = await graphed(repo, walk, parsed, decor, diffFlags, sides)
-      else {
-        const blocks: string[] = []
-        for (const commit of commits) {
-          const entry = await commitEntry(
-            repo,
-            commit,
-            parsed,
-            diffFlags,
-            sides.get(commit.oid) ?? [],
-            decor,
-            summary,
-            walk.parents.get(commit.oid) ?? null,
-          )
-          blocks.push(boundary.has(commit.oid) ? marked(entry, parsed.pretty.kind) : entry)
-        }
-        out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
-      }
-      return out === '' ? null : encodeText(out)
-    }
-    return [null, new IOResult({ rows: { items: rows, render } })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkOperands(ctx, texts)
+  const flags = parseFlags(fl, ctx.env)
+  const repo = await opened(ctx, fl)
+  const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
+  const [mailmap, mapped, decorate] = await displayed(repo, fl, flags.pretty)
+  const parsed = { ...flags, mailmap, useMailmap: mapped, decorate, pathspecs }
+  const [starts, hidden] = await startingPoints(repo, revisions, parsed, dashed)
+  const decor = await decorations(repo, parsed.decorate)
+  let diffFlags = parseDiffFlags(fl, false)
+  // The pickaxe searches the diff, renames paired, whether or not any of it is
+  // printed, which is how `-S -m` comes to name the parent each printed entry
+  // matched against.
+  const diffing =
+    parsed.pickaxe !== null ||
+    diffFlags.patch ||
+    diffFlags.stat ||
+    diffFlags.nameOnly ||
+    diffFlags.nameStatus ||
+    diffFlags.numstat ||
+    diffFlags.shortstat ||
+    diffFlags.summary ||
+    diffFlags.raw
+  if (diffing) {
+    diffFlags = parseDiffFlags(
+      fl,
+      false,
+      'off',
+      true,
+      await renamesEnabled(repo),
+      await configBool(repo, 'core.quotepath', true),
+    )
   }
+  diffFlags = { ...diffFlags, pickaxe: parsed.pickaxe, pathspecs }
+  const walk = await walked(repo, starts, parsed, hidden, diffFlags)
+  const commits = inPrintOrder(walk, parsed)
+  const boundary = new Set(walk.boundary.map((commit) => commit.oid))
+  if (!diffing) {
+    const out = parsed.graph
+      ? await graphed(repo, walk, parsed, decor, null, new Map())
+      : rendered(commits, parsed, repo.abbrev, decor, boundary, walk.parents)
+    return [out === '' ? null : encodeText(out), new IOResult()]
+  }
+  const shownCommits = parsed.graph
+    ? [...walk.steps.filter((step) => step.shown).map((step) => step.commit), ...walk.boundary]
+    : commits
+  const [rows, spans] = await commitDeltas(repo, shownCommits, diffFlags)
+  // A commit whose summary is empty still gets the blank line under its
+  // header, as `show` gives one, though not under oneline (git 2.47.3).
+  const summary = diffFlags.summary && !diffFlags.noPatch && parsed.pretty.kind !== 'oneline'
+  const render = async (shown: Delta[]): Promise<ByteSource | null> => {
+    const sides = commitShown(shown, spans)
+    let out: string
+    if (parsed.graph) out = await graphed(repo, walk, parsed, decor, diffFlags, sides)
+    else {
+      const blocks: string[] = []
+      for (const commit of commits) {
+        const entry = await commitEntry(
+          repo,
+          commit,
+          parsed,
+          diffFlags,
+          sides.get(commit.oid) ?? [],
+          decor,
+          summary,
+          walk.parents.get(commit.oid) ?? null,
+        )
+        blocks.push(boundary.has(commit.oid) ? marked(entry, parsed.pretty.kind) : entry)
+      }
+      out = blocks.join(TERMINATED_KINDS.includes(parsed.pretty.kind) ? '' : '\n')
+    }
+    return out === '' ? null : encodeText(out)
+  }
+  return [null, new IOResult({ rows: { items: rows, render } })]
 }

@@ -403,6 +403,7 @@ class OnePlaceGate:
 
     scoped = True
     granted = ()
+    judged: frozenset[str] = frozenset()
 
     def __init__(self, refused: str) -> None:
         self.refused = refused

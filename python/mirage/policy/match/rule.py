@@ -173,7 +173,9 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
     root (``grep -r x /scratch`` enters ``/scratch/child``: the fan-out
     reruns the traversal inside each descendant mount and no admission
     fires again there, so the ancestor operand is the one place the
-    mount's rule can speak).
+    mount's rule can speak) or takes that directory along whole
+    (``mv /scratch /done``, ``rm -r /scratch``), as a path rule judges
+    a subtree operand.
 
     Args:
         mount (str): the mount root.
@@ -183,7 +185,8 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
         return True
     if any(_under(p.virtual, mount) for p in ctx.paths):
         return True
-    return ctx.walks and any(_under(mount, p.virtual) for p in ctx.paths)
+    holds = ctx.walks or ctx.command in SUBTREE_COMMANDS
+    return holds and any(_under(mount, p.virtual) for p in ctx.paths)
 
 
 def rule_applies(rule: CommandRule, ctx: CommandContext) -> bool:
@@ -355,7 +358,10 @@ def match_io(
     below its operands: the rule names the line (its command patterns
     against the line's tokens, none meaning every command) and its
     paths hold the entry. A rule with no paths spoke about the whole
-    line at admission and has nothing to add at an entry; the
+    line at admission and has nothing to add at an entry, except a
+    mount's: its mount holds the entry, since a line that works outside
+    the mount still reaches entries inside it (``cp -r``, ``chmod -R``,
+    a runtime's ``open``) where no admission asked its rule. The
     directory holding a scope is not in it, so a listing still shows
     a refused entry's name, which is what deny means: present, and
     refused.
@@ -367,12 +373,14 @@ def match_io(
             it, command name first.
         virtual (str): absolute virtual path of the entry.
     """
-    if scope is None:
+    if scope is None and not rule.mount:
         return False
     if rule.commands and not any(
         pattern_matches(p, tokens) for p in rule.commands
     ):
         return False
+    if scope is None:
+        return _under(virtual, rule.mount)
     return path_hidden(scope, virtual)
 
 
@@ -380,8 +388,8 @@ def io_reach(
     rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
 ) -> bool:
     """Whether a rule in force could reach an entry at or under this
-    path for the running line: the rule names the line and its paths
-    could cover something in the subtree.
+    path for the running line: the rule names the line and its paths,
+    or a mount rule's mount, could cover something in the subtree.
 
     What a native walk asks before it trusts the raw tree, per operand
     the way a hide is: a rule on ``/repo/.env`` leaves ``find /s3`` its
@@ -397,13 +405,16 @@ def io_reach(
         return False
     for rule in (*rules.deny, *rules.ask):
         scope = rule_scope(rule)
-        if scope is None:
+        if scope is None and not rule.mount:
             continue
         if rule.commands and not any(
             pattern_matches(p, tokens) for p in rule.commands
         ):
             continue
-        if hides_intersect(scope, virtual):
+        if scope is None:
+            if _under(rule.mount, virtual) or _under(virtual, rule.mount):
+                return True
+        elif hides_intersect(scope, virtual):
             return True
     return False
 

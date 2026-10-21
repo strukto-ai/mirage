@@ -26,10 +26,8 @@ from mirage.commands.cli.builtin.git.constants import (
     SYMLINK,
 )
 from mirage.commands.cli.builtin.git.errors import (
-    GitError,
     IgnoredPathsError,
     NothingSpecifiedError,
-    NoWorkspaceError,
     PathspecError,
     UnindexableFileError,
     UnknownPathspecError,
@@ -55,7 +53,7 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import (
@@ -352,60 +350,53 @@ async def add(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        parsed = parse_flags(fl)
-        if not texts and not parsed.every and not parsed.update:
-            raise NothingSpecifiedError()
-        _repo, location = await opened(ctx, fl, work_tree=True)
-        state = await read_index(vfs, location.gitdir)
-        tracked = decoded(visible_entries(location, state.entries))
-        found = await scan(
-            vfs,
-            location,
-            tracked,
-            UNTRACKED_ALL,
-        )
-        ignores = await load_ignores(
-            vfs, location.commondir, location.worktree
-        )
-        if parsed.update:
-            scope = (
-                _update_scope(
-                    location,
-                    start_point(fl).virtual,
-                    tracked,
-                    set(found.files),
-                    texts,
-                )
-                if texts
-                else tracked
-            )
-            stage = scope & set(found.files)
-            remove = scope - set(found.files)
-        elif parsed.every and not texts:
-            stage = keep_addable(set(found.files), tracked, ignores)
-            remove = tracked - set(found.files)
-        else:
-            stage, remove = await _resolve(
-                vfs,
+    check_switches(ctx, texts)
+    parsed = parse_flags(fl)
+    if not texts and not parsed.every and not parsed.update:
+        raise NothingSpecifiedError()
+    _repo, location = await opened(ctx, fl, work_tree=True)
+    state = await read_index(vfs, location.gitdir)
+    tracked = decoded(visible_entries(location, state.entries))
+    found = await scan(
+        vfs,
+        location,
+        tracked,
+        UNTRACKED_ALL,
+    )
+    ignores = await load_ignores(vfs, location.commondir, location.worktree)
+    if parsed.update:
+        scope = (
+            _update_scope(
                 location,
                 start_point(fl).virtual,
-                texts,
-                found,
                 tracked,
-                ignores,
-                parsed.force,
+                set(found.files),
+                texts,
             )
-        lines = await stage_changes(vfs, location, state, found, stage, remove)
-        await write_index(vfs, location.gitdir, state)
-    except GitError as exc:
-        return fatal(exc)
+            if texts
+            else tracked
+        )
+        stage = scope & set(found.files)
+        remove = scope - set(found.files)
+    elif parsed.every and not texts:
+        stage = keep_addable(set(found.files), tracked, ignores)
+        remove = tracked - set(found.files)
+    else:
+        stage, remove = await _resolve(
+            vfs,
+            location,
+            start_point(fl).virtual,
+            texts,
+            found,
+            tracked,
+            ignores,
+            parsed.force,
+        )
+    lines = await stage_changes(vfs, location, state, found, stage, remove)
+    await write_index(vfs, location.gitdir, state)
     if not parsed.verbose or not lines:
         return None, IOResult()
     return yield_bytes(

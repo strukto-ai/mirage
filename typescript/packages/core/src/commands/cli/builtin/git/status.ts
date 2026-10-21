@@ -19,7 +19,7 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { branchUpstream } from './branch.ts'
 import { assembled, collect, type StatusRow } from './changes.ts'
-import { GitError, NoWorkspaceError } from './errors.ts'
+import { GitError } from './errors.ts'
 import { detachedLine } from './ref_list.ts'
 import { readHead } from './refs.ts'
 import { branchLine, longFormat, relativeEntries, shortFormat } from './render.ts'
@@ -27,7 +27,7 @@ import { configBool, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { HeadRef } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { fatal, startPoint } from './util.ts'
+import { startPoint, requireVfs } from './util.ts'
 import { repoRelative } from './pathspec.ts'
 import { UNTRACKED_ALL, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -129,43 +129,35 @@ export async function status(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
-    }
-    const parsed = parseFlags(fl)
-    const repo = await opened(ctx, fl, true)
-    const head = await readHead(vfs, repo.location.gitdir)
-    const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
-    const fully = await configBool(repo, 'core.quotepath', true)
-    const prefix = parsed.porcelain ? '' : await relativePrefix(repo, startPoint(fl).virtual)
-    const upstream = await branchUpstream(repo, head, noCommits)
-    const detached = head.branch !== null ? '' : await detachedLine(repo, head)
-    const render = async (shown: StatusRow[]): Promise<ByteSource> => {
-      const entries = relativeEntries(await assembled(repo, shown), prefix)
-      const body =
-        parsed.porcelain || parsed.short
-          ? shortFormat(
-              entries,
-              parsed.branch ? branchLine(head.branch, noCommits, upstream) : null,
-              fully,
-            )
-          : longFormat(
-              entries,
-              head.branch,
-              detached,
-              noCommits,
-              state.merging,
-              parsed.untracked === UNTRACKED_NO,
-              fully,
-              upstream,
-            )
-      return encodeText(body)
-    }
-    return [null, new IOResult({ rows: { items: rows, render } })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  const parsed = parseFlags(fl)
+  const repo = await opened(ctx, fl, true)
+  const head = await readHead(vfs, repo.location.gitdir)
+  const [rows, state, noCommits] = await collect(repo, vfs, parsed.untracked, parsed.ignored)
+  const fully = await configBool(repo, 'core.quotepath', true)
+  const prefix = parsed.porcelain ? '' : await relativePrefix(repo, startPoint(fl).virtual)
+  const upstream = await branchUpstream(repo, head, noCommits)
+  const detached = head.branch !== null ? '' : await detachedLine(repo, head)
+  const render = async (shown: StatusRow[]): Promise<ByteSource> => {
+    const entries = relativeEntries(await assembled(repo, shown), prefix)
+    const body =
+      parsed.porcelain || parsed.short
+        ? shortFormat(
+            entries,
+            parsed.branch ? branchLine(head.branch, noCommits, upstream) : null,
+            fully,
+          )
+        : longFormat(
+            entries,
+            head.branch,
+            detached,
+            noCommits,
+            state.merging,
+            parsed.untracked === UNTRACKED_NO,
+            fully,
+            upstream,
+          )
+    return encodeText(body)
   }
+  return [null, new IOResult({ rows: { items: rows, render } })]
 }

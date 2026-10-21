@@ -38,7 +38,6 @@ import {
   GitError,
   InvalidBranchNameError,
   InvalidReferenceError,
-  NoWorkspaceError,
   PathsWithBranchError,
   RefLockError,
   RefReadOnlyError,
@@ -81,7 +80,7 @@ import { restored } from './reset.ts'
 import { commitEntries, type TreeEntry } from './tree.ts'
 import type { HeadRef, IndexEntry, ReadOnlyRefusal, Track } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, fatal, splitMarked, startPoint as lineStart } from './util.ts'
+import { checkSwitches, splitMarked, startPoint as lineStart, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -719,124 +718,116 @@ export async function checkout(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const detach = fl.asBool('detach')
+  const branch = fl.asStr('b')
+  if (detach && branch !== undefined) throw new DetachWithCreateError()
+  const target = branch ?? texts[0] ?? (detach ? HEAD : undefined)
+  if (target === undefined) throw new UnknownPathspecError('')
+  const extra = texts[1]
+  if (detach && extra !== undefined) throw new DetachPathError(extra)
+  const repo = await opened(ctx, fl, true)
+  const mode = await trackMode(repo)
+  const head = await readHead(vfs, repo.location.gitdir)
+  let creating = branch !== undefined
+  const ref = `${BRANCH_PREFIX}${target}`
+  const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
+  if (creating && texts.length > 1) throw new PathsWithBranchError(target)
+  if (!creating && !detach) {
+    const [leading, marked] = splitMarked(texts, ctx.argv ?? [])
+    if (marked.length > 0) {
+      const paths = [...leading.slice(1), ...marked]
+      return await checkoutPaths(ctx, repo, fl, leading[0] ?? null, paths, false)
     }
-    checkSwitches(ctx, texts)
-    const detach = fl.asBool('detach')
-    const branch = fl.asStr('b')
-    if (detach && branch !== undefined) throw new DetachWithCreateError()
-    const target = branch ?? texts[0] ?? (detach ? HEAD : undefined)
-    if (target === undefined) throw new UnknownPathspecError('')
-    const extra = texts[1]
-    if (detach && extra !== undefined) throw new DetachPathError(extra)
-    const repo = await opened(ctx, fl, true)
-    const mode = await trackMode(repo)
-    const head = await readHead(vfs, repo.location.gitdir)
-    let creating = branch !== undefined
-    const ref = `${BRANCH_PREFIX}${target}`
-    const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
-    if (creating && texts.length > 1) throw new PathsWithBranchError(target)
-    if (!creating && !detach) {
-      const [leading, marked] = splitMarked(texts, ctx.argv ?? [])
-      if (marked.length > 0) {
-        const paths = [...leading.slice(1), ...marked]
-        return await checkoutPaths(ctx, repo, fl, leading[0] ?? null, paths, false)
-      }
-      if (texts.length > 1) {
-        const treeish = (await readsAsCommit(repo, known, target)) ? target : null
-        const paths = treeish === null ? texts : texts.slice(1)
-        return await checkoutPaths(ctx, repo, fl, treeish, paths, true)
-      }
+    if (texts.length > 1) {
+      const treeish = (await readsAsCommit(repo, known, target)) ? target : null
+      const paths = treeish === null ? texts : texts.slice(1)
+      return await checkoutPaths(ctx, repo, fl, treeish, paths, true)
     }
-    let guessed: string | null = null
-    // The commit a target names when it is no local branch: a branch of that
-    // name wins over every other reading, as git's checkout reads it.
-    let named: string | null = null
-    if (!creating && (detach || (!known.has(ref) && target !== head.branch))) {
-      try {
-        named = await resolveCommit(repo, target)
-      } catch (err) {
-        if (!(err instanceof GitError)) throw err
-        if (detach) throw new DetachPathError(target)
-        if (await namesPath(repo, vfs, lineStart(fl).virtual, target)) {
-          return await checkoutPaths(ctx, repo, fl, null, texts, true)
-        }
-        guessed = await remoteBranch(repo, target)
-        if (guessed === null) throw new UnknownPathspecError(target)
-        creating = true
-      }
-    }
-    if (!creating && !detach && target === head.branch) {
-      await noteAmbiguity(repo, target)
-      // The shortcut moves nothing, and that is exactly why it has to read the
-      // index: git refuses the line over an unresolved index rather than
-      // answering that there is nothing to do, so a caller cannot read
-      // "Already on" as proof the repository is in a state it can build on.
-      refuseUnresolved(await readIndex(repo, vfs))
-      return [
-        null,
-        new IOResult({
-          stderr: fl.asBool('quiet') ? new Uint8Array() : ENC.encode(`Already on '${target}'\n`),
-        }),
-      ]
-    }
-    // `checkout -b <new> [<start>]` branches from the start point when one is
-    // given, HEAD otherwise. Forcing HEAD here put the new branch on the
-    // current commit and dropped the operand without a word, so every commit
-    // after it landed on the wrong history.
-    const startPoint = guessed ?? (branch !== undefined ? texts[0] : undefined)
-    let oid: string | null = null
-    if (startPoint !== undefined) {
-      try {
-        oid = await resolveCommit(repo, startPoint)
-      } catch (err) {
-        if (err instanceof GitError) throw new BadStartPointError(startPoint, target)
-        throw err
-      }
-      if (guessed === null) await refuseAmbiguous(repo, startPoint, false)
-    }
-    // After the start point and before HEAD is read, which is git's own order:
-    // an unborn HEAD refuses the name, not the line. And before it asks whether
-    // the branch exists, so a refs/heads/HEAD already there is still refused as
-    // a name. A ref is a path below .git, so an unchecked name reaches writeRef
-    // as one: -b ../../config would land on the repository's own configuration
-    // rather than on a branch.
-    if (creating && !validBranchName(target)) throw new InvalidBranchNameError(target)
-    if (creating && known.has(ref)) throw new BranchExistsError(target)
-    if (named !== null) {
-      oid = named
-    } else if (!creating && known.has(ref)) {
-      await noteAmbiguity(repo, target)
-      oid = await resolveCommit(repo, ref)
-    }
-    oid ??= await resolveCommit(repo, creating ? 'HEAD' : target)
-    // Before the working tree moves, which is where git refuses it too: the
-    // ref is locked first and nothing is checked out when the lock cannot be
-    // taken.
-    const held = creating ? blockingRef(new Set(known.keys()), ref) : null
-    if (held !== null) throw new RefLockError(ref, held)
-    const attached = !detach && (creating || known.has(ref))
-    return await moveHead(
-      vfs,
-      repo,
-      known,
-      head,
-      oid,
-      target,
-      attached ? ref : null,
-      creating,
-      startPoint,
-      mode,
-      !detach,
-      fl.asBool('quiet'),
-    )
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
   }
+  let guessed: string | null = null
+  // The commit a target names when it is no local branch: a branch of that
+  // name wins over every other reading, as git's checkout reads it.
+  let named: string | null = null
+  if (!creating && (detach || (!known.has(ref) && target !== head.branch))) {
+    try {
+      named = await resolveCommit(repo, target)
+    } catch (err) {
+      if (!(err instanceof GitError)) throw err
+      if (detach) throw new DetachPathError(target)
+      if (await namesPath(repo, vfs, lineStart(fl).virtual, target)) {
+        return await checkoutPaths(ctx, repo, fl, null, texts, true)
+      }
+      guessed = await remoteBranch(repo, target)
+      if (guessed === null) throw new UnknownPathspecError(target)
+      creating = true
+    }
+  }
+  if (!creating && !detach && target === head.branch) {
+    await noteAmbiguity(repo, target)
+    // The shortcut moves nothing, and that is exactly why it has to read the
+    // index: git refuses the line over an unresolved index rather than
+    // answering that there is nothing to do, so a caller cannot read
+    // "Already on" as proof the repository is in a state it can build on.
+    refuseUnresolved(await readIndex(repo, vfs))
+    return [
+      null,
+      new IOResult({
+        stderr: fl.asBool('quiet') ? new Uint8Array() : ENC.encode(`Already on '${target}'\n`),
+      }),
+    ]
+  }
+  // `checkout -b <new> [<start>]` branches from the start point when one is
+  // given, HEAD otherwise. Forcing HEAD here put the new branch on the
+  // current commit and dropped the operand without a word, so every commit
+  // after it landed on the wrong history.
+  const startPoint = guessed ?? (branch !== undefined ? texts[0] : undefined)
+  let oid: string | null = null
+  if (startPoint !== undefined) {
+    try {
+      oid = await resolveCommit(repo, startPoint)
+    } catch (err) {
+      if (err instanceof GitError) throw new BadStartPointError(startPoint, target)
+      throw err
+    }
+    if (guessed === null) await refuseAmbiguous(repo, startPoint, false)
+  }
+  // After the start point and before HEAD is read, which is git's own order:
+  // an unborn HEAD refuses the name, not the line. And before it asks whether
+  // the branch exists, so a refs/heads/HEAD already there is still refused as
+  // a name. A ref is a path below .git, so an unchecked name reaches writeRef
+  // as one: -b ../../config would land on the repository's own configuration
+  // rather than on a branch.
+  if (creating && !validBranchName(target)) throw new InvalidBranchNameError(target)
+  if (creating && known.has(ref)) throw new BranchExistsError(target)
+  if (named !== null) {
+    oid = named
+  } else if (!creating && known.has(ref)) {
+    await noteAmbiguity(repo, target)
+    oid = await resolveCommit(repo, ref)
+  }
+  oid ??= await resolveCommit(repo, creating ? 'HEAD' : target)
+  // Before the working tree moves, which is where git refuses it too: the
+  // ref is locked first and nothing is checked out when the lock cannot be
+  // taken.
+  const held = creating ? blockingRef(new Set(known.keys()), ref) : null
+  if (held !== null) throw new RefLockError(ref, held)
+  const attached = !detach && (creating || known.has(ref))
+  return await moveHead(
+    vfs,
+    repo,
+    known,
+    head,
+    oid,
+    target,
+    attached ? ref : null,
+    creating,
+    startPoint,
+    mode,
+    !detach,
+    fl.asBool('quiet'),
+  )
 }
 
 /**

@@ -23,10 +23,8 @@ import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
-  GitError,
   IgnoredPathsError,
   NothingSpecifiedError,
-  NoWorkspaceError,
   PathspecError,
   UnindexableFileError,
   UnknownPathspecError,
@@ -40,7 +38,7 @@ import { opened } from './session.ts'
 import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
 import type { IndexEntry, IndexState, RepoLocation, WorkTree } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -271,50 +269,42 @@ export async function add(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
-    }
-    checkSwitches(ctx, texts)
-    const parsed = parseFlags(fl)
-    if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
-    const repo: Repo = await opened(ctx, fl, true)
-    const state = await readIndex(repo, vfs)
-    const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
-    const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
-    const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
-    const present = new Set(found.files.keys())
-    let stage: Set<string>
-    let remove: Set<string>
-    if (parsed.update) {
-      const scope =
-        texts.length > 0
-          ? updateScope(repo.location, startPoint(fl).virtual, texts, tracked, present)
-          : tracked
-      stage = new Set([...scope].filter((path) => present.has(path)))
-      remove = new Set([...scope].filter((path) => !present.has(path)))
-    } else if (parsed.every && texts.length === 0) {
-      stage = keepAddable(present, tracked, ignores)
-      remove = new Set([...tracked].filter((path) => !present.has(path)))
-    } else {
-      ;[stage, remove] = await resolve(
-        vfs,
-        repo.location,
-        startPoint(fl).virtual,
-        texts,
-        found,
-        tracked,
-        ignores,
-        parsed.force,
-      )
-    }
-    const [staged, lines] = await stageChanges(repo, vfs, state.entries, found, stage, remove)
-    await updateIndex(repo, staged, remove)
-    if (!parsed.verbose || lines.length === 0) return [null, new IOResult()]
-    return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const parsed = parseFlags(fl)
+  if (texts.length === 0 && !parsed.every && !parsed.update) throw new NothingSpecifiedError()
+  const repo: Repo = await opened(ctx, fl, true)
+  const state = await readIndex(repo, vfs)
+  const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
+  const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
+  const present = new Set(found.files.keys())
+  let stage: Set<string>
+  let remove: Set<string>
+  if (parsed.update) {
+    const scope =
+      texts.length > 0
+        ? updateScope(repo.location, startPoint(fl).virtual, texts, tracked, present)
+        : tracked
+    stage = new Set([...scope].filter((path) => present.has(path)))
+    remove = new Set([...scope].filter((path) => !present.has(path)))
+  } else if (parsed.every && texts.length === 0) {
+    stage = keepAddable(present, tracked, ignores)
+    remove = new Set([...tracked].filter((path) => !present.has(path)))
+  } else {
+    ;[stage, remove] = await resolve(
+      vfs,
+      repo.location,
+      startPoint(fl).virtual,
+      texts,
+      found,
+      tracked,
+      ignores,
+      parsed.force,
+    )
   }
+  const [staged, lines] = await stageChanges(repo, vfs, state.entries, found, stage, remove)
+  await updateIndex(repo, staged, remove)
+  if (!parsed.verbose || lines.length === 0) return [null, new IOResult()]
+  return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]
 }

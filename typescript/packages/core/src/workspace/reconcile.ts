@@ -61,16 +61,17 @@ enum Verdict {
  * feeds both consumers with separate reactions: the file cache evicts and the
  * namespace GCs any orphaned attribute overlay.
  *
- * Three read paths call in: the dispatcher's cached-read gate
- * (mayServeCached), its main-op catch (onEnoent), and the mount registry's
- * per-command reconcile (reconcileRead) for the operands of a single-mount
- * shell command. The re-stat goes through the ops registry (not mount.call,
- * whose op set omits stat). Reconcile state follows each consumer's store
- * (RAM local, Redis shared across runtimes), so this is a thin coordinator
- * holding references, not config.
+ * Three read paths call in, all at the dispatcher: its cached-read gate
+ * (mayServeCached), its main-op catch (onEnoent), and its first lookup of a
+ * path the running command's line names (reconcileRead). The re-stat goes
+ * through the ops registry (not mount.call, whose op set omits stat).
+ * Reconcile state follows each consumer's store (RAM local, Redis shared
+ * across runtimes), so this is a thin coordinator holding references, not
+ * config.
  *
- * The gate and reconcileRead both run for a warm named operand, once at
- * routing and again at the gate, and they share one scope: the command. The
+ * The gate and reconcileRead both run for a warm named operand, once at the
+ * command's first lookup of it and again at the gate, and they share one
+ * scope: the command. The
  * first probe's backend answer is kept on the mount's CacheManager for the
  * rest of the command, so the gate, and the command's own stat of the
  * operand, reuse it instead of asking again. A write in the command, the
@@ -272,19 +273,17 @@ export class Reconciler {
     return remote instanceof FileStat ? remote.fingerprint : null
   }
 
-  // Reconcile a single-mount shell read before the command runs.
-  // cat/ls/stat on one mount resolve here (not through the dispatcher), so
-  // this is where their reads reconcile against backend truth. Only paths
-  // that carry an overlay or a cached copy are probed (a plain read pays
-  // nothing); a remote delete then evicts the cache AND GCs the orphaned
-  // overlay, and a stale entry is dropped.
+  // Reconcile a path a command names before it answers the command's first
+  // lookup of it. The dispatcher calls this under `read: fresh` for a stat,
+  // listing or exists check of one of the line's own paths: a metadata
+  // command (ls, stat) reads no bytes, so the cache gate never checks its
+  // operand. Only paths that carry an overlay or a cached copy are probed (a
+  // plain lookup pays nothing); a remote delete then evicts the cache AND GCs
+  // the orphaned overlay, and a stale entry is dropped.
   //
-  // Nothing escapes. This runs during routing, before any handler exists, so
-  // an exception here does not fail one command -- it takes the whole line,
-  // later pipeline stages and `;` chains included, and reports itself with no
-  // operand to name. probeOrUnknown still rethrows a programming error for
-  // the gate's benefit, which is correct there because the gate runs inside a
-  // handler; here that same throw is only a way to lose output.
+  // Nothing escapes. A lookup that cannot be verified must still be answered,
+  // so the probe is best-effort: drop what could not be verified, log it, and
+  // let the lookup ask the backend itself.
   async reconcileRead(mount: MountEntry, path: string): Promise<void> {
     if (mount.read.policy !== ReadPolicy.FRESH) return
     if (this.namespace.metaFor(path) === null && !(await this.cache.exists(path))) return

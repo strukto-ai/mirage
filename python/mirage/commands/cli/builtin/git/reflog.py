@@ -18,7 +18,6 @@ import posixpath
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.discover import is_bare
-from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.objects import abbrev_for
 from mirage.commands.cli.builtin.git.repo import config_values
@@ -27,7 +26,6 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
-    fatal,
     maybe_bool,
 )
 from mirage.commands.config import Context
@@ -211,27 +209,24 @@ async def reflog(
         ctx (Context): the line's context, with the entry limit.
     """
     fl = FlagView(ctx.flags)
-    try:
-        texts = texts[1:] if texts[:1] == ["show"] else texts
-        check_operands(ctx, texts)
-        repo, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        revision = texts[0] if texts else HEAD
-        await asyncio.to_thread(resolve_commit, repo, revision)
-        name, data = await _named_log(ctx.vfs, location, revision)
-        rows = [row for row in reversed((data or b"").splitlines()) if row]
-        limit = fl.as_int("max_count")
-        if limit is not None and limit >= 0:
-            rows = rows[:limit]
-        width = abbrev_for(repo)
-        out = []
-        for index, row in enumerate(rows):
-            record, _, message = row.partition(b"\t")
-            oid = record.split(b" ")[1]
-            out.append(
-                f"{oid.decode()[:width]} {name}@{{{index}}}: "
-                f"{message.decode('utf-8', 'replace')}\n"
-            )
-        return "".join(out).encode(), IOResult()
-    except GitError as exc:
-        return fatal(exc)
+    texts = texts[1:] if texts[:1] == ["show"] else texts
+    check_operands(ctx, texts)
+    repo, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    revision = texts[0] if texts else HEAD
+    await asyncio.to_thread(resolve_commit, repo, revision)
+    name, data = await _named_log(ctx.vfs, location, revision)
+    rows = [row for row in reversed((data or b"").splitlines()) if row]
+    limit = fl.as_int("max_count")
+    if limit is not None and limit >= 0:
+        rows = rows[:limit]
+    width = abbrev_for(repo)
+    out = []
+    for index, row in enumerate(rows):
+        record, _, message = row.partition(b"\t")
+        oid = record.split(b" ")[1]
+        out.append(
+            f"{oid.decode()[:width]} {name}@{{{index}}}: "
+            f"{message.decode('utf-8', 'replace')}\n"
+        )
+    return "".join(out).encode(), IOResult()

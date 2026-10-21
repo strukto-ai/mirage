@@ -36,7 +36,6 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     run_separator,
 )
 from mirage.commands.builtin.generic.grep import (
-    directories_action,
     filename_mode,
     line_warnings,
     parse_flags,
@@ -52,7 +51,6 @@ from mirage.commands.builtin.generic.rg import (
     runs_parallel,
     sort_haystacks,
     walk_filter,
-    walks_descendant_mounts,
 )
 from mirage.commands.builtin.generic.rg import (
     parse_flags as parse_rg_flags,
@@ -447,19 +445,3 @@ def _one_footer(
         if f.engine == "default"
         else totals.stats_block(total)
     )
-
-
-def walks_mounts(name: str, flags: dict[str, FlagValue]) -> bool:
-    """Whether this search crosses descendant mounts.
-
-    Args:
-        name (str): Command name.
-        flags (dict[str, FlagValue]): Parsed options.
-    """
-    if name == "rg":
-        return walks_descendant_mounts(flags)
-    if name == "grep":
-        return (
-            directories_action(FlagView(flags, spec=SPECS[name])) == "recurse"
-        )
-    return False

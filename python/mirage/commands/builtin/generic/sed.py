@@ -588,6 +588,31 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SedFlags:
     )
 
 
+def sed_writes(flags: Mapping[str, FlagValue], texts: Sequence[str]) -> bool:
+    """Whether a sed line may change files: under ``-i``, with a script
+    file (its text is read only when sed runs), or when its script names
+    a ``w`` file, which GNU opens even when it then refuses the script.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the flags as the line's parse
+            reads them, before any path value is resolved.
+        texts (Sequence[str]): the line's text operands; the first is the
+            script when no ``-e`` or ``-f`` gave one.
+    """
+    fl = FlagView(flags, spec=SPECS["sed"])
+    if fl.as_bool("i") or fl.raw("f") is not None:
+        return True
+    scripts = fl.as_list("e") or list(texts[:1])
+    if not scripts:
+        return False
+    pieces = [SedScriptPiece("expr", s) for s in scripts]
+    extended = fl.as_bool("E") or fl.as_bool("r")
+    try:
+        return bool(compile_script(pieces, extended).wfiles)
+    except SedError as exc:
+        return bool(exc.wfiles)
+
+
 def _script_origins(
     argv: Sequence[str], count: int
 ) -> list[str | None] | None:

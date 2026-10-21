@@ -289,6 +289,27 @@ async def fill_tree_env(
     return any(session.vars.get(n) is not before[n] for n in names)
 
 
+def made_by_command(dispatch: DispatchFn) -> DispatchFn:
+    """The dispatch a command's own ops go through: every op it issues
+    is made by the command, its admission gate included, so a rule
+    scoped to the command reaches the entries below its operands, and a
+    CLI's own reads, those its output stream makes once it returned
+    included.
+
+    Args:
+        dispatch (DispatchFn): the session's op dispatcher.
+    """
+    gate = current_caller().gate
+
+    async def made(
+        name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]:
+        caller = replace(current_caller(), rule_gate=gate)
+        return await dispatch(name, path, caller=caller, **kwargs)
+
+    return made
+
+
 async def handle_command(
     execute_node: ExecuteNodeFn,
     dispatch: DispatchFn,
@@ -360,20 +381,8 @@ async def handle_command(
             execute_fn,
         )
 
-    # Every op the command or CLI issues from here is made by the command,
-    # its gate included, so a rule scoped to a CLI reaches its own reads,
-    # those its output stream makes once it returned included.
     if dispatch is not None:
-        gate = current_caller().gate
-        unbound = dispatch
-
-        async def made_by_command(
-            name: str, path: PathSpec, /, **kwargs: Any
-        ) -> tuple[Any, IOResult]:
-            caller = replace(current_caller(), rule_gate=gate)
-            return await unbound(name, path, caller=caller, **kwargs)
-
-        dispatch = made_by_command
+        dispatch = made_by_command(dispatch)
     files = Files(
         dispatch,
         (

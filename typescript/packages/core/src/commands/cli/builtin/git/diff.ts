@@ -23,20 +23,14 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import {
-  GitError,
-  InvalidOptionError,
-  NoMergeBaseError,
-  NoWorkspaceError,
-  UsageError,
-} from './errors.ts'
+import { GitError, InvalidOptionError, NoMergeBaseError, UsageError } from './errors.ts'
 import { pathspecPatterns } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { shownEntries } from './seen.ts'
 import { opened } from './session.ts'
 import { mergeBases, rangeCommits, resolveCommit } from './revparse.ts'
-import { fatal, optionOperand, splitMarked, startPoint, STDERR, verbUsage } from './util.ts'
+import { optionOperand, splitMarked, startPoint, STDERR, verbUsage, requireVfs } from './util.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
@@ -100,70 +94,64 @@ export async function diff(
   const fl = new FlagView(ctx.flags)
   const cached = fl.asBool('cached') || fl.asBool('staged')
   const [revisions, marked] = splitMarked(texts, ctx.argv ?? [])
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) throw new NoWorkspaceError()
-    const word = optionOperand(ctx, texts, STDERR)
-    if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
-      throw new UsageError('', verbUsage(ctx))
-    }
-    if (word !== null) throw new InvalidOptionError(word, verbUsage(ctx))
-    const repo = await opened(ctx, fl)
-    const parsed = parseDiffFlags(
-      fl,
-      true,
-      'off',
-      true,
-      await renamesEnabled(repo),
-      await configBool(repo, 'core.quotepath', true),
-    )
-    let before: Tree, after: Tree
-    let warning = ''
-    if (cached) {
-      if (revisions.length > 1) throw new GitError('--cached accepts at most one revision')
-      const state = await readIndex(repo, repo.vfs)
-      refuseUnresolved(state)
-      before = shownEntries(
-        repo,
-        revisions.length
-          ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
-          : ((await headEntries(repo)) ?? new Map<string, TreeEntry>()),
-      )
-      after = shownEntries(repo, stagedEntries(state))
-    } else {
-      const [old, fresh, note] = await sides(repo, revisions)
-      warning = note
-      if (fresh === null) {
-        const state = await readIndex(repo, repo.vfs)
-        after = await workEntries(repo, vfs, state)
-        if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
-        before = old ?? shownEntries(repo, stagedEntries(state))
-      } else {
-        before = old ?? new Map<string, TreeEntry>()
-        after = fresh
-      }
-    }
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
-    const flags = { ...parsed, pathspecs }
-    const rows = deltas(repo.location, [[limited(before, pathspecs), limited(after, pathspecs)]])
-    const render = async (shown: Delta[]): Promise<ByteSource | null> => {
-      const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
-      const body = await renderChanges(
-        repo,
-        await compare(repo, oldSide, newSide, flags.renames),
-        flags,
-      )
-      return body === '' ? null : encodeText(body)
-    }
-    return [
-      null,
-      new IOResult({
-        ...(warning ? { stderr: ENC.encode(warning) } : {}),
-        rows: { items: rows, render },
-      }),
-    ]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  const word = optionOperand(ctx, texts, STDERR)
+  if (word !== null && (cached || revisions.some((text) => !text.startsWith('-')))) {
+    throw new UsageError('', verbUsage(ctx))
   }
+  if (word !== null) throw new InvalidOptionError(word, verbUsage(ctx))
+  const repo = await opened(ctx, fl)
+  const parsed = parseDiffFlags(
+    fl,
+    true,
+    'off',
+    true,
+    await renamesEnabled(repo),
+    await configBool(repo, 'core.quotepath', true),
+  )
+  let before: Tree, after: Tree
+  let warning = ''
+  if (cached) {
+    if (revisions.length > 1) throw new GitError('--cached accepts at most one revision')
+    const state = await readIndex(repo, repo.vfs)
+    refuseUnresolved(state)
+    before = shownEntries(
+      repo,
+      revisions.length
+        ? await commitEntries(repo, await resolveCommit(repo, revisions[0] ?? HEAD))
+        : ((await headEntries(repo)) ?? new Map<string, TreeEntry>()),
+    )
+    after = shownEntries(repo, stagedEntries(state))
+  } else {
+    const [old, fresh, note] = await sides(repo, revisions)
+    warning = note
+    if (fresh === null) {
+      const state = await readIndex(repo, repo.vfs)
+      after = await workEntries(repo, vfs, state)
+      if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
+      before = old ?? shownEntries(repo, stagedEntries(state))
+    } else {
+      before = old ?? new Map<string, TreeEntry>()
+      after = fresh
+    }
+  }
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
+  const flags = { ...parsed, pathspecs }
+  const rows = deltas(repo.location, [[limited(before, pathspecs), limited(after, pathspecs)]])
+  const render = async (shown: Delta[]): Promise<ByteSource | null> => {
+    const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
+    const body = await renderChanges(
+      repo,
+      await compare(repo, oldSide, newSide, flags.renames),
+      flags,
+    )
+    return body === '' ? null : encodeText(body)
+  }
+  return [
+    null,
+    new IOResult({
+      ...(warning ? { stderr: ENC.encode(warning) } : {}),
+      rows: { items: rows, render },
+    }),
+  ]
 }

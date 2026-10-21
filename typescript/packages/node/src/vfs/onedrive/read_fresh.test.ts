@@ -237,9 +237,9 @@ describe('onedrive under read: fresh', () => {
 
 // Measured in python on the first green run, then pinned; the two hosts must
 // agree. The listing makes every ordinary stat an index hit, so what is left
-// is the reconcile probes: cat pays routing's, which the cache gate reuses; cp
-// skips routing (write commands are not reconciled there) and keeps the gate.
-// A warm read downloads nothing and lists nothing.
+// is the reconcile probe: a command pays it at its first lookup of the operand
+// its line names, and the cache gate reuses it. A warm read downloads nothing
+// and lists nothing.
 const WARM: [string, number][] = [
   [CAT, 1],
   ['cat /m/a.txt | head -c 1', 1],

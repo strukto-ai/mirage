@@ -43,7 +43,6 @@ from mirage.commands.cli.builtin.git.tree import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
     split_marked,
     start_point,
     verb_usage,
@@ -247,124 +246,111 @@ async def grep(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    try:
-        check_switches(ctx, texts[:1])
-        words = list(texts)
-        patterns = fl.as_list("e")
-        origin = "-e option" if patterns else "command line"
-        if patterns:
-            before, after = split_marked(tuple(texts), ctx.argv)
-            words, pathspecs = list(before), list(after)
-            marked = "--" in ctx.argv
-            if words and words[-1] == "--":
-                words.pop()
-        else:
-            if not words:
-                if fl.as_bool("h"):
-                    raise UsageError(verb_usage(ctx), "")
-                raise GitError("no pattern given")
-            patterns = [words.pop(0)]
-            marked = "--" in words
-            cut = words.index("--") if marked else len(words)
-            words, pathspecs = words[:cut], words[cut + 1 :]
-        flags = parse_flags(fl, patterns, origin, utf8_locale(ctx.env))
-        repo, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        start = start_point(fl).virtual
-        prefix = repo_relative(location, start, ".")
-        cached = fl.as_bool("cached")
-        sources: list[tuple[str, Tree]] = []
-        for index, word in enumerate(words):
-            if word.startswith("-"):
-                raise GitError(
-                    f"option '{word}' must come before non-option arguments"
-                )
-            try:
-                sources.append(
-                    (word, await asyncio.to_thread(search_entries, repo, word))
-                )
-            except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
-                if marked:
-                    raise GitError(
-                        f"unable to resolve revision: {word}"
-                    ) from exc
-                relative = repo_relative(location, start, word)
-                if not any(
-                    char in word for char in "*?["
-                ) and not await exists(
-                    ctx.vfs, location.worktree.join(relative)
-                ):
-                    raise AmbiguousArgumentError(word) from exc
-                logger.debug("Git grep operand is a pathspec: %s", word)
-                pathspecs = words[index:] + pathspecs
-                break
-        if sources and cached:
-            raise GitError("both --cached and trees are given")
-        if not sources and not cached:
-            await require_work_tree(
-                ctx.vfs,
-                location,
-                fl.as_path("work_tree") is not None,
+    check_switches(ctx, texts[:1])
+    words = list(texts)
+    patterns = fl.as_list("e")
+    origin = "-e option" if patterns else "command line"
+    if patterns:
+        before, after = split_marked(tuple(texts), ctx.argv)
+        words, pathspecs = list(before), list(after)
+        marked = "--" in ctx.argv
+        if words and words[-1] == "--":
+            words.pop()
+    else:
+        if not words:
+            if fl.as_bool("h"):
+                raise UsageError(verb_usage(ctx), "")
+            raise GitError("no pattern given")
+        patterns = [words.pop(0)]
+        marked = "--" in words
+        cut = words.index("--") if marked else len(words)
+        words, pathspecs = words[:cut], words[cut + 1 :]
+    flags = parse_flags(fl, patterns, origin, utf8_locale(ctx.env))
+    repo, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    start = start_point(fl).virtual
+    prefix = repo_relative(location, start, ".")
+    cached = fl.as_bool("cached")
+    sources: list[tuple[str, Tree]] = []
+    for index, word in enumerate(words):
+        if word.startswith("-"):
+            raise GitError(
+                f"option '{word}' must come before non-option arguments"
             )
-        specs = pathspec_patterns(location, start, tuple(pathspecs)) or (
-            prefix,
+        try:
+            sources.append(
+                (word, await asyncio.to_thread(search_entries, repo, word))
+            )
+        except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
+            if marked:
+                raise GitError(f"unable to resolve revision: {word}") from exc
+            relative = repo_relative(location, start, word)
+            if not any(char in word for char in "*?[") and not await exists(
+                ctx.vfs, location.worktree.join(relative)
+            ):
+                raise AmbiguousArgumentError(word) from exc
+            logger.debug("Git grep operand is a pathspec: %s", word)
+            pathspecs = words[index:] + pathspecs
+            break
+    if sources and cached:
+        raise GitError("both --cached and trees are given")
+    if not sources and not cached:
+        await require_work_tree(
+            ctx.vfs,
+            location,
+            fl.as_path("work_tree") is not None,
         )
-        fully = await config_bool(
-            ctx.vfs, location, b"core", b"quotepath", True
-        )
-        if not sources:
-            state = await read_index(ctx.vfs, location.gitdir)
-            entries: Tree = {
-                path: (entry.mode, entry.sha)
-                for path, entry in state.entries.items()
-            }
-            if not cached:
-                for path, conflict in state.conflicts.items():
-                    for entry in (
-                        conflict.this,
-                        conflict.other,
-                        conflict.ancestor,
-                    ):
-                        if entry is not None and entry.mode in (
-                            REGULAR,
-                            EXECUTABLE,
-                        ):
-                            entries[path] = (entry.mode, entry.sha)
-                            break
-            sources.append(("", shown_entries(repo, entries)))
-        out: list[bytes] = []
-        found = False
-        for revision, entries in sources:
-            for path, (mode, oid) in sorted(entries.items()):
-                relative = path.decode("utf-8", "surrogateescape")
-                # Every source is what the session sees already, at the
-                # place its tree stands.
-                if mode not in (REGULAR, EXECUTABLE) or (
-                    relative and not pathspec_selects(relative, specs)
+    specs = pathspec_patterns(location, start, tuple(pathspecs)) or (prefix,)
+    fully = await config_bool(ctx.vfs, location, b"core", b"quotepath", True)
+    if not sources:
+        state = await read_index(ctx.vfs, location.gitdir)
+        entries: Tree = {
+            path: (entry.mode, entry.sha)
+            for path, entry in state.entries.items()
+        }
+        if not cached:
+            for path, conflict in state.conflicts.items():
+                for entry in (
+                    conflict.this,
+                    conflict.other,
+                    conflict.ancestor,
                 ):
+                    if entry is not None and entry.mode in (
+                        REGULAR,
+                        EXECUTABLE,
+                    ):
+                        entries[path] = (entry.mode, entry.sha)
+                        break
+        sources.append(("", shown_entries(repo, entries)))
+    out: list[bytes] = []
+    found = False
+    for revision, entries in sources:
+        for path, (mode, oid) in sorted(entries.items()):
+            relative = path.decode("utf-8", "surrogateescape")
+            # Every source is what the session sees already, at the
+            # place its tree stands.
+            if mode not in (REGULAR, EXECUTABLE) or (
+                relative and not pathspec_selects(relative, specs)
+            ):
+                continue
+            data: bytes | None
+            if revision or cached:
+                data = await asyncio.to_thread(blob_data, repo, (mode, oid))
+            else:
+                target = location.worktree.join(relative)
+                if await is_link(ctx.vfs, target):
                     continue
-                data: bytes | None
-                if revision or cached:
-                    data = await asyncio.to_thread(
-                        blob_data, repo, (mode, oid)
-                    )
-                else:
-                    target = location.worktree.join(relative)
-                    if await is_link(ctx.vfs, target):
-                        continue
-                    data = await read_optional(ctx.vfs, target)
-                    if data is None:
-                        continue
-                label = posixpath.relpath(relative or revision, prefix or ".")
-                if not flags.nul:
-                    label = quote_path(label, False, fully)
-                if revision and relative:
-                    label = revision + ":" + label
-                rendered, hit = searched(data, label, flags)
-                found = found or hit
-                if hit and flags.quiet:
-                    return None, IOResult()
-                out.append(rendered)
-        return b"".join(out), IOResult(exit_code=0 if found else 1)
-    except GitError as exc:
-        return fatal(exc)
+                data = await read_optional(ctx.vfs, target)
+                if data is None:
+                    continue
+            label = posixpath.relpath(relative or revision, prefix or ".")
+            if not flags.nul:
+                label = quote_path(label, False, fully)
+            if revision and relative:
+                label = revision + ":" + label
+            rendered, hit = searched(data, label, flags)
+            found = found or hit
+            if hit and flags.quiet:
+                return None, IOResult()
+            out.append(rendered)
+    return b"".join(out), IOResult(exit_code=0 if found else 1)

@@ -29,8 +29,10 @@ import { MountMode } from '../../types.ts'
 import {
   Consumer,
   SHELL_CONSUMERS,
+  changesFiles,
   dereferences,
   execs,
+  lineFlags,
   readsSubtrees,
   lookup,
   lookupAll,
@@ -229,35 +231,128 @@ describe('lsLinkMode', () => {
   })
 })
 
-describe('walkers and subtree readers', () => {
-  it('walkers are read off the raw line', () => {
-    // find/du/tree/rg always descend; grep and ls only under a flag,
-    // read raw because admission fires before flag parsing.
-    expect(walksMounts('find', ['find', '/data'])).toBe(true)
-    expect(walksMounts('du', ['du', '/data'])).toBe(true)
-    expect(walksMounts('tree', ['tree'])).toBe(true)
-    expect(walksMounts('rg', ['rg', 'x'])).toBe(true)
-    expect(walksMounts('grep', ['grep', 'x', '/data'])).toBe(false)
-    expect(walksMounts('grep', ['grep', '-rn', 'x', '/data'])).toBe(true)
-    expect(walksMounts('grep', ['grep', '--recursive', 'x'])).toBe(true)
-    expect(walksMounts('grep', ['grep', '--', '-r'])).toBe(false)
-    expect(walksMounts('egrep', ['egrep', '-r', 'x'])).toBe(true)
-    expect(walksMounts('fgrep', ['fgrep', 'x', '/data'])).toBe(false)
-    expect(walksMounts('ls', ['ls', '-R', '/data'])).toBe(true)
-    expect(walksMounts('ls', ['ls', '-l', '/data'])).toBe(false)
-    expect(walksMounts('cat', ['cat', '/data/x'])).toBe(false)
+describe('dereference options', () => {
+  it('reads an abbreviated long form', () => {
+    // coreutils 9.7: `stat --deref` is --dereference.
+    expect(dereferences('stat', ['stat', '--deref', '/data/link'])).toBe(true)
+    expect(dereferences('stat', ['stat', '-c', '%L', '/data/link'])).toBe(false)
   })
 
-  it('subtree readers cover the archivers and recursive copy', () => {
-    // tar -c and zip -r and cp -r read below their operands but stop at
-    // a mount boundary, so they read subtrees without walking mounts.
-    expect(readsSubtrees('tar', ['tar', '-cf', '/out.tar', '/data'])).toBe(true)
-    expect(readsSubtrees('tar', ['tar', '-xf', '/out.tar'])).toBe(false)
-    expect(readsSubtrees('zip', ['zip', '-r', '/out.zip', '/data'])).toBe(true)
-    expect(readsSubtrees('cp', ['cp', '-r', '/data', '/copy'])).toBe(true)
-    expect(readsSubtrees('cp', ['cp', '/data/a', '/copy'])).toBe(false)
-    expect(readsSubtrees('grep', ['grep', '-r', 'x', '/data'])).toBe(true)
-    expect(walksMounts('tar', ['tar', '-cf', '/out.tar', '/data'])).toBe(false)
+  // file 5.46 and coreutils 9.7: the later of -L and its take-back (-h, -P)
+  // decides. Mirrors test_constants.py.
+  it.each([
+    [['file', '-h', '/data/link'], false],
+    [['file', '-L', '-h', '/data/link'], false],
+    [['file', '-h', '-L', '/data/link'], true],
+    [['file', '-Lh', '/data/link'], false],
+    [['du', '-LP', '/data/link'], false],
+    [['du', '-PL', '/data/link'], true],
+    [['du', '-L', '-P', '/data/link'], false],
+  ] as const)('reads %j as following: %s', (words, follows) => {
+    expect(dereferences(words[0], words)).toBe(follows)
+  })
+})
+
+describe('walkers and subtree readers', () => {
+  const walks = (words: readonly string[]): boolean =>
+    walksMounts(words[0] ?? '', lineFlags(words[0] ?? '', words))
+  const readsBelow = (words: readonly string[]): boolean =>
+    readsSubtrees(words[0] ?? '', lineFlags(words[0] ?? '', words))
+
+  // grep 3.11, coreutils 9.7: a long option's prefix, -d recurse and an
+  // option's attached value read as grep reads them, and the last of -r and
+  // -d wins. Mirrors test_constants.py.
+  it.each([
+    [['find', '/data'], true],
+    [['du', '/data'], true],
+    [['du', '-x', '/data'], false],
+    [['tree'], true],
+    [['tree', '-x', '/data'], false],
+    [['rg', 'x'], true],
+    [['rg', '--one-file-system', 'x', '/data'], false],
+    [['grep', 'x', '/data'], false],
+    [['grep', '-rn', 'x', '/data'], true],
+    [['grep', '--recursive', 'x'], true],
+    [['grep', '--recur', 'x', '/data'], true],
+    [['grep', '-d', 'recurse', 'x', '/data'], true],
+    [['grep', '--directories=recurse', 'x', '/data'], true],
+    [['grep', '--dereference-recursive', 'x', '/data'], true],
+    [['grep', '-r', '-d', 'skip', 'x', '/data'], false],
+    [['grep', '-ephrase', '/data/x'], false],
+    [['grep', '-frules.txt', '/data/x'], false],
+    [['grep', '--', '-r'], false],
+    [['egrep', '-r', 'x'], true],
+    [['fgrep', 'x', '/data'], false],
+    [['ls', '-R', '/data'], true],
+    [['ls', '--recur', '/data'], true],
+    [['ls', '-l', '/data'], false],
+    [['cat', '/data/x'], false],
+    [['tar', '-cf', '/out.tar', '/data'], false],
+  ] as const)('reads %j as walking: %s', (words, walking) => {
+    expect(walks(words)).toBe(walking)
+  })
+
+  // tar -c (dashless too), zip -r and cp -r or -a read below their operands
+  // but stop at a mount boundary, so they read subtrees without walking
+  // mounts.
+  it.each([
+    [['tar', '-cf', '/out.tar', '/data'], true],
+    [['tar', 'cf', '/out.tar', '/data'], true],
+    [['tar', '--create', '-f', '/out.tar', '/data'], true],
+    [['tar', '-xf', '/out.tar'], false],
+    [['zip', '-r', '/out.zip', '/data'], true],
+    [['cp', '-r', '/data', '/copy'], true],
+    [['cp', '-a', '/data', '/copy'], true],
+    [['cp', '--archive', '/data', '/copy'], true],
+    [['cp', '--recur', '/data', '/copy'], true],
+    [['cp', '/data/a', '/copy'], false],
+    [['grep', '-r', 'x', '/data'], true],
+  ] as const)('reads %j as reading below: %s', (words, reads) => {
+    expect(readsBelow(words)).toBe(reads)
+  })
+})
+
+describe('changesFiles', () => {
+  // sed 4.9 opens a w file while it reads the script, before it refuses a
+  // later command. Mirrors test_constants.py.
+  it.each([
+    [['sort', '/data/a'], false],
+    [['sort', '-o', '/data/b', '/data/a'], true],
+    [['sort', '--out=/data/b', '/data/a'], true],
+    [['shuf', '/data/a'], false],
+    [['shuf', '-o', '/data/b', '/data/a'], true],
+    [['iconv', '-f', 'utf-8', '/data/a'], false],
+    [['iconv', '-o', '/data/b', '/data/a'], true],
+    [['uniq', '/data/a'], false],
+    [['uniq', '/data/a', '/data/b'], true],
+    [['xxd', '/data/a'], false],
+    [['xxd', '-r', '/data/a', '/data/b'], true],
+    [['tee'], false],
+    [['tee', '/data/a'], true],
+    [['mktemp', '-u'], false],
+    [['mktemp'], true],
+    [['tar', '-tf', '/data/a.tar'], false],
+    [['tar', '-xOf', '/data/a.tar'], false],
+    [['tar', '-xf', '/data/a.tar'], true],
+    [['tar', 'cf', '/data/a.tar', '/data/d'], true],
+    [['unzip', '-l', '/data/a.zip'], false],
+    [['unzip', '-p', '/data/a.zip'], false],
+    [['unzip', '/data/a.zip'], true],
+    [['gzip'], false],
+    [['gzip', '-c', '/data/a'], false],
+    [['gzip', '/data/a'], true],
+    [['gunzip', '-t', '/data/a.gz'], false],
+    [['gunzip', '/data/a.gz'], true],
+    [['sed', '-n', 'p', '/data/a'], false],
+    [['sed', '-i', 's/a/b/', '/data/a'], true],
+    [['sed', 'w /data/out', '/data/a'], true],
+    [['sed', '-e', 's/a/b/w /data/out', '/data/a'], true],
+    [['sed', '-f', '/data/script', '/data/a'], true],
+    [['sed', 'w /data/out\\nq q', '/data/a'], true],
+    [['awk', '1', '/data/a'], true],
+    [['cp', '/data/a', '/data/b'], true],
+  ] as const)('reads %j as writing: %s', (words, writes) => {
+    expect(changesFiles(words[0], words)).toBe(writes)
   })
 })
 

@@ -30,7 +30,6 @@ from mirage.commands.cli.builtin.git.errors import (
     NoSuchRefError,
     NotASymbolicRefError,
     NotSymbolicDeleteError,
-    NoWorkspaceError,
     SymbolicRefLockError,
     SymbolicRefReadOnlyError,
     UsageError,
@@ -62,7 +61,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     verb_usage,
 )
 from mirage.commands.config import Context
@@ -210,60 +209,55 @@ async def symbolic_ref(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    vfs = ctx.vfs
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        repo, location = await opened(ctx, fl)
-        message = fl.as_str("m")
-        if message == "":
-            raise EmptyUpdateMessageError()
-        quiet = _switched(fl, "quiet", False)
-        gitdir = location.gitdir
-        table = await load_refs(vfs, gitdir, location.commondir)
-        names = tuple(texts)
-        name = names[0] if names else ""
-        if _switched(fl, "delete", False):
-            if len(names) != 1:
-                raise UsageError("", verb_usage(ctx))
-            found = await resolve_symbolic(vfs, gitdir, table, name, False)
-            if found is None:
-                raise NoSuchRefError(name)
-            if not found.symbolic:
-                raise NotSymbolicDeleteError(name)
-            if name == HEAD:
-                raise DeleteHeadError()
-            owner = owner_of(location, name)
-            await delete_ref(vfs, owner, name)
-            await remove_file(vfs, owner.join(LOGS_DIR, name))
-            return None, IOResult()
-        if len(names) == 2:
-            target = names[1]
-            if name == HEAD and not target.startswith(REFS_PREFIX):
-                raise HeadOutsideRefsError()
-            if not whole_ref_name(target):
-                raise InvalidSymbolicTargetError(name, target)
-            who = identity(fl, ctx.session)
-            await set_symbolic(repo, table, name, target, who, message or "")
-            return None, IOResult()
+    vfs = require_vfs(ctx)
+    check_switches(ctx, texts)
+    repo, location = await opened(ctx, fl)
+    message = fl.as_str("m")
+    if message == "":
+        raise EmptyUpdateMessageError()
+    quiet = _switched(fl, "quiet", False)
+    gitdir = location.gitdir
+    table = await load_refs(vfs, gitdir, location.commondir)
+    names = tuple(texts)
+    name = names[0] if names else ""
+    if _switched(fl, "delete", False):
         if len(names) != 1:
             raise UsageError("", verb_usage(ctx))
-        found = await resolve_symbolic(
-            vfs, gitdir, table, name, _switched(fl, "recurse", True)
-        )
+        found = await resolve_symbolic(vfs, gitdir, table, name, False)
         if found is None:
             raise NoSuchRefError(name)
         if not found.symbolic:
-            if quiet:
-                return None, IOResult(exit_code=1)
-            raise NotASymbolicRefError(name)
-        shown = found.name
-        if _switched(fl, "short", False):
-            known = frozenset(
-                ref.decode(errors="replace") for ref in table.allkeys()
-            )
-            shown = shorten_ref(shown, known, strict=False)
-        return f"{shown}\n".encode(), IOResult()
-    except GitError as exc:
-        return fatal(exc)
+            raise NotSymbolicDeleteError(name)
+        if name == HEAD:
+            raise DeleteHeadError()
+        owner = owner_of(location, name)
+        await delete_ref(vfs, owner, name)
+        await remove_file(vfs, owner.join(LOGS_DIR, name))
+        return None, IOResult()
+    if len(names) == 2:
+        target = names[1]
+        if name == HEAD and not target.startswith(REFS_PREFIX):
+            raise HeadOutsideRefsError()
+        if not whole_ref_name(target):
+            raise InvalidSymbolicTargetError(name, target)
+        who = identity(fl, ctx.session)
+        await set_symbolic(repo, table, name, target, who, message or "")
+        return None, IOResult()
+    if len(names) != 1:
+        raise UsageError("", verb_usage(ctx))
+    found = await resolve_symbolic(
+        vfs, gitdir, table, name, _switched(fl, "recurse", True)
+    )
+    if found is None:
+        raise NoSuchRefError(name)
+    if not found.symbolic:
+        if quiet:
+            return None, IOResult(exit_code=1)
+        raise NotASymbolicRefError(name)
+    shown = found.name
+    if _switched(fl, "short", False):
+        known = frozenset(
+            ref.decode(errors="replace") for ref in table.allkeys()
+        )
+        shown = shorten_ref(shown, known, strict=False)
+    return f"{shown}\n".encode(), IOResult()

@@ -20,19 +20,13 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { headEntries, workChanges } from './changes.ts'
 import { isBare, requireWorkTree } from './discover.ts'
-import {
-  AmbiguousArgumentError,
-  BareResetError,
-  GitError,
-  NoWorkspaceError,
-  RevisionResetError,
-} from './errors.ts'
+import { AmbiguousArgumentError, BareResetError, GitError, RevisionResetError } from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
 import type { TreeEntry } from './tree.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -87,62 +81,53 @@ export async function reset(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  let unstaged: Map<string, string>
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const named = fl.asPath('work_tree') !== undefined
+  if (!named && (await isBare(vfs, repo.location))) throw new BareResetError()
+  await requireWorkTree(vfs, repo.location, named)
+  const state = await readIndex(repo, vfs)
+  const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
+  const start = startPoint(fl).virtual
+  const names = new Set([
+    ...visibleEntries(repo.location, tree).keys(),
+    ...visibleEntries(repo.location, state.entries).keys(),
+  ])
+  let selected: Set<string>
+  if (texts.length > 0) {
+    selected = new Set()
+    for (const operand of texts) {
+      const hits = matched(names, repoRelative(repo.location, start, operand))
+      if (hits.size === 0) throw await unmatched(repo, operand)
+      for (const path of hits) selected.add(path)
     }
-    checkSwitches(ctx, texts)
-    const repo = await opened(ctx, fl)
-    const named = fl.asPath('work_tree') !== undefined
-    if (!named && (await isBare(vfs, repo.location))) throw new BareResetError()
-    await requireWorkTree(vfs, repo.location, named)
-    const state = await readIndex(repo, vfs)
-    const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-    const start = startPoint(fl).virtual
-    const names = new Set([
-      ...visibleEntries(repo.location, tree).keys(),
-      ...visibleEntries(repo.location, state.entries).keys(),
-    ])
-    let selected: Set<string>
-    if (texts.length > 0) {
-      selected = new Set()
-      for (const operand of texts) {
-        const hits = matched(names, repoRelative(repo.location, start, operand))
-        if (hits.size === 0) throw await unmatched(repo, operand)
-        for (const path of hits) selected.add(path)
-      }
-    } else {
-      selected = names
-    }
-    const staged = new Map<string, StagedEntry>()
-    const removed: string[] = []
-    for (const name of selected) {
-      const recorded = tree.get(name)
-      if (recorded === undefined) removed.push(name)
-      else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
-    }
-    if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
-    await updateIndex(repo, staged, removed)
-    const after = await readIndex(repo, vfs)
-    const found = await scan(
-      vfs,
-      repo.location,
-      new Set(visibleEntries(repo.location, after.entries).keys()),
-      UNTRACKED_NO,
-    )
-    unstaged = await workChanges(
-      repo,
-      vfs,
-      repo.location.worktree,
-      visibleEntries(repo.location, after.entries),
-      found,
-    )
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  } else {
+    selected = names
   }
+  const staged = new Map<string, StagedEntry>()
+  const removed: string[] = []
+  for (const name of selected) {
+    const recorded = tree.get(name)
+    if (recorded === undefined) removed.push(name)
+    else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
+  }
+  if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
+  await updateIndex(repo, staged, removed)
+  const after = await readIndex(repo, vfs)
+  const found = await scan(
+    vfs,
+    repo.location,
+    new Set(visibleEntries(repo.location, after.entries).keys()),
+    UNTRACKED_NO,
+  )
+  const unstaged = await workChanges(
+    repo,
+    vfs,
+    repo.location.worktree,
+    visibleEntries(repo.location, after.entries),
+    found,
+  )
   if (unstaged.size === 0 || fl.asBool('quiet')) return [null, new IOResult()]
   const lines = [UNSTAGED_HEADER]
   // Python is `sorted(unstaged.items())`, a tuple sort: path then letter.

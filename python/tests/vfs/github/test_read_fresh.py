@@ -115,15 +115,14 @@ async def test_a_read_leaves_its_sha_on_the_cache_entry(prefix):
 
 
 # Each cell is (dir listings, whole-tree walks, blob downloads) for one line
-# on a warm fresh mount. cat pays one probe, at routing, as hf's table does;
-# its own stat and the cache stage both reuse that answer. cp skips
-# routing's probe, so the cache stage asks, and cp's stat resolves
-# through the listing, which fresh re-checks once per command: on github that
-# is one check of the head, which replaces the tree refetch (Task 1.3).
+# on a warm fresh mount. A command pays one probe, at its first stat of the
+# operand its line names, as hf's table does; its own stat and the cache
+# stage both reuse that answer. On github the probe is one check of the
+# head, which replaces the tree refetch (Task 1.3).
 WARM = [
     ("cat /gh/docs/a.txt", (1, 0, 0)),
     ("cat /gh/docs/a.txt | head -c 1", (1, 0, 0)),
-    ("cp /gh/docs/a.txt /r/a.txt", (2, 0, 0)),
+    ("cp /gh/docs/a.txt /r/a.txt", (1, 0, 0)),
 ]
 
 
@@ -176,7 +175,7 @@ async def test_a_warm_probe_does_not_bypass_a_sessions_hidden_path():
 
 @pytest.mark.asyncio
 async def test_a_cold_stat_of_an_overlaid_path_prints_what_a_bounded_one_does():
-    # Routing probes a path that carries an attribute overlay even when
+    # The operand probe checks a path that carries an attribute overlay even when
     # nothing is cached, so under fresh the command's stat of it comes from
     # the probe; the overlay must still apply on top.
     outs = []
@@ -205,7 +204,7 @@ async def test_a_changed_file_is_refetched_once_then_served_warm():
             assert hub.counts() == (1, 0, 1)
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == NEW
-            # Warm now: the routing probe, and nothing else.
+            # Warm now: the operand probe, and nothing else.
             assert hub.counts() == (1, 0, 0)
         finally:
             await ws.close()
@@ -482,7 +481,7 @@ async def test_a_truncated_parent_listing_is_not_absence():
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == OLD
             assert _kept(ws)
-            # The routing probe's listing of docs/ is cut short, so it defers
+            # The operand probe's listing of docs/ is cut short, so it defers
             # to one walk of the whole tree, which finds the file; cat's own
             # stat and the cache stage reuse its answer.
             assert hub.counts() == (1, 1, 0)
@@ -512,7 +511,7 @@ async def test_a_truncated_repository_probes_one_directory():
             assert await _out(ws, f"cat {PATH}") == OLD
             hub.log.clear()
             assert await _out(ws, f"cat {PATH}") == OLD
-            # One listing of docs/, by the routing probe; cat's own stat and
+            # One listing of docs/, by the operand probe; cat's own stat and
             # the cache stage reuse its answer, so the truncated tree is
             # never walked folder by folder, which would reach docs/ by its
             # sha.

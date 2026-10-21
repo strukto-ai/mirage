@@ -669,7 +669,12 @@ class MountEntry:
                 return rc
         return None
 
-    def may_write(self, cmd_name: str, extension: str | None = None) -> bool:
+    def may_write(
+        self,
+        cmd_name: str,
+        extension: str | None = None,
+        builtins: bool = True,
+    ) -> bool:
         """Whether a run of ``cmd_name`` on an operand with ``extension``
         can reach a handler that declares it may write.
 
@@ -682,9 +687,12 @@ class MountEntry:
             cmd_name (str): command name.
             extension (str | None): the operand's extension; None for
                 none.
+            builtins (bool): whether mirage's own handlers count; False
+                when the line's options leave them nothing to write
+                (``changes_files``). A user command counts either way.
         """
         return any(
-            cmd.write
+            cmd.write and (builtins or self._is_user_command(cmd))
             for cmd in self._resolve_cascade(
                 cmd_name, extension, self._cmds, self._general_cmds
             )

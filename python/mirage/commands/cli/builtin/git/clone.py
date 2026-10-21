@@ -29,7 +29,6 @@ from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.errors import (
     CloneReadOnlyError,
     GitError,
-    NoWorkspaceError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.fetch import (
@@ -71,7 +70,7 @@ from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     config_section,
-    fatal,
+    require_vfs,
     start_point,
     verb_usage,
 )
@@ -171,39 +170,30 @@ async def clone(
             is and never written to the clone's config.
     """
     fl = FlagView(ctx.flags)
-    vfs = ctx.vfs
-    try:
-        check_switches(ctx, texts)
-        if not texts:
-            raise UsageError(
-                "",
-                "fatal: You must specify a repository to clone.\n\n"
-                + verb_usage(ctx),
-            )
-    except GitError as exc:
-        return fatal(exc)
+    vfs = require_vfs(ctx)
+    check_switches(ctx, texts)
+    if not texts:
+        raise UsageError(
+            "",
+            "fatal: You must specify a repository to clone.\n\n"
+            + verb_usage(ctx),
+        )
     url = texts[0]
     name = texts[1] if len(texts) > 1 else default_directory(url)
     quiet = fl.as_bool("quiet")
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        start = start_point(fl)
-        target = start.join(name)
-        info = await stat_of(vfs, target)
-        if info is not None and (
-            info.type is not FileType.DIRECTORY
-            or await read_names(vfs, target)
-        ):
-            raise GitError(
-                f"destination path '{name}' already exists and "
-                "is not an empty directory."
-            )
-        transport = await open_transport(
-            ctx, url, start, await configured_headers(ctx, None), credentials
+    start = start_point(fl)
+    target = start.join(name)
+    info = await stat_of(vfs, target)
+    if info is not None and (
+        info.type is not FileType.DIRECTORY or await read_names(vfs, target)
+    ):
+        raise GitError(
+            f"destination path '{name}' already exists and "
+            "is not an empty directory."
         )
-    except GitError as exc:
-        return fatal(exc)
+    transport = await open_transport(
+        ctx, url, start, await configured_headers(ctx, None), credentials
+    )
     local = is_local(url)
     # git records a local path as the directory it ran in joined to the
     # path as typed, not normalized.

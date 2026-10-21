@@ -661,6 +661,12 @@ describe('what the handler a command resolves to declares', () => {
       'cat /data/a.txt': false,
       'rm -f /data/a.txt': true,
       'sort -o /data/b.txt /data/a.txt': true,
+      // A builtin that writes only under an option reads as a reader without it.
+      'sort /data/a.txt': false,
+      'sed -n p /data/a.txt': false,
+      'sed -i s/a/b/ /data/a.txt': true,
+      'tar -tf /data/a.tar': false,
+      'uniq /data/a.txt /data/u.txt': true,
       'chmod 644 /data/a.txt': true,
       'ln -s /data/a.txt /data/l': true,
       'echo hi': false,

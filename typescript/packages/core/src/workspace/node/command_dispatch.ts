@@ -50,7 +50,7 @@ import { expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
-import { fillTreeEnv, handleCommand } from '../executor/command/command.ts'
+import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
@@ -992,44 +992,49 @@ async function routeArgv(
     argv = argv.withOperands(operands)
   }
 
+  // The programs below run here rather than on a mount, and every op one
+  // issues is the program's, as a mount command's is: a rule scoped to it
+  // reaches what `chmod -R` walks into, not only its operands.
+  const made = madeByCommand(dispatch, admission)
+
   // Symlinks are namespace-backed: not bash builtins, not mount commands.
   // They mutate the addressing layer. `readlink -f/-e/-m` is canonicalization,
   // which falls through to the mount command.
   if (name === 'ln') {
-    return await handleLn(namespace, dispatch, session, operands)
+    return await handleLn(namespace, made, session, operands)
   }
   if (name === 'readlink') {
-    return await handleReadlink(namespace, dispatch, session, operands)
+    return await handleReadlink(namespace, made, session, operands)
   }
 
   // Extended attributes: the dispatcher's node table and the backend's own
   // facts; they read -h themselves.
   if (name === 'getfattr') {
-    return await handleGetfattr(dispatch, session, operands)
+    return await handleGetfattr(made, session, operands)
   }
   if (name === 'setfattr') {
-    return await handleSetfattr(dispatch, session, operands)
+    return await handleSetfattr(made, session, operands)
   }
 
   // Metadata commands (namespace-routed: resolve-then-setattr with
   // overlay fallback; they run their own link follow).
   if (name === 'chmod') {
-    return handleChmod(namespace, dispatch, session, operands)
+    return handleChmod(namespace, made, session, operands)
   }
   if (name === 'chown') {
-    return handleChown(namespace, dispatch, session, operands)
+    return handleChown(namespace, made, session, operands)
   }
   if (name === 'chgrp') {
-    return handleChgrp(namespace, dispatch, session, operands)
+    return handleChgrp(namespace, made, session, operands)
   }
   if (name === 'touch') {
-    return handleTouch(namespace, dispatch, session, operands)
+    return handleTouch(namespace, made, session, operands)
   }
 
   // Capacity (registry-routed: enumerates mounts, reports per-mount capacity;
   // never fabricates numbers).
   if (name === 'df') {
-    return handleDf(registry, session, dispatch, operands)
+    return handleDf(registry, session, made, operands)
   }
   if (name === 'mount') {
     return handleMount(registry, session, operands)

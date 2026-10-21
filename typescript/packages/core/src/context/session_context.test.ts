@@ -405,6 +405,7 @@ describe('the admission binding', () => {
       scoped,
       scopes: () => scoped,
       granted: [],
+      judged: new Set<string>(),
       check: () => undefined,
       refusal: () => null,
     })

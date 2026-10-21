@@ -783,8 +783,10 @@ class CommandContext:
             declares that it may change state (``CLIHandler.write``,
             ``Command.write``): an installed CLI's or a mount tree's
             leaf as the walk names it, a mount command as the mount
-            that would run it resolves it. False for a shell builtin, a
-            function, an external program and an unknown name.
+            that would run it resolves it, and a builtin only when its
+            options let it write (``sort -o`` writes, ``sort`` does
+            not). False for a shell builtin, a function, an external
+            program and an unknown name.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
         vfs (Files | None): the session's files, read only: a write is
@@ -1183,6 +1185,11 @@ class EntryGate(Protocol):
             under a grant for. Read by the dispatcher, which sees the same
             entries from below and would otherwise re-derive a verdict
             that knows nothing of the nod the gate already took.
+        judged (frozenset[str]): the paths the line names, which the gate
+            judged. Read by the dispatcher, which checks a named path
+            against the backend under ``read: fresh`` the first time the
+            command stats it, and leaves the entries a walk reaches to
+            their listings.
     """
 
     @property
@@ -1190,6 +1197,9 @@ class EntryGate(Protocol):
 
     @property
     def granted(self) -> tuple[CommandRule, ...]: ...
+
+    @property
+    def judged(self) -> frozenset[str]: ...
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for

@@ -33,7 +33,6 @@ import {
   InvalidBranchNameError,
   InvalidObjectNameError,
   NoBranchError,
-  NoWorkspaceError,
   RefDeleteReadOnlyError,
   RefLockError,
   RefReadOnlyError,
@@ -96,7 +95,14 @@ import {
   type Upstream,
 } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, configSection, fatal, gitBool, verbUsage, withoutSection } from './util.ts'
+import {
+  checkSwitches,
+  configSection,
+  gitBool,
+  verbUsage,
+  withoutSection,
+  requireVfs,
+} from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -572,48 +578,42 @@ export async function branch(
   const remotesOnly = fl.asBool('r')
   const includeRemotes = remotesOnly || fl.asBool('a')
   const listing = words.length > 0 || fl.asBool('list')
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(ctx, operands)
-    const repo = await opened(ctx, fl)
-    const mode = await trackMode(repo)
-    const filter = await refFilter(repo, words)
-    const refs = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
-    const head = await readHead(vfs, repo.location.gitdir)
-    if (fl.asBool('show_current'))
-      return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
-    const force = fl.asBool('D')
-    if (fl.asBool('delete') || force) {
-      if (listing) throw new UsageError('', verbUsage(ctx))
-      if (operands.length === 0) throw new BranchNameRequiredError()
-      const parts: string[] = []
-      for (const name of operands) parts.push(await remove(vfs, repo, refs, head, name, force))
-      if (fl.asBool('quiet')) return [null, new IOResult()]
-      return [ENC.encode(parts.join('')), new IOResult()]
-    }
-    const first = operands[0]
-    if (first !== undefined && !listing) {
-      const [tracking, warning] = await create(vfs, repo, refs, first, operands[1], mode, head)
-      return [
-        tracking && !fl.asBool('quiet') ? ENC.encode(tracking) : null,
-        new IOResult({ stderr: ENC.encode(warning) }),
-      ]
-    }
-    return await listBranches(
-      ctx,
-      fl,
-      repo,
-      head,
-      listing ? operands : [],
-      filter,
-      remotesOnly,
-      includeRemotes,
-    )
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, operands)
+  const repo = await opened(ctx, fl)
+  const mode = await trackMode(repo)
+  const filter = await refFilter(repo, words)
+  const refs = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
+  const head = await readHead(vfs, repo.location.gitdir)
+  if (fl.asBool('show_current'))
+    return [ENC.encode(head.branch ? head.branch + '\n' : ''), new IOResult()]
+  const force = fl.asBool('D')
+  if (fl.asBool('delete') || force) {
+    if (listing) throw new UsageError('', verbUsage(ctx))
+    if (operands.length === 0) throw new BranchNameRequiredError()
+    const parts: string[] = []
+    for (const name of operands) parts.push(await remove(vfs, repo, refs, head, name, force))
+    if (fl.asBool('quiet')) return [null, new IOResult()]
+    return [ENC.encode(parts.join('')), new IOResult()]
   }
+  const first = operands[0]
+  if (first !== undefined && !listing) {
+    const [tracking, warning] = await create(vfs, repo, refs, first, operands[1], mode, head)
+    return [
+      tracking && !fl.asBool('quiet') ? ENC.encode(tracking) : null,
+      new IOResult({ stderr: ENC.encode(warning) }),
+    ]
+  }
+  return await listBranches(
+    ctx,
+    fl,
+    repo,
+    head,
+    listing ? operands : [],
+    filter,
+    remotesOnly,
+    includeRemotes,
+  )
 }
 
 /** A branch's upstream from `branch.<name>.remote` and `.merge`. */

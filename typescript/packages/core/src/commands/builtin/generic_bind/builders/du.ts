@@ -333,9 +333,9 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     crossing ? null : (mountsOf(ctx)?.maxDuEntries?.((paths[0] ?? ctx.cwd).virtual) ?? null),
     mountsOf(ctx),
   )
-  // Kept on one filesystem across mounts, a listing leaves out the roots of
-  // the mounts below it, which the walk must neither list nor stat.
-  const bound = crossing && flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
+  // Kept on one filesystem, a listing leaves out the roots of the mounts
+  // below it, which the walk must neither list nor stat.
+  const bound = flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
   const listing =
     bound === undefined
       ? files.readdir

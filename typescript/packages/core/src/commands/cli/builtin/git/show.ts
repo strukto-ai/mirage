@@ -23,7 +23,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { GitError, UsageError } from './errors.ts'
+import { UsageError } from './errors.ts'
 import type { CommitFacts, LogFormat } from './format.ts'
 import { decorations, displayed, prettyFormat } from './history.ts'
 import {
@@ -45,7 +45,6 @@ import { deltas, shownSides, type Delta } from './rows.ts'
 import { located, placeNamed, shownItems } from './seen.ts'
 import {
   checkOperands,
-  fatal,
   optionOperand,
   revisionArg,
   splitMarked,
@@ -170,92 +169,83 @@ async function commits(
  */
 export async function show(
   _accessor: NOOPAccessor,
-  paths: PathSpec[],
+  _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkOperands(ctx, texts)
-    const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
-    const repo = await opened(ctx, fl)
-    const base = parseShowFlags(
-      fl,
-      await renamesEnabled(repo),
-      await configBool(repo, 'core.quotepath', true),
-      ctx.env,
-    )
-    const [mailmap, mapped, decorate] = await displayed(repo, fl, base.pretty)
-    const names = revisions.length > 0 ? revisions : [HEAD]
-    const objects: [string, GitObject][] = []
-    for (const name of names) objects.push([name, await resolveObject(repo, name)])
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
-    const parsed = {
-      ...base,
-      mailmap,
-      useMailmap: mapped,
-      decorate,
-      diff: { ...base.diff, pathspecs },
-    }
-    const decor = await decorations(repo, parsed.decorate)
-    const terminated = TERMINATED_KINDS.includes(parsed.pretty.kind)
-    const [rows, spans] = await commitDeltas(
-      repo,
-      await commits(repo, objects, parsed),
-      parsed.diff,
-    )
-    const render = async (shown: Delta[]): Promise<ByteSource> => {
-      const sides = commitShown(shown, spans)
-      const parts: Uint8Array[] = []
-      const shownCommits = new Set<string>()
-      let shownOne = false
-      for (const [name, obj] of objects) {
-        let target = obj
-        const tagged = target.type === 'tag'
-        while (target.type === 'tag') {
-          const [block, next] = await tagBlock(repo, target.oid, parsed)
-          parts.push(encodeText(`${shownOne ? '\n' : ''}${block}`))
-          shownOne = true
-          target = next
-        }
-        // A tag can point past every commit at a tree or a blob, which is
-        // shown only where the session sees it.
-        if (tagged && (await located(repo, target)) === null) continue
-        if (target.type === 'blob') {
-          parts.push((await git.readBlob({ ...repoArgs(repo), oid: target.oid })).blob)
-          continue
-        }
-        if (target.type === 'tree') {
-          const base = await placeNamed(repo, name, target.oid)
-          const body = (await shownItems(repo, target.oid, base))
-            .map((entry) => entry.path + (entry.type === 'tree' ? '/' : '') + '\n')
-            .join('')
-          parts.push(encodeText(`${shownOne ? '\n' : ''}tree ${name}\n\n${body}`))
-          shownOne = true
-          continue
-        }
-        if (shownCommits.has(target.oid)) continue
-        shownCommits.add(target.oid)
-        const facts = await commitFacts(repo, target.oid)
-        const entry = await commitEntry(
-          repo,
-          facts,
-          parsed,
-          parsed.diff,
-          sides.get(facts.oid) ?? [],
-          decor,
-          parsed.diff.summary && !parsed.diff.noPatch && parsed.pretty.kind !== 'oneline',
-        )
-        parts.push(encodeText(`${shownOne && !terminated ? '\n' : ''}${entry}`))
-        shownOne = true
-      }
-      return concat(parts)
-    }
-    return [null, new IOResult({ rows: { items: rows, render } })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkOperands(ctx, texts)
+  const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
+  const repo = await opened(ctx, fl)
+  const base = parseShowFlags(
+    fl,
+    await renamesEnabled(repo),
+    await configBool(repo, 'core.quotepath', true),
+    ctx.env,
+  )
+  const [mailmap, mapped, decorate] = await displayed(repo, fl, base.pretty)
+  const names = revisions.length > 0 ? revisions : [HEAD]
+  const objects: [string, GitObject][] = []
+  for (const name of names) objects.push([name, await resolveObject(repo, name)])
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
+  const parsed = {
+    ...base,
+    mailmap,
+    useMailmap: mapped,
+    decorate,
+    diff: { ...base.diff, pathspecs },
   }
+  const decor = await decorations(repo, parsed.decorate)
+  const terminated = TERMINATED_KINDS.includes(parsed.pretty.kind)
+  const [rows, spans] = await commitDeltas(repo, await commits(repo, objects, parsed), parsed.diff)
+  const render = async (shown: Delta[]): Promise<ByteSource> => {
+    const sides = commitShown(shown, spans)
+    const parts: Uint8Array[] = []
+    const shownCommits = new Set<string>()
+    let shownOne = false
+    for (const [name, obj] of objects) {
+      let target = obj
+      const tagged = target.type === 'tag'
+      while (target.type === 'tag') {
+        const [block, next] = await tagBlock(repo, target.oid, parsed)
+        parts.push(encodeText(`${shownOne ? '\n' : ''}${block}`))
+        shownOne = true
+        target = next
+      }
+      // A tag can point past every commit at a tree or a blob, which is
+      // shown only where the session sees it.
+      if (tagged && (await located(repo, target)) === null) continue
+      if (target.type === 'blob') {
+        parts.push((await git.readBlob({ ...repoArgs(repo), oid: target.oid })).blob)
+        continue
+      }
+      if (target.type === 'tree') {
+        const base = await placeNamed(repo, name, target.oid)
+        const body = (await shownItems(repo, target.oid, base))
+          .map((entry) => entry.path + (entry.type === 'tree' ? '/' : '') + '\n')
+          .join('')
+        parts.push(encodeText(`${shownOne ? '\n' : ''}tree ${name}\n\n${body}`))
+        shownOne = true
+        continue
+      }
+      if (shownCommits.has(target.oid)) continue
+      shownCommits.add(target.oid)
+      const facts = await commitFacts(repo, target.oid)
+      const entry = await commitEntry(
+        repo,
+        facts,
+        parsed,
+        parsed.diff,
+        sides.get(facts.oid) ?? [],
+        decor,
+        parsed.diff.summary && !parsed.diff.noPatch && parsed.pretty.kind !== 'oneline',
+      )
+      parts.push(encodeText(`${shownOne && !terminated ? '\n' : ''}${entry}`))
+      shownOne = true
+    }
+    return concat(parts)
+  }
+  return [null, new IOResult({ rows: { items: rows, render } })]
 }
 
 /**
@@ -268,38 +258,33 @@ export async function show(
  */
 export async function diffTree(
   _accessor: NOOPAccessor,
-  paths: PathSpec[],
+  _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    if (optionOperand(ctx, texts) !== null) throw new UsageError('', verbUsage(ctx))
-    const repo = await opened(ctx, fl)
-    const parsed = parseDiffFlags(
-      fl,
-      false,
-      'off',
-      false,
-      true,
-      await configBool(repo, 'core.quotepath', true),
-    )
-    const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
-    const commit = await commitFacts(repo, await resolveCommit(repo, revisionArg(revisions)))
-    const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
-    const flags = { ...parsed, pathspecs }
-    const sides = await commitSides(repo, commit, flags, fl.asBool('r'), false)
-    const render = async (shown: Delta[]): Promise<ByteSource> => {
-      const bodies = await commitOutput(repo, commit, flags, shownSides(shown, sides.length))
-      const out = bodies
-        .filter((body) => body !== null)
-        .map((body) => (fl.asBool('no_commit_id') ? '' : commit.oid + '\n') + body)
-        .join('')
-      return encodeText(out)
-    }
-    return [null, new IOResult({ rows: { items: deltas(repo.location, sides), render } })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  if (optionOperand(ctx, texts) !== null) throw new UsageError('', verbUsage(ctx))
+  const repo = await opened(ctx, fl)
+  const parsed = parseDiffFlags(
+    fl,
+    false,
+    'off',
+    false,
+    true,
+    await configBool(repo, 'core.quotepath', true),
+  )
+  const [revisions, paths] = splitMarked(texts, ctx.argv ?? [])
+  const commit = await commitFacts(repo, await resolveCommit(repo, revisionArg(revisions)))
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, paths)
+  const flags = { ...parsed, pathspecs }
+  const sides = await commitSides(repo, commit, flags, fl.asBool('r'), false)
+  const render = async (shown: Delta[]): Promise<ByteSource> => {
+    const bodies = await commitOutput(repo, commit, flags, shownSides(shown, sides.length))
+    const out = bodies
+      .filter((body) => body !== null)
+      .map((body) => (fl.asBool('no_commit_id') ? '' : commit.oid + '\n') + body)
+      .join('')
+    return encodeText(out)
   }
+  return [null, new IOResult({ rows: { items: deltas(repo.location, sides), render } })]
 }

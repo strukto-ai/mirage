@@ -28,7 +28,6 @@ import {
   InvalidTagNameError,
   ListModeOnlyError,
   MissingTagMessageError,
-  NoWorkspaceError,
   RefDeleteReadOnlyError,
   RefLockError,
   RefReadOnlyError,
@@ -57,7 +56,7 @@ import {
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveObject } from './revparse.ts'
-import { checkSwitches, fatal, verbUsage } from './util.ts'
+import { checkSwitches, verbUsage, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -184,134 +183,125 @@ export async function tag(
   const operands = withoutFilterValues(texts, words)
   const filtered = words.length > 0
   const fl = new FlagView(ctx.flags)
-  let name: string
-  let was: string | undefined
-  let abbrev: number
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(ctx, operands)
-    const flags = parseFlags(fl)
-    if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
-    // -a, -m and -f create a tag, so a line that lists or deletes instead has
-    // nothing for them to do: git prints its usage and exits 129, where the
-    // same line without them lists or deletes and exits 0. No operand at all is
-    // a listing, which is why it counts here too.
-    if (
-      (flags.annotate || flags.force) &&
-      (flags.listing ||
-        flags.remove ||
-        flags.lines !== undefined ||
-        filtered ||
-        operands.length === 0)
-    ) {
-      throw new UsageError('', verbUsage(ctx))
-    }
-    // After the two usage refusals above, which git reaches first: `-l -d -n1`
-    // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
-    // where `-d -n1` alone dies here.
-    if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
-    const listOnly = flags.remove ? listModeOption(words) : null
-    if (listOnly !== null) throw new ListModeOnlyError(listOnly)
-    const repo = await opened(ctx, fl)
-    abbrev = repo.abbrev
-    const keys = sortKeys(fl, await configuredSort(repo, 'tag'))
-    const filter = await refFilter(repo, words)
-    const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
-    if (flags.remove) {
-      const out: string[] = []
-      const err: string[] = []
-      const doomed: { name: string; ref: string; sha: string }[] = []
-      for (const each of operands) {
-        const ref = `${TAG_PREFIX}${each}`
-        const sha = known.get(ref)
-        if (sha === undefined) {
-          err.push(`error: ${new TagNotFoundError(each).message}\n`)
-          continue
-        }
-        doomed.push({ name: each, ref, sha })
-      }
-      // Every deletion on the line is one ref transaction, and a name given
-      // twice makes two updates for one ref, which the transaction refuses
-      // before applying any of them: the whole line deletes nothing. A name
-      // that is not there never reaches the transaction, so `-d nosuch nosuch`
-      // is two ordinary reports rather than this refusal.
-      const seen = new Map<string, number>()
-      for (const { ref } of doomed) seen.set(ref, (seen.get(ref) ?? 0) + 1)
-      const repeated = [...seen.entries()]
-        .filter(([, count]) => count > 1)
-        .map(([ref]) => ref)
-        .sort(compareCodePoints)
-      const blamed = repeated[0]
-      if (blamed !== undefined) {
-        err.push(`error: ${new RefUpdateConflictError(blamed).message}\n`)
-        return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err.join('')) })]
-      }
-      for (const { name: each, ref, sha } of doomed) {
-        await deleteRef(vfs, repo.location.commondir, ref)
-        out.push(`Deleted tag '${each}' (was ${short(sha, repo.abbrev)})\n`)
-      }
-      return [
-        ENC.encode(out.join('')),
-        new IOResult({ exitCode: err.length > 0 ? 1 : 0, stderr: ENC.encode(err.join('')) }),
-      ]
-    }
-    if (flags.listing || flags.lines !== undefined || filtered || operands.length === 0) {
-      // git reads a -n count while building the format it lists with, so a
-      // count below -1 is refused as the format's own (after both usage
-      // refusals above, and in a repository holding no tags), and --format
-      // drops -n altogether.
-      const fmt = listingFormat(
-        fl.asStr('format') ?? (flags.lines ? linesFormat(flags.lines) : NAME_FORMAT),
-      )
-      const icase = fl.asBool('ignore_case')
-      const wanted = (each: string): boolean =>
-        each.startsWith(TAG_PREFIX) && matchShort(each, operands, icase)
-      const [items, refCtx, errors] = await refListing(
-        repo,
-        usedFields(fmt, keys ?? []),
-        wanted,
-        filter,
-        dateClock(ctx.env),
-      )
-      const [rows, stopped] = formatRefs(fmt, items, refCtx, keys, {
-        omitEmpty: fl.asBool('omit_empty'),
-        icase,
-        stream:
-          (keys === null || !sortsNamed(fl)) &&
-          (filter === null || (filter.merged === null && filter.noMerged === null)),
-      })
-      return listingResult(rows, errors, stopped)
-    }
-    if (operands.length > 2) throw new TooManyArgumentsError()
-    name = operands[0] ?? ''
-    if (!validRefName(name)) throw new InvalidTagNameError(name)
-    const ref = `${TAG_PREFIX}${name}`
-    was = known.get(ref)
-    if (was !== undefined && !flags.force) throw new TagExistsError(name)
-    if (flags.annotate && flags.message === undefined) throw new MissingTagMessageError()
-    const target = await resolveTarget(repo, operands[1] ?? HEAD)
-    let pointed = target.oid
-    if (flags.annotate) {
-      pointed = await buildTag(
-        repo,
-        name,
-        target,
-        flags.message ?? '',
-        identity(fl, ctx.session).line,
-        Math.floor(Date.now() / 1000),
-      )
-    }
-    // After the object is built, which is git's order: an annotated tag whose
-    // ref cannot be locked has already been written to the database and is
-    // left there unreferenced.
-    const held = blockingRef(new Set(known.keys()), ref)
-    if (held !== null) throw new RefLockError(ref, held)
-    await writeRef(vfs, repo.location.commondir, ref, pointed)
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, operands)
+  const flags = parseFlags(fl)
+  if (flags.listing && flags.remove) throw new IncompatibleOptionsError('-l', '-d')
+  // -a, -m and -f create a tag, so a line that lists or deletes instead has
+  // nothing for them to do: git prints its usage and exits 129, where the
+  // same line without them lists or deletes and exits 0. No operand at all is
+  // a listing, which is why it counts here too.
+  if (
+    (flags.annotate || flags.force) &&
+    (flags.listing ||
+      flags.remove ||
+      flags.lines !== undefined ||
+      filtered ||
+      operands.length === 0)
+  ) {
+    throw new UsageError('', verbUsage(ctx))
   }
+  // After the two usage refusals above, which git reaches first: `-l -d -n1`
+  // is the incompatible pair and `-d -f -n1` the usage, both exiting 129,
+  // where `-d -n1` alone dies here.
+  if (flags.remove && flags.lines !== undefined) throw new ListModeOnlyError()
+  const listOnly = flags.remove ? listModeOption(words) : null
+  if (listOnly !== null) throw new ListModeOnlyError(listOnly)
+  const repo = await opened(ctx, fl)
+  const abbrev = repo.abbrev
+  const keys = sortKeys(fl, await configuredSort(repo, 'tag'))
+  const filter = await refFilter(repo, words)
+  const known = await loadRefs(vfs, repo.location.gitdir, repo.location.commondir)
+  if (flags.remove) {
+    const out: string[] = []
+    const err: string[] = []
+    const doomed: { name: string; ref: string; sha: string }[] = []
+    for (const each of operands) {
+      const ref = `${TAG_PREFIX}${each}`
+      const sha = known.get(ref)
+      if (sha === undefined) {
+        err.push(`error: ${new TagNotFoundError(each).message}\n`)
+        continue
+      }
+      doomed.push({ name: each, ref, sha })
+    }
+    // Every deletion on the line is one ref transaction, and a name given
+    // twice makes two updates for one ref, which the transaction refuses
+    // before applying any of them: the whole line deletes nothing. A name
+    // that is not there never reaches the transaction, so `-d nosuch nosuch`
+    // is two ordinary reports rather than this refusal.
+    const seen = new Map<string, number>()
+    for (const { ref } of doomed) seen.set(ref, (seen.get(ref) ?? 0) + 1)
+    const repeated = [...seen.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([ref]) => ref)
+      .sort(compareCodePoints)
+    const blamed = repeated[0]
+    if (blamed !== undefined) {
+      err.push(`error: ${new RefUpdateConflictError(blamed).message}\n`)
+      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(err.join('')) })]
+    }
+    for (const { name: each, ref, sha } of doomed) {
+      await deleteRef(vfs, repo.location.commondir, ref)
+      out.push(`Deleted tag '${each}' (was ${short(sha, repo.abbrev)})\n`)
+    }
+    return [
+      ENC.encode(out.join('')),
+      new IOResult({ exitCode: err.length > 0 ? 1 : 0, stderr: ENC.encode(err.join('')) }),
+    ]
+  }
+  if (flags.listing || flags.lines !== undefined || filtered || operands.length === 0) {
+    // git reads a -n count while building the format it lists with, so a
+    // count below -1 is refused as the format's own (after both usage
+    // refusals above, and in a repository holding no tags), and --format
+    // drops -n altogether.
+    const fmt = listingFormat(
+      fl.asStr('format') ?? (flags.lines ? linesFormat(flags.lines) : NAME_FORMAT),
+    )
+    const icase = fl.asBool('ignore_case')
+    const wanted = (each: string): boolean =>
+      each.startsWith(TAG_PREFIX) && matchShort(each, operands, icase)
+    const [items, refCtx, errors] = await refListing(
+      repo,
+      usedFields(fmt, keys ?? []),
+      wanted,
+      filter,
+      dateClock(ctx.env),
+    )
+    const [rows, stopped] = formatRefs(fmt, items, refCtx, keys, {
+      omitEmpty: fl.asBool('omit_empty'),
+      icase,
+      stream:
+        (keys === null || !sortsNamed(fl)) &&
+        (filter === null || (filter.merged === null && filter.noMerged === null)),
+    })
+    return listingResult(rows, errors, stopped)
+  }
+  if (operands.length > 2) throw new TooManyArgumentsError()
+  const name = operands[0] ?? ''
+  if (!validRefName(name)) throw new InvalidTagNameError(name)
+  const ref = `${TAG_PREFIX}${name}`
+  const was = known.get(ref)
+  if (was !== undefined && !flags.force) throw new TagExistsError(name)
+  if (flags.annotate && flags.message === undefined) throw new MissingTagMessageError()
+  const target = await resolveTarget(repo, operands[1] ?? HEAD)
+  let pointed = target.oid
+  if (flags.annotate) {
+    pointed = await buildTag(
+      repo,
+      name,
+      target,
+      flags.message ?? '',
+      identity(fl, ctx.session).line,
+      Math.floor(Date.now() / 1000),
+    )
+  }
+  // After the object is built, which is git's order: an annotated tag whose
+  // ref cannot be locked has already been written to the database and is
+  // left there unreferenced.
+  const held = blockingRef(new Set(known.keys()), ref)
+  if (held !== null) throw new RefLockError(ref, held)
+  await writeRef(vfs, repo.location.commondir, ref, pointed)
   if (was === undefined) return [null, new IOResult()]
   return [ENC.encode(`Updated tag '${name}' (was ${short(was, abbrev)})\n`), new IOResult()]
 }

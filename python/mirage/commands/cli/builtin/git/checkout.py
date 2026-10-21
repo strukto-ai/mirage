@@ -48,7 +48,6 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     InvalidBranchNameError,
     InvalidReferenceError,
-    NoWorkspaceError,
     PathsWithBranchError,
     RefLockError,
     RefReadOnlyError,
@@ -116,7 +115,7 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     split_marked,
     start_point,
 )
@@ -857,151 +856,146 @@ async def checkout(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        detach = fl.as_bool("detach")
-        branch = fl.as_str("b")
-        if detach and branch is not None:
-            raise DetachWithCreateError()
-        target = (
-            branch
-            if branch is not None
-            else texts[0]
-            if texts
-            else (HEAD if detach else None)
-        )
-        if target is None:
-            raise UnknownPathspecError("")
-        if detach and len(texts) > 1:
-            raise DetachPathError(texts[1])
-        repo, location = await opened(ctx, fl, work_tree=True)
-        mode = await track_mode(repo)
-        head = await read_head(vfs, location.gitdir)
-        creating = branch is not None
-        ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
-        known = repo.refs.allkeys()
-        if creating and len(texts) > 1:
-            raise PathsWithBranchError(target)
-        if not creating and not detach:
-            leading, marked = split_marked(tuple(texts), ctx.argv)
-            if marked:
+    check_switches(ctx, texts)
+    detach = fl.as_bool("detach")
+    branch = fl.as_str("b")
+    if detach and branch is not None:
+        raise DetachWithCreateError()
+    target = (
+        branch
+        if branch is not None
+        else texts[0]
+        if texts
+        else (HEAD if detach else None)
+    )
+    if target is None:
+        raise UnknownPathspecError("")
+    if detach and len(texts) > 1:
+        raise DetachPathError(texts[1])
+    repo, location = await opened(ctx, fl, work_tree=True)
+    mode = await track_mode(repo)
+    head = await read_head(vfs, location.gitdir)
+    creating = branch is not None
+    ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
+    known = repo.refs.allkeys()
+    if creating and len(texts) > 1:
+        raise PathsWithBranchError(target)
+    if not creating and not detach:
+        leading, marked = split_marked(tuple(texts), ctx.argv)
+        if marked:
+            return await _checkout_paths(
+                ctx,
+                repo,
+                location,
+                fl,
+                leading[0] if leading else None,
+                [*leading[1:], *marked],
+                False,
+            )
+        if len(texts) > 1:
+            treeish = (
+                target
+                if await asyncio.to_thread(_reads_as_commit, repo, target)
+                else None
+            )
+            return await _checkout_paths(
+                ctx,
+                repo,
+                location,
+                fl,
+                treeish,
+                texts if treeish is None else texts[1:],
+                True,
+            )
+    guessed = None
+    # The commit a target names when it is no local branch: a branch
+    # of that name wins over every other reading, as git's checkout
+    # reads it.
+    named: Commit | None = None
+    if not creating and (
+        detach or (ref not in known and target != head.branch)
+    ):
+        try:
+            named = resolve_commit(repo, target)
+        except GitError as exc:
+            if detach:
+                raise DetachPathError(target) from exc
+            if await _names_path(
+                vfs, location, start_point(fl).virtual, target
+            ):
                 return await _checkout_paths(
-                    ctx,
-                    repo,
-                    location,
-                    fl,
-                    leading[0] if leading else None,
-                    [*leading[1:], *marked],
-                    False,
+                    ctx, repo, location, fl, None, list(texts), True
                 )
-            if len(texts) > 1:
-                treeish = (
-                    target
-                    if await asyncio.to_thread(_reads_as_commit, repo, target)
-                    else None
-                )
-                return await _checkout_paths(
-                    ctx,
-                    repo,
-                    location,
-                    fl,
-                    treeish,
-                    texts if treeish is None else texts[1:],
-                    True,
-                )
-        guessed = None
-        # The commit a target names when it is no local branch: a branch
-        # of that name wins over every other reading, as git's checkout
-        # reads it.
-        named: Commit | None = None
-        if not creating and (
-            detach or (ref not in known and target != head.branch)
-        ):
-            try:
-                named = resolve_commit(repo, target)
-            except GitError as exc:
-                if detach:
-                    raise DetachPathError(target) from exc
-                if await _names_path(
-                    vfs, location, start_point(fl).virtual, target
-                ):
-                    return await _checkout_paths(
-                        ctx, repo, location, fl, None, list(texts), True
-                    )
-                guessed = remote_branch(repo, target)
-                if guessed is None:
-                    raise UnknownPathspecError(target) from exc
-                creating = True
-        if not creating and not detach and target == head.branch:
-            note_ambiguity(repo, target)
-            # The shortcut moves nothing, and that is exactly why it
-            # has to read the index: git refuses the line over an
-            # unresolved index rather than answering that there is
-            # nothing to do, so a caller cannot read "Already on" as
-            # proof the repository is in a state it can build on.
-            refuse_unresolved(await read_index(vfs, location.gitdir))
-            if fl.as_bool("quiet"):
-                return None, IOResult()
-            return None, IOResult(stderr=f"Already on '{target}'\n".encode())
-        # ``checkout -b <new> [<start>]`` branches from the start point
-        # when one is given, HEAD otherwise. Forcing HEAD here put the new
-        # branch on the current commit and dropped the operand without a
-        # word, so every commit after it landed on the wrong history.
-        start = guessed or (texts[0] if branch is not None and texts else None)
-        commit: Commit | None = None
-        if start is not None:
-            try:
-                commit = resolve_commit(repo, start)
-            except GitError as exc:
-                raise BadStartPointError(start, target) from exc
+            guessed = remote_branch(repo, target)
             if guessed is None:
-                await refuse_ambiguous(repo, start, False)
-        # After the start point and before HEAD is read, which is git's
-        # own order: an unborn HEAD refuses the name, not the line. And
-        # before it asks whether the branch exists, so a refs/heads/HEAD
-        # already there is still refused as a name. A ref is a path
-        # below .git, so an unchecked name reaches write_ref as one: -b
-        # ../../config would land on the repository's own configuration
-        # rather than on a branch.
-        if creating and not valid_branch_name(target):
-            raise InvalidBranchNameError(target)
-        if creating and ref in known:
-            raise BranchExistsError(target)
-        if named is not None:
-            commit = named
-        elif not creating and ref in known:
-            note_ambiguity(repo, target)
-            commit = resolve_commit(repo, ref.decode())
-        if commit is None:
-            commit = resolve_commit(repo, target if not creating else HEAD)
-        # Before the working tree moves, which is where git refuses it
-        # too: the ref is locked first and nothing is checked out when
-        # the lock cannot be taken.
-        held = blocking_ref(known, ref.decode()) if creating else None
-        if held is not None:
-            raise RefLockError(ref.decode(), held)
-        attached = not detach and (creating or ref in known)
-        return await move_head(
-            vfs,
-            repo,
-            location,
-            head,
-            commit,
-            target,
-            ref if attached else None,
-            creating,
-            start,
-            mode,
-            not detach,
-            fl.as_bool("quiet"),
-        )
-    except GitError as exc:
-        return fatal(exc)
+                raise UnknownPathspecError(target) from exc
+            creating = True
+    if not creating and not detach and target == head.branch:
+        note_ambiguity(repo, target)
+        # The shortcut moves nothing, and that is exactly why it
+        # has to read the index: git refuses the line over an
+        # unresolved index rather than answering that there is
+        # nothing to do, so a caller cannot read "Already on" as
+        # proof the repository is in a state it can build on.
+        refuse_unresolved(await read_index(vfs, location.gitdir))
+        if fl.as_bool("quiet"):
+            return None, IOResult()
+        return None, IOResult(stderr=f"Already on '{target}'\n".encode())
+    # ``checkout -b <new> [<start>]`` branches from the start point
+    # when one is given, HEAD otherwise. Forcing HEAD here put the new
+    # branch on the current commit and dropped the operand without a
+    # word, so every commit after it landed on the wrong history.
+    start = guessed or (texts[0] if branch is not None and texts else None)
+    commit: Commit | None = None
+    if start is not None:
+        try:
+            commit = resolve_commit(repo, start)
+        except GitError as exc:
+            raise BadStartPointError(start, target) from exc
+        if guessed is None:
+            await refuse_ambiguous(repo, start, False)
+    # After the start point and before HEAD is read, which is git's
+    # own order: an unborn HEAD refuses the name, not the line. And
+    # before it asks whether the branch exists, so a refs/heads/HEAD
+    # already there is still refused as a name. A ref is a path
+    # below .git, so an unchecked name reaches write_ref as one: -b
+    # ../../config would land on the repository's own configuration
+    # rather than on a branch.
+    if creating and not valid_branch_name(target):
+        raise InvalidBranchNameError(target)
+    if creating and ref in known:
+        raise BranchExistsError(target)
+    if named is not None:
+        commit = named
+    elif not creating and ref in known:
+        note_ambiguity(repo, target)
+        commit = resolve_commit(repo, ref.decode())
+    if commit is None:
+        commit = resolve_commit(repo, target if not creating else HEAD)
+    # Before the working tree moves, which is where git refuses it
+    # too: the ref is locked first and nothing is checked out when
+    # the lock cannot be taken.
+    held = blocking_ref(known, ref.decode()) if creating else None
+    if held is not None:
+        raise RefLockError(ref.decode(), held)
+    attached = not detach and (creating or ref in known)
+    return await move_head(
+        vfs,
+        repo,
+        location,
+        head,
+        commit,
+        target,
+        ref if attached else None,
+        creating,
+        start,
+        mode,
+        not detach,
+        fl.as_bool("quiet"),
+    )
 
 
 def checkout_read_only(

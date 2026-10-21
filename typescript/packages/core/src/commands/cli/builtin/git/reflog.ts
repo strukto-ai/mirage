@@ -17,10 +17,9 @@ import type { PathSpec } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { GitError } from './errors.ts'
 import { resolveCommit } from './revparse.ts'
 import { opened } from './session.ts'
-import { checkOperands, fatal, maybeBool } from './util.ts'
+import { checkOperands, maybeBool } from './util.ts'
 import { readOptional, writeFile } from './io.ts'
 
 import { HEAD } from './constants.ts'
@@ -188,32 +187,27 @@ export async function reflog(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    texts = texts[0] === 'show' ? texts.slice(1) : texts
-    checkOperands(ctx, texts)
-    const repo = await opened(ctx, fl)
-    const revision = texts[0] ?? HEAD
-    await resolveCommit(repo, revision)
-    const [name, data] = await namedLog(repo.vfs, repo.location, revision)
-    let rows = new TextDecoder()
-      .decode(data ?? new Uint8Array())
-      .split('\n')
-      .filter(Boolean)
-      .reverse()
-    const limit = fl.asInt('max_count')
-    if (limit !== undefined && limit >= 0) rows = rows.slice(0, limit)
-    const out = rows
-      .map((row, index) => {
-        const tab = row.indexOf('\t')
-        const fields = tab === -1 ? row : row.slice(0, tab)
-        const message = tab === -1 ? '' : row.slice(tab + 1)
-        const oid = fields.split(' ')[1] ?? ''
-        return `${oid.slice(0, repo.abbrev)} ${name}@{${String(index)}}: ${message}\n`
-      })
-      .join('')
-    return [ENC.encode(out), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
-  }
+  texts = texts[0] === 'show' ? texts.slice(1) : texts
+  checkOperands(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const revision = texts[0] ?? HEAD
+  await resolveCommit(repo, revision)
+  const [name, data] = await namedLog(repo.vfs, repo.location, revision)
+  let rows = new TextDecoder()
+    .decode(data ?? new Uint8Array())
+    .split('\n')
+    .filter(Boolean)
+    .reverse()
+  const limit = fl.asInt('max_count')
+  if (limit !== undefined && limit >= 0) rows = rows.slice(0, limit)
+  const out = rows
+    .map((row, index) => {
+      const tab = row.indexOf('\t')
+      const fields = tab === -1 ? row : row.slice(0, tab)
+      const message = tab === -1 ? '' : row.slice(tab + 1)
+      const oid = fields.split(' ')[1] ?? ''
+      return `${oid.slice(0, repo.abbrev)} ${name}@{${String(index)}}: ${message}\n`
+    })
+    .join('')
+  return [ENC.encode(out), new IOResult()]
 }

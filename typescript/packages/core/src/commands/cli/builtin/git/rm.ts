@@ -20,10 +20,8 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { DELETED, headEntries, MODIFIED, TYPE_CHANGED, workChanges } from './changes.ts'
 import {
-  GitError,
   NoPathspecRemoveError,
   NotRecursiveError,
-  NoWorkspaceError,
   PathspecError,
   RemovalRefusedError,
   RemovePathError,
@@ -36,7 +34,7 @@ import { opened } from './session.ts'
 import type { TreeEntry } from './tree.ts'
 import type { IndexEntry, RepoLocation, WorkTree } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -240,42 +238,32 @@ export async function rm(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  let flags: RmFlags
-  let selected: string[]
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
-    }
-    checkSwitches(ctx, texts)
-    flags = parseFlags(fl)
-    if (texts.length === 0) throw new NoPathspecRemoveError()
-    const repo = await opened(ctx, fl, !flags.cached)
-    const state = await readIndex(repo, vfs)
-    const tracked = new Set([
-      ...visibleEntries(repo.location, state.entries).keys(),
-      ...visibleEntries(repo.location, state.conflicts).keys(),
-    ])
-    selected = select(repo.location, startPoint(fl).virtual, texts, tracked, flags)
-    if (!flags.force) {
-      const checkable = selected.filter((path) => state.entries.has(path))
-      const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
-      const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
-      await refuseLostWork(repo, vfs, tree, state.entries, found, checkable, flags.cached)
-    }
-    const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
-    if (!flags.cached) {
-      await clearWorktree(vfs, repo.location.worktree, selected, lines)
-    }
-    // Last, because the deletions above can fail: git writes the index only
-    // once the working tree is done with, so a refused deletion leaves the
-    // entry staged exactly as it stood rather than staging a removal that
-    // never happened.
-    await updateIndex(repo, new Map(), selected)
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const flags = parseFlags(fl)
+  if (texts.length === 0) throw new NoPathspecRemoveError()
+  const repo = await opened(ctx, fl, !flags.cached)
+  const state = await readIndex(repo, vfs)
+  const tracked = new Set([
+    ...visibleEntries(repo.location, state.entries).keys(),
+    ...visibleEntries(repo.location, state.conflicts).keys(),
+  ])
+  const selected = select(repo.location, startPoint(fl).virtual, texts, tracked, flags)
+  if (!flags.force) {
+    const checkable = selected.filter((path) => state.entries.has(path))
+    const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
+    const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
+    await refuseLostWork(repo, vfs, tree, state.entries, found, checkable, flags.cached)
   }
+  const lines = flags.quiet ? '' : selected.map((path) => `rm '${path}'\n`).join('')
+  if (!flags.cached) {
+    await clearWorktree(vfs, repo.location.worktree, selected, lines)
+  }
+  // Last, because the deletions above can fail: git writes the index only
+  // once the working tree is done with, so a refused deletion leaves the
+  // entry staged exactly as it stood rather than staging a removal that
+  // never happened.
+  await updateIndex(repo, new Map(), selected)
   if (flags.quiet) return [null, new IOResult()]
   return [ENC.encode(selected.map((path) => `rm '${path}'\n`).join('')), new IOResult()]
 }

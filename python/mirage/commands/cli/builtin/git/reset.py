@@ -25,7 +25,6 @@ from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     BareResetError,
     GitError,
-    NoWorkspaceError,
     RevisionResetError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
@@ -39,7 +38,7 @@ from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
@@ -118,59 +117,52 @@ async def reset(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        repo, location = await opened(ctx, fl)
-        named = fl.as_path("work_tree") is not None
-        if not named and await is_bare(vfs, location):
-            raise BareResetError()
-        await require_work_tree(vfs, location, named)
-        state = await read_index(vfs, location.gitdir)
-        tree = await asyncio.to_thread(head_entries, repo) or {}
-        start = start_point(fl).virtual
-        names = decoded(visible_entries(location, tree))
-        names |= decoded(visible_entries(location, state.entries))
-        if texts:
-            selected: set[str] = set()
-            for operand in texts:
-                hits = matched(names, repo_relative(location, start, operand))
-                if not hits:
-                    raise _unmatched(repo, operand)
-                selected |= hits
+    check_switches(ctx, texts)
+    repo, location = await opened(ctx, fl)
+    named = fl.as_path("work_tree") is not None
+    if not named and await is_bare(vfs, location):
+        raise BareResetError()
+    await require_work_tree(vfs, location, named)
+    state = await read_index(vfs, location.gitdir)
+    tree = await asyncio.to_thread(head_entries, repo) or {}
+    start = start_point(fl).virtual
+    names = decoded(visible_entries(location, tree))
+    names |= decoded(visible_entries(location, state.entries))
+    if texts:
+        selected: set[str] = set()
+        for operand in texts:
+            hits = matched(names, repo_relative(location, start, operand))
+            if not hits:
+                raise _unmatched(repo, operand)
+            selected |= hits
+    else:
+        selected = names
+    for name in selected:
+        key = name.encode()
+        recorded = tree.get(key)
+        if recorded is None:
+            state.entries.pop(key, None)
         else:
-            selected = names
-        for name in selected:
-            key = name.encode()
-            recorded = tree.get(key)
-            if recorded is None:
-                state.entries.pop(key, None)
-            else:
-                state.entries[key] = restored(
-                    ObjectID(recorded[1]), recorded[0]
-                )
-        if not texts:
-            for key in visible_entries(location, state.conflicts):
-                state.conflicts.pop(key)
-        await write_index(vfs, location.gitdir, state)
-        found = await scan(
-            vfs,
-            location,
-            decoded(state.entries),
-            UNTRACKED_NO,
-        )
-        unstaged = await work_changes(
-            vfs,
-            location.worktree,
-            visible_entries(location, state.entries),
-            found,
-        )
-    except GitError as exc:
-        return fatal(exc)
+            state.entries[key] = restored(ObjectID(recorded[1]), recorded[0])
+    if not texts:
+        for key in visible_entries(location, state.conflicts):
+            state.conflicts.pop(key)
+    await write_index(vfs, location.gitdir, state)
+    found = await scan(
+        vfs,
+        location,
+        decoded(state.entries),
+        UNTRACKED_NO,
+    )
+    unstaged = await work_changes(
+        vfs,
+        location.worktree,
+        visible_entries(location, state.entries),
+        found,
+    )
     if not unstaged or fl.as_bool("quiet"):
         return None, IOResult()
     lines = [UNSTAGED_HEADER]

@@ -19,8 +19,8 @@ from dulwich.repo import BaseRepo
 
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import (
+    NotAWorkTreeError,
     NoWorkingDirectoryError,
-    NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.config import Context
@@ -38,7 +38,7 @@ from .conftest import REPO
 async def test_no_workspace_behind_the_cli_is_a_fatal():
     # Only reachable when a leaf is called directly: inside a workspace
     # the dispatcher always offers the facts a leaf declares.
-    with pytest.raises(NoWorkspaceError):
+    with pytest.raises(NotAWorkTreeError):
         await opened(Context(), FlagView({"C": REPO}))
 
 
@@ -47,7 +47,7 @@ async def test_a_missing_plane_is_enough_to_fail(workspace):
     # git reads the repository through the session's files, so a
     # record without them cannot open one even with the session wired.
     ctx = replace(repo_context(workspace), vfs=None)
-    with pytest.raises(NoWorkspaceError):
+    with pytest.raises(NotAWorkTreeError):
         await opened(ctx, FlagView({"C": REPO}))
 
 

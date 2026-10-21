@@ -18,12 +18,12 @@ import { concat } from '../../../../utils/bytes.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
 import type { CLIVerbFn } from '../../types.ts'
 import { discover, requireWorkTree } from './discover.ts'
-import { IndexLockError, NoWorkspaceError } from './errors.ts'
+import { GitError, IndexLockError } from './errors.ts'
 import { configValues } from './fs.ts'
 import { openRepo, type Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import { fatal, gitBool, startPoint } from './util.ts'
+import { fatal, gitBool, startPoint, requireVfs } from './util.ts'
 import { isErofs } from '../../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 
@@ -76,6 +76,12 @@ function gitWouldRefuse(
   )
 }
 
+/**
+ * A git verb whose fatal errors are rendered as git renders them (`fatal`), so
+ * no verb catches a `GitError` to render it; whose `refname is ambiguous`
+ * warnings reach stderr ahead of what the verb says; and whose refusal by a
+ * read-only mount is in git's words. Mirrors Python's `verb`.
+ */
 export function verb(
   fn: CLIVerbFn<NOOPAccessor>,
   refused: ReadOnlyRefusal | null = null,
@@ -88,10 +94,14 @@ export function verb(
     try {
       result = await fn(accessor, paths, texts, own)
     } catch (err) {
-      const location = LOCATIONS.get(own.argv) ?? null
-      const path = (err as { virtualPath?: string }).virtualPath
-      if (refused === null || !isErofs(err) || !gitWouldRefuse(ctx, location, path)) throw err
-      result = fatal(refused(texts, ctx, location))
+      if (err instanceof GitError) {
+        result = fatal(err)
+      } else {
+        const location = LOCATIONS.get(own.argv) ?? null
+        const path = (err as { virtualPath?: string }).virtualPath
+        if (refused === null || !isErofs(err) || !gitWouldRefuse(ctx, location, path)) throw err
+        result = fatal(refused(texts, ctx, location))
+      }
     }
     if (result === null || lines.length === 0) return result
     const [out, io] = result
@@ -115,8 +125,7 @@ export function verb(
 export async function opened(ctx: Context, fl: FlagView, workTree = false): Promise<Repo> {
   // The mount root is the session's files' `mountOf`, the same answer a
   // runtime's guest gets.
-  const vfs = ctx.vfs
-  if (vfs === undefined) throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
   const chosen = fl.asPath('work_tree')
   const found = await discover(vfs, startPoint(fl), fl.asPath('git_dir'), chosen)
   const location = { ...found, vfs }

@@ -118,15 +118,14 @@ describe('github under read: fresh', () => {
   }
 
   // Each cell is [dir listings, whole-tree walks, blob downloads] for one line
-  // on a warm fresh mount: cat pays one probe, at routing, as hf's table
-  // does; its own stat and the cache stage both reuse that answer. cp skips
-  // routing's probe, so the cache stage asks, and cp's stat resolves through
-  // the listing, which fresh re-checks once per command: on github that is
-  // one check of the head, which replaces the tree refetch (Task 1.3).
+  // on a warm fresh mount: a command pays one probe, at its first stat of the
+  // operand its line names, as hf's table does; its own stat and the cache
+  // stage both reuse that answer. On github the probe is one check of the
+  // head, which replaces the tree refetch (Task 1.3).
   const WARM: [string, [number, number, number]][] = [
     [`cat ${PATH}`, [1, 0, 0]],
     [`cat ${PATH} | head -c 1`, [1, 0, 0]],
-    [`cp ${PATH} /r/a.txt`, [2, 0, 0]],
+    [`cp ${PATH} /r/a.txt`, [1, 0, 0]],
   ]
   for (const [line, cost] of WARM) {
     it(`costs one listing per probe: ${line}`, async () => {
@@ -159,7 +158,7 @@ describe('github under read: fresh', () => {
     expect(outs[0]).not.toBe('')
   })
 
-  // Routing probes a path that carries an attribute overlay even when nothing
+  // The operand probe checks a path that carries an attribute overlay even when nothing
   // is cached, so under fresh the command's stat of it comes from the probe;
   // the overlay must still apply on top.
   it('prints the same cold stat of an overlaid path as a bounded mount', async () => {
@@ -189,7 +188,7 @@ describe('github under read: fresh', () => {
       expect(gh.counts()).toEqual([1, 0, 1])
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
-      // Warm now: the routing probe, and nothing else.
+      // Warm now: the operand probe, and nothing else.
       expect(gh.counts()).toEqual([1, 0, 0])
     } finally {
       await w.close()
@@ -422,7 +421,7 @@ describe('github cannot-see versus gone', () => {
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       expect(kept(w)).toBe(true)
-      // The routing probe's listing of docs/ is cut short, so it defers to one
+      // The operand probe's listing of docs/ is cut short, so it defers to one
       // walk of the whole tree, which finds the file; cat's own stat and the
       // cache stage reuse its answer.
       expect(gh.counts()).toEqual([1, 1, 0])
@@ -444,7 +443,7 @@ describe('github cannot-see versus gone', () => {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       gh.log.length = 0
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
-      // One listing of docs/, by the routing probe; cat's own stat and the
+      // One listing of docs/, by the operand probe; cat's own stat and the
       // cache stage reuse its answer, so the truncated tree is never walked
       // folder by folder, which would reach docs/ by its sha.
       expect(gh.counts()).toEqual([1, 0, 0])

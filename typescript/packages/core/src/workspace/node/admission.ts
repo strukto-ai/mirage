@@ -76,8 +76,10 @@ import {
   Consumer,
   SLASH_KEEPS_LAST,
   WordPolicy,
+  changesFiles,
   followsLastComponent,
   isTool,
+  lineFlags,
   readsSubtrees,
   lookup,
   runsAs,
@@ -446,8 +448,9 @@ export function unlistedService(
  * directory), on each path's own mount, which a run across mounts hands that
  * path, and on every mount below a path, which a walk reaches. Its handler is
  * picked by an operand's extension, so each path's counts, and a run follows
- * links before it picks either, so a link's target counts beside its name. A
- * namespace or
+ * links before it picks either, so a link's target counts beside its name.
+ * Mirage's own handler counts only when the line's options let it write
+ * (`changesFiles`: `sort -o` writes, `sort` does not). A namespace or
  * routed program that changes what it names (`WRITING_PROGRAMS`: `ln`,
  * `chmod` ...) writes by name. A walk the tree refuses runs nothing, and a
  * shell builtin, a function, an external program or an unknown name declares
@@ -512,7 +515,10 @@ function writes(
     reached.push(...registry.allMounts().filter((m) => m === owner || m.prefix.startsWith(below)))
   }
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
-  return reached.some((m) => [...extensions].some((extension) => m.mayWrite(runs, extension)))
+  const builtins = changesFiles(runs, [runs, ...args])
+  return reached.some((m) =>
+    [...extensions].some((extension) => m.mayWrite(runs, extension, builtins)),
+  )
 }
 
 export async function gate(
@@ -565,7 +571,7 @@ export async function gate(
     tokens,
     program,
     tool,
-    walks: walksMounts(name, [name, ...args]),
+    walks: walksMounts(name, lineFlags(name, [name, ...args])),
     write: writes(name, args, operands, session, registry, namespace, implied),
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
@@ -813,7 +819,7 @@ async function admitWords(
     // The runtime walks and globs on its own, where no entry gate
     // follows an I/O below the judged words, so a command a path or
     // mount rule reads must not reach it with either in hand.
-    if (readsSubtrees(name, line)) {
+    if (readsSubtrees(name, lineFlags(name, line))) {
       return refuse(name, 'walks a tree the gate cannot follow')
     }
     const globby = [...classified.slice(1), ...redirects].some(

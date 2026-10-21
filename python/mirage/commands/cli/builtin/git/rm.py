@@ -27,10 +27,8 @@ from mirage.commands.cli.builtin.git.changes import (
     work_changes,
 )
 from mirage.commands.cli.builtin.git.errors import (
-    GitError,
     NoPathspecRemoveError,
     NotRecursiveError,
-    NoWorkspaceError,
     PathspecError,
     RemovalRefusedError,
     RemovePathError,
@@ -53,7 +51,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
@@ -295,66 +293,57 @@ async def rm(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     fl = FlagView(ctx.flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        flags = parse_flags(fl)
-        if not texts:
-            raise NoPathspecRemoveError()
-        repo, location = await opened(ctx, fl, work_tree=not flags.cached)
-        state = await read_index(vfs, location.gitdir)
-        tracked = decoded(
-            set(visible_entries(location, state.entries))
-            | set(visible_entries(location, state.conflicts))
+    check_switches(ctx, texts)
+    flags = parse_flags(fl)
+    if not texts:
+        raise NoPathspecRemoveError()
+    repo, location = await opened(ctx, fl, work_tree=not flags.cached)
+    state = await read_index(vfs, location.gitdir)
+    tracked = decoded(
+        set(visible_entries(location, state.entries))
+        | set(visible_entries(location, state.conflicts))
+    )
+    selected = select(location, start_point(fl).virtual, texts, tracked, flags)
+    if not flags.force:
+        checkable = [
+            path for path in selected if path.encode() in state.entries
+        ]
+        found = await scan(
+            vfs,
+            location,
+            tracked,
+            UNTRACKED_NO,
         )
-        selected = select(
-            location, start_point(fl).virtual, texts, tracked, flags
+        tree = await asyncio.to_thread(head_entries, repo) or {}
+        await refuse_lost_work(
+            vfs,
+            location,
+            tree,
+            state.entries,
+            found,
+            checkable,
+            flags.cached,
         )
-        if not flags.force:
-            checkable = [
-                path for path in selected if path.encode() in state.entries
-            ]
-            found = await scan(
-                vfs,
-                location,
-                tracked,
-                UNTRACKED_NO,
-            )
-            tree = await asyncio.to_thread(head_entries, repo) or {}
-            await refuse_lost_work(
-                vfs,
-                location,
-                tree,
-                state.entries,
-                found,
-                checkable,
-                flags.cached,
-            )
-        lines = (
-            ""
-            if flags.quiet
-            else "".join(f"rm '{path}'\n" for path in selected)
+    lines = (
+        "" if flags.quiet else "".join(f"rm '{path}'\n" for path in selected)
+    )
+    if not flags.cached:
+        await clear_worktree(
+            vfs,
+            location,
+            selected,
+            lines,
         )
-        if not flags.cached:
-            await clear_worktree(
-                vfs,
-                location,
-                selected,
-                lines,
-            )
-        # Last, because the deletions above can fail: git writes the
-        # index only once the working tree is done with, so a refused
-        # deletion leaves the entry staged exactly as it stood rather
-        # than staging a removal that never happened.
-        for path in selected:
-            state.entries.pop(path.encode(), None)
-            state.conflicts.pop(path.encode(), None)
-        await write_index(vfs, location.gitdir, state)
-    except GitError as exc:
-        return fatal(exc)
+    # Last, because the deletions above can fail: git writes the
+    # index only once the working tree is done with, so a refused
+    # deletion leaves the entry staged exactly as it stood rather
+    # than staging a removal that never happened.
+    for path in selected:
+        state.entries.pop(path.encode(), None)
+        state.conflicts.pop(path.encode(), None)
+    await write_index(vfs, location.gitdir, state)
     if flags.quiet:
         return None, IOResult()
     return yield_bytes(lines.encode()), IOResult()

@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { startPoint, checkSwitches, configSection, fatal, verbUsage } from './util.ts'
+import { startPoint, checkSwitches, configSection, verbUsage, requireVfs } from './util.ts'
 import { PathSpec, FileType } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
-import { CloneReadOnlyError, GitError, NoWorkspaceError, UsageError } from './errors.ts'
+import { CloneReadOnlyError, GitError, UsageError } from './errors.ts'
 import { configuredHeaders, fetchObjects, ignoreFunny } from './fetch.ts'
 import { layOut } from './init.ts'
 import { readNames, removeTree, statOf, writeFile } from './io.ts'
@@ -99,47 +99,26 @@ export async function clone(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const [url, named] = texts
-  try {
-    checkSwitches(ctx, texts)
-    if (url === undefined) {
-      throw new UsageError(
-        '',
-        `fatal: You must specify a repository to clone.\n\n${verbUsage(ctx)}`,
-      )
-    }
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkSwitches(ctx, texts)
+  if (url === undefined) {
+    throw new UsageError('', `fatal: You must specify a repository to clone.\n\n${verbUsage(ctx)}`)
   }
   const name = named ?? defaultDirectory(url)
   const quiet = fl.asBool('quiet')
-  let target: PathSpec
-  let fresh: boolean
-  let transport: Transport
-  let start: PathSpec
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) throw new NoWorkspaceError()
-    start = startPoint(fl)
-    target = PathSpec.fromStrPath(name, undefined, start)
-    const info = await statOf(vfs, target)
-    if (
-      info !== null &&
-      (info.type !== FileType.DIRECTORY || (await readNames(vfs, target)).length)
-    )
-      throw new GitError(`destination path '${name}' already exists and is not an empty directory.`)
-    fresh = info === null
-    transport = await openTransport(
-      ctx,
-      url,
-      start,
-      await configuredHeaders(ctx, null),
-      credentials,
-    )
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
-  }
+  const vfs = requireVfs(ctx)
+  const start = startPoint(fl)
+  const target = PathSpec.fromStrPath(name, undefined, start)
+  const info = await statOf(vfs, target)
+  if (info !== null && (info.type !== FileType.DIRECTORY || (await readNames(vfs, target)).length))
+    throw new GitError(`destination path '${name}' already exists and is not an empty directory.`)
+  const fresh = info === null
+  const transport = await openTransport(
+    ctx,
+    url,
+    start,
+    await configuredHeaders(ctx, null),
+    credentials,
+  )
   const local = isLocal(url)
   // git records a local path as the directory it ran in joined to the path as
   // typed, not normalized.
@@ -171,8 +150,7 @@ async function populate(
   local: boolean,
 ): Promise<string> {
   const fl = new FlagView(ctx.flags)
-  const vfs = ctx.vfs
-  if (vfs === undefined) throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
   const gitdir = target.join('.git')
   const remote = fl.asStr('origin', 'origin')
   if (!validRefName(`refs/remotes/${remote}/test`))

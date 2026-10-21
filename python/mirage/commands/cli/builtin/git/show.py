@@ -41,8 +41,6 @@ from mirage.commands.cli.builtin.git.diff_output import (
     renames_enabled,
 )
 from mirage.commands.cli.builtin.git.errors import (
-    GitError,
-    NoWorkspaceError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.format import (
@@ -80,8 +78,8 @@ from mirage.commands.cli.builtin.git.types import (
 )
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
-    fatal,
     option_operand,
+    require_vfs,
     revision_arg,
     split_marked,
     start_point,
@@ -327,46 +325,41 @@ async def show(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_operands(ctx, texts)
-        revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
-        repo, location = await opened(ctx, fl)
-        parsed = parse_show_flags(
-            fl,
-            await renames_enabled(vfs, location),
-            await config_bool(vfs, location, b"core", b"quotepath", True),
-            ctx.env,
-        )
-        mailmap, mapped, decorate = await displayed(
-            vfs, location, fl, parsed.pretty
-        )
-        parsed = replace(
-            parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
-        )
-        objects = [
-            (name, await asyncio.to_thread(resolve_object, repo, name))
-            for name in revisions or (HEAD,)
-        ]
-        parsed = replace(
-            parsed,
-            diff=replace(
-                parsed.diff,
-                pathspecs=pathspec_patterns(
-                    location, start_point(fl).virtual, pathspecs
-                ),
+    check_operands(ctx, texts)
+    revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
+    repo, location = await opened(ctx, fl)
+    parsed = parse_show_flags(
+        fl,
+        await renames_enabled(vfs, location),
+        await config_bool(vfs, location, b"core", b"quotepath", True),
+        ctx.env,
+    )
+    mailmap, mapped, decorate = await displayed(
+        vfs, location, fl, parsed.pretty
+    )
+    parsed = replace(
+        parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
+    )
+    objects = [
+        (name, await asyncio.to_thread(resolve_object, repo, name))
+        for name in revisions or (HEAD,)
+    ]
+    parsed = replace(
+        parsed,
+        diff=replace(
+            parsed.diff,
+            pathspecs=pathspec_patterns(
+                location, start_point(fl).virtual, pathspecs
             ),
-        )
-        commits = await asyncio.to_thread(_commits, repo, objects, parsed)
-        rows, spans = await asyncio.to_thread(
-            commit_deltas, repo, location, commits, parsed.diff
-        )
-    except GitError as exc:
-        return fatal(exc)
+        ),
+    )
+    commits = await asyncio.to_thread(_commits, repo, objects, parsed)
+    rows, spans = await asyncio.to_thread(
+        commit_deltas, repo, location, commits, parsed.diff
+    )
 
     async def render(shown: list[Delta]) -> ByteSource | None:
         rendered = await asyncio.to_thread(
@@ -419,37 +412,31 @@ async def diff_tree(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    try:
-        if ctx.vfs is None:
-            raise NoWorkspaceError()
-        if option_operand(ctx, texts) is not None:
-            raise UsageError("", verb_usage(ctx))
-        repo, location = await opened(ctx, fl)
-        fully = await config_bool(
-            ctx.vfs, location, b"core", b"quotepath", True
-        )
-        parsed = parse_diff_flags(
-            fl,
-            default_patch=False,
-            porcelain=False,
-            quote_path_fully=fully,
-        )
-        revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
-        commit = await asyncio.to_thread(
-            resolve_commit, repo, revision_arg(revisions)
-        )
-        parsed = replace(
-            parsed,
-            pathspecs=pathspec_patterns(
-                location, start_point(fl).virtual, pathspecs
-            ),
-        )
-        sides = await asyncio.to_thread(
-            commit_sides, repo, commit, parsed, fl.as_bool("r"), False
-        )
-        rows = deltas(location, sides)
-    except GitError as exc:
-        return fatal(exc)
+    vfs = require_vfs(ctx)
+    if option_operand(ctx, texts) is not None:
+        raise UsageError("", verb_usage(ctx))
+    repo, location = await opened(ctx, fl)
+    fully = await config_bool(vfs, location, b"core", b"quotepath", True)
+    parsed = parse_diff_flags(
+        fl,
+        default_patch=False,
+        porcelain=False,
+        quote_path_fully=fully,
+    )
+    revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
+    commit = await asyncio.to_thread(
+        resolve_commit, repo, revision_arg(revisions)
+    )
+    parsed = replace(
+        parsed,
+        pathspecs=pathspec_patterns(
+            location, start_point(fl).virtual, pathspecs
+        ),
+    )
+    sides = await asyncio.to_thread(
+        commit_sides, repo, commit, parsed, fl.as_bool("r"), False
+    )
+    rows = deltas(location, sides)
 
     async def render(shown: list[Delta]) -> ByteSource | None:
         return await asyncio.to_thread(

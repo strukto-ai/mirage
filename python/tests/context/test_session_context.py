@@ -180,6 +180,8 @@ def test_the_boundary_reads_the_bound_sessions_visibility():
 
 
 class _Gate:
+    judged: frozenset[str] = frozenset()
+
     def __init__(self, scoped: bool, refused: str = "") -> None:
         self.scoped = scoped
         self.refused = refused

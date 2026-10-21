@@ -211,17 +211,6 @@ class BadDateError(GitError):
         )
 
 
-class NoWorkspaceError(GitError):
-    """The CLI ran with no workspace behind it, so no file is reachable.
-
-    Only possible when a leaf is called directly in a unit test: inside
-    a workspace the dispatcher always offers the facts a leaf declares.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("this operation must be run in a work tree")
-
-
 class NotAWorkTreeError(GitError):
     """A verb that reads or writes files, run with no work tree to enter.
 

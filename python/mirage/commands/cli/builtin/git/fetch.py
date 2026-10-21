@@ -27,7 +27,6 @@ from mirage.commands.cli.builtin.git.errors import (
     FetchHeadReadOnlyError,
     GitError,
     MissingRepositoryError,
-    NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.inspect import global_sources
 from mirage.commands.cli.builtin.git.io import write_file
@@ -63,8 +62,8 @@ from mirage.commands.cli.builtin.git.transport import (
 from mirage.commands.cli.builtin.git.types import Refspec, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
     multivar,
+    require_vfs,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -645,100 +644,86 @@ async def fetch(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    try:
-        check_switches(ctx, texts)
-        _, location = await opened(ctx, fl)
-        vfs = ctx.vfs
-        if vfs is None:
-            raise NoWorkspaceError()
-        cfg = await read_config(vfs, location)
-        head = await read_head(vfs, location.gitdir)
-        name = texts[0] if texts else None
-        if name is None:
-            branch = head.branch.encode() if head.branch else None
-            remote = b"origin"
-            if branch is not None:
-                remote = next(
-                    iter(multivar(cfg, (b"branch", branch), b"remote")),
-                    b"origin",
-                )
-            name = remote.decode()
-            if not multivar(cfg, (b"remote", remote), b"url"):
-                if name == "origin" and not texts:
-                    raise GitError(NO_REMOTE)
-        urls = multivar(cfg, (b"remote", name.encode()), b"url")
-        url = urls[-1].decode() if urls else name
-        configured = (
-            [
-                parse_refspec(value.decode())
-                for value in multivar(
-                    cfg, (b"remote", name.encode()), b"fetch"
-                )
-            ]
-            if urls
-            else []
-        )
-        merge = None
-        if head.branch is not None and urls:
-            remotes = multivar(
-                cfg, (b"branch", head.branch.encode()), b"remote"
+    check_switches(ctx, texts)
+    _, location = await opened(ctx, fl)
+    vfs = require_vfs(ctx)
+    cfg = await read_config(vfs, location)
+    head = await read_head(vfs, location.gitdir)
+    name = texts[0] if texts else None
+    if name is None:
+        branch = head.branch.encode() if head.branch else None
+        remote = b"origin"
+        if branch is not None:
+            remote = next(
+                iter(multivar(cfg, (b"branch", branch), b"remote")),
+                b"origin",
             )
-            if remotes and remotes[-1].decode() == name:
-                merges = multivar(
-                    cfg, (b"branch", head.branch.encode()), b"merge"
-                )
-                merge = merges[-1].decode() if merges else None
-        bare = await is_bare(vfs, location)
-        start = location.gitdir if bare else location.worktree
-        try:
-            transport = await open_transport(
-                ctx, url, start, await configured_headers(ctx, cfg)
-            )
-        except MissingRepositoryError as exc:
-            raise GitError(
-                f"'{url}' does not appear to be a git repository\n"
-                f"{UNREACHABLE}"
-            ) from exc
-        adv = await transport.advertise()
-        typed = [parse_refspec(text) for text in texts[1:]]
-        wanted, notes = ignore_funny(
-            _plan(adv, typed, configured, merge, fl.as_bool("tags"))
-        )
-        checked = None if bare else head.ref
-        for want in wanted:
-            if want.local is not None and want.local == checked:
-                raise GitError(
-                    f"refusing to fetch into branch '{checked}' "
-                    f"checked out at '{location.worktree.virtual}'"
-                )
-        tag_opt = multivar(cfg, (b"remote", name.encode()), b"tagopt")
-        follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
-        repo, taken = await fetch_objects(
-            vfs, location, transport, adv, wanted, follow
-        )
-        pruned = []
-        if fl.as_bool("prune") and not typed:
-            pruned = await _prune(vfs, repo, location, adv, configured)
-        reason = " ".join(("fetch", *leaf_args(ctx.argv, "fetch")))
-        rows, rejected = await update_refs(
-            vfs, repo, location, taken, reason, not bare
-        )
-        await write_file(
-            vfs, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
-        )
-        shown = pruned + [
-            row for row in rows if row.code != "=" or fl.as_bool("verbose")
+        name = remote.decode()
+        if not multivar(cfg, (b"remote", remote), b"url"):
+            if name == "origin" and not texts:
+                raise GitError(NO_REMOTE)
+    urls = multivar(cfg, (b"remote", name.encode()), b"url")
+    url = urls[-1].decode() if urls else name
+    configured = (
+        [
+            parse_refspec(value.decode())
+            for value in multivar(cfg, (b"remote", name.encode()), b"fetch")
         ]
-        err = notes + (
-            ""
-            if fl.as_bool("quiet")
-            else summary_lines(url, shown, abbrev_for(repo))
+        if urls
+        else []
+    )
+    merge = None
+    if head.branch is not None and urls:
+        remotes = multivar(cfg, (b"branch", head.branch.encode()), b"remote")
+        if remotes and remotes[-1].decode() == name:
+            merges = multivar(cfg, (b"branch", head.branch.encode()), b"merge")
+            merge = merges[-1].decode() if merges else None
+    bare = await is_bare(vfs, location)
+    start = location.gitdir if bare else location.worktree
+    try:
+        transport = await open_transport(
+            ctx, url, start, await configured_headers(ctx, cfg)
         )
-        return None, IOResult(
-            exit_code=1 if rejected else 0, stderr=err.encode()
-        )
-    except GitError as exc:
-        return fatal(exc)
+    except MissingRepositoryError as exc:
+        raise GitError(
+            f"'{url}' does not appear to be a git repository\n{UNREACHABLE}"
+        ) from exc
+    adv = await transport.advertise()
+    typed = [parse_refspec(text) for text in texts[1:]]
+    wanted, notes = ignore_funny(
+        _plan(adv, typed, configured, merge, fl.as_bool("tags"))
+    )
+    checked = None if bare else head.ref
+    for want in wanted:
+        if want.local is not None and want.local == checked:
+            raise GitError(
+                f"refusing to fetch into branch '{checked}' "
+                f"checked out at '{location.worktree.virtual}'"
+            )
+    tag_opt = multivar(cfg, (b"remote", name.encode()), b"tagopt")
+    follow = not fl.as_bool("no_tags") and tag_opt[-1:] != [b"--no-tags"]
+    repo, taken = await fetch_objects(
+        vfs, location, transport, adv, wanted, follow
+    )
+    pruned = []
+    if fl.as_bool("prune") and not typed:
+        pruned = await _prune(vfs, repo, location, adv, configured)
+    reason = " ".join(("fetch", *leaf_args(ctx.argv, "fetch")))
+    rows, rejected = await update_refs(
+        vfs, repo, location, taken, reason, not bare
+    )
+    await write_file(
+        vfs, location.gitdir.join(FETCH_HEAD), fetch_head(url, taken)
+    )
+    shown = pruned + [
+        row for row in rows if row.code != "=" or fl.as_bool("verbose")
+    ]
+    err = notes + (
+        ""
+        if fl.as_bool("quiet")
+        else summary_lines(url, shown, abbrev_for(repo))
+    )
+    return None, IOResult(exit_code=1 if rejected else 0, stderr=err.encode())
 
 
 def fetch_read_only(

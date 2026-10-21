@@ -105,7 +105,10 @@ from mirage.workspace.executor.builtins.alias import (
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
 from mirage.workspace.executor.command import handle_command
-from mirage.workspace.executor.command.command import fill_tree_env
+from mirage.workspace.executor.command.command import (
+    fill_tree_env,
+    made_by_command,
+)
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
@@ -1033,36 +1036,41 @@ async def _route_argv(
         )(operands)
         argv = argv.with_operands(operands)
 
+    # The programs below run here rather than on a mount, and every op
+    # one issues is the program's, as a mount command's is: a rule scoped
+    # to it reaches what ``chmod -R`` walks into, not only its operands.
+    made = made_by_command(dispatch)
+
     # ── symlinks (namespace-backed; not bash builtins, not mount
     #    commands: they mutate the addressing layer) ──
     if name == "ln":
-        return await handle_ln(namespace, dispatch, session, operands)
+        return await handle_ln(namespace, made, session, operands)
 
     if name == "readlink":
-        return await handle_readlink(namespace, dispatch, session, operands)
+        return await handle_readlink(namespace, made, session, operands)
 
     # ── extended attributes (the namespace's node table and the backend's
     #    own facts; they read -h themselves) ──
     if name == "getfattr":
-        return await handle_getfattr(dispatch, session, operands)
+        return await handle_getfattr(made, session, operands)
     if name == "setfattr":
-        return await handle_setfattr(dispatch, session, operands)
+        return await handle_setfattr(made, session, operands)
 
     # ── metadata commands (namespace-routed: resolve-then-setattr with
     #    overlay fallback; they run their own link follow) ──
     if name == "chmod":
-        return await handle_chmod(namespace, dispatch, session, operands)
+        return await handle_chmod(namespace, made, session, operands)
     if name == "chown":
-        return await handle_chown(namespace, dispatch, session, operands)
+        return await handle_chown(namespace, made, session, operands)
     if name == "chgrp":
-        return await handle_chgrp(namespace, dispatch, session, operands)
+        return await handle_chgrp(namespace, made, session, operands)
     if name == "touch":
-        return await handle_touch(namespace, dispatch, session, operands)
+        return await handle_touch(namespace, made, session, operands)
 
     # ── capacity (registry-routed: enumerates mounts, reports per-mount
     #    capacity; never fabricates numbers) ──
     if name == "df":
-        return await handle_df(registry, session, dispatch, operands)
+        return await handle_df(registry, session, made, operands)
     if name == "mount":
         return await handle_mount(registry, session, operands)
 

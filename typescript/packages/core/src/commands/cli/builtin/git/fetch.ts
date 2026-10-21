@@ -20,12 +20,7 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { isBare } from './discover.ts'
-import {
-  FetchHeadReadOnlyError,
-  GitError,
-  MissingRepositoryError,
-  NoWorkspaceError,
-} from './errors.ts'
+import { FetchHeadReadOnlyError, GitError, MissingRepositoryError } from './errors.ts'
 import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
 import { globalSources } from './inspect.ts'
@@ -57,7 +52,7 @@ import {
   type Transport,
 } from './transport.ts'
 import type { ReadOnlyRefusal, Refspec } from './types.ts'
-import { checkSwitches, fatal } from './util.ts'
+import { checkSwitches } from './util.ts'
 
 const ENC = new TextEncoder()
 const FETCH_HEAD = 'FETCH_HEAD'
@@ -493,64 +488,58 @@ export async function fetch(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  checkSwitches(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const { location } = repo
+  const values = (path: string): Promise<string[]> => configValues(repo.vfs, location, path)
+  const head = await readHead(repo.vfs, location.gitdir)
+  let name = texts[0] ?? null
+  if (name === null) {
+    name =
+      head.branch === null
+        ? 'origin'
+        : ((await values(`branch.${head.branch}.remote`))[0] ?? 'origin')
+    if (!(await values(`remote.${name}.url`)).length && name === 'origin')
+      throw new GitError(NO_REMOTE)
+  }
+  const urls = await values(`remote.${name}.url`)
+  const url = urls.at(-1) ?? name
+  const configured = urls.length ? (await values(`remote.${name}.fetch`)).map(parseRefspec) : []
+  let merge: string | null = null
+  if (head.branch !== null && urls.length) {
+    const remotes = await values(`branch.${head.branch}.remote`)
+    if (remotes.at(-1) === name)
+      merge = (await values(`branch.${head.branch}.merge`)).at(-1) ?? null
+  }
+  const bare = await isBare(repo.vfs, location)
+  const start = bare ? location.gitdir : location.worktree
+  let transport: Transport
   try {
-    checkSwitches(ctx, texts)
-    if (ctx.vfs === undefined) throw new NoWorkspaceError()
-    const repo = await opened(ctx, fl)
-    const { location } = repo
-    const values = (path: string): Promise<string[]> => configValues(repo.vfs, location, path)
-    const head = await readHead(repo.vfs, location.gitdir)
-    let name = texts[0] ?? null
-    if (name === null) {
-      name =
-        head.branch === null
-          ? 'origin'
-          : ((await values(`branch.${head.branch}.remote`))[0] ?? 'origin')
-      if (!(await values(`remote.${name}.url`)).length && name === 'origin')
-        throw new GitError(NO_REMOTE)
-    }
-    const urls = await values(`remote.${name}.url`)
-    const url = urls.at(-1) ?? name
-    const configured = urls.length ? (await values(`remote.${name}.fetch`)).map(parseRefspec) : []
-    let merge: string | null = null
-    if (head.branch !== null && urls.length) {
-      const remotes = await values(`branch.${head.branch}.remote`)
-      if (remotes.at(-1) === name)
-        merge = (await values(`branch.${head.branch}.merge`)).at(-1) ?? null
-    }
-    const bare = await isBare(repo.vfs, location)
-    const start = bare ? location.gitdir : location.worktree
-    let transport: Transport
-    try {
-      transport = await openTransport(ctx, url, start, await configuredHeaders(ctx, repo))
-    } catch (err) {
-      if (err instanceof MissingRepositoryError)
-        throw new GitError(`'${url}' does not appear to be a git repository\n${UNREACHABLE}`)
-      throw err
-    }
-    const adv = await transport.advertise()
-    const typed = texts.slice(1).map(parseRefspec)
-    const [wants, notes] = ignoreFunny(plan(adv, typed, configured, merge, fl.asBool('tags')))
-    const checked = bare ? null : head.ref
-    for (const want of wants)
-      if (want.local !== null && want.local === checked)
-        throw new GitError(
-          `refusing to fetch into branch '${checked}' checked out at '${location.worktree.virtual}'`,
-        )
-    const tagOpt = await values(`remote.${name}.tagopt`)
-    const follow = !fl.asBool('no_tags') && tagOpt.at(-1) !== '--no-tags'
-    const [fetched, taken] = await fetchObjects(repo, transport, adv, wants, follow)
-    const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
-    const reason = ['fetch', ...leafArgs(ctx.argv ?? [], 'fetch')].join(' ')
-    const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
-    await writeFile(repo.vfs, location.gitdir.join(FETCH_HEAD), ENC.encode(fetchHead(url, taken)))
-    const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
-    const err = notes + (fl.asBool('quiet') ? '' : summaryLines(url, shown, fetched.abbrev))
-    return [null, new IOResult({ exitCode: rejected ? 1 : 0, stderr: ENC.encode(err) })]
+    transport = await openTransport(ctx, url, start, await configuredHeaders(ctx, repo))
   } catch (err) {
-    if (err instanceof GitError) return fatal(err)
+    if (err instanceof MissingRepositoryError)
+      throw new GitError(`'${url}' does not appear to be a git repository\n${UNREACHABLE}`)
     throw err
   }
+  const adv = await transport.advertise()
+  const typed = texts.slice(1).map(parseRefspec)
+  const [wants, notes] = ignoreFunny(plan(adv, typed, configured, merge, fl.asBool('tags')))
+  const checked = bare ? null : head.ref
+  for (const want of wants)
+    if (want.local !== null && want.local === checked)
+      throw new GitError(
+        `refusing to fetch into branch '${checked}' checked out at '${location.worktree.virtual}'`,
+      )
+  const tagOpt = await values(`remote.${name}.tagopt`)
+  const follow = !fl.asBool('no_tags') && tagOpt.at(-1) !== '--no-tags'
+  const [fetched, taken] = await fetchObjects(repo, transport, adv, wants, follow)
+  const pruned = fl.asBool('prune') && !typed.length ? await prune(fetched, adv, configured) : []
+  const reason = ['fetch', ...leafArgs(ctx.argv ?? [], 'fetch')].join(' ')
+  const [rows, rejected] = await updateRefs(fetched, taken, reason, !bare)
+  await writeFile(repo.vfs, location.gitdir.join(FETCH_HEAD), ENC.encode(fetchHead(url, taken)))
+  const shown = [...pruned, ...rows.filter((line) => line.code !== '=' || fl.asBool('verbose'))]
+  const err = notes + (fl.asBool('quiet') ? '' : summaryLines(url, shown, fetched.abbrev))
+  return [null, new IOResult({ exitCode: rejected ? 1 : 0, stderr: ENC.encode(err) })]
 }
 
 /**

@@ -28,7 +28,6 @@ from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     NoRestorePathsError,
-    NoWorkspaceError,
     UnknownPathspecError,
     UnmergedPathError,
     UnreadableTreeError,
@@ -74,7 +73,7 @@ from mirage.commands.cli.builtin.git.tree import (
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.config import Context
@@ -188,49 +187,42 @@ async def restore(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    require_vfs(ctx)
     fl = FlagView(ctx.flags)
     notes: list[str] = []
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        if not texts:
-            raise NoRestorePathsError()
-        flags = parse_flags(fl)
-        repo, location = await opened(ctx, fl, work_tree=True)
-        source: Tree | None
-        if flags.source is not None:
-            _, source = await asyncio.to_thread(
-                source_tree, repo, flags.source
-            )
-        elif flags.staged:
-            # Before the first commit there is no HEAD to restore the
-            # index from, and reading that as an empty tree unstaged
-            # every selected path and reported success. git refuses the
-            # whole line instead, index untouched. The working tree
-            # restores from the index, so it is only the implicit HEAD
-            # source that has nothing to read: ``--source`` naming a
-            # tree still works in the same repository.
-            found = await asyncio.to_thread(head_entries, repo)
-            if found is None:
-                raise UnresolvableSourceError(HEAD)
-            source = found
-        else:
-            source = None
-        notes, _ = await restore_paths(
-            ctx,
-            repo,
-            location,
-            texts,
-            start_point(fl).virtual,
-            source,
-            flags.staged,
-            flags.worktree,
-            False,
-        )
-    except GitError as exc:
-        return fatal(exc)
+    check_switches(ctx, texts)
+    if not texts:
+        raise NoRestorePathsError()
+    flags = parse_flags(fl)
+    repo, location = await opened(ctx, fl, work_tree=True)
+    source: Tree | None
+    if flags.source is not None:
+        _, source = await asyncio.to_thread(source_tree, repo, flags.source)
+    elif flags.staged:
+        # Before the first commit there is no HEAD to restore the
+        # index from, and reading that as an empty tree unstaged
+        # every selected path and reported success. git refuses the
+        # whole line instead, index untouched. The working tree
+        # restores from the index, so it is only the implicit HEAD
+        # source that has nothing to read: ``--source`` naming a
+        # tree still works in the same repository.
+        found = await asyncio.to_thread(head_entries, repo)
+        if found is None:
+            raise UnresolvableSourceError(HEAD)
+        source = found
+    else:
+        source = None
+    notes, _ = await restore_paths(
+        ctx,
+        repo,
+        location,
+        texts,
+        start_point(fl).virtual,
+        source,
+        flags.staged,
+        flags.worktree,
+        False,
+    )
     told = "".join(notes).encode()
     return None, IOResult(stderr=told) if told else IOResult()
 
@@ -345,9 +337,7 @@ async def restore_paths(
         tuple[list[str], int]: the warnings git prints, and how many
         working-tree files changed.
     """
-    vfs = ctx.vfs
-    if vfs is None:
-        raise NoWorkspaceError()
+    vfs = require_vfs(ctx)
     notes: list[str] = []
     updated = 0
     state = await read_index(vfs, location.gitdir)

@@ -11,7 +11,6 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { requireWorkTree } from './discover.ts'
 import {
-  NoWorkspaceError,
   AmbiguousArgumentError,
   GitError,
   InvalidRevisionNameError,
@@ -30,7 +29,7 @@ import { BINARY_SNIFF } from './summary.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { placeNamed, shownEntries } from './seen.ts'
 import { resolveTree, treeEntries, type TreeEntry } from './tree.ts'
-import { checkSwitches, fatal, splitMarked, startPoint, verbUsage } from './util.ts'
+import { checkSwitches, splitMarked, startPoint, verbUsage, requireVfs } from './util.ts'
 
 /** A compiled search and presentation, independent of content source. */
 interface GrepFlags {
@@ -159,118 +158,112 @@ async function searchEntries(repo: Repo, name: string): Promise<Map<string, Tree
 /** Search tracked working files, index blobs, or named historical trees. */
 export async function grep(
   _accessor: NOOPAccessor,
-  paths: PathSpec[],
+  _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkSwitches(ctx, texts.slice(0, 1))
-    let words = [...texts]
-    let patterns = fl.asList('e')
-    const origin = patterns.length ? '-e option' : 'command line'
-    let paths: string[]
-    let marked: boolean
-    if (patterns.length) {
-      ;[words, paths] = splitMarked(texts, ctx.argv ?? [])
-      marked = (ctx.argv ?? []).includes('--')
-      if (words.at(-1) === '--') words.pop()
-    } else {
-      const pattern = words.shift()
-      if (pattern === undefined) {
-        if (fl.asBool('h')) throw new UsageError(verbUsage(ctx), '')
-        throw new GitError('no pattern given')
-      }
-      patterns = [pattern]
-      marked = words.includes('--')
-      const cut = marked ? words.indexOf('--') : words.length
-      paths = words.slice(cut + 1)
-      words = words.slice(0, cut)
+  checkSwitches(ctx, texts.slice(0, 1))
+  let words = [...texts]
+  let patterns = fl.asList('e')
+  const origin = patterns.length ? '-e option' : 'command line'
+  let paths: string[]
+  let marked: boolean
+  if (patterns.length) {
+    ;[words, paths] = splitMarked(texts, ctx.argv ?? [])
+    marked = (ctx.argv ?? []).includes('--')
+    if (words.at(-1) === '--') words.pop()
+  } else {
+    const pattern = words.shift()
+    if (pattern === undefined) {
+      if (fl.asBool('h')) throw new UsageError(verbUsage(ctx), '')
+      throw new GitError('no pattern given')
     }
-    const flags = parseFlags(fl, patterns, origin, utf8Locale(ctx.env))
-    const repo = await opened(ctx, fl)
-    const start = startPoint(fl).virtual
-    const prefix = repoRelative(repo.location, start, '.')
-    const cached = fl.asBool('cached')
-    const sources: [string, Map<string, TreeEntry>][] = []
-    for (const [index, word] of words.entries()) {
-      if (word.startsWith('-'))
-        throw new GitError(`option '${word}' must come before non-option arguments`)
-      try {
-        sources.push([word, await searchEntries(repo, word)])
-      } catch (err) {
-        if (!(err instanceof AmbiguousArgumentError || err instanceof InvalidRevisionNameError))
-          throw err
-        if (marked) throw new GitError(`unable to resolve revision: ${word}`)
-        const relative = repoRelative(repo.location, start, word)
-        if (!/[*?[]/.test(word) && !(await exists(repo.vfs, repo.location.worktree.join(relative))))
-          throw new AmbiguousArgumentError(word)
-        console.debug('Git grep operand is a pathspec:', word)
-        paths = [...words.slice(index), ...paths]
-        break
-      }
+    patterns = [pattern]
+    marked = words.includes('--')
+    const cut = marked ? words.indexOf('--') : words.length
+    paths = words.slice(cut + 1)
+    words = words.slice(0, cut)
+  }
+  const flags = parseFlags(fl, patterns, origin, utf8Locale(ctx.env))
+  const repo = await opened(ctx, fl)
+  const start = startPoint(fl).virtual
+  const prefix = repoRelative(repo.location, start, '.')
+  const cached = fl.asBool('cached')
+  const sources: [string, Map<string, TreeEntry>][] = []
+  for (const [index, word] of words.entries()) {
+    if (word.startsWith('-'))
+      throw new GitError(`option '${word}' must come before non-option arguments`)
+    try {
+      sources.push([word, await searchEntries(repo, word)])
+    } catch (err) {
+      if (!(err instanceof AmbiguousArgumentError || err instanceof InvalidRevisionNameError))
+        throw err
+      if (marked) throw new GitError(`unable to resolve revision: ${word}`)
+      const relative = repoRelative(repo.location, start, word)
+      if (!/[*?[]/.test(word) && !(await exists(repo.vfs, repo.location.worktree.join(relative))))
+        throw new AmbiguousArgumentError(word)
+      console.debug('Git grep operand is a pathspec:', word)
+      paths = [...words.slice(index), ...paths]
+      break
     }
-    if (sources.length && cached) throw new GitError('both --cached and trees are given')
-    if (!sources.length && !cached) {
-      if (ctx.vfs === undefined) throw new NoWorkspaceError()
-      await requireWorkTree(ctx.vfs, repo.location, fl.asPath('work_tree') !== undefined)
-    }
-    const specs = pathspecPatterns(repo.location, start, paths)
-    if (!specs.length) specs.push(prefix)
-    const fully = await configBool(repo, 'core.quotepath', true)
-    if (!sources.length) {
-      const state = await readIndex(repo, repo.vfs)
-      const entries = new Map(
-        [...state.entries].map(([path, entry]) => [
-          path,
-          { mode: entry.mode.toString(8), oid: entry.oid },
-        ]),
-      )
-      if (!cached) {
-        for (const [path, conflict] of state.conflicts) {
-          for (const entry of [conflict.this, conflict.other, conflict.ancestor]) {
-            if (entry !== null && [REGULAR, EXECUTABLE].includes(entry.mode)) {
-              entries.set(path, { mode: entry.mode.toString(8), oid: entry.oid })
-              break
-            }
+  }
+  if (sources.length && cached) throw new GitError('both --cached and trees are given')
+  if (!sources.length && !cached) {
+    await requireWorkTree(requireVfs(ctx), repo.location, fl.asPath('work_tree') !== undefined)
+  }
+  const specs = pathspecPatterns(repo.location, start, paths)
+  if (!specs.length) specs.push(prefix)
+  const fully = await configBool(repo, 'core.quotepath', true)
+  if (!sources.length) {
+    const state = await readIndex(repo, repo.vfs)
+    const entries = new Map(
+      [...state.entries].map(([path, entry]) => [
+        path,
+        { mode: entry.mode.toString(8), oid: entry.oid },
+      ]),
+    )
+    if (!cached) {
+      for (const [path, conflict] of state.conflicts) {
+        for (const entry of [conflict.this, conflict.other, conflict.ancestor]) {
+          if (entry !== null && [REGULAR, EXECUTABLE].includes(entry.mode)) {
+            entries.set(path, { mode: entry.mode.toString(8), oid: entry.oid })
+            break
           }
         }
       }
-      sources.push(['', shownEntries(repo, entries)])
     }
-    const out: Uint8Array[] = []
-    let found = false
-    for (const [revision, entries] of sources) {
-      for (const [path, entry] of [...entries].sort(([a], [b]) =>
-        compareCodePoints(byteView(a), byteView(b)),
-      )) {
-        // Every source is what the session sees already, at the place its
-        // tree stands.
-        if (
-          ![REGULAR_MODE, EXECUTABLE_MODE].includes(entry.mode) ||
-          (path && !pathspecSelects(path, specs))
-        )
-          continue
-        let data: Uint8Array | null
-        if (revision || cached) data = await blobData(repo, entry)
-        else {
-          const target = repo.location.worktree.join(path)
-          if (await isLink(repo.vfs, target)) continue
-          data = await readOptional(repo.vfs, target)
-          if (data === null) continue
-        }
-        let label = relativePath(path || revision, prefix)
-        if (!flags.nul) label = quotePath(label, false, fully)
-        if (revision && path) label = revision + ':' + label
-        const [rendered, hit] = searched(data, label, flags)
-        found ||= hit
-        if (hit && flags.quiet) return [null, new IOResult()]
-        out.push(rendered)
-      }
-    }
-    return [concat(out), new IOResult({ exitCode: found ? 0 : 1 })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+    sources.push(['', shownEntries(repo, entries)])
   }
+  const out: Uint8Array[] = []
+  let found = false
+  for (const [revision, entries] of sources) {
+    for (const [path, entry] of [...entries].sort(([a], [b]) =>
+      compareCodePoints(byteView(a), byteView(b)),
+    )) {
+      // Every source is what the session sees already, at the place its
+      // tree stands.
+      if (
+        ![REGULAR_MODE, EXECUTABLE_MODE].includes(entry.mode) ||
+        (path && !pathspecSelects(path, specs))
+      )
+        continue
+      let data: Uint8Array | null
+      if (revision || cached) data = await blobData(repo, entry)
+      else {
+        const target = repo.location.worktree.join(path)
+        if (await isLink(repo.vfs, target)) continue
+        data = await readOptional(repo.vfs, target)
+        if (data === null) continue
+      }
+      let label = relativePath(path || revision, prefix)
+      if (!flags.nul) label = quotePath(label, false, fully)
+      if (revision && path) label = revision + ':' + label
+      const [rendered, hit] = searched(data, label, flags)
+      found ||= hit
+      if (hit && flags.quiet) return [null, new IOResult()]
+      out.push(rendered)
+    }
+  }
+  return [concat(out), new IOResult({ exitCode: found ? 0 : 1 })]
 }
