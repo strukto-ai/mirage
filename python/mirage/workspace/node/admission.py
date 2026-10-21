@@ -97,8 +97,10 @@ from mirage.workspace.lookup import (
     SLASH_KEEPS_LAST,
     Consumer,
     WordPolicy,
+    changes_files,
     follows_last_component,
     is_tool,
+    line_flags,
     lookup,
     reads_subtrees,
     runs_as,
@@ -423,7 +425,9 @@ def _writes(
     across mounts hands that path, and on every mount below a path, which
     a walk reaches. Its handler is picked by an operand's extension, so
     each path's counts, and a run follows links before it picks either,
-    so a link's target counts beside its name. A namespace or routed
+    so a link's target counts beside its name. Mirage's own handler
+    counts only when the line's options let it write (``changes_files``:
+    ``sort -o`` writes, ``sort`` does not). A namespace or routed
     program that changes what it names (``WRITING_PROGRAMS``: ``ln``,
     ``chmod`` ...) writes by name.
     A walk the tree refuses runs nothing, and a shell builtin, a function,
@@ -503,8 +507,9 @@ def _writes(
             if m is owner or m.prefix.startswith(below)
         ]
     extensions = {get_extension(p.virtual) for p in named} or {None}
+    builtins = changes_files(runs, [runs, *operands])
     return any(
-        m.may_write(runs, extension)
+        m.may_write(runs, extension, builtins)
         for m in reached
         for extension in extensions
     )
@@ -619,7 +624,7 @@ async def gate(
         tokens=tokens,
         program=program,
         tool=tool,
-        walks=walks_mounts(name, [name, *args]),
+        walks=walks_mounts(name, line_flags(name, [name, *args])),
         write=_writes(
             name, args, operands, session, registry, namespace, implied
         ),
@@ -993,7 +998,7 @@ async def _admit_words(
         # The runtime walks and globs on its own, where no entry gate
         # follows an I/O below the judged words, so a command a path or
         # mount rule reads must not reach it with either in hand.
-        if reads_subtrees(name, line):
+        if reads_subtrees(name, line_flags(name, line)):
             return _refuse(name, "walks a tree the gate cannot follow")
         if any(
             is_glob(p.raw_path or p.virtual)

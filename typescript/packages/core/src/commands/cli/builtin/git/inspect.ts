@@ -20,7 +20,6 @@ import {
   AbbrevModeError,
   AmbiguousArgumentError,
   GitError,
-  NoWorkspaceError,
   NotAWorkTreeError,
   SingleRevisionError,
   UnknownSubcommandError,
@@ -44,6 +43,7 @@ import {
   STDERR,
   STDOUT,
   verbUsage,
+  requireVfs,
 } from './util.ts'
 import { HELP_SWITCH, gitOptionRefusal, gitUsage, leafRefusal } from '../../refusal.ts'
 import { GIT_LONG_OPTIONS } from '../../constants.ts'
@@ -77,32 +77,27 @@ export async function remote(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    const [word] = texts
-    if (word === 'get-url') return await remoteGetUrl(texts, ctx)
-    checkOperands(ctx, texts)
-    if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(ctx))
-    const repo = await opened(ctx, fl)
-    const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
-      compareCodePoints(a.remote, b.remote),
-    )
-    const cfg = await configLines(
-      new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
-    )
-    const lines: string[] = []
-    for (const row of rows) {
-      if (!fl.asBool('verbose')) lines.push(row.remote)
-      else {
-        const [urls, push] = remoteUrls(cfg, row.remote)
-        if (urls[0]) lines.push(`${row.remote}\t${urls[0]} (fetch)`)
-        for (const url of push.length ? push : urls) lines.push(`${row.remote}\t${url} (push)`)
-      }
+  const [word] = texts
+  if (word === 'get-url') return await remoteGetUrl(texts, ctx)
+  checkOperands(ctx, texts)
+  if (word !== undefined) throw new UnknownSubcommandError(word, verbUsage(ctx))
+  const repo = await opened(ctx, fl)
+  const rows = (await git.listRemotes(repoArgs(repo))).sort((a, b) =>
+    compareCodePoints(a.remote, b.remote),
+  )
+  const cfg = await configLines(
+    new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
+  )
+  const lines: string[] = []
+  for (const row of rows) {
+    if (!fl.asBool('verbose')) lines.push(row.remote)
+    else {
+      const [urls, push] = remoteUrls(cfg, row.remote)
+      if (urls[0]) lines.push(`${row.remote}\t${urls[0]} (fetch)`)
+      for (const url of push.length ? push : urls) lines.push(`${row.remote}\t${url} (push)`)
     }
-    return [ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
   }
+  return [ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''), new IOResult()]
 }
 
 /** Apply the longest matching URL prefix once, as Git does. */
@@ -147,50 +142,45 @@ export function remoteUrls(cfg: readonly ConfigLine[], name: string): [string[],
 
 /** Read the get-url remainder through the shared option parser. */
 export async function remoteGetUrl(texts: string[], ctx: Context): Promise<CommandFnResult> {
-  try {
-    const parsed = parseCommand(
+  const parsed = parseCommand(
+    GET_URL,
+    [...texts.slice(1)],
+    ctx.cwd.virtual,
+    '',
+    undefined,
+    false,
+    GIT_LONG_OPTIONS.get('remote get-url'),
+  )
+  if (parsed.optionErrorKinds.length > 0) {
+    const [stderr, exitCode, stdout] = leafRefusal(
+      UsageStyle.GIT,
+      new Uint8Array(),
+      parsed,
+      'remote get-url',
       GET_URL,
-      [...texts.slice(1)],
-      ctx.cwd.virtual,
-      '',
-      undefined,
-      false,
-      GIT_LONG_OPTIONS.get('remote get-url'),
     )
-    if (parsed.optionErrorKinds.length > 0) {
-      const [stderr, exitCode, stdout] = leafRefusal(
-        UsageStyle.GIT,
-        new Uint8Array(),
-        parsed,
-        'remote get-url',
-        GET_URL,
-      )
-      return [stdout, new IOResult({ exitCode, stderr })]
-    }
-    const names = parsed.args.map(([word]) => word)
-    const bad = offending(names, escaped(ctx.argv ?? []), new Set())
-    if (bad !== null) throw new UsageError(...gitOptionRefusal(bad, 'remote get-url', GET_URL))
-    const [name] = names
-    if (names.length !== 1 || name === undefined)
-      throw new UsageError('', gitUsage('remote get-url', GET_URL))
-    const fl = new FlagView(parseToKwargs(parsed), GET_URL)
-    const repo = await opened(ctx, new FlagView(ctx.flags))
-    const cfg = await configLines(
-      new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
-    )
-    const [urls, push] = remoteUrls(cfg, name)
-    if (!urls.length)
-      return [
-        null,
-        new IOResult({ exitCode: 2, stderr: ENC.encode(`error: No such remote '${name}'\n`) }),
-      ]
-    let selected = fl.typedOrder('push', 'no_push').at(-1) === 'push' ? push : urls
-    if (fl.typedOrder('all', 'no_all').at(-1) !== 'all') selected = selected.slice(0, 1)
-    return [ENC.encode(selected.map((url) => `${url}\n`).join('')), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+    return [stdout, new IOResult({ exitCode, stderr })]
   }
+  const names = parsed.args.map(([word]) => word)
+  const bad = offending(names, escaped(ctx.argv ?? []), new Set())
+  if (bad !== null) throw new UsageError(...gitOptionRefusal(bad, 'remote get-url', GET_URL))
+  const [name] = names
+  if (names.length !== 1 || name === undefined)
+    throw new UsageError('', gitUsage('remote get-url', GET_URL))
+  const fl = new FlagView(parseToKwargs(parsed), GET_URL)
+  const repo = await opened(ctx, new FlagView(ctx.flags))
+  const cfg = await configLines(
+    new TextDecoder().decode(await readFile(repo.vfs, repo.location.commondir.join('config'))),
+  )
+  const [urls, push] = remoteUrls(cfg, name)
+  if (!urls.length)
+    return [
+      null,
+      new IOResult({ exitCode: 2, stderr: ENC.encode(`error: No such remote '${name}'\n`) }),
+    ]
+  let selected = fl.typedOrder('push', 'no_push').at(-1) === 'push' ? push : urls
+  if (fl.typedOrder('all', 'no_all').at(-1) !== 'all') selected = selected.slice(0, 1)
+  return [ENC.encode(selected.map((url) => `${url}\n`).join('')), new IOResult()]
 }
 
 /**
@@ -205,8 +195,7 @@ export async function globalSources(
   ctx: Context,
   listing: boolean,
 ): Promise<{ source: string; data: Uint8Array }[]> {
-  const vfs = ctx.vfs
-  if (!vfs) throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
   const home = ctx.env?.HOME ?? ''
   const override = ctx.env?.GIT_CONFIG_GLOBAL
   if (override === undefined && !home) throw new GitError('$HOME not set')
@@ -245,32 +234,26 @@ export async function mergeBase(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkSwitches(ctx, texts)
-    const repo = await opened(ctx, fl)
-    const ancestor = fl.asBool('is_ancestor')
-    const all = fl.asBool('all')
-    if (ancestor && all)
-      throw new GitError("options '--is-ancestor' and '--all' cannot be used together")
-    if (ancestor && texts.length !== 2)
-      throw new GitError('--is-ancestor takes exactly two commits')
-    if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
-    const [one, bases] = await mergeBaseIds(repo, texts)
-    if (ancestor)
-      return [
-        null,
-        new IOResult({
-          exitCode: bases.includes(one) ? 0 : 1,
-        }),
-      ]
+  checkSwitches(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const ancestor = fl.asBool('is_ancestor')
+  const all = fl.asBool('all')
+  if (ancestor && all)
+    throw new GitError("options '--is-ancestor' and '--all' cannot be used together")
+  if (ancestor && texts.length !== 2) throw new GitError('--is-ancestor takes exactly two commits')
+  if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
+  const [one, bases] = await mergeBaseIds(repo, texts)
+  if (ancestor)
     return [
-      ENC.encode((all ? bases : bases.slice(0, 1)).map((oid) => `${oid}\n`).join('')),
-      new IOResult({ exitCode: bases.length ? 0 : 1 }),
+      null,
+      new IOResult({
+        exitCode: bases.includes(one) ? 0 : 1,
+      }),
     ]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
-  }
+  return [
+    ENC.encode((all ? bases : bases.slice(0, 1)).map((oid) => `${oid}\n`).join('')),
+    new IOResult({ exitCode: bases.length ? 0 : 1 }),
+  ]
 }
 
 export async function config(
@@ -292,72 +275,65 @@ export async function config(
         ),
       }),
     ]
-  try {
-    let sources: { source: string; data: Uint8Array }[]
-    if (fl.asBool('global')) sources = await globalSources(ctx, fl.asBool('list'))
-    else {
-      const repo = await opened(ctx, fl)
-      const path = repo.location.commondir.join(`config`)
-      const ordinary =
-        repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
-        startPoint(fl).virtual === repo.location.worktree.virtual
-      sources = [
-        {
-          source: ordinary ? '.git/config' : path.rawPath,
-          data: await readFile(repo.vfs, path),
-        },
-      ]
-    }
-    const listing = fl.asBool('list'),
-      regexp = fl.asBool('get_regexp'),
-      origin = fl.asBool('show_origin')
-    if (!listing && !texts.length)
-      return [
-        null,
-        new IOResult({ exitCode: 129, stderr: ENC.encode('error: wrong number of arguments\n') }),
-      ]
-    const key = texts[0] ?? ''
-    // git matches keys by the locale: bytes in C, characters in UTF-8.
-    const utf8 = utf8Locale(ctx.env)
-    let pattern: PosixRegex | null
-    try {
-      pattern = regexp
-        ? posixRegex(byteView(configKey(key), utf8), true, 'posix', false, utf8)
-        : null
-    } catch (err) {
-      if (!(err instanceof RegexError)) throw err
-      return [
-        null,
-        new IOResult({ exitCode: 6, stderr: ENC.encode(`error: invalid key pattern: ${key}\n`) }),
-      ]
-    }
-    const values: [string, string, string][] = []
-    for (const { source, data } of sources) {
-      for (const line of await configLines(new TextDecoder().decode(data))) {
-        if (
-          listing ||
-          (pattern
-            ? pattern.search(byteView(line.path, utf8)) !== null
-            : line.path === configKey(key))
-        )
-          values.push([source, line.path, line.value ?? ''])
-      }
-    }
-    const chosen = listing || regexp ? values : values.slice(-1)
-    const out = chosen
-      .map(
-        ([source, name, value]) =>
-          (origin ? `file:${source}\t` : '') +
-          (listing || regexp ? name + (listing ? '=' : ' ') : '') +
-          value +
-          '\n',
-      )
-      .join('')
-    return [ENC.encode(out), new IOResult({ exitCode: chosen.length || listing ? 0 : 1 })]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  let sources: { source: string; data: Uint8Array }[]
+  if (fl.asBool('global')) sources = await globalSources(ctx, fl.asBool('list'))
+  else {
+    const repo = await opened(ctx, fl)
+    const path = repo.location.commondir.join(`config`)
+    const ordinary =
+      repo.location.commondir.virtual === repo.location.worktree.virtual + '/.git' &&
+      startPoint(fl).virtual === repo.location.worktree.virtual
+    sources = [
+      {
+        source: ordinary ? '.git/config' : path.rawPath,
+        data: await readFile(repo.vfs, path),
+      },
+    ]
   }
+  const listing = fl.asBool('list'),
+    regexp = fl.asBool('get_regexp'),
+    origin = fl.asBool('show_origin')
+  if (!listing && !texts.length)
+    return [
+      null,
+      new IOResult({ exitCode: 129, stderr: ENC.encode('error: wrong number of arguments\n') }),
+    ]
+  const key = texts[0] ?? ''
+  // git matches keys by the locale: bytes in C, characters in UTF-8.
+  const utf8 = utf8Locale(ctx.env)
+  let pattern: PosixRegex | null
+  try {
+    pattern = regexp ? posixRegex(byteView(configKey(key), utf8), true, 'posix', false, utf8) : null
+  } catch (err) {
+    if (!(err instanceof RegexError)) throw err
+    return [
+      null,
+      new IOResult({ exitCode: 6, stderr: ENC.encode(`error: invalid key pattern: ${key}\n`) }),
+    ]
+  }
+  const values: [string, string, string][] = []
+  for (const { source, data } of sources) {
+    for (const line of await configLines(new TextDecoder().decode(data))) {
+      if (
+        listing ||
+        (pattern
+          ? pattern.search(byteView(line.path, utf8)) !== null
+          : line.path === configKey(key))
+      )
+        values.push([source, line.path, line.value ?? ''])
+    }
+  }
+  const chosen = listing || regexp ? values : values.slice(-1)
+  const out = chosen
+    .map(
+      ([source, name, value]) =>
+        (origin ? `file:${source}\t` : '') +
+        (listing || regexp ? name + (listing ? '=' : ' ') : '') +
+        value +
+        '\n',
+    )
+    .join('')
+  return [ENC.encode(out), new IOResult({ exitCode: chosen.length || listing ? 0 : 1 })]
 }
 
 export async function showRef(
@@ -367,29 +343,22 @@ export async function showRef(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkSwitches(ctx, texts)
-    const repo = await opened(ctx, fl)
-    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-    const lines: string[] = []
-    for (const ref of [...refs.keys()]
-      .filter((r) => r.startsWith('refs/'))
-      .sort(compareCodePoints)) {
-      if (texts.length && !texts.some((pattern) => ref === pattern || ref.endsWith(`/${pattern}`)))
-        continue
-      // A ref that resolves to nothing (a dangling symbolic ref) is skipped
-      // silently, as git's ref iteration skips it. Pinned against git 2.47.3.
-      const [oid] = resolveRef(refs, ref)
-      if (oid !== null) lines.push(`${oid} ${ref}`)
-    }
-    return [
-      ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''),
-      new IOResult({ exitCode: lines.length ? 0 : 1 }),
-    ]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkSwitches(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  const lines: string[] = []
+  for (const ref of [...refs.keys()].filter((r) => r.startsWith('refs/')).sort(compareCodePoints)) {
+    if (texts.length && !texts.some((pattern) => ref === pattern || ref.endsWith(`/${pattern}`)))
+      continue
+    // A ref that resolves to nothing (a dangling symbolic ref) is skipped
+    // silently, as git's ref iteration skips it. Pinned against git 2.47.3.
+    const [oid] = resolveRef(refs, ref)
+    if (oid !== null) lines.push(`${oid} ${ref}`)
   }
+  return [
+    ENC.encode(lines.length ? `${lines.join('\n')}\n` : ''),
+    new IOResult({ exitCode: lines.length ? 0 : 1 }),
+  ]
 }
 
 export async function revList(
@@ -399,31 +368,26 @@ export async function revList(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    const sole = (ctx.argv ?? []).slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
-    if (optionOperand(ctx, texts, sole ? STDOUT : STDERR) !== null) {
-      throw new UsageError('', verbUsage(ctx))
-    }
-    const repo = await opened(ctx, fl)
-    const parsed = parseFlags(fl)
-    const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
-    // A line naming only paths has no revision either (git 2.47.3).
-    if (!revisions.length && !parsed.allRefs) throw new UsageError('', verbUsage(ctx))
-    const flags = { ...parsed, pathspecs }
-    const [shown, hidden] = await walkEnds(repo, revisions, dashed)
-    const starts = flags.allRefs ? [...(await refCommits(repo)), ...shown] : shown
-    const walk = await walked(repo, starts, flags, hidden)
-    const commits = inPrintOrder(walk, flags)
-    // A `--boundary` commit's line starts with `-` (git 2.47.3).
-    const boundary = new Set(walk.boundary.map((commit) => commit.oid))
-    const out = fl.asBool('count')
-      ? `${String(commits.length)}\n`
-      : commits.map((c) => `${boundary.has(c.oid) ? '-' : ''}${c.oid}\n`).join('')
-    return [ENC.encode(out), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const sole = (ctx.argv ?? []).slice(-2).join(' ') === `rev-list ${HELP_SWITCH}`
+  if (optionOperand(ctx, texts, sole ? STDOUT : STDERR) !== null) {
+    throw new UsageError('', verbUsage(ctx))
   }
+  const repo = await opened(ctx, fl)
+  const parsed = parseFlags(fl)
+  const [revisions, pathspecs, dashed] = await walkOperands(ctx, fl, repo, texts)
+  // A line naming only paths has no revision either (git 2.47.3).
+  if (!revisions.length && !parsed.allRefs) throw new UsageError('', verbUsage(ctx))
+  const flags = { ...parsed, pathspecs }
+  const [shown, hidden] = await walkEnds(repo, revisions, dashed)
+  const starts = flags.allRefs ? [...(await refCommits(repo)), ...shown] : shown
+  const walk = await walked(repo, starts, flags, hidden)
+  const commits = inPrintOrder(walk, flags)
+  // A `--boundary` commit's line starts with `-` (git 2.47.3).
+  const boundary = new Set(walk.boundary.map((commit) => commit.oid))
+  const out = fl.asBool('count')
+    ? `${String(commits.length)}\n`
+    : commits.map((c) => `${boundary.has(c.oid) ? '-' : ''}${c.oid}\n`).join('')
+  return [ENC.encode(out), new IOResult()]
 }
 
 export function version(

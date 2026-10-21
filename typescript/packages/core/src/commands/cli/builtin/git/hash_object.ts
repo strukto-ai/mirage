@@ -22,13 +22,13 @@ import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { OBJECT_TYPES } from './constants.ts'
-import { GitError, NoWorkspaceError, ObjectWriteReadOnlyError } from './errors.ts'
+import { GitError, ObjectWriteReadOnlyError } from './errors.ts'
 import { readFile } from './io.ts'
 import { repoArgs } from './repo.ts'
 import { opened } from './session.ts'
 import type { RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('latin1')
@@ -130,44 +130,38 @@ export async function hashObject(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const vfs = ctx.vfs
-  try {
-    if (vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(ctx, texts)
-    const asked = fl.asStr('t', 'blob')
-    const kind = OBJECT_TYPES.find((type) => type === asked)
-    if (kind === undefined) throw new GitError(`invalid object type "${asked}"`)
-    const base = startPoint(fl)
-    const contents: Uint8Array[] = []
-    if (fl.asBool('stdin')) {
-      contents.push((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
-    }
-    const names = [...texts]
-    if (fl.asBool('stdin_paths')) {
-      const listed = new TextDecoder().decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
-      names.push(...listed.split('\n').filter((line) => line !== ''))
-    }
-    for (const name of names) contents.push(await content(vfs, base, name))
-    if (!fl.asBool('literally') && !contents.every((data) => wellFormed(kind, data))) {
-      throw new GitError('refusing to create malformed object')
-    }
-    if (fl.asBool('w') && contents.length > 0) {
-      const repo = await opened(ctx, fl)
-      for (const data of contents) {
-        // hash-object writes any of the four types, which only the general
-        // writer takes.
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        await git.writeObject({ ...repoArgs(repo), type: kind, object: data, format: 'content' })
-      }
-    }
-    const ids: string[] = []
-    for (const data of contents) ids.push(await objectId(kind, data))
-    const out = ids.map((id) => `${id}\n`).join('')
-    return [out === '' ? null : ENC.encode(out), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const asked = fl.asStr('t', 'blob')
+  const kind = OBJECT_TYPES.find((type) => type === asked)
+  if (kind === undefined) throw new GitError(`invalid object type "${asked}"`)
+  const base = startPoint(fl)
+  const contents: Uint8Array[] = []
+  if (fl.asBool('stdin')) {
+    contents.push((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
   }
+  const names = [...texts]
+  if (fl.asBool('stdin_paths')) {
+    const listed = new TextDecoder().decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
+    names.push(...listed.split('\n').filter((line) => line !== ''))
+  }
+  for (const name of names) contents.push(await content(vfs, base, name))
+  if (!fl.asBool('literally') && !contents.every((data) => wellFormed(kind, data))) {
+    throw new GitError('refusing to create malformed object')
+  }
+  if (fl.asBool('w') && contents.length > 0) {
+    const repo = await opened(ctx, fl)
+    for (const data of contents) {
+      // hash-object writes any of the four types, which only the general
+      // writer takes.
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      await git.writeObject({ ...repoArgs(repo), type: kind, object: data, format: 'content' })
+    }
+  }
+  const ids: string[] = []
+  for (const data of contents) ids.push(await objectId(kind, data))
+  const out = ids.map((id) => `${id}\n`).join('')
+  return [out === '' ? null : ENC.encode(out), new IOResult()]
 }
 
 /**

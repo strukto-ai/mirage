@@ -1742,6 +1742,127 @@ describe('command permissions end to end', () => {
     const [dirCode, , dirErr] = await line(ws, 'grep x /scratch')
     expect(dirCode).toBe(2)
     expect(dirErr).toContain('Is a directory')
+    // Every spelling grep reads as recursive walks as -r does: a long
+    // option's prefix, -d recurse and --dereference-recursive.
+    for (const text of [
+      'grep --recur x /scratch',
+      'grep -d recurse x /scratch',
+      'grep --directories=recurse x /scratch',
+      'grep --dereference-recursive x /scratch',
+    ]) {
+      expect(await line(ws, text)).toEqual([
+        126,
+        '',
+        'grep: Permission denied\npolicy denied: boxed\n',
+      ])
+    }
+    // A value that only holds an r is no -r.
+    const [valueCode, , valueErr] = await line(ws, 'grep -erx /scratch/a')
+    expect([valueCode, valueErr]).toEqual([1, ''])
+  })
+
+  it('a mount rule holds at every entry a line reaches', async () => {
+    // A line working outside /a/b/c still reaches entries inside it: cp -r
+    // and chmod -R walk in, and the child's rule refuses each entry there.
+    // mv takes the directory holding the child along whole, so the rule
+    // speaks on the line, as a path rule does on a subtree operand; a move
+    // into that directory takes nothing of the child. du -x keeps to its
+    // operand's mount and never meets the child.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMVFS(), '/a/b/c': new RAMVFS(), '/t': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          default: parseSessionProfile({
+            mounts: {
+              '/a/b/c': {
+                commands: {
+                  deny: [{ reason: 'boxed', commands: ['cp', 'chmod', 'mv', 'du'] }],
+                },
+              },
+            },
+          }),
+        },
+      },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/c/secret')
+    expect(await line(ws, 'cp -r /a/b /t/cp')).toEqual([
+      1,
+      '',
+      "cp: cannot access '/a/b/c': Permission denied\npolicy denied: boxed\n",
+    ])
+    expect(await line(ws, 'find /t/cp')).toEqual([0, '/t/cp\n/t/cp/c\n/t/cp/f\n', ''])
+    const [chmodCode, , chmodErr] = await line(ws, 'chmod -R 700 /a/b')
+    expect(chmodCode).toBe(1)
+    expect(chmodErr).toContain('chmod: /a/b/c: Permission denied')
+    expect(await line(ws, 'stat -c %a /a/b/c/secret /a/b/f')).toEqual([0, '644\n700\n', ''])
+    // So does a move naming its target by -t, or reaching the directory
+    // through a link.
+    await ws.shell('mkdir -p /a/out /a/other && ln -s /a /a/alias')
+    for (const text of ['mv -t /a/out /a/other /a/b', 'mv /a/alias/b /a/out', 'mv /a/b /t/mv']) {
+      expect(await line(ws, text)).toEqual([
+        126,
+        '',
+        'mv: Permission denied\npolicy denied: boxed\n',
+      ])
+    }
+    await ws.shell('rm /a/alias && rmdir /a/out /a/other')
+    // A move into the directory holding the mount takes nothing of it.
+    expect(await line(ws, 'echo m > /t/m && mv /t/m /a/b')).toEqual([0, '', ''])
+    expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n', ''])
+    // Nor does one naming the directory by an attached -t, one whose -S suffix
+    // holds a t, or one reaching it through a link.
+    await ws.shell('echo x > /t/n && echo x > /t/s && echo x > /t/l')
+    await ws.shell('ln -s /a /a/alias')
+    for (const text of ['mv -t/a/b /t/n', 'mv -S.txt /t/s /a/b', 'mv /t/l /a/alias/b']) {
+      expect(await line(ws, text)).toEqual([0, '', ''])
+    }
+  })
+
+  it('a command rule reaches what chmod -R walks into', async () => {
+    // chmod, chown and touch run beside the mounts, not on one; their own
+    // ops still carry the command's gate, so a rule naming the command and
+    // a path below the operand refuses that entry and lets the rest change.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        profiles: {
+          default: parseSessionProfile({
+            commands: {
+              deny: [
+                {
+                  reason: 'sealed',
+                  commands: { chmod: ['/a/b/secret'], chown: ['/a/b/secret'] },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    )
+    open.push(ws)
+    await ws.shell('mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/secret')
+    expect(await line(ws, 'chmod -R 700 /a/b')).toEqual([
+      1,
+      '',
+      'chmod: /a/b/secret: Permission denied\npolicy denied: sealed\n',
+    ])
+    expect(await line(ws, 'chown -R 5 /a/b')).toEqual([
+      1,
+      '',
+      'chown: /a/b/secret: Permission denied\npolicy denied: sealed\n',
+    ])
+    expect(await line(ws, "stat -c '%a %u' /a/b/secret /a/b/f")).toEqual([
+      0,
+      '644 default\n700 5\n',
+      '',
+    ])
   })
 
   it('a whole-line runtime is gated like the tree', async () => {

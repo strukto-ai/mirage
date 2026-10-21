@@ -76,7 +76,7 @@ describe('normalizeMounts', () => {
     expect(entry.read.policy).toBe(ReadPolicy.BOUNDED)
   })
 
-  // Downstream -- the gate, the routing reconcile -- all compare with
+  // Downstream -- the gate, the operand probe -- all compare with
   // `===`, so the spec has to be normalized where it becomes live mount
   // state or a capable backend mounts `fresh` and behaves as bounded.
   it('stores the coerced policy, not the wire string it was given', () => {

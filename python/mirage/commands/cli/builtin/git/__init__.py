@@ -23,7 +23,6 @@ from mirage.commands.cli.builtin.git.checkout import (
 from mirage.commands.cli.builtin.git.clone import clone, clone_read_only
 from mirage.commands.cli.builtin.git.commit import commit
 from mirage.commands.cli.builtin.git.diff import diff
-from mirage.commands.cli.builtin.git.errors import GitError
 from mirage.commands.cli.builtin.git.fetch import fetch, fetch_read_only
 from mirage.commands.cli.builtin.git.for_each_ref import for_each_ref
 from mirage.commands.cli.builtin.git.fsck import fsck
@@ -63,7 +62,7 @@ from mirage.commands.cli.builtin.git.symbolic_ref import (
     symbolic_ref_read_only,
 )
 from mirage.commands.cli.builtin.git.tag import tag, tag_read_only
-from mirage.commands.cli.builtin.git.util import check_switches, fatal
+from mirage.commands.cli.builtin.git.util import check_switches
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.cli.walk import find_node, node_help
 from mirage.commands.config import Context
@@ -758,10 +757,7 @@ async def help_cmd(
         texts (list[str]): the optional command to describe.
         ctx (Context): the line's context.
     """
-    try:
-        check_switches(ctx, texts)
-    except GitError as exc:
-        return fatal(exc)
+    check_switches(ctx, texts)
     found = find_node(GIT.spec, texts)
     if found is None:
         return None, IOResult(

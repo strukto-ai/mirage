@@ -1394,6 +1394,159 @@ async def test_a_mount_rule_speaks_on_a_walk_from_above():
         # A non-recursive grep of the parent never enters the child.
         code, _, err = await _line(ws, "grep x /scratch")
         assert code == 2 and "Is a directory" in err
+        # Every spelling grep reads as recursive walks as -r does: a long
+        # option's prefix, -d recurse and --dereference-recursive.
+        for line in (
+            "grep --recur x /scratch",
+            "grep -d recurse x /scratch",
+            "grep --directories=recurse x /scratch",
+            "grep --dereference-recursive x /scratch",
+        ):
+            assert await _line(ws, line) == (
+                126,
+                "",
+                "grep: Permission denied\npolicy denied: boxed\n",
+            ), line
+        # A value that only holds an r is no -r.
+        code, _, err = await _line(ws, "grep -erx /scratch/a")
+        assert (code, err) == (1, "")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
+    # A line working outside /a/b/c still reaches entries inside it: cp -r
+    # and chmod -R walk in, and the child's rule refuses each entry there.
+    # mv takes the directory holding the child along whole, so the rule
+    # speaks on the line, as a path rule does on a subtree operand; a move
+    # into that directory takes nothing of the child. du -x keeps to its
+    # operand's mount and never meets the child.
+    ws = Workspace(
+        {
+            "/a/": (RAMVFS(), MountMode.WRITE),
+            "/a/b/c/": (RAMVFS(), MountMode.WRITE),
+            "/t/": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {
+                "mounts": {
+                    "/a/b/c": {
+                        "commands": {
+                            "deny": [
+                                {
+                                    "reason": "boxed",
+                                    "commands": ["cp", "chmod", "mv", "du"],
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+    )
+    try:
+        await ws.shell(
+            "mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/c/secret"
+        )
+        assert await _line(ws, "cp -r /a/b /t/cp") == (
+            1,
+            "",
+            "cp: cannot access '/a/b/c': Permission denied\n"
+            "policy denied: boxed\n",
+        )
+        code, out, _ = await _line(ws, "find /t/cp")
+        assert (code, out) == (0, "/t/cp\n/t/cp/c\n/t/cp/f\n")
+        code, _, err = await _line(ws, "chmod -R 700 /a/b")
+        assert code == 1 and "chmod: /a/b/c: Permission denied" in err
+        assert await _line(ws, "stat -c %a /a/b/c/secret /a/b/f") == (
+            0,
+            "644\n700\n",
+            "",
+        )
+        # So does a move naming its target by -t, or reaching the directory
+        # through a link.
+        await ws.shell("mkdir -p /a/out /a/other && ln -s /a /a/alias")
+        for line in (
+            "mv -t /a/out /a/other /a/b",
+            "mv /a/alias/b /a/out",
+            "mv /a/b /t/mv",
+        ):
+            assert await _line(ws, line) == (
+                126,
+                "",
+                "mv: Permission denied\npolicy denied: boxed\n",
+            ), line
+        await ws.shell("rm /a/alias && rmdir /a/out /a/other")
+        # A move into the directory holding the mount takes nothing of it.
+        assert await _line(ws, "echo m > /t/m && mv /t/m /a/b") == (
+            0,
+            "",
+            "",
+        )
+        assert await _line(ws, "du -x -a /a/b") == (
+            0,
+            "2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n",
+            "",
+        )
+        # Nor does one naming the directory by an attached -t, one whose
+        # -S suffix holds a t, or one reaching it through a link.
+        await ws.shell("echo x > /t/n && echo x > /t/s && echo x > /t/l")
+        await ws.shell("ln -s /a /a/alias")
+        for line in (
+            "mv -t/a/b /t/n",
+            "mv -S.txt /t/s /a/b",
+            "mv /t/l /a/alias/b",
+        ):
+            assert await _line(ws, line) == (0, "", ""), line
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_rule_reaches_what_chmod_r_walks_into():
+    # chmod, chown and touch run beside the mounts, not on one; their own
+    # ops still carry the command's gate, so a rule naming the command and
+    # a path below the operand refuses that entry and lets the rest change.
+    ws = Workspace(
+        {"/a/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {
+                "commands": {
+                    "deny": [
+                        {
+                            "reason": "sealed",
+                            "commands": {
+                                "chmod": ["/a/b/secret"],
+                                "chown": ["/a/b/secret"],
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    try:
+        await ws.shell(
+            "mkdir -p /a/b && echo x > /a/b/f && echo s > /a/b/secret"
+        )
+        assert await _line(ws, "chmod -R 700 /a/b") == (
+            1,
+            "",
+            "chmod: /a/b/secret: Permission denied\npolicy denied: sealed\n",
+        )
+        assert await _line(ws, "chown -R 5 /a/b") == (
+            1,
+            "",
+            "chown: /a/b/secret: Permission denied\npolicy denied: sealed\n",
+        )
+        assert await _line(ws, "stat -c '%a %u' /a/b/secret /a/b/f") == (
+            0,
+            "644 default\n700 5\n",
+            "",
+        )
     finally:
         await ws.close()
 

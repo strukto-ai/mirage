@@ -288,16 +288,15 @@ async def test_a_drift_check_on_a_loaded_mount_asks_one_path():
 
 
 # Measured on the first green run, then pinned (test plan T31): each path
-# ask is one reconcile probe, and a warm read makes no download. cat's own
-# stat and the cache stage reuse the routing probe's answer. Cross-mount
-# cp skips routing's
-# probe, so only the cache stage asks, and its stat re-checks the listing
-# its path resolves through, which fresh does once per command: one head check
-# against the listing's version, where it was a whole tree walk (Task 1.3).
+# ask is one reconcile probe, and a warm read makes no download. The probe
+# runs at the command's first lookup of the operand its line names, and the
+# command's own stat and the cache stage reuse its answer, so a cross-mount
+# cp re-checks no listing either (it was a head check, and before that a
+# whole tree walk, Task 1.3).
 WARM = [
     ("cat /m/a.txt", 1, 0, 0),
     ("cat /m/a.txt | head -c 1", 1, 0, 0),
-    ("cp /m/a.txt /r/a.txt", 1, 0, 1),
+    ("cp /m/a.txt /r/a.txt", 1, 0, 0),
 ]
 
 

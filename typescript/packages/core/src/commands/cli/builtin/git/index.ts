@@ -50,8 +50,7 @@ import { show, diffTree } from './show.ts'
 import { status } from './status.ts'
 import { switchBranch, switchReadOnly } from './switch.ts'
 import { tag, tagReadOnly } from './tag.ts'
-import { GitError } from './errors.ts'
-import { checkSwitches, fatal } from './util.ts'
+import { checkSwitches } from './util.ts'
 
 // `-C` is git's own before-anything-else option, so it sits on the root and
 // every verb inherits it. The "." default is load-bearing: a PATH default lands
@@ -529,12 +528,7 @@ function helpCmd(
   texts: string[],
   ctx: Context,
 ): CommandFnResult {
-  try {
-    checkSwitches(ctx, texts)
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
-  }
+  checkSwitches(ctx, texts)
   const found = findNode(GIT.spec, texts)
   if (found === null)
     return [

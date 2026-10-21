@@ -37,7 +37,6 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import listed_tree, resolve_tree
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
     start_point,
     verb_usage,
 )
@@ -64,42 +63,37 @@ async def ls_files(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    try:
-        check_switches(ctx, texts)
-        _, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        fully = await config_bool(
-            ctx.vfs, location, b"core", b"quotepath", True
+    check_switches(ctx, texts)
+    _, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    fully = await config_bool(ctx.vfs, location, b"core", b"quotepath", True)
+    state = await read_index(ctx.vfs, location.gitdir)
+    start = start_point(fl).virtual
+    prefix = repo_relative(location, start, ".")
+    patterns = pathspec_patterns(location, start, texts)
+    rows = [(path, 0, entry) for path, entry in state.entries.items()]
+    rows.extend(
+        (path, stage, entry)
+        for path, conflict in state.conflicts.items()
+        for stage, entry in enumerate(
+            (conflict.ancestor, conflict.this, conflict.other), 1
         )
-        state = await read_index(ctx.vfs, location.gitdir)
-        start = start_point(fl).virtual
-        prefix = repo_relative(location, start, ".")
-        patterns = pathspec_patterns(location, start, texts)
-        rows = [(path, 0, entry) for path, entry in state.entries.items()]
-        rows.extend(
-            (path, stage, entry)
-            for path, conflict in state.conflicts.items()
-            for stage, entry in enumerate(
-                (conflict.ancestor, conflict.this, conflict.other), 1
-            )
-            if entry is not None
-        )
-        nul = fl.as_bool("z")
-        out = []
-        for path, stage, entry in sorted(rows, key=lambda row: row[:2]):
-            name = path.decode("utf-8", "surrogateescape")
-            if not pathspec_selects(name, patterns or (prefix,)):
-                continue
-            relative = posixpath.relpath(name, prefix or ".")
-            label = relative if nul else quote_path(relative, False, fully)
-            metadata = ""
-            if fl.as_bool("stage"):
-                metadata = f"{entry.mode:06o} {entry.sha.decode()} {stage}\t"
-            text = metadata + label + ("\0" if nul else "\n")
-            out.append(Line(entry_path(location, path), text))
-        return None, IOResult(rows=Rows(out, printed))
-    except GitError as exc:
-        return fatal(exc)
+        if entry is not None
+    )
+    nul = fl.as_bool("z")
+    out = []
+    for path, stage, entry in sorted(rows, key=lambda row: row[:2]):
+        name = path.decode("utf-8", "surrogateescape")
+        if not pathspec_selects(name, patterns or (prefix,)):
+            continue
+        relative = posixpath.relpath(name, prefix or ".")
+        label = relative if nul else quote_path(relative, False, fully)
+        metadata = ""
+        if fl.as_bool("stage"):
+            metadata = f"{entry.mode:06o} {entry.sha.decode()} {stage}\t"
+        text = metadata + label + ("\0" if nul else "\n")
+        out.append(Line(entry_path(location, path), text))
+    return None, IOResult(rows=Rows(out, printed))
 
 
 async def ls_tree(
@@ -114,75 +108,64 @@ async def ls_tree(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
+    check_switches(ctx, texts)
+    if not texts:
+        raise UsageError("", verb_usage(ctx))
+    repo, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    name, *pathspecs = texts
     try:
-        check_switches(ctx, texts)
-        if not texts:
-            raise UsageError("", verb_usage(ctx))
-        repo, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        name, *pathspecs = texts
-        try:
-            tree = await asyncio.to_thread(resolve_tree, repo, name)
-        except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
-            raise GitError(f"Not a valid object name {name}") from exc
-        # Each row stands where the tree does, so the hides it is
-        # filtered by are the ones at that place, not at the root.
-        base = await asyncio.to_thread(place_named, repo, name, tree)
-        full_tree = fl.as_bool("full_tree")
-        start = (
-            location.worktree.virtual if full_tree else start_point(fl).virtual
+        tree = await asyncio.to_thread(resolve_tree, repo, name)
+    except (AmbiguousArgumentError, InvalidRevisionNameError) as exc:
+        raise GitError(f"Not a valid object name {name}") from exc
+    # Each row stands where the tree does, so the hides it is
+    # filtered by are the ones at that place, not at the root.
+    base = await asyncio.to_thread(place_named, repo, name, tree)
+    full_tree = fl.as_bool("full_tree")
+    start = location.worktree.virtual if full_tree else start_point(fl).virtual
+    prefix = repo_relative(location, start, ".")
+    selected: list[str] = []
+    for path in pathspecs:
+        if path == "":
+            raise EmptyPathspecError()
+        relative = repo_relative(location, start, path)
+        directory = path.endswith(("/", "/.", "/..")) or path in (
+            ".",
+            "..",
         )
-        prefix = repo_relative(location, start, ".")
-        selected: list[str] = []
-        for path in pathspecs:
-            if path == "":
-                raise EmptyPathspecError()
-            relative = repo_relative(location, start, path)
-            directory = path.endswith(("/", "/.", "/..")) or path in (
-                ".",
-                "..",
-            )
-            selected.append(relative + ("/" if relative and directory else ""))
-        patterns = tuple(selected)
-        if not patterns and prefix:
-            patterns = (prefix + "/",)
-        rows = await asyncio.to_thread(
-            listed_tree,
-            repo,
-            tree,
-            patterns,
-            fl.as_bool("r"),
-            fl.as_bool("t"),
-            fl.as_bool("d"),
+        selected.append(relative + ("/" if relative and directory else ""))
+    patterns = tuple(selected)
+    if not patterns and prefix:
+        patterns = (prefix + "/",)
+    rows = await asyncio.to_thread(
+        listed_tree,
+        repo,
+        tree,
+        patterns,
+        fl.as_bool("r"),
+        fl.as_bool("t"),
+        fl.as_bool("d"),
+    )
+    fully = await config_bool(ctx.vfs, location, b"core", b"quotepath", True)
+    nul = fl.as_bool("z")
+    names = fl.as_bool("name_only") or fl.as_bool("name_status")
+    full_name = full_tree or fl.as_bool("full_name")
+    terminator = "\0" if nul else "\n"
+    out: list[Line] = []
+    for path, mode, oid in rows:
+        relative = (
+            path if full_name else posixpath.relpath(path, prefix or ".")
         )
-        fully = await config_bool(
-            ctx.vfs, location, b"core", b"quotepath", True
+        label = relative if nul else quote_path(relative, False, fully)
+        kind = (
+            "tree"
+            if mode == "040000"
+            else "commit"
+            if mode == "160000"
+            else "blob"
         )
-        nul = fl.as_bool("z")
-        names = fl.as_bool("name_only") or fl.as_bool("name_status")
-        full_name = full_tree or fl.as_bool("full_name")
-        terminator = "\0" if nul else "\n"
-        out: list[Line] = []
-        for path, mode, oid in rows:
-            relative = (
-                path if full_name else posixpath.relpath(path, prefix or ".")
-            )
-            label = relative if nul else quote_path(relative, False, fully)
-            kind = (
-                "tree"
-                if mode == "040000"
-                else "commit"
-                if mode == "160000"
-                else "blob"
-            )
-            text = (
-                ("" if names else f"{mode} {kind} {oid}\t")
-                + label
-                + terminator
-            )
-            out.append(
-                Line(location.worktree.join(posixpath.join(base, path)), text)
-            )
-        return None, IOResult(rows=Rows(out, printed))
-    except GitError as exc:
-        return fatal(exc)
+        text = ("" if names else f"{mode} {kind} {oid}\t") + label + terminator
+        out.append(
+            Line(location.worktree.join(posixpath.join(base, path)), text)
+        )
+    return None, IOResult(rows=Rows(out, printed))

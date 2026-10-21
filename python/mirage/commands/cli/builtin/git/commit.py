@@ -29,10 +29,8 @@ from mirage.commands.cli.builtin.git.diff_output import commit_summary
 from mirage.commands.cli.builtin.git.errors import (
     AllWithPathsError,
     BrokenHeadError,
-    GitError,
     LockExistsError,
     MissingMessageError,
-    NoWorkspaceError,
     PartialCommitError,
     UnmergedIndexError,
 )
@@ -55,7 +53,7 @@ from mirage.commands.cli.builtin.git.summary import report
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.config import Context
@@ -182,79 +180,72 @@ async def commit(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
+    check_switches(ctx, texts)
+    staging = fl.as_bool("all")
+    if texts:
+        raise (AllWithPathsError if staging else PartialCommitError)(texts[0])
+    message = fl.as_str("message")
+    if not message:
+        raise MissingMessageError()
+    repo, location = await opened(ctx, fl, work_tree=True)
+    # git takes the index's lock before it looks for anything to
+    # commit, so a read-only repository refuses an empty commit too.
     try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        staging = fl.as_bool("all")
-        if texts:
-            raise (AllWithPathsError if staging else PartialCommitError)(
-                texts[0]
-            )
-        message = fl.as_str("message")
-        if not message:
-            raise MissingMessageError()
-        repo, location = await opened(ctx, fl, work_tree=True)
-        # git takes the index's lock before it looks for anything to
-        # commit, so a read-only repository refuses an empty commit too.
-        try:
-            await take_lock(vfs, location.gitdir.join("index"))
-        except FileExistsError as exc:
-            raise LockExistsError(exc.filename) from exc
-        state = await read_index(vfs, location.gitdir)
-        if state.conflicts:
-            raise UnmergedIndexError()
-        if staging:
-            await stage_tracked(vfs, location, state)
-        head = await read_head(vfs, location.gitdir)
-        before = await asyncio.to_thread(head_entries, repo)
-        after = staged_entries(state)
-        if (
-            before is not None
-            and before == after
-            and not fl.as_bool("allow_empty")
-        ):
-            # Printed on stdout, where the status report it stands in
-            # for would have gone, and exits 1.
-            report_of = await report_rows(
-                vfs, repo, location, head, start_point(fl).virtual
-            )
-            return None, IOResult(exit_code=1, rows=report_of)
-        parents = [] if before is None else [repo.refs[HEAD_REF]]
-        who = identity(fl, ctx.session)
-        when = int(time.time())
-        written = await asyncio.to_thread(
-            build_commit, repo, state, message, who, parents, when
+        await take_lock(vfs, location.gitdir.join("index"))
+    except FileExistsError as exc:
+        raise LockExistsError(exc.filename) from exc
+    state = await read_index(vfs, location.gitdir)
+    if state.conflicts:
+        raise UnmergedIndexError()
+    if staging:
+        await stage_tracked(vfs, location, state)
+    head = await read_head(vfs, location.gitdir)
+    before = await asyncio.to_thread(head_entries, repo)
+    after = staged_entries(state)
+    if (
+        before is not None
+        and before == after
+        and not fl.as_bool("allow_empty")
+    ):
+        # Printed on stdout, where the status report it stands in
+        # for would have gone, and exits 1.
+        report_of = await report_rows(
+            vfs, repo, location, head, start_point(fl).virtual
         )
-        # The object is written and the ref is not, as git leaves it: the
-        # files backend refuses to lock a HEAD whose branch path leaves
-        # the ref tree, rather than let the commit land on .git/config.
-        if head.ref is not None and not safe_ref_name(head.ref):
-            raise BrokenHeadError(head.ref)
-        if head.ref is not None:
-            await write_ref(vfs, location.commondir, head.ref, written.id)
-        else:
-            await detach_head(vfs, location.gitdir, written.id)
-        if staging:
-            await write_index(vfs, location.gitdir, state)
-        await record(
-            vfs,
-            location.gitdir,
-            location.commondir,
-            head.ref,
-            parents[0] if parents else None,
-            written.id,
-            who,
-            when,
-            f"commit{ROOT_NOTE if before is None else ''}: "
-            f"{message.splitlines()[0]}",
-        )
-        fully = await config_bool(vfs, location, b"core", b"quotepath", True)
-    except GitError as exc:
-        return fatal(exc)
+        return None, IOResult(exit_code=1, rows=report_of)
+    parents = [] if before is None else [repo.refs[HEAD_REF]]
+    who = identity(fl, ctx.session)
+    when = int(time.time())
+    written = await asyncio.to_thread(
+        build_commit, repo, state, message, who, parents, when
+    )
+    # The object is written and the ref is not, as git leaves it: the
+    # files backend refuses to lock a HEAD whose branch path leaves
+    # the ref tree, rather than let the commit land on .git/config.
+    if head.ref is not None and not safe_ref_name(head.ref):
+        raise BrokenHeadError(head.ref)
+    if head.ref is not None:
+        await write_ref(vfs, location.commondir, head.ref, written.id)
+    else:
+        await detach_head(vfs, location.gitdir, written.id)
+    if staging:
+        await write_index(vfs, location.gitdir, state)
+    await record(
+        vfs,
+        location.gitdir,
+        location.commondir,
+        head.ref,
+        parents[0] if parents else None,
+        written.id,
+        who,
+        when,
+        f"commit{ROOT_NOTE if before is None else ''}: "
+        f"{message.splitlines()[0]}",
+    )
+    fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     if fl.as_bool("quiet"):
         return None, IOResult()
 

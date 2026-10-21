@@ -25,7 +25,6 @@ import { GITLINK_MODE, HEAD } from './constants.ts'
 import {
   GitError,
   NoRestorePathsError,
-  NoWorkspaceError,
   UnknownPathspecError,
   UnmergedPathError,
   UnreadableTreeError,
@@ -55,7 +54,7 @@ import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
 import { checkRules, ruledUnder } from './seen.ts'
 import { treeEntries, type TreeEntry } from './tree.ts'
 import type { GitObject, IndexEntry, RepoLocation } from './types.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -152,45 +151,36 @@ export async function restore(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   let notes: string[] = []
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
-    }
-    checkSwitches(ctx, texts)
-    if (texts.length === 0) throw new NoRestorePathsError()
-    const flags = parseFlags(fl)
-    const repo = await opened(ctx, fl, true)
-    let source: Map<string, TreeEntry> | null
-    if (flags.source !== undefined) {
-      ;[, source] = await sourceTree(repo, flags.source)
-    } else if (flags.staged) {
-      // Before the first commit there is no HEAD to restore the index from, and
-      // reading that as an empty tree unstaged every selected path and reported
-      // success. git refuses the whole line instead, index untouched. The
-      // working tree restores from the index, so it is only the implicit HEAD
-      // source that has nothing to read: `--source` naming a tree still works
-      // in the same repository.
-      const found = await headEntries(repo)
-      if (found === null) throw new UnresolvableSourceError(HEAD)
-      source = found
-    } else {
-      source = null
-    }
-    ;[notes] = await restorePaths(
-      ctx,
-      repo,
-      texts,
-      startPoint(fl).virtual,
-      source,
-      flags.staged,
-      flags.worktree,
-      false,
-    )
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  checkSwitches(ctx, texts)
+  if (texts.length === 0) throw new NoRestorePathsError()
+  const flags = parseFlags(fl)
+  const repo = await opened(ctx, fl, true)
+  let source: Map<string, TreeEntry> | null
+  if (flags.source !== undefined) {
+    ;[, source] = await sourceTree(repo, flags.source)
+  } else if (flags.staged) {
+    // Before the first commit there is no HEAD to restore the index from, and
+    // reading that as an empty tree unstaged every selected path and reported
+    // success. git refuses the whole line instead, index untouched. The
+    // working tree restores from the index, so it is only the implicit HEAD
+    // source that has nothing to read: `--source` naming a tree still works
+    // in the same repository.
+    const found = await headEntries(repo)
+    if (found === null) throw new UnresolvableSourceError(HEAD)
+    source = found
+  } else {
+    source = null
   }
+  ;[notes] = await restorePaths(
+    ctx,
+    repo,
+    texts,
+    startPoint(fl).virtual,
+    source,
+    flags.staged,
+    flags.worktree,
+    false,
+  )
   const told = notes.join('')
   return [null, told === '' ? new IOResult() : new IOResult({ stderr: ENC.encode(told) })]
 }
@@ -291,8 +281,7 @@ export async function restorePaths(
   worktree: boolean,
   overlay: boolean,
 ): Promise<[string[], number]> {
-  const vfs = ctx.vfs
-  if (vfs === undefined) throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
   const notes: string[] = []
   let updated = 0
   const state = await readIndex(repo, vfs)

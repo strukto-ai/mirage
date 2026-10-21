@@ -168,18 +168,6 @@ export class BadDateError extends GitError {
 }
 
 /**
- * The CLI ran with no workspace behind it, so no file is reachable.
- *
- * Only possible when a leaf is called directly in a unit test: inside a
- * workspace the dispatcher always offers the facts a leaf declares.
- */
-export class NoWorkspaceError extends GitError {
-  constructor() {
-    super('this operation must be run in a work tree')
-  }
-}
-
-/**
  * A verb that reads or writes files, run with no work tree to enter.
  *
  * git refuses a bare repository and a work tree that is not a directory in the

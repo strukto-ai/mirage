@@ -157,6 +157,36 @@
    ]
   },
   {
+   "id": "a_mount_rule_holds_where_a_line_walks_into_its_mount",
+   "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}, "/a/b/c": {"vfs": "ram", "config": {}}, "/t": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"mounts": {"/a/b/c": {"commands": {"deny": [{"reason": "boxed", "commands": ["grep", "ls", "cp", "chmod", "mv", "du"]}]}}}}},
+    {"op": "exec", "command": "mkdir -p /a/b && echo x > /a/b/f && echo x > /a/b/c/secret", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "grep -r x /a/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "grep --recur x /a/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "grep -d recurse x /a/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "grep --dereference-recursive x /a/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "ls --recur /a/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "ls: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "grep -erx /a/b/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cp -r /a/b /t/cp; find /t/cp", "expect": {"value": {"exit_code": 0, "stdout": "/t/cp\n/t/cp/c\n/t/cp/f\n", "stderr": "cp: cannot access '/a/b/c': Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "chmod -R 700 /a/b; stat -c %a /a/b/c/secret", "expect": {"value": {"exit_code": 0, "stdout": "644\n", "stderr": "chmod: /a/b/c: Permission denied\nchmod: cannot read directory '/a/b/c': Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "mv /a/b /t/mv", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mv: Permission denied\n", "refusal": "boxed"}}},
+    {"op": "exec", "session": "agent", "command": "du -x -a /a/b", "expect": {"value": {"exit_code": 0, "stdout": "2\t/a/b/f\n2\t/a/b\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo m > /t/m && mv /t/m /a/b && cat /a/b/m", "expect": {"value": {"exit_code": 0, "stdout": "m\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
+   "id": "a_command_rule_reaches_the_entries_chmod_r_walks_into",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "commands": {"chmod": ["/data/b/secret"], "chown": ["/data/b/secret"]}}]}}},
+    {"op": "exec", "command": "mkdir -p /data/b && echo x > /data/b/f && echo s > /data/b/secret", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "chmod -R 700 /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "chmod: /data/b/secret: Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "chown -R 5 /data/b", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "chown: /data/b/secret: Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "stat -c '%a %u' /data/b/secret /data/b/f", "expect": {"value": {"exit_code": 0, "stdout": "644 -\n700 5\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
    "id": "every_vfs_call_meets_the_path_rule",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

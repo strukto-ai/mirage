@@ -541,9 +541,10 @@ export function runWithAdmission<T>(gate: EntryGate, fn: () => Promise<T>): Prom
  * refusal: an entry must pass every live gate's `check`, its `refusal` is
  * the first live gate's that refuses it, and a rule counts
  * as granted only when every live gate carries it (a once-grant nodded
- * for one line must not authorize another's dispatcher). `scoped` and
- * `scopes` are true when any live gate scopes, keeping walks off the
- * unfiltered native fast paths.
+ * for one line must not authorize another's dispatcher), and a path as
+ * judged only when every live gate names it. `scoped` and `scopes` are
+ * true when any live gate scopes, keeping walks off the unfiltered native
+ * fast paths.
  */
 export function getAdmission(): EntryGate | null {
   const gates = liveCallers().flatMap((caller) => (caller.gate === null ? [] : [caller.gate]))
@@ -553,6 +554,7 @@ export function getAdmission(): EntryGate | null {
   return {
     scoped: gates.some((gate) => gate.scoped),
     granted: first.granted.filter((rule) => gates.every((gate) => gate.granted.includes(rule))),
+    judged: new Set([...first.judged].filter((p) => gates.every((gate) => gate.judged.has(p)))),
     check(virtual: string): void {
       for (const gate of gates) gate.check(virtual)
     },

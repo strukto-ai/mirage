@@ -728,6 +728,31 @@ class _Call:
         return mount.renders(filetype)
 
 
+def _names(call: _Call) -> bool:
+    """Whether a lookup is of a path the running command's line names.
+
+    Under ``read: fresh`` such a path is checked against the backend the
+    first time the command looks it up (``Reconciler.reconcile_read``),
+    whatever it asks first (``ls`` lists its operand before it stats it):
+    a metadata command reads no bytes, so the cache gate never checks its
+    operand, and a copy the backend replaced would stay cached. The answer
+    is kept for the command, so its later lookups and the cache gate reuse
+    it. The entries a walk reaches are left to their listings.
+
+    Args:
+        call (_Call): the admitted op.
+    """
+    # A lookup meets no rule (``METADATA_OPS``), so the command's gate
+    # rides on its caller rather than on the call.
+    gate = call.caller.rule_gate
+    return (
+        call.name in ("stat", "readdir", "exists")
+        and not call.fresh
+        and gate is not None
+        and (call.path.virtual.rstrip("/") or "/") in gate.judged
+    )
+
+
 def _probed(call: _Call, mount: MountEntry) -> FileStat | None:
     """What the freshness probe of the running command got from the
     backend for a stat's path, None when it asked nothing.
@@ -2105,6 +2130,10 @@ class Dispatcher:
                     kwargs["files"] = await self._visible_files(mount, call)
                 if call.fresh:
                     kwargs["index"] = ListingCheckStore(hints=mount.index)
+                if _names(call):
+                    await self._reconciler.reconcile_read(
+                        mount, call.path.virtual
+                    )
                 probed = _probed(call, mount)
                 result = (
                     probed

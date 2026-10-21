@@ -135,6 +135,7 @@ async function guardedRepo(ws: Workspace): Promise<Repo> {
 class OnePlaceGate implements EntryGate {
   readonly scoped = true
   readonly granted: readonly CommandRule[] = []
+  readonly judged: ReadonlySet<string> = new Set()
 
   constructor(private readonly refused: string) {}
 

@@ -358,6 +358,28 @@ function parseFlags(bag: Record<string, FlagValue>): SedFlags {
   }
 }
 
+/**
+ * Whether a sed line may change files: under `-i`, with a script file (its
+ * text is read only when sed runs), or when its script names a `w` file,
+ * which GNU opens even when it then refuses the script. `bag` holds the
+ * flags as the line's parse reads them; the first of `texts` is the script
+ * when no `-e` or `-f` gave one. Mirrors Python's sed_writes.
+ */
+export function sedWrites(bag: Record<string, FlagValue>, texts: readonly string[]): boolean {
+  const fl = new FlagView(bag, specOf('sed'))
+  if (fl.asBool('i') || fl.raw('f') !== undefined) return true
+  const expressions = fl.asList('e')
+  const scripts = expressions.length > 0 ? expressions : texts.slice(0, 1)
+  if (scripts.length === 0) return false
+  const pieces = scripts.map((text): SedScriptPiece => ({ kind: 'expr', text }))
+  try {
+    return compileScript(pieces, fl.asBool('E') || fl.asBool('r')).wfiles.length > 0
+  } catch (err) {
+    if (err instanceof SedError) return err.wfiles.length > 0
+    throw err
+  }
+}
+
 export async function sedGeneric(
   paths: PathSpec[],
   texts: string[],

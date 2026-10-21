@@ -21,11 +21,9 @@ import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
-  GitError,
   MoveOverlapError,
   MoveRefusedError,
   NotADirectoryDestinationError,
-  NoWorkspaceError,
   RenameFailedError,
   UsageError,
 } from './errors.ts'
@@ -36,7 +34,7 @@ import { entryName } from '../../../../utils/remnants.ts'
 import { opened } from './session.ts'
 import type { IndexEntry, RepoLocation } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, fatal, startPoint, verbUsage } from './util.ts'
+import { checkSwitches, startPoint, verbUsage, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -359,55 +357,47 @@ export async function mv(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const lines: string[] = []
-  try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const flags = parseFlags(fl)
+  if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
+  const repo = await opened(ctx, fl, true)
+  const state = await readIndex(repo, vfs)
+  const conflicted = new Set(state.conflicts.keys())
+  // An unmerged path holds no ordinary entry, so a tracked set built from the
+  // entries alone would call it untracked and let a directory holding one
+  // move with its stages left behind.
+  const tracked = new Set([...state.entries.keys(), ...conflicted])
+  const moves = await plan(
+    vfs,
+    repo.location,
+    startPoint(fl).virtual,
+    texts,
+    tracked,
+    conflicted,
+    flags,
+  )
+  if (flags.dryRun) {
+    for (const move of moves) {
+      lines.push(`Checking rename of '${move.source}' to '${move.destination}'`)
     }
-    checkSwitches(ctx, texts)
-    const flags = parseFlags(fl)
-    if (texts.length < 2) throw new UsageError('', verbUsage(ctx))
-    const repo = await opened(ctx, fl, true)
-    const state = await readIndex(repo, vfs)
-    const conflicted = new Set(state.conflicts.keys())
-    // An unmerged path holds no ordinary entry, so a tracked set built from the
-    // entries alone would call it untracked and let a directory holding one
-    // move with its stages left behind.
-    const tracked = new Set([...state.entries.keys(), ...conflicted])
-    const moves = await plan(
-      vfs,
-      repo.location,
-      startPoint(fl).virtual,
-      texts,
-      tracked,
-      conflicted,
-      flags,
-    )
-    if (flags.dryRun) {
-      for (const move of moves) {
-        lines.push(`Checking rename of '${move.source}' to '${move.destination}'`)
+  }
+  if (flags.verbose) {
+    for (const move of moves) lines.push(`Renaming ${move.source} to ${move.destination}`)
+  }
+  if (!flags.dryRun) {
+    const staged = new Map<string, StagedEntry>()
+    const removed: string[] = []
+    for (const move of moves) {
+      await apply(vfs, repo.location, move, flags.force)
+      for (const path of move.paths) {
+        const entry: IndexEntry | undefined = state.entries.get(path)
+        if (entry === undefined) continue
+        removed.push(path)
+        staged.set(movedPath(move, path), { oid: entry.oid, mode: entry.mode, size: entry.size })
       }
     }
-    if (flags.verbose) {
-      for (const move of moves) lines.push(`Renaming ${move.source} to ${move.destination}`)
-    }
-    if (!flags.dryRun) {
-      const staged = new Map<string, StagedEntry>()
-      const removed: string[] = []
-      for (const move of moves) {
-        await apply(vfs, repo.location, move, flags.force)
-        for (const path of move.paths) {
-          const entry: IndexEntry | undefined = state.entries.get(path)
-          if (entry === undefined) continue
-          removed.push(path)
-          staged.set(movedPath(move, path), { oid: entry.oid, mode: entry.mode, size: entry.size })
-        }
-      }
-      await updateIndex(repo, staged, removed)
-    }
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+    await updateIndex(repo, staged, removed)
   }
   if (lines.length === 0) return [null, new IOResult()]
   return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]

@@ -260,7 +260,5 @@ async def fsck(
             )
             io.stderr = notice.encode() + await io.materialize_stderr()
         return out, io
-    except GitError as exc:
-        return fatal(exc)
     except ChecksumMismatch as exc:
         return fatal(GitError(str(exc)))

@@ -35,7 +35,6 @@ from mirage.commands.cli.builtin.git.errors import (
     GitError,
     InvalidOptionError,
     NoMergeBaseError,
-    NoWorkspaceError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.index_file import (
@@ -59,8 +58,8 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import tree_entries
 from mirage.commands.cli.builtin.git.util import (
     STDERR,
-    fatal,
     option_operand,
+    require_vfs,
     split_marked,
     start_point,
     verb_usage,
@@ -196,60 +195,51 @@ async def diff(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     fl = FlagView(ctx.flags)
     cached = fl.as_bool("cached") or fl.as_bool("staged")
     revisions, pathspecs = split_marked(tuple(texts), ctx.argv)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        word = option_operand(ctx, texts, STDERR)
-        if word is not None and (
-            cached or any(not text.startswith("-") for text in revisions)
-        ):
-            raise UsageError("", verb_usage(ctx))
-        if word is not None:
-            raise InvalidOptionError(word, verb_usage(ctx))
-        repo, location = await opened(ctx, fl)
-        parsed = parse_diff_flags(
-            fl,
-            default_renames=await renames_enabled(vfs, location),
-            quote_path_fully=await config_bool(
-                vfs, location, b"core", b"quotepath", True
-            ),
-        )
-        warning = b""
-        if cached:
+    word = option_operand(ctx, texts, STDERR)
+    if word is not None and (
+        cached or any(not text.startswith("-") for text in revisions)
+    ):
+        raise UsageError("", verb_usage(ctx))
+    if word is not None:
+        raise InvalidOptionError(word, verb_usage(ctx))
+    repo, location = await opened(ctx, fl)
+    parsed = parse_diff_flags(
+        fl,
+        default_renames=await renames_enabled(vfs, location),
+        quote_path_fully=await config_bool(
+            vfs, location, b"core", b"quotepath", True
+        ),
+    )
+    warning = b""
+    if cached:
+        state = await read_index(vfs, location.gitdir)
+        refuse_unresolved(state)
+        before = await asyncio.to_thread(_base, repo, revisions)
+        after = shown_entries(repo, staged_entries(state))
+    else:
+        old, new, warning = await asyncio.to_thread(_sides, repo, revisions)
+        if new is None:
             state = await read_index(vfs, location.gitdir)
-            refuse_unresolved(state)
-            before = await asyncio.to_thread(_base, repo, revisions)
-            after = shown_entries(repo, staged_entries(state))
-        else:
-            old, new, warning = await asyncio.to_thread(
-                _sides, repo, revisions
+            after = await work_entries(vfs, repo, location, state)
+            if old is None:
+                for path in state.conflicts:
+                    after.pop(path, None)
+            before = (
+                shown_entries(repo, staged_entries(state))
+                if old is None
+                else old
             )
-            if new is None:
-                state = await read_index(vfs, location.gitdir)
-                after = await work_entries(vfs, repo, location, state)
-                if old is None:
-                    for path in state.conflicts:
-                        after.pop(path, None)
-                before = (
-                    shown_entries(repo, staged_entries(state))
-                    if old is None
-                    else old
-                )
-            else:
-                before, after = old or {}, new
-        patterns = pathspec_patterns(
-            location, start_point(fl).virtual, pathspecs
-        )
-        parsed = replace(parsed, pathspecs=patterns)
-        rows = deltas(
-            location, [(limited(before, patterns), limited(after, patterns))]
-        )
-    except GitError as exc:
-        return fatal(exc)
+        else:
+            before, after = old or {}, new
+    patterns = pathspec_patterns(location, start_point(fl).virtual, pathspecs)
+    parsed = replace(parsed, pathspecs=patterns)
+    rows = deltas(
+        location, [(limited(before, patterns), limited(after, patterns))]
+    )
 
     async def render(shown: list[Delta]) -> ByteSource | None:
         [(old_side, new_side)] = shown_sides(shown, 1)

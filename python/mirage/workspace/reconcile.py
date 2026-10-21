@@ -62,18 +62,19 @@ class Reconciler:
     One deletion signal feeds both consumers with separate reactions: the
     file cache evicts and the namespace GCs any orphaned attribute overlay.
 
-    Three read paths call in: the dispatcher's cached-read gate
-    (``may_serve_cached``), its main-op catch (``on_enoent``), and the
-    mount registry's per-command reconcile (``reconcile_read``) for the
-    operands of a single-mount shell command. Reconcile state follows each
-    consumer's store (RAM local, Redis shared across runtimes), so this is
-    a thin coordinator holding references, not config.
+    Three read paths call in, all at the dispatcher: its cached-read gate
+    (``may_serve_cached``), its main-op catch (``on_enoent``), and its
+    first lookup of a path the running command's line names
+    (``reconcile_read``). Reconcile state follows each consumer's store
+    (RAM local, Redis shared across runtimes), so this is a thin
+    coordinator holding references, not config.
 
     The gate and ``reconcile_read`` both run for a warm named operand, once
-    at routing and again at the gate, and they share one scope: the
-    command. The first probe's backend answer is kept on the mount's
-    ``CacheManager`` for the rest of the command, so the gate, and the
-    command's own stat of the operand, reuse it instead of asking again. A
+    at the command's first lookup of it and again at the gate, and they
+    share one scope: the command. The first probe's backend answer is kept
+    on the mount's ``CacheManager`` for the rest of the command, so the
+    gate, and the command's own stat of the operand, reuse it instead of
+    asking again. A
     write in the command, the clear after an external program, or a re-list
     that finds the path gone retires it, and a read outside any command (FUSE,
     the dispatcher) never sees it.
@@ -317,27 +318,24 @@ class Reconciler:
         return remote.fingerprint if isinstance(remote, FileStat) else None
 
     async def reconcile_read(self, mount: MountEntry, path: str) -> None:
-        """Reconcile a single-mount shell read before the command runs.
+        """Reconcile a path a command names before it answers the
+        command's first lookup of it.
 
-        ``cat``/``ls``/``stat`` on one mount resolve here (not through the
-        dispatcher), so this is where their reads reconcile against backend
-        truth. Only paths that carry an overlay or a cached copy are probed
-        (a plain read pays nothing); a remote delete then evicts the cache
-        AND GCs the orphaned overlay, and a stale entry is dropped.
+        The dispatcher calls this under ``read: fresh`` for a stat, listing
+        or exists check of one of the line's own paths: a metadata command
+        (``ls``, ``stat``) reads no bytes, so the cache gate never checks
+        its operand. Only paths that carry an overlay or a cached copy are
+        probed (a plain lookup pays nothing); a remote delete then evicts
+        the cache AND GCs the orphaned overlay, and a stale entry is
+        dropped.
 
-        **Nothing escapes.** This runs during routing, before any handler
-        exists, so an exception here does not fail one command -- it takes
-        the whole line, later pipeline stages and `;` chains included, and
-        reports itself with no operand to name. ``_probe_or_unknown`` still
-        re-raises a programming error for the gate's benefit, which is
-        correct there because the gate runs inside a handler; here that same
-        raise is only a way to lose output. So the probe is best-effort: drop
-        what could not be verified, log it, and let the command read the
-        backend itself.
+        **Nothing escapes.** A lookup that cannot be verified must still be
+        answered, so the probe is best-effort: drop what could not be
+        verified, log it, and let the lookup ask the backend itself.
 
         Args:
             mount (MountEntry): the resolved mount for ``path``.
-            path (str): absolute virtual path the command will read.
+            path (str): absolute virtual path the command looks up.
         """
         if mount.read.policy is not ReadPolicy.FRESH:
             return

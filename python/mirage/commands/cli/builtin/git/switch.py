@@ -33,7 +33,6 @@ from mirage.commands.cli.builtin.git.errors import (
     InvalidBranchNameError,
     InvalidReferenceError,
     MissingBranchArgumentError,
-    NoWorkspaceError,
     OneReferenceError,
     RefLockError,
     RefReadOnlyError,
@@ -61,7 +60,7 @@ from mirage.commands.cli.builtin.git.session import index_locked, opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -131,141 +130,136 @@ async def switch_branch(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     fl = FlagView(ctx.flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        flags = parse_flags(fl)
-        creating = flags.create is not None
-        if creating and flags.detach:
-            raise DetachWithCreateError()
-        if len(texts) > 1:
-            raise OneReferenceError()
-        # A detach takes HEAD when nothing is named, which is git's
-        # own default; only an attaching switch needs a branch to name.
-        if not creating and not texts and not flags.detach:
-            raise MissingBranchArgumentError()
-        repo, location = await opened(ctx, fl, work_tree=True)
-        mode = await track_mode(repo)
-        head = await read_head(vfs, location.gitdir)
-        known = repo.refs.allkeys()
-        if flags.create is not None:
-            target = flags.create
-            ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
-            start = texts[0] if texts else None
-            # Before the first commit there is nothing for HEAD to
-            # resolve to, and git makes the branch anyway: the line
-            # only repoints symbolic HEAD, writing neither the ref nor
-            # a reflog line, because a branch with no commit is a name
-            # and nothing else. A start point is a different line and
-            # stays unresolvable (``fatal: invalid reference: main``),
-            # so this reads the shape of the line rather than probing
-            # HEAD. Pinned against git 2.50.1.
-            unborn = (
-                start is None
-                and head.ref is not None
-                and Ref(head.ref.encode()) not in known
-            )
-            if start is not None:
-                try:
-                    commit = resolve_commit(repo, start)
-                except GitError as exc:
-                    raise InvalidReferenceError(start) from exc
-                await refuse_ambiguous(repo, start, False)
-            # After a start point that was named and before HEAD is
-            # read or anything is written, which is git's own order, and
-            # before it asks whether the branch exists, so a
-            # refs/heads/HEAD already there is still refused as a name.
-            # A ref is a path below .git, so an unchecked name reaches
-            # write_ref as one: -c ../../config would land on the
-            # repository's own configuration rather than on a branch.
-            if not valid_branch_name(target):
-                raise InvalidBranchNameError(target)
-            if ref in known:
-                raise BranchExistsError(target)
-            if start is None and not unborn:
-                try:
-                    commit = resolve_commit(repo, HEAD)
-                except GitError as exc:
-                    raise InvalidReferenceError(HEAD) from exc
-            # And before the working tree moves: git takes the ref lock
-            # first, so a name whose path another ref holds refuses with
-            # nothing checked out.
-            held = blocking_ref(known, ref.decode())
-            if held is not None:
-                raise RefLockError(ref.decode(), held)
-            attached = True
-            if unborn:
-                await set_head(vfs, location.gitdir, ref.decode())
-                return yield_bytes(b""), IOResult(
-                    stderr=b""
-                    if fl.as_bool("quiet")
-                    else f"Switched to a new branch '{target}'\n".encode()
-                )
-        else:
-            start = None
-            target = texts[0] if texts else HEAD
-            ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
-            # The ref has to exist, not just be the name HEAD carries.
-            # A fresh repository's HEAD names a branch that has never
-            # been written, and reading the name alone answered
-            # ``Already on 'main'`` at exit 0 for a branch with no
-            # commit to be on. git resolves it first and dies, which is
-            # what leaves ``switch -c`` as the only line an unborn HEAD
-            # accepts. Pinned against git 2.50.1.
-            if not flags.detach and target == head.branch and ref in known:
-                note_ambiguity(repo, target)
-                # Moving nothing is not the same as having nothing to
-                # check: git dies on an unresolved index here too, so
-                # the shortcut reads it before it answers. Every ref
-                # check above comes first, which is git's own order.
-                refuse_unresolved(await read_index(vfs, location.gitdir))
-                return None, IOResult(
-                    stderr=b""
-                    if fl.as_bool("quiet")
-                    else f"Already on '{target}'\n".encode()
-                )
-            # git's --guess, on by default: no such branch here but one
-            # remote has it, so the switch creates it tracking that one.
-            start = (
-                None
-                if flags.detach or ref in known
-                else remote_branch(repo, target)
-            )
-            creating = start is not None
-            # A branch of that name wins over every other reading, as
-            # git's switch reads it, though the name is still reported
-            # as ambiguous.
-            local = not flags.detach and start is None and ref in known
-            if local:
-                note_ambiguity(repo, target)
-            try:
-                commit = resolve_commit(
-                    repo, ref.decode() if local else (start or target)
-                )
-            except GitError as exc:
-                raise InvalidReferenceError(target) from exc
-            attached = creating or (not flags.detach and ref in known)
-            if not flags.detach and not attached:
-                raise BranchExpectedError(expected_kind(known, target), target)
-        return await move_head(
-            vfs,
-            repo,
-            location,
-            head,
-            commit,
-            target,
-            ref if attached else None,
-            creating,
-            start,
-            mode,
-            False,
-            fl.as_bool("quiet"),
+    check_switches(ctx, texts)
+    flags = parse_flags(fl)
+    creating = flags.create is not None
+    if creating and flags.detach:
+        raise DetachWithCreateError()
+    if len(texts) > 1:
+        raise OneReferenceError()
+    # A detach takes HEAD when nothing is named, which is git's
+    # own default; only an attaching switch needs a branch to name.
+    if not creating and not texts and not flags.detach:
+        raise MissingBranchArgumentError()
+    repo, location = await opened(ctx, fl, work_tree=True)
+    mode = await track_mode(repo)
+    head = await read_head(vfs, location.gitdir)
+    known = repo.refs.allkeys()
+    if flags.create is not None:
+        target = flags.create
+        ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
+        start = texts[0] if texts else None
+        # Before the first commit there is nothing for HEAD to
+        # resolve to, and git makes the branch anyway: the line
+        # only repoints symbolic HEAD, writing neither the ref nor
+        # a reflog line, because a branch with no commit is a name
+        # and nothing else. A start point is a different line and
+        # stays unresolvable (``fatal: invalid reference: main``),
+        # so this reads the shape of the line rather than probing
+        # HEAD. Pinned against git 2.50.1.
+        unborn = (
+            start is None
+            and head.ref is not None
+            and Ref(head.ref.encode()) not in known
         )
-    except GitError as exc:
-        return fatal(exc)
+        if start is not None:
+            try:
+                commit = resolve_commit(repo, start)
+            except GitError as exc:
+                raise InvalidReferenceError(start) from exc
+            await refuse_ambiguous(repo, start, False)
+        # After a start point that was named and before HEAD is
+        # read or anything is written, which is git's own order, and
+        # before it asks whether the branch exists, so a
+        # refs/heads/HEAD already there is still refused as a name.
+        # A ref is a path below .git, so an unchecked name reaches
+        # write_ref as one: -c ../../config would land on the
+        # repository's own configuration rather than on a branch.
+        if not valid_branch_name(target):
+            raise InvalidBranchNameError(target)
+        if ref in known:
+            raise BranchExistsError(target)
+        if start is None and not unborn:
+            try:
+                commit = resolve_commit(repo, HEAD)
+            except GitError as exc:
+                raise InvalidReferenceError(HEAD) from exc
+        # And before the working tree moves: git takes the ref lock
+        # first, so a name whose path another ref holds refuses with
+        # nothing checked out.
+        held = blocking_ref(known, ref.decode())
+        if held is not None:
+            raise RefLockError(ref.decode(), held)
+        attached = True
+        if unborn:
+            await set_head(vfs, location.gitdir, ref.decode())
+            return yield_bytes(b""), IOResult(
+                stderr=b""
+                if fl.as_bool("quiet")
+                else f"Switched to a new branch '{target}'\n".encode()
+            )
+    else:
+        start = None
+        target = texts[0] if texts else HEAD
+        ref = Ref(f"{BRANCH_PREFIX}{target}".encode())
+        # The ref has to exist, not just be the name HEAD carries.
+        # A fresh repository's HEAD names a branch that has never
+        # been written, and reading the name alone answered
+        # ``Already on 'main'`` at exit 0 for a branch with no
+        # commit to be on. git resolves it first and dies, which is
+        # what leaves ``switch -c`` as the only line an unborn HEAD
+        # accepts. Pinned against git 2.50.1.
+        if not flags.detach and target == head.branch and ref in known:
+            note_ambiguity(repo, target)
+            # Moving nothing is not the same as having nothing to
+            # check: git dies on an unresolved index here too, so
+            # the shortcut reads it before it answers. Every ref
+            # check above comes first, which is git's own order.
+            refuse_unresolved(await read_index(vfs, location.gitdir))
+            return None, IOResult(
+                stderr=b""
+                if fl.as_bool("quiet")
+                else f"Already on '{target}'\n".encode()
+            )
+        # git's --guess, on by default: no such branch here but one
+        # remote has it, so the switch creates it tracking that one.
+        start = (
+            None
+            if flags.detach or ref in known
+            else remote_branch(repo, target)
+        )
+        creating = start is not None
+        # A branch of that name wins over every other reading, as
+        # git's switch reads it, though the name is still reported
+        # as ambiguous.
+        local = not flags.detach and start is None and ref in known
+        if local:
+            note_ambiguity(repo, target)
+        try:
+            commit = resolve_commit(
+                repo, ref.decode() if local else (start or target)
+            )
+        except GitError as exc:
+            raise InvalidReferenceError(target) from exc
+        attached = creating or (not flags.detach and ref in known)
+        if not flags.detach and not attached:
+            raise BranchExpectedError(expected_kind(known, target), target)
+    return await move_head(
+        vfs,
+        repo,
+        location,
+        head,
+        commit,
+        target,
+        ref if attached else None,
+        creating,
+        start,
+        mode,
+        False,
+        fl.as_bool("quiet"),
+    )
 
 
 def switch_read_only(

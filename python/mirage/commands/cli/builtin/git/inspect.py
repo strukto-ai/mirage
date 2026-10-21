@@ -16,7 +16,6 @@ from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     GitError,
     NotAWorkTreeError,
-    NoWorkspaceError,
     SingleRevisionError,
     UnknownSubcommandError,
     UsageError,
@@ -62,6 +61,7 @@ from mirage.commands.cli.builtin.git.util import (
     multivar,
     offending,
     option_operand,
+    require_vfs,
     start_point,
     verb_usage,
 )
@@ -121,28 +121,25 @@ async def remote(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    try:
-        if texts and texts[0] == "get-url":
-            return await remote_get_url(texts, ctx)
-        check_operands(ctx, texts)
-        if texts:
-            raise UnknownSubcommandError(texts[0], verb_usage(ctx))
-        cfg = await repo_config(ctx, fl)
-        lines = []
-        for section in sorted(cfg.sections()):
-            if len(section) != 2 or section[0] != b"remote":
-                continue
-            name = section[1].decode()
-            if not fl.as_bool("verbose"):
-                lines.append(name)
-                continue
-            urls, push = remote_urls(cfg, name)
-            if urls:
-                lines.append(f"{name}\t{urls[0]} (fetch)")
-            lines.extend(f"{name}\t{url} (push)" for url in push)
-        return ("".join(f"{line}\n" for line in lines).encode(), IOResult())
-    except GitError as exc:
-        return fatal(exc)
+    if texts and texts[0] == "get-url":
+        return await remote_get_url(texts, ctx)
+    check_operands(ctx, texts)
+    if texts:
+        raise UnknownSubcommandError(texts[0], verb_usage(ctx))
+    cfg = await repo_config(ctx, fl)
+    lines = []
+    for section in sorted(cfg.sections()):
+        if len(section) != 2 or section[0] != b"remote":
+            continue
+        name = section[1].decode()
+        if not fl.as_bool("verbose"):
+            lines.append(name)
+            continue
+        urls, push = remote_urls(cfg, name)
+        if urls:
+            lines.append(f"{name}\t{urls[0]} (fetch)")
+        lines.extend(f"{name}\t{url} (push)" for url in push)
+    return ("".join(f"{line}\n" for line in lines).encode(), IOResult())
 
 
 def _rewrite_url(url: str, rules: list[tuple[str, str]]) -> str:
@@ -207,45 +204,38 @@ async def remote_get_url(
         texts (list[str]): the remote operands, ``get-url`` first.
         ctx (Context): the line's context, with its verbatim remainder.
     """
-    try:
-        parsed = parse_command(
-            GET_URL,
-            list(texts[1:]),
-            ctx.cwd.virtual,
-            abbreviations=GIT_LONG_OPTIONS["remote get-url"],
+    parsed = parse_command(
+        GET_URL,
+        list(texts[1:]),
+        ctx.cwd.virtual,
+        abbreviations=GIT_LONG_OPTIONS["remote get-url"],
+    )
+    if parsed.option_error_kinds:
+        stderr, code, stdout = leaf_refusal(
+            UsageStyle.GIT, b"", parsed, "remote get-url", GET_URL
         )
-        if parsed.option_error_kinds:
-            stderr, code, stdout = leaf_refusal(
-                UsageStyle.GIT, b"", parsed, "remote get-url", GET_URL
-            )
-            return stdout, IOResult(exit_code=code, stderr=stderr)
-        names = tuple(word for word, _ in parsed.args)
-        bad = offending(names, escaped(ctx.argv), frozenset())
-        if bad is not None:
-            raise UsageError(
-                *git_option_refusal(bad, "remote get-url", GET_URL)
-            )
-        if len(names) != 1:
-            raise UsageError("", git_usage("remote get-url", GET_URL))
-        fl = FlagView(parse_to_kwargs(parsed), GET_URL)
-        cfg = await repo_config(ctx, FlagView(ctx.flags))
-        name = names[0]
-        urls, push = remote_urls(cfg, name)
-        if not urls:
-            return None, IOResult(
-                exit_code=2,
-                stderr=f"error: No such remote '{name}'\n".encode(),
-            )
-        selected = (
-            push
-            if fl.typed_order("push", "no_push")[-1:] == ["push"]
-            else urls
+        return stdout, IOResult(exit_code=code, stderr=stderr)
+    names = tuple(word for word, _ in parsed.args)
+    bad = offending(names, escaped(ctx.argv), frozenset())
+    if bad is not None:
+        raise UsageError(*git_option_refusal(bad, "remote get-url", GET_URL))
+    if len(names) != 1:
+        raise UsageError("", git_usage("remote get-url", GET_URL))
+    fl = FlagView(parse_to_kwargs(parsed), GET_URL)
+    cfg = await repo_config(ctx, FlagView(ctx.flags))
+    name = names[0]
+    urls, push = remote_urls(cfg, name)
+    if not urls:
+        return None, IOResult(
+            exit_code=2,
+            stderr=f"error: No such remote '{name}'\n".encode(),
         )
-        if fl.typed_order("all", "no_all")[-1:] != ["all"]:
-            selected = selected[:1]
-        return "".join(f"{url}\n" for url in selected).encode(), IOResult()
-    except GitError as exc:
-        return fatal(exc)
+    selected = (
+        push if fl.typed_order("push", "no_push")[-1:] == ["push"] else urls
+    )
+    if fl.typed_order("all", "no_all")[-1:] != ["all"]:
+        selected = selected[:1]
+    return "".join(f"{url}\n" for url in selected).encode(), IOResult()
 
 
 async def global_sources(
@@ -262,9 +252,7 @@ async def global_sources(
         ctx (Context): the line's context, for its env and files.
         listing (bool): ``--list`` was given.
     """
-    vfs = ctx.vfs
-    if vfs is None:
-        raise NoWorkspaceError()
+    vfs = require_vfs(ctx)
     env = ctx.env or {}
     home = env.get("HOME", "")
     override = env.get("GIT_CONFIG_GLOBAL")
@@ -307,29 +295,24 @@ async def merge_base(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    try:
-        check_switches(ctx, texts)
-        repo, _ = await opened(ctx, fl)
-        ancestor = fl.as_bool("is_ancestor")
-        all_bases = fl.as_bool("all")
-        if ancestor and all_bases:
-            raise GitError(
-                "options '--is-ancestor' and '--all' cannot be used together"
-            )
-        if ancestor and len(texts) != 2:
-            raise GitError("--is-ancestor takes exactly two commits")
-        if len(texts) < 2:
-            raise UsageError("", verb_usage(ctx))
-        one, bases = await asyncio.to_thread(
-            _merge_base_ids, repo, tuple(texts)
+    check_switches(ctx, texts)
+    repo, _ = await opened(ctx, fl)
+    ancestor = fl.as_bool("is_ancestor")
+    all_bases = fl.as_bool("all")
+    if ancestor and all_bases:
+        raise GitError(
+            "options '--is-ancestor' and '--all' cannot be used together"
         )
-        if ancestor:
-            return None, IOResult(exit_code=0 if one in bases else 1)
-        return b"".join(
-            oid + b"\n" for oid in (bases if all_bases else bases[:1])
-        ), IOResult(exit_code=0 if bases else 1)
-    except GitError as exc:
-        return fatal(exc)
+    if ancestor and len(texts) != 2:
+        raise GitError("--is-ancestor takes exactly two commits")
+    if len(texts) < 2:
+        raise UsageError("", verb_usage(ctx))
+    one, bases = await asyncio.to_thread(_merge_base_ids, repo, tuple(texts))
+    if ancestor:
+        return None, IOResult(exit_code=0 if one in bases else 1)
+    return b"".join(
+        oid + b"\n" for oid in (bases if all_bases else bases[:1])
+    ), IOResult(exit_code=0 if bases else 1)
 
 
 async def config(
@@ -346,72 +329,64 @@ async def config(
                 b"writes are not supported\n"
             ),
         )
-    try:
-        if fl.as_bool("global"):
-            sources = await global_sources(ctx, fl.as_bool("list"))
-        else:
-            _, location = await opened(ctx, fl)
-            assert ctx.vfs is not None
-            path = location.commondir.join("config")
-            data = await read_file(ctx.vfs, path)
-            source = path.raw_path
-            ordinary = (
-                location.commondir.virtual
-                == location.worktree.virtual + "/.git"
-            )
-            if (
-                ordinary
-                and start_point(fl).virtual == location.worktree.virtual
-            ):
-                source = ".git/config"
-            sources = [(source, ConfigFile.from_file(BytesIO(data)))]
-        listing = fl.as_bool("list")
-        regexp = fl.as_bool("get_regexp")
-        origin = fl.as_bool("show_origin")
-        if not listing and not texts:
-            return None, IOResult(
-                exit_code=129, stderr=b"error: wrong number of arguments\n"
-            )
-        key = texts[0] if texts else ""
-        # git matches keys by the locale: bytes in C, characters in UTF-8.
-        utf8 = utf8_locale(ctx.env)
-        try:
-            pattern = (
-                posix_regex(byte_view(config_key(key), utf8), True, utf8=utf8)
-                if regexp
-                else None
-            )
-        except RegexError:
-            return None, IOResult(
-                exit_code=6,
-                stderr=f"error: invalid key pattern: {key}\n".encode(),
-            )
-        values = []
-        for source, cfg in sources:
-            for section in cfg.sections():
-                for name, value in cfg.items(section):
-                    full = b".".join((*section, name.lower())).decode()
-                    if listing or (
-                        pattern.search(byte_view(full, utf8)) is not None
-                        if pattern
-                        else full == config_key(key)
-                    ):
-                        values.append((source, full, value.decode()))
-        if not listing and not regexp:
-            values = values[-1:]
-        lines = [
-            (f"file:{source}\t" if origin else "")
-            + (name + ("=" if listing else " ") if listing or regexp else "")
-            + value
-            + "\n"
-            for source, name, value in values
-        ]
-        return "".join(lines).encode(), IOResult(
-            exit_code=0 if values or listing else 1
+    if fl.as_bool("global"):
+        sources = await global_sources(ctx, fl.as_bool("list"))
+    else:
+        _, location = await opened(ctx, fl)
+        assert ctx.vfs is not None
+        path = location.commondir.join("config")
+        data = await read_file(ctx.vfs, path)
+        source = path.raw_path
+        ordinary = (
+            location.commondir.virtual == location.worktree.virtual + "/.git"
         )
-
-    except GitError as exc:
-        return fatal(exc)
+        if ordinary and start_point(fl).virtual == location.worktree.virtual:
+            source = ".git/config"
+        sources = [(source, ConfigFile.from_file(BytesIO(data)))]
+    listing = fl.as_bool("list")
+    regexp = fl.as_bool("get_regexp")
+    origin = fl.as_bool("show_origin")
+    if not listing and not texts:
+        return None, IOResult(
+            exit_code=129, stderr=b"error: wrong number of arguments\n"
+        )
+    key = texts[0] if texts else ""
+    # git matches keys by the locale: bytes in C, characters in UTF-8.
+    utf8 = utf8_locale(ctx.env)
+    try:
+        pattern = (
+            posix_regex(byte_view(config_key(key), utf8), True, utf8=utf8)
+            if regexp
+            else None
+        )
+    except RegexError:
+        return None, IOResult(
+            exit_code=6,
+            stderr=f"error: invalid key pattern: {key}\n".encode(),
+        )
+    values = []
+    for source, cfg in sources:
+        for section in cfg.sections():
+            for name, value in cfg.items(section):
+                full = b".".join((*section, name.lower())).decode()
+                if listing or (
+                    pattern.search(byte_view(full, utf8)) is not None
+                    if pattern
+                    else full == config_key(key)
+                ):
+                    values.append((source, full, value.decode()))
+    if not listing and not regexp:
+        values = values[-1:]
+    lines = [
+        (f"file:{source}\t" if origin else "")
+        + (name + ("=" if listing else " ") if listing or regexp else "")
+        + value
+        + "\n"
+        for source, name, value in values
+    ]
+    return "".join(lines).encode(), IOResult(
+        exit_code=0 if values or listing else 1
+    )
 
 
 def _show_refs(repo: BaseRepo, patterns: tuple[str, ...]) -> bytes:
@@ -441,13 +416,10 @@ def _show_refs(repo: BaseRepo, patterns: tuple[str, ...]) -> bytes:
 async def show_ref(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
-    try:
-        check_switches(ctx, texts)
-        repo, _ = await opened(ctx, FlagView(ctx.flags))
-        out = await asyncio.to_thread(_show_refs, repo, tuple(texts))
-        return out, IOResult(exit_code=0 if out else 1)
-    except GitError as exc:
-        return fatal(exc)
+    check_switches(ctx, texts)
+    repo, _ = await opened(ctx, FlagView(ctx.flags))
+    out = await asyncio.to_thread(_show_refs, repo, tuple(texts))
+    return out, IOResult(exit_code=0 if out else 1)
 
 
 def _revisions(
@@ -480,32 +452,29 @@ async def rev_list(
     accessor: Accessor, paths: list[PathSpec], texts: list[str], ctx: Context
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    try:
-        sole = ctx.argv[-2:] == ("rev-list", HELP_SWITCH)
-        if option_operand(ctx, texts, STDOUT if sole else STDERR):
-            raise UsageError("", verb_usage(ctx))
-        repo, location = await opened(ctx, fl)
-        flags = parse_flags(fl)
-        revisions, patterns, dashed = await walk_operands(
-            ctx, fl, repo, location, texts
-        )
-        # A line naming only paths has no revision either (git 2.47.3).
-        if not revisions and not flags.all_refs:
-            raise UsageError("", verb_usage(ctx))
-        commits = await asyncio.to_thread(
-            _revisions,
-            repo,
-            revisions,
-            replace(flags, pathspecs=patterns),
-            dashed,
-        )
-        return (
-            f"{len(commits)}\n".encode()
-            if fl.as_bool("count")
-            else b"".join(oid + b"\n" for oid in commits)
-        ), IOResult()
-    except GitError as exc:
-        return fatal(exc)
+    sole = ctx.argv[-2:] == ("rev-list", HELP_SWITCH)
+    if option_operand(ctx, texts, STDOUT if sole else STDERR):
+        raise UsageError("", verb_usage(ctx))
+    repo, location = await opened(ctx, fl)
+    flags = parse_flags(fl)
+    revisions, patterns, dashed = await walk_operands(
+        ctx, fl, repo, location, texts
+    )
+    # A line naming only paths has no revision either (git 2.47.3).
+    if not revisions and not flags.all_refs:
+        raise UsageError("", verb_usage(ctx))
+    commits = await asyncio.to_thread(
+        _revisions,
+        repo,
+        revisions,
+        replace(flags, pathspecs=patterns),
+        dashed,
+    )
+    return (
+        f"{len(commits)}\n".encode()
+        if fl.as_bool("count")
+        else b"".join(oid + b"\n" for oid in commits)
+    ), IOResult()
 
 
 async def version(
@@ -776,8 +745,6 @@ async def rev_parse(
     except SingleRevisionError as exc:
         if quiet:
             return None, IOResult(exit_code=1)
-        return fatal(exc)
-    except GitError as exc:
         return fatal(exc)
     finally:
         if quiet and isinstance(repo, Repo) and repo.ambiguous:

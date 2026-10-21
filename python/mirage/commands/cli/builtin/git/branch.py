@@ -38,7 +38,6 @@ from mirage.commands.cli.builtin.git.errors import (
     InvalidBranchNameError,
     InvalidObjectNameError,
     NoBranchError,
-    NoWorkspaceError,
     RefDeleteReadOnlyError,
     RefLockError,
     RefReadOnlyError,
@@ -115,9 +114,9 @@ from mirage.commands.cli.builtin.git.types import (
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     config_section,
-    fatal,
     git_bool,
     multivar,
+    require_vfs,
     verb_usage,
     without_section,
 )
@@ -747,7 +746,7 @@ async def branch(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     words = filter_words(ctx)
     operands = without_filter_values(texts, words)
     flags = ctx.flags
@@ -755,56 +754,51 @@ async def branch(
     remotes_only = fl.as_bool("r")
     include_remotes = remotes_only or fl.as_bool("a")
     listing = bool(words) or fl.as_bool("list")
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, operands)
-        repo, location = await opened(ctx, fl)
-        mode = await track_mode(repo)
-        filt = await asyncio.to_thread(ref_filter, repo, words)
-        head = await read_head(vfs, location.gitdir)
-        if fl.as_bool("show_current"):
-            return (
-                (head.branch + "\n").encode() if head.branch else b""
-            ), IOResult()
-        force = fl.as_bool("D")
-        if fl.as_bool("delete") or force:
-            if listing:
-                raise UsageError("", verb_usage(ctx))
-            if not operands:
-                raise BranchNameRequiredError()
-            deleted = b"".join(
-                [await _delete(repo, head, name, force) for name in operands]
-            )
-            if fl.as_bool("quiet"):
-                return None, IOResult()
-            return yield_bytes(deleted), IOResult()
-        if operands and not listing:
-            tracking, warning = await _create(
-                repo,
-                operands[0],
-                operands[1] if len(operands) > 1 else None,
-                mode,
-                head,
-            )
-            return (
-                yield_bytes(tracking.encode())
-                if tracking and not fl.as_bool("quiet")
-                else None,
-                IOResult(stderr=warning.encode()),
-            )
-        return await _list_branches(
-            ctx,
-            fl,
-            repo,
-            head,
-            operands if listing else (),
-            filt,
-            remotes_only,
-            include_remotes,
+    check_switches(ctx, operands)
+    repo, location = await opened(ctx, fl)
+    mode = await track_mode(repo)
+    filt = await asyncio.to_thread(ref_filter, repo, words)
+    head = await read_head(vfs, location.gitdir)
+    if fl.as_bool("show_current"):
+        return (
+            (head.branch + "\n").encode() if head.branch else b""
+        ), IOResult()
+    force = fl.as_bool("D")
+    if fl.as_bool("delete") or force:
+        if listing:
+            raise UsageError("", verb_usage(ctx))
+        if not operands:
+            raise BranchNameRequiredError()
+        deleted = b"".join(
+            [await _delete(repo, head, name, force) for name in operands]
         )
-    except GitError as exc:
-        return fatal(exc)
+        if fl.as_bool("quiet"):
+            return None, IOResult()
+        return yield_bytes(deleted), IOResult()
+    if operands and not listing:
+        tracking, warning = await _create(
+            repo,
+            operands[0],
+            operands[1] if len(operands) > 1 else None,
+            mode,
+            head,
+        )
+        return (
+            yield_bytes(tracking.encode())
+            if tracking and not fl.as_bool("quiet")
+            else None,
+            IOResult(stderr=warning.encode()),
+        )
+    return await _list_branches(
+        ctx,
+        fl,
+        repo,
+        head,
+        operands if listing else (),
+        filt,
+        remotes_only,
+        include_remotes,
+    )
 
 
 def upstream_of(

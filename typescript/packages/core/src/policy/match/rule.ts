@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HiddenPaths, PathSpec } from '../../types.ts'
+import { gnuBasename } from '../../utils/path.ts'
 import {
   anchorDepth,
   classifyPaths,
@@ -28,6 +29,8 @@ import {
   SUBTREE_OPS,
 } from '../constants.ts'
 import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
+import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { lineTokens } from './allow.ts'
 import { patternMatches } from './pattern.ts'
@@ -111,6 +114,30 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 }
 
 /**
+ * The target directory an `mv` line names by option (`-t`,
+ * `--target-directory`), as its grammar reads the line, so a `-S.txt` suffix
+ * is no target; null when it names none. Mirrors Python's `_target_directory`.
+ */
+function targetDirectory(ctx: CommandContext): string | null {
+  const spec = SPECS.mv
+  if (spec === undefined) return null
+  const fl = new FlagView(parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')), spec)
+  return fl.asStr('target_directory') ?? null
+}
+
+/**
+ * `mv`'s positional destination, null when the line has none: another
+ * command, a single operand, or a target directory named by option, which
+ * leaves every operand a source. Mirrors Python's `_destination`.
+ */
+function destination(ctx: CommandContext): PathSpec | null {
+  const operands = operandPaths(ctx)
+  if (ctx.command !== 'mv' || operands.length < 2) return null
+  if (targetDirectory(ctx) !== null) return null
+  return operands.at(-1) ?? null
+}
+
+/**
  * What a line's rules are read against, in the order they are read.
  *
  * Every path the line names first, each asked whether it lies inside a
@@ -124,9 +151,10 @@ export function subjects(ctx: CommandContext): readonly Subject[] {
   const subs: Subject[] = ctx.paths.map((p) => ({ path: p, holds: false, ancestors: true }))
   if (SUBTREE_COMMANDS.has(ctx.command)) {
     const operands = operandPaths(ctx)
-    const dst = ctx.command === 'mv' && operands.length > 1 ? operands.pop() : undefined
+    const dst = destination(ctx)
+    if (dst !== null) operands.pop()
     for (const p of operands) subs.push({ path: p, holds: true, ancestors: true })
-    if (dst !== undefined) subs.push({ path: dst, holds: true, ancestors: false })
+    if (dst !== null) subs.push({ path: dst, holds: true, ancestors: false })
   }
   return subs
 }
@@ -140,11 +168,31 @@ function under(path: string, root: string): boolean {
 // (`grep -r x /scratch` enters `/scratch/child`: the fan-out reruns the
 // traversal inside each descendant mount and no admission fires again
 // there, so the ancestor operand is the one place the mount's rule can
-// speak).
+// speak) or takes that directory along whole (`mv /scratch /done`,
+// `rm -r /scratch`), as a path rule judges a subtree operand.
 function touches(mount: string, ctx: CommandContext): boolean {
   if (under(ctx.cwd, mount)) return true
   if (ctx.paths.some((p) => under(p.virtual, mount))) return true
-  return (ctx.walks ?? false) && ctx.paths.some((p) => under(mount, p.virtual))
+  if (ctx.walks ?? false) return ctx.paths.some((p) => under(mount, p.virtual))
+  if (!SUBTREE_COMMANDS.has(ctx.command)) return false
+  // Every path the line names is taken along, a link's target included,
+  // except where mv moves things to: its -t value or its destination, typed or
+  // reached through a link above it. mv never follows a last component, so a
+  // followed path keeps the operand's name: one under the destination's name
+  // that no source carries is the destination.
+  const targets = new Set<string>()
+  const target = ctx.command === 'mv' ? targetDirectory(ctx) : null
+  if (target !== null) targets.add(target)
+  const dst = destination(ctx)
+  if (dst !== null) {
+    const name = gnuBasename(dst.virtual)
+    const sources = operandPaths(ctx).slice(0, -1)
+    if (sources.every((p) => gnuBasename(p.virtual) !== name)) {
+      for (const p of ctx.paths) if (gnuBasename(p.virtual) === name) targets.add(p.virtual)
+    }
+    targets.add(dst.virtual)
+  }
+  return ctx.paths.some((p) => !targets.has(p.virtual) && under(mount, p.virtual))
 }
 
 /**
@@ -357,9 +405,12 @@ export function ruleScope(rule: CommandRule): HiddenPaths | null {
  * its operands: the rule names the line (its command patterns against
  * the line's tokens, none meaning every command) and its paths hold the
  * entry. A rule with no paths spoke about the whole line at admission
- * and has nothing to add at an entry; the directory holding a scope is
- * not in it, so a listing still shows a refused entry's name, which is
- * what deny means: present, and refused.
+ * and has nothing to add at an entry, except a mount's: its mount holds
+ * the entry, since a line that works outside the mount still reaches
+ * entries inside it (`cp -r`, `chmod -R`, a runtime's `open`) where no
+ * admission asked its rule. The directory holding a scope is not in it,
+ * so a listing still shows a refused entry's name, which is what deny
+ * means: present, and refused.
  */
 export function matchIo(
   rule: CommandRule,
@@ -367,9 +418,11 @@ export function matchIo(
   tokens: readonly string[],
   virtual: string,
 ): boolean {
-  if (scope === null) return false
+  const mount = rule.mount ?? ''
+  if (scope === null && mount === '') return false
   const commands = rule.commands ?? []
   if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) return false
+  if (scope === null) return under(virtual, mount)
   return pathHidden(scope, virtual)
 }
 
@@ -406,8 +459,8 @@ export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
 
 /**
  * Whether a rule in force could reach an entry at or under this path for
- * the running line: the rule names the line and its paths could cover
- * something in the subtree. What a native walk asks before it trusts the
+ * the running line: the rule names the line and its paths, or a mount
+ * rule's mount, could cover something in the subtree. What a native walk asks before it trusts the
  * raw tree, per operand the way a hide is: a rule on `/repo/.env` leaves
  * `find /s3` its native op.
  */
@@ -419,10 +472,13 @@ export function ioReach(
   if (rules === null) return false
   for (const rule of [...rules.deny, ...rules.ask]) {
     const scope = ruleScope(rule)
-    if (scope === null) continue
+    const mount = rule.mount ?? ''
+    if (scope === null && mount === '') continue
     const commands = rule.commands ?? []
     if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) continue
-    if (hidesIntersect(scope, virtual)) return true
+    if (scope === null) {
+      if (under(mount, virtual) || under(virtual, mount)) return true
+    } else if (hidesIntersect(scope, virtual)) return true
   }
   return false
 }

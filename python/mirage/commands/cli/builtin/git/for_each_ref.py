@@ -45,7 +45,6 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import QuoteStyle, RefKind
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -94,72 +93,66 @@ async def for_each_ref(
     fl = FlagView(ctx.flags)
     words = filter_words(ctx)
     operands = without_filter_values(texts, words)
-    try:
-        check_switches(ctx, operands)
-        repo, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        filt = await asyncio.to_thread(ref_filter, repo, words)
-        count = fl.as_int("count") or 0
-        if count < 0:
-            raise FormatUsageError(f"invalid --count argument: `{count}'")
-        template = fl.as_str("format")
-        fmt = parse_format(
-            DEFAULT_FORMAT if template is None else template, quote_style(fl)
+    check_switches(ctx, operands)
+    repo, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    filt = await asyncio.to_thread(ref_filter, repo, words)
+    count = fl.as_int("count") or 0
+    if count < 0:
+        raise FormatUsageError(f"invalid --count argument: `{count}'")
+    template = fl.as_str("format")
+    fmt = parse_format(
+        DEFAULT_FORMAT if template is None else template, quote_style(fl)
+    )
+    keys = sort_keys(fl, ("refname",))
+    icase = fl.as_bool("ignore_case")
+    patterns = operands
+    if fl.as_bool("stdin"):
+        if operands:
+            raise GitError("unknown arguments supplied with --stdin")
+        text = (await read_stdin_async(ctx.stdin) or b"").decode(
+            "utf-8", "replace"
         )
-        keys = sort_keys(fl, ("refname",))
-        icase = fl.as_bool("ignore_case")
-        patterns = operands
-        if fl.as_bool("stdin"):
-            if operands:
-                raise GitError("unknown arguments supplied with --stdin")
-            text = (await read_stdin_async(ctx.stdin) or b"").decode(
-                "utf-8", "replace"
-            )
-            lines = text.split("\n")
-            if lines[-1] == "":
-                lines.pop()
-            patterns = tuple(line.removesuffix("\r") for line in lines)
-        roots = fl.as_bool("include_root_refs")
-        excludes = tuple(fl.as_list("exclude"))
+        lines = text.split("\n")
+        if lines[-1] == "":
+            lines.pop()
+        patterns = tuple(line.removesuffix("\r") for line in lines)
+    roots = fl.as_bool("include_root_refs")
+    excludes = tuple(fl.as_list("exclude"))
 
-        def wanted(name: str) -> bool:
-            listed = name.startswith("refs/") or (roots and is_root_ref(name))
-            return (
-                listed
-                and match_as_path(name, patterns, icase)
-                and not (excludes and match_as_path(name, excludes, icase))
-            )
+    def wanted(name: str) -> bool:
+        listed = name.startswith("refs/") or (roots and is_root_ref(name))
+        return (
+            listed
+            and match_as_path(name, patterns, icase)
+            and not (excludes and match_as_path(name, excludes, icase))
+        )
 
-        items, ref_ctx, errors = await ref_listing(
-            repo,
-            await read_config(ctx.vfs, location),
-            used_fields(fmt, keys or ()),
-            wanted,
-            filt,
-            date_clock(ctx.env),
-            roots,
-        )
-        if roots:
-            items = [
-                replace(item, kind=RefKind.ROOT)
-                if item.kind is RefKind.DETACHED
-                else item
-                for item in items
-            ]
-        out, stopped = format_refs(
-            fmt,
-            items,
-            ref_ctx,
-            keys,
-            count=count,
-            omit_empty=fl.as_bool("omit_empty"),
-            icase=icase,
-            stream=(keys is None or not sorts_named(fl))
-            and (
-                filt is None
-                or (filt.merged is None and filt.no_merged is None)
-            ),
-        )
-    except GitError as exc:
-        return fatal(exc)
+    items, ref_ctx, errors = await ref_listing(
+        repo,
+        await read_config(ctx.vfs, location),
+        used_fields(fmt, keys or ()),
+        wanted,
+        filt,
+        date_clock(ctx.env),
+        roots,
+    )
+    if roots:
+        items = [
+            replace(item, kind=RefKind.ROOT)
+            if item.kind is RefKind.DETACHED
+            else item
+            for item in items
+        ]
+    out, stopped = format_refs(
+        fmt,
+        items,
+        ref_ctx,
+        keys,
+        count=count,
+        omit_empty=fl.as_bool("omit_empty"),
+        icase=icase,
+        stream=(keys is None or not sorts_named(fl))
+        and (filt is None or (filt.merged is None and filt.no_merged is None)),
+    )
     return listing_result(out, errors, stopped)

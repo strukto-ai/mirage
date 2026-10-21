@@ -25,7 +25,6 @@ from mirage.commands.cli.builtin.git.discover import (
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     IndexLockError,
-    NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.repo import (
     Repo,
@@ -36,6 +35,7 @@ from mirage.commands.cli.builtin.git.types import ReadOnlyRefusal, RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     fatal,
     git_bool,
+    require_vfs,
     start_point,
 )
 from mirage.commands.config import Context
@@ -107,15 +107,18 @@ def verb(
     [Accessor, list[PathSpec], list[str], Context],
     Awaitable[tuple[ByteSource | None, IOResult]],
 ]:
-    """A git verb whose ``refname is ambiguous`` warnings reach stderr,
-    and whose refusal by a read-only mount is in git's words.
+    """A git verb whose fatal errors are rendered as git renders them,
+    whose ``refname is ambiguous`` warnings reach stderr, and whose
+    refusal by a read-only mount is in git's words.
 
-    git prints the warning where it resolves the name, ahead of anything
-    the verb says after; each invocation gets a list of its own here,
-    resolution adds to it, and the lines go in front of the verb's own
-    stderr. A write a read-only mount turns down fails before anything
-    is written, so the verb's own refusal stands in for it: git's lock
-    on the index or on the ref it was about to write.
+    Every ``GitError`` a verb raises is rendered here (``fatal``), so no
+    verb catches one to render it. git prints the warning where it
+    resolves the name, ahead of anything the verb says after; each
+    invocation gets a list of its own here, resolution adds to it, and
+    the lines go in front of the verb's own stderr. A write a read-only
+    mount turns down fails before anything is written, so the verb's own
+    refusal stands in for it: git's lock on the index or on the ref it
+    was about to write.
 
     Args:
         fn: the verb.
@@ -135,6 +138,8 @@ def verb(
         try:
             try:
                 out, io = await fn(accessor, paths, texts, ctx)
+            except GitError as exc:
+                out, io = fatal(exc)
             except OSError as exc:
                 location = LOCATIONS.get()
                 if (
@@ -177,8 +182,8 @@ async def opened(
             ``NEED_WORK_TREE`` asks.
 
     Raises:
-        NoWorkspaceError: a plane this verb needs is not wired.
-        NotAWorkTreeError: ``work_tree`` and there is none to enter.
+        NotAWorkTreeError: no files are wired, or ``work_tree`` and there
+            is none to enter.
     """
     location = await located(ctx, fl)
     vfs = ctx.vfs
@@ -203,9 +208,7 @@ async def located(ctx: Context, fl: FlagView) -> RepoLocation:
         ctx (Context): the line's context, whose files git reads.
         fl (FlagView): repository-selection flags.
     """
-    vfs = ctx.vfs
-    if vfs is None:
-        raise NoWorkspaceError()
+    vfs = require_vfs(ctx)
     chosen = fl.as_path("work_tree")
     gitdir = fl.as_path("git_dir")
     location = await discover(vfs, start_point(fl), gitdir, chosen)

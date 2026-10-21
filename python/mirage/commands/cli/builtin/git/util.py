@@ -21,6 +21,7 @@ from mirage.commands.cli.builtin.git.constants import HEAD
 from mirage.commands.cli.builtin.git.errors import (
     BadConfigValueError,
     GitError,
+    NotAWorkTreeError,
     UnrecognizedArgumentError,
     UsageError,
 )
@@ -36,6 +37,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.workspace.files import Files
 
 ROOT = "/"
 STDOUT = "stdout"
@@ -287,6 +289,23 @@ def check_switches(ctx: Context, texts: Sequence[str]) -> None:
     if word is not None:
         spec = ctx.spec or CommandSpec()
         raise UsageError(*git_option_refusal(word, spec.name, spec))
+
+
+def require_vfs(ctx: Context) -> Files:
+    """The session's files, which every verb reads and writes through.
+
+    Only a leaf called directly, outside a workspace, has none; git
+    words that the way it words a bare repository.
+
+    Args:
+        ctx (Context): the line's context.
+
+    Raises:
+        NotAWorkTreeError: no files are wired.
+    """
+    if ctx.vfs is None:
+        raise NotAWorkTreeError()
+    return ctx.vfs
 
 
 def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:

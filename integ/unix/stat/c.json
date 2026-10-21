@@ -579,6 +579,44 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "stat_deref_follows_a_link_by_any_spelling",
+      "seq": 15400210,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "statvfs"
+      ],
+      "command": "printf 'x\\n' > {mount}/sdr_f && ln -s {mount}/sdr_f {mount}/sdr_l && stat --deref -c %F {mount}/sdr_l; stat --dereference -c %F {mount}/sdr_l; stat -c %F {mount}/sdr_l; rm {mount}/sdr_l {mount}/sdr_f",
+      "expect": {
+        "exit": 0,
+        "stdout": "regular file\nregular file\nsymbolic link\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
     }
   ]
 }

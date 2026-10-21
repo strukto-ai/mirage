@@ -17,12 +17,11 @@ import { joinRuns } from './fanout/fanout.ts'
 import { ownedScopes } from './scopes.ts'
 import type { CrossResult, OperandRun, RunSingle, OwnedScope } from './types.ts'
 import { mergeOperandIos, runOperands, runSeparator } from './utils.ts'
-import { directoriesAction, filenameMode, lineWarnings, parseFlags } from '../grep.ts'
+import { filenameMode, lineWarnings, parseFlags } from '../grep.ts'
 import {
   labelFlags,
   parseFlags as parseRgFlags,
   rgMatcher,
-  walksDescendantMounts,
   walkFilter,
   filtersFiles,
   haystacks,
@@ -346,12 +345,4 @@ async function oneFooter(
         : totals.statsBlock(total),
     ]),
   ]
-}
-
-export function walksMounts(name: string, bag: Record<string, FlagValue>): boolean {
-  if (name === 'rg') return walksDescendantMounts(bag)
-  if (name === 'grep') {
-    return directoriesAction(new FlagView(bag, specOf(name))) === 'recurse'
-  }
-  return false
 }

@@ -414,7 +414,7 @@ export class MountEntry {
     //
     // Coerced because `ReadPolicy` is a string-const object: a runtime
     // spec carrying `'FRESH'` matches no `===` downstream -- the gate, the
-    // routing reconcile -- so the mount would pass its capability check
+    // operand probe -- so the mount would pass its capability check
     // and then read as `bounded` everywhere, which is the silent
     // downgrade the policy exists to remove. The Python twin normalizes
     // at this same point.
@@ -542,12 +542,14 @@ export class MountEntry {
    * handler that declares it may write. Every handler the run's cascade tries
    * counts, the filetype one first, since one that declines hands the run to
    * the next. The directory probe a run makes (`pickHandlers`) is not made,
-   * so a directory named like a file counts its filetype handler too. Mirrors
-   * Python's MountEntry.may_write.
+   * so a directory named like a file counts its filetype handler too.
+   * `builtins` is false when the line's options leave mirage's own handlers
+   * nothing to write (`changesFiles`); a user command counts either way.
+   * Mirrors Python's MountEntry.may_write.
    */
-  mayWrite(cmdName: string, extension: string | null = null): boolean {
+  mayWrite(cmdName: string, extension: string | null = null, builtins = true): boolean {
     return this.resolveCascade(cmdName, extension, this.cmds, this.generalCmds).some(
-      (cmd) => cmd.write,
+      (cmd) => cmd.write && (builtins || this.isUserCommand(cmd)),
     )
   }
 

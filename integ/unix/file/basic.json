@@ -278,6 +278,44 @@
       "flags": [
         "i"
       ]
+    },
+    {
+      "id": "file_the_last_of_L_and_h_decides",
+      "seq": 15800085,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'hello\\n' > /data/fLh_f && ln -s /data/fLh_f /data/fLh_l && file -L -h /data/fLh_l; file -h -L /data/fLh_l; file -Lh /data/fLh_l; rm /data/fLh_l /data/fLh_f",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fLh_l: symbolic link to /data/fLh_f\n/data/fLh_l: text\n/data/fLh_l: symbolic link to /data/fLh_f\n",
+        "stderr": ""
+      },
+      "flags": [
+        "L",
+        "h"
+      ]
     }
   ]
 }

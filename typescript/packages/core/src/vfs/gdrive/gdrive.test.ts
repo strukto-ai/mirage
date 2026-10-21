@@ -120,8 +120,8 @@ async function warmFile(ws: Workspace, depth: number): Promise<string> {
 }
 
 describe('GoogleDriveVFS warm read under fresh', () => {
-  // Cost is the contract, and the routing probe is the cost. A warm named
-  // operand is probed at routing, with a fresh index, so the probe walks the
+  // Cost is the contract, and the operand probe is the cost. A warm named
+  // operand is probed at the command's first lookup of it, with a fresh index, so the probe walks the
   // parent listings: one per level. The command's own stat and the gate both
   // reuse that answer for the rest of the command instead of asking again.
   // More means one of them reached Drive again.

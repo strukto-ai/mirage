@@ -17,12 +17,22 @@ import pytest
 from mirage.types import LsLinkMode, PathSpec
 from mirage.workspace.lookup.constants import (
     NO_FOLLOW_COMMANDS,
+    changes_files,
     dereferences,
     follows_last_component,
+    line_flags,
     ls_link_mode,
     reads_subtrees,
     walks_mounts,
 )
+
+
+def _walks(words: list[str]) -> bool:
+    return walks_mounts(words[0], line_flags(words[0], words))
+
+
+def _reads_subtrees(words: list[str]) -> bool:
+    return reads_subtrees(words[0], line_flags(words[0], words))
 
 
 def test_stat_is_a_no_follow_command():
@@ -136,31 +146,147 @@ def test_find_link_options_only_count_before_the_operand():
     assert dereferences("find", ["find", "/data/link", "-L"]) is False
 
 
-def test_walkers_are_read_off_the_raw_line():
-    # find/du/tree/rg always descend; grep and ls only under a flag,
-    # read raw because admission fires before flag parsing.
-    assert walks_mounts("find", ["find", "/data"]) is True
-    assert walks_mounts("du", ["du", "/data"]) is True
-    assert walks_mounts("tree", ["tree"]) is True
-    assert walks_mounts("rg", ["rg", "x"]) is True
-    assert walks_mounts("grep", ["grep", "x", "/data"]) is False
-    assert walks_mounts("grep", ["grep", "-rn", "x", "/data"]) is True
-    assert walks_mounts("grep", ["grep", "--recursive", "x"]) is True
-    assert walks_mounts("grep", ["grep", "--", "-r"]) is False
-    assert walks_mounts("egrep", ["egrep", "-r", "x"]) is True
-    assert walks_mounts("fgrep", ["fgrep", "x", "/data"]) is False
-    assert walks_mounts("ls", ["ls", "-R", "/data"]) is True
-    assert walks_mounts("ls", ["ls", "-l", "/data"]) is False
-    assert walks_mounts("cat", ["cat", "/data/x"]) is False
+def test_long_form_abbreviated_dereferences():
+    # coreutils 9.7: `stat --deref` is --dereference.
+    assert dereferences("stat", ["stat", "--deref", "/data/link"]) is True
 
 
-def test_subtree_readers_cover_the_archivers_and_recursive_copy():
-    # tar -c and zip -r and cp -r read below their operands but stop at
-    # a mount boundary, so they read subtrees without walking mounts.
-    assert reads_subtrees("tar", ["tar", "-cf", "/out.tar", "/data"]) is True
-    assert reads_subtrees("tar", ["tar", "-xf", "/out.tar"]) is False
-    assert reads_subtrees("zip", ["zip", "-r", "/out.zip", "/data"]) is True
-    assert reads_subtrees("cp", ["cp", "-r", "/data", "/copy"]) is True
-    assert reads_subtrees("cp", ["cp", "/data/a", "/copy"]) is False
-    assert reads_subtrees("grep", ["grep", "-r", "x", "/data"]) is True
-    assert walks_mounts("tar", ["tar", "-cf", "/out.tar", "/data"]) is False
+@pytest.mark.parametrize(
+    "words, follows",
+    [
+        (["file", "-h", "/data/link"], False),
+        (["file", "-L", "-h", "/data/link"], False),
+        (["file", "-h", "-L", "/data/link"], True),
+        (["file", "-Lh", "/data/link"], False),
+        (["du", "-LP", "/data/link"], False),
+        (["du", "-PL", "/data/link"], True),
+        (["du", "-L", "-P", "/data/link"], False),
+    ],
+)
+def test_the_last_link_option_wins(words, follows):
+    # file 5.46 and coreutils 9.7: the later of -L and its take-back
+    # (-h, -P) decides.
+    assert dereferences(words[0], words) is follows
+
+
+@pytest.mark.parametrize(
+    "words, walks",
+    [
+        (["find", "/data"], True),
+        (["du", "/data"], True),
+        (["du", "-x", "/data"], False),
+        (["tree"], True),
+        (["tree", "-x", "/data"], False),
+        (["rg", "x"], True),
+        (["rg", "--one-file-system", "x", "/data"], False),
+        (["grep", "x", "/data"], False),
+        (["grep", "-rn", "x", "/data"], True),
+        (["grep", "--recursive", "x"], True),
+        (["grep", "--recur", "x", "/data"], True),
+        (["grep", "-d", "recurse", "x", "/data"], True),
+        (["grep", "--directories=recurse", "x", "/data"], True),
+        (["grep", "--dereference-recursive", "x", "/data"], True),
+        (["grep", "-r", "-d", "skip", "x", "/data"], False),
+        (["grep", "-ephrase", "/data/x"], False),
+        (["grep", "-frules.txt", "/data/x"], False),
+        (["grep", "--", "-r"], False),
+        (["egrep", "-r", "x"], True),
+        (["fgrep", "x", "/data"], False),
+        (["ls", "-R", "/data"], True),
+        (["ls", "--recur", "/data"], True),
+        (["ls", "-l", "/data"], False),
+        (["cat", "/data/x"], False),
+        (["tar", "-cf", "/out.tar", "/data"], False),
+    ],
+)
+def test_walkers_are_read_off_the_parsed_line(words, walks):
+    # grep 3.11, coreutils 9.7: a long option's prefix, -d recurse and an
+    # option's attached value read as grep reads them, and the last of
+    # -r and -d wins.
+    assert _walks(words) is walks
+
+
+@pytest.mark.parametrize(
+    "words, reads",
+    [
+        (["tar", "-cf", "/out.tar", "/data"], True),
+        (["tar", "cf", "/out.tar", "/data"], True),
+        (["tar", "--create", "-f", "/out.tar", "/data"], True),
+        (["tar", "-xf", "/out.tar"], False),
+        (["zip", "-r", "/out.zip", "/data"], True),
+        (["cp", "-r", "/data", "/copy"], True),
+        (["cp", "-a", "/data", "/copy"], True),
+        (["cp", "--archive", "/data", "/copy"], True),
+        (["cp", "--recur", "/data", "/copy"], True),
+        (["cp", "/data/a", "/copy"], False),
+        (["grep", "-r", "x", "/data"], True),
+        (["du", "-x", "/data"], True),
+        (["tree", "-x", "/data"], True),
+        (["rg", "--one-file-system", "x", "/data"], True),
+        (["ls", "-l", "/data"], False),
+    ],
+)
+def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
+    # tar -c (dashless too), zip -r and cp -r or -a read below their
+    # operands but stop at a mount boundary, so they read subtrees
+    # without walking mounts; a walk kept to one mount still reads its
+    # subtree.
+    assert _reads_subtrees(words) is reads
+
+
+@pytest.mark.parametrize(
+    "words, writes",
+    [
+        (["sort", "/data/a"], False),
+        (["sort", "-o", "/data/b", "/data/a"], True),
+        (["sort", "--out=/data/b", "/data/a"], True),
+        (["shuf", "/data/a"], False),
+        (["shuf", "-o", "/data/b", "/data/a"], True),
+        (["iconv", "-f", "utf-8", "/data/a"], False),
+        (["iconv", "-o", "/data/b", "/data/a"], True),
+        (["uniq", "/data/a"], False),
+        (["uniq", "/data/a", "/data/b"], True),
+        (["xxd", "/data/a"], False),
+        (["xxd", "-r", "/data/a", "/data/b"], True),
+        (["tee"], False),
+        (["tee", "/data/a"], True),
+        (["mktemp", "-u"], False),
+        (["mktemp"], True),
+        (["tar", "-tf", "/data/a.tar"], False),
+        (["tar", "-xOf", "/data/a.tar"], False),
+        (["tar", "-xf", "/data/a.tar"], True),
+        (["tar", "cf", "/data/a.tar", "/data/d"], True),
+        (["unzip", "-l", "/data/a.zip"], False),
+        (["unzip", "-p", "/data/a.zip"], False),
+        (["unzip", "/data/a.zip"], True),
+        (["gzip"], False),
+        (["gzip", "-c", "/data/a"], False),
+        (["gzip", "/data/a"], True),
+        (["gunzip", "-t", "/data/a.gz"], False),
+        (["gunzip", "/data/a.gz"], True),
+        (["sed", "-n", "p", "/data/a"], False),
+        (["sed", "-i", "s/a/b/", "/data/a"], True),
+        (["sed", "w /data/out", "/data/a"], True),
+        (["sed", "-e", "s/a/b/w /data/out", "/data/a"], True),
+        (["sed", "-f", "/data/script", "/data/a"], True),
+        (["sed", "w /data/out\nq q", "/data/a"], True),
+        (["awk", "1", "/data/a"], True),
+        (["cp", "/data/a", "/data/b"], True),
+    ],
+)
+def test_a_builtin_writes_only_when_its_line_can(words, writes):
+    # sed 4.9 opens a w file while it reads the script, before it
+    # refuses a later command.
+    assert changes_files(words[0], words) is writes
+
+
+@pytest.mark.parametrize("name", ["uniq", "xxd"])
+def test_a_pattern_operand_may_name_the_output(name):
+    # The backend expands a pattern after admission, so `uniq /data/p.*`
+    # may hand it an input and an output; a quoted name is no pattern.
+    pattern = PathSpec(
+        "/data/p.*", "/data", "p.*", pattern="p.*", resolved=False
+    )
+    literal = PathSpec("/data/p[1]", "/data", "p[1]")
+    assert changes_files(name, [name, pattern]) is True
+    assert changes_files(name, [name, literal]) is False

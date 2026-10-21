@@ -19,21 +19,21 @@ from mirage.commands.cli.builtin.git.errors import (
     BadStartPointError,
     GitError,
     NotARepositoryError,
+    NotAWorkTreeError,
     NoWorkingDirectoryError,
-    NoWorkspaceError,
     RevisionResetError,
 )
 from mirage.errors.types import FsCondition
 
 
 def test_every_fatal_shares_one_base():
-    # `fatal` renders any GitError the same way, so a verb catches the
-    # base and never enumerates the subclasses.
+    # `fatal` renders any GitError the same way, so the verb wrapper
+    # catches the base and never enumerates the subclasses.
     for exc in (
         NotARepositoryError(),
         AmbiguousArgumentError("x"),
         BadDateError("--since", "x"),
-        NoWorkspaceError(),
+        NotAWorkTreeError(),
         NoWorkingDirectoryError("x"),
     ):
         assert isinstance(exc, GitError)
@@ -76,7 +76,7 @@ def test_bad_date_names_both_the_flag_and_the_value():
 
 
 def test_missing_worktree_matches_gits_wording():
-    assert str(NoWorkspaceError()) == (
+    assert str(NotAWorkTreeError()) == (
         "this operation must be run in a work tree"
     )
 

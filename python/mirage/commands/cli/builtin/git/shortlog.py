@@ -5,7 +5,6 @@ from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
-    GitError,
     ShortlogOptionError,
 )
 from mirage.commands.cli.builtin.git.format import subject
@@ -24,7 +23,6 @@ from mirage.commands.cli.builtin.git.mailmap import (
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import MailmapEntry
 from mirage.commands.cli.builtin.git.util import (
-    fatal,
     option_operand,
     verb_usage,
 )
@@ -94,27 +92,24 @@ async def shortlog(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    try:
-        word = option_operand(ctx, texts)
-        if word is not None:
-            raise ShortlogOptionError(word, verb_usage(ctx))
-        repo, location = await opened(ctx, fl)
-        assert ctx.vfs is not None
-        mailmap = await load_mailmap(ctx.vfs, location)
-        revisions, patterns, dashed = await walk_operands(
-            ctx, fl, repo, location, texts
-        )
-        out = await asyncio.to_thread(
-            _summary,
-            repo,
-            revisions,
-            replace(parse_flags(fl), pathspecs=patterns),
-            fl.as_bool("email"),
-            fl.as_bool("numbered"),
-            fl.as_bool("summary"),
-            mailmap,
-            dashed,
-        )
-        return out, IOResult()
-    except GitError as exc:
-        return fatal(exc)
+    word = option_operand(ctx, texts)
+    if word is not None:
+        raise ShortlogOptionError(word, verb_usage(ctx))
+    repo, location = await opened(ctx, fl)
+    assert ctx.vfs is not None
+    mailmap = await load_mailmap(ctx.vfs, location)
+    revisions, patterns, dashed = await walk_operands(
+        ctx, fl, repo, location, texts
+    )
+    out = await asyncio.to_thread(
+        _summary,
+        repo,
+        revisions,
+        replace(parse_flags(fl), pathspecs=patterns),
+        fl.as_bool("email"),
+        fl.as_bool("numbered"),
+        fl.as_bool("summary"),
+        mailmap,
+        dashed,
+    )
+    return out, IOResult()

@@ -22,7 +22,8 @@ import { httpRequest } from '../../../builtin/utils/http.ts'
 import type { Context } from '../../../config.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
-import { GitError, MissingRepositoryError, NoWorkspaceError } from './errors.ts'
+import { GitError, MissingRepositoryError } from './errors.ts'
+import { requireVfs } from './util.ts'
 import { loadRefs, readHead } from './refs.ts'
 import { objectType, openRepo, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -423,8 +424,7 @@ export async function openTransport(
     throw new GitError(`Unable to find remote helper for '${helper}'`)
   if (helper === null && SCP_LIKE.test(url))
     throw new GitError("Unable to find remote helper for 'ssh'")
-  const vfs = ctx.vfs
-  if (vfs === undefined) throw new NoWorkspaceError()
+  const vfs = requireVfs(ctx)
   const raw = helper === null ? url : decodeURIComponent(new URL(url).pathname)
   const path = PathSpec.fromStrPath(raw, undefined, start)
   for (const suffix of REPO_SUFFIXES) {

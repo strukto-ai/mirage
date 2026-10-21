@@ -294,9 +294,9 @@ def test_always_revalidates_a_walk_and_a_glob():
 
 
 def test_always_warm_read_costs_one_probe():
-    """Cost is the contract, and the routing probe is the cost.
+    """Cost is the contract, and the operand probe is the cost.
 
-    A warm ``cat`` is one backend stat: the routing reconcile. ``cat``'s own
+    A warm ``cat`` is one backend stat: the operand probe. ``cat``'s own
     operand stat and the gate both reuse its answer for the rest of the
     command, so a count cannot tell the gate on from off here; the gate's
     own reach -- the reads routing never sees -- is pinned by
@@ -316,7 +316,7 @@ def test_always_warm_read_costs_one_probe():
 
     asyncio.run(run())
     assert client.calls["head_object"] == 1, (
-        "the routing reconcile, reused by cat's stat and the gate"
+        "the operand probe, reused by cat's stat and the gate"
     )
     assert client.calls["get_object"] == 0, (
         "an unchanged object must still be served from cache"
@@ -350,11 +350,11 @@ def _warm_stat(line: str, session_id: str | None = None):
 
 
 def test_always_warm_stat_costs_one_probe():
-    """The keyed-store ``stat`` override reuses the routing probe too.
+    """The keyed-store ``stat`` override reuses the operand probe too.
 
     s3 and gridfs register their own ``stat`` rather than the generic's,
     so they get the probe answer only if the override's adapter carries
-    it: one HEAD, the routing reconcile, where it cost two.
+    it: one HEAD, the operand probe, where it cost two.
     """
     (code, out, _), client = _warm_stat("stat -c %s /s3/a.txt")
     assert (code, out) == (0, b"9\n")
@@ -546,15 +546,15 @@ def test_ram_cannot_declare_fresh():
     assert "needs a resource that caches reads" in str(exc.value)
 
 
-def test_a_routing_probe_failure_never_takes_the_line():
-    """Routing runs before any handler, so a raise there loses the line.
+def test_an_operand_probe_failure_never_takes_the_line():
+    """A lookup must be answered, so a raise in its probe loses nothing.
 
-    ``reconcile_read`` probes a warm named operand at routing. If that
-    probe raised, there would be no command yet to report it: the whole
-    line fails, later ``;`` stages included, with no operand named. The
-    probe is best-effort instead. The entry is dropped and the command
-    reads the backend itself, so ``ls`` lists and ``cat`` prints current
-    bytes, and the stage after the ``;`` still runs.
+    ``reconcile_read`` probes a warm named operand at the command's first
+    lookup of it. If that probe raised, the lookup would fail with an
+    error that names no operand, and the line with it. The probe is
+    best-effort instead. The entry is dropped and the command reads the
+    backend itself, so ``ls`` lists and ``cat`` prints current bytes, and
+    the stage after the ``;`` still runs.
     """
     objects = {"a.txt": b"v1\n"}
     session, ws = _always_mount(objects)
@@ -580,10 +580,10 @@ def test_a_routing_probe_failure_never_takes_the_line():
 
     (ls_exit, ls_out), (cat_exit, cat_out) = asyncio.run(run())
     assert ls_exit == 0 and ls_out.endswith(b"/s3/a.txt\nsurvived\n"), (
-        "a routing probe failure must not take a metadata command's line"
+        "an operand probe failure must not take a metadata command's line"
     )
     assert cat_exit == 0 and cat_out == b"v1\nsurvived\n", (
-        "a routing probe failure drops the entry and the read goes cold"
+        "an operand probe failure drops the entry and the read goes cold"
     )
 
 
@@ -592,10 +592,10 @@ def test_metadata_command_reconciles_its_operand():
 
     Routing is the one entry point a metadata command has to backend truth, and
     it must keep probing there. The stat count cannot show it any more:
-    ``ls``'s own operand stat serves the routing probe's answer, so a warm
+    ``ls``'s own operand stat serves the operand probe's answer, so a warm
     ``ls -l`` is the probe plus ls's readdir check of its operand, and with
     routing dark it is ls's stat plus that same check -- two either way.
-    What only the routing probe does is evict a copy the backend replaced,
+    What only the operand probe does is evict a copy the backend replaced,
     so that is what this pins.
     """
     objects = {"a.txt": b"v1\n"}
@@ -617,7 +617,7 @@ def test_metadata_command_reconciles_its_operand():
     kept, evicted = asyncio.run(run())
     assert kept, "an unchanged copy survives the probe"
     assert evicted, (
-        "ls must still reconcile its operand at routing; a replaced copy "
+        "ls must still reconcile its operand; a replaced copy "
         "left in the cache means the one entry point a metadata command has to "
         "backend truth went dark"
     )
@@ -684,7 +684,7 @@ def test_bounded_serves_within_the_bound_then_goes_cold():
     assert warm == b"v1\n"
     assert warm_calls["head_object"] == 1, (
         "a warm bounded read is cat's own stat and nothing else; the same "
-        "read under fresh also costs one (the routing reconcile, whose "
+        "read under fresh also costs one (the operand probe, whose "
         "answer cat's stat and the gate reuse), so anything above one here "
         "means an entry point that should have skipped did not"
     )
@@ -846,8 +846,8 @@ def test_one_line_serves_each_mount_under_its_own_policy(
     first; only the fresh leg's missing probe shows it.
 
     The closing `cat` of the bounded leg is the other entry point: a
-    single-mount read reconciles at routing, which a walk over directory
-    operands never reaches, so a routing reconcile reading the
+    single-mount read reconciles its named operand, which a walk over
+    directory operands never reaches, so an operand probe reading the
     workspace's `fresh` would refetch v2 there and nothing above would
     notice.
     """
@@ -952,8 +952,8 @@ def test_one_line_serves_each_mount_under_its_own_policy(
         "only the fresh leg's refetch reaches the backend"
     )
     assert (single_out, single_calls) == (b"v1\n", {}), (
-        "a single-mount read of the bounded leg must not reconcile at "
-        "routing; v2 here means the routing probe read another policy"
+        "a single-mount read of the bounded leg must not reconcile its "
+        "operand; v2 here means the operand probe read another policy"
     )
 
 

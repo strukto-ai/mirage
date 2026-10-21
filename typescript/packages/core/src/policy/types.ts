@@ -625,9 +625,10 @@ export interface CommandContext {
    * Whether the handler this command resolves to declares that it may
    * change state (`CLIHandler.write`, `Command.write`): an installed CLI's
    * or a mount tree's leaf as the walk names it, a mount command as the
-   * mount that would run it resolves it. False for a shell builtin, a
-   * function, an external program and an unknown name. Absent reads as
-   * false.
+   * mount that would run it resolves it, and a builtin only when its options
+   * let it write (`sort -o` writes, `sort` does not). False for a shell
+   * builtin, a function, an external program and an unknown name. Absent
+   * reads as false.
    */
   write?: boolean
   /** The session, read only: a write through it is refused. Filled when a method is asked. */
@@ -963,6 +964,13 @@ export interface EntryGate {
    * took.
    */
   readonly granted: readonly CommandRule[]
+  /**
+   * The paths the line names, which the gate judged. Read by the dispatcher,
+   * which checks a named path against the backend under `read: fresh` the
+   * first time the command looks it up, and leaves the entries a walk reaches
+   * to their listings.
+   */
+  readonly judged: ReadonlySet<string>
   check(virtual: string): void
   /** Whether anything at or under this path could be refused for the
    * running command, so a native walk there gives way to the guarded one;

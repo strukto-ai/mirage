@@ -22,7 +22,6 @@ from mirage.commands.builtin.generic.crossmount.constants import (
 from mirage.commands.builtin.generic.crossmount.du import run_du
 from mirage.commands.builtin.generic.crossmount.find import run_find
 from mirage.commands.builtin.generic.crossmount.route import handle_cross_mount
-from mirage.commands.builtin.generic.crossmount.search import walks_mounts
 from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
@@ -42,6 +41,7 @@ from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
 from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.files import Files
+from mirage.workspace.lookup import walks_mounts
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -52,6 +52,11 @@ from mirage.workspace.types import ExecutionNode
 logger = logging.getLogger(__name__)
 
 _TRAVERSAL_CMDS = frozenset({"find", "du"})
+
+# The walks the fan-out composes over nested mounts: find and du from each
+# mount's rows, ls and the searches from each mount's own part. tree walks
+# them through the dispatcher's listings.
+_COMPOSED = _TRAVERSAL_CMDS | {"ls", "grep", "rg"}
 
 
 async def _own_part(
@@ -113,12 +118,12 @@ def _should_fan_out(
 ) -> bool:
     """Whether `cmd` on this path should run across multiple mounts.
 
-    True when the command is in the traversal whitelist (find/du)
-    and the path has at least one descendant mount; or for grep with
-    -r/-R; or for ls -R. Returns False when there's no descendant
-    mount under the path (single-mount dispatch is correct), and for a
-    walk told to keep to its operand's filesystem (``du -x``, ``rg
-    --one-file-system``), since a mount is one.
+    True for a walk the fan-out composes when the path has at least one
+    descendant mount and the line walks into it (``walks_mounts``, the
+    answer the admission gate stamped on the line). False when there is
+    no descendant mount under the path (single-mount dispatch is
+    correct), and for a walk told to keep to its operand's filesystem
+    (``du -x``, ``rg --one-file-system``), since a mount is one.
     """
     # Use the raw mount table: hidden descendants still shadow backend keys.
     # Refused operands name nothing. Every other operand can own nested
@@ -128,13 +133,7 @@ def _should_fan_out(
         for p in paths
     ):
         return False
-    if cmd_name == "du":
-        return flag_kwargs.get("one_file_system") is not True
-    if cmd_name in _TRAVERSAL_CMDS:
-        return True
-    if cmd_name == "ls":
-        return flag_kwargs.get("recursive") is True
-    return walks_mounts(cmd_name, flag_kwargs)
+    return cmd_name in _COMPOSED and walks_mounts(cmd_name, flag_kwargs)
 
 
 async def _fan_out_traversal(

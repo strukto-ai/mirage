@@ -33,13 +33,13 @@ from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
     MissingRepositoryError,
-    NoWorkspaceError,
 )
 from mirage.commands.cli.builtin.git.io import (
     stat_of,
 )
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.util import require_vfs
 from mirage.commands.config import Context
 from mirage.types import PathSpec
 
@@ -496,9 +496,7 @@ async def open_transport(
         raise GitError(f"Unable to find remote helper for '{scheme.group(1)}'")
     if scheme is None and SCP_LIKE.match(url):
         raise GitError("Unable to find remote helper for 'ssh'")
-    vfs = ctx.vfs
-    if vfs is None:
-        raise NoWorkspaceError()
+    vfs = require_vfs(ctx)
     path = urlsplit(url).path if scheme is not None else url
     scope = PathSpec.from_str_path(unquote(path), cwd=start)
     for suffix in REPO_SUFFIXES:

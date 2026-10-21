@@ -308,6 +308,7 @@ describe('the admission gate on the fallback storage', () => {
       scoped,
       scopes: () => scoped,
       granted,
+      judged: new Set<string>(),
       check(virtual: string): void {
         if (virtual === refuse) throw new Error(`refused: ${virtual}`)
       },

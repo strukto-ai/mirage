@@ -24,7 +24,6 @@ import {
   GitError,
   IncompatibleOptionsError,
   InvalidRevisionNameError,
-  NoWorkspaceError,
   UsageError,
 } from './errors.ts'
 import { OBJECT_TYPES } from './constants.ts'
@@ -33,7 +32,7 @@ import { resolveObject } from './revparse.ts'
 import { guarded, located, placeNamed, rooted, shownItems, shownRaw } from './seen.ts'
 import { opened } from './session.ts'
 import type { GitObject } from './types.ts'
-import { checkSwitches, fatal, verbUsage } from './util.ts'
+import { checkSwitches, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -223,65 +222,59 @@ export async function catFile(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    if (ctx.vfs === undefined) throw new NoWorkspaceError()
-    checkSwitches(ctx, texts)
-    const modes = fl.typedOrder(...QUERIES)
-    const [first, second] = modes
-    if (first !== undefined && second !== undefined) {
-      throw new IncompatibleOptionsError(`-${second}`, `-${first}`)
+  checkSwitches(ctx, texts)
+  const modes = fl.typedOrder(...QUERIES)
+  const [first, second] = modes
+  if (first !== undefined && second !== undefined) {
+    throw new IncompatibleOptionsError(`-${second}`, `-${first}`)
+  }
+  const batch = fl.typedOrder('batch', 'batch_check').at(-1)
+  if (batch !== undefined) {
+    if (texts.length > 0) {
+      throw new UsageError('', 'fatal: batch modes take no arguments\n\n' + verbUsage(ctx))
     }
-    const batch = fl.typedOrder('batch', 'batch_check').at(-1)
-    if (batch !== undefined) {
-      if (texts.length > 0) {
-        throw new UsageError('', 'fatal: batch modes take no arguments\n\n' + verbUsage(ctx))
+    const value = fl.raw(batch)
+    const template = typeof value === 'string' ? value : BATCH_FORMAT
+    for (const found of template.matchAll(FORMAT_ATOM)) {
+      if (!BATCH_ATOMS.has(found[1] ?? '')) {
+        throw new GitError(`bad cat-file format: ${found[0]}`)
       }
-      const value = fl.raw(batch)
-      const template = typeof value === 'string' ? value : BATCH_FORMAT
-      for (const found of template.matchAll(FORMAT_ATOM)) {
-        if (!BATCH_ATOMS.has(found[1] ?? '')) {
-          throw new GitError(`bad cat-file format: ${found[0]}`)
-        }
-      }
-      const repo = await opened(ctx, fl)
-      const text = DEC.decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
-      const lines = text.split('\n')
-      if (lines.at(-1) === '') lines.pop()
-      const heads: [Uint8Array, GitObject | null, string][] = []
-      for (const line of lines) heads.push(await batchHead(repo, line, template))
-      return [batchLines(repo, heads, batch === 'batch'), new IOResult()]
-    }
-    if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(ctx))
-    if (first !== undefined) {
-      const name = texts[0]
-      if (name === undefined) {
-        throw new UsageError('', `fatal: <object> required with '-${first}'\n\n` + verbUsage(ctx))
-      }
-      if (texts.length > 1) {
-        throw new UsageError('', 'fatal: too many arguments\n\n' + verbUsage(ctx))
-      }
-      const repo = await opened(ctx, fl)
-      const [out, code] = await query(repo, first, name)
-      return [out.length > 0 ? out : null, new IOResult({ exitCode: code })]
-    }
-    const [kind, name] = texts
-    if (kind === undefined || name === undefined || texts.length !== 2) {
-      throw new UsageError(
-        '',
-        'fatal: only two arguments allowed in <type> <object> mode, ' +
-          `not ${String(texts.length)}\n\n` +
-          verbUsage(ctx),
-      )
-    }
-    if (!OBJECT_TYPES.some((type) => type === kind)) {
-      throw new GitError(`invalid object type "${kind}"`)
     }
     const repo = await opened(ctx, fl)
-    const shown = await typedBytes(repo, name, kind)
-    if (shown === null) throw new GitError(`git cat-file ${name}: bad file`)
-    return [shown, new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+    const text = DEC.decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
+    const lines = text.split('\n')
+    if (lines.at(-1) === '') lines.pop()
+    const heads: [Uint8Array, GitObject | null, string][] = []
+    for (const line of lines) heads.push(await batchHead(repo, line, template))
+    return [batchLines(repo, heads, batch === 'batch'), new IOResult()]
   }
+  if (first === undefined && texts.length === 0) throw new UsageError('', verbUsage(ctx))
+  if (first !== undefined) {
+    const name = texts[0]
+    if (name === undefined) {
+      throw new UsageError('', `fatal: <object> required with '-${first}'\n\n` + verbUsage(ctx))
+    }
+    if (texts.length > 1) {
+      throw new UsageError('', 'fatal: too many arguments\n\n' + verbUsage(ctx))
+    }
+    const repo = await opened(ctx, fl)
+    const [out, code] = await query(repo, first, name)
+    return [out.length > 0 ? out : null, new IOResult({ exitCode: code })]
+  }
+  const [kind, name] = texts
+  if (kind === undefined || name === undefined || texts.length !== 2) {
+    throw new UsageError(
+      '',
+      'fatal: only two arguments allowed in <type> <object> mode, ' +
+        `not ${String(texts.length)}\n\n` +
+        verbUsage(ctx),
+    )
+  }
+  if (!OBJECT_TYPES.some((type) => type === kind)) {
+    throw new GitError(`invalid object type "${kind}"`)
+  }
+  const repo = await opened(ctx, fl)
+  const shown = await typedBytes(repo, name, kind)
+  if (shown === null) throw new GitError(`git cat-file ${name}: bad file`)
+  return [shown, new IOResult()]
 }

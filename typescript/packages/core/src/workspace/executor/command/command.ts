@@ -235,6 +235,21 @@ export async function fillTreeEnv(
   return [...names].some((n) => sessionEntry(session.vars, n) !== before.get(n))
 }
 
+/**
+ * The dispatch a command's own ops go through: every op it issues is made by
+ * the command, its admission gate included, so a rule scoped to the command
+ * reaches the entries below its operands, and a CLI's own reads and every
+ * mount run below (one run, a fan-out or a cross-mount) included. Mirrors
+ * Python's made_by_command.
+ */
+export function madeByCommand(
+  dispatch: CallerDispatchFn,
+  admission: EntryGate | null,
+): CallerDispatchFn {
+  return (op, path, args, kwargs, report, caller) =>
+    dispatch(op, path, args, kwargs, report, caller ?? { ...currentCaller(), ruleGate: admission })
+}
+
 export async function handleCommand(
   executeNode: ExecuteNodeFn,
   dispatch: CallerDispatchFn,
@@ -306,19 +321,7 @@ export async function handleCommand(
     )
   }
 
-  // Every op the command or CLI issues from here is made by the command,
-  // its gate included, so a rule scoped to a CLI reaches its own reads, and
-  // so does every mount run below: one run, a fan-out or a cross-mount.
-  const commandDispatch = dispatch
-  dispatch = (op, path, args, kwargs, report, caller) =>
-    commandDispatch(
-      op,
-      path,
-      args,
-      kwargs,
-      report,
-      caller ?? { ...currentCaller(), ruleGate: admission },
-    )
+  dispatch = madeByCommand(dispatch, admission)
   // The command's own files keep no ledger: the dispatcher accounts for the line.
   const commandFiles = (follow: FollowOperands | null): Files =>
     new Files(

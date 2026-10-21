@@ -16,7 +16,6 @@ import { DISPATCH_BUILDERS } from '../../commands/builtin/generic/crossmount/con
 import { runDu } from '../../commands/builtin/generic/crossmount/du.ts'
 import { runFind } from '../../commands/builtin/generic/crossmount/find.ts'
 import { handleCrossMount } from '../../commands/builtin/generic/crossmount/route.ts'
-import { walksMounts } from '../../commands/builtin/generic/crossmount/search.ts'
 import type { RunSingle, DispatchFn } from '../../commands/builtin/generic/crossmount/types.ts'
 import { runDispatch } from '../../commands/builtin/generic_bind/dispatch.ts'
 import { UsageError } from '../../commands/errors.ts'
@@ -34,8 +33,14 @@ import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Files, readerOf } from '../files.ts'
+import { walksMounts } from '../lookup/index.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
+
+// The walks the fan-out composes over nested mounts: find and du from each
+// mount's rows, ls and the searches from each mount's own part. tree walks
+// them through the dispatcher's listings.
+const COMPOSED: ReadonlySet<string> = new Set([...TRAVERSAL_CMDS, 'ls', 'grep', 'rg'])
 
 /**
  * One mount's part of a find or du, on the command that mount serves. A mount
@@ -87,12 +92,7 @@ export function shouldFanOut(
   // A refused operand names nothing; every valid operand may own a subtree.
   if (!paths.some((p) => p.walkError === null && registry.descendantMounts(p.virtual).length > 0))
     return false
-  if (cmdName === 'du') return flagKwargs.one_file_system !== true
-  if (TRAVERSAL_CMDS.has(cmdName)) return true
-  if (cmdName === 'ls') {
-    return flagKwargs.recursive === true
-  }
-  return walksMounts(cmdName, flagKwargs)
+  return COMPOSED.has(cmdName) && walksMounts(cmdName, flagKwargs)
 }
 
 /**

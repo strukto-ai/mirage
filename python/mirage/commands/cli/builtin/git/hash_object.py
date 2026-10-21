@@ -23,7 +23,6 @@ from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.cli.builtin.git.constants import OBJECT_TYPES
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
-    NoWorkspaceError,
     ObjectWriteReadOnlyError,
 )
 from mirage.commands.cli.builtin.git.io import read_file
@@ -31,7 +30,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
-    fatal,
+    require_vfs,
     start_point,
 )
 from mirage.commands.config import Context
@@ -157,39 +156,34 @@ async def hash_object(
         ctx (Context): the line's context.
     """
     fl = FlagView(ctx.flags)
-    vfs = ctx.vfs
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_switches(ctx, texts)
-        kind = fl.as_str("t", "blob")
-        if kind not in OBJECT_TYPES:
-            raise GitError(f'invalid object type "{kind}"')
-        literally = fl.as_bool("literally")
-        base = start_point(fl)
-        contents: list[bytes] = []
-        if fl.as_bool("stdin"):
-            contents.append(await read_stdin_async(ctx.stdin) or b"")
-        names = list(texts)
-        if fl.as_bool("stdin_paths"):
-            listed = (await read_stdin_async(ctx.stdin) or b"").decode(
-                "utf-8", "replace"
-            )
-            names += [line for line in listed.split("\n") if line]
-        for name in names:
-            contents.append(await _content(vfs, base, name))
-        if not literally and not all(well_formed(kind, d) for d in contents):
-            raise GitError("refusing to create malformed object")
-        if fl.as_bool("w") and contents:
-            repo, _ = await opened(ctx, fl)
-            cls = OBJECT_CLASSES[kind]
-            for data in contents:
-                obj = cls.from_raw_string(cls.type_num, data)
-                await asyncio.to_thread(repo.object_store.add_object, obj)
-        out = b"".join(object_id(kind, data) + b"\n" for data in contents)
-        return out or None, IOResult()
-    except GitError as exc:
-        return fatal(exc)
+    vfs = require_vfs(ctx)
+    check_switches(ctx, texts)
+    kind = fl.as_str("t", "blob")
+    if kind not in OBJECT_TYPES:
+        raise GitError(f'invalid object type "{kind}"')
+    literally = fl.as_bool("literally")
+    base = start_point(fl)
+    contents: list[bytes] = []
+    if fl.as_bool("stdin"):
+        contents.append(await read_stdin_async(ctx.stdin) or b"")
+    names = list(texts)
+    if fl.as_bool("stdin_paths"):
+        listed = (await read_stdin_async(ctx.stdin) or b"").decode(
+            "utf-8", "replace"
+        )
+        names += [line for line in listed.split("\n") if line]
+    for name in names:
+        contents.append(await _content(vfs, base, name))
+    if not literally and not all(well_formed(kind, d) for d in contents):
+        raise GitError("refusing to create malformed object")
+    if fl.as_bool("w") and contents:
+        repo, _ = await opened(ctx, fl)
+        cls = OBJECT_CLASSES[kind]
+        for data in contents:
+            obj = cls.from_raw_string(cls.type_num, data)
+            await asyncio.to_thread(repo.object_store.add_object, obj)
+    out = b"".join(object_id(kind, data) + b"\n" for data in contents)
+    return out or None, IOResult()
 
 
 def hash_object_read_only(

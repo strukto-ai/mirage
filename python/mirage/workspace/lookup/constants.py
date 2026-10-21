@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
+from mirage.commands.builtin.generic.grep import directories_action
 from mirage.commands.builtin.generic.ls import link_mode
+from mirage.commands.builtin.generic.rg import walks_descendant_mounts
+from mirage.commands.builtin.generic.sed import sed_writes
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import FlagValue
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
 from mirage.types import LsLinkMode, PathSpec
@@ -254,17 +258,17 @@ INTERPRETER_NAMES = frozenset(
 # runtime's own processes rather than mirage's managed runners.
 CAPTURABLE_BUILTINS = INTERPRETER_NAMES | frozenset({"ps", "kill"})
 
-# Per-command flags that turn a no-follow command back into a following
-# one, GNU's -L / --dereference.
-DEREFERENCE_FLAGS = {
-    "stat": ("L", ("dereference",)),
-    "file": ("L", ("dereference",)),
-    "du": ("L", ("dereference",)),
+# Per-command option that turns a no-follow command back into a
+# following one (GNU's -L), then the one that takes it back, the last of
+# the two winning: `du -LP` does not follow, `du -PL` does, and so for
+# file's -L and -h (file 5.46). Each is the option's dest in the
+# command's spec, read off the parsed line, so a long spelling and its
+# abbreviation count as the short one does (`stat --deref`).
+DEREFERENCE_FLAGS: dict[str, tuple[str, ...]] = {
+    "stat": ("dereference",),
+    "file": ("L", "h"),
+    "du": ("L", "P"),
 }
-
-# The options that take a dereference back, the last of the two winning
-# (GNU du: `du -LP` does not follow, `du -PL` does).
-NO_DEREFERENCE_FLAGS = {"du": ("P", ("no-dereference",))}
 
 # find states its link policy as a leading option rather than a flag, and
 # the last one wins: `find -L -P x` does not follow, `find -P -L x` does.
@@ -387,57 +391,170 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
     return words
 
 
-# Commands whose traversal descends into descendant mounts (the
-# executor's fan-out reruns them per mount), always or under a flag.
-# What the admission gate reads to stamp ``CommandContext.walks``, so a
-# mount rule can speak on an ancestor operand. ``tar`` and ``zip`` walk
-# too but refuse to cross a mount boundary, so they are deliberately
-# absent: a mount rule has nothing to say about a walk that never
-# enters it.
-WALK_COMMANDS = frozenset({"find", "du", "tree", "rg"})
-WALK_FLAGS = {"grep": ("rR", ("recursive",)), "ls": ("R", ("recursive",))}
+def line_flags(
+    name: str, words: Sequence[str | PathSpec]
+) -> Mapping[str, FlagValue]:
+    """The flags a builtin's own grammar reads off its words, as the
+    executor will hand them to its handler; empty for a name with no
+    builtin grammar. A wrapper reads as the program it runs.
 
-# Commands whose reads exceed the words the gate judged even inside one
-# mount: the walkers above plus the subtree readers that stop at a
-# mount boundary. What the whole-line gate reads: a runtime does its
-# own walking where no entry gate follows, so a path rule that scopes
-# such a command refuses the captured line instead of running it
-# unguarded.
-SUBTREE_READ_FLAGS = {
-    "tar": ("c", ("create",)),
-    "zip": ("r", ("recurse-paths",)),
-    "cp": ("rR", ("recursive",)),
-}
-
-
-def walks_mounts(name: str, words: Sequence[str | PathSpec]) -> bool:
-    """Whether a command's traversal enters descendant mounts; a
-    wrapper walks as the program it runs.
+    The facts below are read off this parse rather than scanned from the
+    words, so an abbreviation, a long spelling, a valued option and an
+    option's attached value all read as the handler will read them:
+    ``grep --recur`` and ``grep -d recurse`` walk, ``grep -ephrase``
+    does not.
 
     Args:
         name (str): command name.
-        words (Sequence[str | PathSpec]): the command's raw words,
-            name first.
+        words (Sequence[str | PathSpec]): the command's raw words, name
+            first.
+    """
+    runs, *first = EXEC_WRAPPERS.get(name, (name,))
+    spec = SPECS.get(runs)
+    if spec is None:
+        return {}
+    argv = [w if isinstance(w, str) else w.raw_path for w in words[1:]]
+    return parse_to_kwargs(parse_command(spec, [*first, *argv], "/", runs))
+
+
+def walks_mounts(name: str, flags: Mapping[str, FlagValue]) -> bool:
+    """Whether a command's traversal enters the mounts below its
+    operands; a wrapper walks as the program it runs.
+
+    What the admission gate stamps as ``CommandContext.walks``, so a
+    mount rule can speak on an ancestor operand, and what the executor's
+    fan-out reruns in each descendant mount: one answer for both, so a
+    line the fan-out carries into a mount is one its rule was asked
+    about. ``du -x``, ``tree -x`` and ``rg --one-file-system`` keep to
+    the operand's mount. ``tar`` and ``zip`` walk too but refuse to cross
+    a mount boundary, so a mount rule has nothing to say about them.
+
+    Args:
+        name (str): command name.
+        flags (Mapping[str, FlagValue]): the parsed flags
+            (``line_flags``).
     """
     runs = EXEC_WRAPPERS.get(name, (name,))[0]
-    if runs in WALK_COMMANDS:
+    if runs == "find":
         return True
-    spec = WALK_FLAGS.get(runs)
-    return spec is not None and _has_option(words, spec[0], spec[1])
+    if runs == "rg":
+        return walks_descendant_mounts(flags)
+    if runs not in ("du", "tree", "ls", "grep"):
+        return False
+    fl = FlagView(flags, spec=SPECS[runs])
+    if runs == "du":
+        return not fl.as_bool("one_file_system")
+    if runs == "tree":
+        return not fl.as_bool("x")
+    if runs == "ls":
+        return fl.as_bool("recursive")
+    return directories_action(fl) == "recurse"
 
 
-def reads_subtrees(name: str, words: Sequence[str | PathSpec]) -> bool:
-    """Whether a command reads below the paths its words name.
+def reads_subtrees(name: str, flags: Mapping[str, FlagValue]) -> bool:
+    """Whether a command reads below the paths its words name: every
+    walk, whether or not it crosses into the mounts below (``du -x``,
+    ``rg --one-file-system`` read their own mount's subtree), plus the
+    subtree readers that stop at a mount boundary (``tar -c``,
+    ``zip -r``, ``cp -r``, ``cp -a``).
+
+    What the whole-line gate reads: a runtime does its own walking where
+    no entry gate follows, so a path rule that scopes such a command
+    refuses the captured line instead of running it unguarded.
 
     Args:
         name (str): command name.
-        words (Sequence[str | PathSpec]): the command's raw words,
-            name first.
+        flags (Mapping[str, FlagValue]): the parsed flags
+            (``line_flags``).
     """
-    if walks_mounts(name, words):
+    runs = EXEC_WRAPPERS.get(name, (name,))[0]
+    if runs in ("find", "du", "tree", "rg"):
         return True
-    spec = SUBTREE_READ_FLAGS.get(name)
-    return spec is not None and _has_option(words, spec[0], spec[1])
+    if runs in ("grep", "ls"):
+        return walks_mounts(runs, flags)
+    if name not in ("tar", "zip", "cp"):
+        return False
+    fl = FlagView(flags, spec=SPECS[name])
+    if name == "tar":
+        return fl.as_bool("create")
+    if name == "zip":
+        return fl.as_bool("r")
+    return any(fl.as_bool(d) for d in ("r", "recursive", "archive"))
+
+
+# The builtins whose declared write ``changes_files`` narrows by line.
+_NARROWED_WRITES = frozenset(
+    {
+        "sort",
+        "shuf",
+        "iconv",
+        "uniq",
+        "xxd",
+        "tee",
+        "mktemp",
+        "tar",
+        "unzip",
+        "gzip",
+        "gunzip",
+        "sed",
+    }
+)
+
+
+def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
+    """Whether this run of a builtin may change files, read off its
+    words: the narrowing of a builtin's declared ``write`` that its
+    options make. ``sort -o``, ``shuf -o`` and ``iconv -o`` write their
+    output file and ``uniq`` and ``xxd`` their second operand, which a
+    pattern operand may name; ``sed``
+    writes under ``-i``, a ``w`` file in its script or a script file
+    (unread here, so assumed to); ``tar`` writes to create or extract,
+    not to list or to extract to stdout; ``unzip`` writes unless it
+    lists, tests or pipes; ``gzip`` and ``gunzip`` write a file operand
+    unless ``-c`` or ``-t``; ``tee`` writes the files it names;
+    ``mktemp -u`` creates nothing. Every other name may write whenever
+    its handler declares so.
+
+    Args:
+        name (str): command name.
+        words (Sequence[str | PathSpec]): the command's words, name
+            first; an operand classified as a path carries whether it is
+            a pattern still to expand.
+    """
+    if name not in _NARROWED_WRITES:
+        return True
+    spec = SPECS[name]
+    argv = [w if isinstance(w, str) else w.raw_path for w in words[1:]]
+    parsed = parse_command(spec, argv, "/", name)
+    flags = parse_to_kwargs(parsed)
+    fl = FlagView(flags, spec=spec)
+    operands = len(parsed.args)
+    if name in ("sort", "shuf"):
+        return fl.raw("output") is not None
+    if name == "iconv":
+        return fl.raw("o") is not None
+    if name in ("uniq", "xxd"):
+        # A pattern the backend expands may name the output file too; a
+        # quoted name is no pattern.
+        return operands > 1 or any(
+            isinstance(w, PathSpec) and w.pattern is not None
+            for w in words[1:]
+        )
+    if name == "tee":
+        return operands > 0
+    if name == "mktemp":
+        return not fl.as_bool("dry_run")
+    if name == "tar":
+        return fl.as_bool("create") or (
+            fl.as_bool("extract") and not fl.as_bool("to_stdout")
+        )
+    if name == "unzip":
+        return not any(fl.as_bool(d) for d in ("args_l", "t", "v", "p", "Z"))
+    if name == "gzip":
+        return operands > 0 and not fl.as_bool("c")
+    if name == "gunzip":
+        return operands > 0 and not (fl.as_bool("c") or fl.as_bool("t"))
+    return sed_writes(flags, parsed.texts())
 
 
 # Commands the router must not resolve the last component for, even
@@ -455,73 +572,6 @@ def reads_subtrees(name: str, words: Sequence[str | PathSpec]) -> bool:
 # deliberately absent: `zip -y -r a.zip dlink/` descends where
 # `zip -y -r a.zip dlink` stores the link.
 SLASH_KEEPS_LAST = {"tar", "rm", "rmdir", "mv", "unlink", "mkdir"}
-
-
-def _has_option(
-    words: Sequence[str | PathSpec], shorts: str, longs: tuple[str, ...]
-) -> bool:
-    """Whether any of the given options appears among a command's words.
-
-    Read off the command line rather than the parsed flags because
-    operand rewriting happens before flag parsing. Only option words are
-    inspected, so a format string like ``-c '%L'`` cannot trip it.
-
-    Args:
-        words (Sequence[str | PathSpec]): the command's raw words,
-            name first.
-        shorts (str): short option letters, any of which counts.
-        longs (tuple[str, ...]): long option names, without the dashes.
-    """
-    for word in words[1:]:
-        # Option words are always plain strings; path operands arrive as
-        # PathSpec and can never be a flag.
-        if not isinstance(word, str):
-            continue
-        if word == "--":
-            return False
-        if word.startswith("--"):
-            if word[2:] in longs:
-                return True
-            continue
-        if word.startswith("-") and any(c in word[1:] for c in shorts):
-            return True
-    return False
-
-
-def _follows_last(
-    words: Sequence[str | PathSpec],
-    follow: tuple[str, tuple[str, ...]],
-    no_follow: tuple[str, tuple[str, ...]],
-) -> bool:
-    """Whether the last of a command's link options asks it to follow.
-
-    Args:
-        words (Sequence[str | PathSpec]): the command's raw words,
-            name first.
-        follow (tuple[str, tuple[str, ...]]): the short letters and long
-            names that dereference.
-        no_follow (tuple[str, tuple[str, ...]]): the ones that take it
-            back.
-    """
-    follows = False
-    for word in words[1:]:
-        if not isinstance(word, str) or word == "-":
-            continue
-        if word == "--":
-            break
-        if word.startswith("--"):
-            if word[2:] in follow[1]:
-                follows = True
-            elif word[2:] in no_follow[1]:
-                follows = False
-            continue
-        if word.startswith("-"):
-            for letter in word[1:]:
-                if letter in follow[0]:
-                    follows = True
-                elif letter in no_follow[0]:
-                    follows = False
-    return follows
 
 
 def _last_link_option(
@@ -551,10 +601,11 @@ def dereferences(name: str, words: list[str | PathSpec]) -> bool:
     policy = LAST_WINS_LINK_OPTIONS.get(name)
     if policy is not None:
         return _last_link_option(words, policy)
-    spec = DEREFERENCE_FLAGS.get(name)
-    if spec is None:
+    options = DEREFERENCE_FLAGS.get(name)
+    if options is None:
         return False
-    return _follows_last(words, spec, NO_DEREFERENCE_FLAGS.get(name, ("", ())))
+    fl = FlagView(line_flags(name, words), spec=SPECS[name])
+    return fl.typed_order(*options)[-1:] == [options[0]]
 
 
 def ls_link_mode(words: Sequence[str | PathSpec]) -> LsLinkMode:
@@ -569,10 +620,7 @@ def ls_link_mode(words: Sequence[str | PathSpec]) -> LsLinkMode:
         words (Sequence[str | PathSpec]): the command's raw words, name
             first.
     """
-    argv = [w if isinstance(w, str) else w.raw_path for w in words[1:]]
-    spec = SPECS["ls"]
-    parsed = parse_command(spec, argv, "/", "ls")
-    return link_mode(FlagView(parse_to_kwargs(parsed), spec=spec))
+    return link_mode(FlagView(line_flags("ls", words), spec=SPECS["ls"]))
 
 
 # Commands that decide the last component for themselves, so the router

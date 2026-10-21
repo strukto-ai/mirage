@@ -10,7 +10,7 @@ import { toHex } from '../../../../utils/hex.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GITLINK, GITLINK_MODE } from './constants.ts'
-import { GitError, NoWorkspaceError } from './errors.ts'
+import { GitError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
@@ -19,7 +19,6 @@ import { loadRefs } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { fatal } from './util.ts'
 
 const PACK_BLOCK = 1 << 18
 
@@ -131,88 +130,81 @@ export async function fsck(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  try {
-    const fl = new FlagView(ctx.flags)
-    const vfs = ctx.vfs
-    if (vfs === undefined) throw new NoWorkspaceError()
-    const repo = await opened(ctx, fl)
-    const args = repoArgs(repo)
-    const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-    const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))
-    const index = await readIndex(repo, repo.vfs)
-    for (const entry of index.entries.values()) if (entry.mode !== GITLINK) roots.add(entry.oid)
-    for (const conflict of index.conflicts.values()) {
-      for (const entry of [conflict.ancestor, conflict.this, conflict.other])
-        if (entry !== null && entry.mode !== GITLINK) roots.add(entry.oid)
-    }
-    for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
-      for (const oid of await logRoots(repo.vfs, directory.join('logs'))) roots.add(oid)
-    }
-    const referenced = new Set(roots)
-    const edges = new Map<string, string[]>()
-    const objects = new Map<string, string>()
-    const errors: string[] = []
-    const ids = await objectIds(repo)
-    for (const oid of roots) ids.add(oid)
-    for (const oid of [...ids].sort(compareCodePoints)) {
-      try {
-        // fsck must inspect unknown object types and their exact encoded content.
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        const result = await git.readObject({ ...args, oid, format: 'content' })
-        const body = result.object as Uint8Array
-        const header = new TextEncoder().encode(`${result.type} ${String(body.length)}\0`)
-        const wrapped = new Uint8Array(header.length + body.length)
-        wrapped.set(header)
-        wrapped.set(body, header.length)
-        if ((await sha1Hex(wrapped)) !== oid) throw new Error('hash mismatch')
-        const links: string[] = []
-        if (result.type === 'commit') {
-          const { commit } = await git.readCommit({ ...args, oid })
-          links.push(commit.tree, ...commit.parent)
-        } else if (result.type === 'tree') {
-          const { tree } = await git.readTree({ ...args, oid })
-          for (const entry of tree) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
-        } else if (result.type === 'tag') {
-          const { tag } = await git.readTag({ ...args, oid })
-          links.push(tag.object)
-        } else if (result.type !== 'blob') throw new Error(`invalid object type: ${result.type}`)
-        objects.set(oid, result.type)
-        edges.set(oid, links)
-        for (const link of links) referenced.add(link)
-      } catch (err) {
-        errors.push(`error: object ${oid}: ${err instanceof Error ? err.message : String(err)}\n`)
-      }
-    }
-    for (const oid of [...referenced].sort(compareCodePoints))
-      if (!objects.has(oid) && !roots.has(oid)) errors.push(`missing object ${oid}\n`)
-    let stderr = errors.join('')
-    if (roots.size === 0) {
-      const head = await readOptional(repo.vfs, repo.location.gitdir.join('HEAD'))
-      const branch = new TextDecoder()
-        .decode(head ?? new Uint8Array())
-        .trim()
-        .replace(/^ref: refs\/heads\//, '')
-      stderr =
-        `notice: HEAD points to an unborn branch (${branch})\nnotice: No default references\n` +
-        stderr
-    }
-    const unreachable = fl.asBool('unreachable')
-    const excluded = unreachable ? reachable(roots, edges) : referenced
-    const label = unreachable ? 'unreachable' : 'dangling'
-    const stdout =
-      unreachable || !fl.asBool('no_dangling')
-        ? [...objects]
-            .filter(([oid]) => !excluded.has(oid))
-            .sort(([a], [b]) => compareCodePoints(a, b))
-            .map(([oid, type]) => `${label} ${type} ${oid}\n`)
-            .join('')
-        : ''
-    return [
-      new TextEncoder().encode(stdout),
-      new IOResult({ exitCode: errors.length ? 1 : 0, stderr: new TextEncoder().encode(stderr) }),
-    ]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+  const fl = new FlagView(ctx.flags)
+  const repo = await opened(ctx, fl)
+  const args = repoArgs(repo)
+  const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  const roots = new Set([...refs.values()].filter((oid) => !oid.startsWith('ref: ')))
+  const index = await readIndex(repo, repo.vfs)
+  for (const entry of index.entries.values()) if (entry.mode !== GITLINK) roots.add(entry.oid)
+  for (const conflict of index.conflicts.values()) {
+    for (const entry of [conflict.ancestor, conflict.this, conflict.other])
+      if (entry !== null && entry.mode !== GITLINK) roots.add(entry.oid)
   }
+  for (const directory of new Set([repo.location.gitdir, repo.location.commondir])) {
+    for (const oid of await logRoots(repo.vfs, directory.join('logs'))) roots.add(oid)
+  }
+  const referenced = new Set(roots)
+  const edges = new Map<string, string[]>()
+  const objects = new Map<string, string>()
+  const errors: string[] = []
+  const ids = await objectIds(repo)
+  for (const oid of roots) ids.add(oid)
+  for (const oid of [...ids].sort(compareCodePoints)) {
+    try {
+      // fsck must inspect unknown object types and their exact encoded content.
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      const result = await git.readObject({ ...args, oid, format: 'content' })
+      const body = result.object as Uint8Array
+      const header = new TextEncoder().encode(`${result.type} ${String(body.length)}\0`)
+      const wrapped = new Uint8Array(header.length + body.length)
+      wrapped.set(header)
+      wrapped.set(body, header.length)
+      if ((await sha1Hex(wrapped)) !== oid) throw new Error('hash mismatch')
+      const links: string[] = []
+      if (result.type === 'commit') {
+        const { commit } = await git.readCommit({ ...args, oid })
+        links.push(commit.tree, ...commit.parent)
+      } else if (result.type === 'tree') {
+        const { tree } = await git.readTree({ ...args, oid })
+        for (const entry of tree) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
+      } else if (result.type === 'tag') {
+        const { tag } = await git.readTag({ ...args, oid })
+        links.push(tag.object)
+      } else if (result.type !== 'blob') throw new Error(`invalid object type: ${result.type}`)
+      objects.set(oid, result.type)
+      edges.set(oid, links)
+      for (const link of links) referenced.add(link)
+    } catch (err) {
+      errors.push(`error: object ${oid}: ${err instanceof Error ? err.message : String(err)}\n`)
+    }
+  }
+  for (const oid of [...referenced].sort(compareCodePoints))
+    if (!objects.has(oid) && !roots.has(oid)) errors.push(`missing object ${oid}\n`)
+  let stderr = errors.join('')
+  if (roots.size === 0) {
+    const head = await readOptional(repo.vfs, repo.location.gitdir.join('HEAD'))
+    const branch = new TextDecoder()
+      .decode(head ?? new Uint8Array())
+      .trim()
+      .replace(/^ref: refs\/heads\//, '')
+    stderr =
+      `notice: HEAD points to an unborn branch (${branch})\nnotice: No default references\n` +
+      stderr
+  }
+  const unreachable = fl.asBool('unreachable')
+  const excluded = unreachable ? reachable(roots, edges) : referenced
+  const label = unreachable ? 'unreachable' : 'dangling'
+  const stdout =
+    unreachable || !fl.asBool('no_dangling')
+      ? [...objects]
+          .filter(([oid]) => !excluded.has(oid))
+          .sort(([a], [b]) => compareCodePoints(a, b))
+          .map(([oid, type]) => `${label} ${type} ${oid}\n`)
+          .join('')
+      : ''
+  return [
+    new TextEncoder().encode(stdout),
+    new IOResult({ exitCode: errors.length ? 1 : 0, stderr: new TextEncoder().encode(stderr) }),
+  ]
 }

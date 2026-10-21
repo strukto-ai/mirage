@@ -44,7 +44,6 @@ import {
   DEFAULT_READ_SPEC,
   MountMode,
   PathSpec,
-  ReadPolicy,
   WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
@@ -62,7 +61,6 @@ import { type Clock, SystemClock } from '../../utils/clock.ts'
 // `reconcile` imports the mount layer, not the other way round. The Reconciler
 // satisfies it structurally.
 interface ReadReconciler {
-  reconcileRead(mount: MountEntry, path: string): Promise<void>
   mayServeListing(mount: MountEntry, folder: string, version: string | null): Promise<boolean>
   onGone(gone: readonly Evicted[], excluded?: readonly string[]): Promise<void>
 }
@@ -728,23 +726,6 @@ export class MountRegistry {
     }
     if (mount === null) return null
     await mount.ensureReady()
-    // Warm reads are served in place by withReadCache, so a read-only command
-    // stays on its real mount. Single-mount reads do not go through the
-    // dispatcher, so this is where they reconcile against backend truth: the
-    // shared Reconciler evicts a stale cache entry and GCs an orphaned overlay
-    // when the backend reports the path gone.
-    const baseCmd = mount.resolveCommand(cmdName)
-    if (
-      this.reconciler !== null &&
-      pathScopes.length > 0 &&
-      mount.vfs.cachesReads &&
-      baseCmd?.write !== true &&
-      mount.read.policy === ReadPolicy.FRESH
-    ) {
-      for (const scope of pathScopes) {
-        await this.reconciler.reconcileRead(mount, scope.virtual)
-      }
-    }
     return mount
   }
 }

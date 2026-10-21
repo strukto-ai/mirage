@@ -37,10 +37,6 @@ from mirage.commands.cli.builtin.git.diff_output import (
     renames_enabled,
     separator_line,
 )
-from mirage.commands.cli.builtin.git.errors import (
-    GitError,
-    NoWorkspaceError,
-)
 from mirage.commands.cli.builtin.git.format import (
     FULL_SHA,
     Decorations,
@@ -69,7 +65,7 @@ from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.types import Decoration
 from mirage.commands.cli.builtin.git.util import (
     check_operands,
-    fatal,
+    require_vfs,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -341,58 +337,53 @@ async def log(
         ctx (Context): the line's context; git reads its repository
             through ``ctx.vfs``.
     """
-    vfs = ctx.vfs
+    vfs = require_vfs(ctx)
     flags = ctx.flags
     fl = FlagView(flags)
-    try:
-        if vfs is None:
-            raise NoWorkspaceError()
-        check_operands(ctx, texts)
-        parsed = parse_flags(fl, ctx.env)
-        repo, location = await opened(ctx, fl)
-        revisions, patterns, dashed = await walk_operands(
-            ctx, fl, repo, location, texts
+    check_operands(ctx, texts)
+    parsed = parse_flags(fl, ctx.env)
+    repo, location = await opened(ctx, fl)
+    revisions, patterns, dashed = await walk_operands(
+        ctx, fl, repo, location, texts
+    )
+    parsed = replace(parsed, pathspecs=patterns)
+    mailmap, mapped, decorate = await displayed(
+        vfs, location, fl, parsed.pretty
+    )
+    parsed = replace(
+        parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
+    )
+    diff_flags = parse_diff_flags(fl, default_patch=False)
+    # The pickaxe searches the diff, renames paired, whether or not
+    # any of it is printed, which is how ``-S -m`` comes to name the
+    # parent each printed entry matched against.
+    diffing = parsed.pickaxe is not None or any(
+        (
+            diff_flags.patch,
+            diff_flags.stat,
+            diff_flags.name_only,
+            diff_flags.name_status,
+            diff_flags.numstat,
+            diff_flags.shortstat,
+            diff_flags.summary,
+            diff_flags.raw,
         )
-        parsed = replace(parsed, pathspecs=patterns)
-        mailmap, mapped, decorate = await displayed(
-            vfs, location, fl, parsed.pretty
+    )
+    if diffing:
+        diff_flags = parse_diff_flags(
+            fl,
+            default_patch=False,
+            default_renames=await renames_enabled(vfs, location),
+            quote_path_fully=await config_bool(
+                vfs, location, b"core", b"quotepath", True
+            ),
         )
-        parsed = replace(
-            parsed, mailmap=mailmap, use_mailmap=mapped, decorate=decorate
-        )
-        diff_flags = parse_diff_flags(fl, default_patch=False)
-        # The pickaxe searches the diff, renames paired, whether or not
-        # any of it is printed, which is how ``-S -m`` comes to name the
-        # parent each printed entry matched against.
-        diffing = parsed.pickaxe is not None or any(
-            (
-                diff_flags.patch,
-                diff_flags.stat,
-                diff_flags.name_only,
-                diff_flags.name_status,
-                diff_flags.numstat,
-                diff_flags.shortstat,
-                diff_flags.summary,
-                diff_flags.raw,
-            )
-        )
-        if diffing:
-            diff_flags = parse_diff_flags(
-                fl,
-                default_patch=False,
-                default_renames=await renames_enabled(vfs, location),
-                quote_path_fully=await config_bool(
-                    vfs, location, b"core", b"quotepath", True
-                ),
-            )
-        diff_flags = replace(
-            diff_flags, pickaxe=parsed.pickaxe, pathspecs=patterns
-        )
-        commits, walk, decor = await asyncio.to_thread(
-            _collect, repo, revisions, parsed, diff_flags, dashed
-        )
-    except GitError as exc:
-        return fatal(exc)
+    diff_flags = replace(
+        diff_flags, pickaxe=parsed.pickaxe, pathspecs=patterns
+    )
+    commits, walk, decor = await asyncio.to_thread(
+        _collect, repo, revisions, parsed, diff_flags, dashed
+    )
     boundary = frozenset(commit.id for commit in walk.boundary)
     if not diffing:
         out = (

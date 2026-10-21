@@ -78,6 +78,11 @@ Deny wins at equal depth.
 Here, `rm /data/review/note.txt` asks for approval despite the broader deny;
 `rm /data/other.txt` is denied. A multi-path command must pass each path's checks.
 
+A rule written under a mount section speaks for that mount: for a line whose
+working directory or paths lie in it, for a walk or a move of a directory that
+holds it (`grep -r`, `ls -R`, `mv`), and for each entry inside it that a line
+reaches on its own (`cp -r`, `chmod -R`).
+
 `paths.hide` and ask/deny path entries may be absolute paths or slashless
 name patterns such as `*.pem`, including inside mount sections.
 `paths.show` entries must be absolute paths. A literal path covers its subtree;

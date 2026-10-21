@@ -23,7 +23,6 @@ import {
   BadRefNameUpdateError,
   DeleteHeadError,
   EmptyUpdateMessageError,
-  GitError,
   HeadOutsideRefsError,
   InvalidSymbolicTargetError,
   NoSuchRefError,
@@ -50,7 +49,7 @@ import {
 import type { Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { opened } from './session.ts'
-import { checkSwitches, fatal, verbUsage } from './util.ts'
+import { checkSwitches, verbUsage } from './util.ts'
 
 const ENC = new TextEncoder()
 const REFS_PREFIX = 'refs/'
@@ -144,51 +143,46 @@ export async function symbolicRef(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  try {
-    checkSwitches(ctx, texts)
-    const repo = await opened(ctx, fl)
-    const message = fl.asStr('m')
-    if (message === '') throw new EmptyUpdateMessageError()
-    const quiet = switched(fl, 'quiet', false)
-    const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-    const [name = '', target] = texts
-    if (switched(fl, 'delete', false)) {
-      if (texts.length !== 1) throw new UsageError('', verbUsage(ctx))
-      const found = await resolveSymbolic(repo.vfs, repo.location.gitdir, table, name, false)
-      if (found === null) throw new NoSuchRefError(name)
-      if (!found.symbolic) throw new NotSymbolicDeleteError(name)
-      if (name === HEAD) throw new DeleteHeadError()
-      const owner = ownerOf(repo.location, name)
-      await deleteRef(repo.vfs, owner, name)
-      await removeFile(repo.vfs, owner.join(LOGS_DIR, name))
-      return [null, new IOResult()]
-    }
-    if (texts.length === 2 && target !== undefined) {
-      if (name === HEAD && !target.startsWith(REFS_PREFIX)) throw new HeadOutsideRefsError()
-      if (!wholeRefName(target)) throw new InvalidSymbolicTargetError(name, target)
-      const who = identity(fl, ctx.session).line
-      await setSymbolic(repo, table, name, target, who, message ?? '')
-      return [null, new IOResult()]
-    }
+  checkSwitches(ctx, texts)
+  const repo = await opened(ctx, fl)
+  const message = fl.asStr('m')
+  if (message === '') throw new EmptyUpdateMessageError()
+  const quiet = switched(fl, 'quiet', false)
+  const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
+  const [name = '', target] = texts
+  if (switched(fl, 'delete', false)) {
     if (texts.length !== 1) throw new UsageError('', verbUsage(ctx))
-    const found = await resolveSymbolic(
-      repo.vfs,
-      repo.location.gitdir,
-      table,
-      name,
-      switched(fl, 'recurse', true),
-    )
+    const found = await resolveSymbolic(repo.vfs, repo.location.gitdir, table, name, false)
     if (found === null) throw new NoSuchRefError(name)
-    if (!found.symbolic) {
-      if (quiet) return [null, new IOResult({ exitCode: 1 })]
-      throw new NotASymbolicRefError(name)
-    }
-    const shown = switched(fl, 'short', false)
-      ? shortenRef(found.name, new Set(table.keys()), false)
-      : found.name
-    return [ENC.encode(`${shown}\n`), new IOResult()]
-  } catch (err) {
-    if (err instanceof GitError) return fatal(err)
-    throw err
+    if (!found.symbolic) throw new NotSymbolicDeleteError(name)
+    if (name === HEAD) throw new DeleteHeadError()
+    const owner = ownerOf(repo.location, name)
+    await deleteRef(repo.vfs, owner, name)
+    await removeFile(repo.vfs, owner.join(LOGS_DIR, name))
+    return [null, new IOResult()]
   }
+  if (texts.length === 2 && target !== undefined) {
+    if (name === HEAD && !target.startsWith(REFS_PREFIX)) throw new HeadOutsideRefsError()
+    if (!wholeRefName(target)) throw new InvalidSymbolicTargetError(name, target)
+    const who = identity(fl, ctx.session).line
+    await setSymbolic(repo, table, name, target, who, message ?? '')
+    return [null, new IOResult()]
+  }
+  if (texts.length !== 1) throw new UsageError('', verbUsage(ctx))
+  const found = await resolveSymbolic(
+    repo.vfs,
+    repo.location.gitdir,
+    table,
+    name,
+    switched(fl, 'recurse', true),
+  )
+  if (found === null) throw new NoSuchRefError(name)
+  if (!found.symbolic) {
+    if (quiet) return [null, new IOResult({ exitCode: 1 })]
+    throw new NotASymbolicRefError(name)
+  }
+  const shown = switched(fl, 'short', false)
+    ? shortenRef(found.name, new Set(table.keys()), false)
+    : found.name
+  return [ENC.encode(`${shown}\n`), new IOResult()]
 }

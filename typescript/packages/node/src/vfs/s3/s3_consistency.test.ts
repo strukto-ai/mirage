@@ -438,7 +438,7 @@ describe('S3 cache consistency (mocked)', () => {
         mock.resetCalls()
         const single = await ws.shell(`cat ${bounded}/f.txt`)
         expect(DEC.decode(single.stdout)).toBe('v1\n')
-        // v2 or any send here means the routing probe read another policy.
+        // v2 or any send here means the operand probe read another policy.
         expect([...ledger('fresh-bkt'), ...ledger('bounded-bkt')]).toEqual([0, 0, 0, 0, 0, 0])
       } finally {
         await ws.close()
@@ -520,7 +520,7 @@ describe('S3 cache consistency (mocked)', () => {
   })
 
   it('a warm read costs one probe', async () => {
-    // A warm `cat` is one stat: the routing reconcile. cat's own operand stat
+    // A warm `cat` is one stat: the operand probe. cat's own operand stat
     // and the gate both reuse its answer for the rest of the command, so a
     // count cannot tell the gate on from off here; the gate's own reach -- the
     // reads routing never sees -- is pinned by 'fresh revalidates a walk and a
@@ -543,7 +543,7 @@ describe('S3 cache consistency (mocked)', () => {
 
   // s3 and gridfs register their own stat rather than the generic's, so they
   // get the probe answer only if the override's adapter carries it: one HEAD,
-  // the routing reconcile, where it cost two. The answer is served below every
+  // the operand probe, where it cost two. The answer is served below every
   // guard: a trailing slash still refuses, and `nope/..` -- a directory only
   // the walk guard proves missing -- still answers ENOENT, as GNU does.
   for (const [line, code, out, err] of [
@@ -626,8 +626,8 @@ describe('S3 cache consistency (mocked)', () => {
     }
   })
 
-  it('a routing probe failure never takes the line', async () => {
-    // reconcileRead probes a warm named operand at routing, before any
+  it('an operand probe failure never takes the line', async () => {
+    // reconcileRead probes a warm named operand at the command's first lookup of it, before any
     // handler exists. If that probe threw, the whole line would fail --
     // later `;` stages included -- with no operand named. It is best-effort
     // instead: the entry is dropped and the command reads the backend
@@ -661,7 +661,7 @@ describe('S3 cache consistency (mocked)', () => {
     // `ls` reads no bytes, so the cache gate never fires for it. Routing is
     // the one entry point a metadata command has to backend truth and must keep
     // probing there. The stat count cannot show it any more: ls's own operand
-    // stat serves the routing probe's answer, so a warm `ls -l` is the probe
+    // stat serves the operand probe's answer, so a warm `ls -l` is the probe
     // plus ls's readdir check of its operand, and with routing dark it is
     // ls's stat plus that same check -- two either way. What only the routing
     // probe does is evict a copy the backend replaced, so that is what this

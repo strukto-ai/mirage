@@ -189,7 +189,7 @@ def test_a_wire_string_policy_is_judged_like_the_enum(policy):
 
 
 def test_a_mount_stores_the_coerced_policy_not_the_wire_string():
-    # Downstream -- the gate, the routing reconcile -- all compare with
+    # Downstream -- the gate, the operand probe -- all compare with
     # `is`, so the spec has to be normalized where it becomes live mount
     # state or a capable backend mounts `fresh` and behaves as bounded.
     vfs = S3VFS(S3Config(bucket="b"))

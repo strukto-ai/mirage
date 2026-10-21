@@ -25,10 +25,8 @@ import { headEntries } from './changes.ts'
 import {
   AllWithPathsError,
   BrokenHeadError,
-  GitError,
   LockExistsError,
   MissingMessageError,
-  NoWorkspaceError,
   PartialCommitError,
   UnmergedIndexError,
 } from './errors.ts'
@@ -46,7 +44,7 @@ import { reportRows } from './status.ts'
 import { report } from './summary.ts'
 import { TREE_MODE, type TreeEntry } from './tree.ts'
 import type { IndexState } from './types.ts'
-import { checkSwitches, fatal, startPoint } from './util.ts'
+import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 
@@ -211,88 +209,79 @@ export async function commit(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  const vfs = requireVfs(ctx)
+  checkSwitches(ctx, texts)
+  const staging = fl.asBool('all')
+  const named = texts[0]
+  if (named !== undefined)
+    throw staging ? new AllWithPathsError(named) : new PartialCommitError(named)
+  const message = fl.asStr('message')
+  if (message === undefined || message === '') throw new MissingMessageError()
+  const repo = await opened(ctx, fl, true)
+  // git takes the index's lock before it looks for anything to commit, so a
+  // read-only repository refuses an empty commit too.
+  const index = repo.location.gitdir.join('index')
   try {
-    const vfs = ctx.vfs
-    if (vfs === undefined) {
-      throw new NoWorkspaceError()
-    }
-    checkSwitches(ctx, texts)
-    const staging = fl.asBool('all')
-    const named = texts[0]
-    if (named !== undefined)
-      throw staging ? new AllWithPathsError(named) : new PartialCommitError(named)
-    const message = fl.asStr('message')
-    if (message === undefined || message === '') throw new MissingMessageError()
-    const repo = await opened(ctx, fl, true)
-    // git takes the index's lock before it looks for anything to commit, so a
-    // read-only repository refuses an empty commit too.
-    const index = repo.location.gitdir.join('index')
-    try {
-      await takeLock(vfs, index)
-    } catch (err) {
-      if (isEexist(err)) throw new LockExistsError(`${index.virtual}.lock`)
-      throw err
-    }
-    const state = await readIndex(repo, vfs)
-    if (state.conflicts.size > 0) throw new UnmergedIndexError()
-    const restaged = staging ? await stageTracked(repo, vfs, state) : null
-    const head = await readHead(vfs, repo.location.gitdir)
-    const before = await headEntries(repo)
-    const after = indexTree(state)
-    const same =
-      before !== null &&
-      before.size === after.size &&
-      [...after].every(([path, entry]) => {
-        const held = before.get(path)
-        return held?.oid === entry.oid && held.mode === entry.mode
-      })
-    if (same && !fl.asBool('allow_empty')) {
-      // Printed on stdout, where the status report it stands in for would
-      // have gone, and exits 1.
-      const reportOf = await reportRows(repo, vfs, head, startPoint(fl).virtual)
-      return [null, new IOResult({ exitCode: 1, rows: reportOf })]
-    }
-    const parents =
-      before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
-    const who = identity(fl, ctx.session)
-    const when = Math.floor(Date.now() / 1000)
-    const oid = await buildCommit(repo, state, message, who, parents, when)
-    // The object is written and the ref is not, as git leaves it: the files
-    // backend refuses to lock a HEAD whose branch path leaves the ref tree,
-    // rather than let the commit land on .git/config.
-    if (head.ref !== null && !safeRefName(head.ref)) throw new BrokenHeadError(head.ref)
-    if (head.ref !== null) await writeRef(vfs, repo.location.commondir, head.ref, oid)
-    else await detachHead(vfs, repo.location.gitdir, oid)
-    if (restaged !== null) await updateIndex(repo, restaged[0], restaged[1])
-    await record(
-      vfs,
-      repo.location.gitdir,
-      repo.location.commondir,
-      head.ref,
-      parents[0] ?? null,
-      oid,
-      who.line,
-      when,
-      `commit${before === null ? ROOT_NOTE : ''}: ${message.split('\n')[0] ?? ''}`,
-    )
-    const fully = await configBool(repo, 'core.quotepath', true)
-    if (fl.asBool('quiet')) return [null, new IOResult()]
-    const render = async (shown: Delta[]): Promise<ByteSource> => {
-      const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
-      const body = report(
-        oid,
-        message,
-        head.branch,
-        await commitSummary(repo, oldSide, newSide, fully),
-        repo.abbrev,
-        before === null,
-      )
-      return encodeText(body)
-    }
-    const rows = deltas(repo.location, [[before ?? new Map(), after]])
-    return [null, new IOResult({ rows: { items: rows, render } })]
+    await takeLock(vfs, index)
   } catch (err) {
-    if (err instanceof GitError) return fatal(err)
+    if (isEexist(err)) throw new LockExistsError(`${index.virtual}.lock`)
     throw err
   }
+  const state = await readIndex(repo, vfs)
+  if (state.conflicts.size > 0) throw new UnmergedIndexError()
+  const restaged = staging ? await stageTracked(repo, vfs, state) : null
+  const head = await readHead(vfs, repo.location.gitdir)
+  const before = await headEntries(repo)
+  const after = indexTree(state)
+  const same =
+    before !== null &&
+    before.size === after.size &&
+    [...after].every(([path, entry]) => {
+      const held = before.get(path)
+      return held?.oid === entry.oid && held.mode === entry.mode
+    })
+  if (same && !fl.asBool('allow_empty')) {
+    // Printed on stdout, where the status report it stands in for would
+    // have gone, and exits 1.
+    const reportOf = await reportRows(repo, vfs, head, startPoint(fl).virtual)
+    return [null, new IOResult({ exitCode: 1, rows: reportOf })]
+  }
+  const parents = before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
+  const who = identity(fl, ctx.session)
+  const when = Math.floor(Date.now() / 1000)
+  const oid = await buildCommit(repo, state, message, who, parents, when)
+  // The object is written and the ref is not, as git leaves it: the files
+  // backend refuses to lock a HEAD whose branch path leaves the ref tree,
+  // rather than let the commit land on .git/config.
+  if (head.ref !== null && !safeRefName(head.ref)) throw new BrokenHeadError(head.ref)
+  if (head.ref !== null) await writeRef(vfs, repo.location.commondir, head.ref, oid)
+  else await detachHead(vfs, repo.location.gitdir, oid)
+  if (restaged !== null) await updateIndex(repo, restaged[0], restaged[1])
+  await record(
+    vfs,
+    repo.location.gitdir,
+    repo.location.commondir,
+    head.ref,
+    parents[0] ?? null,
+    oid,
+    who.line,
+    when,
+    `commit${before === null ? ROOT_NOTE : ''}: ${message.split('\n')[0] ?? ''}`,
+  )
+  const fully = await configBool(repo, 'core.quotepath', true)
+  if (fl.asBool('quiet')) return [null, new IOResult()]
+  const render = async (shown: Delta[]): Promise<ByteSource> => {
+    const [oldSide, newSide] = shownSides(shown, 1)[0] ?? [new Map(), new Map()]
+    const body = report(
+      oid,
+      message,
+      head.branch,
+      await commitSummary(repo, oldSide, newSide, fully),
+      repo.abbrev,
+      before === null,
+    )
+    return encodeText(body)
+  }
+  const rows = deltas(repo.location, [[before ?? new Map(), after]])
+  return [null, new IOResult({ rows: { items: rows, render } })]
 }
