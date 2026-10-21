@@ -27,6 +27,8 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { runWithSession } from '@struktoai/mirage-core/context/session_context'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { render } from '@struktoai/mirage-core/test-utils'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -549,6 +551,35 @@ describe('patchNodeFs — refusals', () => {
     const patched = op === 'read' ? fs.promises.readFile(path) : fs.promises.writeFile(path, 'x')
     await expect(direct).rejects.toMatchObject({ code })
     await expect(patched).rejects.toMatchObject({ code })
+    await ws.close()
+  })
+})
+
+describe('patchNodeFs — access', () => {
+  // W_OK answers what the write itself meets: a session capped to read is
+  // refused, a writable show entry below the cap is not.
+  it("answers write from the session's mode", async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f.txt', 'f')
+    await ws.vfs.mkdir('/data/out')
+    await ws.vfs.write('/data/out/g.txt', 'g')
+    const capped = ws.createSession('capped', {
+      profile: parseSessionProfile({
+        mounts: { '/data': 'read' },
+        paths: { show: { '/data/out': 'rw' } },
+      }),
+    })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    const { R_OK, W_OK } = fs.constants
+    await fs.promises.access('/data/f.txt', W_OK)
+    await runWithSession(capped, async () => {
+      await expect(fs.promises.access('/data/f.txt', W_OK)).rejects.toMatchObject({
+        code: 'EACCES',
+      })
+      await fs.promises.access('/data/f.txt', R_OK)
+      await fs.promises.access('/data/out/g.txt', W_OK)
+    })
     await ws.close()
   })
 })

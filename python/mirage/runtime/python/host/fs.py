@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, TypeVar, cast
 
 from mirage.bridge.sync import run_async_from_sync
+from mirage.context.session_context import effective_path_mode
 from mirage.errors import FsCondition
 from mirage.errors.fs import ebusy, eexist, fs_error
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -50,6 +51,7 @@ from mirage.runtime.python.host.stat import stat_result
 from mirage.runtime.python.host.syscall import as_raised, host_files, syscall
 from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
+from mirage.types import MountMode
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
@@ -357,22 +359,18 @@ class HostFs:
         return spelled if self._files.is_mounted(spelled) else None
 
     def _writable(self, virtual: str) -> bool:
-        """Whether the mount owning `virtual` takes writes.
-
-        The owner is resolved over every prefix and only then looked up
-        among the writable ones: resolving over the writable subset
-        instead let the catch-all root mount answer for a path a
-        read-only mount owns, so a read-only mount reported W_OK.
+        """Whether a write at `virtual` would be admitted by mode: the
+        mode in force there for the session (``effective_path_mode``),
+        which is what the write itself meets.
 
         Args:
             virtual (str): the mounted virtual path.
         """
-        owner = owner_prefix(self._files.mount_prefixes(), virtual)
+        owner = reader_of(self._files).owner(virtual)
         if owner is None:
             return False
-        return any(
-            prefix == owner for prefix, _ in self._files.writable_mounts()
-        )
+        mode = effective_path_mode(virtual, owner.prefix, owner.mode)
+        return mode is not MountMode.READ
 
     def _stat_of(
         self, virtual: str, st: VFSStat, unlinked: bool = False
@@ -563,12 +561,12 @@ class HostFs:
     ) -> bool:
         """Whether the caller may reach `path` the requested way.
 
-        Read is granted by existence and write by the owning mount's
-        mode, because a mount mode is mirage's access control and the
-        permission bits a backend has none of are cosmetic. Execute is
-        the one question the bits answer, so it reads them. A session's
-        own narrower grant is enforced at the entry point when the write
-        actually happens, exactly as POSIX leaves access(2) advisory.
+        Read is granted by existence and write by the mode in force at
+        the path for the session, because a mode is mirage's access
+        control and the permission bits a backend has none of are
+        cosmetic: W_OK answers what the write itself would meet, as
+        access(2) refuses a write on a read-only file system. Execute
+        is the one question the bits answer, so it reads them.
 
         Args:
             path (Any): the path to test.

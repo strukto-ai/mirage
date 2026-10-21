@@ -17,6 +17,7 @@ import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { effectivePathMode } from '@struktoai/mirage-core/context/session_context'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
@@ -445,18 +446,28 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     }
   }
 
+  /**
+   * Whether a write at `path` would be admitted by mode: the mode in force
+   * there for the session (`effectivePathMode`), which is what the write
+   * itself meets. Mirrors Python's `_writable`.
+   */
+  private writable(path: string): boolean {
+    const mount = this.ws.registry.tryMountFor(path)
+    if (mount === null) return false
+    return effectivePathMode(path, mount.prefix, mount.mode) !== MountMode.READ
+  }
+
   private nativeCall(name: string, ...args: unknown[]): Promise<unknown> {
     return ((this.native.promises as FsObject)[name] as Fn)(...args) as Promise<unknown>
   }
 
   async access(path: string, mode = 0): Promise<void> {
     const st = await this.files.stat(path)
-    // Write is the mount's mode, mirage's access control; a session's own
-    // narrower grant answers when the write happens, as POSIX leaves
-    // access(2) advisory. Execute is the one question the bits answer.
-    if (mode & W_OK && this.ws.registry.tryMountFor(path)?.mode === MountMode.READ) {
-      throw refusal('EACCES', 'access', path)
-    }
+    // Write is the mode in force at the path for the session, mirage's
+    // access control: W_OK answers what the write itself would meet, as
+    // access(2) refuses a write on a read-only file system. Execute is the
+    // one question the bits answer.
+    if (mode & W_OK && !this.writable(path)) throw refusal('EACCES', 'access', path)
     if (mode & X_OK && (st.mode & 0o111) === 0) throw refusal('EACCES', 'access', path)
   }
 
