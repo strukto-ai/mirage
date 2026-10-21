@@ -428,6 +428,9 @@ async function runPreparedLine(
   // aliases as they are now, not those of the function running it.
   const outerView = effectiveSession.aliasView
   effectiveSession.aliasView = null
+  // A line run on its caller's evaluation (a CLI's own `ws.shell`) routes
+  // itself; the caller's route comes back when it ends.
+  const outerRouting = context.frame.routing
   try {
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status write can refuse an
@@ -803,6 +806,8 @@ async function runPreparedLine(
     )
   } finally {
     effectiveSession.aliasView = outerView
+    if (outerRouting === undefined) delete context.frame.routing
+    else context.frame.routing = outerRouting
     if (options.record !== false) {
       // Every read of the line has ended, so what a read kept of the
       // aliases it changed goes with it.

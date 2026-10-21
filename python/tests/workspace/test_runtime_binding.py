@@ -18,7 +18,10 @@ import pytest
 import pytest_asyncio
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.config import command
+from mirage.commands.spec.types import CommandSpec
 from mirage.config import _build_runtime_entries
+from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import (
     CommandExplanation,
@@ -149,6 +152,20 @@ async def runtime_arg_ws():
 @pytest.mark.asyncio
 async def test_runtime_arg_rebinds_captured_stage(runtime_arg_ws):
     io = await runtime_arg_ws.shell("python3 -c 'x'", runtime="beta")
+    assert await materialize(io.stdout) == b"ran-beta\n"
+
+
+@pytest.mark.asyncio
+async def test_a_nested_line_leaves_its_callers_route(runtime_arg_ws):
+    @command("nested", vfs="ram", spec=CommandSpec())
+    async def nested(accessor, paths, texts, opts):
+        await runtime_arg_ws.shell("echo inner")
+        return b"", IOResult()
+
+    mount = runtime_arg_ws._registry.mount_for("/")
+    for registered in nested._registered_commands:
+        mount.register(registered)
+    io = await runtime_arg_ws.shell("nested; python3 -c 'x'", runtime="beta")
     assert await materialize(io.stdout) == b"ran-beta\n"
 
 

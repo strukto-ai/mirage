@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Runtime } from '../../runtime/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { RouteDecision } from '../../runtime/routing/types.ts'
 import type { NamespaceLinks, SessionView } from '../../view/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -115,7 +113,6 @@ export async function expandArgv(
   registry: MountRegistry,
   links: NamespaceLinks | null = null,
   view?: SessionView,
-  routing?: RouteDecision<Runtime>,
 ): Promise<Argv> {
   const session = context.session
   let expanded = await expandWords(parts, context, executeFn, callStack, view)
@@ -136,8 +133,8 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const consumer = lookup(name, session, registry, routing)
-  const refused = runtimeRefused(name, session, registry, routing)
+  const consumer = lookup(name, session, registry, context.frame.routing)
+  const refused = runtimeRefused(name, session, registry, context.frame.routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)

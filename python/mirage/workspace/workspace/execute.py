@@ -699,6 +699,9 @@ async def run_prepared_line(
     # the aliases as they are now, not those of the function running it.
     outer_view = effective_session._alias_view
     effective_session._alias_view = None
+    # A line run on its caller's evaluation (a CLI's own ``ws.shell``)
+    # routes itself; the caller's route comes back when it ends.
+    outer_routing = context.frame.routing
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
     # ``Workspace.shell``, after the last await of the line, so an
@@ -1110,6 +1113,7 @@ async def run_prepared_line(
         parse_scope.release()
         scope.close()
         effective_session._alias_view = outer_view
+        context.frame.routing = outer_routing
         if is_line:
             # Every read of the line has ended, so what a read kept of the
             # aliases it changed goes with it.
