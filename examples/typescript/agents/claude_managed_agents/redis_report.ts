@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import { MountMode, RAMVFS, RedisVFS, Workspace } from '@struktoai/mirage-node'
-import { mirageTools } from '@struktoai/mirage-agents/claude-managed-agents'
+import { mirageTools } from '@struktoai/mirage-claude-managed-agents'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

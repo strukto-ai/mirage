@@ -19,7 +19,7 @@ import { dirname, resolve } from 'node:path'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { ChatAnthropic } from '@langchain/anthropic'
 import { createDeepAgent } from 'deepagents'
-import { LangchainWorkspace, extractText } from '@struktoai/mirage-agents/langchain'
+import { LangchainWorkspace, extractText } from '@struktoai/mirage-langchain'
 
 const __HERE = dirname(fileURLToPath(import.meta.url))
 loadEnv({ path: resolve(__HERE, '../../../../.env.development') })

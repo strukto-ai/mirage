@@ -9,7 +9,7 @@ icon: /images/claude-logo.svg
 ## Install
 
 ```bash
-npm install @struktoai/mirage-agents @struktoai/mirage-node @anthropic-ai/sdk
+npm install @struktoai/mirage-claude-managed-agents @struktoai/mirage-node @anthropic-ai/sdk
 ```
 
 ## Run a worker
@@ -26,7 +26,7 @@ Create a self-hosted environment and an agent with the `agent_toolset_20260401` 
 ```ts
 import Anthropic from '@anthropic-ai/sdk'
 import { MountMode, RAMVFS, RedisVFS, Workspace } from '@struktoai/mirage-node'
-import { mirageTools } from '@struktoai/mirage-agents/claude-managed-agents'
+import { mirageTools } from '@struktoai/mirage-claude-managed-agents'
 
 const ws = new Workspace(
   { '/workspace': new RAMVFS(), '/redis': new RedisVFS({ url: 'redis://localhost:6379' }) },

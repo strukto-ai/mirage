@@ -92,7 +92,8 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 ### Python
 
 ```bash
-uv add mirage-ai    # cài thư viện `mirage` và binary CLI `mirage`
+uv add mirage-ai              # cài thư viện `mirage` và binary CLI `mirage`
+uv add 'mirage-ai[openai]'    # adapter OpenAI Agents; mỗi framework agent là một extra
 ```
 
 ### TypeScript
@@ -100,7 +101,7 @@ uv add mirage-ai    # cài thư viện `mirage` và binary CLI `mirage`
 ```bash
 npm install @struktoai/mirage-node      # máy chủ Node.js và CLI
 npm install @struktoai/mirage-browser   # trình duyệt / edge runtime
-npm install @struktoai/mirage-agents    # adapter OpenAI / Vercel AI / LangChain / Mastra
+npm install @struktoai/mirage-vercel    # adapter Vercel AI; mỗi framework agent có package riêng
 ```
 
 Cả hai gói runtime đều tự động kéo theo `@struktoai/mirage-core`.

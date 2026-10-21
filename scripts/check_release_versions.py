@@ -9,7 +9,21 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # The npm packages a release builds and publishes; opencode is not
 # published yet.
-NPM_PACKAGES = ("agents", "browser", "cli", "core", "dsh", "node", "server")
+NPM_PACKAGES = (
+    "browser",
+    "claude-agent-sdk",
+    "claude-managed-agents",
+    "cli",
+    "core",
+    "dsh",
+    "langchain",
+    "mastra",
+    "node",
+    "openai-agents",
+    "pi",
+    "server",
+    "vercel",
+)
 
 # Cargo and npm spell a pre-release `0.0.7-alpha.2`, PyPI `0.0.7a2`.
 PRE_RELEASES = {"alpha": "a", "beta": "b", "rc": "rc"}

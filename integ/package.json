@@ -63,7 +63,6 @@
     "@prisma/client": "^6.19.3",
     "@pydantic/monty": "1.0.0",
     "@qdrant/js-client-rest": "^1.18.0",
-    "@struktoai/mirage-agents": "workspace:*",
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",

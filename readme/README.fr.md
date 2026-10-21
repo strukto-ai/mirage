@@ -92,7 +92,8 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 ### Python
 
 ```bash
-uv add mirage-ai    # installe la bibliothèque `mirage` et le binaire CLI `mirage`
+uv add mirage-ai              # installe la bibliothèque `mirage` et le binaire CLI `mirage`
+uv add 'mirage-ai[openai]'    # adaptateur OpenAI Agents ; chaque framework d'agents est un extra
 ```
 
 ### TypeScript
@@ -100,7 +101,7 @@ uv add mirage-ai    # installe la bibliothèque `mirage` et le binaire CLI `mira
 ```bash
 npm install @struktoai/mirage-node      # serveurs Node.js et CLI
 npm install @struktoai/mirage-browser   # navigateur / runtimes edge
-npm install @struktoai/mirage-agents    # adaptateurs OpenAI / Vercel AI / LangChain / Mastra
+npm install @struktoai/mirage-vercel    # adaptateur Vercel AI ; chaque framework d'agents a son propre paquet
 ```
 
 Les deux paquets runtime installent automatiquement `@struktoai/mirage-core`.

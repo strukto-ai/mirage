@@ -14,7 +14,7 @@
 
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { main } from '@earendil-works/pi-coding-agent'
-import { mirageExtension } from '@struktoai/mirage-agents/pi'
+import { mirageExtension } from '@struktoai/mirage-pi'
 
 const ram = new RAMVFS()
 const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })

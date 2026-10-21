@@ -92,7 +92,8 @@ await ws.shell('slack send-message --channel general --text "report is up"')
 ### Python
 
 ```bash
-uv add mirage-ai    # `mirage` 라이브러리와 `mirage` CLI 바이너리를 설치
+uv add mirage-ai              # `mirage` 라이브러리와 `mirage` CLI 바이너리를 설치
+uv add 'mirage-ai[openai]'    # OpenAI Agents 어댑터, 에이전트 프레임워크마다 별도 extra
 ```
 
 ### TypeScript
@@ -100,7 +101,7 @@ uv add mirage-ai    # `mirage` 라이브러리와 `mirage` CLI 바이너리를 �
 ```bash
 npm install @struktoai/mirage-node      # Node.js 서버와 CLI
 npm install @struktoai/mirage-browser   # 브라우저 / edge 런타임
-npm install @struktoai/mirage-agents    # OpenAI / Vercel AI / LangChain / Mastra 어댑터
+npm install @struktoai/mirage-vercel    # Vercel AI 어댑터, 에이전트 프레임워크마다 별도 패키지
 ```
 
 두 런타임 패키지 모두 `@struktoai/mirage-core`를 자동으로 가져옵니다.

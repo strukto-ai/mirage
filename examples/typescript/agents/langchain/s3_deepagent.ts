@@ -27,7 +27,7 @@ import {
   LangchainWorkspace,
   buildSystemPrompt,
   extractText,
-} from '@struktoai/mirage-agents/langchain'
+} from '@struktoai/mirage-langchain'
 
 loadEnv({
   path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../../.env.development'),

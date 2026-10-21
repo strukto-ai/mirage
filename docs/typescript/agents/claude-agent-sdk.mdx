@@ -13,7 +13,7 @@ This is distinct from [Claude Code](/typescript/agents/claude-code), which point
 Use this integration from Node. The Claude Agent SDK launches the native Claude Code runtime, so the complete `query()` workflow does not run in a browser.
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @anthropic-ai/claude-agent-sdk
+pnpm add @struktoai/mirage-claude-agent-sdk @struktoai/mirage-node @anthropic-ai/claude-agent-sdk
 ```
 
 ## Usage
@@ -23,7 +23,7 @@ pnpm add @struktoai/mirage-agents @struktoai/mirage-node @anthropic-ai/claude-ag
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { buildOptions } from '@struktoai/mirage-agents/claude-agent-sdk'
+import { buildOptions } from '@struktoai/mirage-claude-agent-sdk'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -40,7 +40,7 @@ for await (const msg of query({
 Use `MirageServer` directly to combine Mirage with other servers:
 
 ```ts
-import { MirageServer, buildSystemPrompt } from '@struktoai/mirage-agents/claude-agent-sdk'
+import { MirageServer, buildSystemPrompt } from '@struktoai/mirage-claude-agent-sdk'
 
 const options = {
   mcpServers: { mirage: MirageServer(ws), github: githubServer },

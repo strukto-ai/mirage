@@ -8,14 +8,14 @@ The OpenAI Agents SDK ([@openai/agents](https://github.com/openai/openai-agents-
 
 ## Install
 
-`@struktoai/mirage-agents/openai_agents` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
+`@struktoai/mirage-openai-agents` is runtime-agnostic. Pair it with `@struktoai/mirage-node` for Node or `@struktoai/mirage-browser` for the browser.
 
 <CodeGroup>
 ```bash Node
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @openai/agents
+pnpm add @struktoai/mirage-openai-agents @struktoai/mirage-node @openai/agents
 ```
 ```bash Browser
-pnpm add @struktoai/mirage-agents @struktoai/mirage-browser @openai/agents
+pnpm add @struktoai/mirage-openai-agents @struktoai/mirage-browser @openai/agents
 ```
 </CodeGroup>
 
@@ -29,7 +29,7 @@ import {
   MirageShellExecutor,
   buildSystemPrompt,
   mirageReadFileTool,
-} from '@struktoai/mirage-agents/openai_agents'
+} from '@struktoai/mirage-openai-agents'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
@@ -58,7 +58,7 @@ For an OpenAI-compatible provider without the Responses API, give the agent `mir
 ```ts
 import { run } from '@openai/agents'
 import { Capabilities, SandboxAgent } from '@openai/agents/sandbox'
-import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-agents/openai_agents'
+import { MirageCapability, MirageSandboxClient } from '@struktoai/mirage-openai-agents'
 
 const agent = new SandboxAgent({
   name: 'Mirage Sandbox Agent',

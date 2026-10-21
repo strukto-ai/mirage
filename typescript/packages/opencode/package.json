@@ -37,6 +37,10 @@
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js"
     }
   },
   "files": [
@@ -48,7 +52,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@struktoai/mirage-agents": "workspace:*",
+    "@struktoai/mirage-core": "workspace:*",
+    "@struktoai/mirage-node": "workspace:*",
     "@struktoai/mirage-server": "workspace:*"
   },
   "peerDependencies": {

@@ -14,7 +14,7 @@ icon: /images/pi-logo.svg
 ## Install
 
 ```bash
-pnpm add @struktoai/mirage-agents @struktoai/mirage-node @earendil-works/pi-coding-agent
+pnpm add @struktoai/mirage-pi @struktoai/mirage-node @earendil-works/pi-coding-agent
 ```
 
 ## Native Pi UI
@@ -24,7 +24,7 @@ Pass the Mirage extension to Pi's regular entry point. Pi continues to own its C
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 import { main } from '@earendil-works/pi-coding-agent'
-import { mirageExtension } from '@struktoai/mirage-agents/pi'
+import { mirageExtension } from '@struktoai/mirage-pi'
 
 const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
 
