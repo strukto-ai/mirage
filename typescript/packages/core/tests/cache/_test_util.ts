@@ -22,8 +22,11 @@ export class RefusingStore extends RAMFileCacheStore {
   override set(): Promise<void> {
     return Promise.reject(new Error('OOM command not allowed'))
   }
-  override remove(key: string): Promise<void> {
+  override remove(
+    key: string,
+    options?: { subtree?: boolean; excluded?: readonly string[] },
+  ): Promise<void> {
     if (this.down) return Promise.reject(new Error('connection refused'))
-    return super.remove(key)
+    return super.remove(key, options)
   }
 }

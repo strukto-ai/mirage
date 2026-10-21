@@ -533,16 +533,17 @@ export class CacheManager {
     const key = this.cacheKey(path)
     const [data, facts] = await captureRead(key, fetch)
     if (!(data instanceof Uint8Array)) return data
-    const cache = this.readableCache(key)
-    if (cache !== null) {
-      await this.keepRead(cache, key, data, generation, keep, () =>
+    await this.keep(
+      key,
+      data,
+      () =>
         facts.length > 0
           ? facts.every((fp) => fp === facts[0])
             ? (facts[0] ?? null)
             : null
           : latestFingerprint(records?.slice(start), key),
-      )
-    }
+      this.admits(generation, keep),
+    )
     return data
   }
 
@@ -589,33 +590,67 @@ export class CacheManager {
       yield chunk
     }
     if (chunks !== null) {
-      await this.keepRead(cache, key, concat(chunks), generation, keep, () =>
-        latestFingerprint(records, key),
+      await this.keep(
+        key,
+        concat(chunks),
+        () => latestFingerprint(records, key),
+        this.admits(generation, keep),
       )
     }
   }
 
-  /** Store a cold read's bytes unless something since made them stale. */
-  private async keepRead(
-    cache: FileCache,
+  // A cold read's last say: no write landed since it began, and `keep` agrees.
+  private admits(generation: number, keep: (() => boolean) | undefined): () => boolean {
+    return () => generation === this.readGeneration && (keep === undefined || keep())
+  }
+
+  /**
+   * Keep a write's bytes for the next read, as a read keeps its own.
+   * `fingerprint` is the token the write's backend answered, null when it
+   * vouched for none. Mirrors Python's `keep_written`.
+   */
+  async keepWritten(path: PathSpec, data: Uint8Array, fingerprint: string | null): Promise<void> {
+    await this.keep(
+      this.cacheKey(path),
+      data,
+      () => fingerprint,
+      () => true,
+    )
+  }
+
+  /**
+   * Store bytes a read or a write settled on, unless they went stale.
+   *
+   * The one way bytes enter the file cache. The checks run under the cache's
+   * mutation lock, so a name this mount stopped owning or caching keeps
+   * nothing, nor do bytes `admit` refuses. Bytes over the whole cache limit
+   * would evict every warm entry, so the copy held for the key, now stale,
+   * goes instead; a store that refuses the bytes (out of memory, a value over
+   * its size limit) costs only the next read a fetch, so the refusal is
+   * logged, never thrown, and the stale copy goes too. Mirrors Python's
+   * `_keep`.
+   */
+  private async keep(
     key: string,
     data: Uint8Array,
-    generation: number,
-    keep: (() => boolean) | undefined,
     token: () => string | null,
+    admit: () => boolean,
   ): Promise<void> {
-    if (data.byteLength > cache.cacheLimit) return
+    const cache = this.fileCache
+    if (cache === null) return
     await mutationLock(cache, async () => {
-      if (
-        this.ownsPath(key) &&
-        generation === this.readGeneration &&
-        (keep === undefined || keep())
-      ) {
+      if (!(this.cachesReads && this.ownsPath(key) && admit())) return
+      try {
+        if (data.byteLength > cache.cacheLimit) await cache.remove(key)
+        else await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`cache fill refused for ${key}: ${msg}`)
         try {
-          await cache.set(key, data, { fingerprint: token(), ttl: this.readTtl })
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          console.warn(`cache fill refused for ${key}: ${msg}`)
+          await cache.remove(key)
+        } catch (dropErr) {
+          const why = dropErr instanceof Error ? dropErr.message : String(dropErr)
+          console.warn(`stale copy not dropped for ${key}: ${why}`)
         }
       }
     })

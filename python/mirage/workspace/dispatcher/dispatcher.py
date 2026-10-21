@@ -2475,15 +2475,10 @@ class Dispatcher:
         elif record is not None and record.bytes != len(data):
             await self._cache.remove(call.path.virtual)
             return
-        await cache_io.set_cached(
-            self._cache,
-            call.path.virtual,
-            data,
-            fingerprint,
-            lambda path: _facts_of(
-                mount if self._namespace.try_mount_for(path) is mount else None
-            ),
-        )
+        if mount.cache_manager is not None:
+            await mount.cache_manager.keep_written(
+                call.path, data, fingerprint
+            )
 
     def _filter(self, call: _Call, result: Any) -> Any:
         """Merge the namespace into a backend answer and drop hidden names.

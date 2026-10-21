@@ -17,7 +17,7 @@ import type { ByteSource } from '../../io/types.ts'
 
 import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
-import { keepVersions, setCached } from '../../cache/file/io.ts'
+import { keepVersions } from '../../cache/file/io.ts'
 import { drainBudget, type FileCache } from '../../cache/file/mixin.ts'
 import { type KeyHold, KeyLock } from '../../cache/lock.ts'
 import type { CacheManager } from '../../cache/manager.ts'
@@ -2244,9 +2244,7 @@ export class Dispatcher {
       await this.cache.remove(call.path.virtual)
       return
     }
-    await setCached(this.cache, call.path.virtual, data, fingerprint, (path) =>
-      factsOf(this.namespace.tryMountFor(path) === mount ? mount : null),
-    )
+    await mount.cacheManager?.keepWritten(call.path, data, fingerprint)
   }
 
   /**

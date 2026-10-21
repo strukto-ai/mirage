@@ -1097,6 +1097,49 @@ async def test_a_cold_read_the_store_refuses_still_returns_its_bytes(
 
 
 @pytest.mark.asyncio
+async def test_a_write_keeps_its_bytes_with_their_token_and_the_bound():
+    cache = RAMFileCacheStore()
+    manager = CacheManager(
+        cache, RAMIndexCacheStore(ttl=600), "/s3/", True, read_ttl=45
+    )
+    await manager.keep_written(_spec("/s3/f.txt"), b"hello", "etag")
+    assert await cache.get("/s3/f.txt") == b"hello"
+    assert await cache.is_fresh("/s3/f.txt", "etag") is True
+    assert cache._entries["/s3/f.txt"].ttl == 45
+
+
+@pytest.mark.asyncio
+async def test_a_write_keeps_nothing_on_a_mount_that_does_not_cache():
+    cache = RAMFileCacheStore()
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/s3/", False)
+    await manager.keep_written(_spec("/s3/f.txt"), b"hello", None)
+    assert await cache.exists("/s3/f.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_a_write_bigger_than_the_cache_drops_the_stale_copy():
+    cache = RAMFileCacheStore(cache_limit=10)
+    await cache.set("/s3/warm", b"abc")
+    await cache.set("/s3/big", b"old")
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/s3/", True)
+    await manager.keep_written(_spec("/s3/big"), b"x" * 11, None)
+    assert await cache.exists("/s3/big") is False
+    assert await cache.get("/s3/warm") == b"abc"
+
+
+# The write landed: a refused fill, or a refused drop too, is no failure,
+# and the stale copy goes when it can.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("down", [False, True])
+async def test_a_write_the_store_refuses_never_fails(refusing_store, down):
+    cache = refusing_store(down)
+    await RAMFileCacheStore.set(cache, "/s3/f", b"old")
+    manager = CacheManager(cache, RAMIndexCacheStore(ttl=600), "/s3/", True)
+    await manager.keep_written(_spec("/s3/f"), b"new", None)
+    assert await cache.exists("/s3/f") is down
+
+
+@pytest.mark.asyncio
 async def test_a_line_is_indexed_a_bounded_number_of_times(monkeypatch):
     # One index per line, absorbing only new records; one per write was quadratic.
     built: list[int] = []

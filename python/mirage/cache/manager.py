@@ -641,19 +641,15 @@ class CacheManager:
         data, facts = await capture_read(key, fetch)
         if not isinstance(data, bytes):
             return data
-        cache = self._readable_cache(key)
-        if cache is not None:
 
-            def token() -> str | None:
-                if facts:
-                    same = all(fp == facts[0] for fp in facts)
-                    return facts[0] if same else None
-                records = (
-                    recorder.sink[start:] if recorder is not None else None
-                )
-                return latest_fingerprint(records, key)
+        def token() -> str | None:
+            if facts:
+                same = all(fp == facts[0] for fp in facts)
+                return facts[0] if same else None
+            records = recorder.sink[start:] if recorder is not None else None
+            return latest_fingerprint(records, key)
 
-            await self._keep_read(cache, key, data, generation, keep, token)
+        await self._keep(key, data, token, self._admits(generation, keep))
         return data
 
     def fill_stream(
@@ -709,49 +705,86 @@ class CacheManager:
         finally:
             await close_quietly(source)
         if chunks is not None:
-            await self._keep_read(
-                cache,
+            await self._keep(
                 key,
                 b"".join(chunks),
-                generation,
-                keep,
                 lambda: latest_fingerprint(records, key),
+                self._admits(generation, keep),
             )
 
-    async def _keep_read(
-        self,
-        cache: FileCacheMixin,
-        key: str,
-        data: bytes,
-        generation: int,
-        keep: Callable[[], bool] | None,
-        token: Callable[[], str | None],
-    ) -> None:
-        """Store a cold read's bytes unless something since made them stale.
+    def _admits(
+        self, generation: int, keep: Callable[[], bool] | None
+    ) -> Callable[[], bool]:
+        """A cold read's last say: no write landed since it began, and
+        ``keep`` agrees.
 
         Args:
-            cache (FileCacheMixin): the cache to fill.
-            key (str): the path's cache key.
-            data (bytes): the bytes read.
             generation (int): the read generation the read began in.
-            keep (Callable[[], bool] | None): the last say on keeping.
-            token (Callable[[], str | None]): the token labelling them.
+            keep (Callable[[], bool] | None): the caller's last say.
         """
-        if len(data) > cache.cache_limit:
+        return lambda: (
+            generation == self._read_generation and (keep is None or keep())
+        )
+
+    async def keep_written(
+        self, path: PathSpec, data: bytes, fingerprint: str | None
+    ) -> None:
+        """Keep a write's bytes for the next read, as a read keeps its own.
+
+        Args:
+            path (PathSpec): the path written.
+            data (bytes): the bytes the file now holds.
+            fingerprint (str | None): the token the write's backend
+                answered, None when it vouched for none.
+        """
+        await self._keep(
+            self._cache_key(path), data, lambda: fingerprint, lambda: True
+        )
+
+    async def _keep(
+        self,
+        key: str,
+        data: bytes,
+        token: Callable[[], str | None],
+        admit: Callable[[], bool],
+    ) -> None:
+        """Store bytes a read or a write settled on, unless they went stale.
+
+        The one way bytes enter the file cache. The checks run under the
+        cache's mutation lock, so a name this mount stopped owning or
+        caching keeps nothing, nor do bytes ``admit`` refuses. Bytes over
+        the whole cache limit would evict every warm entry, so the copy
+        held for the key, now stale, goes instead; a store that refuses
+        the bytes (out of memory, a value over its size limit) costs only
+        the next read a fetch, so the refusal is logged, never raised, and
+        the stale copy goes too.
+
+        Args:
+            key (str): the cache key.
+            data (bytes): the bytes to keep.
+            token (Callable[[], str | None]): their backend token.
+            admit (Callable[[], bool]): the last say, asked under the lock.
+        """
+        cache = self._file_cache
+        if cache is None:
             return
         async with mutation_lock(cache):
-            if (
-                self._owns_path(key)
-                and generation == self._read_generation
-                and (keep is None or keep())
-            ):
-                try:
+            if not (self._caches_reads and self._owns_path(key) and admit()):
+                return
+            try:
+                if len(data) > cache.cache_limit:
+                    await cache.remove(key)
+                else:
                     await cache.set(
                         key, data, fingerprint=token(), ttl=self._read_ttl
                     )
+            except Exception:
+                logger.warning("cache fill refused for %s", key, exc_info=True)
+                try:
+                    await cache.remove(key)
                 except Exception:
                     logger.warning(
-                        "cache fill refused for %s", key, exc_info=True
+                        "stale copy not dropped for %s", key, exc_info=True
                     )
 
     async def cached_size(self, path: PathSpec) -> int | None:

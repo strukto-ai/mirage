@@ -993,6 +993,49 @@ describe('a cold read bigger than the cache', () => {
   })
 })
 
+describe('a write kept for the next read', () => {
+  const ENC = new TextEncoder()
+  const DEC = new TextDecoder()
+  const at = (path: string): PathSpec =>
+    new PathSpec({ vfsPath: mountKey(path, '/s3/'), virtual: path, directory: '/s3/' })
+
+  it('keeps its bytes with their token and the bound', async () => {
+    const cache = new RAMFileCacheStore()
+    const index = new RAMIndexCacheStore({ ttl: 600 })
+    const manager = new CacheManager(cache, index, '/s3/', true, undefined, 45)
+    await manager.keepWritten(at('/s3/f.txt'), ENC.encode('hello'), 'etag')
+    expect(DEC.decode((await cache.get('/s3/f.txt')) ?? new Uint8Array())).toBe('hello')
+    expect(await cache.isFresh('/s3/f.txt', 'etag')).toBe(true)
+  })
+
+  it('keeps nothing on a mount that does not cache', async () => {
+    const cache = new RAMFileCacheStore()
+    const manager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/s3/', false)
+    await manager.keepWritten(at('/s3/f.txt'), ENC.encode('hello'), null)
+    expect(await cache.exists('/s3/f.txt')).toBe(false)
+  })
+
+  it('drops the stale copy for bytes bigger than the cache', async () => {
+    const cache = new RAMFileCacheStore({ limit: 10 })
+    await cache.set('/s3/warm', ENC.encode('abc'))
+    await cache.set('/s3/big', ENC.encode('old'))
+    const manager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/s3/', true)
+    await manager.keepWritten(at('/s3/big'), ENC.encode('x'.repeat(11)), null)
+    expect(await cache.exists('/s3/big')).toBe(false)
+    expect(DEC.decode((await cache.get('/s3/warm')) ?? new Uint8Array())).toBe('abc')
+  })
+
+  // The write landed: a refused fill, or a refused drop too, is no failure,
+  // and the stale copy goes when it can.
+  it.each([false, true])('never fails on a store that refuses (down=%s)', async (down) => {
+    const cache = new RefusingStore(down)
+    await RAMFileCacheStore.prototype.set.call(cache, '/s3/f', ENC.encode('old'))
+    const manager = new CacheManager(cache, new RAMIndexCacheStore({ ttl: 600 }), '/s3/', true)
+    await manager.keepWritten(at('/s3/f'), ENC.encode('new'), null)
+    expect(await cache.exists('/s3/f')).toBe(down)
+  })
+})
+
 describe('version lookups in one line', () => {
   it('index the line a bounded number of times, not once per write', async () => {
     // One index per line, absorbing only new records; one per write was quadratic.
