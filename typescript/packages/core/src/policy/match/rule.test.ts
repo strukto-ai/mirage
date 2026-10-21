@@ -15,21 +15,20 @@
 import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
-import { classifyPaths } from '../../utils/hidden.ts'
 import {
   CommandWord,
+  Outcome,
   type CommandContext,
   type CommandRule,
   type AdmissionRules,
   type VfsContext,
 } from '../types.ts'
 import { WordKind } from '../../commands/spec/types.ts'
+import { decide } from './decide.ts'
 import {
   ioReach,
   ioRefusal,
   matchIo,
-  matchOp,
-  matchRule,
   opRuling,
   ruleReach,
   ruleScope,
@@ -67,43 +66,69 @@ function subject(virtual: string): Subject {
   return { path: path(virtual), holds: false, ancestors: true }
 }
 
+/**
+ * How a profile holding this one deny rule answers a line: refused or
+ * not, and the operand the refusal names (null for the whole line).
+ */
+function verdict(rule: CommandRule, line: CommandContext): [Outcome, string | null] {
+  const ruling = decide(line, { allow: null, deny: [rule], ask: [] })
+  return [ruling.outcome, ruling.matchedPath]
+}
+
+/** Whether a profile holding this one deny rule refuses an op. */
+function refusesOp(rule: CommandRule, op: VfsContext): boolean {
+  return opRuling({ allow: null, deny: [rule], ask: [] }, op, []) !== null
+}
+
+const DENY_LINE = [Outcome.DENY, null]
+const ALLOW = [Outcome.ALLOW, null]
+
 describe('rules', () => {
-  it('matchRule by command pattern, operand and mount', () => {
+  it('a rule reaches a line by command pattern, operand and mount', () => {
     const whole: CommandRule = { reason: 'no', commands: ['git push'] }
-    expect(matchRule(whole, null, ctx('git', { tokens: ['git', 'push', 'origin'] }))).toEqual({
-      operand: null,
-      depth: 0,
-    })
-    expect(matchRule(whole, null, ctx('git', { tokens: ['git', 'pull'] }))).toBeNull()
+    expect(verdict(whole, ctx('git', { tokens: ['git', 'push', 'origin'] }))).toEqual(DENY_LINE)
+    expect(verdict(whole, ctx('git', { tokens: ['git', 'pull'] }))).toEqual(ALLOW)
     const scoped: CommandRule = { reason: 'no', commands: ['rm'], paths: ['/repo/*'] }
-    const scope = classifyPaths(scoped.paths ?? [])
-    // The depth is the matched entry's, which is what the path axis
-    // orders by.
-    expect(
-      matchRule(scoped, scope, ctx('rm', { paths: [path('/repo/x', 'x')], cwd: '/repo' })),
-    ).toEqual({ operand: 'x', depth: 1 })
-    expect(matchRule(scoped, scope, ctx('rm', { paths: [path('/scratch/x')] }))).toBeNull()
+    expect(verdict(scoped, ctx('rm', { paths: [path('/repo/x', 'x')], cwd: '/repo' }))).toEqual([
+      Outcome.DENY,
+      'x',
+    ])
+    expect(verdict(scoped, ctx('rm', { paths: [path('/scratch/x')] }))).toEqual(ALLOW)
     // A mount-tier rule applies to a line whose cwd or paths lie under
     // the mount, and to nothing else.
     const mount: CommandRule = { reason: 'ro', commands: ['git push'], mount: '/repo' }
+    const push = ['git', 'push']
+    expect(verdict(mount, ctx('git', { tokens: push, cwd: '/repo/sub' }))).toEqual(DENY_LINE)
     expect(
-      matchRule(mount, null, ctx('git', { tokens: ['git', 'push'], cwd: '/repo/sub' })),
-    ).not.toBeNull()
-    expect(
-      matchRule(
-        mount,
-        null,
-        ctx('git', { tokens: ['git', 'push'], cwd: '/scratch', paths: [path('/repo')] }),
-      ),
-    ).not.toBeNull()
-    expect(
-      matchRule(mount, null, ctx('git', { tokens: ['git', 'push'], cwd: '/scratch' })),
-    ).toBeNull()
-    expect(
-      matchRule(mount, null, ctx('git', { tokens: ['git', 'push'], cwd: '/repository' })),
-    ).toBeNull()
+      verdict(mount, ctx('git', { tokens: push, cwd: '/scratch', paths: [path('/repo')] })),
+    ).toEqual(DENY_LINE)
+    expect(verdict(mount, ctx('git', { tokens: push, cwd: '/scratch' }))).toEqual(ALLOW)
+    expect(verdict(mount, ctx('git', { tokens: push, cwd: '/repository' }))).toEqual(ALLOW)
     // An every-command rule (no patterns) matches whatever line.
-    expect(matchRule({ reason: 'locked' }, null, ctx('ls'))).not.toBeNull()
+    expect(verdict({ reason: 'locked' }, ctx('ls'))).toEqual(DENY_LINE)
+  })
+
+  it("a rule's paths read the one path grammar", () => {
+    // A plain entry is an exact path and its subtree, so `/data/prod`
+    // covers `/data/prod/x` but not `/data/production`; a slashless glob
+    // matches any name component; `?` and a class are patterns too.
+    const prod: CommandRule = { reason: 'prod', commands: ['rm'], paths: ['/data/prod'] }
+    for (const virtual of ['/data/prod', '/data/prod/x']) {
+      expect(verdict(prod, ctx('rm', { paths: [path(virtual)] }))).toEqual([Outcome.DENY, virtual])
+    }
+    expect(verdict(prod, ctx('rm', { paths: [path('/data/production')] }))).toEqual(ALLOW)
+    const keys: CommandRule = { reason: 'keys', paths: ['*.key'] }
+    expect(verdict(keys, ctx('cat', { paths: [path('/a/b.key/c')] }))).toEqual([
+      Outcome.DENY,
+      '/a/b.key/c',
+    ])
+    expect(verdict(keys, ctx('cat', { paths: [path('/a/b.keyx')] }))).toEqual(ALLOW)
+    const one: CommandRule = { reason: 'one', paths: ['/data/?.txt'] }
+    expect(verdict(one, ctx('cat', { paths: [path('/data/a.txt')] }))[0]).toBe(Outcome.DENY)
+    expect(verdict(one, ctx('cat', { paths: [path('/data/ab.txt')] }))).toEqual(ALLOW)
+    const cls: CommandRule = { reason: 'cls', paths: ['/data/[ab].txt'] }
+    expect(verdict(cls, ctx('cat', { paths: [path('/data/b.txt')] }))[0]).toBe(Outcome.DENY)
+    expect(verdict(cls, ctx('cat', { paths: [path('/data/c.txt')] }))).toEqual(ALLOW)
   })
 
   it('a walking command touches the mounts under its operands', () => {
@@ -113,13 +138,11 @@ describe('rules', () => {
     // speaks. A command that does not walk, or an operand that is not
     // above the root, stays untouched.
     const mount: CommandRule = { reason: 'boxed', mount: '/scratch/child' }
-    expect(matchRule(mount, null, ctx('grep', { paths: [path('/scratch')], walks: true }))).toEqual(
-      { operand: null, depth: 0 },
-    )
-    expect(matchRule(mount, null, ctx('grep', { paths: [path('/scratch')] }))).toBeNull()
-    expect(
-      matchRule(mount, null, ctx('grep', { paths: [path('/scratch/file.txt')], walks: true })),
-    ).toBeNull()
+    const above = [path('/scratch')]
+    expect(verdict(mount, ctx('grep', { paths: above, walks: true }))).toEqual(DENY_LINE)
+    expect(verdict(mount, ctx('grep', { paths: above }))).toEqual(ALLOW)
+    const beside = [path('/scratch/file.txt')]
+    expect(verdict(mount, ctx('grep', { paths: beside, walks: true }))).toEqual(ALLOW)
   })
 
   it('opRuling reads depth before verb and honours a grant', () => {
@@ -163,18 +186,17 @@ describe('rules', () => {
     expect(opRuling(named, inside, [])).toBeNull()
   })
 
-  it('matchOp only for pure path rules', () => {
+  it('an op meets pure path rules only', () => {
     const rule: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
-    const scope = classifyPaths(rule.paths ?? [])
     const op: VfsContext = {
       call: callOf('write'),
       path: path('/data/locked/a'),
       write: true,
       prefix: '/data/',
     }
-    expect(matchOp(rule, scope, op)).toBe(true)
+    expect(refusesOp(rule, op)).toBe(true)
     expect(
-      matchOp(rule, scope, {
+      refusesOp(rule, {
         call: callOf('write'),
         path: path('/data/open/a'),
         write: true,
@@ -182,8 +204,8 @@ describe('rules', () => {
       }),
     ).toBe(false)
     const named: CommandRule = { reason: 'x', commands: ['rm'], paths: ['/data/*'] }
-    expect(matchOp(named, classifyPaths(named.paths ?? []), op)).toBe(false)
-    expect(matchOp({ reason: 'x', commands: ['rm'] }, null, op)).toBe(false)
+    expect(refusesOp(named, op)).toBe(false)
+    expect(refusesOp({ reason: 'x', commands: ['rm'] }, op)).toBe(false)
   })
 
   function subtreeCtx(command: string, ...operands: string[]): CommandContext {
@@ -200,40 +222,26 @@ describe('rules', () => {
     // and `mv /x/locked elsewhere` take them along, so for rm, rmdir and
     // mv the operand at or above the holding directory matches.
     const rule: CommandRule = { reason: 'frozen', paths: ['/x/locked/*'] }
-    const scope = classifyPaths(rule.paths ?? [])
     for (const command of ['rm', 'rmdir']) {
       for (const operand of ['/x/locked', '/x', '/']) {
-        expect(matchRule(rule, scope, subtreeCtx(command, operand))).toEqual({ operand, depth: 2 })
+        expect(verdict(rule, subtreeCtx(command, operand))).toEqual([Outcome.DENY, operand])
       }
-      expect(matchRule(rule, scope, subtreeCtx(command, '/x/other'))).toBeNull()
+      expect(verdict(rule, subtreeCtx(command, '/x/other'))).toEqual(ALLOW)
     }
-    expect(matchRule(rule, scope, subtreeCtx('mv', '/x/locked', '/y'))).toEqual({
-      operand: '/x/locked',
-      depth: 2,
-    })
-    expect(matchRule(rule, scope, subtreeCtx('mv', '/x', '/y'))).toEqual({
-      operand: '/x',
-      depth: 2,
-    })
+    expect(verdict(rule, subtreeCtx('mv', '/x/locked', '/y'))).toEqual([Outcome.DENY, '/x/locked'])
+    expect(verdict(rule, subtreeCtx('mv', '/x', '/y'))).toEqual([Outcome.DENY, '/x'])
     // mv's destination matches only as the holding directory itself:
     // moving into it lands in the scope, moving into an ancestor does not.
-    expect(matchRule(rule, scope, subtreeCtx('mv', '/z', '/x/locked'))).toEqual({
-      operand: '/x/locked',
-      depth: 2,
-    })
-    expect(matchRule(rule, scope, subtreeCtx('mv', '/z', '/x'))).toBeNull()
+    expect(verdict(rule, subtreeCtx('mv', '/z', '/x/locked'))).toEqual([Outcome.DENY, '/x/locked'])
+    expect(verdict(rule, subtreeCtx('mv', '/z', '/x'))).toEqual(ALLOW)
     // A reader given the same operand is not a whole-line refusal: its
     // I/O under the scope is the command tier's to refuse, file by file.
-    expect(matchRule(rule, scope, subtreeCtx('cat', '/x/locked'))).toBeNull()
-    expect(matchRule(rule, scope, subtreeCtx('cp', '/x', '/y'))).toBeNull()
+    expect(verdict(rule, subtreeCtx('cat', '/x/locked'))).toEqual(ALLOW)
+    expect(verdict(rule, subtreeCtx('cp', '/x', '/y'))).toEqual(ALLOW)
     // A command-scoped rule judges its own command the same way.
     const named: CommandRule = { reason: 'locked', commands: ['rm'], paths: ['/x/locked/*'] }
-    const namedScope = classifyPaths(named.paths ?? [])
-    expect(matchRule(named, namedScope, subtreeCtx('rm', '/x'))).toEqual({
-      operand: '/x',
-      depth: 2,
-    })
-    expect(matchRule(named, namedScope, subtreeCtx('mv', '/x', '/y'))).toBeNull()
+    expect(verdict(named, subtreeCtx('rm', '/x'))).toEqual([Outcome.DENY, '/x'])
+    expect(verdict(named, subtreeCtx('mv', '/x', '/y'))).toEqual(ALLOW)
   })
 
   it("subjects are the line's paths, then its subtree operands", () => {
@@ -276,9 +284,8 @@ describe('rules', () => {
     expect(ruleReach(inside, scope, { ...subject('/'), holds: true })).toBe(3)
   })
 
-  it('matchOp refuses a subtree op on the directory holding the scope', () => {
+  it('a subtree op on the directory holding the scope is refused', () => {
     const rule: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
-    const scope = classifyPaths(rule.paths ?? [])
     for (const [op, virtual] of [
       ['rename', '/data/locked'],
       ['rename', '/data'],
@@ -286,7 +293,7 @@ describe('rules', () => {
       ['rm_r', '/data'],
     ] as const) {
       expect(
-        matchOp(rule, scope, {
+        refusesOp(rule, {
           call: callOf(op),
           path: path(virtual),
           write: true,
@@ -297,7 +304,7 @@ describe('rules', () => {
     // A read or write of the directory itself is not in the scope, and a
     // subtree op beside the scope is not either.
     expect(
-      matchOp(rule, scope, {
+      refusesOp(rule, {
         call: callOf('readdir'),
         path: path('/data/locked'),
         write: false,
@@ -305,7 +312,7 @@ describe('rules', () => {
       }),
     ).toBe(false)
     expect(
-      matchOp(rule, scope, {
+      refusesOp(rule, {
         call: callOf('rename'),
         path: path('/data/other'),
         write: true,
@@ -313,10 +320,9 @@ describe('rules', () => {
       }),
     ).toBe(false)
   })
-  it('matchOp lets a metadata op through', () => {
+  it('a metadata op is let through', () => {
     // Deny is present and refused: the entry stats, the read is refused.
     const rule: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
-    const scope = classifyPaths(rule.paths ?? [])
     const exists: VfsCall = {
       name: 'exists',
       effect: Effect.METADATA,
@@ -326,7 +332,7 @@ describe('rules', () => {
     }
     for (const call of [callOf('stat'), exists]) {
       expect(
-        matchOp(rule, scope, {
+        refusesOp(rule, {
           call,
           path: path('/data/locked/a'),
           write: false,
@@ -335,7 +341,7 @@ describe('rules', () => {
       ).toBe(false)
     }
     expect(
-      matchOp(rule, scope, {
+      refusesOp(rule, {
         call: callOf('read'),
         path: path('/data/locked/a'),
         write: false,

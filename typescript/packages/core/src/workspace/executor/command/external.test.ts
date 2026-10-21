@@ -16,7 +16,9 @@ import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RulePolicy } from '../../../policy/rule.ts'
+import type { Policy } from '../../../policy/base.ts'
+import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
+import type { CommandRule } from '../../../policy/types.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { Runtime } from '../../../runtime/base.ts'
@@ -406,6 +408,11 @@ describe('external command routing regressions', () => {
   })
 })
 
+/** The production rule law fed one deny rule as every session's profile. */
+function profileRule(rule: CommandRule): PermissionsPolicy {
+  return new PermissionsPolicy({ commandsOf: () => ({ allow: null, deny: [rule], ask: [] }) })
+}
+
 describe.each(['process', 'shell'] as const)('external %s path admission', (kind) => {
   async function guardedWorkspace(): Promise<[Workspace, ProcessProbe | ShellProbe]> {
     const options = { captures: ['cat', 'grep', 'tar'] }
@@ -417,7 +424,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
         runtimes: [probe],
         mode: MountMode.EXEC,
         policies: [
-          new RulePolicy({
+          profileRule({
             reason: 'protected',
             commands: ['cat', 'grep', 'tar'],
             paths: ['/work/secret.txt'],
@@ -468,7 +475,7 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
 describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kind) => {
   async function textWorkspace(
     captures: string[],
-    policies: RulePolicy[] = [],
+    policies: Policy[] = [],
   ): Promise<[Workspace, ProcessProbe | ShellProbe]> {
     const probe = kind === 'process' ? new ProcessProbe({ captures }) : new ShellProbe({ captures })
     const ws = new Workspace(
@@ -521,7 +528,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
     const [ws, probe] = await textWorkspace(
       ['grep', 'python3'],
       [
-        new RulePolicy({
+        profileRule({
           reason: 'protected',
           commands: ['grep', 'python3'],
           paths: ['/work/secret.txt'],
@@ -564,7 +571,7 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
         shellParser: await getTestParser(),
         runtimes: [probe],
         mode: MountMode.EXEC,
-        policies: [new RulePolicy({ reason: 'protected', paths: ['/work/*'] })],
+        policies: [profileRule({ reason: 'protected', paths: ['/work/*'] })],
       },
     )
     await ws.shell('cd /work')

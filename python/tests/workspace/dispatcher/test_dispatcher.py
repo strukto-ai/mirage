@@ -43,6 +43,7 @@ from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
+    AdmissionRules,
     CommandRule,
     Deny,
     Policies,
@@ -51,7 +52,7 @@ from mirage.policy import (
     VfsContext,
     VfsResultContext,
 )
-from mirage.policy.rule import RulePolicy
+from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
     FileStat,
@@ -246,12 +247,21 @@ async def test_readlink_answers_from_the_namespace():
     ns.follow.assert_not_called()
 
 
+class _OneRule:
+    """Every session's compiled profile: one deny rule."""
+
+    def __init__(self, rule: CommandRule) -> None:
+        self.rules = AdmissionRules(deny=(rule,))
+
+    def commands_of(self, session_id: str) -> AdmissionRules:
+        return self.rules
+
+
 @pytest.mark.asyncio
-async def test_spec_op_twin_holds_on_the_dispatcher():
+async def test_a_profile_path_rule_holds_on_the_dispatcher():
     policies = Policies()
-    policies.add(
-        RulePolicy(CommandRule(reason="frozen", paths=("/data/locked/*",)))
-    )
+    frozen = CommandRule(reason="frozen", paths=("/data/locked/*",))
+    policies.add(PermissionsPolicy(_OneRule(frozen)))
     dispatcher, _ = _dispatcher(policies)
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))

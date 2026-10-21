@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
-import { matchOp, ruleScope } from '../../policy/match/rule.ts'
+import { opRuling } from '../../policy/match/rule.ts'
 import type { VfsContext } from '../../policy/types.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
@@ -221,9 +221,8 @@ describe('compileCommands', () => {
     // The stamp scopes the rule at admission, but the dispatcher reads the
     // paths alone, so a raw name pattern refused a read in every other
     // mount too.
-    const scope = ruleScope(rule)
-    expect(matchOp(rule, scope, readOp('/repo/deep/key.pem'))).toBe(true)
-    expect(matchOp(rule, scope, readOp('/other/key.pem'))).toBe(false)
+    expect(opRuling(rules, readOp('/repo/deep/key.pem'), [])).toEqual([rule, false])
+    expect(opRuling(rules, readOp('/other/key.pem'), [])).toBeNull()
   })
 
   it('is null when the profile states no rules', () => {

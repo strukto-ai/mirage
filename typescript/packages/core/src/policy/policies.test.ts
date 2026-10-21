@@ -36,7 +36,6 @@ import {
   refusalOf,
   renderDeny,
 } from './policies.ts'
-import { RulePolicy } from './rule.ts'
 import { scriptContext } from './script.ts'
 import { Outcome, type PolicyCaller, type RouteContext } from './types.ts'
 import type {
@@ -200,6 +199,13 @@ function executableWorkspace(
   )
 }
 
+/** A user policy refusing every rm. */
+class UserRule implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    return ctx.command === 'rm' ? { kind: 'deny', reason: 'user rule' } : null
+  }
+}
+
 describe('Policies', () => {
   it('carries no rules by default', async () => {
     expect(await new Policies().preCommand(ctx('rm', [path('/data')]))).toBeNull()
@@ -213,13 +219,13 @@ describe('Policies', () => {
 
   it('builtin runs first, then user policies in order', async () => {
     const policies = new Policies([new MountRootPolicy(registry())])
-    policies.add(new RulePolicy({ reason: 'user rule', commands: ['rm'] }))
+    policies.add(new UserRule())
     // Both match `rm /data`; the built-in GNU message wins by order.
     let deny = await policies.preCommand(ctx('rm', [path('/data')]))
     expect(deny?.reason).toContain('Is a directory')
     // Only the user rule matches `rm /data/x`.
     deny = await policies.preCommand(ctx('rm', [path('/data/x')]))
-    expect(deny).toEqual({ kind: 'deny', reason: 'user rule', policy: 'RulePolicy' })
+    expect(deny).toEqual({ kind: 'deny', reason: 'user rule', policy: 'UserRule' })
     // The command plane renders a whole-command refusal at 126, one about
     // a path in the GNU voice at 1, and one carrying an error as the
     // command's own line, whoever produced it.

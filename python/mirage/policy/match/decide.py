@@ -17,13 +17,13 @@ from dataclasses import replace
 from mirage.policy.constants import VERB_ORDER
 from mirage.policy.match.allow import line_allowed
 from mirage.policy.match.rule import (
-    Subject,
-    better_match,
     matched_operand,
     rule_applies,
+    rule_at,
     rule_reach,
     rule_scope,
     subjects,
+    written,
 )
 from mirage.policy.types import (
     AdmissionRules,
@@ -54,29 +54,6 @@ def outranks(current: tuple[int, int], verb: int, depth: int) -> bool:
     if verb != best_verb:
         return verb < best_verb
     return depth > best_depth
-
-
-def rule_at(
-    live: LiveRules, subject: Subject
-) -> tuple[Outcome, CommandRule, int] | None:
-    """The rule that speaks about one subject of a line, None when none
-    does: the deepest anchor, deny before ask at equal depth, the
-    earlier rule on a full tie.
-
-    Args:
-        live (LiveRules): the rules that apply to this line, deny
-            before ask, in the order written.
-        subject (Subject): one subject of the line.
-    """
-    best: tuple[int, int] | None = None
-    chosen: tuple[Outcome, CommandRule, int] | None = None
-    for outcome, rule in live:
-        depth = rule_reach(rule, rule_scope(rule), subject)
-        if depth is None or not better_match(best, depth, VERB_ORDER[outcome]):
-            continue
-        best = (depth, VERB_ORDER[outcome])
-        chosen = (outcome, rule, depth)
-    return chosen
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
@@ -132,18 +109,16 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         return Ruling(Outcome.DENY, source="commands.allow")
     live: LiveRules = [
         (outcome, rule)
-        for outcome, written in (
-            (Outcome.DENY, rules.deny),
-            (Outcome.ASK, rules.ask),
-        )
-        for rule in written
+        for outcome, rule in written(rules)
         if rule_applies(rule, ctx)
     ]
     best: tuple[int, int] | None = None
     chosen = Ruling(Outcome.ALLOW)
     asked: list[CommandRule] = []
     for subject in subjects(ctx):
-        spoke = rule_at(live, subject)
+        spoke = rule_at(
+            live, lambda rule: rule_reach(rule, rule_scope(rule), subject)
+        )
         if spoke is None:
             continue
         outcome, rule, depth = spoke

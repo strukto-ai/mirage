@@ -146,7 +146,7 @@ class CommandRule:
 
     It is the compiled element of ``commands.deny`` and ``commands.ask``
     wherever the profile writes one, and reaches the workspace only inside
-    that document; the internal RulePolicy is what evaluates it. The
+    that document; ``PermissionsPolicy`` is what evaluates it. The
     document writes a rule in one of three shapes, and each compiles to
     rules of this class: a list of command patterns (a whole-line rule
     on each, no paths), a mapping of command pattern to its paths (one

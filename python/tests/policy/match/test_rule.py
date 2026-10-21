@@ -13,14 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.types import WordKind
+from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import (
-    RuleMatch,
     Subject,
     io_reach,
     io_refusal,
     match_io,
-    match_op,
-    match_rule,
     op_ruling,
     rule_reach,
     rule_scope,
@@ -32,10 +30,10 @@ from mirage.policy.types import (
     CommandContext,
     CommandRule,
     CommandWord,
+    Outcome,
     VfsContext,
 )
 from mirage.types import PathSpec
-from mirage.utils.hidden import classify_paths
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.workspace.dispatcher.constants import CALLS
 
@@ -67,64 +65,86 @@ def _ctx(
     )
 
 
-def test_match_rule_by_command_pattern_operand_and_mount():
+def _verdict(
+    rule: CommandRule, ctx: CommandContext
+) -> tuple[Outcome, str | None]:
+    """How a profile holding this one deny rule answers a line: refused
+    or not, and the operand the refusal names (None for the whole line)."""
+    ruling = decide(ctx, AdmissionRules(deny=(rule,)))
+    return ruling.outcome, ruling.matched_path
+
+
+def _refuses_op(rule: CommandRule, op: VfsContext) -> bool:
+    """Whether a profile holding this one deny rule refuses an op."""
+    return op_ruling(AdmissionRules(deny=(rule,)), op, ()) is not None
+
+
+DENY_LINE = (Outcome.DENY, None)
+ALLOW = (Outcome.ALLOW, None)
+
+
+def test_a_rule_reaches_a_line_by_command_pattern_operand_and_mount():
     whole = CommandRule(reason="no", commands=("git push",))
-    assert match_rule(
-        whole, None, _ctx("git", tokens=("git", "push", "origin"))
-    ) == RuleMatch(operand=None)
-    assert match_rule(whole, None, _ctx("git", tokens=("git", "pull"))) is None
-    scoped = CommandRule(reason="no", commands=("rm",), paths=("/repo/*",))
-    scope = classify_paths(scoped.paths)
-    hit = match_rule(
-        scoped,
-        scope,
-        _ctx("rm", paths=(_path("/repo/x", raw="x"),), cwd="/repo"),
-    )
-    # The depth is the matched entry's, which is what the path axis
-    # orders by.
-    assert hit == RuleMatch(operand="x", depth=1)
     assert (
-        match_rule(scoped, scope, _ctx("rm", paths=(_path("/scratch/x"),)))
-        is None
+        _verdict(whole, _ctx("git", tokens=("git", "push", "origin")))
+        == DENY_LINE
     )
+    assert _verdict(whole, _ctx("git", tokens=("git", "pull"))) == ALLOW
+    scoped = CommandRule(reason="no", commands=("rm",), paths=("/repo/*",))
+    assert _verdict(
+        scoped, _ctx("rm", paths=(_path("/repo/x", raw="x"),), cwd="/repo")
+    ) == (Outcome.DENY, "x")
+    assert _verdict(scoped, _ctx("rm", paths=(_path("/scratch/x"),))) == ALLOW
     # A mount-tier rule applies to a line whose cwd or paths lie under
     # the mount, and to nothing else.
     mount = CommandRule(reason="ro", commands=("git push",), mount="/repo")
-    assert (
-        match_rule(
-            mount, None, _ctx("git", tokens=("git", "push"), cwd="/repo/sub")
-        )
-        is not None
+    push = ("git", "push")
+    assert _verdict(mount, _ctx("git", tokens=push, cwd="/repo/sub")) == (
+        DENY_LINE
     )
     assert (
-        match_rule(
+        _verdict(
             mount,
-            None,
-            _ctx(
-                "git",
-                tokens=("git", "push"),
-                cwd="/scratch",
-                paths=(_path("/repo"),),
-            ),
+            _ctx("git", tokens=push, cwd="/scratch", paths=(_path("/repo"),)),
         )
-        is not None
+        == DENY_LINE
     )
-    assert (
-        match_rule(
-            mount, None, _ctx("git", tokens=("git", "push"), cwd="/scratch")
-        )
-        is None
-    )
-    assert (
-        match_rule(
-            mount, None, _ctx("git", tokens=("git", "push"), cwd="/repository")
-        )
-        is None
+    assert _verdict(mount, _ctx("git", tokens=push, cwd="/scratch")) == ALLOW
+    assert _verdict(mount, _ctx("git", tokens=push, cwd="/repository")) == (
+        ALLOW
     )
     # An every-command rule (no patterns) matches whatever line.
-    assert (
-        match_rule(CommandRule(reason="locked"), None, _ctx("ls")) is not None
+    assert _verdict(CommandRule(reason="locked"), _ctx("ls")) == DENY_LINE
+
+
+def test_a_rules_paths_read_the_one_path_grammar():
+    # A plain entry is an exact path and its subtree, so `/data/prod`
+    # covers `/data/prod/x` but not `/data/production`; a slashless glob
+    # matches any name component; `?` and a class are patterns too.
+    prod = CommandRule(reason="prod", commands=("rm",), paths=("/data/prod",))
+    for virtual in ("/data/prod", "/data/prod/x"):
+        assert _verdict(prod, _ctx("rm", paths=(_path(virtual),))) == (
+            Outcome.DENY,
+            virtual,
+        )
+    production = (_path("/data/production"),)
+    assert _verdict(prod, _ctx("rm", paths=production)) == ALLOW
+    keys = CommandRule(reason="keys", paths=("*.key",))
+    assert _verdict(keys, _ctx("cat", paths=(_path("/a/b.key/c"),))) == (
+        Outcome.DENY,
+        "/a/b.key/c",
     )
+    assert _verdict(keys, _ctx("cat", paths=(_path("/a/b.keyx"),))) == ALLOW
+    one = CommandRule(reason="one", paths=("/data/?.txt",))
+    assert _verdict(one, _ctx("cat", paths=(_path("/data/a.txt"),)))[0] is (
+        Outcome.DENY
+    )
+    assert _verdict(one, _ctx("cat", paths=(_path("/data/ab.txt"),))) == ALLOW
+    cls = CommandRule(reason="cls", paths=("/data/[ab].txt",))
+    assert _verdict(cls, _ctx("cat", paths=(_path("/data/b.txt"),)))[0] is (
+        Outcome.DENY
+    )
+    assert _verdict(cls, _ctx("cat", paths=(_path("/data/c.txt"),))) == ALLOW
 
 
 def test_a_walking_command_touches_the_mounts_under_its_operands():
@@ -134,36 +154,24 @@ def test_a_walking_command_touches_the_mounts_under_its_operands():
     # speaks. A command that does not walk, or an operand that is not
     # above the root, stays untouched.
     mount = CommandRule(reason="boxed", mount="/scratch/child")
-    assert match_rule(
-        mount, None, _ctx("grep", paths=(_path("/scratch"),), walks=True)
-    ) == RuleMatch(operand=None)
-    assert (
-        match_rule(mount, None, _ctx("grep", paths=(_path("/scratch"),)))
-        is None
-    )
-    assert (
-        match_rule(
-            mount,
-            None,
-            _ctx("grep", paths=(_path("/scratch/file.txt"),), walks=True),
-        )
-        is None
-    )
+    above = (_path("/scratch"),)
+    assert _verdict(mount, _ctx("grep", paths=above, walks=True)) == DENY_LINE
+    assert _verdict(mount, _ctx("grep", paths=above)) == ALLOW
+    beside = (_path("/scratch/file.txt"),)
+    assert _verdict(mount, _ctx("grep", paths=beside, walks=True)) == ALLOW
 
 
-def test_match_op_only_for_pure_path_rules():
+def test_an_op_meets_pure_path_rules_only():
     rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    scope = classify_paths(rule.paths)
     op = VfsContext(
         call=CALLS["write"],
         path=_path("/data/locked/a"),
         write=True,
         prefix="/data/",
     )
-    assert match_op(rule, scope, op)
-    assert not match_op(
+    assert _refuses_op(rule, op)
+    assert not _refuses_op(
         rule,
-        scope,
         VfsContext(
             call=CALLS["write"],
             path=_path("/data/open/a"),
@@ -172,8 +180,8 @@ def test_match_op_only_for_pure_path_rules():
         ),
     )
     named = CommandRule(reason="x", commands=("rm",), paths=("/data/*",))
-    assert not match_op(named, classify_paths(named.paths), op)
-    assert not match_op(CommandRule(reason="x", commands=("rm",)), None, op)
+    assert not _refuses_op(named, op)
+    assert not _refuses_op(CommandRule(reason="x", commands=("rm",)), op)
 
 
 def test_op_ruling_reads_depth_before_verb_and_honours_a_grant():
@@ -238,44 +246,38 @@ def test_a_subtree_command_on_the_directory_holding_the_scope_matches():
     # and `mv /x/locked elsewhere` take them along, so for rm, rmdir and
     # mv the operand at or above the holding directory matches.
     rule = CommandRule(reason="frozen", paths=("/x/locked/*",))
-    scope = classify_paths(rule.paths)
     for command in ("rm", "rmdir"):
         for operand in ("/x/locked", "/x", "/"):
-            assert match_rule(
-                rule, scope, _subtree_ctx(command, operand)
-            ) == RuleMatch(operand=operand, depth=2)
-        assert (
-            match_rule(rule, scope, _subtree_ctx(command, "/x/other")) is None
-        )
-    assert match_rule(
-        rule, scope, _subtree_ctx("mv", "/x/locked", "/y")
-    ) == RuleMatch(operand="/x/locked", depth=2)
-    assert match_rule(
-        rule, scope, _subtree_ctx("mv", "/x", "/y")
-    ) == RuleMatch(operand="/x", depth=2)
+            assert _verdict(rule, _subtree_ctx(command, operand)) == (
+                Outcome.DENY,
+                operand,
+            )
+        assert _verdict(rule, _subtree_ctx(command, "/x/other")) == ALLOW
+    assert _verdict(rule, _subtree_ctx("mv", "/x/locked", "/y")) == (
+        Outcome.DENY,
+        "/x/locked",
+    )
+    assert _verdict(rule, _subtree_ctx("mv", "/x", "/y")) == (
+        Outcome.DENY,
+        "/x",
+    )
     # mv's destination matches only as the holding directory itself:
     # moving into it lands in the scope, moving into an ancestor does not.
-    assert match_rule(
-        rule, scope, _subtree_ctx("mv", "/z", "/x/locked")
-    ) == RuleMatch(operand="/x/locked", depth=2)
-    assert match_rule(rule, scope, _subtree_ctx("mv", "/z", "/x")) is None
+    assert _verdict(rule, _subtree_ctx("mv", "/z", "/x/locked")) == (
+        Outcome.DENY,
+        "/x/locked",
+    )
+    assert _verdict(rule, _subtree_ctx("mv", "/z", "/x")) == ALLOW
     # A reader given the same operand is not a whole-line refusal: its
     # I/O under the scope is the command tier's to refuse, file by file.
-    assert match_rule(rule, scope, _subtree_ctx("cat", "/x/locked")) is None
-    assert match_rule(rule, scope, _subtree_ctx("cp", "/x", "/y")) is None
+    assert _verdict(rule, _subtree_ctx("cat", "/x/locked")) == ALLOW
+    assert _verdict(rule, _subtree_ctx("cp", "/x", "/y")) == ALLOW
     # A command-scoped rule judges its own command the same way.
     named = CommandRule(
         reason="locked", commands=("rm",), paths=("/x/locked/*",)
     )
-    assert match_rule(
-        named, classify_paths(named.paths), _subtree_ctx("rm", "/x")
-    ) == RuleMatch(operand="/x", depth=2)
-    assert (
-        match_rule(
-            named, classify_paths(named.paths), _subtree_ctx("mv", "/x", "/y")
-        )
-        is None
-    )
+    assert _verdict(named, _subtree_ctx("rm", "/x")) == (Outcome.DENY, "/x")
+    assert _verdict(named, _subtree_ctx("mv", "/x", "/y")) == ALLOW
 
 
 def test_subjects_are_the_lines_paths_then_its_subtree_operands():
@@ -317,18 +319,16 @@ def test_rule_reach_scores_the_entry_that_reached_and_no_other():
     assert rule_reach(inside, scope, Subject(_path("/"), holds=True)) == 3
 
 
-def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
+def test_a_subtree_op_on_the_directory_holding_the_scope_is_refused():
     rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    scope = classify_paths(rule.paths)
     for op, virtual in (
         ("rename", "/data/locked"),
         ("rename", "/data"),
         ("rmdir", "/data/locked"),
         ("rm_r", "/data"),
     ):
-        assert match_op(
+        assert _refuses_op(
             rule,
-            scope,
             VfsContext(
                 call=CALLS[op],
                 path=_path(virtual),
@@ -338,9 +338,8 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
         )
     # A read or write of the directory itself is not in the scope, and a
     # subtree op beside the scope is not either.
-    assert not match_op(
+    assert not _refuses_op(
         rule,
-        scope,
         VfsContext(
             call=CALLS["readdir"],
             path=_path("/data/locked"),
@@ -348,9 +347,8 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
             prefix="/data/",
         ),
     )
-    assert not match_op(
+    assert not _refuses_op(
         rule,
-        scope,
         VfsContext(
             call=CALLS["rename"],
             path=_path("/data/other"),
@@ -360,15 +358,13 @@ def test_match_op_refuses_a_subtree_op_on_the_directory_holding_the_scope():
     )
 
 
-def test_match_op_lets_a_metadata_op_through():
+def test_a_metadata_op_is_let_through():
     # Deny is present and refused: the entry stats, the read is refused.
     rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    scope = classify_paths(rule.paths)
     exists = VfsCall("exists", Effect.METADATA, Target.ANY, False)
     for call in (CALLS["stat"], exists):
-        assert not match_op(
+        assert not _refuses_op(
             rule,
-            scope,
             VfsContext(
                 call=call,
                 path=_path("/data/locked/a"),
@@ -376,9 +372,8 @@ def test_match_op_lets_a_metadata_op_through():
                 prefix="/data/",
             ),
         )
-    assert match_op(
+    assert _refuses_op(
         rule,
-        scope,
         VfsContext(
             call=CALLS["read"],
             path=_path("/data/locked/a"),

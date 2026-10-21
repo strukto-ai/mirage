@@ -17,7 +17,7 @@ from mirage.policy.match.allow import (
     line_allowed,
     line_tokens,
 )
-from mirage.policy.match.decide import decide, outranks, rule_at, source_of
+from mirage.policy.match.decide import decide, outranks, source_of
 from mirage.policy.match.pattern import (
     pattern_matches,
     pattern_names,
@@ -26,7 +26,6 @@ from mirage.policy.match.pattern import (
 )
 from mirage.policy.match.reads import has_rules, reads_args, scopes_paths
 from mirage.policy.match.rule import (
-    RuleMatch,
     Subject,
     better_match,
     covers_depth,
@@ -34,14 +33,13 @@ from mirage.policy.match.rule import (
     io_reach,
     io_refusal,
     match_io,
-    match_op,
-    match_rule,
     matched_operand,
     op_reach,
     op_ruling,
     operand_paths,
     posix_level,
     rule_applies,
+    rule_at,
     rule_reach,
     rule_scope,
     skipped_at_dispatch,
@@ -52,7 +50,6 @@ from mirage.utils.hidden import anchor_depth
 
 __all__ = [
     "Outcome",
-    "RuleMatch",
     "Ruling",
     "Subject",
     "anchor_depth",
@@ -67,8 +64,6 @@ __all__ = [
     "line_allowed",
     "line_tokens",
     "match_io",
-    "match_op",
-    "match_rule",
     "matched_operand",
     "op_reach",
     "posix_level",
