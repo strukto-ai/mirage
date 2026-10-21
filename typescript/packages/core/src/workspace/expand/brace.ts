@@ -95,6 +95,9 @@ function genSequence(body: string): string[] | null {
     if (lo === null || hi === null) return null
     const step = parseStep(stepText, lo >= hi)
     if (step === null) return null
+    // Pinned Bash leaves these directed spans literal, even with a large step.
+    const maxSpan = (1n << 63n) - 3n
+    if ((lo < 0n && hi - lo > maxSpan) || (lo > 0n && lo - hi > maxSpan)) return null
     const values = seqValues(lo, hi, step)
     if (isPadded(loText) || isPadded(hiText)) {
       const width = Math.max(loText.length, hiText.length)
