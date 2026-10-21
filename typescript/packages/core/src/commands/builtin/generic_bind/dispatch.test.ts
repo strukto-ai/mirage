@@ -342,6 +342,34 @@ it.each([
   }
 })
 
+// A link above the subtree leads the dispatcher onto another mount, so the
+// walk asks that mount, not the one at the path as spelled: `/repo/a/sub`
+// stands on the root RAM by name and on the mount at /data/dev by its
+// links.
+it('a walk following a link onto a mount without readTree walks it', async () => {
+  const enc = new TextEncoder()
+  const main = new Untreed()
+  main.loadState({ type: 'ram', files: { '/x.txt': enc.encode('ada\n') } })
+  const dev = new Untreed()
+  dev.loadState({ type: 'ram', dirs: ['/', '/sub'], files: {} })
+  const ws = new Workspace(
+    { '/repo/main': main, '/data/dev': dev },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  try {
+    await ws.shell('ln -s /data/dev /repo/a')
+    const r = await ws.shell('du -aL /repo')
+    const dec = new TextDecoder()
+    expect([dec.decode(r.stdout), dec.decode(r.stderr), r.exitCode]).toEqual([
+      '0\t/repo/a/sub\n0\t/repo/a\n4\t/repo/main/x.txt\n4\t/repo/main\n4\t/repo\n',
+      '',
+      0,
+    ])
+  } finally {
+    await ws.close()
+  }
+})
+
 // A run across mounts reads as served by no mount, even while a mount's scope
 // is bound (another task's: there is no task isolation), so its walk descends.
 it('walks across mounts as a run across them, even inside a mount scope', async () => {

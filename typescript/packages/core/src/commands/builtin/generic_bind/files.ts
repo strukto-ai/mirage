@@ -27,10 +27,19 @@ import {
   type ResolveGlobFn,
 } from '../../../utils/glob_walk.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
+import { CycleError } from '../../../utils/path.ts'
 import type { SessionAccess } from '../../../view/types.ts'
 import type { Context } from '../../config.ts'
 import { guardInput } from '../utils/limit.ts'
-import { crossesMounts, followOf, linksOf, mountRoot, mountsOf, owedNames } from '../utils/links.ts'
+import {
+  crossesMounts,
+  followOf,
+  linkLocation,
+  linksOf,
+  mountRoot,
+  mountsOf,
+  owedNames,
+} from '../utils/links.ts'
 import { isImplicitDir } from '../utils/paths.ts'
 import { callerStream } from './dispatch.ts'
 
@@ -503,6 +512,17 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   const readdir = guard(rawReaddir)
   const links = crossing ? undefined : linksOf(ctx)
   const access = crossing ? undefined : ctx.session?.access()
+  // Where a call that keeps its final name lands: every link above it
+  // followed, as the dispatcher follows them. A loop is left to the call.
+  const landing = (virtual: string): string => {
+    if (links === undefined) return virtual
+    try {
+      return linkLocation(links, virtual)
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err
+      return virtual
+    }
+  }
   return {
     stat,
     exists: guard((path: PathSpec) => dispatchedExists(dispatch, path)),
@@ -568,11 +588,12 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     // A subtree read stops at a link at the final name (ENOTDIR): it cannot
     // pass through one, so a walk that follows links lists them directory by
     // directory instead. `answers` speaks for the serving mount, but a walk
-    // through the dispatcher also reaches the mounts below it, so a subtree
-    // on one that answers no read_tree (a disk mount under the root RAM) is
-    // left to be walked rather than refused with ENOTSUP.
+    // through the dispatcher also reaches the mounts below it and those a
+    // link above the subtree leads to, so a subtree on one that answers no
+    // read_tree (a disk mount under the root RAM) is left to be walked
+    // rather than refused with ENOTSUP.
     readTree: guard(async (path: PathSpec) =>
-      !crossing && mounts !== undefined && !mounts.answers(path.virtual, 'read_tree')
+      !crossing && mounts !== undefined && !mounts.answers(landing(path.virtual), 'read_tree')
         ? null
         : ((await call('read_tree', path, [], { nofollow: true })) as Map<string, FileStat> | null),
     ),

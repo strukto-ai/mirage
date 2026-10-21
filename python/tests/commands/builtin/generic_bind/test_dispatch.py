@@ -329,3 +329,29 @@ async def test_a_walk_reaches_mounts_without_read_tree_under_a_synthetic_dir(
         assert (r.stdout, r.stderr or b"", r.exit_code) == (stdout, b"", 0)
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_walk_following_a_link_onto_a_mount_without_read_tree_walks_it():
+    # A link above the subtree leads the dispatcher onto another mount, so
+    # the walk asks that mount, not the one at the path as spelled:
+    # /repo/a/sub stands on the root RAM by name and on the mount at
+    # /data/dev by its links.
+    main = _Untreed()
+    main.load_state({"files": {"/x.txt": b"ada\n"}})
+    dev = _Untreed()
+    dev.load_state({"files": {}, "dirs": ["/", "/sub"]})
+    ws = Workspace(
+        {"/repo/main/": main, "/data/dev/": dev}, mode=MountMode.WRITE
+    )
+    try:
+        await ws.shell("ln -s /data/dev /repo/a")
+        r = await ws.shell("du -aL /repo")
+        assert (r.stdout, r.stderr or b"", r.exit_code) == (
+            b"0\t/repo/a/sub\n0\t/repo/a\n4\t/repo/main/x.txt\n"
+            b"4\t/repo/main\n4\t/repo\n",
+            b"",
+            0,
+        )
+    finally:
+        await ws.close()
