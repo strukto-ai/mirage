@@ -19,7 +19,7 @@ import { YieldBudget } from '../io/yield_budget.ts'
 import { StreamRefusal } from '../rs/errors.ts'
 import { openStream, type OpenStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
-import { concat } from './bytes.ts'
+import { materialize } from '../io/types.ts'
 
 export class GzipDataError extends Error {
   readonly reasons: readonly string[]
@@ -64,8 +64,6 @@ export function crc32(data: Uint8Array, crc = 0): number {
   }
   return (c ^ 0xffffffff) >>> 0
 }
-
-export const GZIP_CHUNK_SIZE = 65536
 
 const gzipFailure = z
   .object({
@@ -143,15 +141,11 @@ export async function gzip(
   name = '',
   level: number | null = null,
 ): Promise<Uint8Array> {
-  const parts: Uint8Array[] = []
-  for await (const part of gzipCompressStream(yieldBytes(bytes), level, name)) parts.push(part)
-  return concat(parts)
+  return materialize(gzipCompressStream(yieldBytes(bytes), level, name))
 }
 
 export async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const parts: Uint8Array[] = []
-  for await (const part of gunzipStream(yieldBytes(bytes))) parts.push(part)
-  return concat(parts)
+  return materialize(gunzipStream(yieldBytes(bytes)))
 }
 
 /** Encode bounded chunks and close an abandoned source. */
@@ -185,9 +179,7 @@ export function inflateRawStream(
 }
 
 export async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const parts: Uint8Array[] = []
-  for await (const part of inflateRawStream(yieldBytes(bytes))) parts.push(part)
-  return concat(parts)
+  return materialize(inflateRawStream(yieldBytes(bytes)))
 }
 
 // `compress` is optional because a codec may be decompress-only: every

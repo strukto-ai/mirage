@@ -2,9 +2,6 @@ const computations: Record<string, () => Promise<unknown>> = {
   diffDispatch: async () => (await import('../rs/diff_worker.ts')).diffDispatch,
   scan: async () => (await import('../utils/regex_scan.ts')).scan,
   jqRunTexts: async () => (await import('../core/jq/eval.ts')).jqRunTexts,
-  edScript: async () => (await import('../commands/builtin/diff_format.ts')).edScript,
-  unifiedDiff: async () => (await import('../commands/builtin/diff_format.ts')).unifiedDiff,
-  normalDiff: async () => (await import('../commands/builtin/diff_format.ts')).normalDiff,
 }
 
 interface Request {

@@ -65,7 +65,7 @@ import { OutputStream, ensureStream } from '../../../io/stream.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
-import { isStdin, stdinStream, wrapBytes } from '../utils/stream.ts'
+import { isStdin, stdinStream } from '../utils/stream.ts'
 import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
 import { RustRegexError, translateRust, wholeLine, wholeWord } from '../utils/rust_regex.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -1354,7 +1354,7 @@ async function* searchAll(
             warnings.push(refusal)
             continue
           }
-          source = wrapBytes(text)
+          source = ensureStream(text)
         } else if (
           f.searchZip === true &&
           GZIP_NAMES.some((ext) => h.virtual.endsWith(ext)) &&

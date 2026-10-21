@@ -20,7 +20,6 @@ import type {
   ShownPaths,
   Visibility,
 } from '../types.ts'
-import type { PathRecord } from '../io/types.ts'
 import { weakerMode } from '../types.ts'
 import { fnmatch } from './fnmatch.ts'
 import { MAX_SYMLINK_HOPS } from './path.ts'
@@ -282,18 +281,6 @@ export function pathVisible(vis: Visibility | null | undefined, virtual: string)
     }
   }
   return false
-}
-
-/**
- * The records whose path the session leaves visible. A command's output is
- * rendered from its records after this, so a row, a count or a total never
- * stands for a hidden file.
- */
-export function visibleRecords(
-  vis: Visibility | null | undefined,
-  records: readonly PathRecord[],
-): PathRecord[] {
-  return records.filter((r) => pathVisible(vis, r.path.virtual))
 }
 
 /**

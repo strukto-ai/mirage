@@ -29,13 +29,10 @@ import {
   showHead,
   shownMode,
   varHidden,
-  visibleRecords,
 } from './hidden.ts'
-import type { PathRecord } from '../io/types.ts'
 import {
   DEFAULT_VISIBILITY,
   MountMode,
-  PathSpec,
   type HiddenPaths,
   type HiddenVars,
   type ShownPaths,
@@ -223,16 +220,6 @@ describe('pathVisible', () => {
     expect(pathVisible(vis(hidden, shown), '/repo/secrets/key.pem')).toBe(false)
     expect(pathVisible(vis(null, shown), '/anywhere')).toBe(true)
     expect(pathVisible(vis(hidden), '/repo/x')).toBe(false)
-  })
-
-  it('keeps the records the session sees, in order', () => {
-    const records: PathRecord[] = [
-      { path: PathSpec.fromStrPath('/repo/public/a'), run: 0, size: 1 },
-      { path: PathSpec.fromStrPath('/repo/secret'), run: 0, size: 2 },
-      { path: PathSpec.fromStrPath('/other/b'), run: 1 },
-    ]
-    expect(visibleRecords(vis(hidden, shown), records)).toEqual([records[0], records[2]])
-    expect(visibleRecords(null, records)).toEqual(records)
   })
 
   it('lets hide win the equal-depth tie', () => {

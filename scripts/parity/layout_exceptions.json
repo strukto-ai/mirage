@@ -118,6 +118,7 @@
   },
   "commands/builtin": {
    "typescript_only": {
+    "diff_format": "Git's opcode matching and grouping helpers replace Python's standard-library difflib.SequenceMatcher. Shell diff uses the shared Rust engine; its obsolete host formatters have been removed.",
     "tar_helper": "Adapts modern-tar (a GNU-tolerant header check, typeflag mapping) to stand in for CPython's tarfile, which Python's generic/tar/tar.py and workspace/snapshot/tar_io.py call directly. Folding it into generic/tar would make snapshot/tar_io import the tar command."
    }
   },

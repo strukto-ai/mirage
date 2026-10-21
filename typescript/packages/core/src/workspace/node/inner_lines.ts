@@ -328,16 +328,9 @@ function timeInner(args: readonly Word[]): InnerLine[] {
   return asArgv(args.slice(i))
 }
 
-// `nohup COMMAND [ARG]...`.
-function nohupInner(args: readonly Word[]): InnerLine[] {
-  const first = args[0]
-  return asArgv(first !== undefined && wordValue(first) === '--' ? args.slice(1) : args)
-}
-
-// `builtin shell-builtin [ARG]...`: the named builtin runs with the
-// words as given (bash takes no options here but still honors a leading
-// `--`), so `builtin eval 'rm x'` is `eval`'s line.
-function builtinInner(args: readonly Word[]): InnerLine[] {
+// `nohup` and `builtin` run the remaining words verbatim after an
+// optional leading `--`.
+function argvInner(args: readonly Word[]): InnerLine[] {
   const first = args[0]
   return asArgv(first !== undefined && wordValue(first) === '--' ? args.slice(1) : args)
 }
@@ -390,7 +383,8 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
     case 'command':
       return commandInner(args)
     case 'builtin':
-      return builtinInner(args)
+    case 'nohup':
+      return argvInner(args)
     case 'exec':
       return execInner(args)
     case 'env':
@@ -408,8 +402,6 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
       return niceInner(args)
     case 'time':
       return timeInner(args)
-    case 'nohup':
-      return nohupInner(args)
     default:
       return []
   }

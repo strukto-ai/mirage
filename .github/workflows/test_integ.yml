@@ -73,9 +73,13 @@ jobs:
             # The bc package split and shared Rust jq codecs stay covered
             # by the whole-host filters, including Node/browser providers.
             # Rust cut/tr streams and both host adapters use these filters.
+            # Git's remaining TypeScript diff_format helpers use the TS
+            # filter; shell diff uses the shared Rust engine on both hosts.
             # Shared fixtures under packages/*/tests and the openai_agents
             # adapter stay covered by the whole TypeScript filters. Some
             # integration runners import those fixtures, so keep them covered.
+            # Formatting and stream tests consolidated under builtin/utils
+            # remain in the same whole-host filters on both hosts.
             core:
               - 'integ/**'
               - 'data/**'

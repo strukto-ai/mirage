@@ -9,6 +9,7 @@ from mirage.core.wandb.pathing import LEAVES, parts, run_vars
 from mirage.core.wandb.queries import RUN, RUN_CONFIG, RUN_SUMMARY
 from mirage.core.wandb.readdir import readdir
 from mirage.errors.fs import eisdir, enoent
+from mirage.io.types import materialize
 from mirage.types import FileType, PathSpec
 
 
@@ -60,4 +61,4 @@ async def read_stream(
 
 
 async def read(accessor: WandbAccessor, path: PathSpec) -> bytes:
-    return b"".join([chunk async for chunk in read_stream(accessor, path)])
+    return await materialize(read_stream(accessor, path))

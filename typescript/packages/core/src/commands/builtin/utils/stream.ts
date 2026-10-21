@@ -12,37 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { closeStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
-import type { ByteSource } from '../../../io/types.ts'
+import { materialize, type ByteSource } from '../../../io/types.ts'
 import type { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isEisdir } from '../../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STDIN_HEADER_NAME } from './constants.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
 
 export async function readStdinAsync(stdin: ByteSource | null): Promise<Uint8Array | null> {
-  if (stdin === null) return null
-  if (stdin instanceof Uint8Array) return stdin
-  const chunks: Uint8Array[] = []
-  for await (const chunk of stdin) chunks.push(chunk)
-  return concat(chunks)
-}
-
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function* wrapBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
-  yield data
+  return stdin === null ? null : materialize(stdin)
 }
 
 export function resolveSource(stdin: ByteSource | null): AsyncIterable<Uint8Array> {
-  if (stdin === null) {
-    // GNU semantics: no stdin behaves like empty input (/dev/null)
-    return wrapBytes(new Uint8Array(0))
-  }
-  if (stdin instanceof Uint8Array) return wrapBytes(stdin)
-  return stdin
+  // GNU semantics: no stdin behaves like empty input (/dev/null)
+  return ensureStream(stdin ?? new Uint8Array(0))
 }
 
 /**

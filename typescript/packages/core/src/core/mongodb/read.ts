@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../utils/bytes.ts'
+import { materialize } from '../../io/types.ts'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import type { PathSpec } from '../../types.ts'
 import { makeRead } from '../hierarchy/read.ts'
@@ -39,11 +39,7 @@ async function readDocuments(
   match: ScopeMatch,
   path: PathSpec,
 ): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of readStream(accessor, path)) {
-    chunks.push(chunk)
-  }
-  return concat(chunks)
+  return materialize(readStream(accessor, path))
 }
 
 async function readSchemaJson(

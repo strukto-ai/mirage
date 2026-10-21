@@ -19,12 +19,34 @@ import pytest
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
     operand_label,
+    read_stdin_async,
+    resolve_source,
     stdin_stat,
     stdin_stream,
     stream_output,
 )
+from mirage.io.stream import async_chain, yield_bytes
 from mirage.rs.stream import open_stream
 from mirage.types import FileStat, FileType, PathSpec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [None, b"", b"input"])
+async def test_stdin_preserves_absence_and_empty_bytes(data):
+    assert await read_stdin_async(data) is data
+    assert [part async for part in resolve_source(data)] == [data or b""]
+
+
+@pytest.mark.asyncio
+async def test_read_stdin_drains_multiple_chunks():
+    assert await read_stdin_async(async_chain([b"hel", b"lo"])) == b"hello"
+
+
+@pytest.mark.asyncio
+async def test_resolving_stdin_preserves_the_producers_identity():
+    source = yield_bytes(b"input")
+    assert resolve_source(source) is source
+    assert await read_stdin_async(source) == b"input"
 
 
 def _operand(raw: str, virtual: str) -> PathSpec:

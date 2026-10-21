@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.io.types import PathRecord
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
     MountMode,
-    PathSpec,
     ShowEntry,
     Visibility,
 )
@@ -35,7 +33,6 @@ from mirage.utils.hidden import (
     show_head,
     shown_mode,
     var_hidden,
-    visible_records,
 )
 
 
@@ -231,20 +228,6 @@ def test_path_visible_is_the_anchor_depth_rule():
     # No hide, always visible; no show, plain hiding.
     assert path_visible(Visibility(shown=vis.shown), "/anywhere")
     assert not path_visible(Visibility(paths=vis.paths), "/repo/x")
-
-
-def test_visible_records_keep_what_the_session_sees_in_order():
-    vis = _vis(["/repo"], (ShowEntry("/repo/public", MountMode.READ),))
-    records = [
-        PathRecord(PathSpec.from_str_path(p), run, size)
-        for run, p, size in [
-            (0, "/repo/public/a", 1),
-            (0, "/repo/secret", 2),
-            (1, "/other/b", None),
-        ]
-    ]
-    assert visible_records(vis, records) == [records[0], records[2]]
-    assert visible_records(None, records) == records
 
 
 def test_hide_wins_the_equal_depth_tie():

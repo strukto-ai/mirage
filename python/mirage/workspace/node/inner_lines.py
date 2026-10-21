@@ -370,16 +370,13 @@ def _time_inner(args: Sequence[Word]) -> list[InnerLine]:
     return [InnerLine(argv=rest)] if rest else []
 
 
-def _nohup_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``nohup COMMAND [ARG]...``."""
-    rest = tuple(args[1:] if args and args[0].value == "--" else args)
-    return [InnerLine(argv=rest)] if rest else []
+def _argv_inner(args: Sequence[Word]) -> list[InnerLine]:
+    """``nohup`` and ``builtin`` run the remaining words verbatim,
+    after an optional leading ``--``.
 
-
-def _builtin_inner(args: Sequence[Word]) -> list[InnerLine]:
-    """``builtin shell-builtin [ARG]...``: the named builtin runs with
-    the words as given (bash takes no options here but still honors a
-    leading ``--``), so ``builtin eval 'rm x'`` is ``eval``'s line."""
+    Args:
+        args (Sequence[Word]): the words after the wrapper command.
+    """
     rest = tuple(args[1:] if args and args[0].value == "--" else args)
     return [InnerLine(argv=rest)] if rest else []
 
@@ -437,8 +434,8 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _shell_inner(args)
     if head == "command":
         return _command_inner(args)
-    if head == "builtin":
-        return _builtin_inner(args)
+    if head in ("builtin", "nohup"):
+        return _argv_inner(args)
     if head == "exec":
         return _exec_inner(args)
     if head == "env":
@@ -455,6 +452,4 @@ def inner_lines(head: str, args: Sequence[Word]) -> list[InnerLine]:
         return _nice_inner(args)
     if head == "time":
         return _time_inner(args)
-    if head == "nohup":
-        return _nohup_inner(args)
     return []

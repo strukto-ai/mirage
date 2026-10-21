@@ -17,9 +17,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { materialize } from '../io/types.ts'
 import { YIELD_INTERVAL } from '../io/yield_budget.ts'
 import { yieldBytes } from '../io/stream.ts'
-import { GZIP_CHUNK_SIZE, crc32, gunzipStream, gzip, gzipCompressStream } from './compress.ts'
+import { crc32, gunzipStream, gzip, gzipCompressStream } from './compress.ts'
 import { GzipDataError } from './compress.ts'
 
+const GZIP_CHUNK_SIZE = 65536
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 

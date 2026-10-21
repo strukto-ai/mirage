@@ -18,7 +18,7 @@ from contextlib import aclosing
 from mirage.commands.builtin.utils.constants import STDIN_HEADER_NAME
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.io.async_line_iterator import AsyncLineIterator
-from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.rs.stream import OpenStream, close_stream, stream_output_chunks
 from mirage.shell.bytes import encode_text
@@ -26,27 +26,12 @@ from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 
 
 async def read_stdin_async(stdin: ByteSource | None) -> bytes | None:
-    if stdin is None:
-        return None
-    if isinstance(stdin, bytes):
-        return stdin
-    chunks: list[bytes] = []
-    async for chunk in stdin:
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-async def _wrap_bytes(data: bytes) -> AsyncIterator[bytes]:
-    yield data
+    return None if stdin is None else await materialize(stdin)
 
 
 def resolve_source(stdin: ByteSource | None) -> AsyncIterator[bytes]:
-    if stdin is not None:
-        if isinstance(stdin, bytes):
-            return _wrap_bytes(stdin)
-        return stdin
     # GNU semantics: no stdin behaves like empty input (/dev/null)
-    return _wrap_bytes(b"")
+    return ensure_stream(b"" if stdin is None else stdin)
 
 
 def is_stdin(path: PathSpec, dash: bool = True) -> bool:
