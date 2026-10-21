@@ -111,6 +111,27 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 }
 
 /**
+ * `mv`'s positional destination, null when the line has none: another
+ * command, a single operand, or a target directory named by option (`-t`,
+ * `--target-directory`), which leaves every operand a source. Read loosely: a
+ * word that could name a target counts, so a doubtful line keeps its last
+ * operand a source, the stricter reading. Mirrors Python's `_destination`.
+ */
+function destination(ctx: CommandContext): PathSpec | null {
+  const operands = operandPaths(ctx)
+  if (ctx.command !== 'mv' || operands.length < 2) return null
+  for (const w of ctx.words ?? []) {
+    if (w.kind === WordKind.VALUE && w.path !== null) return null
+    if (
+      w.kind === WordKind.OPTION &&
+      (w.text.startsWith('--t') || (!w.text.startsWith('--') && w.text.includes('t')))
+    )
+      return null
+  }
+  return operands.at(-1) ?? null
+}
+
+/**
  * What a line's rules are read against, in the order they are read.
  *
  * Every path the line names first, each asked whether it lies inside a
@@ -124,9 +145,10 @@ export function subjects(ctx: CommandContext): readonly Subject[] {
   const subs: Subject[] = ctx.paths.map((p) => ({ path: p, holds: false, ancestors: true }))
   if (SUBTREE_COMMANDS.has(ctx.command)) {
     const operands = operandPaths(ctx)
-    const dst = ctx.command === 'mv' && operands.length > 1 ? operands.pop() : undefined
+    const dst = destination(ctx)
+    if (dst !== null) operands.pop()
     for (const p of operands) subs.push({ path: p, holds: true, ancestors: true })
-    if (dst !== undefined) subs.push({ path: dst, holds: true, ancestors: false })
+    if (dst !== null) subs.push({ path: dst, holds: true, ancestors: false })
   }
   return subs
 }
@@ -147,10 +169,16 @@ function touches(mount: string, ctx: CommandContext): boolean {
   if (ctx.paths.some((p) => under(p.virtual, mount))) return true
   if (ctx.walks ?? false) return ctx.paths.some((p) => under(mount, p.virtual))
   if (!SUBTREE_COMMANDS.has(ctx.command)) return false
-  // mv's destination takes nothing along; only what it moves does.
-  const taken = operandPaths(ctx)
-  if (ctx.command === 'mv' && taken.length > 1) taken.pop()
-  return taken.some((p) => under(mount, p.virtual))
+  // Every path the line names is taken along, a link's target included,
+  // except where mv moves things to: its destination or its -t value.
+  const targets = new Set(
+    (ctx.words ?? []).flatMap((w) =>
+      w.kind === WordKind.VALUE && w.path !== null ? [w.path.virtual] : [],
+    ),
+  )
+  const dst = destination(ctx)
+  if (dst !== null) targets.add(dst.virtual)
+  return ctx.paths.some((p) => !targets.has(p.virtual) && under(mount, p.virtual))
 }
 
 /**

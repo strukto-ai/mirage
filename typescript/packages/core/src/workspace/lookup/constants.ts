@@ -22,8 +22,7 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 import { compileSpec } from '../../commands/spec/compile.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
-import type { LsLinkMode, PathSpec } from '../../types.ts'
-import { isGlob } from '../../utils/hidden.ts'
+import { type LsLinkMode, PathSpec } from '../../types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -306,7 +305,8 @@ const NARROWED_WRITES: ReadonlySet<string> = new Set([
  * unless it lists, tests or pipes; `gzip` and `gunzip` write a file operand
  * unless `-c` or `-t`; `tee` writes the files it names; `mktemp -u` creates
  * nothing. Every other name may write whenever its handler declares so.
- * Mirrors Python's changes_files.
+ * An operand classified as a path carries whether it is a pattern still to
+ * expand. Mirrors Python's changes_files.
  */
 export function changesFiles(name: string, words: readonly (string | PathSpec)[]): boolean {
   const spec = SPECS[name]
@@ -324,8 +324,9 @@ export function changesFiles(name: string, words: readonly (string | PathSpec)[]
       return fl.raw('o') !== undefined
     case 'uniq':
     case 'xxd':
-      // A pattern the backend expands may name the output file too.
-      return operands > 1 || parsed.paths().some((p) => isGlob(p))
+      // A pattern the backend expands may name the output file too; a quoted
+      // name is no pattern.
+      return operands > 1 || words.slice(1).some((w) => w instanceof PathSpec && w.pattern !== null)
     case 'tee':
       return operands > 0
     case 'mktemp':

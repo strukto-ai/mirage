@@ -246,10 +246,8 @@ def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
         (["iconv", "-o", "/data/b", "/data/a"], True),
         (["uniq", "/data/a"], False),
         (["uniq", "/data/a", "/data/b"], True),
-        (["uniq", "/data/pair.*"], True),
         (["xxd", "/data/a"], False),
         (["xxd", "-r", "/data/a", "/data/b"], True),
-        (["xxd", "/data/x?"], True),
         (["tee"], False),
         (["tee", "/data/a"], True),
         (["mktemp", "-u"], False),
@@ -280,3 +278,15 @@ def test_a_builtin_writes_only_when_its_line_can(words, writes):
     # sed 4.9 opens a w file while it reads the script, before it
     # refuses a later command.
     assert changes_files(words[0], words) is writes
+
+
+@pytest.mark.parametrize("name", ["uniq", "xxd"])
+def test_a_pattern_operand_may_name_the_output(name):
+    # The backend expands a pattern after admission, so `uniq /data/p.*`
+    # may hand it an input and an output; a quoted name is no pattern.
+    pattern = PathSpec(
+        "/data/p.*", "/data", "p.*", pattern="p.*", resolved=False
+    )
+    literal = PathSpec("/data/p[1]", "/data", "p[1]")
+    assert changes_files(name, [name, pattern]) is True
+    assert changes_files(name, [name, literal]) is False

@@ -667,6 +667,9 @@ describe('what the handler a command resolves to declares', () => {
       'sed -i s/a/b/ /data/a.txt': true,
       'tar -tf /data/a.tar': false,
       'uniq /data/a.txt /data/u.txt': true,
+      // A pattern may expand to an output file too; a quoted name is no pattern.
+      'uniq /data/a.*': true,
+      "uniq '/data/a[1].txt'": false,
       'chmod 644 /data/a.txt': true,
       'ln -s /data/a.txt /data/l': true,
       'echo hi': false,

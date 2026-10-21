@@ -515,7 +515,7 @@ function writes(
     reached.push(...registry.allMounts().filter((m) => m === owner || m.prefix.startsWith(below)))
   }
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
-  const builtins = changesFiles(runs, [runs, ...args])
+  const builtins = changesFiles(runs, [runs, ...operands])
   return reached.some((m) =>
     [...extensions].some((extension) => m.mayWrite(runs, extension, builtins)),
   )

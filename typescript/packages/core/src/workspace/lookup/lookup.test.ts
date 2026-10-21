@@ -25,7 +25,7 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import {
   Consumer,
   SHELL_CONSUMERS,
@@ -329,10 +329,8 @@ describe('changesFiles', () => {
     [['iconv', '-o', '/data/b', '/data/a'], true],
     [['uniq', '/data/a'], false],
     [['uniq', '/data/a', '/data/b'], true],
-    [['uniq', '/data/pair.*'], true],
     [['xxd', '/data/a'], false],
     [['xxd', '-r', '/data/a', '/data/b'], true],
-    [['xxd', '/data/x?'], true],
     [['tee'], false],
     [['tee', '/data/a'], true],
     [['mktemp', '-u'], false],
@@ -359,6 +357,21 @@ describe('changesFiles', () => {
     [['cp', '/data/a', '/data/b'], true],
   ] as const)('reads %j as writing: %s', (words, writes) => {
     expect(changesFiles(words[0], words)).toBe(writes)
+  })
+
+  it.each(['uniq', 'xxd'])('%s reads a pattern operand as a possible output', (name) => {
+    // The backend expands a pattern after admission, so `uniq /data/p.*` may
+    // hand it an input and an output; a quoted name is no pattern.
+    const pattern = new PathSpec({
+      virtual: '/data/p.*',
+      directory: '/data',
+      vfsPath: 'p.*',
+      pattern: 'p.*',
+      resolved: false,
+    })
+    const literal = new PathSpec({ virtual: '/data/p[1]', directory: '/data', vfsPath: 'p[1]' })
+    expect(changesFiles(name, [name, pattern])).toBe(true)
+    expect(changesFiles(name, [name, literal])).toBe(false)
   })
 })
 

@@ -1799,11 +1799,17 @@ describe('command permissions end to end', () => {
     expect(chmodCode).toBe(1)
     expect(chmodErr).toContain('chmod: /a/b/c: Permission denied')
     expect(await line(ws, 'stat -c %a /a/b/c/secret /a/b/f')).toEqual([0, '644\n700\n', ''])
-    expect(await line(ws, 'mv /a/b /t/mv')).toEqual([
-      126,
-      '',
-      'mv: Permission denied\npolicy denied: boxed\n',
-    ])
+    // So does a move naming its target by -t, or reaching the directory
+    // through a link.
+    await ws.shell('mkdir -p /a/out /a/other && ln -s /a /a/alias')
+    for (const text of ['mv -t /a/out /a/other /a/b', 'mv /a/alias/b /a/out', 'mv /a/b /t/mv']) {
+      expect(await line(ws, text)).toEqual([
+        126,
+        '',
+        'mv: Permission denied\npolicy denied: boxed\n',
+      ])
+    }
+    await ws.shell('rm /a/alias && rmdir /a/out /a/other')
     // A move into the directory holding the mount takes nothing of it.
     expect(await line(ws, 'echo m > /t/m && mv /t/m /a/b')).toEqual([0, '', ''])
     expect(await line(ws, 'du -x -a /a/b')).toEqual([0, '2\t/a/b/f\n2\t/a/b/m\n4\t/a/b\n', ''])

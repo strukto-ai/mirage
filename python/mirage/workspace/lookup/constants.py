@@ -25,7 +25,6 @@ from mirage.commands.spec.types import FlagValue
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
 from mirage.types import LsLinkMode, PathSpec
-from mirage.utils.hidden import is_glob
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -518,8 +517,9 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
 
     Args:
         name (str): command name.
-        words (Sequence[str | PathSpec]): the command's raw words, name
-            first.
+        words (Sequence[str | PathSpec]): the command's words, name
+            first; an operand classified as a path carries whether it is
+            a pattern still to expand.
     """
     if name not in _NARROWED_WRITES:
         return True
@@ -534,8 +534,12 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
     if name == "iconv":
         return fl.raw("o") is not None
     if name in ("uniq", "xxd"):
-        # A pattern the backend expands may name the output file too.
-        return operands > 1 or any(is_glob(p) for p in parsed.paths())
+        # A pattern the backend expands may name the output file too; a
+        # quoted name is no pattern.
+        return operands > 1 or any(
+            isinstance(w, PathSpec) and w.pattern is not None
+            for w in words[1:]
+        )
     if name == "tee":
         return operands > 0
     if name == "mktemp":

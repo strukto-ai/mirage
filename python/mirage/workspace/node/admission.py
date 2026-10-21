@@ -507,7 +507,7 @@ def _writes(
             if m is owner or m.prefix.startswith(below)
         ]
     extensions = {get_extension(p.virtual) for p in named} or {None}
-    builtins = changes_files(runs, [runs, *args])
+    builtins = changes_files(runs, [runs, *operands])
     return any(
         m.may_write(runs, extension, builtins)
         for m in reached

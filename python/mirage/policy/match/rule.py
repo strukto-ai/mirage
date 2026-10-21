@@ -134,6 +134,30 @@ def operand_paths(ctx: CommandContext) -> list[PathSpec]:
     ]
 
 
+def _destination(ctx: CommandContext) -> PathSpec | None:
+    """``mv``'s positional destination, None when the line has none:
+    another command, a single operand, or a target directory named by
+    option (``-t``, ``--target-directory``), which leaves every operand
+    a source. Read loosely: a word that could name a target counts, so a
+    doubtful line keeps its last operand a source, the stricter reading.
+
+    Args:
+        ctx (CommandContext): the classified command.
+    """
+    operands = operand_paths(ctx)
+    if ctx.command != "mv" or len(operands) < 2:
+        return None
+    for w in ctx.words:
+        if w.kind is WordKind.VALUE and w.path is not None:
+            return None
+        if w.kind is WordKind.OPTION and (
+            w.text.startswith("--t")
+            or (not w.text.startswith("--") and "t" in w.text)
+        ):
+            return None
+    return operands[-1]
+
+
 def subjects(ctx: CommandContext) -> tuple[Subject, ...]:
     """What a line's rules are read against, in the order they are read.
 
@@ -152,11 +176,9 @@ def subjects(ctx: CommandContext) -> tuple[Subject, ...]:
     subs = [Subject(p) for p in ctx.paths]
     if ctx.command in SUBTREE_COMMANDS:
         operands = operand_paths(ctx)
-        dst = (
+        dst = _destination(ctx)
+        if dst is not None:
             operands.pop()
-            if ctx.command == "mv" and len(operands) > 1
-            else None
-        )
         subs.extend(Subject(p, holds=True) for p in operands)
         if dst is not None:
             subs.append(Subject(dst, holds=True, ancestors=False))
@@ -189,11 +211,19 @@ def _touches(mount: str, ctx: CommandContext) -> bool:
         return any(_under(mount, p.virtual) for p in ctx.paths)
     if ctx.command not in SUBTREE_COMMANDS:
         return False
-    # mv's destination takes nothing along; only what it moves does.
-    taken = operand_paths(ctx)
-    if ctx.command == "mv" and len(taken) > 1:
-        taken.pop()
-    return any(_under(mount, p.virtual) for p in taken)
+    # Every path the line names is taken along, a link's target included,
+    # except where mv moves things to: its destination or its -t value.
+    targets = {
+        w.path.virtual
+        for w in ctx.words
+        if w.kind is WordKind.VALUE and w.path is not None
+    }
+    dst = _destination(ctx)
+    if dst is not None:
+        targets.add(dst.virtual)
+    return any(
+        _under(mount, p.virtual) for p in ctx.paths if p.virtual not in targets
+    )
 
 
 def rule_applies(rule: CommandRule, ctx: CommandContext) -> bool:

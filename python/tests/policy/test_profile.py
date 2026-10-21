@@ -1465,11 +1465,20 @@ async def test_a_mount_rule_holds_at_every_entry_a_line_reaches():
             "644\n700\n",
             "",
         )
-        assert await _line(ws, "mv /a/b /t/mv") == (
-            126,
-            "",
-            "mv: Permission denied\npolicy denied: boxed\n",
-        )
+        # So does a move naming its target by -t, or reaching the directory
+        # through a link.
+        await ws.shell("mkdir -p /a/out /a/other && ln -s /a /a/alias")
+        for line in (
+            "mv -t /a/out /a/other /a/b",
+            "mv /a/alias/b /a/out",
+            "mv /a/b /t/mv",
+        ):
+            assert await _line(ws, line) == (
+                126,
+                "",
+                "mv: Permission denied\npolicy denied: boxed\n",
+            ), line
+        await ws.shell("rm /a/alias && rmdir /a/out /a/other")
         # A move into the directory holding the mount takes nothing of it.
         assert await _line(ws, "echo m > /t/m && mv /t/m /a/b") == (
             0,

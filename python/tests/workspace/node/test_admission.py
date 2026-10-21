@@ -835,6 +835,10 @@ async def test_a_command_reads_as_writing_when_its_handler_says_so():
         "sed -i s/a/b/ /data/a.txt": True,
         "tar -tf /data/a.tar": False,
         "uniq /data/a.txt /data/u.txt": True,
+        # A pattern may expand to an output file too; a quoted name is no
+        # pattern.
+        "uniq /data/a.*": True,
+        "uniq '/data/a[1].txt'": False,
         "chmod 644 /data/a.txt": True,
         "ln -s /data/a.txt /data/l": True,
         "echo hi": False,
