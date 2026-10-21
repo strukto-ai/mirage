@@ -142,6 +142,7 @@ def qdrant_config() -> QdrantConfig:
         blob_field="image_bytes",
         blob_ext="png",
         vector_field="vector",
+        cloud_inference=True,
     )
 
 
@@ -167,6 +168,7 @@ def lineage() -> FakeAccessor:
         basename_fields=["metadata.source"],
         name_field="metadata.page",
         text_field="page_content",
+        cloud_inference=True,
     )
     return FakeAccessor(config, client)
 

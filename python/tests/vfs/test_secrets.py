@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -100,6 +100,25 @@ def test_a_provider_config_still_reports_a_redacted_secret():
 
 def test_an_absent_secret_stays_none():
     assert redacted_config_dump(ProviderConfig())["access_token"] is None
+
+
+class HookConfig(BaseModel):
+    hook: Callable[[str], Awaitable[list[float]]] | None = None
+    host: str = "h"
+
+
+async def _hook(text: str) -> list[float]:
+    return [float(len(text))]
+
+
+def test_a_hook_callable_redacts_instead_of_crashing():
+    # box's refresh_fn and qdrant's embed carry no SecretStr in their
+    # type, and still have no serialized form.
+    data = redacted_config_dump(HookConfig(hook=_hook))
+    assert data == {"hook": REDACTED_SECRET, "host": "h"}
+    assert revealed_config_dump(HookConfig(hook=_hook))["hook"] == (
+        REDACTED_SECRET
+    )
 
 
 # A subclass saving its own config under an inherited `type` makes a class

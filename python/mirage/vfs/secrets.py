@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable, Mapping
-from typing import Any, get_args
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel, SecretBytes, SecretStr
 
@@ -138,5 +138,7 @@ def _contains_redacted_secret(value: Any) -> bool:
 
 def _is_secret_annotation(annotation: Any) -> bool:
     if annotation in (SecretStr, SecretBytes):
+        return True
+    if get_origin(annotation) is Callable:
         return True
     return any(_is_secret_annotation(arg) for arg in get_args(annotation))

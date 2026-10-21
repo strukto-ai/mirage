@@ -41,9 +41,9 @@ const CHUNKS = DATA.chunks
 // A bag of words over the corpus vocabulary stands in for a sentence
 // model: a word's first five letters are its stem, so `refund` meets
 // `refunds`, a query word the corpus never used is dropped, and the vector
-// is unit length so cosine similarity is word overlap. A real model (the
-// Python example runs fastembed's all-MiniLM-L6-v2) plugs into the same
-// `embed` hook the mount config takes.
+// is unit length so cosine similarity is word overlap. A real model
+// (fastembed's all-MiniLM-L6-v2, say) plugs into the same `embed` hook the
+// mount config takes.
 function stems(text: string): string[] {
   return text
     .toLowerCase()

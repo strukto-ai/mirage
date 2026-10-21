@@ -102,8 +102,7 @@ vector plugs in the same way. Without it, `cloudInference: true` sends the query
 text to the server, so the cluster must have inference enabled (Qdrant Cloud)
 and store vectors from the same `embeddingModel` (default
 `sentence-transformers/all-MiniLM-L6-v2`). With neither, `search` refuses the
-query: Python embeds it in process by default, which no JS client can.
-The hook never lands in a snapshot: a restored mount asks for a fresh
+query. The hook never lands in a snapshot: a restored mount asks for a fresh
 VFS. Browsing (`ls`/`cat`/`find`/`grep`) needs no embedding.
 
 ## Supported commands

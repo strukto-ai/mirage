@@ -18,22 +18,10 @@ version = "0.207.0"
 reason = "Apache-2.0: the LICENSE in both 0.207.0 wheels. Reached through the daytona extra."
 
 [[python]]
-name = "fastembed"
-license = "LicenseRef-Proprietary"
-version = "0.8.0"
-reason = "Apache-2.0: the LICENSE and NOTICE in the 0.8.0 wheel; only its trove classifier says proprietary. Reached through the qdrant and sandbox extras."
-
-[[python]]
 name = "protobuf-py-ext"
 license = "LicenseRef-Unknown"
 version = "0.1.1"
 reason = "Apache-2.0: the LICENSE of bufbuild/protobuf-py, which builds it; the wheel carries none. Reached through the e2b extra."
-
-[[python]]
-name = "py-rust-stemmers"
-license = "LicenseRef-Unknown"
-version = "0.1.8"
-reason = "MIT: the LICENSE in the 0.1.8 wheel. Reached through the qdrant extra."
 
 # --- weak copyleft, accepted as unmodified, separately installed packages ---
 

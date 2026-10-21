@@ -15,7 +15,7 @@
 import asyncio
 import os
 
-from build_collection import MODEL, build_collection, build_lineage_collection
+from build_collection import build_collection, build_lineage_collection, embed
 from qdrant_client import QdrantClient
 
 from mirage import MountMode, Workspace
@@ -42,6 +42,10 @@ def _client() -> QdrantClient:
     )
 
 
+async def _embed(text: str) -> list[float]:
+    return embed(text)
+
+
 async def show(ws: Workspace, cmd: str) -> None:
     print(f"\n=== {cmd} ===")
     result = await ws.shell(cmd)
@@ -61,7 +65,10 @@ async def main() -> None:
         text_field="productDisplayName",
         blob_field="image_b64",
         blob_ext="jpg",
-        embedding_model=MODEL,
+        # `search` vectorizes its query through this hook, in-process, so a
+        # self-hosted Qdrant with no inference works and mirage itself
+        # depends on no model runtime.
+        embed=_embed,
         search_limit=4,
     )
     # Chunks grouped by the document they came from: `metadata.source` is
@@ -74,7 +81,7 @@ async def main() -> None:
         basename_fields=["metadata.source"],
         name_field="metadata.page",
         text_field="page_content",
-        embedding_model=MODEL,
+        embed=_embed,
         search_limit=2,
     )
     ws = Workspace(

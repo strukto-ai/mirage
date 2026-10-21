@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
+
 from pydantic import BaseModel, ConfigDict, SecretStr
+
+EmbedFn = Callable[[str], Awaitable[list[float]]]
 
 
 class QdrantConfig(BaseModel):
@@ -36,3 +40,4 @@ class QdrantConfig(BaseModel):
     max_rows: int = 1000
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     cloud_inference: bool = False
+    embed: EmbedFn | None = None

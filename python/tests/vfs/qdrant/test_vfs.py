@@ -2,6 +2,7 @@ import pytest
 
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
+from mirage.vfs.secrets import REDACTED_SECRET
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
@@ -52,3 +53,12 @@ def test_vfs_get_state_redacts_api_key():
     res = _vfs(api_key="secret-value")
     state = res.get_state()
     assert "secret-value" not in str(state)
+
+
+async def _embed(text: str) -> list[float]:
+    return [float(len(text))]
+
+
+def test_vfs_get_state_redacts_embed():
+    state = _vfs(embed=_embed).get_state()
+    assert state["config"]["embed"] == REDACTED_SECRET

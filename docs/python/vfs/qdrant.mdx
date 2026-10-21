@@ -27,6 +27,7 @@ config = QdrantConfig(
     text_field="productDisplayName",
     blob_field="image_b64",
     blob_ext="jpg",
+    cloud_inference=True,
     search_limit=5,
 )
 vfs = QdrantVFS(config)
@@ -141,6 +142,19 @@ Nike Men White Running Sneakers
 
 Flags: `--top-k <n>` (default `search_limit`), `--threshold <min-score>`,
 `--method semantic` (the only supported method; `grep`/`rg` stay lexical).
+
+### Search embedding
+
+`search` needs a vector for the query, and the config decides where it comes
+from. With `embed` set, an async `(text: str) -> list[float]` the caller brings,
+the query is vectorized in-process, so a self-hosted Qdrant works and mirage
+depends on no model runtime; `examples/python/vfs/qdrant/qdrant_vfs.py` feeds it
+a dependency-free bag of words, and any model that returns a vector plugs in the
+same way. Without it, `cloud_inference=True` sends the query text to the server,
+so the cluster must have inference enabled (Qdrant Cloud) and store vectors from
+the same `embedding_model` (default `sentence-transformers/all-MiniLM-L6-v2`).
+With neither, `search` refuses the query. The hook never lands in a snapshot: a
+restored mount asks for a fresh VFS.
 
 ## Supported commands
 

@@ -351,18 +351,29 @@ async def search_rows(
     accessor: QdrantAccessor, table: str, query_text: str, limit: int
 ) -> list[QdrantRow]:
     async def fetch() -> list[QdrantRow]:
+        config = accessor.config
+        query: list[float] | models.Document
+        if config.embed is not None:
+            query = await config.embed(query_text)
+        elif config.cloud_inference:
+            query = models.Document(
+                text=query_text, model=config.embedding_model
+            )
+        else:
+            raise ValueError(
+                "search: the query needs a vector: pass embed, or set "
+                "cloud_inference for a cluster with inference"
+            )
         client = await accessor.client()
         response = await client.query_points(
             collection_name=table,
-            query=models.Document(
-                text=query_text, model=accessor.config.embedding_model
-            ),
+            query=query,
             limit=limit,
             with_payload=True,
         )
         rows: list[QdrantRow] = []
         for point in response.points:
-            row = _point_to_row(point, accessor.config.id_field)
+            row = _point_to_row(point, config.id_field)
             row["_score"] = point.score
             rows.append(row)
         return rows
