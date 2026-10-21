@@ -116,6 +116,10 @@ def _gen_sequence(body: str) -> list[str] | None:
         step = _parse_step(step_text, lo >= hi)
         if step is None:
             return None
+        # Pinned Bash leaves these directed spans literal, even with a large step.
+        max_span = (1 << 63) - 3
+        if (lo < 0 and hi - lo > max_span) or (lo > 0 and lo - hi > max_span):
+            return None
         values = _seq_values(lo, hi, step)
         if _is_padded(lo_text) or _is_padded(hi_text):
             width = max(len(lo_text), len(hi_text))
