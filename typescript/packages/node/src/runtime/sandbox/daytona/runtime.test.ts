@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stdinRedirect } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { stdinRedirect } from './constants.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'

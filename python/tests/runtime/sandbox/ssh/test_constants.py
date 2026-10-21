@@ -16,18 +16,25 @@ import pytest
 
 from mirage.runtime.sandbox.ssh.constants import wrap_line
 
+PRELUDE = 'sh -c \'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"\' sh '
+
 
 @pytest.mark.parametrize(
     ("line", "env", "cwd", "wrapped"),
     [
-        ("echo hi", {"A": "1"}, "/w", "cd '/w' && env 'A=1' sh -c 'echo hi'"),
+        (
+            "echo hi",
+            {"A": "1"},
+            "/w",
+            f"{PRELUDE}'/w' env 'A=1' sh -c 'echo hi'",
+        ),
         (
             "echo 'hi'",
             {"M": "two words"},
             "/a b",
-            "cd '/a b' && env 'M=two words' sh -c 'echo '\\''hi'\\'''",
+            f"{PRELUDE}'/a b' env 'M=two words' sh -c 'echo '\\''hi'\\'''",
         ),
-        ("pwd", {}, "/", "cd '/' && env sh -c 'pwd'"),
+        ("pwd", {}, "/", f"{PRELUDE}'/' env sh -c 'pwd'"),
     ],
     ids=["cwd-env-line", "hostile-values", "no-env"],
 )

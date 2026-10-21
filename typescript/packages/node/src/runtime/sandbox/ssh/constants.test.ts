@@ -15,18 +15,20 @@
 import { describe, expect, it } from 'vitest'
 import { wrapLine } from './constants.ts'
 
+const PRELUDE = `sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
+
 describe('wrapLine', () => {
   it('dresses cwd, env, and the line', () => {
-    expect(wrapLine('echo hi', { A: '1' }, '/w')).toBe("cd '/w' && env 'A=1' sh -c 'echo hi'")
+    expect(wrapLine('echo hi', { A: '1' }, '/w')).toBe(`${PRELUDE}'/w' env 'A=1' sh -c 'echo hi'`)
   })
 
   it('quotes hostile values', () => {
     expect(wrapLine("echo 'hi'", { M: 'two words' }, '/a b')).toBe(
-      "cd '/a b' && env 'M=two words' sh -c 'echo '\\''hi'\\'''",
+      `${PRELUDE}'/a b' env 'M=two words' sh -c 'echo '\\''hi'\\'''`,
     )
   })
 
   it('still runs env with no assignments', () => {
-    expect(wrapLine('pwd', {}, '/')).toBe("cd '/' && env sh -c 'pwd'")
+    expect(wrapLine('pwd', {}, '/')).toBe(`${PRELUDE}'/' env sh -c 'pwd'`)
   })
 })

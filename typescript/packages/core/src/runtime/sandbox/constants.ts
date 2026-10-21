@@ -14,42 +14,6 @@
 
 import type { MountType } from '../types.ts'
 
-// Providers whose exec API has no stdin stream (Daytona) upload
-// piped bytes to a per-invocation file and redirect it into the line.
-const STDIN_PREFIX = '/tmp/.mirage_stdin'
-
-/**
- * A unique in-sandbox path for one invocation's stdin bytes: unique
- * per invocation so concurrent lines on the same runtime never
- * overwrite each other's payload.
- */
-export function stdinPath(): string {
-  return `${STDIN_PREFIX}_${crypto.randomUUID().replaceAll('-', '')}`
-}
-
-/**
- * The line rewritten to read its stdin from an uploaded file: runs
- * the line in a subshell with stdin redirected from the path, removes
- * the file afterward, and preserves the line's exit code. Daytona uses
- * this when its exec API has no stdin stream; a PTY would merge
- * streams and mangle bytes.
- *
- * Known limitations, all inherent to the file transport:
- * - stdin is fully buffered and uploaded before the line starts;
- *   nothing is streamed, so no interactive stdin.
- * - the bytes briefly touch the sandbox's /tmp, readable by other
- *   processes in the sandbox and left behind if the exec dies before
- *   the `rm` runs (a later line's unique path is never affected).
- * - each stdin line costs two extra provider API calls (mkdir +
- *   upload).
- * - the sandbox must have a POSIX sh (subshell, `$?`, `rm`).
- * If a provider ever adds real exec stdin, drop this for that
- * provider (docker already streams via `docker exec -i`).
- */
-export function stdinRedirect(line: string, path: string): string {
-  return `(\n${line}\n) < ${path}; _s=$?; rm -f ${path}; exit $_s`
-}
-
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
 
 // How long a sandbox has to show a served prefix as mounted, and how
@@ -77,20 +41,15 @@ export const SSHFS_OPTIONS =
 // stdout is the SFTP stream, so its stderr cannot share the pipe.
 export const SSHFS_LOG_PREFIX = '/tmp/.mirage_sshfs'
 
-// A PTY carries a served prefix's SFTP where a provider's exec decodes
-// output as text (E2B): the terminal goes raw, so bytes pass unchanged,
-// and the marker ends the shell's own output before sshfs starts.
-export const PTY_MARK = new Uint8Array([1, ...new TextEncoder().encode('mirage-sftp'), 2])
-export const PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
-
 export const SSHFS_HINT =
   'serving the workspace into a sandbox needs sshfs there; install it in the image (apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
   'serving the workspace into a sandbox needs @struktoai/mirage-node and its ssh2 peer'
 
 /**
- * Every argv a provider CLI execs runs under this POSIX sh prelude, with
- * the cwd as $1 and `-w /` on the exec. An exec's `-e` can append to the
+ * Every argv a sandbox runs goes under this POSIX sh prelude, with the
+ * cwd as $1: a provider CLI's exec passes `-w /` (`execArgs`), and ssh
+ * dresses its line with it (`wrapLine`). An exec's `-e` can append to the
  * image's environment rather than replace a name it already sets, and
  * `-w` can create a missing directory instead of failing. sh imports the
  * environment last-wins, `cd` fails loud (126) on a cwd the sandbox does

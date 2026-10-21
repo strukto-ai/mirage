@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -20,7 +20,7 @@ import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/type
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
 import { DOCKER_CLI_HINT } from './constants.ts'
-import { type CliResult, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * A container the user runs as a whole-line runtime.
@@ -32,7 +32,11 @@ import { type CliResult, openCliPipe, runCli } from '../cli.ts'
  * the merged environment, the session cwd, real stdin, and separated
  * stderr.
  */
-export class DockerRuntime extends RemoteSandbox<DockerConfig> {
+export class DockerRuntime
+  extends RemoteSandbox<DockerConfig>
+  implements ProcessExecutor<undefined>
+{
+  readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'docker'
 
   constructor(options: RuntimeOptions<DockerConfig> = {}) {
@@ -71,15 +75,16 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> {
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const args = ['exec', '-i', '-w', '/']
-    for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    args.push(this.config.container, 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
+    const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
     const result = await this.docker(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe('docker', ['exec', '-i', this.config.container, 'sh', '-c', command])
+    return openCliPipe(
+      'docker',
+      execArgs(['exec', '-i'], [this.config.container], {}, null, ['sh', '-c', command]),
+    )
   }
 }
 

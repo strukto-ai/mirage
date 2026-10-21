@@ -175,6 +175,8 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
       expect((await readFile(`${fake}.args`, 'utf8')).split('\n')).toEqual([
         'exec',
         '-i',
+        '-w',
+        '/',
         'cid-42',
         'sh',
         '-c',
@@ -246,7 +248,8 @@ function restricted(runtime: DockerRuntime, profile: SessionProfile): Workspace 
 }
 
 function ran(runtime: FakeDockerRuntime, line: string): boolean {
-  return runtime.calls.some(([args]) => args[args.length - 1] === line)
+  const words = line.split(' ')
+  return runtime.calls.some(([args]) => args.slice(-words.length).join(' ') === words.join(' '))
 }
 
 describe('DockerRuntime under session restrictions', () => {

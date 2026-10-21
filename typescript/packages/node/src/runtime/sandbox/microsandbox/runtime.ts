@@ -14,8 +14,7 @@
 
 import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { checkMountType, requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
-import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -26,7 +25,7 @@ import {
   INSPECT_TIMEOUT_SECONDS,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
 
 /**
  * Run programs in an existing Microsandbox guest through the msb CLI.
@@ -44,7 +43,6 @@ export class MicrosandboxRuntime
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
     super(options, MICROSANDBOX_CONFIG_KEYS)
     requireId('microsandbox', 'sandbox', this.config.sandbox)
-    this.serveMounts(checkMountType('microsandbox', this.config.mountType))
   }
 
   /** Skip the connect-once latch: every exec probes the guest. */
@@ -113,32 +111,21 @@ export class MicrosandboxRuntime
     signal?.throwIfAborted()
     await this.connect(signal)
     signal?.throwIfAborted()
-    const args = ['exec', this.config.sandbox, '--quiet', '--no-tty', '-w', '/']
-    for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
-    // `--` ends the flags: the command is a trailing var arg, so a
-    // line starting with a dash would otherwise parse as one.
-    // Released agents block their event loop during chdir into passive SSHFS.
-    // Defer it until the shell starts, so the agent can serve the mount pipe.
-    args.push('--', 'sh', '-c', EXEC_PRELUDE, 'sh', cwd, ...argv)
+    const args = execArgs(this.head(), ['--'], env, cwd, argv)
     const result = await this.microsandbox(args, stdin, signal)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   override async openPipe(command: string): Promise<SandboxPipe> {
     await this.connect()
-    return openCliPipe('msb', [
-      'exec',
-      this.config.sandbox,
-      '--quiet',
-      '--no-tty',
-      '--stream',
-      '-w',
-      '/',
-      '--',
-      'sh',
-      '-c',
-      command,
-    ])
+    return openCliPipe(
+      'msb',
+      execArgs([...this.head(), '--stream'], ['--'], {}, null, ['sh', '-c', command]),
+    )
+  }
+
+  private head(): string[] {
+    return ['exec', this.config.sandbox, '--quiet', '--no-tty']
   }
 }
 

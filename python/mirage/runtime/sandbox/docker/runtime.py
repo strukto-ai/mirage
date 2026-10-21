@@ -13,15 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import open_cli_pipe, run_cli
-from mirage.runtime.sandbox.constants import EXEC_PRELUDE
+from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.docker.config import DockerConfig
 from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
 from mirage.runtime.types import RunResult, SandboxPipe
 
 
-class DockerRuntime(RemoteSandbox):
+class DockerRuntime(RemoteSandbox, ProcessExecutorMixin[None]):
     """A container the user runs as a whole-line runtime.
 
     You start the container yourself; mirage only connects to it and
@@ -71,16 +71,22 @@ class DockerRuntime(RemoteSandbox):
         env: dict[str, str],
         cwd: str,
     ) -> RunResult:
-        args = ["exec", "-i", "-w", "/"]
-        for key, value in env.items():
-            args += ["-e", f"{key}={value}"]
-        args += [self.config.container, "sh", "-c", EXEC_PRELUDE, "sh", cwd]
-        args += argv
-        stdout, stderr, code = await self._docker(args, stdin=stdin)
+        stdout, stderr, code = await self._docker(
+            exec_args(
+                ("exec", "-i"), (self.config.container,), env, cwd, argv
+            ),
+            stdin=stdin,
+        )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         return await open_cli_pipe(
             "docker",
-            ["exec", "-i", self.config.container, "sh", "-c", command],
+            exec_args(
+                ("exec", "-i"),
+                (self.config.container,),
+                {},
+                None,
+                ("sh", "-c", command),
+            ),
         )

@@ -107,7 +107,17 @@ async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
     runtime = DockerRuntime(config={"container": "cid-42"})
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert spawned == [
-        ("docker", "exec", "-i", "cid-42", "sh", "-c", "exec sshfs x y")
+        (
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/",
+            "cid-42",
+            "sh",
+            "-c",
+            "exec sshfs x y",
+        )
     ]
     payload = bytes(range(256))
     pipe.writer.write(payload)
@@ -158,7 +168,8 @@ def restricted(runtime, profile):
 
 
 def ran(runtime, line):
-    return any(args[-1] == line for args, _ in runtime.calls)
+    words = line.split()
+    return any(args[-len(words) :] == words for args, _ in runtime.calls)
 
 
 @pytest.mark.asyncio

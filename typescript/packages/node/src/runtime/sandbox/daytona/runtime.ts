@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
-import { stdinPath, stdinRedirect } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { stdinPath, stdinRedirect } from './constants.ts'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'

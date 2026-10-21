@@ -18,6 +18,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 from mirage.types import PathSpec
 
@@ -101,10 +102,15 @@ async def test_exec_line_threads_cwd_env_stdin_and_real_stderr():
         "vm",
         "-i",
         "-w",
-        "/root/workspace",
+        "/",
         "-e",
         "E=1",
         "--",
+        "sh",
+        "-c",
+        EXEC_PRELUDE,
+        "sh",
+        "/root/workspace",
         "sh",
         "-c",
         "wc -l",
@@ -117,8 +123,16 @@ async def test_exec_line_ends_flags_so_a_dashed_line_is_not_parsed():
     runtime = FakeSmolvmRuntime(config={"machine": "vm"})
     await runtime.exec_line("--version", None, {}, "/")
     args, _ = runtime.calls[-1]
-    assert args[-3:] == ["sh", "-c", "--version"]
-    assert args[-4] == "--"
+    assert args[args.index("--") + 1 :] == [
+        "sh",
+        "-c",
+        EXEC_PRELUDE,
+        "sh",
+        "/",
+        "sh",
+        "-c",
+        "--version",
+    ]
 
 
 @pytest.mark.asyncio
@@ -140,10 +154,15 @@ async def test_process_preserves_argv_and_shares_the_shell_connection():
             "vm",
             "-i",
             "-w",
-            "/work",
+            "/",
             "-e",
             "E=request",
             "--",
+            "sh",
+            "-c",
+            EXEC_PRELUDE,
+            "sh",
+            "/work",
             *argv,
         ],
         b"input",

@@ -20,6 +20,7 @@ import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { describe, expect, it } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
@@ -123,10 +124,15 @@ describe('SmolvmRuntime', () => {
       'vm',
       '-i',
       '-w',
-      '/root/ws',
+      '/',
       '-e',
       'E=1',
       '--',
+      'sh',
+      '-c',
+      EXEC_PRELUDE,
+      'sh',
+      '/root/ws',
       'sh',
       '-c',
       'wc -l',
@@ -138,7 +144,16 @@ describe('SmolvmRuntime', () => {
     const runtime = makeRuntime()
     await runtime.execLine('--version', null, {}, '/')
     const args = runtime.calls[runtime.calls.length - 1]?.[0] ?? []
-    expect(args.slice(-4)).toEqual(['--', 'sh', '-c', '--version'])
+    expect(args.slice(args.indexOf('--') + 1)).toEqual([
+      'sh',
+      '-c',
+      EXEC_PRELUDE,
+      'sh',
+      '/',
+      'sh',
+      '-c',
+      '--version',
+    ])
   })
 
   it("registers under the config name 'smolvm'", () => {
@@ -184,7 +199,24 @@ it('preserves argv through execute and shares the shell connection', async () =>
   )
   expect(DEC.decode(result.stdout)).toBe('out:--flag')
   expect(runtime.calls.at(-1)).toEqual([
-    ['machine', 'exec', '--name', 'vm', '-i', '-w', '/work', '-e', 'E=request', '--', ...argv],
+    [
+      'machine',
+      'exec',
+      '--name',
+      'vm',
+      '-i',
+      '-w',
+      '/',
+      '-e',
+      'E=request',
+      '--',
+      'sh',
+      '-c',
+      EXEC_PRELUDE,
+      'sh',
+      '/work',
+      ...argv,
+    ],
     stdin,
   ])
   await runtime.execute(

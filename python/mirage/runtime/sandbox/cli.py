@@ -17,12 +17,13 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import Context
 
 from mirage.io.stream import async_chain, close_quietly
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.constants import (
+    EXEC_PRELUDE,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
 )
@@ -201,6 +202,44 @@ async def _spawn(
         start_new_session=True,
     )
     return asyncio.subprocess.Process(transport, protocol, loop), transport
+
+
+def exec_args(
+    head: Sequence[str],
+    tail: Sequence[str],
+    env: Mapping[str, str],
+    cwd: str | None,
+    argv: Sequence[str],
+) -> list[str]:
+    """A sandbox CLI's exec arguments, the same for every CLI that runs
+    a command in a box: the CLI's own words, ``/`` as the working
+    directory and each variable as ``-e``, the target or ``--``, then
+    the command.
+
+    A ``cwd`` runs the command there through the prelude, which exits
+    126 when the box lacks it, and defers the chdir until the shell
+    starts, so an agent that blocks on a chdir into a passive sshfs
+    prefix still serves the mount's pipe. None runs it from ``/`` as
+    given, for a helper pipe.
+
+    Args:
+        head (Sequence[str]): the CLI's exec words before the working
+            directory (``exec -i``, smolvm's ``machine exec --name M``).
+        tail (Sequence[str]): what follows the flags: the target, or
+            ``--`` where the command is a trailing var arg, so a line
+            starting with a dash is not read as a flag.
+        env (Mapping[str, str]): the command's environment.
+        cwd (str | None): the working directory, passed through verbatim;
+            None for a helper pipe.
+        argv (Sequence[str]): the command.
+    """
+    args = [*head, "-w", "/"]
+    for key, value in env.items():
+        args += ["-e", f"{key}={value}"]
+    args += tail
+    if cwd is not None:
+        args += ["sh", "-c", EXEC_PRELUDE, "sh", cwd]
+    return [*args, *argv]
 
 
 def cwd_refusal(name: str, cwd: str) -> RunResult | None:

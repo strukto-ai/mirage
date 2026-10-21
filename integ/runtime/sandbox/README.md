@@ -9,7 +9,7 @@ checks hides, a read-only mount and a host change through it, and that
 
 | File            | Pins                                                          | Runs on                                          |
 | --------------- | ------------------------------------------------------------- | ------------------------------------------------ |
-| `line.json`     | echo, an exit code, quoting                                   | every box; quoting on ssh and e2b                |
+| `line.json`     | echo, an exit code, an unserved cwd exits 126, quoting        | every box; quoting on ssh and e2b                |
 | `stdin.json`    | piped stdin; no input closes stdin at start; empty input      | every box; the end-of-input cases on ssh and e2b |
 | `env.json`      | config `env` reaches the line                                 | every box                                        |
 | `timeout.json`  | a mount limit's timeout ends the line with 124                | every box                                        |

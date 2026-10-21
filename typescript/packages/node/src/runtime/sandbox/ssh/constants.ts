@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 
 /**
@@ -20,12 +21,14 @@ import { singleQuote } from '@struktoai/mirage-core/utils/quote'
  * SSH exec has no docker-style `-w`/`-e` (the protocol's env channel
  * is AcceptEnv-gated server-side, so it silently drops names), so the
  * working directory and the merged environment ride the command
- * itself: `cd 'cwd' && env 'K=V' ... sh -c 'line'`. Every piece is
- * single-quoted for sh, so the remote login shell reads each as one word
- * whatever it holds; the machine only needs a POSIX-compatible shell.
+ * itself: the prelude every sandbox runs a command under enters `cwd`
+ * (exit 126 when the host lacks it), then `env 'K=V' ... sh -c 'line'`.
+ * Every piece is single-quoted for sh, so the remote login shell reads
+ * each as one word whatever it holds; the machine only needs a
+ * POSIX-compatible shell.
  */
 export function wrapLine(line: string, env: Record<string, string>, cwd: string): string {
-  const parts = ['cd', singleQuote(cwd), '&&', 'env']
+  const parts = ['sh', '-c', singleQuote(EXEC_PRELUDE), 'sh', singleQuote(cwd), 'env']
   for (const [key, value] of Object.entries(env)) parts.push(singleQuote(`${key}=${value}`))
   parts.push('sh', '-c', singleQuote(line))
   return parts.join(' ')

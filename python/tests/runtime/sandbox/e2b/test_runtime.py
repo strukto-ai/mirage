@@ -22,8 +22,8 @@ from e2b import CommandExitException, NotFoundException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
+from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.types import PathSpec
 

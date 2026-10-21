@@ -176,17 +176,15 @@ class RemoteSandbox(Runtime[None], LineExecutorMixin[None]):
     ) -> RunResult:
         raise NotImplementedError
 
-    def _serve_mounts(self, mount_type: MountType | None) -> None:
+    def _serve_mounts(self, mount_type: MountType) -> None:
         """Let the sandbox see the workspace by ``mount_type``.
 
         Args:
-            mount_type (MountType | None): ssh, fuse or both; None
-                serves nothing.
+            mount_type (MountType): ssh, fuse or both.
         """
-        if mount_type is not None:
-            self._mounts = SandboxMounts(
-                self.name, mount_type, self._setup, self.open_pipe
-            )
+        self._mounts = SandboxMounts(
+            self.name, mount_type, self._setup, self.open_pipe
+        )
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")

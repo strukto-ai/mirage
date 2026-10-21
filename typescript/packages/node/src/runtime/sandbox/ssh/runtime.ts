@@ -72,6 +72,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> {
     )
     await new Promise<void>((resolveFn, rejectFn) => {
       client.on('ready', () => {
+        // A mount_type's SFTP rides this connection, which stalls on
+        // Nagle as the SSH accessor's did (accessor/ssh.ts).
+        client.setNoDelay(true)
         resolveFn()
       })
       client.on('error', rejectFn)

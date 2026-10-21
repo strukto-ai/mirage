@@ -165,6 +165,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   private async prepare(signal?: AbortSignal): Promise<RunResult | null> {
+    // Served here rather than in the constructor, which runs before a
+    // subclass names itself.
+    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     await this.ensureConnected(signal)
     return (await this.mounts?.admit(this.binding, signal)) ?? null
   }
@@ -180,7 +183,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /** Let the sandbox see the workspace by `mountType`; null serves nothing. */
-  protected serveMounts(mountType: MountType | null): void {
+  private serveMounts(mountType: MountType | null): void {
     if (mountType === null) return
     this.mounts = new SandboxMounts(
       this.name,
@@ -196,7 +199,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
-    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     this.connecting ??= this.connect().catch((err: unknown) => {
       this.connecting = null
       throw err

@@ -12,52 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import shlex
-import uuid
-
 from mirage.runtime.types import MountType
-
-# Providers whose exec API has no stdin stream (Daytona) upload
-# piped bytes to a per-invocation file and redirect it into the line.
-STDIN_PREFIX = "/tmp/.mirage_stdin"
-
-
-def stdin_path() -> str:
-    """A unique in-sandbox path for one invocation's stdin bytes.
-
-    Unique per invocation so concurrent lines on the same runtime
-    never overwrite each other's payload.
-    """
-    return f"{STDIN_PREFIX}_{uuid.uuid4().hex}"
-
-
-def stdin_redirect(line: str, path: str) -> str:
-    """The line rewritten to read its stdin from an uploaded file.
-
-    Runs the line in a subshell with stdin redirected from ``path``,
-    removes the file afterward, and preserves the line's exit code.
-    Daytona uses this when its exec API has no stdin stream; a PTY
-    would merge streams and mangle bytes.
-
-    Known limitations, all inherent to the file transport:
-    - stdin is fully buffered and uploaded before the line starts;
-      nothing is streamed, so no interactive stdin.
-    - the bytes briefly touch the sandbox's /tmp, readable by other
-      processes in the sandbox and left behind if the exec dies
-      before the ``rm`` runs (a later line's unique path is never
-      affected).
-    - each stdin line costs two extra provider API calls (mkdir +
-      upload).
-    - the sandbox must have a POSIX sh (subshell, ``$?``, ``rm``).
-    If a provider ever adds real exec stdin, drop this for that
-    provider (docker already streams via ``docker exec -i``).
-
-    Args:
-        line (str): the raw shell line.
-        path (str): the uploaded stdin file (from stdin_path()).
-    """
-    quoted = shlex.quote(path)
-    return f"(\n{line}\n) < {quoted}; _s=$?; rm -f {quoted}; exit $_s"
 
 
 def sdk_install_hint(name: str) -> str:
@@ -102,12 +57,6 @@ SSHFS_OPTIONS = (
 # stdout is the SFTP stream, so its stderr cannot share the pipe.
 SSHFS_LOG_PREFIX = "/tmp/.mirage_sshfs"
 
-# A PTY carries a served prefix's SFTP where a provider's exec decodes
-# output as text (E2B): the terminal goes raw, so bytes pass unchanged,
-# and the marker ends the shell's own output before sshfs starts.
-PTY_MARK = b"\x01mirage-sftp\x02"
-PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
-
 SSHFS_HINT = (
     "serving the workspace into a sandbox needs sshfs there; "
     "install it in the image (apt-get install sshfs)"
@@ -117,8 +66,9 @@ PIPE_SERVER_HINT = (
     "install with: pip install mirage-ai[ssh]"
 )
 
-# Every argv a provider CLI execs runs under this POSIX sh prelude, with
-# the cwd as $1 and `-w /` on the exec. An exec's `-e` can append to the
+# Every argv a sandbox runs goes under this POSIX sh prelude, with the
+# cwd as $1: a provider CLI's exec passes `-w /` (exec_args), and ssh
+# dresses its line with it (wrap_line). An exec's `-e` can append to the
 # image's environment rather than replace a name it already sets, and
 # `-w` can create a missing directory instead of failing. sh imports the
 # environment last-wins, `cd` fails loud (126) on a cwd the sandbox does

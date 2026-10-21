@@ -20,6 +20,7 @@ import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import {
+  EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
@@ -166,6 +167,34 @@ export async function runCli(
     signal?.removeEventListener('abort', abort)
     children?.delete(child)
   }
+}
+
+/**
+ * A sandbox CLI's exec arguments, the same for every CLI that runs a
+ * command in a box: the CLI's own words (`head`: `exec -i`, smolvm's
+ * `machine exec --name M`), `/` as the working directory and each
+ * variable as `-e`, the target or `--` (`tail`: `--` where the command is
+ * a trailing var arg, so a line starting with a dash is not read as a
+ * flag), then the command.
+ *
+ * A `cwd` runs the command there through the prelude, which exits 126
+ * when the box lacks it, and defers the chdir until the shell starts, so
+ * an agent that blocks on a chdir into a passive sshfs prefix still
+ * serves the mount's pipe. Null runs it from `/` as given, for a helper
+ * pipe. Mirrors Python's `exec_args`.
+ */
+export function execArgs(
+  head: readonly string[],
+  tail: readonly string[],
+  env: Record<string, string>,
+  cwd: string | null,
+  argv: readonly string[],
+): string[] {
+  const args = [...head, '-w', '/']
+  for (const [key, value] of Object.entries(env)) args.push('-e', `${key}=${value}`)
+  args.push(...tail)
+  if (cwd !== null) args.push('sh', '-c', EXEC_PRELUDE, 'sh', cwd)
+  return [...args, ...argv]
 }
 
 /**

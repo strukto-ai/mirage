@@ -15,8 +15,8 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.runtime.sandbox.constants import stdin_redirect
 from mirage.runtime.sandbox.daytona import DaytonaRuntime, sdk
+from mirage.runtime.sandbox.daytona.constants import stdin_redirect
 
 
 class FakeProcess:

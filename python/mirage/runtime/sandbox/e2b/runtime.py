@@ -18,13 +18,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import (
-    PTY_MARK,
-    PTY_RAW,
-    sdk_install_hint,
-)
+from mirage.runtime.sandbox.constants import sdk_install_hint
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
+from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)

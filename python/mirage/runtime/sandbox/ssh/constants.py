@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE
 from mirage.utils.quote import single_quote
 
 ASYNCSSH_HINT = (
@@ -25,17 +26,19 @@ def wrap_line(line: str, env: dict[str, str], cwd: str) -> str:
     SSH exec has no docker-style ``-w``/``-e`` (the protocol's env
     channel is AcceptEnv-gated server-side, so it silently drops
     names), so the working directory and the merged environment ride
-    the command itself: ``cd 'cwd' && env 'K=V' ... sh -c 'line'``.
-    Every piece is single-quoted for sh, so the remote login shell reads
-    each as one word whatever it holds; the machine only needs a
-    POSIX-compatible shell.
+    the command itself: the prelude every sandbox runs a command under
+    enters ``cwd`` (exit 126 when the host lacks it), then
+    ``env 'K=V' ... sh -c 'line'``. Every piece is single-quoted for
+    sh, so the remote login shell reads each as one word whatever it
+    holds; the machine only needs a POSIX-compatible shell.
 
     Args:
         line (str): the raw shell line.
         env (dict[str, str]): the merged environment.
         cwd (str): the working directory, passed through verbatim.
     """
-    parts = ["cd", single_quote(cwd), "&&", "env"]
+    parts = ["sh", "-c", single_quote(EXEC_PRELUDE), "sh", single_quote(cwd)]
+    parts += ["env"]
     parts += [single_quote(f"{key}={value}") for key, value in env.items()]
     parts += ["sh", "-c", single_quote(line)]
     return " ".join(parts)

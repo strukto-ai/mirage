@@ -54,9 +54,8 @@ class FakeSandbox extends RemoteSandbox {
     private readonly sshfs = true,
     private readonly sshfsMounts = true,
   ) {
-    super({ captures: ['python3'] })
+    super({ captures: ['python3'], config: { mountType } })
     for (const prefix of own) this.table.set(prefix, 'tmpfs')
-    this.serveMounts(mountType)
   }
 
   connect(): Promise<void> {
