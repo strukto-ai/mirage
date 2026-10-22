@@ -1012,6 +1012,7 @@ export class Dispatcher {
           lostPaths(activeRecords()),
         )
       }
+      await this.dateMade(made, true)
       throw err
     }
     const [answer, dst, fullArgs] = ran
@@ -1026,9 +1027,7 @@ export class Dispatcher {
         answer,
       )
     }
-    for (const dir of made) {
-      await this.changed(dir.virtual, FileChangeKind.CREATE, null, { observed: Date.now() / 1000 })
-    }
+    await this.dateMade(made, false)
     if (!CALLS.has(name)) result = this.customAnswer(call, vfs.name, result)
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
@@ -3568,6 +3567,29 @@ export class Dispatcher {
    * new entry, kept in its parent's listing; null drops that entry. Mirrors
    * Python's Dispatcher._changed.
    */
+  /**
+   * Time the directories a `mkdir -p` made above its path, as the path
+   * itself is timed. After a failure only those that now exist are: a chain
+   * is made outermost first, so the first one missing ends it. Mirrors
+   * Python's `_date_made`.
+   */
+  private async dateMade(made: readonly PathSpec[], failed: boolean): Promise<void> {
+    for (const spec of made) {
+      if (failed) {
+        try {
+          const [row] = await this.dispatch('stat', spec, [], { fresh: true })
+          if (row === null || row === undefined) return
+        } catch (err) {
+          console.debug(`mkdir -p stopped at ${spec.virtual}: ${String(err)}`)
+          return
+        }
+      }
+      await this.changed(spec.virtual, FileChangeKind.CREATE, null, {
+        observed: Date.now() / 1000,
+      })
+    }
+  }
+
   private async changed(
     rawPath: string,
     kind: FileChangeKind,

@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.errors.fs import eacces
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -31,6 +32,25 @@ class _Unattributed(RAMVFS):
         if row.type is FileType.DIRECTORY:
             return row.model_copy(update={"modified": None})
         return row
+
+
+class _Unkept(_Unattributed):
+    """A store that keeps no empty directory, as hf does: mkdir succeeds
+    and makes nothing until a key lands below."""
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        return None
+
+
+class _Halting(_Unattributed):
+    """A store whose ``-p`` chain stops after its first directory, as
+    one whose second marker write is refused does."""
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        if not parents:
+            return await super().mkdir(path, parents)
+        self._store.dirs.add("/p")
+        raise eacces(path)
 
 
 @pytest.mark.asyncio
@@ -61,5 +81,44 @@ async def test_every_directory_parents_makes_takes_its_time():
             0,
             b"/d/p\n/d/p/a\n/d/p/a/b\n",
         )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vfs", [RAMVFS, _Unattributed])
+async def test_parents_leaves_an_existing_directory_its_mode(vfs):
+    ws = Workspace({"/d": vfs()}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(
+            "mkdir /d/e && chmod 750 /d/e && (umask 077; mkdir -p /d/e) && "
+            "mkdir -p -m 700 /d/e && stat -c %a /d/e"
+        )
+        assert (result.exit_code, result.stdout) == (0, b"750\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_store_keeping_no_empty_directory_takes_a_mask():
+    ws = Workspace({"/d": _Unkept()}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(
+            "(umask 077; mkdir -p /d/new) && mkdir -m 700 /d/other && echo ok"
+        )
+        assert (result.exit_code, result.stdout) == (0, b"ok\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_chain_that_fails_partway_times_what_it_made():
+    ws = Workspace({"/d": _Halting()}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(
+            "touch -d 2000-01-01 /d/ref; mkdir -p /d/p/a/b; echo rc=$?; "
+            "find /d/p -newer /d/ref"
+        )
+        assert result.stdout == b"rc=1\n/d/p\n"
     finally:
         await ws.close()

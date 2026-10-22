@@ -216,6 +216,77 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "mkdir_p_leaves_an_existing_directory_its_mode",
+      "seq": 601067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir /data/pmkd8 && chmod 750 /data/pmkd8 && (umask 077; mkdir -p /data/pmkd8) && mkdir -p -m 700 /data/pmkd8 && stat -c %a /data/pmkd8",
+      "expect": {
+        "exit": 0,
+        "stdout": "750\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "id": "mkdir_p_under_a_mask_then_writes_below",
+      "seq": 601087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "(umask 077; mkdir -p /data/pmkd9/new) && echo x > /data/pmkd9/new/f && cat /data/pmkd9/new/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
     }
   ]
 }

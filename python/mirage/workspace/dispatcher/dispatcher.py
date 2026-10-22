@@ -1313,16 +1313,14 @@ class Dispatcher:
         except BaseException:
             if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
+            await self._date_made(caller, mount, made, failed=True)
             raise
         result = self._filter(call, ran)
         if settles:
             await self._settle_write(
                 mount, name, call.path, kwargs, call.vis, created=ran
             )
-        for made_dir in made:
-            await self._changed(
-                mount, made_dir, FileChangeKind.CREATE, observed=time.time()
-            )
+        await self._date_made(caller, mount, made, failed=False)
         if name not in CALLS:
             result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
@@ -3733,6 +3731,39 @@ class Dispatcher:
             return _facts_of(mount if original is mount else None)
 
         return facts
+
+    async def _date_made(
+        self,
+        caller: Caller,
+        mount: MountEntry,
+        made: list[PathSpec],
+        failed: bool,
+    ) -> None:
+        """Time the directories a ``mkdir -p`` made above its path, as
+        the path itself is timed.
+
+        After a failure only those that now exist are: a chain is made
+        outermost first, so the first one missing ends it.
+
+        Args:
+            caller (Caller): who made them.
+            mount (MountEntry): the mount they are on.
+            made (list[PathSpec]): what :func:`_made_above` found
+                missing, outermost first.
+            failed (bool): whether the create raised.
+        """
+        for spec in made:
+            if failed:
+                try:
+                    await self._walk_stat(caller, spec, fresh=True)
+                except OSError as exc:
+                    logger.debug(
+                        "mkdir -p stopped at %s: %s", spec.virtual, exc
+                    )
+                    return
+            await self._changed(
+                mount, spec, FileChangeKind.CREATE, observed=time.time()
+            )
 
     async def _changed(
         self,

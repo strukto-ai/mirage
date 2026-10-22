@@ -242,14 +242,17 @@ const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
       continue
     }
     const names = verbose ? await createdNames(p, parents, links, probe) : []
+    const existed = mode !== null && (await files.exists(p))
     const failed = await makeDirectory(files.mkdir, p, parents, mountRoot(ctx), links, probe)
     if (failed !== null) {
       errors.push(failed)
       continue
     }
-    // -m applies to the named directory only; any parents made by -p keep
-    // the default mode (GNU).
-    if (mode !== null) await files.setAttrs(p, { mode })
+    // -m applies to the named directory only, and only when this mkdir made
+    // it: parents made by -p keep the default mode, a directory -p found
+    // keeps its own (GNU), and a store that keeps no empty directory (hf)
+    // has none to set it on.
+    if (mode !== null && !existed && (await files.exists(p))) await files.setAttrs(p, { mode })
     lines.push(...createdLines(names))
   }
   return [formatOptionalRecords(lines), operandsIo(errors.map((line) => `${line}\n`).join(''))]
