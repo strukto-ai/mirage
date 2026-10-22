@@ -33,6 +33,7 @@ from mirage.policy import (
     CommandExplanation,
     Deny,
     Policy,
+    ShellNode,
 )
 from mirage.policy.match import Outcome
 from mirage.policy.types import DryRun, Scope
@@ -1051,6 +1052,100 @@ async def test_a_line_the_gate_cannot_read_is_explained_as_refused():
             assert [(e.exit_code, e.stderr) for e in said if e.exit_code] == [
                 (126, await ran.stderr_str())
             ]
+    finally:
+        await ws.close()
+
+
+SEALED_READS = {
+    "commands": {
+        "allow": ["cat", "cd", "grep"],
+        "deny": [
+            {
+                "reason": "sealed",
+                "commands": {
+                    "cat": ["/data/secret*"],
+                    "grep": ["/data/secret*"],
+                },
+            }
+        ],
+    }
+}
+
+
+@pytest.mark.asyncio
+async def test_explain_says_what_a_whole_line_gate_refuses_past_the_chain():
+    # A runtime that takes the line whole walks, globs and changes
+    # directory where no gate follows, so under a path rule its gate
+    # refuses a walk, a glob and a command after a cd it cannot follow;
+    # explain said each would run. A cd it can follow moves the path the
+    # rule reads, which the gate read in the session's cwd and ran.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": SEALED_READS},
+        runtimes=[box, "workspace"],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line, reason in (
+            ("grep -r x /data", "walks a tree the gate cannot follow"),
+            ("cat /data/*.txt", "expands a pattern only the runtime can read"),
+            ('cd "$D" && cat notes', "runs after a cd the gate cannot follow"),
+            ("cd /data && cat secret", "sealed"),
+        ):
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.refusal is not None and ran.refusal.reason == reason
+            assert (said.outcome, said.reason) == (Outcome.DENY, reason)
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            )
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+def _commands(node: ShellNode) -> list[CommandExplanation]:
+    """Every command an explained tree holds, nested scopes included.
+
+    Args:
+        node (ShellNode): the tree's root.
+    """
+    out: list[CommandExplanation] = []
+    for child in node.children:
+        if isinstance(child, CommandExplanation):
+            out.append(child)
+            for scope in child.children:
+                out.extend(_commands(scope))
+        else:
+            out.extend(_commands(child))
+    return out
+
+
+@pytest.mark.asyncio
+async def test_explain_reads_a_line_as_the_runtime_it_is_placed_on():
+    # A line placed on the workspace meets the per-command gate, which
+    # reads a name once expanded, though the default runtime takes lines
+    # whole; explain read the default and refused the name as unreadable.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": PROFILE},
+        runtimes=[_LineBox(), "workspace"],
+        route_policy=lambda ctx: "workspace",
+    )
+    try:
+        ws.create_session("s", profile="r")
+        line = 'X=echo; "$X" hi'
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert (ran.exit_code, ran.stdout) == (0, b"hi\n")
+        assert said.exit_code == 0
+        assert [c.exit_code for c in _commands(said.node)] == [0] * len(
+            _commands(said.node)
+        )
     finally:
         await ws.close()
 

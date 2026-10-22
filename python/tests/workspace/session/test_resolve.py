@@ -365,7 +365,6 @@ def test_narrow_carries_the_role_s_admission_rules_onto_the_session():
     session = SessionState(session_id="s")
     narrow(session, compiled)
     assert session.commands == compiled.policies.commands
-    assert session.visibility.commands == ("ls",)
     assert compile_profile(SessionProfile(cwd="/x")).policies.commands is None
 
 

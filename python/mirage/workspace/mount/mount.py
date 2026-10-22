@@ -1412,7 +1412,12 @@ class MountEntry:
             await self.cache_manager.drop(bodies)
         else:
             await self.index_store.invalidate()
-        self.vfs.accessor.forget()
+        self.accessor.forget()
+
+    @property
+    def accessor(self) -> Accessor:
+        """The client this mount's VFS reaches its backend with."""
+        return self.vfs.accessor
 
     def answers_at(self, name: str, path: str) -> bool:
         """Report whether an op would resolve for a path on this mount.

@@ -14,12 +14,18 @@
 
 import asyncio
 import dataclasses
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Callable,
+    Generator,
+    Iterator,
+    Sequence,
+)
 from dataclasses import dataclass
 from typing import Any
 
 from mirage.policy import (
-    Abandoned,
+    AdmissionRules,
     Ask,
     Claimant,
     CommandContext,
@@ -35,8 +41,11 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
-from mirage.policy.match import Outcome, Ruling, decide, has_rules
+from mirage.policy.builtin.permissions import PermissionsPolicy
+from mirage.policy.decisions import is_pending
+from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
+from mirage.policy.policies import settled
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
@@ -49,26 +58,24 @@ from mirage.shell.helpers import (
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
 from mirage.types import PathSpec, Refusal
-from mirage.utils.abort import MirageAbortError
+from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
+from mirage.workspace.lookup import line_flags, reads_subtrees
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
-    UNREADABLE_LINES,
     Refused,
-    admit,
     classified_words,
     gate,
-    is_pending_refusal,
     redirect_paths,
+    resolved,
     statement_redirects,
     statement_stdin,
-    unlisted_service,
-    unreadable,
 )
 from mirage.workspace.node.inner_lines import (
+    InnerLine,
     Word,
     inner_lines,
     read_word,
@@ -118,6 +125,11 @@ FORK_SCOPES = frozenset(
         NodeType.PROCESS_SUBSTITUTION,
     }
 )
+
+
+# Why the gate refuses, under a rule, a command that runs lines it cannot
+# see into: a sourced file, a script, a bash option mirage does not read.
+UNREADABLE_LINES = "runs lines the gate cannot read"
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,15 +199,25 @@ def _denied(command: str, reason: str) -> Judgment:
     )
 
 
+def unreadable(raw: str) -> str:
+    """Why the gate refuses a word only the runtime can expand.
+
+    Args:
+        raw (str): the word as typed.
+    """
+    return f"cannot read {raw} before the runtime expands it"
+
+
 def _explained(
     ctx: CommandContext,
-    session: SessionState,
     registry: MountRegistry,
     asked: Deny | Ask | None,
     answers: tuple[Deny | Ask, ...],
 ) -> Judgment:
-    """One command's explanation, rendered from the same table the gate
-    renders a refusal with.
+    """One command's explanation, read off the answers the gate's chain
+    gave and rendered from the same table the gate renders a refusal
+    with: the profile's rules (``PermissionsPolicy``) say the outcome
+    and the rule that spoke, the chain's answer what the line would do.
 
     An Ask reads the session's standing grants and stops there
     (``Decisions.held``): a dry run must not spend one, record a
@@ -205,24 +227,34 @@ def _explained(
 
     Args:
         ctx (CommandContext): the classified command.
-        session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the decision ledger.
         asked (Deny | Ask | None): what the policy chain answered.
         answers (tuple[Deny | Ask, ...]): the answers it came from.
     """
-    decision = decide(ctx, session.commands)
-    if decision.outcome is Outcome.ALLOW and unlisted_service(
-        ctx, registry, session
-    ):
-        decision = Ruling(Outcome.DENY, source="commands.allow")
+    document = settled(
+        tuple(a for a in answers if a.policy == PermissionsPolicy.__name__)
+    )
+    rule = document.rule if document is not None else None
     base = Judgment(
         command=ctx.command,
         argv=ctx.argv,
-        outcome=decision.outcome,
-        rule=decision.rule,
-        reason=decision.rule.reason if decision.rule else "",
-        source=decision.source,
-        matched_path=decision.matched_path,
+        outcome=(
+            Outcome.DENY
+            if isinstance(document, Deny)
+            else Outcome.ASK
+            if isinstance(document, Ask)
+            else Outcome.ALLOW
+        ),
+        rule=rule,
+        reason=rule.reason if rule is not None else "",
+        source=(
+            source_of(rule)
+            if rule is not None
+            else "commands.allow"
+            if document is not None
+            else ""
+        ),
+        matched_path=document.path if isinstance(document, Deny) else None,
         paths=tuple(p.virtual for p in ctx.paths),
         answers=answers,
     )
@@ -320,6 +352,71 @@ def _unread_paths(
     return frozenset(unread - read)
 
 
+def _line_refusal(
+    name: str,
+    args: list[str],
+    words: Sequence[Word],
+    operands: Sequence[str | PathSpec],
+    redirects: Sequence[PathSpec],
+    inners: Sequence[InnerLine],
+    rules: AdmissionRules | None,
+    open_: bool,
+    lost: bool,
+) -> str | None:
+    """Why a runtime that takes the line whole may not run a command the
+    chain did not refuse, None when it may.
+
+    Such a runtime expands, walks, globs and changes directory on its
+    own (a remote sandbox's own disk, a host process), where no entry
+    gate follows an I/O below the judged words, so a command a rule
+    reads must not reach it with any of them in hand. A command a path
+    or mount rule reads is refused when it walks (``find``,
+    ``grep -r``, ``tar -c``) or names a glob; one a rule reads the
+    arguments of when a word only the runtime can expand stands among
+    them, when the runtime appends operands (``xargs``, ``find -exec``)
+    or when it runs after a ``cd`` the walk could not follow; and any
+    command, under any rule, that runs lines the gate cannot read (a
+    sourced file, a script, ``eval "$p"``). With no rule in force
+    nothing is refused on this account: the words are admitted as
+    typed, which is all a coded policy ever saw.
+
+    Args:
+        name (str): the command name.
+        args (list[str]): the words after it.
+        words (Sequence[Word]): the same words and the statement's
+            redirect targets, as the gate read them.
+        operands (Sequence[str | PathSpec]): the words after the name,
+            classified.
+        redirects (Sequence[PathSpec]): the redirect targets' paths.
+        inners (Sequence[InnerLine]): the lines the command runs.
+        rules (AdmissionRules | None): the session's admission rules.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read.
+        lost (bool): whether a ``cd`` the walk could not follow ran
+            before the command.
+    """
+    if scopes_paths(rules, name):
+        if reads_subtrees(name, line_flags(name, [name, *args])):
+            return "walks a tree the gate cannot follow"
+        if any(
+            is_glob(p.raw_path or p.virtual)
+            for p in (*operands, *redirects)
+            if isinstance(p, PathSpec)
+        ):
+            return "expands a pattern only the runtime can read"
+    if reads_args(rules, name):
+        unread = next((w.raw for w in words if w.text is None), None)
+        if unread is not None:
+            return unreadable(unread)
+        if open_:
+            return "runs on operands the gate cannot read"
+        if lost:
+            return "runs after a cd the gate cannot follow"
+    if has_rules(rules) and any(not inner.readable for inner in inners):
+        return UNREADABLE_LINES
+    return None
+
+
 async def _judge_words(
     words: list[Word],
     occurrence: Occurrence,
@@ -332,21 +429,27 @@ async def _judge_words(
     whole_line: bool = False,
     lost: bool = False,
     every: bool = False,
+    rules_only: bool = True,
     stdin: bytes | None = None,
-) -> list[Judged]:
-    """Explain one command and whatever lines it runs in turn, each
-    with its occurrence.
+    open_: bool = False,
+) -> AsyncIterator[Judged]:
+    """Judge one command and whatever lines it runs in turn, each with
+    its occurrence, one at a time, so a reader that stops at a refusal
+    never asks the chain about what comes after it.
 
-    The redirect targets are read as words of the command, exactly as
-    admission reads them: the shell opens them on its own fds, outside
-    the window the command's own gate covers, so a rule about
-    ``/protected`` sees ``echo x > /protected`` only if they are passed
-    here. Omitting them made the dry run answer ALLOW for a line the
-    run then refused. A line the command runs (``eval``, ``sh -c``) is
-    parsed on its own and read under the command's occurrence, exactly
-    as the nested evaluation will stand when it runs; words a command
-    runs (``command``, ``env``, ``timeout``, ``xargs``) are read as the
-    one line the builtin hands the evaluator, spelled as it spells it.
+    The redirect targets are read as words of the command: the shell
+    opens them on its own fds, outside the window the command's own gate
+    covers, so a rule about ``/protected`` sees ``echo x > /protected``
+    only if they are passed here. A line the command runs (``eval``,
+    ``sh -c``) is parsed on its own and read under the command's
+    occurrence, exactly as the nested evaluation will stand when it
+    runs; words a command runs (``command``, ``env``, ``timeout``,
+    ``xargs``) are read as the one line the builtin hands the evaluator,
+    spelled as it spells it. For a runtime that takes the line whole
+    this is the gate itself (:func:`admit_line`), so what ``explain``
+    says about such a line is what its admission does: a deny first,
+    then what the runtime would do past the gate (:func:`_line_refusal`),
+    then an ask.
 
     Args:
         words (list[Word]): the command's words, name first.
@@ -357,34 +460,49 @@ async def _judge_words(
         namespace (Namespace | None): the link table.
         redirect_words (tuple[Word, ...]): the statement's redirect
             targets, empty for a command that has none and for the
-            inner lines a command runs, which admission reads the same
-            way.
+            inner lines a command runs.
         stated (bool): whether the words reach here as the gate will
             read them; False under a command the runtime completes,
             since a line built from its words (``eval``) or run on its
             operands (``xargs``) is completed with them.
         intrinsic (bool): keep the shell-provided operation's tool policy.
-        whole_line (bool): whether a runtime takes the line whole. Only
-            its gate refuses a name the runtime expands, and only under a
-            rule (``admit_line``); the executor judges the expanded name.
+        whole_line (bool): whether a runtime takes the line whole, where
+            this is the only gate; the executor judges each command
+            again once its words are expanded.
         lost (bool): whether a ``cd`` the walk could not follow ran
             before the command, as ``Walked`` carries it.
         every (bool): ask every policy past a Deny, for ``explain``.
-            Without it the pass judges a line before it runs, which
-            asks the profile's rules alone: a policy's own
+        rules_only (bool): ask the profile's rules alone, for a pass
+            that judges a line before it runs; a policy's own
             ``pre_command`` is asked once, by the gate that runs the
             command.
         stdin (bytes | None): empty when the statement redirects input.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read (``xargs``, ``find -exec``, ``mapfile -C``).
     """
     head = words[0]
+    rules = session.commands
+    if whole_line and await registry.policies.wants_for(
+        "post_command", session.session_id
+    ):
+        # The runtime runs the commands itself: no command's result
+        # comes back for a post_command policy to judge.
+        yield Judged(
+            _denied(
+                head.raw,
+                "a post_command policy cannot judge a line a runtime "
+                "runs whole",
+            ),
+            occurrence,
+            False,
+        )
+        return
     if head.text is None:
-        if whole_line and has_rules(session.commands):
-            return [
-                Judged(
-                    _denied(head.raw, unreadable(head.raw)), occurrence, False
-                )
-            ]
-        return []
+        if whole_line and has_rules(rules):
+            yield Judged(
+                _denied(head.raw, unreadable(head.raw)), occurrence, False
+            )
+        return
     stated = stated and all(
         w.text is not None for w in [*words, *redirect_words]
     )
@@ -410,7 +528,7 @@ async def _judge_words(
         session.cwd,
         env_snapshot(session),
     )
-    gated = await gate(
+    ctx, asked, answers = await gate(
         name,
         args,
         classified[1:],
@@ -422,71 +540,82 @@ async def _judge_words(
         intrinsic=intrinsic,
         unread=unread,
         every=every,
-        rules_only=not every,
+        rules_only=rules_only,
         line=occurrence.source,
     )
-    ctx, asked, answers = gated
-    out = [
-        Judged(
-            dataclasses.replace(
-                _explained(ctx, session, registry, asked, answers),
-                words=words_read,
-            ),
+    inners = inner_lines(name, words[1:])
+    refused = (
+        _line_refusal(
+            name,
+            args,
+            read_words,
+            classified[1:],
+            redirects,
+            inners,
+            rules,
+            open_,
+            lost,
+        )
+        if whole_line and not isinstance(asked, Deny)
+        else None
+    )
+    if refused is not None:
+        yield Judged(
+            dataclasses.replace(_denied(name, refused), words=words_read),
             occurrence,
             stated,
             intrinsic,
             unread,
-            ctx,
-            session,
         )
-    ]
-    for inner in inner_lines(name, words[1:]):
+        return
+    yield Judged(
+        dataclasses.replace(
+            _explained(ctx, registry, asked, answers), words=words_read
+        ),
+        occurrence,
+        stated,
+        intrinsic,
+        unread,
+        ctx,
+        session,
+    )
+    for inner in inners:
         if not inner.readable:
-            if whole_line and has_rules(session.commands):
-                return [
-                    Judged(
-                        dataclasses.replace(
-                            _denied(name, UNREADABLE_LINES), words=words_read
-                        ),
-                        occurrence,
-                        stated,
-                        intrinsic,
-                    )
-                ]
             continue
         if inner.line is not None:
-            out.extend(
-                await _judge_line(
-                    parse(inner.line),
-                    session,
-                    registry,
-                    namespace,
-                    line_frame(inner.line, occurrence),
-                    stated and not inner.open,
-                    whole_line,
-                    lost,
-                    every,
-                )
-            )
+            async for one in _judge_line(
+                parse(inner.line),
+                session,
+                registry,
+                namespace,
+                line_frame(inner.line, occurrence),
+                stated and not inner.open,
+                whole_line,
+                lost,
+                every,
+                rules_only,
+                inner.open,
+            ):
+                yield one
         else:
             argv = list(inner.argv)
             within = whole_occurrence(
                 argv_frame([w.value for w in argv], occurrence)
             )
-            out.extend(
-                await _judge_words(
-                    argv,
-                    within,
-                    session,
-                    registry,
-                    namespace,
-                    stated=stated and not inner.open,
-                    whole_line=whole_line,
-                    lost=lost,
-                    every=every,
-                )
-            )
-    return out
+            async for one in _judge_words(
+                argv,
+                within,
+                session,
+                registry,
+                namespace,
+                stated=stated and not inner.open,
+                whole_line=whole_line,
+                lost=lost,
+                every=every,
+                rules_only=rules_only,
+                open_=inner.open,
+            ):
+                yield one
 
 
 def _is_verdict(expl: Judgment) -> bool:
@@ -539,7 +668,7 @@ def _refuses(expl: Judgment) -> bool:
     Args:
         expl (Judgment): one command's explanation.
     """
-    return expl.exit_code != 0 and not is_pending_refusal(expl.refusal)
+    return expl.exit_code != 0 and not is_pending(expl.refusal)
 
 
 def _asks_for(one: Judged) -> bool:
@@ -881,18 +1010,21 @@ async def line_judgments(
         judged.append(
             (
                 item,
-                await _judge_words(
-                    item.words,
-                    item.occurrence,
-                    item.session,
-                    registry,
-                    namespace,
-                    item.redirects,
-                    item.stated,
-                    stdin=item.stdin,
-                    intrinsic=item.intrinsic,
-                    lost=item.lost,
-                ),
+                [
+                    one
+                    async for one in _judge_words(
+                        item.words,
+                        item.occurrence,
+                        item.session,
+                        registry,
+                        namespace,
+                        item.redirects,
+                        item.stated,
+                        stdin=item.stdin,
+                        intrinsic=item.intrinsic,
+                        lost=item.lost,
+                    )
+                ],
             )
         )
     return judged
@@ -1020,43 +1152,118 @@ async def prejudge_line(
         )
     if sum(len(explained) for _, explained in judged) < 2:
         return None
-    for item, explained in judged:
-        walked = item.session
-        targets = redirect_paths(item.redirects, registry, walked.cwd)
-        for index, one in enumerate(explained):
-            expl = one.judgment
-            if not _is_judged(expl) or not _asks_for(one):
+    for _, explained in judged:
+        for one in explained:
+            if not _is_judged(one.judgment) or not _asks_for(one):
                 continue
-            args = list(expl.argv)
-            classified = classified_words(expl.command, args, walked, registry)
-            answered = await admit(
-                expl.command,
-                args,
-                classified[1:],
-                walked,
-                registry,
-                namespace,
-                # _judge_words lists the statement's own command first
-                # and the lines it runs after it, so only the first
-                # explanation is the command the redirects belong to.
-                stdin=item.stdin if index == 0 else None,
-                redirects=targets if index == 0 else (),
-                cancel=cancel,
-                # This pass judges on the gate's behalf and runs nothing
-                # itself, so a grant the host gives here is claimed for
-                # the per-command gate that runs the line, and spent
-                # when the line ends: one question per run, not per
-                # pass.
-                claimant=Claimant(handed, one.occurrence),
-                intrinsic=one.intrinsic,
-                unread=one.unread,
-                rules_only=True,
-            )
-            if isinstance(answered, Refused):
-                return answered
+            # This pass judges on the gate's behalf and runs nothing
+            # itself, so a grant the host gives here is claimed for the
+            # per-command gate that runs the line, and spent when the
+            # line ends: one question per run, not per pass.
+            refused = await _admitted(one, registry, handed, cancel)
+            if refused is not None:
+                return refused
             # The host answered this one inline. The rest of the line
             # has not been judged yet, so the scan goes on: stopping
             # here let a later command's deny run behind an approval.
+    return None
+
+
+async def _admitted(
+    one: Judged,
+    registry: MountRegistry,
+    handed: HandOff | None,
+    cancel: asyncio.Event | None,
+) -> Refused | None:
+    """One judged command put through the ledger, as the gate puts it.
+
+    A command refused before any policy was asked (``Judged.ctx`` None)
+    stands as judged. Otherwise the chain's answer the judgment recorded
+    is the gate's, and its Ask is answered from the session's grants or
+    the host and claimed on the line's hand-off for this occurrence, so
+    the policies are asked once per command, by the pass that judged it.
+
+    Args:
+        one (Judged): the command's judgment and its place on the line.
+        registry (MountRegistry): registry holding the decision ledger.
+        handed (HandOff | None): the line's hand-off, None outside a
+            line.
+        cancel (asyncio.Event | None): the run's kill channel.
+
+    Returns:
+        The command's refusal, or None to let it run.
+    """
+    judgment = one.judgment
+    if one.ctx is None:
+        return Refused(
+            encode_text(judgment.stderr), judgment.exit_code, judgment.refusal
+        )
+    action = await resolved(
+        one.ctx,
+        settled(judgment.answers),
+        registry,
+        cancel,
+        Claimant(handed, one.occurrence) if handed is not None else None,
+    )
+    if action is None:
+        return None
+    err, code = render_deny(judgment.command, action)
+    return Refused(err, code, refusal_of(action))
+
+
+async def admit_line(
+    ast: Any,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+    cancel: asyncio.Event | None = None,
+    handed: HandOff | None = None,
+) -> Refused | None:
+    """Admit every command of a line a runtime takes whole.
+
+    A whole line is a command like any other, but the runtime does the
+    expanding, so the gate reads the line as typed, walked as
+    ``explain`` walks it: each command is judged on its literal words
+    (quotes removed, escapes resolved, a path-shaped word a path, an
+    installed CLI's verb path walked) where it stands, a ``cd`` before
+    it on the line included, and the first refusal is the line's. A
+    statement's redirect targets are read as words of its command, so
+    ``cat < /data/secret`` is judged on the file it opens; the lines a
+    command runs (``eval``, ``sh -c``, ``xargs``, ``env`` ... see
+    ``inner_lines``) are judged in turn; and what the runtime would do
+    past the gate is refused under a rule that would have read it
+    (:func:`_line_refusal`).
+
+    No gate follows this pass: the runtime runs the line whole, so
+    every grant it matches is claimed on the line's hand-off exactly as
+    any reader on a line claims, and the executor's sweep spends them
+    when the line ends. A line held on a question still waiting keeps
+    its earlier answers standing for the retry, exactly as the
+    compound-line pass does, where spending them here asked the human
+    again for each on every retry.
+
+    Args:
+        ast (Any): the parsed tree-sitter root node.
+        session (SessionState): the session running the line.
+        registry (MountRegistry): registry holding the policies, the
+            decision ledger and the CLI installs.
+        namespace (Namespace | None): the link table.
+        cancel (asyncio.Event | None): the run's kill channel.
+        handed (HandOff | None): the line's hand-off, None outside a
+            line (a bare admission with no run behind it).
+    """
+    async for one in _judge_line(
+        ast,
+        session,
+        registry,
+        namespace,
+        root_frame(ast, handed.origin if handed is not None else None),
+        whole_line=True,
+        rules_only=False,
+    ):
+        refused = await _admitted(one, registry, handed, cancel)
+        if refused is not None:
+            return refused
     return None
 
 
@@ -1088,9 +1295,7 @@ async def _verdict_refuses(
     ctx = judged.ctx
     if ctx is None:
         return True
-    answers = judged.judgment.answers
-    first = answers[0] if answers else None
-    asked = next((a for a in answers if isinstance(a, Deny)), first)
+    asked = settled(judged.judgment.answers)
     if not isinstance(asked, Ask):
         return isinstance(asked, Deny)
     claimant = Claimant(handed, judged.occurrence)
@@ -1102,10 +1307,7 @@ async def _verdict_refuses(
     # hand_off: this pass exists to decide whether a secret is fetched, and
     # the gate behind it still has to admit the line. An answer given here is
     # claimed for that gate, which runs on it -- so the host is asked once.
-    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
-    if isinstance(action, Abandoned):
-        raise MirageAbortError()
-    return action is not None
+    return await resolved(ctx, asked, registry, cancel, claimant) is not None
 
 
 def _defines_function(node: Any) -> bool:
@@ -1184,18 +1386,20 @@ async def _command_refused(
         line (bool): whether the command is the whole line, which runs
             nothing at all once the allow list refuses it.
     """
-    walked = item.session
-    explained = await _judge_words(
-        item.words,
-        item.occurrence,
-        walked,
-        registry,
-        namespace,
-        item.redirects,
-        item.stated,
-        stdin=item.stdin,
-        lost=item.lost,
-    )
+    explained = [
+        one
+        async for one in _judge_words(
+            item.words,
+            item.occurrence,
+            item.session,
+            registry,
+            namespace,
+            item.redirects,
+            item.stated,
+            stdin=item.stdin,
+            lost=item.lost,
+        )
+    ]
     # The allow list refusing the line's one command on words no glob
     # can change means nothing runs. A line it hands on, or a line handed
     # on to it, is not enough: what runs it may not ask the gate.
@@ -1297,9 +1501,12 @@ async def _judge_line(
     whole_line: bool = False,
     lost: bool = False,
     every: bool = False,
-) -> list[Judged]:
-    """Every command of a line explained, in the order the gate reads
-    them, each with its place on the line.
+    rules_only: bool = True,
+    open_: bool = False,
+) -> AsyncIterator[Judged]:
+    """Every command of a line judged, in the order the gate reads
+    them, each with its place on the line, one at a time as
+    ``_judge_words`` yields them.
 
     Args:
         ast (Any): the parsed tree-sitter root node.
@@ -1315,26 +1522,31 @@ async def _judge_line(
         lost (bool): whether the line begins with its cwd lost, as a
             line a command runs after such a ``cd`` does.
         every (bool): ask every policy past a Deny, for ``explain``.
+        rules_only (bool): ask the profile's rules alone, as
+            ``_judge_words`` takes it.
+        open_ (bool): whether the runtime appends operands the gate
+            cannot read to the line (``mapfile -C``'s callback, which
+            runs with the index and the record after it), as
+            ``_judge_words`` takes it for each of its commands.
     """
-    out: list[Judged] = []
     for item in _walked_line(ast, session, frame, lost):
-        out.extend(
-            await _judge_words(
-                item.words,
-                item.occurrence,
-                item.session,
-                registry,
-                namespace,
-                item.redirects,
-                stated and item.stated,
-                stdin=item.stdin,
-                intrinsic=item.intrinsic,
-                whole_line=whole_line,
-                lost=item.lost,
-                every=every,
-            )
-        )
-    return out
+        async for one in _judge_words(
+            item.words,
+            item.occurrence,
+            item.session,
+            registry,
+            namespace,
+            item.redirects,
+            stated and item.stated,
+            stdin=item.stdin,
+            intrinsic=item.intrinsic,
+            whole_line=whole_line,
+            lost=item.lost,
+            every=every,
+            rules_only=rules_only,
+            open_=open_,
+        ):
+            yield one
 
 
 async def line_held(
@@ -1371,17 +1583,16 @@ async def line_held(
                 continue
             if _refuses(expl):
                 return True
-            asked = next((a for a in expl.answers if isinstance(a, Ask)), None)
-            if one.ctx is None or asked is None or not one.stated:
+            asked = settled(expl.answers)
+            if one.ctx is None or not isinstance(asked, Ask) or not one.stated:
                 continue
-            action = await registry.decisions.resolve(
+            action = await resolved(
                 one.ctx,
                 asked,
+                registry,
                 cancel,
                 Claimant(handed, one.occurrence),
             )
-            if isinstance(action, Abandoned):
-                raise MirageAbortError()
             if action is not None:
                 return True
     return False
@@ -1433,15 +1644,19 @@ async def explain_line(
             shows them; False asks the profile's rules alone, as the run
             does before any of the line runs, which is what holds it.
     """
-    return await _judge_line(
-        ast,
-        session,
-        registry,
-        namespace,
-        root_frame(ast, None),
-        whole_line=whole_line,
-        every=every,
-    )
+    return [
+        one
+        async for one in _judge_line(
+            ast,
+            session,
+            registry,
+            namespace,
+            root_frame(ast, None),
+            whole_line=whole_line,
+            every=every,
+            rules_only=not every,
+        )
+    ]
 
 
 def explained_line(
@@ -1449,6 +1664,7 @@ def explained_line(
     judged: Sequence[Judged],
     verdicts: Sequence[Judged],
     runtime_of: Callable[[str], str],
+    whole_line: bool = False,
 ) -> ShellExplanation:
     """A line's public explanation: its verdict and its parse tree, with
     every command's explanation where the command stands.
@@ -1459,7 +1675,9 @@ def explained_line(
     carrying the first ask an approval lets through. A command refused
     only where it stands, a policy's own ``pre_command`` refusal
     included, keeps its refusal to its own node, since the rest of the
-    line still runs.
+    line still runs. A runtime that takes the line whole runs none of
+    it once any command is refused (:func:`admit_line`), so there every
+    refusal is the line's.
 
     Every scope a command reads its words in (the typed line, a
     ``$( )`` body, a ``bash -c`` string) is parsed on its own, as the
@@ -1469,10 +1687,13 @@ def explained_line(
     Args:
         line (str): the line as given.
         judged (Sequence[Judged]): :func:`explain_line`'s judgments.
-        verdicts (Sequence[Judged]): the same line judged by the
-            profile's rules alone (``every=False``).
+        verdicts (Sequence[Judged]): the judgments the run holds the
+            line on: the profile's rules alone (``every=False``), or
+            ``judged`` itself for a runtime that takes the line whole,
+            whose gate asks every policy.
         runtime_of (Callable[[str], str]): the runtime that would run a
             command, empty for the workspace.
+        whole_line (bool): whether a runtime takes the line whole.
     """
     scopes: dict[tuple[Occurrence | None, str], list[Judged]] = {}
     for one in judged:
@@ -1489,8 +1710,7 @@ def explained_line(
             one
             for one in verdicts
             if one.judgment.exit_code
-            and _is_verdict(one.judgment)
-            and _asks_for(one)
+            and (whole_line or (_is_verdict(one.judgment) and _asks_for(one)))
         ),
         None,
     )
@@ -1535,10 +1755,7 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
     Args:
         judgment (Judgment): the command's judgment.
     """
-    denied = next((a for a in judgment.answers if isinstance(a, Deny)), None)
-    decider = denied or next(
-        (a for a in judgment.answers if isinstance(a, Ask)), None
-    )
+    decider = settled(judgment.answers)
     if decider is not None and decider.rule is not None:
         source = source_of(decider.rule)
     else:
@@ -1547,7 +1764,7 @@ def _verdict_of(judgment: Judgment) -> tuple[Outcome, str, str]:
         )
     refusal = judgment.refusal
     if refusal is not None:
-        outcome = Outcome.ASK if refusal.kind == "pending" else Outcome.DENY
+        outcome = Outcome.ASK if is_pending(refusal) else Outcome.DENY
         return outcome, refusal.reason, source
     if isinstance(decider, Ask):
         return Outcome.ASK, decider.reason, source

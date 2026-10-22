@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Accessor } from '../accessor/base.ts'
+import { ResponseCache } from '../accessor/responses.ts'
 import { RAMFileCacheStore } from '../cache/file/ram.ts'
 import { LookupStatus } from '../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
@@ -21,7 +23,11 @@ class RecordingCache implements Pick<CacheManager, 'invalidate'> {
 }
 
 class FakeRegistry implements EventRegistry {
-  constructor(readonly mount: EventMount) {}
+  readonly mount: EventMount
+
+  constructor(mount: Omit<EventMount, 'accessor'> & { accessor?: Accessor }) {
+    this.mount = { accessor: new Accessor(), ...mount }
+  }
 
   mountFor(): EventMount {
     return this.mount
@@ -182,6 +188,26 @@ describe('EventHub', () => {
       'move:/nc/data/new.txt:data/new.txt',
       'delete:/nc/old/original.txt:old/original.txt',
     ])
+    await hub.close()
+  })
+
+  it("drops the answers the mount's client keeps of its own", async () => {
+    // An event is often the only word that the service changed, and no path
+    // names a client's own answers (a repository's tree, a database's
+    // names), so they answered the old service until the mount dropped its
+    // caches for some other reason.
+    const answers = new ResponseCache<string, string>()
+    class Keeping extends Accessor {
+      override caches(): readonly ResponseCache<unknown, unknown>[] {
+        return [answers as ResponseCache<unknown, unknown>]
+      }
+    }
+    const hub = new EventHub(
+      new FakeRegistry({ prefix: '/nc/', cacheManager: null, accessor: new Keeping() }),
+    )
+    await answers.get('names', () => Promise.resolve('before'))
+    await hub.notify(change(FileChangeKind.CREATE, '/nc/data/new.txt'))
+    expect(await answers.get('names', () => Promise.resolve('after'))).toBe('after')
     await hub.close()
   })
 

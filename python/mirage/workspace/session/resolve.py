@@ -542,7 +542,6 @@ def compile_profile(
                 effective.vars.hide if effective.vars is not None else ()
             ),
             processes=processes.list,
-            commands=commands.allow if commands is not None else None,
         ),
         policies=ProfilePolicies(
             mount_modes=_modes(effective),

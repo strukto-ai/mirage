@@ -32,9 +32,9 @@ from mirage.workspace.expand.classify import classify_parts
 from mirage.workspace.node.admission import (
     Admitted,
     admit,
-    admit_line,
     policy_scopes,
 )
+from mirage.workspace.node.explain import admit_line
 from mirage.workspace.tools.io_text import with_refusal
 
 DOC = {
@@ -626,7 +626,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         ctx=_gate_ctx(("grep", "-r", "x", "/data")),
         judged=frozenset({"/data"}),
         granted=(),
-        scoped=True,
     )
     gate.check("/data")
     gate.check("/data/open/o")
@@ -648,7 +647,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         ctx=_gate_ctx(("grep", "x", "/data/asked/a")),
         judged=frozenset({"/data/asked/a"}),
         granted=(),
-        scoped=True,
     )
     judged.check("/data/asked/a")
     granted = Admitted(
@@ -656,7 +654,6 @@ def test_the_admitted_gate_judges_what_the_line_did_not_name():
         ctx=_gate_ctx(("grep", "-r", "x", "/data/asked")),
         judged=frozenset({"/data/asked"}),
         granted=(ask,),
-        scoped=True,
     )
     granted.check("/data/asked/a")
 
@@ -672,7 +669,6 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
         ctx=_gate_ctx(("find", "/data", "/other")),
         judged=frozenset({"/data", "/other"}),
         granted=(),
-        scoped=True,
     )
     assert gate.scopes("/data")
     assert gate.scopes("/data/sealed/s")
@@ -680,7 +676,7 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
 
 
 @pytest.mark.asyncio
-async def test_admit_reports_the_grant_the_line_runs_under_and_its_scope():
+async def test_admit_reports_the_grant_the_line_runs_under():
     ws = _ws()
     try:
         session = ws._session_mgr.get(ws._session_mgr.default_id)
@@ -693,13 +689,6 @@ async def test_admit_reports_the_grant_the_line_runs_under_and_its_scope():
         assert verdict.ctx.tokens == ("rm", "/data/x")
         assert verdict.judged == frozenset({"/data/x"})
         assert verdict.granted == ()
-        # `rm` is under no path rule in this document; `cat` is.
-        assert not verdict.scoped
-        words = classify_parts(["cat", "/data/a"], registry, session.cwd)
-        verdict = await admit(
-            "cat", ["/data/a"], words[1:], session, registry, namespace
-        )
-        assert isinstance(verdict, Admitted) and verdict.scoped
     finally:
         await ws.close()
 

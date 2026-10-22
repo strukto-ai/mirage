@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.pattern import pattern_names, split_pattern
+from mirage.policy.match.pattern import pattern_reaches, split_pattern
 from mirage.policy.types import AdmissionRules, CommandRule
 
 
@@ -38,14 +38,14 @@ def _rule_reads_args(rule: CommandRule, name: str) -> bool:
         name (str): the command name.
     """
     names = not rule.commands or any(
-        pattern_names(p, name) for p in rule.commands
+        pattern_reaches(p, (name,)) for p in rule.commands
     )
     if not names:
         return False
     if rule.paths or rule.mount:
         return True
     return any(
-        pattern_names(p, name) and len(split_pattern(p)) > 1
+        pattern_reaches(p, (name,)) and len(split_pattern(p)) > 1
         for p in rule.commands
     )
 
@@ -67,7 +67,10 @@ def reads_args(rules: AdmissionRules | None, name: str) -> bool:
     if rules is None:
         return False
     for pattern in rules.allow or ():
-        if pattern_names(pattern, name) and len(split_pattern(pattern)) > 1:
+        if (
+            pattern_reaches(pattern, (name,))
+            and len(split_pattern(pattern)) > 1
+        ):
             return True
     return any(
         _rule_reads_args(rule, name) for rule in (*rules.ask, *rules.deny)
@@ -96,7 +99,7 @@ def scopes_paths(rules: AdmissionRules | None, name: str) -> bool:
         if not rule.paths and not rule.mount:
             continue
         if not rule.commands or any(
-            pattern_names(p, name) for p in rule.commands
+            pattern_reaches(p, (name,)) for p in rule.commands
         ):
             return True
     return False

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import type { HandOff, Occurrence } from '../../policy/types.ts'
-import { commandNodes } from '../../runtime/routing/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import {
@@ -24,9 +23,21 @@ async function parse(line: string): Promise<TSNodeLike> {
   return parser.parse(line) as unknown as TSNodeLike
 }
 
+/** Every command node of a parse, in source order, nested ones included. */
+function commands(root: TSNodeLike): TSNodeLike[] {
+  const out: TSNodeLike[] = []
+  const stack = [root]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.type === NodeType.COMMAND || current.type === NodeType.TEST_COMMAND)
+      out.push(current)
+    stack.push(...[...current.children].reverse())
+  }
+  return out
+}
+
 /** The nth command of a parse, which the test knows is there. */
 function command(root: TSNodeLike, index: number): TSNodeLike {
-  const node = commandNodes(root)[index]
+  const node = commands(root)[index]
   if (node === undefined) throw new Error(`no command ${String(index)}`)
   return node
 }
@@ -104,7 +115,7 @@ describe('occurrence', () => {
     const inner = body(sub, frame)
     expect(inner.text).toBe('cat /data/secret.txt')
     expect(inner.parent).toEqual(occurrenceIn(sub, frame))
-    const within = commandNodes(root).find(
+    const within = commands(root).find(
       (c) =>
         (c.startIndex ?? 0) > (sub.startIndex ?? 0) && (c.endIndex ?? 0) <= (sub.endIndex ?? 0),
     )

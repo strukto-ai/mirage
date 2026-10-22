@@ -30,7 +30,6 @@ from mirage.policy import (
     CommandRule,
     CommandWord,
     Deny,
-    HandOff,
     Pending,
     Scope,
     ask_rule,
@@ -41,29 +40,23 @@ from mirage.policy import (
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.match import (
     Outcome,
-    has_rules,
     io_reach,
     io_refusal,
     line_tokens,
     pattern_matches,
-    reads_args,
-    scopes_paths,
     split_pattern,
 )
-from mirage.runtime.routing import command_nodes
-from mirage.shell import parse
+from mirage.policy.policies import settled
 from mirage.shell.helpers import (
-    get_parts,
     get_redirects,
     literal_word,
-    split_env_prefix,
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
 from mirage.types import PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
-from mirage.utils.hidden import is_glob, path_visible
+from mirage.utils.hidden import path_visible
 from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.condition.operands import (
@@ -102,7 +95,6 @@ from mirage.workspace.lookup import (
     is_tool,
     line_flags,
     lookup,
-    reads_subtrees,
     runs_as,
     walks_mounts,
     word_policy,
@@ -115,29 +107,13 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (
     Word,
-    inner_lines,
-    read_word,
-    reads_of_test,
-)
-from mirage.workspace.node.occurrence import (
-    Frame,
-    argv_frame,
-    line_frame,
-    occurrence_in,
-    root_frame,
-    whole_occurrence,
 )
 from mirage.workspace.session import SessionState, env_snapshot
-from mirage.workspace.session.shell_dirs import home_dir
 
 # The nodes a redirected statement may wrap whose last command is the
 # one the redirect binds to. A `!` wraps one command, so it is its own
 # last one: `! cat < f` parses as redirected(negated(cat), < f).
 REDIRECT_CHAIN = frozenset({NT.LIST, NT.PIPELINE, NT.NEGATED_COMMAND})
-
-# Why the gate refuses, under a rule, a command that runs lines it cannot
-# see into: a sourced file, a script, a bash option mirage does not read.
-UNREADABLE_LINES = "runs lines the gate cannot read"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,16 +161,12 @@ class Admitted:
         granted (tuple[CommandRule, ...]): the ask rules the line runs
             under a grant for: the one the entry point answered for this
             line, and the session's standing ones.
-        scoped (bool): whether a path or mount rule in force reads
-            this command's paths, so a command whose runtime walks on
-            its own is refused (``_admit_words``).
     """
 
     rules: AdmissionRules | None
     ctx: CommandContext
     judged: frozenset[str]
     granted: tuple[CommandRule, ...]
-    scoped: bool
 
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
@@ -399,9 +371,10 @@ def unlisted_service(
     ):
         return False
     tokens = line_tokens(ctx)
+    rules = session.commands
     return not any(
         split_pattern(p)[:1] == (ctx.command,) and pattern_matches(p, tokens)
-        for p in session.visibility.commands or ()
+        for p in (rules.allow if rules is not None else None) or ()
     )
 
 
@@ -643,12 +616,39 @@ async def gate(
             policy=PermissionsPolicy.__name__,
         )
         answers = (refused, *answers)
-    first = answers[0] if answers else None
-    return (
-        ctx,
-        next((a for a in answers if isinstance(a, Deny)), first),
-        answers,
-    )
+    return ctx, settled(answers), answers
+
+
+async def resolved(
+    ctx: CommandContext,
+    asked: Deny | Ask | None,
+    registry: MountRegistry,
+    cancel: asyncio.Event | None,
+    claimant: Claimant | None,
+) -> Deny | Pending | None:
+    """The chain's answer once the ledger has had its say.
+
+    An Ask is the chain's answer only after every Deny had its say; the
+    ledger answers it from the session's records or the host, so an
+    answer never re-opens a deny. A wait the run's kill cut short is the
+    kill landing late, not a ruling, so it raises as every other
+    abandoned wait does rather than being rendered as a refusal the
+    document never made.
+
+    Args:
+        ctx (CommandContext): the context the chain was shown.
+        asked (Deny | Ask | None): what the chain answered.
+        registry (MountRegistry): registry holding the decision ledger.
+        cancel (asyncio.Event | None): the run's kill channel.
+        claimant (Claimant | None): the command and its line, as
+            ``admit`` takes it.
+    """
+    if not isinstance(asked, Ask):
+        return asked
+    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
+    if isinstance(action, Abandoned):
+        raise MirageAbortError()
+    return action
 
 
 async def admit(
@@ -728,20 +728,7 @@ async def admit(
         line=claimant.occurrence.source if claimant is not None else "",
     )
     ctx, asked, _ = gated
-    # An Ask is the chain's answer only after every Deny had its say;
-    # the ledger answers it from the session's records or the host, so
-    # an answer never re-opens a deny.
-    action: Deny | Pending | Abandoned | None = (
-        await registry.decisions.resolve(ctx, asked, cancel, claimant)
-        if isinstance(asked, Ask)
-        else asked
-    )
-    # The ledger stopped waiting on a host because this run was killed
-    # while it was deciding. That is the kill landing late, not a ruling,
-    # so it joins every other abandoned wait rather than being rendered
-    # as a refusal the document never made.
-    if isinstance(action, Abandoned):
-        raise MirageAbortError()
+    action = await resolved(ctx, asked, registry, cancel, claimant)
     if action is None:
         granted = [
             r.rule
@@ -750,13 +737,11 @@ async def admit(
         ]
         if isinstance(asked, Ask):
             granted[:0] = asked.rules or (ask_rule(ctx, asked),)
-        rules = session.commands
         return Admitted(
-            rules=rules,
+            rules=session.commands,
             ctx=ctx,
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
-            scoped=scopes_paths(rules, name),
         )
     err, code = render_deny(name, action)
     return Refused(err, code, refusal_of(action))
@@ -805,40 +790,6 @@ async def admit_test(
     if isinstance(verdict, Refused):
         raise CondRefused(verdict.stderr, verdict.exit_code, verdict.refusal)
     return verdict
-
-
-def is_pending_refusal(refusal: Refusal | None) -> bool:
-    """Whether a record is a question the host has not answered yet,
-    which holds the line for its retry rather than ending it.
-
-    Args:
-        refusal (Refusal | None): the record a result carries.
-    """
-    return refusal is not None and refusal.kind == "pending"
-
-
-def is_pending(refused: Refused) -> bool:
-    """Whether a refusal is a question the host has not answered yet.
-
-    Args:
-        refused (Refused): what the gate refused with.
-    """
-    return is_pending_refusal(refused.refusal)
-
-
-def _refuse(name: str, reason: str) -> Refused:
-    deny = Deny(reason)
-    err, code = render_deny(name, deny)
-    return Refused(err, code, refusal_of(deny))
-
-
-def unreadable(raw: str) -> str:
-    """Why the gate refuses a word only the runtime can expand.
-
-    Args:
-        raw (str): the word as typed.
-    """
-    return f"cannot read {raw} before the runtime expands it"
 
 
 def _word_hints(
@@ -940,234 +891,6 @@ def redirect_paths(
         if w.text is not None
     ]
     return tuple(p for p in targets if isinstance(p, PathSpec))
-
-
-async def _admit_words(
-    words: list[Word],
-    open_: bool,
-    session: SessionState,
-    registry: MountRegistry,
-    namespace: Namespace | None,
-    rules: AdmissionRules | None,
-    redirect_words: tuple[Word, ...] = (),
-    cancel: asyncio.Event | None = None,
-    claimant: Claimant | None = None,
-    stdin: ByteSource | None = None,
-) -> Refused | None:
-    """Admit one command of a whole line on the words the gate read,
-    then whatever lines the command runs in turn.
-
-    Args:
-        words (list[Word]): the command's words, name first.
-        open_ (bool): whether the runtime appends operands the gate
-            cannot read (``xargs``, ``find -exec``).
-        session (SessionState): the session running the line.
-        registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
-        namespace (Namespace | None): the link table.
-        rules (AdmissionRules | None): the session's admission rules.
-        redirect_words (tuple[Word, ...]): the statement's redirect
-            targets, as the gate reads them.
-        cancel (asyncio.Event | None): the run's kill channel.
-        claimant (Claimant | None): the command and its line, as
-            ``admit`` takes it; the lines it runs stand under it.
-        stdin (ByteSource | None): the statement's effective input binding.
-    """
-    head = words[0]
-    if head.text is None and has_rules(rules):
-        return _refuse(head.raw, unreadable(head.raw))
-    name = head.value
-    args = [w.value for w in words[1:]]
-    line = [name, *args]
-    classified = classified_words(name, args, session, registry)
-    redirects = redirect_paths(redirect_words, registry, session.cwd)
-    action = await admit(
-        name,
-        args,
-        classified[1:],
-        session,
-        registry,
-        namespace,
-        stdin=stdin,
-        redirects=redirects,
-        cancel=cancel,
-        claimant=claimant,
-    )
-    if isinstance(action, Refused):
-        return action
-    if action.scoped:
-        # The runtime walks and globs on its own, where no entry gate
-        # follows an I/O below the judged words, so a command a path or
-        # mount rule reads must not reach it with either in hand.
-        if reads_subtrees(name, line_flags(name, line)):
-            return _refuse(name, "walks a tree the gate cannot follow")
-        if any(
-            is_glob(p.raw_path or p.virtual)
-            for p in (*classified[1:], *redirects)
-            if isinstance(p, PathSpec)
-        ):
-            return _refuse(name, "expands a pattern only the runtime can read")
-    unread = next(
-        (w.raw for w in (*words[1:], *redirect_words) if w.text is None), None
-    )
-    if (unread is not None or open_) and reads_args(rules, name):
-        return _refuse(
-            name,
-            unreadable(unread)
-            if unread is not None
-            else "runs on operands the gate cannot read",
-        )
-    for inner in inner_lines(name, words[1:]):
-        if not inner.readable:
-            if has_rules(rules):
-                return _refuse(name, UNREADABLE_LINES)
-            continue
-        if inner.line is not None:
-            frame = (
-                line_frame(inner.line, claimant.occurrence)
-                if claimant is not None
-                else None
-            )
-            refusal = await admit_line(
-                parse(inner.line),
-                session,
-                registry,
-                namespace,
-                cancel,
-                claimant.line if claimant else None,
-                frame,
-                inner.open,
-            )
-        else:
-            argv = list(inner.argv)
-            within = (
-                Claimant(
-                    claimant.line,
-                    whole_occurrence(
-                        argv_frame(
-                            [w.value for w in argv], claimant.occurrence
-                        )
-                    ),
-                )
-                if claimant is not None
-                else None
-            )
-            refusal = await _admit_words(
-                argv,
-                inner.open,
-                session,
-                registry,
-                namespace,
-                rules,
-                cancel=cancel,
-                claimant=within,
-            )
-        if refusal is not None:
-            return refusal
-    return None
-
-
-async def admit_line(
-    ast: Any,
-    session: SessionState,
-    registry: MountRegistry,
-    namespace: Namespace | None,
-    cancel: asyncio.Event | None = None,
-    handed: HandOff | None = None,
-    frame: Frame | None = None,
-    open_: bool = False,
-) -> Refused | None:
-    """Admit every command of a line a runtime takes whole.
-
-    A whole line is a command like any other, but the runtime does the
-    expanding, so the gate reads the line as typed: each command is
-    admitted on its literal words (quotes removed, escapes resolved, a
-    path-shaped word a path, an installed CLI's verb path walked), and
-    the first refusal is the line's. A word only the runtime can expand
-    (``$cmd``, ``"$p"``, ``$(...)``, ``{a,b}``) is refused wherever a
-    rule in force would have read it: as the command name whenever the
-    session has any command rule, as an argument when a rule reads that
-    command's arguments (a pattern with a token after the name, a
-    path-scoped or mount-scoped rule). The words that run other words
-    (``eval``, ``sh -c``, ``xargs``, ``env`` ... see ``inner_lines``)
-    have those lines admitted in turn, and a line the gate cannot read
-    at all (a sourced file, a script, ``eval "$p"``) is refused under
-    any command rule. A statement's redirect targets are read as words
-    of its command, so ``cat < /data/secret`` is judged on the file it
-    opens. A command a path or mount rule reads is refused outright
-    when its I/O would pass the judged words -- a walk (``find``,
-    ``grep -r``, ``tar -c``) or a glob only the runtime expands --
-    because every line executor acts outside the entry gate (a remote
-    sandbox's own disk, a host process), so a walk the gate cannot
-    follow does not run; a runtime whose I/O rides the dispatcher could
-    relax this by carrying the gate. With no rule in force nothing is
-    refused on this account: the words are admitted as typed, which is
-    all a coded policy ever saw.
-
-    No gate follows this pass: the runtime runs the line whole, so
-    every grant it matches is claimed on the line's hand-off exactly as
-    any reader on a line claims, and the executor's sweep spends them
-    when the line ends. A line held on a question still waiting keeps
-    its earlier answers standing for the retry, exactly as the
-    compound-line pass does, where spending them here asked the human
-    again for each on every retry.
-
-    Args:
-        ast (Any): the parsed tree-sitter root node.
-        session (SessionState): the session running the line.
-        registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
-        namespace (Namespace | None): the link table.
-        cancel (asyncio.Event | None): the run's kill channel.
-        handed (HandOff | None): the line's hand-off, None outside a
-            line (a bare admission with no run behind it).
-        frame (Frame | None): the scope the line is read in, for a line
-            a word runs; None reads ``ast`` as the line itself.
-        open_ (bool): whether the runtime appends operands the gate
-            cannot read to the line (``mapfile -C``'s callback, which
-            runs with the index and the record after it), as
-            ``_admit_words`` takes it for each of its commands.
-    """
-    rules = session.commands
-    home = home_dir(session)
-    if frame is None:
-        frame = root_frame(ast, handed.origin if handed is not None else None)
-    for node in command_nodes(ast):
-        if node.type == NT.TEST_COMMAND:
-            reads = [test.words for test in reads_of_test(node, home)]
-        else:
-            _, parts = split_env_prefix(get_parts(node))
-            reads = [[read_word(part, home) for part in parts]]
-        for words in reads:
-            if not words:
-                continue
-            if await registry.policies.wants_for(
-                "post_command", session.session_id
-            ):
-                # The runtime runs the commands itself: no command's
-                # result comes back for a post_command policy to judge.
-                return _refuse(
-                    words[0].raw,
-                    "a post_command policy cannot judge a line a runtime "
-                    "runs whole",
-                )
-            refusal = await _admit_words(
-                words,
-                open_,
-                session,
-                registry,
-                namespace,
-                rules,
-                redirect_words=statement_redirects(node, home),
-                stdin=statement_stdin(node),
-                cancel=cancel,
-                claimant=Claimant(handed, occurrence_in(node, frame))
-                if handed is not None
-                else None,
-            )
-            if refusal is not None:
-                return refusal
-    return None
 
 
 def statement_redirects_raw(node: Any) -> list[Redirect]:

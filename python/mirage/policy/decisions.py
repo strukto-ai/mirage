@@ -47,7 +47,7 @@ from mirage.policy.types import (
     SessionDecisionsQuery,
     VfsContext,
 )
-from mirage.types import PathSpec
+from mirage.types import PathSpec, Refusal
 
 # A host that answers an Ask inside the line.
 #
@@ -214,6 +214,16 @@ def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
             return scope.start <= within.start and within.end <= scope.end
         within = within.parent
     return False
+
+
+def is_pending(refusal: Refusal | None) -> bool:
+    """Whether a refusal record is a question the host has not answered
+    yet, which holds the line for its retry rather than ending it.
+
+    Args:
+        refusal (Refusal | None): the record a result carries.
+    """
+    return refusal is not None and refusal.kind == "pending"
 
 
 def op_question(
@@ -578,7 +588,7 @@ class Decisions:
         try:
             return await run(handed)
         except PolicyDenied as exc:
-            if exc.refusal is not None and exc.refusal.kind == "pending":
+            if is_pending(exc.refusal):
                 self.release(session_id, handed)
             raise
         finally:

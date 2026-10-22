@@ -78,6 +78,59 @@
       ]
     },
     {
+      "id": "a_rule_reads_the_path_where_the_lines_cd_leaves_it",
+      "runtimes": [
+        "docker",
+        "ssh",
+        "e2b",
+        "smolvm",
+        "microsandbox",
+        "apple_container"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "s\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "profile": {
+            "commands": {
+              "deny": [
+                {
+                  "reason": "sealed",
+                  "paths": [
+                    "/data/secret.txt"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "command": "cd /data && cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
+          "command": "grep -r x /data",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "grep: Permission denied\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "quoting",
       "runtimes": [
         "ssh",

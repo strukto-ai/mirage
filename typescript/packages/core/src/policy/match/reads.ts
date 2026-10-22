@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CommandRule, AdmissionRules } from '../types.ts'
-import { patternNames, splitPattern } from './pattern.ts'
+import { patternReaches, splitPattern } from './pattern.ts'
 
 /**
  * Whether the profile states a command rule at all: an allow list, an ask
@@ -31,10 +31,10 @@ export function hasRules(rules: AdmissionRules | null): boolean {
  */
 function ruleReadsArgs(rule: CommandRule, name: string): boolean {
   const commands = rule.commands ?? []
-  const names = commands.length === 0 || commands.some((p) => patternNames(p, name))
+  const names = commands.length === 0 || commands.some((p) => patternReaches(p, [name]))
   if (!names) return false
   if ((rule.paths ?? []).length > 0 || (rule.mount ?? '') !== '') return true
-  return commands.some((p) => patternNames(p, name) && splitPattern(p).length > 1)
+  return commands.some((p) => patternReaches(p, [name]) && splitPattern(p).length > 1)
 }
 
 /**
@@ -50,7 +50,7 @@ function ruleReadsArgs(rule: CommandRule, name: string): boolean {
 export function readsArgs(rules: AdmissionRules | null, name: string): boolean {
   if (rules === null) return false
   for (const pattern of rules.allow ?? []) {
-    if (patternNames(pattern, name) && splitPattern(pattern).length > 1) return true
+    if (patternReaches(pattern, [name]) && splitPattern(pattern).length > 1) return true
   }
   for (const rule of [...rules.ask, ...rules.deny]) {
     if (ruleReadsArgs(rule, name)) return true
@@ -75,7 +75,7 @@ export function scopesPaths(rules: AdmissionRules | null, name: string): boolean
   for (const rule of [...rules.ask, ...rules.deny]) {
     if ((rule.paths ?? []).length === 0 && (rule.mount ?? '') === '') continue
     const commands = rule.commands ?? []
-    if (commands.length === 0 || commands.some((p) => patternNames(p, name))) return true
+    if (commands.length === 0 || commands.some((p) => patternReaches(p, [name]))) return true
   }
   return false
 }

@@ -657,25 +657,13 @@ class Workspace:
         """
         session = self.get_session(session_id or self.default_session_id)
         ast = parse(line)
-        whole_line = (
-            whole_line_runtime(self._registry.runtime_bindings) is not None
-        )
-        judged = await explain_line(
-            ast,
-            session,
-            self._registry,
-            self._namespace,
-            whole_line=whole_line,
-        )
         verdicts = await explain_line(
-            ast,
-            session,
-            self._registry,
-            self._namespace,
-            whole_line=whole_line,
-            every=False,
+            ast, session, self._registry, self._namespace, every=False
         )
         if holds([one.judgment for one in verdicts]):
+            judged = await explain_line(
+                ast, session, self._registry, self._namespace
+            )
             return explained_line(line, judged, verdicts, lambda command: "")
         answers, placed = await self._router.placement(
             line,
@@ -683,6 +671,19 @@ class Workspace:
             lambda: line_judgments(
                 ast, session, self._registry, self._namespace, HandOff()
             ),
+        )
+        # The run reads a line its placed runtime takes whole as typed,
+        # and that reading is its only gate (``admit_line``).
+        whole_line = (
+            not isinstance(placed, (Deny, Pending))
+            and whole_line_runtime(placed.bindings) is not None
+        )
+        judged = await explain_line(
+            ast,
+            session,
+            self._registry,
+            self._namespace,
+            whole_line=whole_line,
         )
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
@@ -704,8 +705,9 @@ class Workspace:
         said = explained_line(
             line,
             judged,
-            verdicts,
+            judged if whole_line else verdicts,
             lambda command: self._router.runtime_for(command, placed),
+            whole_line,
         )
         return dataclasses.replace(said, answers=answers)
 

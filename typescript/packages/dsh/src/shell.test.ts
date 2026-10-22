@@ -400,7 +400,7 @@ describe('sandbox policy', () => {
     )
     expect(missing.stderr.text).toContain('sort: Permission denied')
     // The twin carries the source's allow list.
-    expect(ws.getSession('agent::read-only').visibility.commands).toEqual(['cat', 'ls', 'echo'])
+    expect(ws.getSession('agent::read-only').commands?.allow).toEqual(['cat', 'ls', 'echo'])
   })
 
   it('keeps a bound session out of the read-only twin it narrowed into', async () => {

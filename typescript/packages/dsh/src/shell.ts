@@ -763,11 +763,7 @@ export class MirageShellExecutor extends ShellExecutor {
       ...(hide.length > 0 ? { permissions: { paths: { hide } } } : {}),
     })
     twin.commands = source.commands
-    twin.visibility = {
-      ...twin.visibility,
-      vars: source.visibility.vars,
-      commands: source.visibility.commands,
-    }
+    twin.visibility = { ...twin.visibility, vars: source.visibility.vars }
     setCwd(twin, this.workdir)
     return sessionId
   }

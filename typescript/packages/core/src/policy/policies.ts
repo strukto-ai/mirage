@@ -137,6 +137,8 @@ export function agreed(routes: readonly Route[]): Deny | Route | null {
  * Ask, else the Route every placing answer agrees on. Mirrors the Python
  * `settled`.
  */
+export function settled(answers: readonly (Deny | Ask)[]): Deny | Ask | null
+export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | Route | null
 export function settled(answers: readonly (Deny | Ask | Route)[]): Deny | Ask | Route | null {
   const deny = answers.find((a): a is Deny => a.kind === 'deny')
   if (deny !== undefined) return deny
@@ -183,7 +185,7 @@ async function explainedOp(
   const answers = (await policies.answers('preVfs', ctx)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
   )
-  const winner = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
+  const winner = settled(answers)
   const base: VfsExplanation = {
     call: ctx.call.name,
     paths: [ctx.path.virtual],
@@ -660,7 +662,6 @@ export class Policies {
           limits.push(action)
           continue
         }
-        if (action.kind === 'hide') continue
         said.push(
           action.policy === undefined || action.policy === ''
             ? { ...action, policy: name }
@@ -706,10 +707,9 @@ export class Policies {
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route[]]> {
     const [said, limits] = await this.said(method, ctx, false, placed, rulesOnly)
-    const deny = said.find((a): a is Deny => a.kind === 'deny')
-    if (deny !== undefined) return [deny, null, []]
-    const asked = said.find((a): a is Ask => a.kind === 'ask') ?? null
-    return [asked, Limit.aggr(limits), said.filter((a): a is Route => a.kind === 'route')]
+    const action = settled(said.filter((a): a is Deny | Ask => a.kind !== 'route'))
+    if (action?.kind === 'deny') return [action, null, []]
+    return [action, Limit.aggr(limits), said.filter((a): a is Route => a.kind === 'route')]
   }
 
   /**

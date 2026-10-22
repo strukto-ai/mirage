@@ -714,25 +714,38 @@ export class CacheManager {
    * keyed store materializes every missing level of a key in one put, so those
    * listings gained entries too. Each affected listing becomes partial and
    * keeps its unaffected siblings. Every change retires this mount's in-flight
-   * reads and probe answers. Mirrors Python's `CacheManager.invalidate`.
+   * reads and probe answers, all but `probed`. Mirrors Python's
+   * `CacheManager.invalidate`.
    *
    * @param path the changed path; only `virtual` is read.
    * @param kind what happened, which decides the reach.
    * @param row a CREATE's new entry, kept in its parent's listing; null drops
    *   that entry.
    * @param options.leaf a DELETE whose remover knows nothing was below the path.
+   * @param options.probed the backend's answer the change was found by, which
+   *   this command's probe keeps serving for `path` (`probedStat`) past the
+   *   retire.
+   * @param options.own only this mount's name, as a freshness probe drops what
+   *   it found: the store's other names answer to their own mount's read
+   *   policy.
    */
   async invalidate(
     path: string | PathSpec,
     kind: FileChangeKind,
     row: FileStat | null = null,
-    options: { leaf?: boolean } = {},
+    options: { leaf?: boolean; probed?: FileStat | null; own?: boolean } = {},
   ): Promise<void> {
     const key = mountKey(path instanceof PathSpec ? path.virtual : path, this.prefix)
-    for (const manager of [this, ...this.aliases()]) {
+    for (const manager of options.own === true ? [this] : [this, ...this.aliases()]) {
       const name = manager.name(key)
       if (manager === this || manager.ownsPath(name)) {
-        await manager.invalidateKey(name, kind, row, options.leaf === true)
+        await manager.invalidateKey(
+          name,
+          kind,
+          row,
+          options.leaf === true,
+          manager === this ? (options.probed ?? null) : null,
+        )
       }
     }
   }
@@ -744,9 +757,10 @@ export class CacheManager {
     kind: FileChangeKind,
     row: FileStat | null,
     leaf: boolean,
+    probed: FileStat | null,
   ): Promise<void> {
     try {
-      await this.invalidateOwn(key, kind, row, leaf)
+      await this.invalidateOwn(key, kind, row, leaf, probed)
     } catch (error) {
       try {
         await this.invalidateAncestors(key)
@@ -763,8 +777,13 @@ export class CacheManager {
     kind: FileChangeKind,
     row: FileStat | null,
     leaf: boolean,
+    probed: FileStat | null,
   ): Promise<void> {
     this.retire()
+    const started = commandStarted()
+    if (probed !== null && started !== null) {
+      this.probed.set(key, [started, this.readGeneration, probed])
+    }
     if (this.cachesReads && this.fileCache !== null) await this.fileCache.remove(key)
     if (kind === FileChangeKind.UNKNOWN) {
       await this.dropBelow(key)

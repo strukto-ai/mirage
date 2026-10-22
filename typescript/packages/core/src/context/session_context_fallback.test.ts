@@ -165,7 +165,6 @@ describe('session predicates on the fallback storage', () => {
         },
         vars: { names: ['A'] },
         processes: 'workspace',
-        commands: ['ls', 'cat'],
       },
     })
     const narrow = new SessionState({
@@ -175,7 +174,6 @@ describe('session predicates on the fallback storage', () => {
         shown: { entries: [{ path: '/b/ok', mode: MountMode.WRITE }] },
         vars: { patterns: ['X_*'] },
         processes: 'session',
-        commands: ['cat', 'rm'],
       },
     })
     const [hold, release] = gate()
@@ -194,7 +192,6 @@ describe('session predicates on the fallback storage', () => {
       shown: { entries: [{ path: '/b/ok', mode: MountMode.READ }] },
       vars: { names: ['A'], patterns: ['X_*'] },
       processes: 'session',
-      commands: ['cat'],
     })
   })
 

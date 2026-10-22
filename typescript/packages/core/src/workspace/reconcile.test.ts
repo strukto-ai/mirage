@@ -44,6 +44,11 @@ function enoent(path: string): Error {
   return Object.assign(new Error(path), { code: 'ENOENT' })
 }
 
+/** A RAM store whose reads the file cache keeps, as a remote store's are. */
+class CachingRAM extends RAMVFS {
+  override readonly cachesReads = true
+}
+
 function mountOf(ws: Workspace, path: string): MountEntry {
   return ws.namespace.mountFor(path)
 }
@@ -233,7 +238,7 @@ describe('Reconciler', () => {
     // verdict: RAM stats without a fingerprint, which is UNKNOWN, which
     // evicts. This used to be answered by a supportsSnapshot short-circuit
     // that never probed at all.
-    const ram = new RAMVFS()
+    const ram = new CachingRAM()
     await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
     const ws = new Workspace({ '/data': ram })
     try {
@@ -299,7 +304,7 @@ describe('Reconciler', () => {
       // so warning on every read would be noise, while a throwing stat is an
       // anomaly worth surfacing. Asserting the log is what keeps the carve-out
       // from being dead weight.
-      const ram = new RAMVFS()
+      const ram = new CachingRAM()
       await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
       const ws = new Workspace({ '/data': ram })
       const logged = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -345,7 +350,7 @@ describe('Reconciler', () => {
       // chains included. Every failure is absorbed -- including the classes
       // the gate may rethrow -- and what could not be verified is dropped, or
       // a metadata command would serve a stale size from it with no check.
-      const ws = new Workspace({ '/data': new RAMVFS() })
+      const ws = new Workspace({ '/data': new CachingRAM() })
       await ws.namespace.ensureLoaded()
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
       vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -373,7 +378,7 @@ describe('unverified freshness probes', () => {
   it.each(['unknown', 'none', 'failed', 'fresh'])(
     '%s cannot silently certify cached bytes',
     async (probe) => {
-      const ws = new Workspace({ '/data': new RAMVFS() })
+      const ws = new Workspace({ '/data': new CachingRAM() })
       try {
         const path = '/data/f.txt'
         const mount = withFresh(mountOf(ws, path))
@@ -667,7 +672,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
     rec: Reconciler
     calls: () => number
   }> {
-    const resource = new RAMVFS()
+    const resource = new CachingRAM()
     resource.store.files.set('/f.txt', new TextEncoder().encode('v1'))
     const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
     await ws.namespace.ensureLoaded()
@@ -712,6 +717,31 @@ describe('the gate reuses what the operand probe got from the backend', () => {
       })
       expect(await ws.cache.exists('/data/f.txt')).toBe(false)
       expect(calls()).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // The copy is dropped as a write drops it; every listing the mount held went
+  // with it, so one stale file cost a re-list of every folder.
+  it('leaves the other listings when a copy is stale', async () => {
+    const resource = new CachingRAM()
+    resource.store.files.set('/f.txt', new TextEncoder().encode('v1'))
+    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE, index: { ttl: 600 } })
+    try {
+      await ws.namespace.ensureLoaded()
+      const mount = withFresh(mountOf(ws, '/data/f.txt'))
+      vi.spyOn(mount, 'callKeyed').mockImplementation(() =>
+        Promise.resolve(
+          new FileStat({ name: 'f.txt', size: 2, type: FileType.FILE, fingerprint: 'fp2' }),
+        ),
+      )
+      await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
+      await mount.indexStore.setDir('/data/sub', [])
+      const rec = new Reconciler(ws.cache, ws.namespace)
+      expect(await rec.mayServeCached(mount, '/data/f.txt')).toBe(false)
+      expect(await ws.cache.exists('/data/f.txt')).toBe(false)
+      expect((await mount.indexStore.listDir('/data/sub')).entries).toEqual([])
     } finally {
       await ws.close()
     }

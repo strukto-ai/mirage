@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { WILDCARD } from '../constants.ts'
-import { patternMatches, patternNames, patternReaches, splitPattern } from './pattern.ts'
+import { patternMatches, patternReaches, splitPattern } from './pattern.ts'
 
 describe('patterns', () => {
   it('splitPattern drops trailing wildcards only', () => {
@@ -43,10 +43,10 @@ describe('patterns', () => {
     expect(patternMatches('*', ['anything', 'at', 'all'])).toBe(true)
   })
 
-  it('patternNames starts a line of the command', () => {
-    expect(patternNames('git log', 'git')).toBe(true)
-    expect(patternNames('git log', 'log')).toBe(false)
-    expect(patternNames('*', 'rm')).toBe(true)
+  it('patternReaches a command a line of it starts', () => {
+    expect(patternReaches('git log', ['git'])).toBe(true)
+    expect(patternReaches('git log', ['log'])).toBe(false)
+    expect(patternReaches('*', ['rm'])).toBe(true)
   })
 
   it('patternReaches reads only the words the two share', () => {

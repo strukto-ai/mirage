@@ -66,10 +66,14 @@ export class EventHub implements EventRuntime {
    * decides how far down it reaches, UNKNOWN taking the subtree a push that
    * names only a scope reports (IMAP IDLE says a mailbox changed, not which
    * message), and every ancestor's entry goes too, since a nested create or
-   * delete implies levels appeared or vanished with it.
+   * delete implies levels appeared or vanished with it. The answers the
+   * mount's client keeps of its own go with them (`Accessor.forget`: a
+   * repository's tree, a site's ids, a database's names), since no path names
+   * them and nothing else tells the client its service changed.
    */
   private async evict(mount: EventMount, path: PathSpec, kind: FileChangeKind): Promise<void> {
     await mount.cacheManager?.invalidate(path, kind)
+    mount.accessor.forget?.()
   }
 
   private async invalidate(mount: EventMount, change: FileEvent): Promise<void> {

@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Accessor } from '../accessor/base.ts'
 import type { CacheManager } from '../cache/manager.ts'
 import type { Delta, FileEvent, PathSpec } from '../types.ts'
 
 export interface EventMount {
   readonly prefix: string
   readonly cacheManager: Pick<CacheManager, 'invalidate'> | null
+  readonly accessor: Accessor
 }
 
 // The raising lookup: a subscribed path or change event outside every mount

@@ -191,6 +191,7 @@ async def test_may_serve_cached_no_fingerprint_forces_reread():
     short-circuit that never probed at all.
     """
     resource = RAMVFS()
+    resource.caches_reads = True
     resource._store.files["/f.txt"] = b"v1"
     ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
     try:
@@ -289,6 +290,7 @@ async def test_an_unverifiable_probe_drops_the_entry(caplog, failure):
     the log is what keeps the carve-out from being dead weight.
     """
     resource = RAMVFS()
+    resource.caches_reads = True
     resource._store.files["/f.txt"] = b"v1"
     ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
     try:
@@ -376,7 +378,9 @@ async def test_always_probes_live_s3_with_warm_index(
 async def test_unverified_probe_cannot_serve_cached_bytes(
     monkeypatch, probe, surface
 ):
-    ws = Workspace({"/data": RAMVFS()})
+    resource = RAMVFS()
+    resource.caches_reads = True
+    ws = Workspace({"/data": resource})
     try:
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
@@ -431,7 +435,9 @@ async def test_reconcile_read_never_raises_and_drops_the_entry(failure):
     flaky arm already has. Keeping the entry would let a metadata command
     serve a stale size from it with no check at all.
     """
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    resource = RAMVFS()
+    resource.caches_reads = True
+    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
     try:
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")
@@ -744,6 +750,7 @@ class _CountingStat:
 
 async def _gated(fingerprint: str = "fp1"):
     resource = RAMVFS()
+    resource.caches_reads = True
     resource._store.files["/f.txt"] = b"v1"
     ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
     await ws.namespace.ensure_loaded()
@@ -817,6 +824,32 @@ async def test_the_gate_still_compares_a_reused_answer_with_the_cache():
             assert await rec.may_serve_cached(mount, "/data/f.txt") is False
         assert not await ws.cache.exists("/data/f.txt")
         assert stat.calls == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_copy_the_probe_finds_stale_leaves_the_other_listings():
+    # The copy is dropped as a write drops it; every listing the mount held
+    # went with it, so one stale file cost a re-list of every folder.
+    resource = RAMVFS()
+    resource.caches_reads = True
+    resource._store.files["/f.txt"] = b"v1"
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, index=IndexConfig(ttl=600)
+    )
+    try:
+        await ws.namespace.ensure_loaded()
+        mount = ws.namespace.mount_for("/data/f.txt")
+        mount.read = ReadSpec(policy=ReadPolicy.FRESH)
+        mount.call = _CountingStat("fp2")
+        await ws.cache.set("/data/f.txt", b"v1", fingerprint="fp1")
+        await mount.index_store.set_dir("/data/sub", [])
+        rec = Reconciler(ws.cache, ws.namespace)
+        assert await rec.may_serve_cached(mount, "/data/f.txt") is False
+        assert not await ws.cache.exists("/data/f.txt")
+        listed = await mount.index_store.list_dir("/data/sub")
+        assert listed.entries == []
     finally:
         await ws.close()
 

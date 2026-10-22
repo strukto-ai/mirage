@@ -356,7 +356,6 @@ describe('narrow / applyProfile', () => {
     const session = new SessionState({ sessionId: 's' })
     narrow(session, compiled)
     expect(session.commands).toEqual(compiled.policies.commands)
-    expect(session.visibility.commands).toEqual(['ls'])
     expect(compileProfile({ cwd: '/x' }).policies.commands).toBeNull()
   })
 

@@ -14,5 +14,4 @@
 
 export { runtimeForLanguage } from './decide.ts'
 export { RouteError } from './errors.ts'
-export { commandNodes } from './facts.ts'
 export type { RouteDecision, RoutePolicy } from './types.ts'

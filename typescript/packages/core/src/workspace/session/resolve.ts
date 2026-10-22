@@ -430,7 +430,6 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       shown: shown(effective),
       vars: classifyVars(effective.vars?.hide ?? []),
       processes: processes.list,
-      commands: commands?.allow ?? null,
     },
     policies: {
       mountModes: modes(effective),

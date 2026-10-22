@@ -1026,7 +1026,6 @@ export class SessionState {
             ? { names: data.hidden_vars.names ?? [], patterns: data.hidden_vars.patterns ?? [] }
             : null,
         processes: processes.list,
-        commands: commands?.allow ?? null,
       },
       hideReasons:
         data.hide_reasons != null

@@ -12,11 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { refusalOf, renderDeny } from '../../policy/index.ts'
-import { decide, sourceOf } from '../../policy/match/decide.ts'
-import { hasRules } from '../../policy/match/reads.ts'
+import { PermissionsPolicy, refusalOf, renderDeny } from '../../policy/index.ts'
+import { isPending } from '../../policy/decisions.ts'
+import { sourceOf } from '../../policy/match/decide.ts'
+import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
+import { settled } from '../../policy/policies.ts'
 import {
   Outcome,
+  type AdmissionRules,
   type Ask,
   type Claimant,
   type CommandContext,
@@ -40,28 +43,24 @@ import {
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
+import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
-import { makeAbortError } from '../../utils/abort.ts'
 import { commandWords } from '../executor/command/routing.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
+import { lineFlags, readsSubtrees } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { envSnapshot } from '../session/state.ts'
 import {
-  Admitted,
-  admit,
   classifiedWords,
   gate,
-  isPendingRefusal,
   redirectPaths,
+  resolved,
   statementRedirects,
   statementStdin,
   type Refused,
-  UNREADABLE_LINES,
-  unlistedService,
-  unreadable,
 } from './admission.ts'
 import {
   innerLines,
@@ -69,6 +68,7 @@ import {
   readWord,
   readsOfTest,
   wordValue,
+  type InnerLine,
   type Word,
 } from './inner_lines.ts'
 import {
@@ -83,7 +83,11 @@ import {
   segmentFrames,
   wholeOccurrence,
 } from './occurrence.ts'
-import { decodeText } from '../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
+
+// Why the gate refuses, under a rule, a command that runs lines it cannot
+// see into: a sourced file, a script, a bash option mirage does not read.
+export const UNREADABLE_LINES = 'runs lines the gate cannot read'
 
 /**
  * Nodes that run their commands in a child shell: a `cd` inside one
@@ -270,9 +274,16 @@ function denied(command: string, reason: string): Judgment {
   }
 }
 
+/** Why the gate refuses a word only the runtime can expand. */
+export function unreadable(raw: string): string {
+  return `cannot read ${raw} before the runtime expands it`
+}
+
 /**
- * One command's explanation, rendered from the same table the gate
- * renders a refusal with.
+ * One command's explanation, read off the answers the gate's chain gave
+ * and rendered from the same table the gate renders a refusal with: the
+ * profile's rules (`PermissionsPolicy`) say the outcome and the rule that
+ * spoke, the chain's answer what the line would do.
  *
  * An Ask reads the session's standing grants and stops there
  * (`Decisions.held`): a dry run must not spend one, record a question
@@ -282,29 +293,21 @@ function denied(command: string, reason: string): Judgment {
  */
 async function explained(
   ctx: CommandContext,
-  session: SessionState,
   registry: MountRegistry,
   asked: Deny | Ask | null,
   answers: readonly (Deny | Ask)[],
 ): Promise<Judgment> {
-  let decision = decide(ctx, session.commands)
-  if (decision.outcome === Outcome.ALLOW && unlistedService(ctx, registry, session)) {
-    decision = {
-      outcome: Outcome.DENY,
-      rule: null,
-      matchedPath: null,
-      source: 'commands.allow',
-      asks: [],
-    }
-  }
+  const document = settled(answers.filter((a) => a.policy === PermissionsPolicy.name))
+  const rule = document?.rule ?? null
   const base: Judgment = {
     command: ctx.command,
     argv: ctx.argv,
-    outcome: decision.outcome,
-    rule: decision.rule,
-    reason: decision.rule?.reason ?? '',
-    source: decision.source,
-    matchedPath: decision.matchedPath,
+    outcome:
+      document === null ? Outcome.ALLOW : document.kind === 'deny' ? Outcome.DENY : Outcome.ASK,
+    rule,
+    reason: rule?.reason ?? '',
+    source: rule !== null ? sourceOf(rule) : document !== null ? 'commands.allow' : '',
+    matchedPath: document?.kind === 'deny' ? (document.path ?? null) : null,
     paths: ctx.paths.map((p) => p.virtual),
     exitCode: 0,
     stderr: '',
@@ -326,27 +329,80 @@ async function explained(
 }
 
 /**
- * Explain one command and whatever lines it runs in turn, each with its
- * occurrence. The redirect targets are read as words of the command,
- * exactly as admission reads them: the shell opens them on its own fds,
- * outside the window the command's own gate covers, so a rule about
- * `/protected` sees `echo x > /protected` only if they are passed here;
- * they are empty for a command with none and for the inner lines a
- * command runs, which admission reads the same way. A line the command runs (`eval`, `sh -c`) is parsed on
- * its own and read under the command's occurrence, exactly as the
- * nested evaluation will stand when it runs. `stated` is whether the
- * words reach here as the gate will read them; false under a command
- * the runtime completes, since a line built from its words (`eval`) or
- * run on its operands (`xargs`) is completed with them. `wholeLine` is whether a runtime takes the line whole: only its gate
- * refuses a name the runtime expands, and only under a rule (`admitLine`);
- * the executor judges the expanded name. `lost` is whether a `cd` the
- * walk could not follow ran before the command, as `Walked` carries it.
- * `every` asks every policy past a Deny, for `explain`. Without it the pass
- * judges a line before it runs, which asks the profile's rules alone: a
- * policy's own `preCommand` is asked once, by the gate that runs the
- * command.
+ * Why a runtime that takes the line whole may not run a command the chain
+ * did not refuse, null when it may. Such a runtime expands, walks, globs and
+ * changes directory on its own (a remote sandbox's own disk, a host
+ * process), where no entry gate follows an I/O below the judged words, so a
+ * command a rule reads must not reach it with any of them in hand. A command
+ * a path or mount rule reads is refused when it walks (`find`, `grep -r`,
+ * `tar -c`) or names a glob; one a rule reads the arguments of when a word
+ * only the runtime can expand stands among them, when the runtime appends
+ * operands (`xargs`, `find -exec`) or when it runs after a `cd` the walk
+ * could not follow; and any command, under any rule, that runs lines the
+ * gate cannot read (a sourced file, a script, `eval "$p"`). With no rule in
+ * force nothing is refused on this account: the words are admitted as
+ * typed, which is all a coded policy ever saw. `words` are the words after
+ * the name and the statement's redirect targets, as the gate read them;
+ * `operands` the words after the name, classified. Mirrors the Python
+ * `_line_refusal`.
  */
-async function judgeWords(
+function lineRefusal(
+  name: string,
+  args: readonly string[],
+  words: readonly Word[],
+  operands: readonly (string | PathSpec)[],
+  redirects: readonly PathSpec[],
+  inners: readonly InnerLine[],
+  rules: AdmissionRules | null,
+  open: boolean,
+  lost: boolean,
+): string | null {
+  if (scopesPaths(rules, name)) {
+    if (readsSubtrees(name, lineFlags(name, [name, ...args]))) {
+      return 'walks a tree the gate cannot follow'
+    }
+    const globby = [...operands, ...redirects].some(
+      (p) => p instanceof PathSpec && isGlob(p.rawPath || p.virtual),
+    )
+    if (globby) return 'expands a pattern only the runtime can read'
+  }
+  if (readsArgs(rules, name)) {
+    const unread = words.find((w) => w.text === null)?.raw
+    if (unread !== undefined) return unreadable(unread)
+    if (open) return 'runs on operands the gate cannot read'
+    if (lost) return 'runs after a cd the gate cannot follow'
+  }
+  if (hasRules(rules) && inners.some((inner) => !innerReadable(inner))) return UNREADABLE_LINES
+  return null
+}
+
+/**
+ * Judge one command and whatever lines it runs in turn, each with its
+ * occurrence, one at a time, so a reader that stops at a refusal never asks
+ * the chain about what comes after it. The redirect targets are read as
+ * words of the command: the shell opens them on its own fds, outside the
+ * window the command's own gate covers, so a rule about `/protected` sees
+ * `echo x > /protected` only if they are passed here; they are empty for a
+ * command with none and for the inner lines a command runs. A line the
+ * command runs (`eval`, `sh -c`) is parsed on its own and read under the
+ * command's occurrence, exactly as the nested evaluation will stand when it
+ * runs. For a runtime that takes the line whole this is the gate itself
+ * (`admitLine`), so what `explain` says about such a line is what its
+ * admission does: a deny first, then what the runtime would do past the gate
+ * (`lineRefusal`), then an ask. `stated` is whether the words reach here as
+ * the gate will read them; false under a command the runtime completes,
+ * since a line built from its words (`eval`) or run on its operands
+ * (`xargs`) is completed with them. `wholeLine` is whether a runtime takes
+ * the line whole, where this is the only gate; the executor judges each
+ * command again once its words are expanded. `lost` is whether a `cd` the
+ * walk could not follow ran before the command, as `Walked` carries it.
+ * `every` asks every policy past a Deny, for `explain`; `rulesOnly` asks the
+ * profile's rules alone, for a pass that judges a line before it runs, since
+ * a policy's own `preCommand` is asked once, by the gate that runs the
+ * command. `open` says the runtime appends operands the gate cannot read
+ * (`xargs`, `find -exec`, `mapfile -C`).
+ */
+async function* judgeWords(
   words: readonly Word[],
   occurrence: Occurrence,
   session: SessionState,
@@ -360,14 +416,24 @@ async function judgeWords(
   lost = false,
   every = false,
   stdin: Uint8Array | null = null,
-): Promise<Judged[]> {
+  rulesOnly = true,
+  open = false,
+): AsyncGenerator<Judged> {
   const head = words[0]
-  if (head === undefined) return []
+  if (head === undefined) return
+  const rules = session.commands
+  // The runtime runs the commands itself: no command's result comes back
+  // for a postCommand policy to judge.
+  if (wholeLine && (await registry.policies.wantsFor('postCommand', session.sessionId))) {
+    const reason = 'a post_command policy cannot judge a line a runtime runs whole'
+    yield { judgment: denied(head.raw, reason), occurrence, stated: false }
+    return
+  }
   if (head.text === null) {
-    if (wholeLine && hasRules(session.commands)) {
-      return [{ judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }]
+    if (wholeLine && hasRules(rules)) {
+      yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
     }
-    return []
+    return
   }
   const literal = stated && [...words, ...redirectWords].every((w) => w.text !== null)
   const name = wordValue(head)
@@ -389,7 +455,7 @@ async function judgeWords(
     session.cwd,
     envSnapshot(session),
   )
-  const gated = await gate(
+  const [ctx, asked, answers] = await gate(
     name,
     args,
     classified.slice(1),
@@ -401,71 +467,81 @@ async function judgeWords(
     intrinsic,
     unread,
     every,
-    !every,
+    rulesOnly,
     occurrence.source,
   )
-  const [ctx, asked, answers] = gated
-  const out: Judged[] = [
-    {
-      judgment: { ...(await explained(ctx, session, registry, asked, answers)), words: wordsRead },
+  const inners = innerLines(name, words.slice(1))
+  const refused =
+    wholeLine && asked?.kind !== 'deny'
+      ? lineRefusal(
+          name,
+          args,
+          readWords,
+          classified.slice(1),
+          redirects,
+          inners,
+          rules,
+          open,
+          lost,
+        )
+      : null
+  if (refused !== null) {
+    yield {
+      judgment: { ...denied(name, refused), words: wordsRead },
       occurrence,
       stated: literal,
       intrinsic,
       unread,
-      ctx,
-      session,
-    },
-  ]
-  for (const inner of innerLines(name, words.slice(1))) {
-    if (!innerReadable(inner)) {
-      if (wholeLine && hasRules(session.commands)) {
-        return [
-          {
-            judgment: { ...denied(name, UNREADABLE_LINES), words: wordsRead },
-            occurrence,
-            stated: literal,
-            intrinsic,
-          },
-        ]
-      }
-      continue
     }
+    return
+  }
+  yield {
+    judgment: { ...(await explained(ctx, registry, asked, answers)), words: wordsRead },
+    occurrence,
+    stated: literal,
+    intrinsic,
+    unread,
+    ctx,
+    session,
+  }
+  for (const inner of inners) {
+    if (!innerReadable(inner)) continue
     if (inner.line !== null) {
-      out.push(
-        ...(await judgeLine(
-          reparse(inner.line),
-          session,
-          registry,
-          namespace,
-          reparse,
-          lineFrame(inner.line, occurrence),
-          literal && !inner.open,
-          wholeLine,
-          lost,
-          every,
-        )),
+      yield* judgeLine(
+        reparse(inner.line),
+        session,
+        registry,
+        namespace,
+        reparse,
+        lineFrame(inner.line, occurrence),
+        literal && !inner.open,
+        wholeLine,
+        lost,
+        every,
+        rulesOnly,
+        inner.open,
       )
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
-      out.push(
-        ...(await judgeWords(
-          inner.argv,
-          within,
-          session,
-          registry,
-          namespace,
-          reparse,
-          [],
-          literal && !inner.open,
-          false,
-          wholeLine,
-          lost,
-          every,
-        )),
+      yield* judgeWords(
+        inner.argv,
+        within,
+        session,
+        registry,
+        namespace,
+        reparse,
+        [],
+        literal && !inner.open,
+        false,
+        wholeLine,
+        lost,
+        every,
+        null,
+        rulesOnly,
+        inner.open,
       )
     }
   }
-  return out
 }
 
 /** One command node's words, name first, the env prefix dropped. */
@@ -705,7 +781,7 @@ function uncovered(expl: Judgment): boolean {
  * answered.
  */
 function refuses(expl: Judgment): boolean {
-  return expl.exitCode !== 0 && !isPendingRefusal(expl.refusal)
+  return expl.exitCode !== 0 && !isPending(expl.refusal)
 }
 
 /**
@@ -750,24 +826,25 @@ export async function lineJudgments(
   const frame = rootFrame(root, handed.origin)
   for (const item of walkedLine(root, session, reparse, frame)) {
     if (item.words[0]?.text === null) continue
-    judged.push([
-      item,
-      await judgeWords(
-        item.words,
-        item.occurrence,
-        item.session,
-        registry,
-        namespace,
-        reparse,
-        item.redirects,
-        item.stated ?? true,
-        item.intrinsic,
-        false,
-        item.lost,
-        false,
-        item.stdin,
-      ),
-    ])
+    const explained: Judged[] = []
+    for await (const one of judgeWords(
+      item.words,
+      item.occurrence,
+      item.session,
+      registry,
+      namespace,
+      reparse,
+      item.redirects,
+      item.stated ?? true,
+      item.intrinsic,
+      false,
+      item.lost,
+      false,
+      item.stdin,
+    )) {
+      explained.push(one)
+    }
+    judged.push([item, explained])
   }
   return judged
 }
@@ -858,41 +935,105 @@ export async function prejudgeLine(
 ): Promise<Refused | null> {
   const judged = made ?? (await lineJudgments(root, session, registry, namespace, handed, reparse))
   if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
-  for (const [item, explained] of judged) {
-    const walked = item.session
-    const targets = redirectPaths(item.redirects, registry, walked.cwd)
-    for (const [index, one] of explained.entries()) {
-      const expl = one.judgment
-      if (!isJudged(expl) || !asksFor(one)) continue
-      const args = [...expl.argv]
-      const classified = classifiedWords(expl.command, args, walked, registry)
-      const answered = await admit(
-        expl.command,
-        args,
-        classified.slice(1),
-        walked,
-        registry,
-        namespace,
-        index === 0 ? (item.stdin ?? null) : null,
-        // judgeWords lists the statement's own command first and the
-        // lines it runs after it, so only the first explanation is the
-        // command the redirects belong to.
-        index === 0 ? targets : [],
-        signal,
-        // This pass judges on the gate's behalf and runs nothing itself, so
-        // a grant the host gives here is claimed for the per-command gate
-        // that runs the line, and spent when the line ends: one question per
-        // run, not per pass.
-        { line: handed, occurrence: one.occurrence },
-        one.intrinsic,
-        one.unread,
-        true,
-      )
-      if (!(answered instanceof Admitted)) return answered
+  for (const [, explained] of judged) {
+    for (const one of explained) {
+      if (!isJudged(one.judgment) || !asksFor(one)) continue
+      // This pass judges on the gate's behalf and runs nothing itself, so a
+      // grant the host gives here is claimed for the per-command gate that
+      // runs the line, and spent when the line ends: one question per run,
+      // not per pass.
+      const refused = await admitted(one, registry, handed, signal)
+      if (refused !== null) return refused
       // The host answered this one inline. The rest of the line has not
       // been judged yet, so the scan goes on: stopping here let a later
       // command's deny run behind an approval.
     }
+  }
+  return null
+}
+
+/**
+ * One judged command put through the ledger, as the gate puts it. A command
+ * refused before any policy was asked (`Judged.ctx` absent) stands as
+ * judged. Otherwise the chain's answer the judgment recorded is the gate's,
+ * and its Ask is answered from the session's grants or the host and claimed
+ * on the line's hand-off (`handed`, null outside a line) for this
+ * occurrence, so the policies are asked once per command, by the pass that
+ * judged it. Mirrors the Python `_admitted`.
+ */
+async function admitted(
+  one: Judged,
+  registry: MountRegistry,
+  handed: HandOff | null,
+  signal?: AbortSignal,
+): Promise<Refused | null> {
+  const judgment = one.judgment
+  if (one.ctx === undefined) {
+    return {
+      stderr: encodeText(judgment.stderr),
+      exitCode: judgment.exitCode,
+      refusal: judgment.refusal,
+    }
+  }
+  const action = await resolved(
+    one.ctx,
+    settled(judgment.answers),
+    registry,
+    signal,
+    handed === null ? null : { line: handed, occurrence: one.occurrence },
+  )
+  if (action === null) return null
+  const [stderr, exitCode] = renderDeny(judgment.command, action)
+  return { stderr, exitCode, refusal: refusalOf(action) }
+}
+
+/**
+ * Admit every command of a line a runtime takes whole. A whole line is a
+ * command like any other, but the runtime does the expanding, so the gate
+ * reads the line as typed, walked as `explain` walks it: each command is
+ * judged on its literal words (quotes removed, escapes resolved, a
+ * path-shaped word a path, an installed CLI's verb path walked) where it
+ * stands, a `cd` before it on the line included, and the first refusal is
+ * the line's. A statement's redirect targets are read as words of its
+ * command, so `cat < /data/secret` is judged on the file it opens; the lines
+ * a command runs (`eval`, `sh -c`, `xargs`, `env` ... see `innerLines`) are
+ * judged in turn; and what the runtime would do past the gate is refused
+ * under a rule that would have read it (`lineRefusal`). `reparse` parses the
+ * text a word runs the way the line reader parsed the line.
+ *
+ * No gate follows this pass: the runtime runs the line whole, so every
+ * grant it matches is claimed on the line's hand-off exactly as any reader
+ * on a line claims, and the executor's sweep spends them when the line
+ * ends. A line held on a question still waiting keeps its earlier answers
+ * standing for the retry, exactly as the compound-line pass does, where
+ * spending them here asked the human again for each on every retry.
+ * `handed` is null outside a line (a bare admission with no run behind it).
+ * Mirrors the Python `admit_line`.
+ */
+export async function admitLine(
+  root: TSNodeLike,
+  session: SessionState,
+  registry: MountRegistry,
+  namespace: Namespace | null,
+  reparse: (line: string) => TSNodeLike,
+  signal?: AbortSignal,
+  handed: HandOff | null = null,
+): Promise<Refused | null> {
+  for await (const one of judgeLine(
+    root,
+    session,
+    registry,
+    namespace,
+    reparse,
+    rootFrame(root, handed?.origin ?? null),
+    true,
+    true,
+    false,
+    false,
+    false,
+  )) {
+    const refused = await admitted(one, registry, handed, signal)
+    if (refused !== null) return refused
   }
   return null
 }
@@ -921,8 +1062,7 @@ async function verdictRefuses(
 ): Promise<boolean> {
   const ctx = judged.ctx
   if (ctx === undefined) return true
-  const answers = judged.judgment.answers
-  const asked = answers.find((a) => a.kind === 'deny') ?? answers[0] ?? null
+  const asked = settled(judged.judgment.answers)
   if (asked?.kind !== 'ask') return asked !== null
   const claimant: Claimant = { line: handed, occurrence: judged.occurrence }
   const standing = await registry.decisions.held(ctx, asked, claimant)
@@ -931,9 +1071,7 @@ async function verdictRefuses(
   // handOff: this pass exists to decide whether a secret is fetched, and the
   // gate behind it still has to admit the line. An answer given here is
   // claimed for that gate, which runs on it, so the host is asked once.
-  const action = await registry.decisions.resolve(ctx, asked, signal, claimant)
-  if (action !== null && action.kind === 'abandoned') throw makeAbortError()
-  return action !== null
+  return (await resolved(ctx, asked, registry, signal, claimant)) !== null
 }
 
 /**
@@ -996,11 +1134,11 @@ async function commandRefused(
   signal?: AbortSignal,
   line = false,
 ): Promise<boolean> {
-  const walked = item.session
-  const explained = await judgeWords(
+  const explained: Judged[] = []
+  for await (const one of judgeWords(
     item.words,
     item.occurrence,
-    walked,
+    item.session,
     registry,
     namespace,
     reparse,
@@ -1011,7 +1149,9 @@ async function commandRefused(
     item.lost,
     false,
     item.stdin,
-  )
+  )) {
+    explained.push(one)
+  }
   // The allow list refusing the line's one command on words no glob can
   // change means nothing runs. A line it hands on, or a line handed on to
   // it, is not enough: what runs it may not ask the gate.
@@ -1117,16 +1257,10 @@ export async function lineHeld(
       const expl = one.judgment
       if (!isVerdict(expl) || expl.exitCode === 0) continue
       if (refuses(expl)) return true
-      const asked = expl.answers.find((a): a is Ask => a.kind === 'ask')
-      if (one.ctx === undefined || asked === undefined || !one.stated) continue
-      const action = await registry.decisions.resolve(one.ctx, asked, signal, {
-        line: handed,
-        occurrence: one.occurrence,
-      })
-      if (action !== null) {
-        if (action.kind === 'abandoned') throw makeAbortError()
-        return true
-      }
+      const asked = settled(expl.answers)
+      if (one.ctx === undefined || asked?.kind !== 'ask' || !one.stated) continue
+      const claimant: Claimant = { line: handed, occurrence: one.occurrence }
+      if ((await resolved(one.ctx, asked, registry, signal, claimant)) !== null) return true
     }
   }
   return false
@@ -1169,7 +1303,8 @@ export async function explainLine(
   wholeLine = false,
   every = true,
 ): Promise<Judged[]> {
-  return judgeLine(
+  const judged: Judged[] = []
+  for await (const one of judgeLine(
     root,
     session,
     registry,
@@ -1180,7 +1315,11 @@ export async function explainLine(
     wholeLine,
     false,
     every,
-  )
+    !every,
+  )) {
+    judged.push(one)
+  }
+  return judged
 }
 
 /**
@@ -1192,8 +1331,11 @@ export async function explainLine(
  * runs, carrying the first ask an approval lets through. A command
  * refused only where it stands, a policy's own `preCommand` refusal
  * included, keeps its refusal to its own node, since the rest of the
- * line still runs. Every scope a command reads its words in (the typed line, a `$( )` body, a
- * `bash -c` string) is parsed on its own with `reparse`, as the nested
+ * line still runs. A runtime that takes the line whole (`wholeLine`) runs
+ * none of it once any command is refused (`admitLine`), so there every
+ * refusal is the line's, and `verdicts` is `judged` itself, whose gate asks
+ * every policy. Every scope a command reads its words in (the typed line, a
+ * `$( )` body, a `bash -c` string) is parsed on its own with `reparse`, as the nested
  * line will be; a judgment is placed on the command at its span in that
  * scope, and a nested scope under the command holding it. Mirrors the
  * Python `explained_line`.
@@ -1204,6 +1346,7 @@ export function explainedLine(
   verdicts: readonly Judged[],
   runtimeOf: (command: string) => string,
   reparse: (line: string) => TSNodeLike,
+  wholeLine = false,
 ): ShellExplanation {
   const scopes: Scope[] = []
   for (const one of judged) {
@@ -1222,7 +1365,8 @@ export function explainedLine(
   // (`find -exec`, `xargs`) is the gate's, asked where it runs, so it holds
   // nothing here either.
   const held = verdicts.find(
-    (one) => one.judgment.exitCode !== 0 && isVerdict(one.judgment) && asksFor(one),
+    (one) =>
+      one.judgment.exitCode !== 0 && (wholeLine || (isVerdict(one.judgment) && asksFor(one))),
   )
   if (held !== undefined) {
     const judgment = held.judgment
@@ -1281,10 +1425,7 @@ function sameAt(a: Occurrence | null, b: Occurrence | null): boolean {
  * the document's own. Mirrors the Python `_verdict_of`.
  */
 function verdictOf(judgment: Judgment): [Outcome, string, string] {
-  const decider =
-    judgment.answers.find((a) => a.kind === 'deny') ??
-    judgment.answers.find((a) => a.kind === 'ask') ??
-    null
+  const decider = settled(judgment.answers)
   const source =
     decider?.rule !== undefined
       ? sourceOf(decider.rule)
@@ -1293,7 +1434,7 @@ function verdictOf(judgment: Judgment): [Outcome, string, string] {
         : ''
   const refusal = judgment.refusal
   if (refusal !== null) {
-    return [refusal.kind === 'pending' ? Outcome.ASK : Outcome.DENY, refusal.reason, source]
+    return [isPending(refusal) ? Outcome.ASK : Outcome.DENY, refusal.reason, source]
   }
   if (decider?.kind === 'ask') return [Outcome.ASK, decider.reason, source]
   if (judgment.exitCode !== 0) return [Outcome.DENY, '', source]
@@ -1390,15 +1531,19 @@ function commandOf(
 }
 
 /**
- * Every command of a line explained, in the order the gate reads them,
- * each with its place on the line. `frame` is the scope the line is
- * read in; `stated` is whether the line's text reaches here as the gate
- * will read it, and `wholeLine` whether a runtime takes it whole, as
- * `judgeWords` takes them; `lost` is whether the line begins with its cwd
- * lost, as a line a command runs after such a `cd` does; `every` asks
- * every policy past a Deny, for `explain`.
+ * Every command of a line judged, in the order the gate reads them, each
+ * with its place on the line, one at a time as `judgeWords` yields them.
+ * `frame` is the scope the line is read in; `stated` is whether the line's
+ * text reaches here as the gate will read it, and `wholeLine` whether a
+ * runtime takes it whole, as `judgeWords` takes them; `lost` is whether the
+ * line begins with its cwd lost, as a line a command runs after such a `cd`
+ * does; `every` asks every policy past a Deny, for `explain`, and
+ * `rulesOnly` the profile's rules alone; `open` says the runtime appends
+ * operands the gate cannot read to the line (`mapfile -C`'s callback, which
+ * runs with the index and the record after it), as `judgeWords` takes it
+ * for each of its commands.
  */
-async function judgeLine(
+async function* judgeLine(
   root: TSNodeLike,
   session: SessionState,
   registry: MountRegistry,
@@ -1409,26 +1554,26 @@ async function judgeLine(
   wholeLine = false,
   lost = false,
   every = false,
-): Promise<Judged[]> {
-  const out: Judged[] = []
+  rulesOnly = true,
+  open = false,
+): AsyncGenerator<Judged> {
   for (const item of walkedLine(root, session, reparse, frame, lost)) {
-    out.push(
-      ...(await judgeWords(
-        item.words,
-        item.occurrence,
-        item.session,
-        registry,
-        namespace,
-        reparse,
-        item.redirects,
-        stated && (item.stated ?? true),
-        item.intrinsic,
-        wholeLine,
-        item.lost,
-        every,
-        item.stdin,
-      )),
+    yield* judgeWords(
+      item.words,
+      item.occurrence,
+      item.session,
+      registry,
+      namespace,
+      reparse,
+      item.redirects,
+      stated && (item.stated ?? true),
+      item.intrinsic,
+      wholeLine,
+      item.lost,
+      every,
+      item.stdin,
+      rulesOnly,
+      open,
     )
   }
-  return out
 }

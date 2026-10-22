@@ -732,9 +732,7 @@ class SessionState:
             or shown is not None
             or vars_ is not None
             or processes is not None
-            or commands is not None
         ):
-            rules = data.get("commands")
             data["visibility"] = Visibility(
                 paths=(
                     HiddenPaths(
@@ -770,7 +768,6 @@ class SessionState:
                     else None
                 ),
                 processes=data.get("processes", ProcessPermissions()).list,
-                commands=rules.allow if rules is not None else None,
             )
         session = cls(**data)
         if recorded is not None:

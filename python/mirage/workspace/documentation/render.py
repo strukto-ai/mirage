@@ -59,7 +59,6 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
         if (
             vis.paths is None
             and vis.shown is None
-            and vis.commands is None
             and session.commands is None
             and mode == mount.mode
         ):

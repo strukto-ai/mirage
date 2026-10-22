@@ -161,21 +161,19 @@ export type ProcessScope = 'session' | 'workspace'
  * What exists for one session, compiled once from its profile.
  *
  * The one answer to "is this here?" for everything a session touches:
- * paths (hides, re-opened by deeper shows), variables, processes and
- * commands. The views filter what they list through it and the op
+ * paths (hides, re-opened by deeper shows), variables and processes.
+ * The views filter what they list through it and the op
  * boundary answers a hidden path as absent from it; nothing else asks
  * the profile what exists. `DEFAULT_VISIBILITY` hides nothing.
  *
  * `shown` re-opens a hidden subtree and states a subtree's mode;
- * `processes` is whose processes the session sees; `commands` is the
- * allow patterns that install commands, null installing every one.
+ * `processes` is whose processes the session sees.
  */
 export interface Visibility {
   readonly paths: HiddenPaths | null
   readonly shown: ShownPaths | null
   readonly vars: HiddenVars | null
   readonly processes: ProcessScope
-  readonly commands: readonly string[] | null
 }
 
 export const DEFAULT_VISIBILITY: Visibility = Object.freeze({
@@ -183,7 +181,6 @@ export const DEFAULT_VISIBILITY: Visibility = Object.freeze({
   shown: null,
   vars: null,
   processes: 'session',
-  commands: null,
 })
 
 const MOUNT_MODE_ALIASES: Readonly<Record<string, MountMode>> = Object.freeze({
