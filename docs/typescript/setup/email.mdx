@@ -4,7 +4,7 @@ icon: envelope
 description: Mount an IMAP/SMTP mailbox as a Mirage filesystem (Node only).
 ---
 
-`EmailVFS` reads messages over IMAP, exposing the mailbox as a tree of folders and messages; the [himalaya CLI](/typescript/cli/himalaya) sends through SMTP.
+`EmailVFS` reads the mailbox over IMAP as a tree of folders and messages. The [himalaya CLI](/typescript/cli/himalaya) sends mail.
 
 <Note>
   Node only. Requires `imapflow`, `mailparser`, and `nodemailer` peers. The browser cannot speak raw TCP for IMAP/SMTP.

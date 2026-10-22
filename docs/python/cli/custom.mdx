@@ -359,7 +359,7 @@ collects single option values, while `extend` flattens fixed groups.
 
 | Argument or field | Handler view |
 | --- | --- |
-| `accessor` | This installation's accessor, built from its validated config; the default `NOOPAccessor` holds that config at `accessor.config`, or `None`. |
+| `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`None` without a config model). |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `ctx.argv` | Verbatim words after the installed head word, including subcommands. |

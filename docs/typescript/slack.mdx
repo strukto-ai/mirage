@@ -19,7 +19,7 @@ Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/
    - `groups:history`, `groups:read`
    - `im:history`, `im:read`
    - `users:read`
-3. For the CLI `send-message` command, also add `chat:write`; the mount itself never posts.
+3. For the CLI `send-message` command, also add `chat:write`. The mount never posts.
 4. For [`search.messages`](https://api.slack.com/methods/search.messages), Slack requires a **user token** (`xoxp-…`) with `search:read`. Bot tokens (`xoxb-…`) get `not_allowed_token_type`. Provide it via the optional `searchToken` field.
 5. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-…`).
 

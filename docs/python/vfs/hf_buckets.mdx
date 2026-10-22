@@ -4,8 +4,8 @@ description: Mount Hugging Face Buckets as a Mirage filesystem with async reads 
 icon: /images/huggingface-logo.svg
 ---
 The HF Buckets VFS mounts a [Hugging Face Bucket](https://huggingface.co/docs/buckets)
-at some prefix such as `/hf/`. Listing and writes go through
-[OpenDAL](https://opendal.apache.org/) (the `hf-buckets` extra); reads stream
+at some prefix such as `/hf/`. Listing and writes use
+[OpenDAL](https://opendal.apache.org/) (the `hf-buckets` extra). Reads stream
 from the Hub.
 
 For credential setup, see [HF Buckets Setup](/home/setup/hf_buckets).
@@ -186,7 +186,7 @@ from range reads to avoid downloading entire objects.
 | Command  | Notes                                 |
 | -------- | ------------------------------------- |
 | `rm`     | Remove files; `-r` removes a subtree  |
-| `mkdir`  | Create a directory                    |
+| `mkdir`  | No-op: a directory exists only while it holds a file |
 | `touch`  | Create empty file or update timestamp |
 | `mktemp` | Create temporary file                 |
 | `split`  | Split file into pieces                |

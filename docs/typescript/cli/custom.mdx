@@ -20,9 +20,8 @@ command takes: the installation's accessor, the operands, and the same
 `accessor.config`) and the workspace closes it when the install goes. The
 example below shows the
 registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/cli/pager.ts)
-adds a mutable incident service and shared cross-language coverage. A type-only
-import from a `@struktoai/mirage-core/...` subpath needs `@struktoai/mirage-core`
-installed beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`).
+adds a mutable incident service and shared cross-language coverage. The
+`@struktoai/mirage-core/...` type imports need `pnpm add @struktoai/mirage-core`.
 
 ```typescript
 import {
@@ -389,7 +388,7 @@ collects single option values, while `extend` flattens fixed groups.
 
 | Argument or field | Handler view |
 | --- | --- |
-| `accessor` | This installation's accessor, built from its validated config; the default `NOOPAccessor` holds that config at `accessor.config`, or `null`. |
+| `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`null` without a config model). |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `ctx.argv` | Verbatim words after the installed head word, including subcommands. |

@@ -39,7 +39,7 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `snapshotStore` | none | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
 | `stateRoot` | under `$MIRAGE_HOME` | Where live state is kept. |
 | `idleGraceSeconds` | `30` | Seconds the last workspace may be gone before `onIdleExit` is called. |
-| `pidFile` | `$MIRAGE_HOME/daemon.pid` | Where the process id is written. |
+| `pidFile` | `$MIRAGE_HOME/daemon.pid` | PID file path, exposed as `app.pidFile`. Only the daemon writes it. |
 | `onIdleExit` | a no-op | Called when the last workspace has been gone `idleGraceSeconds` (30), or on `POST /v1/shutdown`. |
 
 ## Started by the CLI
