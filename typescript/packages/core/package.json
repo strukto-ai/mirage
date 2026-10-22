@@ -81,7 +81,7 @@
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
     "@types/sha.js": "^2.4.4",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "e2b": "^2.45.0"
   },
   "dependencies": {

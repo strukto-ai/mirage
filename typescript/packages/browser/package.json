@@ -65,7 +65,7 @@
     "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "web-tree-sitter": "^0.26.13",
     "e2b": "^2.45.0"
   },
