@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -933,6 +933,76 @@ describe('workspace cancel, kill and close', () => {
         payload: { command: 'history' },
       })
       expect(r.json<{ stdout: string }>().stdout).toContain('echo kept')
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('PUT /v1/workspaces/:id/profiles/:name defines and replaces a name', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-profile-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const create = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: RAM })
+      const id = create.json<{ id: string }>().id
+      const route = `/v1/workspaces/${id}/profiles/reader`
+      const set = await app.inject({
+        method: 'PUT',
+        url: route,
+        payload: { commands: { allow: ['whoami'] } },
+      })
+      expect(set.statusCode).toBe(200)
+      expect(set.json()).toEqual({ name: 'reader' })
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/sessions`,
+        payload: { session_id: 'a', profile: 'reader' },
+      })
+      const run = async (): Promise<string> =>
+        (
+          await app.inject({
+            method: 'POST',
+            url: `/v1/workspaces/${id}/shell?session_id=a`,
+            payload: { command: 'whoami; echo hi' },
+          })
+        ).json<{ stdout: string }>().stdout
+      expect(await run()).toBe('reader\n')
+      await app.inject({
+        method: 'PUT',
+        url: route,
+        payload: { commands: { allow: ['whoami', 'echo'] } },
+      })
+      const moved = await app.inject({
+        method: 'PATCH',
+        url: `/v1/workspaces/${id}/sessions/a`,
+        payload: { profile: 'reader' },
+      })
+      expect(moved.statusCode).toBe(200)
+      expect(await run()).toBe('reader\nhi\n')
+      const refused = await app.inject({
+        method: 'PUT',
+        url: route,
+        payload: {
+          commands: { allow: ['ls'], deny: [{ commands: ['cat *'], reason: 'sealed' }] },
+        },
+      })
+      expect(refused.statusCode).toBe(422)
+      const unknown = await app.inject({ method: 'PUT', url: `${route}x`, payload: { bogus: 1 } })
+      expect(unknown.statusCode).toBe(422)
+      mkdirSync(join(root, 'guard.py'))
+      const unreadable = await app.inject({
+        method: 'PUT',
+        url: `${route}y`,
+        payload: { policy: { pre_command: [{ script: join(root, 'guard.py') }] } },
+      })
+      expect(unreadable.statusCode).toBe(422)
+      expect(unreadable.json<{ detail: string }>().detail).toContain('directory')
+      const missing = await app.inject({
+        method: 'PUT',
+        url: '/v1/workspaces/nope/profiles/reader',
+        payload: {},
+      })
+      expect(missing.statusCode).toBe(404)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

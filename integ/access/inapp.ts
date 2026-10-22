@@ -21,6 +21,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
 import { classify } from '@struktoai/mirage-core/errors/classify'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { answered, checked, explanationToDict } from '@struktoai/mirage-server/io_serde'
@@ -253,9 +254,18 @@ async function steps(
           step.kind === 'vfs' ? await ws.vfsMd(path, options) : await ws.skillMd(path, options)
         answers.push({ text: kind === 'expose' ? 'exposed' : headings(markdown) })
       } else if (kind === 'session_update') {
-        const profile = typeof step.profile === 'string' ? step.profile : null
+        const asked = step.profile
+        const profile =
+          typeof asked === 'string'
+            ? asked
+            : asked === undefined || asked === null
+              ? null
+              : parseSessionProfile(asked)
         await get(wid).setSessionProfile(step.session as string, profile)
         answers.push({ text: step.session })
+      } else if (kind === 'set_profile') {
+        get(wid).setProfile(step.name as string, parseSessionProfile(step.profile))
+        answers.push({ text: step.name })
       } else if (kind === 'close_workspace') {
         await get(wid).close()
         workspaces.delete(wid)

@@ -17,6 +17,8 @@ import type { FastifyInstance } from 'fastify'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { MountMode } from '@struktoai/mirage-core/types'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { loadProfilePolicy } from '@struktoai/mirage-node'
 
 export interface SessionsRoutesDeps {
   registry: WorkspaceRegistry
@@ -98,14 +100,14 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
   )
 
   /** Replace the session's profile; its cwd, env and history stay. */
-  app.patch<{ Params: WsSessionParams; Body: { profile: string | null } }>(
+  app.patch<{ Params: WsSessionParams; Body: { profile: unknown } }>(
     '/v1/workspaces/:wsId/sessions/:sessionId',
     {
       schema: {
         body: {
           type: 'object',
           required: ['profile'],
-          properties: { profile: { type: ['string', 'null'] } },
+          properties: { profile: { type: ['string', 'null', 'object'] } },
           additionalProperties: false,
         },
       },
@@ -113,8 +115,13 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
     async (req, reply) => {
       const ws = await sessionWorkspace(req.params, req.account)
       if (typeof ws === 'string') return reply.status(404).send({ detail: ws })
+      const asked = req.body.profile
       try {
-        const session = await ws.setSessionProfile(req.params.sessionId, req.body.profile)
+        const profile =
+          typeof asked === 'string' || asked === null
+            ? asked
+            : loadProfilePolicy(parseSessionProfile(asked))
+        const session = await ws.setSessionProfile(req.params.sessionId, profile)
         return { session_id: session.sessionId, cwd: session.cwd }
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })

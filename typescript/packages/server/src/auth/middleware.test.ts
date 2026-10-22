@@ -355,6 +355,7 @@ describe('AuthMiddleware integration', () => {
           ['POST', '/v1/workspaces/a/close', undefined],
           ['POST', '/v1/workspaces/a/cancel', undefined],
           ['POST', '/v1/workspaces/a/kill', undefined],
+          ['PUT', '/v1/workspaces/a/profiles/x', {}],
           ['GET', '/v1/workspaces/a/snapshot', undefined],
           ['POST', '/v1/workspaces/a/snapshot', { key: 's.tar' }],
           ['GET', `/v1/jobs/${jobId}`, undefined],

@@ -616,12 +616,19 @@ class HttpSteps:
         return reply.text
 
     async def session_update(
-        self, wid: str, session: str, profile: str | None
+        self, wid: str, session: str, profile: str | dict[str, Any] | None
     ) -> None:
         await self._ok(
             "PATCH",
             f"/v1/workspaces/{wid}/sessions/{session}",
             json={"profile": profile},
+        )
+
+    async def set_profile(
+        self, wid: str, name: str, profile: dict[str, Any]
+    ) -> None:
+        await self._ok(
+            "PUT", f"/v1/workspaces/{wid}/profiles/{name}", json=profile
         )
 
     async def close_workspace(self, wid: str) -> None:
@@ -731,6 +738,7 @@ class CliSteps:
     ) -> None:
         self.server = server
         self.snapshots = snapshots
+        self.scratch = scratch
         self.config_file = scratch / "workspace.json"
         self.config_file.write_text(json.dumps(config))
 
@@ -840,13 +848,28 @@ class CliSteps:
             raise RuntimeError(f"mirage {' '.join(args)} exited {code}: {err}")
         return out
 
+    def _profile_file(self, profile: dict[str, Any]) -> str:
+        path = self.scratch / "profile.json"
+        path.write_text(json.dumps(profile))
+        return str(path)
+
     async def session_update(
-        self, wid: str, session: str, profile: str | None
+        self, wid: str, session: str, profile: str | dict[str, Any] | None
     ) -> None:
-        chosen = (
-            ["-p", profile] if profile is not None else ["--default-profile"]
-        )
+        if isinstance(profile, dict):
+            chosen = ["--profile-file", self._profile_file(profile)]
+        elif profile is not None:
+            chosen = ["-p", profile]
+        else:
+            chosen = ["--default-profile"]
         await self._json("session", "update", wid, session, *chosen)
+
+    async def set_profile(
+        self, wid: str, name: str, profile: dict[str, Any]
+    ) -> None:
+        await self._json(
+            "workspace", "set-profile", wid, name, self._profile_file(profile)
+        )
 
     async def close_workspace(self, wid: str) -> None:
         await self._json("workspace", "close", wid)
@@ -1009,9 +1032,14 @@ class InAppSteps:
         return await method(path, session_id=session, profile=profile)
 
     async def session_update(
-        self, wid: str, session: str, profile: str | None
+        self, wid: str, session: str, profile: str | dict[str, Any] | None
     ) -> None:
         await self.workspaces[wid].set_session_profile(session, profile)
+
+    async def set_profile(
+        self, wid: str, name: str, profile: dict[str, Any]
+    ) -> None:
+        self.workspaces[wid].set_profile(name, profile)
 
     async def close_workspace(self, wid: str) -> None:
         await self.workspaces.pop(wid).close()
@@ -1144,6 +1172,9 @@ async def run_steps(
                     wid, step["session"], step.get("profile")
                 )
                 answer = {"text": step["session"]}
+            elif kind == "set_profile":
+                await steps.set_profile(wid, step["name"], step["profile"])
+                answer = {"text": step["name"]}
             elif kind == "close_workspace":
                 await steps.close_workspace(wid)
                 answer = {"text": "closed"}

@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 import typer
+import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
@@ -76,6 +77,31 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
         fail(str(e), exit_code=2)
     _absolutize_scripts(resolved, path.resolve().parent)
     return resolved
+
+
+def load_profile_argument(path: Path) -> dict[str, Any]:
+    """Read a profile YAML/JSON document the way a config file's
+    ``profiles`` entry is read: ``${VAR}`` interpolated from the CLI's
+    env, and a relative policy ``script`` rebased onto the file's
+    directory. Mirrors ``loadProfileArgument`` in the TypeScript CLI.
+
+    Args:
+        path (Path): the profile document.
+    """
+    from mirage.config import _absolutize_scripts, _interpolate_env
+
+    try:
+        doc = parse_yaml(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        fail(f"invalid profile YAML/JSON at {path}: {e}", exit_code=2)
+    if not isinstance(doc, dict):
+        fail(f"profile file must hold a mapping: {path}", exit_code=2)
+    try:
+        resolved = _interpolate_env({"profiles": {"": doc}}, dict(os.environ))
+    except ValueError as e:
+        fail(str(e), exit_code=2)
+    _absolutize_scripts(resolved, path.resolve().parent)
+    return resolved["profiles"][""]
 
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:
@@ -233,6 +259,31 @@ def kill_cmd(workspace_id: str = typer.Argument(...)) -> None:
         client.ensure_running(allow_spawn=False)
         r = client.request(
             "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/kill"
+        )
+    emit(handle_response(r))
+
+
+@app.command("set-profile")
+def set_profile_cmd(
+    workspace_id: str = typer.Argument(...),
+    name: str = typer.Argument(..., help="The profile's name."),
+    profile_path: Path = typer.Argument(
+        ..., exists=True, readable=True, help="YAML/JSON profile document."
+    ),
+) -> None:
+    """Define or replace a named profile on the live workspace.
+
+    Sessions keep their rules until `session update` moves them, and the
+    workspace config is not rewritten.
+    """
+    body = load_profile_argument(profile_path)
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        wid = quote(workspace_id, safe="")
+        r = client.request(
+            "PUT",
+            f"/v1/workspaces/{wid}/profiles/{quote(name, safe='')}",
+            json=body,
         )
     emit(handle_response(r))
 

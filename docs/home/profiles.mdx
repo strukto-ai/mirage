@@ -48,6 +48,23 @@ Replace RAM with your [VFS](/home/setup/vfs). `profile: researcher` selects
 the default for new sessions; another session can use a different named
 profile. A profile cannot grant access beyond the workspace's permissions.
 
+## Change a profile while it runs
+
+A host can add a profile or replace what a name means on a running
+workspace, then move sessions onto it. A session keeps its rules until it is
+moved, and keeps its working directory, variables and history when it is. The
+workspace YAML is never rewritten.
+
+| | Set a profile | Move a session onto it |
+| --- | --- | --- |
+| Python | `ws.set_profile(name, doc)` | `await ws.set_session_profile(id, name)` |
+| TypeScript | `ws.setProfile(name, doc)` | `await ws.setSessionProfile(id, name)` |
+| [HTTP](/home/access/http#set-a-profile) | `PUT /v1/workspaces/{id}/profiles/{name}` | `PATCH /v1/workspaces/{id}/sessions/{session_id}` |
+| [CLI](/home/access/cli#workspaces) | `mirage workspace set-profile ID NAME FILE` | `mirage session update ID S -p NAME` |
+
+An agent cannot reach these: they are host operations, so no builtin, MCP tool
+or RPC method changes a profile.
+
 ## Rule matching
 
 Command patterns match token prefixes. `git push` matches `git push origin main`.

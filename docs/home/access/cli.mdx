@@ -137,6 +137,7 @@ a `workspace_id`.
 | `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
 | `mirage workspace cancel ID` | Cancel the running lines of every session. |
 | `mirage workspace kill ID` | Kill the background jobs of every session. |
+| `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
 | `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
 | `mirage workspace snapshot ID --key KEY` | Save it to the server's snapshot store instead. |
@@ -162,7 +163,7 @@ a `workspace_id`.
 | `mirage session delete ID S` | Close a session. |
 | `mirage session cancel ID S` | Cancel the session's running lines. |
 | `mirage session kill ID S` | Kill the session's background jobs. |
-| `mirage session update ID S (-p PROFILE \| --default-profile)` | Replace the session's profile; its cwd, env and history stay. |
+| `mirage session update ID S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
 
 ## Jobs
 
