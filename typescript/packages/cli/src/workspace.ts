@@ -56,6 +56,29 @@ async function loadConfigArgument(path: string): Promise<JsonValue> {
   return config
 }
 
+// A profile document handed to `set-profile` or `session update
+// --profile-file`, read the way a config file's `profiles` entry is read:
+// env-interpolated, and with a relative policy `script` rebased onto the
+// file's directory. Mirrors `load_profile_argument` in the Python CLI;
+// async for the reason `loadConfigArgument` is.
+export async function loadProfileArgument(path: string): Promise<JsonValue> {
+  if (!existsSync(path)) fail(`profile file not found: ${path}`, 2)
+  const { absolutizeScripts, interpolateEnv, readProcessEnv } =
+    await import('@struktoai/mirage-node/config')
+  const { parse: yamlParse } = await import('yaml')
+  let wrapped: { profiles: Record<string, JsonValue> }
+  try {
+    wrapped = interpolateEnv(
+      { profiles: { '': (yamlParse(readFileSync(path, 'utf-8')) as JsonValue) ?? {} } },
+      readProcessEnv(),
+    )
+  } catch (err: unknown) {
+    fail(`invalid profile YAML/JSON at ${path}: ${String(err)}`, 2)
+  }
+  absolutizeScripts(wrapped, dirname(resolve(path)))
+  return wrapped.profiles[''] ?? {}
+}
+
 interface WorkspaceBrief {
   id: string
   mode: string
@@ -291,6 +314,30 @@ export function registerWorkspaceCommands(program: Command): void {
       emit(
         await handleResponse(
           await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/kill`),
+        ),
+      )
+    })
+
+  ws.command('set-profile')
+    .description(
+      'Define or replace a named profile on the live workspace. Sessions keep ' +
+        'their rules until `session update` moves them, and the workspace ' +
+        'config is not rewritten.',
+    )
+    .argument('<id>')
+    .argument('<name>', "The profile's name.")
+    .argument('<file>', 'YAML/JSON profile document.')
+    .action(async (id: string, name: string, file: string) => {
+      const body = await loadProfileArgument(file)
+      const c = buildClient()
+      await c.ensureRunning({ allowSpawn: false })
+      emit(
+        await handleResponse(
+          await c.request(
+            'PUT',
+            `/v1/workspaces/${encodeURIComponent(id)}/profiles/${encodeURIComponent(name)}`,
+            { body: JSON.stringify(body) },
+          ),
         ),
       )
     })

@@ -622,33 +622,23 @@ function loadProgram(program: ProfilePolicySpec): ProfilePolicySpec {
 }
 
 /**
- * Load each profile's path-form policy programs into ScriptSources.
+ * Load a profile's path-form policy programs into ScriptSources.
  *
  * By this entry point the path is absolute for a file config (the check entry point
  * rebased it onto the config file's directory); an object config's
  * relative path resolves against the process cwd, as in Python. Code
  * that passes a loaded ScriptSource is left alone.
  */
-function loadProfileScripts(
-  profiles: Record<string, SessionProfile>,
-): Record<string, SessionProfile> {
-  const out: Record<string, SessionProfile> = {}
-  for (const [name, profile] of Object.entries(profiles)) {
-    const policy = profile.policy
-    out[name] =
-      policy == null
-        ? profile
-        : {
-            ...profile,
-            policy: Object.fromEntries(
-              Object.entries(policy).map(([method, programs]) => [
-                method,
-                programs.map(loadProgram),
-              ]),
-            ),
-          }
-  }
-  return out
+export function loadProfilePolicy(profile: SessionProfile): SessionProfile {
+  const policy = profile.policy
+  return policy == null
+    ? profile
+    : {
+        ...profile,
+        policy: Object.fromEntries(
+          Object.entries(policy).map(([method, programs]) => [method, programs.map(loadProgram)]),
+        ),
+      }
 }
 
 const VAR_RE = /\$\{([A-Z_][A-Z0-9_]*)\}/g
@@ -1193,7 +1183,14 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
         ? { routePolicy: loadProgram(parseProgram(cfg.routePolicy, 'route_policy')) }
         : {}),
       ...(cfg.profiles !== undefined && cfg.profiles !== null
-        ? { profiles: loadProfileScripts(parseProfiles(cfg.profiles)) }
+        ? {
+            profiles: Object.fromEntries(
+              Object.entries(parseProfiles(cfg.profiles)).map(([name, profile]) => [
+                name,
+                loadProfilePolicy(profile),
+              ]),
+            ),
+          }
         : {}),
       ...(cfg.profile !== undefined && cfg.profile !== null
         ? { profile: cfg.profile as string }

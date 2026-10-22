@@ -366,6 +366,7 @@ async def test_an_account_reaches_only_its_own_workspaces(rsa_keys, tmp_path):
             ("POST", "/v1/workspaces/a/close", None),
             ("POST", "/v1/workspaces/a/cancel", None),
             ("POST", "/v1/workspaces/a/kill", None),
+            ("PUT", "/v1/workspaces/a/profiles/x", {}),
             ("GET", "/v1/workspaces/a/snapshot", None),
             ("GET", f"/v1/jobs/{job_id}", None),
             ("DELETE", f"/v1/jobs/{job_id}", None),

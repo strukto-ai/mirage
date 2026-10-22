@@ -1236,3 +1236,47 @@ async def test_close_keeps_state_for_the_same_id(tmp_path):
         )
         assert "echo kept" in r.json()["stdout"]
         await client.delete("/v1/workspaces/keep")
+
+
+@pytest.mark.asyncio
+async def test_set_profile_defines_and_replaces_a_name(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        route = f"/v1/workspaces/{wid}/profiles/reader"
+        r = await client.put(route, json={"commands": {"allow": ["whoami"]}})
+        assert r.status_code == 200 and r.json() == {"name": "reader"}
+        await client.post(
+            f"/v1/workspaces/{wid}/sessions",
+            json={"session_id": "a", "profile": "reader"},
+        )
+        line = {"command": "whoami; echo hi"}
+        shell = f"/v1/workspaces/{wid}/shell"
+        r = await client.post(shell, params={"session_id": "a"}, json=line)
+        assert r.json()["stdout"] == "reader\n"
+        await client.put(
+            route, json={"commands": {"allow": ["whoami", "echo"]}}
+        )
+        r = await client.patch(
+            f"/v1/workspaces/{wid}/sessions/a", json={"profile": "reader"}
+        )
+        assert r.status_code == 200
+        r = await client.post(shell, params={"session_id": "a"}, json=line)
+        assert r.json()["stdout"] == "reader\nhi\n"
+        refused = {
+            "commands": {
+                "allow": ["ls"],
+                "deny": [{"commands": ["cat *"], "reason": "sealed"}],
+            }
+        }
+        r = await client.put(route, json=refused)
+        assert r.status_code == 422
+        r = await client.put(f"{route}x", json={"bogus": 1})
+        assert r.status_code == 422
+        r = await client.put("/v1/workspaces/nope/profiles/reader", json={})
+        assert r.status_code == 404
+        await client.delete(f"/v1/workspaces/{wid}")

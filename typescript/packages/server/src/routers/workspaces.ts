@@ -18,6 +18,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
@@ -30,6 +31,7 @@ import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { buildOverrideMounts, cloneWorkspaceWithOverride, type OverrideShape } from '../clone.ts'
 import {
   configToWorkspaceArgs,
+  loadProfilePolicy,
   loadWorkspaceConfig,
   type WorkspaceArgs,
   type WorkspaceConfigRaw,
@@ -473,6 +475,29 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
     return { killed: await entry.runner.ws.kill() }
   })
+
+  /**
+   * Define a named profile on the live workspace, or replace it. Only the
+   * live table changes: a session moves when it is updated onto the name,
+   * and the workspace's config is never rewritten.
+   */
+  app.put<{ Params: { id: string; name: string }; Body: unknown }>(
+    '/v1/workspaces/:id/profiles/:name',
+    async (req, reply) => {
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+      const name = req.params.name
+      try {
+        entry.runner.ws.setProfile(
+          name,
+          loadProfilePolicy(parseSessionProfile(req.body, `profile \`${name}\``)),
+        )
+      } catch (err) {
+        return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+      }
+      return { name }
+    },
+  )
 
   app.post<{ Params: WorkspaceIdParams; Body: CloneWorkspaceBody }>(
     '/v1/workspaces/:id/clone',

@@ -400,6 +400,7 @@ export {
   checkWorkspaceConfigFile,
   configToWorkspaceArgs,
   interpolateEnv,
+  loadProfilePolicy,
   loadWorkspaceConfig,
   loadWorkspaceConfigFile,
   type MountBlock,

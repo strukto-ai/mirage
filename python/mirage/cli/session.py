@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, handle_response
+from mirage.cli.workspace import load_profile_argument
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
 
@@ -154,13 +156,32 @@ def update_cmd(
     profile: str | None = typer.Option(
         None, "--profile", "-p", help="Replace the live session's profile."
     ),
+    profile_file: Path | None = typer.Option(
+        None,
+        "--profile-file",
+        exists=True,
+        readable=True,
+        help="Replace it with this YAML/JSON profile document.",
+    ),
     default_profile: bool = typer.Option(
         False, "--default-profile", help="Use the workspace default profile."
     ),
 ) -> None:
     """Replace the session's profile; its cwd, env and history stay."""
-    if (profile is None) == (not default_profile):
-        raise typer.BadParameter("choose --profile or --default-profile")
+    if (
+        sum((profile is not None, profile_file is not None, default_profile))
+        != 1
+    ):
+        raise typer.BadParameter(
+            "choose --profile, --profile-file or --default-profile"
+        )
+    body = {
+        "profile": (
+            load_profile_argument(profile_file)
+            if profile_file is not None
+            else profile
+        )
+    }
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         wid = quote(workspace_id, safe="")
@@ -168,6 +189,6 @@ def update_cmd(
         r = client.request(
             "PATCH",
             f"/v1/workspaces/{wid}/sessions/{sid}",
-            json={"profile": profile},
+            json=body,
         )
     emit(handle_response(r))

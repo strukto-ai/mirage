@@ -283,3 +283,32 @@ async def test_session_kill_stops_background_jobs_and_keeps_the_session():
         )
         assert "alive" in r.json()["stdout"]
         await client.delete(f"/v1/workspaces/{wid}")
+
+
+@pytest.mark.asyncio
+async def test_update_session_takes_a_profile_document(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "a"}
+        )
+        r = await client.patch(
+            f"/v1/workspaces/{wid}/sessions/a",
+            json={"profile": {"commands": {"allow": ["whoami"]}}},
+        )
+        assert r.status_code == 200, r.text
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            params={"session_id": "a"},
+            json={"command": "whoami"},
+        )
+        assert r.json()["stderr"] == "whoami: cannot find name for user ID\n"
+        r = await client.patch(
+            f"/v1/workspaces/{wid}/sessions/a",
+            json={"profile": {"commands": {"bogus": []}}},
+        )
+        assert r.status_code == 422
+        await client.delete(f"/v1/workspaces/{wid}")

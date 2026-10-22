@@ -221,6 +221,26 @@ Cancels the running and queued lines of every session, however they came in, and
 
 Kills every session's background jobs (`cmd &`) and the processes runtimes started, and answers `{"killed": 1}`.
 
+### Set a profile
+
+<Badge color="orange">PUT</Badge> `/v1/workspaces/{id}/profiles/{name}`
+
+The body is the [profile](/home/policy/overview) as JSON, the same document as an entry under `profiles` in the workspace YAML.
+
+Adds the profile or replaces what the name means, and answers `{"name": "reader"}`.
+A document no session could run under answers `422` and changes nothing. A
+session on the name keeps its rules until you [change its
+profile](#change-a-sessions-profile) to the name again. The workspace's config
+is not rewritten, so creating the workspace again after a restart brings back
+the profiles its YAML defines; restored sessions keep the rules they last ran
+under.
+
+```bash
+curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"paths":{"hide":["/vault"]},"commands":{"allow":["cat","ls","whoami"]}}'
+```
+
 ### Clone a workspace
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`
@@ -295,10 +315,10 @@ Kills the session's background jobs and the processes its runtimes started, and 
 
 <Badge color="orange">PATCH</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
 
-<ParamField body="profile" type="string | null" required>A [profile](/home/policy/overview) from the workspace's `profiles`; `null` for the workspace default.</ParamField>
+<ParamField body="profile" type="string | object | null" required>A [profile](/home/policy/overview) from the workspace's `profiles`, `null` for the workspace default, or a profile document. A document runs without a name, so `whoami` and the profile's policy programs see none.</ParamField>
 
-Replaces the session's modes, hides and rules, and answers the session. Its cwd,
-env and history stay.
+Replaces the session's modes, hides and rules with the profile's current
+definition, and answers the session. Its cwd, env and history stay.
 
 ### VFS.md and SKILL.md
 

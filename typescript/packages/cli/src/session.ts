@@ -15,6 +15,7 @@
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, handleResponse } from './output.ts'
+import { loadProfileArgument } from './workspace.ts'
 import { loadDaemonSettings } from './settings.ts'
 
 function buildClient() {
@@ -155,15 +156,24 @@ export function registerSessionCommands(program: Command): void {
     .argument('<wsId>')
     .argument('<sessionId>')
     .option('-p, --profile <name>', "Replace the live session's profile.")
+    .option('--profile-file <file>', 'Replace it with this YAML/JSON profile document.')
     .option('--default-profile', 'Use the workspace default profile.')
     .action(
       async (
         wsId: string,
         sessionId: string,
-        opts: { profile?: string; defaultProfile?: boolean },
+        opts: { profile?: string; profileFile?: string; defaultProfile?: boolean },
       ) => {
-        if ((opts.profile === undefined) === (opts.defaultProfile !== true))
-          fail('choose --profile or --default-profile', 2)
+        const chosen = [
+          opts.profile !== undefined,
+          opts.profileFile !== undefined,
+          opts.defaultProfile === true,
+        ].filter(Boolean).length
+        if (chosen !== 1) fail('choose --profile, --profile-file or --default-profile', 2)
+        const profile =
+          opts.profileFile !== undefined
+            ? await loadProfileArgument(opts.profileFile)
+            : (opts.profile ?? null)
         const c = buildClient()
         await c.ensureRunning({ allowSpawn: false })
         emit(
@@ -171,7 +181,7 @@ export function registerSessionCommands(program: Command): void {
             await c.request(
               'PATCH',
               `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
-              { body: JSON.stringify({ profile: opts.profile ?? null }) },
+              { body: JSON.stringify({ profile }) },
             ),
           ),
         )

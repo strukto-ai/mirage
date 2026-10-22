@@ -60,6 +60,7 @@ describe('mirage CLI program', () => {
         'list',
         'list-asks',
         'load',
+        'set-profile',
         'snapshot',
         'vfs-md',
         'skill-md',

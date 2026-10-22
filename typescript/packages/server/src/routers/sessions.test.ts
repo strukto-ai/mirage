@@ -186,4 +186,41 @@ describe('session cancel and kill', () => {
       await app.close()
     }
   })
+
+  it('PATCH takes a profile document, which runs without a name', async () => {
+    const app = buildApp()
+    try {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+      })
+      const id = create.json<{ id: string }>().id
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/sessions`,
+        payload: { session_id: 'a' },
+      })
+      const moved = await app.inject({
+        method: 'PATCH',
+        url: `/v1/workspaces/${id}/sessions/a`,
+        payload: { profile: { commands: { allow: ['whoami'] } } },
+      })
+      expect(moved.statusCode).toBe(200)
+      const run = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/shell?session_id=a`,
+        payload: { command: 'whoami' },
+      })
+      expect(run.json<{ stderr: string }>().stderr).toBe('whoami: cannot find name for user ID\n')
+      const refused = await app.inject({
+        method: 'PATCH',
+        url: `/v1/workspaces/${id}/sessions/a`,
+        payload: { profile: { commands: { bogus: [] } } },
+      })
+      expect(refused.statusCode).toBe(422)
+    } finally {
+      await app.close()
+    }
+  })
 })

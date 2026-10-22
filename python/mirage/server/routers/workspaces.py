@@ -27,7 +27,13 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from mirage import Workspace
 from mirage.concurrency.limiter import run_blocking
-from mirage.config import WorkspaceConfig, resolve_secrets
+from mirage.config import (
+    WorkspaceConfig,
+    _load_profile_policy,
+    resolve_secrets,
+)
+from mirage.policy.errors import PolicyError
+from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
 from mirage.server.clone import (
     build_override_mounts,
@@ -381,6 +387,30 @@ async def kill_workspace_jobs(
     entry = require_entry(request, workspace_id)
     killed = await entry.runner.call(entry.runner.ws.kill())
     return KillJobsResponse(killed=killed)
+
+
+@router.put("/{workspace_id}/profiles/{name}")
+async def set_profile(
+    workspace_id: str, name: str, profile: SessionProfile, request: Request
+) -> dict[str, str]:
+    """Define a named profile on the live workspace, or replace it.
+
+    Only the live table changes: a session moves when it is updated
+    onto the name, and the workspace's config is never rewritten.
+
+    Args:
+        workspace_id (str): the workspace.
+        name (str): the profile's name.
+        profile (SessionProfile): the document, as a config's
+            ``profiles`` entry states it.
+        request (Request): the HTTP request, for the app's registry.
+    """
+    entry = require_entry(request, workspace_id)
+    try:
+        entry.runner.ws.set_profile(name, _load_profile_policy(profile))
+    except (FileNotFoundError, ValueError, PolicyError, SecretsError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"name": name}
 
 
 @router.post(
