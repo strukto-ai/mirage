@@ -101,6 +101,29 @@ const FORK_SCOPES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Nodes whose body may run again from where it ended, or later than where it
+ * stands: a `cd` in one moves the commands before it too.
+ */
+const REPEATED_SCOPES: ReadonlySet<string> = new Set([
+  NodeType.FOR_STATEMENT,
+  NodeType.C_STYLE_FOR_STATEMENT,
+  NodeType.WHILE_STATEMENT,
+  NodeType.FUNCTION_DEFINITION,
+])
+
+/**
+ * Commands that move the shell's cwd where the walk cannot follow: a line
+ * run in this shell, and the directory stack.
+ */
+const CWD_MOVERS: ReadonlySet<string> = new Set(['eval', '.', 'source', 'pushd', 'popd'])
+
+/**
+ * How many other places a line may stand in before the walk calls its cwd
+ * lost: each relative `cd` doubles them.
+ */
+const PLACES_LIMIT = 8
+
+/**
  * How the explanation tree names a parse node that shapes a line; a node
  * not here (a redirected or negated statement) is read through. Mirrors
  * the Python SHAPES.
@@ -167,7 +190,8 @@ export interface Judgment {
  * says a `cd` the walk could not follow ran before the command, so the
  * session's cwd is not where it stands. `stated` (true when absent) says
  * whether the gate admits the command on these words once each is literal
- * (`TestRead.stated`).
+ * (`TestRead.stated`). `elsewhere` holds the other places the command may
+ * stand, where a `cd` before it was skipped or failed.
  */
 export interface Walked {
   readonly words: Word[]
@@ -178,6 +202,7 @@ export interface Walked {
   readonly lost?: boolean
   readonly stdin?: Uint8Array | null
   readonly stated?: boolean
+  readonly elsewhere?: readonly SessionState[]
 }
 
 /**
@@ -217,12 +242,18 @@ export interface Judged {
 }
 
 /**
- * A walk yields each command and returns where its scope ends: the
- * session, and whether a `cd` it could not follow lost the cwd. That is
- * how a `cd` reaches the commands after it without escaping the child
- * shell it ran in.
+ * Where a scope leaves the shell: the session, whether a `cd` the walk could
+ * not follow lost the cwd, and the other places a `cd` that may have been
+ * skipped or failed leaves it.
  */
-type Walk = Generator<Walked, [SessionState, boolean]>
+type Stand = [SessionState, boolean, readonly SessionState[]]
+
+/**
+ * A walk yields each command and returns where its scope ends. That is how
+ * a `cd` reaches the commands after it without escaping the child shell it
+ * ran in.
+ */
+type Walk = Generator<Walked, Stand>
 
 /**
  * The paths a command's words may name that the pass cannot vouch for:
@@ -429,10 +460,9 @@ async function* judgeWords(
     yield { judgment: denied(head.raw, reason), occurrence, stated: false }
     return
   }
-  if (head.text === null) {
-    if (wholeLine && hasRules(rules)) {
-      yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
-    }
+  if (head.text === null && !wholeLine) return
+  if (head.text === null && hasRules(rules)) {
+    yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
     return
   }
   const literal = stated && [...words, ...redirectWords].every((w) => w.text !== null)
@@ -576,9 +606,12 @@ function* walkSubstitution(
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost: boolean,
+  elsewhere: readonly SessionState[],
 ): Walk {
   const redirect = inputSubstitutionRedirect(tree)
-  if (redirect === null) return yield* walkNode(tree, session, home, frame, reparse, lost)
+  if (redirect === null) {
+    return yield* walkNode(tree, session, home, frame, reparse, lost, elsewhere)
+  }
   const target = redirect.targetNode as TSNodeLike
   yield {
     words: [{ raw: 'cat', text: 'cat' }],
@@ -587,9 +620,10 @@ function* walkSubstitution(
     occurrence: occurrenceIn(tree, frame),
     intrinsic: true,
     lost,
+    elsewhere,
   }
-  yield* walkNode(target, session, home, frame, reparse, lost)
-  return [session, lost]
+  yield* walkNode(target, session, home, frame, reparse, lost, elsewhere)
+  return [session, lost, elsewhere]
 }
 
 function* walkNode(
@@ -599,6 +633,7 @@ function* walkNode(
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost = false,
+  elsewhere: readonly SessionState[] = [],
 ): Walk {
   if (node.type === NodeType.FUNCTION_DEFINITION) frame = definitionFrame(node, frame)
   if (node.type === NodeType.TEST_COMMAND) {
@@ -614,13 +649,16 @@ function* walkNode(
         intrinsic: true,
         lost,
         stated: test.stated,
+        elsewhere,
       }
     }
-    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse, lost)
-    return [session, lost]
+    for (const child of node.children) {
+      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+    }
+    return [session, lost, elsewhere]
   }
   if (node.type === NodeType.COMMAND) {
-    let walked: [SessionState, boolean] = [session, lost]
+    let walked: Stand = [session, lost, elsewhere]
     const words = wordsOf(node, home)
     if (words.length > 0) {
       yield {
@@ -630,11 +668,14 @@ function* walkNode(
         session,
         occurrence: occurrenceIn(node, frame),
         lost,
+        elsewhere,
       }
-      walked = afterCd(words, session, lost)
+      walked = afterCd(words, session, lost, elsewhere)
     }
     // A substitution among the words runs in its own shell.
-    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse, lost)
+    for (const child of node.children) {
+      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+    }
     return walked
   }
   if (FORK_SCOPES.has(node.type)) {
@@ -648,24 +689,50 @@ function* walkNode(
       // pair, parsed on its own, because tree-sitter lexes touching pairs
       // as one node whose subtree is not what runs.
       for (const inner of segments) {
-        yield* walkSubstitution(reparse(inner.text), session, home, inner, reparse, lost)
+        yield* walkSubstitution(reparse(inner.text), session, home, inner, reparse, lost, elsewhere)
       }
-      return [session, lost]
+      return [session, lost, elsewhere]
     }
     const inner = bodyFrame(node, frame)
     if (node.type === NodeType.COMMAND_SUBSTITUTION && inner !== null) {
       const body = { ...inner, base: 0 }
-      yield* walkSubstitution(reparse(inner.text), session, home, body, reparse, lost)
-      return [session, lost]
+      yield* walkSubstitution(reparse(inner.text), session, home, body, reparse, lost, elsewhere)
+      return [session, lost, elsewhere]
     }
-    yield* walkChildren(node, session, home, inner ?? frame, reparse, lost)
-    return [session, lost]
+    yield* walkChildren(node, session, home, inner ?? frame, reparse, lost, elsewhere)
+    return [session, lost, elsewhere]
   }
   if (node.type === NodeType.PIPELINE) {
-    for (const child of node.children) yield* walkNode(child, session, home, frame, reparse, lost)
-    return [session, lost]
+    for (const child of node.children) {
+      yield* walkNode(child, session, home, frame, reparse, lost, elsewhere)
+    }
+    return [session, lost, elsewhere]
   }
-  return yield* walkChildren(node, session, home, frame, reparse, lost)
+  if (
+    REPEATED_SCOPES.has(node.type) &&
+    moves(walkChildren(node, session, home, frame, reparse, lost, elsewhere), [
+      session,
+      lost,
+      elsewhere,
+    ])
+  ) {
+    lost = true
+  }
+  return yield* walkChildren(node, session, home, frame, reparse, lost, elsewhere)
+}
+
+/**
+ * Whether a scope leaves the shell anywhere but where it began, found by
+ * walking it without judging any of it.
+ */
+function moves(walk: Walk, began: Stand): boolean {
+  for (;;) {
+    const step = walk.next()
+    if (step.done === true) {
+      const [session, lost, elsewhere] = step.value
+      return lost !== began[1] || session !== began[0] || elsewhere !== began[2]
+    }
+  }
 }
 
 /**
@@ -679,13 +746,14 @@ function* walkChildren(
   frame: Frame,
   reparse: (line: string) => TSNodeLike,
   lost: boolean,
+  elsewhere: readonly SessionState[],
 ): Walk {
-  let walked: [SessionState, boolean] = [session, lost]
+  let walked: Stand = [session, lost, elsewhere]
   const children = node.children
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index]
     if (child === undefined) continue
-    const ended = yield* walkNode(child, walked[0], home, frame, reparse, walked[1])
+    const ended = yield* walkNode(child, walked[0], home, frame, reparse, walked[1], walked[2])
     if (children[index + 1]?.type === '&') continue
     walked = ended
   }
@@ -693,31 +761,49 @@ function* walkChildren(
 }
 
 /**
- * Where the next command of a line stands, which differs from this one
- * only when this command was a `cd`.
+ * Where the next command of a line stands, which differs from this one only
+ * when this command moved the shell.
  *
- * `cd /repo && git commit` is judged before the line runs, so without
- * this the rule about `/repo` reads the cwd the session happened to be
- * in and answers about the wrong directory. A `cd` the walk cannot
- * follow (`cd "$d"`, `cd -`, a relative one once the cwd is lost) loses
- * the cwd, and what the commands after it name relative to it is the
- * per-command gate's to judge, in the real one: judged in the cwd the
- * walk last knew, `cd "$d" && rm x` refused a line that removes an
- * allowed file.
+ * `cd /repo && git commit` is judged before the line runs, so without this
+ * the rule about `/repo` reads the cwd the session happened to be in and
+ * answers about the wrong directory. A `cd` may also be skipped
+ * (`false && cd d`) or fail, so the shell may still stand anywhere it stood
+ * before: those places ride along, and a runtime that takes the line whole
+ * admits a command only where every one of them does. A `cd` the walk
+ * cannot follow (`cd "$d"`, `cd -`, any once the cwd is lost, since it too
+ * may fail), a line run in this shell (`eval`, `source`) or the directory
+ * stack loses the cwd, and what the commands after it name relative to it
+ * is the per-command gate's to judge, in the real one: judged in the cwd the
+ * walk last knew, `cd "$d" && rm x` refused a line that removes an allowed
+ * file.
  */
 function afterCd(
   words: readonly Word[],
   session: SessionState,
   lost: boolean,
-): [SessionState, boolean] {
+  elsewhere: readonly SessionState[],
+): Stand {
   const head = words[0]
-  if (head === undefined || wordValue(head) !== 'cd') return [session, lost]
-  const target = words.length === 2 ? (words[1]?.text ?? null) : null
-  if (target === null || target.startsWith('-') || (lost && !target.startsWith('/'))) {
-    return [session, true]
+  if (head === undefined) return [session, lost, elsewhere]
+  const name = wordValue(head)
+  if ((name === 'command' || name === 'builtin') && words.length > 1) {
+    return afterCd(words.slice(1), session, lost, elsewhere)
   }
+  if (CWD_MOVERS.has(name)) return [session, true, elsewhere]
+  if (name !== 'cd') return [session, lost, elsewhere]
+  const target = words.length === 2 ? (words[1]?.text ?? null) : null
+  if (lost || target === null || target.startsWith('-')) return [session, true, elsewhere]
   const predicted = session.fork({ cwd: resolvePath(target, session.cwd) })
-  return [predicted, false]
+  const places = new Map<string, SessionState>()
+  for (const place of [
+    session,
+    ...elsewhere,
+    ...elsewhere.map((e) => e.fork({ cwd: resolvePath(target, e.cwd) })),
+  ]) {
+    if (place.cwd !== predicted.cwd && !places.has(place.cwd)) places.set(place.cwd, place)
+  }
+  if (places.size > PLACES_LIMIT) return [session, true, elsewhere]
+  return [predicted, false, [...places.values()]]
 }
 
 /**
@@ -1557,11 +1643,11 @@ async function* judgeLine(
   rulesOnly = true,
   open = false,
 ): AsyncGenerator<Judged> {
-  for (const item of walkedLine(root, session, reparse, frame, lost)) {
-    yield* judgeWords(
+  const judged = (item: Walked, place: SessionState): AsyncGenerator<Judged> =>
+    judgeWords(
       item.words,
       item.occurrence,
-      item.session,
+      place,
       registry,
       namespace,
       reparse,
@@ -1575,5 +1661,32 @@ async function* judgeLine(
       rulesOnly,
       open,
     )
+  for (const item of walkedLine(root, session, reparse, frame, lost)) {
+    const elsewhere = item.elsewhere ?? []
+    if (!wholeLine || elsewhere.length === 0) {
+      yield* judged(item, item.session)
+      continue
+    }
+    const places: Judged[][] = []
+    for (const place of [item.session, ...elsewhere]) {
+      const one: Judged[] = []
+      for await (const judgment of judged(item, place)) one.push(judgment)
+      places.push(one)
+    }
+    yield* strictest(places)
   }
+}
+
+/**
+ * What a command is judged to do where it may stand, the strictest first: a
+ * place where it is refused, then one where it asks, then where the walk
+ * predicts it stands.
+ */
+function strictest(places: readonly Judged[][]): Judged[] {
+  const first = places.map((judged) => judged.find((one) => one.judgment.exitCode !== 0))
+  for (const refused of [true, false]) {
+    const index = first.findIndex((one) => one !== undefined && refuses(one.judgment) === refused)
+    if (index >= 0) return places[index] ?? []
+  }
+  return places[0] ?? []
 }

@@ -121,6 +121,14 @@
           }
         },
         {
+          "command": "cd /data && false && cd /tmp; cat secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: secret.txt: Permission denied\n"
+          }
+        },
+        {
           "command": "grep -r x /data",
           "expect": {
             "exit": 126,

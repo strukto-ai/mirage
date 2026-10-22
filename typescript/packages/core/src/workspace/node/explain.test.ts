@@ -497,6 +497,13 @@ async function sealedWs(): Promise<Workspace> {
   return w
 }
 
+class SealedSecret implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    if (!ctx.paths.some((p) => p.virtual === '/data/secret.txt')) return null
+    return { kind: 'deny', reason: 'sealed' }
+  }
+}
+
 class NoCat implements Policy {
   preCommand(ctx: CommandContext): Action | null {
     if (ctx.command !== 'cat') return null
@@ -900,6 +907,110 @@ describe('prejudge', () => {
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
       expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
     }
+    expect(box.lines).toEqual([])
+  })
+
+  it('judges a whole line wherever a cd may leave it', async () => {
+    // A cd may be skipped or fail, and a loop runs its body again from where
+    // it ended: the gate judged each command only where the walk predicted it
+    // stood, and admitted a read of the secret the box made from the cwd the
+    // cd never left.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        profiles: {
+          r: parseSessionProfile({
+            commands: {
+              allow: ['cat', 'cd', 'false', 'grep'],
+              deny: [
+                {
+                  reason: 'sealed',
+                  commands: { cat: ['/data/secret*'], grep: ['/data/secret*'] },
+                },
+              ],
+            },
+          }),
+        },
+        runtimes: [box, 'workspace'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    for (const [cwd, line, reason] of [
+      ['/data', 'false && cd /data/public; cat secret', 'sealed'],
+      ['/data', 'cd /data/public; cat secret', 'sealed'],
+      [
+        '/data/public',
+        'for i in 1 2; do cat secret; cd /data; done',
+        'runs after a cd the gate cannot follow',
+      ],
+    ] as const) {
+      w.getSession('s').cwd = cwd
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect(ran.refusal?.reason).toBe(reason)
+      expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
+    }
+    expect(box.lines).toEqual([])
+  })
+
+  it('has a coded policy judge a whole line where it may stand', async () => {
+    // With no rule in force a coded policy is a whole line's only gate: it
+    // was shown only the cwd a skipped cd predicted, and nothing at all for a
+    // name only the runtime expands.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        policies: [new SealedSecret()],
+        runtimes: [box, 'workspace'],
+      },
+    )
+    open.push(w)
+    w.getSession(w.defaultSessionId).cwd = '/data'
+    for (const line of ['false && cd /data/public; cat secret.txt', '"$CMD" /data/secret.txt']) {
+      const said = await w.explain(line)
+      const ran = await w.shell(line)
+      expect(ran.refusal?.reason).toBe('sealed')
+      expect([said.outcome, said.reason]).toEqual([Outcome.DENY, 'sealed'])
+    }
+    expect(box.lines).toEqual([])
+  })
+
+  it('judges a held line as its runtime takes it', async () => {
+    // A line the rules hold stays on its static bindings, whose runtime takes
+    // it whole and refuses the walk before asking; explain read the held line
+    // command by command and offered an approval the run never asks for.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        profiles: {
+          r: parseSessionProfile({
+            commands: {
+              allow: ['grep'],
+              ask: [{ reason: 'nod', commands: { grep: ['/data'] } }],
+            },
+          }),
+        },
+        runtimes: [box, 'workspace'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const line = 'grep -r x /data'
+    const reason = 'walks a tree the gate cannot follow'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect(ran.refusal?.reason).toBe(reason)
+    expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
     expect(box.lines).toEqual([])
   })
 

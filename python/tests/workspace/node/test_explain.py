@@ -1107,6 +1107,116 @@ async def test_explain_says_what_a_whole_line_gate_refuses_past_the_chain():
         await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
+    # A cd may be skipped or fail, and a loop runs its body again from
+    # where it ended: the gate judged each command only where the walk
+    # predicted it stood, and admitted a read of the secret the box made
+    # from the cwd the cd never left.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={
+            "r": {
+                "commands": {
+                    "allow": ["cat", "cd", "false", "grep"],
+                    "deny": SEALED_READS["commands"]["deny"],
+                }
+            }
+        },
+        runtimes=[box, "workspace"],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for cwd, line, reason in (
+            ("/data", "false && cd /data/public; cat secret", "sealed"),
+            ("/data", "cd /data/public; cat secret", "sealed"),
+            (
+                "/data/public",
+                "for i in 1 2; do cat secret; cd /data; done",
+                "runs after a cd the gate cannot follow",
+            ),
+        ):
+            ws.get_session("s").cwd = cwd
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.refusal is not None and ran.refusal.reason == reason
+            assert (said.outcome, said.reason) == (Outcome.DENY, reason)
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+class _SealedSecret(Policy):
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        if any(p.virtual == "/data/secret.txt" for p in ctx.paths):
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
+    # With no rule in force a coded policy is a whole line's only gate:
+    # it was shown only the cwd a skipped cd predicted, and nothing at
+    # all for a name only the runtime expands.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        policies=[_SealedSecret()],
+        runtimes=[box, "workspace"],
+    )
+    try:
+        ws.get_session(ws.default_session_id).cwd = "/data"
+        for line in (
+            "false && cd /data/public; cat secret.txt",
+            '"$CMD" /data/secret.txt',
+        ):
+            said = await ws.explain(line)
+            ran = await ws.shell(line)
+            assert ran.refusal is not None and ran.refusal.reason == "sealed"
+            assert (said.outcome, said.reason) == (Outcome.DENY, "sealed")
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
+    # A line the rules hold stays on its static bindings, whose runtime
+    # takes it whole and refuses the walk before asking; explain read
+    # the held line command by command and offered an approval the run
+    # never asks for.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={
+            "r": {
+                "commands": {
+                    "allow": ["grep"],
+                    "ask": [
+                        {"reason": "nod", "commands": {"grep": ["/data"]}}
+                    ],
+                }
+            }
+        },
+        runtimes=[box, "workspace"],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        line = "grep -r x /data"
+        reason = "walks a tree the gate cannot follow"
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert ran.refusal is not None and ran.refusal.reason == reason
+        assert (said.outcome, said.reason) == (Outcome.DENY, reason)
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
 def _commands(node: ShellNode) -> list[CommandExplanation]:
     """Every command an explained tree holds, nested scopes included.
 

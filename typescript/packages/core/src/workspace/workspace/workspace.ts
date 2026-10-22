@@ -1193,8 +1193,25 @@ export class Workspace {
         false,
       )
       if (holds(verdicts.map((one) => one.judgment))) {
-        const judged = await explainLine(root, session, this.registry, this.namespace, reparse)
-        return explainedLine(line, judged, verdicts, () => '', reparse)
+        // The run leaves a held line on its static bindings for the gate to
+        // answer (`Router.decide`), whole when they take it whole.
+        const wholeLine = wholeLineRuntime(this.registry.runtimeBindings) !== null
+        const judged = await explainLine(
+          root,
+          session,
+          this.registry,
+          this.namespace,
+          reparse,
+          wholeLine,
+        )
+        return explainedLine(
+          line,
+          judged,
+          wholeLine ? judged : verdicts,
+          () => '',
+          reparse,
+          wholeLine,
+        )
       }
       const [answers, placed] = await this.router.placement(line, session, () =>
         lineJudgments(
