@@ -19,7 +19,7 @@ import { createDriveItem } from '../drive/item.ts'
 import type { C } from '../store/client.ts'
 import { asObj, asObjArr } from '../wire/json.ts'
 import { SLIDE_MIME } from '../wire/mime.ts'
-import { NOT_FOUND, idVerbOf, ok, unknownRoute } from '../wire/reply.ts'
+import { NOT_FOUND, googleError, idVerbOf, ok, unknownRoute } from '../wire/reply.ts'
 import { slidesBatchUpdate } from './batch.ts'
 import { fmtPage, fmtPresentation } from './page.ts'
 
@@ -39,14 +39,14 @@ export function slidesRoutes(): KitRoute<C>[] {
         // real API takes it, so a case can pin the shape of a real Drive id:
         // [A-Za-z0-9_-], which can hold the `__` a mount's filename uses.
         const given = typeof body.presentationId === 'string' ? body.presentationId : ''
-        const item = createDriveItem(
-          ctx.db,
-          title,
-          SLIDE_MIME,
-          [],
-          Buffer.alloc(0),
-          given !== '' ? given : ctx.db.nextId('pres'),
-        )
+        // A taken id is refused, as files.create refuses a pinned one, and a
+        // minted id steps over one a caller pinned, so neither replaces a file.
+        if (given !== '' && ctx.db.files.has(given)) {
+          return googleError(409, 'A presentation with that id already exists.', 'ALREADY_EXISTS')
+        }
+        let id = given
+        while (id === '' || ctx.db.files.has(id)) id = ctx.db.nextId('pres')
+        const item = createDriveItem(ctx.db, title, SLIDE_MIME, [], Buffer.alloc(0), id)
         const pres = ctx.db.presentations.get(item.id)
         if (pres === undefined) return NOT_FOUND
         return ok(fmtPresentation(pres, item.id))
