@@ -172,7 +172,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
       try {
         const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
         const session = await sessionOf(ws, req.query.session_id)
-        return reply
+        return await reply
           .type('application/json; charset=utf-8')
           .send(JSON.stringify(await customAnswer(session, req.params.name, req.body)))
       } catch (err) {
