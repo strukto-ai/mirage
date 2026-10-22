@@ -68,10 +68,11 @@ export async function loadProfileArgument(path: string): Promise<JsonValue> {
   const { parse: yamlParse } = await import('yaml')
   let wrapped: { profiles: Record<string, JsonValue> }
   try {
-    wrapped = interpolateEnv(
-      { profiles: { '': (yamlParse(readFileSync(path, 'utf-8')) as JsonValue) ?? {} } },
-      readProcessEnv(),
-    )
+    const doc = yamlParse(readFileSync(path, 'utf-8')) as JsonValue
+    if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+      fail(`profile file must hold a mapping: ${path}`, 2)
+    }
+    wrapped = interpolateEnv({ profiles: { '': doc } }, readProcessEnv())
   } catch (err: unknown) {
     fail(`invalid profile YAML/JSON at ${path}: ${String(err)}`, 2)
   }

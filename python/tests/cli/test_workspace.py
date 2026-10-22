@@ -162,3 +162,15 @@ def test_load_with_a_key_takes_only_a_config(fake, tmp_path):
     assert body["key"] == "a.tar"
     assert body["override"]["mounts"]["/ram"]["vfs"] == "ram"
     assert _invoke("load", "--key", "a.tar", str(config), "x").exit_code == 2
+
+
+@pytest.mark.parametrize("text", ["", "null\n", "false\n", "0\n", "[]\n"])
+def test_set_profile_refuses_a_file_that_holds_no_mapping(
+    fake, tmp_path, text
+):
+    path = tmp_path / "profile.yaml"
+    path.write_text(text)
+    result = _invoke("set-profile", "w", "reader", str(path))
+    assert result.exit_code == 2
+    assert "mapping" in result.output
+    assert fake.calls == []

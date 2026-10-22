@@ -406,9 +406,14 @@ async def set_profile(
         request (Request): the HTTP request, for the app's registry.
     """
     entry = require_entry(request, workspace_id)
+
+    async def define() -> None:
+        entry.runner.ws.set_profile(name, doc)
+
     try:
-        entry.runner.ws.set_profile(name, _load_profile_policy(profile))
-    except (FileNotFoundError, ValueError, PolicyError, SecretsError) as exc:
+        doc = _load_profile_policy(profile)
+        await entry.runner.call(define())
+    except (OSError, ValueError, PolicyError, SecretsError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return {"name": name}
 

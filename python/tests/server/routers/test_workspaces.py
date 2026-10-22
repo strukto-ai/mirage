@@ -1277,6 +1277,11 @@ async def test_set_profile_defines_and_replaces_a_name(tmp_path):
         assert r.status_code == 422
         r = await client.put(f"{route}x", json={"bogus": 1})
         assert r.status_code == 422
+        (tmp_path / "guard.py").mkdir()
+        script = {"script": str(tmp_path / "guard.py")}
+        unreadable = {"policy": {"pre_command": [script]}}
+        r = await client.put(f"{route}y", json=unreadable)
+        assert r.status_code == 422 and "directory" in r.json()["detail"]
         r = await client.put("/v1/workspaces/nope/profiles/reader", json={})
         assert r.status_code == 404
         await client.delete(f"/v1/workspaces/{wid}")

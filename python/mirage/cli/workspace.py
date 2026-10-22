@@ -89,7 +89,9 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     """
     from mirage.config import _absolutize_scripts, _interpolate_env
 
-    doc = parse_yaml(path.read_text(encoding="utf-8")) or {}
+    doc = parse_yaml(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        fail(f"profile file must hold a mapping: {path}", exit_code=2)
     try:
         resolved = _interpolate_env({"profiles": {"": doc}}, dict(os.environ))
     except ValueError as e:

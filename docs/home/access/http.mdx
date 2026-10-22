@@ -232,8 +232,9 @@ A document no session could run under answers `422` and changes nothing. A
 session on the name keeps its rules until you [change its
 profile](#change-a-sessions-profile) to the name again. The workspace's config
 is not rewritten, so creating the workspace again after a restart brings back
-the profiles its YAML defines; restored sessions keep the rules they last ran
-under.
+the profiles its YAML defines. Restored sessions keep the rules they last ran
+under, except that the default session takes the YAML's default profile again
+when the YAML names one.
 
 ```bash
 curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \

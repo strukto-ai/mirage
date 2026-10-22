@@ -145,3 +145,21 @@ describe('mirage workspace snapshot and load', () => {
     }
   })
 })
+
+describe('mirage workspace set-profile', () => {
+  it('refuses a file that holds no mapping with exit 2, before any request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-profile-'))
+    tempDirs.push(dir)
+    const { url, seen, server } = await fakeServer()
+    try {
+      const profile = join(dir, 'profile.yaml')
+      for (const text of ['', 'null\n', 'false\n', '0\n', '[]\n']) {
+        writeFileSync(profile, text)
+        expect(await mirage(url, dir, 'set-profile', 'w', 'reader', profile)).toBe(2)
+      }
+      expect(seen).toEqual([])
+    } finally {
+      server.close()
+    }
+  })
+})

@@ -144,6 +144,6 @@ async def update_session(
         )
     except KeyError as exc:
         raise HTTPException(404, "session not found") from exc
-    except (FileNotFoundError, ValueError, PolicyError) as exc:
+    except (OSError, ValueError, PolicyError) as exc:
         raise HTTPException(422, str(exc)) from exc
     return SessionResponse(session_id=sess.session_id, cwd=sess.cwd)

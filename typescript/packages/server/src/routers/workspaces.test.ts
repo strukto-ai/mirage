@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -989,6 +989,14 @@ describe('workspace cancel, kill and close', () => {
       expect(refused.statusCode).toBe(422)
       const unknown = await app.inject({ method: 'PUT', url: `${route}x`, payload: { bogus: 1 } })
       expect(unknown.statusCode).toBe(422)
+      mkdirSync(join(root, 'guard.py'))
+      const unreadable = await app.inject({
+        method: 'PUT',
+        url: `${route}y`,
+        payload: { policy: { pre_command: [{ script: join(root, 'guard.py') }] } },
+      })
+      expect(unreadable.statusCode).toBe(422)
+      expect(unreadable.json<{ detail: string }>().detail).toContain('directory')
       const missing = await app.inject({
         method: 'PUT',
         url: '/v1/workspaces/nope/profiles/reader',
