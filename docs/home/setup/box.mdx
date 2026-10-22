@@ -18,7 +18,7 @@ Box is similar to Dropbox in shape but uses **numeric folder/file IDs** rather t
 Mirage caches the path → ID mapping in the index store, so once you `ls /box/` the IDs are
 remembered and subsequent reads don't pay the lookup cost.
 
-Three credential modes are supported:
+Four credential modes are supported:
 
 - **Developer token**, fastest first-run path. Click one button in the Box app console, paste
   the 32-char access token, and you're done. Lives 60 minutes; you regenerate by hand. No
@@ -26,6 +26,8 @@ Three credential modes are supported:
 - **Code flow with client secret**, for Node/server long-running use. Needs `client_id`,
   `client_secret`, `refresh_token`.
 - **PKCE flow**, for browsers. Needs only `client_id` and `refresh_token` (no secret in the bundle).
+- **Client credentials (service account)**, for headless servers. Needs `client_id`,
+  `client_secret`, `enterprise_id`; no refresh token, expired tokens are re-fetched.
 
 <Note>
 **Box rotates the refresh token on every refresh.** The token you copy out of the initial code
@@ -77,7 +79,7 @@ Open the app's **Configuration** tab:
   - Any production origins (e.g. `https://yourapp.com`)
 - **Application Scopes**:
   - **Read all files and folders stored in Box** (required)
-  - **Write all files and folders stored in Box** (only if you'll add write commands later)
+  - **Write all files and folders stored in Box** (only if you'll mount Box in `WRITE` mode)
 - Click **Save Changes**
 
 ### 3. Submit for Authorization (enterprise apps only)

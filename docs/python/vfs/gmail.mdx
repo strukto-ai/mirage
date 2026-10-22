@@ -59,7 +59,7 @@ Example:
 
 Label directories appear at the root. System labels use the Gmail
 label ID (e.g., `INBOX`, `SENT`, `STARRED`). User-created labels
-use their label name with spaces replaced by underscores.
+use their label name as is; a `/` in a nested label renders as `∕`.
 
 ### Date Directories
 
@@ -200,8 +200,10 @@ gws gmail reply --message-id msg123 --body "Thanks for the notes"
 
 ## Working with Large Labels
 
-Labels with many messages are split into date directories. Tips
-for efficient access:
+Labels with many messages are split into date directories. A bare
+`ls` of a label lists the days of its 50 most recent messages; a glob
+over the date names (`ls /gmail/INBOX/2026-03-*`) or a date directory
+by name reaches older days. Tips for efficient access:
 
 ```bash
 # List available dates

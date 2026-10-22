@@ -39,7 +39,7 @@ new SharePointVFS({
 | `keyPrefix` | unset | Folder subtree inside the scoped library. |
 | `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Graph search names; see [grep and rg](#grep-and-rg). |
 | `timeout` | `30` | Request and copy-monitor timeout in seconds. |
-| `maxRetries` | `5` | Retries for Graph throttling and transient failures. |
+| `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
 
 ## grep and rg
 

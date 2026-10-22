@@ -93,8 +93,10 @@ for `from`, `ref` and `key` examples.
 ## Values and paths
 
 `${NAME}` placeholders are substituted from the host process environment when
-the config loads. A missing variable is an error. Use a credential pointer
-when the value should be fetched through a source instead.
+the config loads. `NAME` is uppercase letters, digits and underscores, not
+starting with a digit; any other `${...}` is left as written. A missing
+variable is an error. Use a credential pointer when the value should be
+fetched through a source instead.
 
 Relative script paths and file-based code references resolve from the config
 file's directory. Relative dotenv paths resolve from the Mirage process's

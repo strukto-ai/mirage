@@ -24,7 +24,7 @@ A browser cannot mount a folder; use Mirage's shell and file APIs there.
 | --- | --- | --- | --- |
 | Unmount | `fusermount3 -u` or closing the workspace | `diskutil unmount` or closing the workspace | When the process exits |
 | A file whose size is unknown | Reads in full | Reads in full | Size fetched when opened |
-| Mountpoint folder | Must exist | Must exist | Must not exist; created for you |
+| Mountpoint folder | Created if missing | Created if missing | Must not exist; created for you |
 
 ## Set up
 

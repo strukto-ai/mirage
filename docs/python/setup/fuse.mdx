@@ -164,8 +164,9 @@ create with ENOSYS after the file already landed.
 `examples/python/fuse/fskit.py` runs all of this end to end: the size
 warning, exact reads on a live mount, and each write op with its result.
 
-TypeScript supports the same backend with the same guards
-([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
+TypeScript supports the same backend with the same size and write warnings,
+but it cannot create new names: `create`, `mkdir` and `rename` return
+ENOSYS there ([details](/typescript/setup/fuse#mounting-without-the-kernel-extension-fskit));
 `examples/typescript/fuse/fskit.ts` is its live end-to-end check.
 
 ## Size semantics for API-backed files

@@ -20,7 +20,7 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 | [`pyodide`](/home/setup/runtime/pyodide) | `python3`, CPython in WebAssembly | Mirage workspace | TypeScript |
 | [`quickjs`](/home/setup/runtime/quickjs) | `node` and `js`, without Node.js APIs | Mirage workspace | both (default) |
 | [`local`](/home/setup/runtime/local) | host programs such as `python3`, `node` or `tsx` | host | Python, Node |
-| [Sandboxes](/home/setup/runtime/sandbox) | native programs | a container, VM, cloud sandbox or SSH machine, or this Linux host with Sandlock | Python, Node |
+| [Sandboxes](/home/setup/runtime/sandbox) | native programs | a container, VM, cloud sandbox or SSH machine, or this Linux host with Sandlock | Python, Node; E2B also in the browser |
 
 ## Routing
 
@@ -89,7 +89,7 @@ Here `python3 job.py | grep error` runs `python3` in the container and
 | Monty, WASI, QuickJS | directly | no host files or network |
 | Pyodide | directly | Browser programs retain JavaScript and network access; `init_module` enables host access. See [containment](/typescript/runtime/python#containment). |
 | `local`, Sandlock | a [FUSE folder](/home/setup/fuse) you mount | the host's disk and network; under Sandlock, only the paths you grant |
-| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`), or a Mirage inside the sandbox | that sandbox's disk and network |
+| Other sandboxes | SFTP and `sshfs` with `mount_type: ssh` (`docker`, `e2b`, `ssh`, `smolvm`, `apple_container`, `microsandbox`), or a Mirage inside the sandbox | that sandbox's disk and network |
 
 Mount modes, profiles and policies apply to every file call that reaches the
 workspace. A host or sandbox runtime also has its own files and network, which

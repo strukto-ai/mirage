@@ -57,7 +57,7 @@ drives for you. Both `READ` and `WRITE` modes are supported.
 | `content_search` | No     | Let `grep -w` and `rg -w` read only the files Graph search names (default `False`; see [grep and rg](#grep-and-rg)) |
 | `graph_base_url` | No     | Full service root, for any deployment but the worldwide one       |
 | `timeout`      | No       | Request timeout in seconds (default `30`)                          |
-| `max_retries`  | No       | Max retries on `429`/`5xx` with backoff (default `5`)             |
+| `max_retries`  | No       | Max retries on `429`/`503`/`504` with backoff (default `5`)       |
 
 `access_token` accepts either a static string or a `Callable[[], str]` provider.
 With a callable, the VFS refreshes the token on `401`, so long-running
