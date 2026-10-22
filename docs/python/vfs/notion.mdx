@@ -18,7 +18,7 @@ from mirage.vfs.notion import NotionConfig, NotionVFS
 
 config = NotionConfig(api_key=os.environ["NOTION_API_KEY"])
 vfs = NotionVFS(config=config)
-ws = Workspace({"/notion": vfs}, mode=MountMode.WRITE)
+ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
 ```
 
 | Field      | Required | Default                        | Description             |
@@ -219,7 +219,7 @@ vfs = NotionVFS(config=config)
 
 
 async def main():
-    ws = Workspace({"/notion": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
     ws.register_cli("ntn", NTN, config.model_dump())
 
     # List top-level pages

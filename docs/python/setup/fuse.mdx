@@ -72,7 +72,7 @@ mounts:
     mountpoint: /tmp/data-repo   # explicit path
   /s3:
     vfs: s3
-    backend: MountBackend.FUSE             # temp directory
+    backend: fuse                # temp directory
   /logs:
     vfs: disk
     # no backend key: stays on the workspace default, not kernel-mounted

@@ -57,8 +57,7 @@ const ws = new Workspace(
 Set the per-queue capacity when creating the workspace:
 
 ```ts
-import { IOConfig } from '@struktoai/mirage-core'
-import { RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { IOConfig, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/': new RAMVFS() },
@@ -266,7 +265,7 @@ console.log(result.exitCode, result.stdoutText)
 
 ### Streaming execution
 
-`await session.shell(line, { stream: true })` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+`await session.shell(line, { stream: true })` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream: "stdout"` or `stream: "stderr"` and raw `Uint8Array` bytes. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 
 Consume `events` while the line runs, then await `wait()` for its final `ExecuteResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. The result describes finished work; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 
@@ -283,7 +282,7 @@ try {
     await sendBytes(event.stream, event.data)
   }
   const result = await execution.wait()
-  console.log(execution.id, result.exitCode)
+  console.log(result.exitCode)
 } finally {
   await execution.close()
 }
@@ -403,7 +402,7 @@ The seven agent tools, for a model rather than a program: every answer is text, 
   <ResponseField name="isError" type="boolean | undefined">`true` when the call failed.</ResponseField>
 </Expandable>
 
-`readMedia(path)` answers an image or a PDF as media instead of numbered text, for adapters that hand media to the model. `@struktoai/mirage-core/workspace/tools/tool_descriptions` has each tool's description and JSON schema to hand the model, and the [agent adapters](/typescript/agents/index) wire the tools into each framework. `new MirageToolOperations(session, false)`, from `@struktoai/mirage-core/workspace/tools/tool_operations`, is a table without the read guard.
+`readMedia(path)` answers an image or a PDF as media instead of numbered text, for adapters that hand media to the model. `@struktoai/mirage-core/workspace/tools/tool_descriptions` (needs `pnpm add @struktoai/mirage-core`) has each tool's description and JSON schema to hand the model, and the [agent adapters](/typescript/agents/index) wire the tools into each framework. `new MirageToolOperations(session, false)`, from `@struktoai/mirage-core/workspace/tools/tool_operations`, is a table without the read guard.
 
 ```ts
 await session.tools.call('read', { path: '/notes.txt' })

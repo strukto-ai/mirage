@@ -91,8 +91,9 @@ such as `--by` declares an option; a bare name declares a positional.
 such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
 
 Declare `config_model` on the account `CLI`. Registration validates
-each installation, and `config` holds that account's settings. Without a
-config model, a typed CLI accepts no config and receives `None`.
+each installation, and the default `NOOPAccessor` holds that account's settings
+at `accessor.config`. Without a config model, a typed CLI accepts no config and
+`accessor.config` is `None`.
 
 Mark mutating `CLIHandler` bindings `write=True`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
@@ -358,7 +359,7 @@ collects single option values, while `extend` flattens fixed groups.
 
 | Argument or field | Handler view |
 | --- | --- |
-| `config` | This installation's validated config, or `None`. |
+| `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`None` without a config model). |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `ctx.argv` | Verbatim words after the installed head word, including subcommands. |

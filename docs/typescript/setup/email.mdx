@@ -4,7 +4,7 @@ icon: envelope
 description: Mount an IMAP/SMTP mailbox as a Mirage filesystem (Node only).
 ---
 
-`EmailVFS` reads messages over IMAP and sends via SMTP, exposing the mailbox as a tree of folders and messages.
+`EmailVFS` reads the mailbox over IMAP as a tree of folders and messages. The [himalaya CLI](/typescript/cli/himalaya) sends mail.
 
 <Note>
   Node only. Requires `imapflow`, `mailparser`, and `nodemailer` peers. The browser cannot speak raw TCP for IMAP/SMTP.
@@ -24,11 +24,11 @@ import { EmailVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 const email = new EmailVFS({
   imapHost: 'imap.example.com',
   smtpHost: 'smtp.example.com',
-  username: process.env.EMAIL_USER!,
+  username: process.env.EMAIL_USERNAME!,
   password: process.env.EMAIL_PASSWORD!,
 })
 
-const ws = new Workspace({ '/mail': email }, { mode: MountMode.WRITE })
+const ws = new Workspace({ '/mail': email }, { mode: MountMode.READ })
 await ws.shell('ls /mail/INBOX/')
 ```
 
@@ -37,11 +37,11 @@ await ws.shell('ls /mail/INBOX/')
 | `imapHost` | required | IMAP server hostname. |
 | `imapPort` | `993` | |
 | `smtpHost` | required | SMTP server hostname. |
-| `smtpPort` | `465` | |
+| `smtpPort` | `587` | `465` uses implicit TLS. Other ports use STARTTLS when the server offers it. |
 | `username` | required | Mailbox login. |
 | `password` | required | App password. Redacted in snapshots. |
-| `useSsl` | `true` | Implicit TLS for both IMAP and SMTP. |
-| `maxMessages` | `1000` | Hard ceiling per folder listing. |
+| `useSsl` | `true` | Implicit TLS for IMAP only. |
+| `maxMessages` | `200` | Hard ceiling per folder listing. |
 | `contentSearch` | `false` | Narrow `grep -r` and `rg` with IMAP search ([below](#grep-and-rg)). |
 
 ## grep and rg
@@ -61,6 +61,6 @@ narrowed scan could miss a message there.
 
 ## Mount mode
 
-`read`, `write` (sending mail via the synthesized `/sent/` path).
+`read`. Send mail through the [himalaya CLI](/typescript/cli/himalaya).
 
 For mailbox layout, search behavior, and synthesized date directories see the [Python Email docs](/python/vfs/email).
