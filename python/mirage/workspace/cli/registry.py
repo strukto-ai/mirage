@@ -178,8 +178,10 @@ class CLIRegistry:
             if unknown:
                 names = ", ".join(sorted(unknown))
                 raise ValueError(f"CLI {name!r}: unknown config keys: {names}")
+        # By field name, the spelling the unknown-key check and a narrowed
+        # subclass instance both use, so an aliased field still installs.
         try:
-            return model(**(config or {}))
+            return model.model_validate(dict(config or {}), by_name=True)
         except ValidationError as exc:
             # An account CLI's config is where a fetched credential
             # lands, the same as a mount's, and the create route answers

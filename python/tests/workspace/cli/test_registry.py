@@ -15,7 +15,7 @@
 import asyncio
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
@@ -161,6 +161,22 @@ def test_an_instance_of_a_subclass_is_narrowed_to_the_model():
     stored = reg.install("prog", tree(TokenConfig), config).config
     assert type(stored) is TokenConfig
     assert stored == TokenConfig(token="eng")
+
+
+class AliasedTokenConfig(BaseModel):
+    token: str = Field(alias="api_token")
+
+
+class ScopedAliasedTokenConfig(AliasedTokenConfig):
+    scope: str = "all"
+
+
+def test_a_subclass_instance_of_an_aliased_model_installs():
+    reg = CLIRegistry()
+    config = ScopedAliasedTokenConfig(api_token="eng")
+    stored = reg.install("prog", tree(AliasedTokenConfig), config).config
+    assert type(stored) is AliasedTokenConfig
+    assert stored.token == "eng"
 
 
 @pytest.mark.parametrize(
