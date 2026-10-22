@@ -37,10 +37,10 @@ await ws.shell('ls /mail/INBOX/')
 | `imapHost` | required | IMAP server hostname. |
 | `imapPort` | `993` | |
 | `smtpHost` | required | SMTP server hostname. |
-| `smtpPort` | `587` | |
+| `smtpPort` | `587` | `465` uses implicit TLS. Other ports use STARTTLS when the server offers it. |
 | `username` | required | Mailbox login. |
 | `password` | required | App password. Redacted in snapshots. |
-| `useSsl` | `true` | Implicit TLS for IMAP. SMTP uses implicit TLS on port 465; on any other port it upgrades with STARTTLS when the server offers it. |
+| `useSsl` | `true` | Implicit TLS for IMAP only. |
 | `maxMessages` | `200` | Hard ceiling per folder listing. |
 | `contentSearch` | `false` | Narrow `grep -r` and `rg` with IMAP search ([below](#grep-and-rg)). |
 
