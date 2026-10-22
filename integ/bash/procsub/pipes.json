@@ -91,6 +91,36 @@
       }
     },
     {
+      "id": "procsub_closed_output_ends_a_printf_redirect",
+      "seq": 1346147,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(printf %200000s x > >(head -c 1 > /dev/null); echo in:$?); echo st:$?; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_closed_output_through_symlink_ends_a_printf_redirect",
+      "seq": 1346148,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "f() { ln -s \"$1\" {mount}/procsub-printf-alias; printf %200000s x > {mount}/procsub-printf-alias; echo in:$?; }; (f >(head -c 1 > /dev/null)); echo st:$?; rm {mount}/procsub-printf-alias; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "st:141\nafter\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "procsub_closed_output_ends_only_the_program_in_group",
       "seq": 1346084,
       "targets": [

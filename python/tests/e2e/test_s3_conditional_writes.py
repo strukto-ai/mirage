@@ -154,33 +154,33 @@ VERSION_SOURCES = [
         ("sed -i s/one/ONE/ /s3/f",),
         "echo x > /s3/f",
         PUT,
-        [{"IfMatch": etag(b"ONE\n")}, EMPTY],
+        [{"IfMatch": etag(b"ONE\n")}],
     ),
-    ("grep", ("grep o /s3/f",), "echo z > /s3/f", PUT, [ONE, EMPTY]),
-    ("head", ("head -n1 /s3/f",), "echo z > /s3/f", PUT, [ONE, EMPTY]),
-    ("wc", ("wc -l /s3/f",), "echo z > /s3/f", PUT, [ONE, EMPTY]),
+    ("grep", ("grep o /s3/f",), "echo z > /s3/f", PUT, [ONE]),
+    ("head", ("head -n1 /s3/f",), "echo z > /s3/f", PUT, [ONE]),
+    ("wc", ("wc -l /s3/f",), "echo z > /s3/f", PUT, [ONE]),
     (
         "append",
         ("echo a >> /s3/f",),
         "echo z > /s3/f",
         PUT,
-        [{"IfMatch": etag(b"one\na\n")}, EMPTY],
+        [{"IfMatch": etag(b"one\na\n")}],
     ),
     (
         "truncate",
         ("truncate -s 2 /s3/f",),
         "echo z > /s3/f",
         PUT,
-        [{"IfMatch": etag(b"on")}, EMPTY],
+        [{"IfMatch": etag(b"on")}],
     ),
     (
         "cross-cp",
         ("echo hi > /ram/x; cp /ram/x /s3/y",),
         "echo z > /s3/y",
         PUT,
-        [{"IfMatch": etag(b"hi\n")}, EMPTY],
+        [{"IfMatch": etag(b"hi\n")}],
     ),
-    ("removed", ("cat /s3/f", "rm /s3/f"), "echo x > /s3/f", PUT, [{}, EMPTY]),
+    ("removed", ("cat /s3/f", "rm /s3/f"), "echo x > /s3/f", PUT, [{}]),
     ("unread-tee", (), "echo y | tee /s3/g", PUT, [{}]),
     ("unread-cross-cp", (), "echo r > /ram/r; cp /ram/r /s3/g", PUT, [{}]),
     ("unread-cp", (), "cp /s3/f /s3/g", COPY, [{}]),
@@ -189,35 +189,35 @@ VERSION_SOURCES = [
         (),
         "cat /s3/f; rm /s3/f; echo x > /s3/f",
         PUT,
-        [{}, EMPTY],
+        [{}],
     ),
     (
         "mv-on-line",
         (),
         "cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g",
         PUT,
-        [{}, EMPTY],
+        [{}],
     ),
     (
         "rm-r-on-line",
         (),
         "cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a",
         PUT,
-        [{}, EMPTY],
+        [{}],
     ),
     (
         "rm-r",
         ("cat /s3/d/a; rm -r /s3/d",),
         "echo x > /s3/d/a",
         PUT,
-        [{}, EMPTY],
+        [{}],
     ),
     (
         "dir-mv",
         ("cat /s3/d/a; mv /s3/d /s3/e",),
         "echo x > /s3/d/a",
         PUT,
-        [{}, EMPTY],
+        [{}],
     ),
     (
         "dir-mv-copies",
@@ -1251,6 +1251,39 @@ async def test_a_later_error_keeps_the_versions_an_earlier_page_lost(
     code, _, err = await _run(ws, "rm /s3/d/a")
     assert code == 1 and STALE in err, err
     assert fake.buckets["b"]["d/a"] == b"newest\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "write", [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL]
+)
+@pytest.mark.parametrize(
+    "line, key, after",
+    [
+        ("cat /s3/f; echo x > /s3/f", "f", b"x\n"),
+        ("cat /s3/f; printf x > /s3/f", "f", b"x"),
+        ("cat /s3/f; : > /s3/f", "f", b""),
+        ("echo x > /s3/new", "new", b"x\n"),
+    ],
+)
+async def test_an_output_only_redirect_lands_in_one_put(
+    fake, workspaces, write, line, key, after
+):
+    # The output's write opens the target: no empty object in between.
+    ws = workspaces(write)
+    code, _, err = await _run(ws, line)
+    assert (code, err) == (0, "")
+    assert (len(_sent(fake, PUT)), fake.buckets["b"][key]) == (1, after)
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_never_shows_the_object_emptied(fake, workspaces):
+    seen: list[bytes] = []
+    for _ in range(2):
+        fake.before(PUT, lambda: seen.append(fake.buckets["b"]["f"]))
+    ws = workspaces(WritePolicy.UNCONDITIONAL)
+    assert await _run(ws, "echo x > /s3/f") == (0, "", "")
+    assert (seen, fake.buckets["b"]["f"]) == ([SEED["f"]], b"x\n")
 
 
 # ── costs: a condition is a header, never a request ─────────────────────

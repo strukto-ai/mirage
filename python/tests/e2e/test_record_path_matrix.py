@@ -80,15 +80,14 @@ _GENERIC_OUT = [
 
 # Op sequences were measured by running SCRIPT on each backend; every path is
 # predicted as the operand's virtual path, never copied from the measurement.
-# Redirects open before echo runs: `>` records its empty open and output
-# write. RAM and Redis skip recording an empty append; disk and SSH record it.
+# echo's `>` is opened by its output write: one write. RAM and Redis skip
+# recording an empty append; disk and SSH record it.
 # ram, disk and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
 # A caching mount serves each read of what the line just wrote from the
 # bytes the write kept, so only the writes reach the backend.
 _WARM_OUT = [op for op in _GENERIC_OUT[1:] if op[0] == "write"]
 
 _NATIVE_APPEND = [
-    ("write", K),
     ("write", K),
     ("append", K),
     ("append", K),
@@ -106,7 +105,6 @@ _NATIVE_APPEND = [
 # cached copy it extends, so cat, the cp source and gzip's read are served
 # from cache; it records its own copy, rename, unlink, rmdir and rm_r.
 _S3 = [
-    ("write", K),
     ("write", K),
     ("read", K),
     ("write", K),
@@ -131,7 +129,6 @@ _S3 = [
 # or split's streamed read.
 _SSH = [
     ("write", K),
-    ("write", K),
     ("append", K),
     ("append", K),
     ("append", K),
@@ -145,7 +142,7 @@ _SSH = [
 
 EXPECTED = {
     "ram": _NATIVE_APPEND,
-    "disk": [*_NATIVE_APPEND[:2], ("append", K), *_NATIVE_APPEND[2:]],
+    "disk": [*_NATIVE_APPEND[:1], ("append", K), *_NATIVE_APPEND[1:]],
     "redis": _NATIVE_APPEND,
     "s3": _S3,
     "ssh": _SSH,

@@ -398,8 +398,8 @@ async def test_a_box_conditional_write_asks_by_id_before_each_upload(
 ):
     # Every write first asks, by the id the listing named, that the file is
     # still at the path; a held version is checked against that answer, so a
-    # changed file is refused before its body goes out. The redirect
-    # truncates, then writes: two uploads.
+    # changed file is refused before its body goes out. The redirect's
+    # write is its open: one upload.
     logs = []
     fid = drive.box.id_of("f")
     for policy in (WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL):
@@ -410,7 +410,7 @@ async def test_a_box_conditional_write_asks_by_id_before_each_upload(
         logs.append(drive.box.log[before:])
         drive.put("f", SEED["f"])
     upload = f"upload:{fid}"
-    assert logs == [[f"info:{fid}", upload] * 2] * 2
+    assert logs == [[f"info:{fid}", upload]] * 2
 
 
 @pytest.mark.asyncio
@@ -613,7 +613,7 @@ async def test_a_dropbox_held_write_costs_one_lookup_more(drive, workspace):
         log = drive.dropbox.log[before:]
         counts.append([name for name, _ in log if name != "token"])
         drive.put("f", SEED["f"])
-    assert counts == [["upload", "upload"], ["get_metadata", "upload"] * 2]
+    assert counts == [["upload"], ["get_metadata", "upload"]]
 
 
 @pytest.mark.asyncio

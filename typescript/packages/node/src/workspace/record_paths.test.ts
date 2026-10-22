@@ -111,10 +111,8 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
   }
 }
 
-// Redirects open before echo runs: `>` records its empty open and output
-// write. RAM skips recording an empty append; disk and SSH record it.
+// echo's `>` is opened by its output write: one write. RAM skips recording an empty append; disk and SSH record it.
 const NATIVE_APPEND: [string, string][] = [
-  ['write', K],
   ['write', K],
   ['append', K],
   ['append', K],
@@ -140,9 +138,9 @@ describe('record paths name the virtual path (node backends)', () => {
     mkdirSync(join(root, 'm'))
     try {
       expect(await ledger(new DiskVFS({ root }), null)).toEqual([
-        ...NATIVE_APPEND.slice(0, 2),
+        ...NATIVE_APPEND.slice(0, 1),
         ['append', K],
-        ...NATIVE_APPEND.slice(2),
+        ...NATIVE_APPEND.slice(1),
         ['create', C],
         ['append', C],
       ])
@@ -166,7 +164,6 @@ describe('record paths name the virtual path (node backends)', () => {
       // a write, since s3 has no native append, and the rewrite proves the
       // cached copy it extends.
       expect(await ledger(vfs, null)).toEqual([
-        ['write', K],
         ['write', K],
         ['read', K],
         ['write', K],
@@ -204,7 +201,6 @@ describe('record paths name the virtual path (node backends)', () => {
     // ssh caches reads, so only cat's read of k.txt reaches the server; the
     // later reads, the in-mount cp's included, are served from the cache.
     expect(await ledger(vfs, null)).toEqual([
-      ['write', K],
       ['write', K],
       ['append', K],
       ['append', K],
