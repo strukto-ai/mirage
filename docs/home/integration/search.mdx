@@ -1,101 +1,304 @@
 ---
 title: Search
-description: Use cloud search and RAG indexes through grep and rg.
+description: Answer grep and rg from your service's search.
 icon: magnifying-glass
 ---
 
-Mirage connects your service's search API to `grep` and `rg`. Agents use
-familiar commands while the backend finds relevant files or rows, avoiding
-unnecessary downloads.
+`grep` and `rg` can ask your VFS which files or lines may hold the text,
+instead of reading every file. Mirage still matches each line itself, so the
+output is the same. Return `None` (TypeScript: `null`) when your search cannot
+answer, and Mirage reads the file.
 
-## Example: search a RAG knowledge base
+For example, with [Chroma](/python/vfs/chroma) at `/knowledge/`,
+`grep -r refund /knowledge/` asks Chroma which documents contain `refund` and
+reads only those.
 
-With a Chroma knowledge base mounted at `/knowledge/`:
+## When grep and rg call these methods
 
-```bash
-grep -r 'refund' /knowledge/
-```
+Only when every match contains a plain text of 3 or more characters, such as
+`refund` in `grep 'refund.*2026'`, or a `-w` or `-x` word of any length.
 
-Mirage asks Chroma which document chunks contain `refund`, then reads the
-matching documents and applies grep. Adding `-n` prints the original line
-numbers:
+They never call them with these flags, and read every file instead:
 
-```bash
-grep -rn 'refund' /knowledge/
-```
+`grep` and `rg`:
 
-This searches for exact text. For semantic search, use
-[`chroma-query`](/python/vfs/chroma#vector-search).
+- `-v`: print lines that do not match
+- `-f FILE`: read patterns from a file
+- `-i`, when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k`
+  or `s`
 
-## Connect your own search
+`rg` only:
 
-Override these methods on your VFS. Mirage handles the command options and
-output formatting; you do not need a separate implementation for `grep -n`,
-`grep -c` or each other option.
+- `--passthru`: print every line
+- `--files-without-match`: list files with no match
+- `--json`: print JSON
+- `--stats`: print statistics
+- `-z`: search compressed files
+- `-L`: follow symlinks
+- `--pre COMMAND`: preprocess each file
+- `-E ENCODING`: read files in an encoding
+- `-c` or `--count-matches`, with `--include-zero`
 
-Mirage checks the candidates with the command's matcher. Include every
-possible match; return `None` in Python or `null` in TypeScript when your
-search cannot answer, and Mirage reads the files normally.
+## `files_containing`
 
-### `files_containing`
+Which files under a folder may contain a text.
 
-Return paths of files that may contain the text. Used by `grep -r`, `grep -R`,
-`grep -d recurse` and `rg` when searching directories. The TypeScript name is
-`filesContaining`.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def files_containing(
+        self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+    ) -> list[PathSpec] | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    filesContaining(
+      path: PathSpec,
+      text: string,
+      opts: { wholeWord: boolean; ignoreCase: boolean },
+    ): Promise<PathSpec[] | null>
+    ```
+  </Tab>
+</Tabs>
 
-| Command or option | How Mirage uses your retrieval |
+| Argument | Meaning |
 | --- | --- |
-| Plain recursive search | Read candidate files and match their contents. |
-| Line numbers (`-n`) or byte offsets (`-b`) | Read candidate files and calculate the original positions. |
-| Context (`-A`, `-B`, `-C`; grep's `-NUM`) | Read candidate files and include surrounding lines. |
-| Counts, filenames, match-only output or limits (`-c`, `-l`, `-q`, `-o`, `-m`) | Apply the options while reading candidate files. |
-| Case or word matching (`-i`, `-w`, `-x`; rg's `-S`) | Retrieve candidates for the requested matching mode. |
-| Multiple patterns (`-e`) | Combine candidate files from the search terms. |
-| Nonmatching lines (`-v`) or patterns from a file (`-f`) | Use normal file reads instead of retrieval. |
+| `path` | The folder `grep -r` or `rg` walks. |
+| `text` | A text every match contains. Asked once per text, so `grep -r -e refund -e order` asks twice. |
+| `whole_word` | `True` for `-w` or `-x`: `text` must match as a whole word. |
+| `ignore_case` | `True` for `-i`. |
 
-For example, `grep -rn 'refund' /knowledge/` uses your retrieval to choose
-documents, then Mirage reads them and adds line numbers.
-
-### `lines_containing`
-
-Return candidate lines from one file, in their original order. Used by
-`grep` and `rg`, including during directory searches. The TypeScript name is
-`linesContaining`.
-
-For files that may contain a NUL (zero) byte, return `None` or `null` so
-Mirage reads the original file and detects binary content correctly.
-
-| Command or option | How Mirage uses your retrieval |
+| Return | Mirage then |
 | --- | --- |
-| Plain search with one term | Match the returned lines directly. |
-| Line numbers (`-n`) or byte offsets (`-b`) | Check for candidates, then read the original file to calculate positions. |
-| Context (`-A`, `-B`, `-C`; grep's `-NUM`) | Check for candidates, then read the original file for surrounding lines. |
-| Counts, filenames, match-only output or limits (`-c`, `-l`, `-q`, `-o`, `-m`) | Apply the options to returned lines for one term, without positions or context. |
-| Case or word matching (`-i`, `-w`, `-x`; rg's `-S`) | Retrieve candidate lines, then apply the exact matching rules. |
-| Multiple patterns (`-e`) | Check the terms; read the original file when candidates need combining. |
-| rg's `--column`, `--vimgrep` or multiline searches | Check for candidates, then read the original file. |
-| Nonmatching lines (`-v`) or patterns from a file (`-f`) | Use normal file reads instead of retrieval. |
+| The files that may contain `text` | Reads only these files; the others have no match. Include every file that could match. |
+| An empty list | Reads no file under `path`. |
+| `None` | Reads every file. |
 
-For example, `grep 'refund' tickets.jsonl` can search the returned rows
-directly. Adding `-n` requires reading the original file because snippets
-alone do not provide original line numbers.
+These commands call `files_containing`:
 
-Both tables assume your search can answer the requested text. Some modes,
-such as rg's `--json`, `--stats`, preprocessing and compressed-file search,
-use normal file reads instead.
+- `grep -r`, `grep -R`, `grep -d recurse`
+- `rg` on a folder
 
-## Enable cloud content search
+A file named on the line is always read.
 
-Some backends, such as Dropbox and Google Drive, have a `content_search`
-mount option. Set it to `true` to let Mirage use the provider's content index.
-It defaults to `false`, which uses ordinary file reads. In TypeScript config
-objects, the option is named `contentSearch`.
+This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example-a-read-only-vfs):
 
-For example, with content search enabled on Dropbox:
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+    from mirage.utils.key_prefix import mounted_path
 
-```bash
-grep -rw 'refund' /dropbox/policies/
-```
+    from notes import NotesVFS
 
-The `-w` requests whole-word matches, which Dropbox's index supports. See the
-[backend's docs](/python/vfs/dropbox) for its search coverage and setup.
+
+    class SearchableNotesVFS(NotesVFS):
+        async def files_containing(
+            self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+        ) -> list[PathSpec] | None:
+            if ignore_case:
+                return None
+            return [
+                mounted_path(path, name)
+                for name, page in self.pages.items()
+                if text in page
+            ]
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+    import { NotesVFS } from './notes.ts'
+
+    export class SearchableNotesVFS extends NotesVFS {
+      override async filesContaining(
+        path: PathSpec,
+        text: string,
+        opts: { wholeWord: boolean; ignoreCase: boolean },
+      ): Promise<PathSpec[] | null> {
+        if (opts.ignoreCase) return null
+        return Object.entries(this.pages)
+          .filter(([, page]) => page.includes(text))
+          .map(([name]) => mountedPath(path, name))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`grep -rn mirage /notes` then reads only the pages that contain `mirage`.
+`mounted_path` turns a name below the mount into a path.
+
+## `lines_containing`
+
+Which lines of one file may contain a text.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def lines_containing(
+        self, path: PathSpec, text: str, *, ignore_case: bool
+    ) -> bytes | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    linesContaining(
+      path: PathSpec,
+      text: string,
+      opts: { ignoreCase: boolean },
+    ): Promise<Uint8Array | null>
+    ```
+  </Tab>
+</Tabs>
+
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file `grep` or `rg` would read. |
+| `text` | A text every match contains. Asked once per text. |
+| `ignore_case` | `True` for `-i`. |
+
+| Return | Mirage then |
+| --- | --- |
+| The lines that may contain `text`, in their order | Matches them instead of reading the file, or reads the file if they hold a match. See the lists below. |
+| Empty bytes | The file has no match. It is not read. |
+| `None` | Reads the file. Return it for a file that may hold a NUL byte. |
+
+Mirage matches your lines instead of reading the file for `grep` and `rg` with
+no flag, or with:
+
+- `-c`: count matching lines
+- `-l`: list files with a match
+- `-q`: print nothing, exit 0 on a match
+- `-o`: print only the matched text
+- `-m N`: stop after N matches
+- `-i`: ignore case
+- `-w`: match whole words
+- `-x`: match whole lines
+- `-F`: match the text literally
+- `-r`: search folders
+- `-L`: list files with no match (`grep` only)
+
+Mirage reads the file only if your lines hold a match, and skips it if not, for
+`grep` and `rg` with:
+
+- `-n`: print line numbers
+- `-b`: print byte offsets
+- `-A N`, `-B N`, `-C N`: print lines around each match
+- more than one pattern, such as `-e a -e b` or `'a|b'`
+- `-z`: lines end with NUL (`grep` only; `--null-data` in `rg`)
+- `--column`: print column numbers (`rg` only)
+- `--vimgrep`: print every match with its position (`rg` only)
+- `-U`: match across lines (`rg` only)
+
+This example extends the same `NotesVFS`:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class LineSearchNotesVFS(NotesVFS):
+        async def lines_containing(
+            self, path: PathSpec, text: str, *, ignore_case: bool
+        ) -> bytes | None:
+            if ignore_case:
+                return None
+            lines = self.page(path).splitlines(keepends=True)
+            return "".join(line for line in lines if text in line).encode()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class LineSearchNotesVFS extends NotesVFS {
+      override async linesContaining(
+        path: PathSpec,
+        text: string,
+        opts: { ignoreCase: boolean },
+      ): Promise<Uint8Array | null> {
+        if (opts.ignoreCase) return null
+        const lines = this.page(path).split(/(?<=\n)/).filter((line) => line.includes(text))
+        return new TextEncoder().encode(lines.join(''))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`grep mirage /notes/todo.txt` and `grep -c mirage /notes/todo.txt` then read
+nothing. `grep -n mirage /notes/todo.txt` reads the page, since it holds a
+match.
+
+## Turn on a service's search
+
+These built-in VFSs keep their service's search off until you set
+`content_search: true`, because the service's index can miss a match: it
+lags recent writes, or searches other text than the file `grep` reads:
+
+- Box
+- Dropbox
+- Email (IMAP)
+- Gmail
+- Google Calendar, Docs, Drive, Sheets and Slides
+- Linear
+- OneDrive
+- SharePoint
+- Slack
+- Trello
+
+Gmail and Email ask their service for any text; the others only for `-w`.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.slack import SlackConfig, SlackVFS
+
+    slack = SlackVFS(
+        config=SlackConfig(
+            token=os.environ["SLACK_BOT_TOKEN"],
+            search_token=os.environ["SLACK_USER_TOKEN"],
+            content_search=True,
+        )
+    )
+    ws = Workspace({"/slack": slack}, mode=MountMode.READ)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
+
+    const slack = new SlackVFS({
+      token: process.env.SLACK_BOT_TOKEN!,
+      searchToken: process.env.SLACK_USER_TOKEN,
+      contentSearch: true,
+    })
+    const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+    ```
+  </Tab>
+  <Tab title="YAML" icon="file-code">
+    ```yaml
+    mounts:
+      /slack:
+        vfs: slack
+        mode: read
+        config:
+          token: ${SLACK_BOT_TOKEN}
+          search_token: ${SLACK_USER_TOKEN}
+          content_search: true
+    ```
+  </Tab>
+</Tabs>
+
+`grep -rw refund /slack/channels/` then asks Slack's search which days mention
+`refund` and reads only those.

@@ -1,44 +1,286 @@
 ---
 title: Lines
-description: Use database queries and live updates through head, tail and wc.
+description: Answer head, tail and wc -l from your service.
 icon: list-ol
 ---
 
-Mirage connects `head`, `tail` and `wc -l` to your backend's queries and live
-updates. A database can fetch a few rows or count them without exporting the
-whole table. A chat service can send new messages to `tail -f`.
+`head`, `tail`, `wc -l` and `tail -f` can ask your VFS for lines or a count,
+instead of reading the file. Return exactly what a read would hold, or `None`
+(TypeScript: `null`) and Mirage reads the file.
 
-## Example: inspect a table
+For example, [PostgreSQL](/python/vfs/postgres) answers
+`head -n 20 rows.jsonl` with `LIMIT 20` and `wc -l rows.jsonl` with
+`COUNT(*)`.
 
-With PostgreSQL mounted at `/db/`:
+## `first_lines`
 
-```bash
-head -n 20 /db/public/tables/tickets/rows.jsonl
-wc -l /db/public/tables/tickets/rows.jsonl
-```
+The first lines of one file.
 
-Mirage uses `LIMIT` to fetch the first 20 rows and `COUNT(*)` to count them.
-Adding a byte count with `wc -lc` requires reading the file instead.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def first_lines(self, path: PathSpec, n: int) -> bytes | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    firstLines(path: PathSpec, n: number): Promise<Uint8Array | null>
+    ```
+  </Tab>
+</Tabs>
 
-## Connect your own backend
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file. |
+| `n` | How many lines, 1 or more. |
 
-Override the methods your service supports:
+| Return | Mirage then |
+| --- | --- |
+| The first `n` lines, or all of them if the file is shorter | Prints them. The file is not read. |
+| `None` | Reads the file. |
 
-| Method | Commands using your method | Uses normal reads instead |
-| --- | --- | --- |
-| `first_lines` | `head` or `head -n N` for the first N lines; default 10. | Byte counts (`-c`), NUL separators (`-z`), or all but the last N lines (`-n -N`). |
-| `last_lines` | `tail` or `tail -n N` for the last N lines; default 10. | Byte counts (`-c`) or starting at line N (`-n +N`). |
-| `line_count` | `wc -l` for the newline count. | Plain `wc`, or adding word, byte, character or line-length counts (`-w`, `-c`, `-m`, `-L`). |
-| `follow` | `tail -f` on one file, optionally with `-n N`. | Following by name (`-F`, `--follow=name`), byte counts (`-c`), or starting at line N (`-n +N`). |
+These commands call `first_lines`:
 
-The TypeScript names are `firstLines`, `lastLines`, `lineCount` and `follow`.
-For `first_lines` and `last_lines`, N must be positive. Standard input is
-always read normally.
+- `head`: the first 10 lines
+- `head -n N`, `head -N`: the first N lines
 
-For `follow`, first yield the last N lines, then new lines as they arrive.
-Keep the stream open until the caller closes it; ending it makes `tail -f`
-exit with an error.
+These read the file instead:
 
-Return the same content and order as a normal file read. Return `None` in
-Python or `null` in TypeScript when a method cannot answer; Mirage reads the
-file normally.
+- `head -c N`: the first N bytes
+- `head -n -N`: all but the last N lines
+- `head -z`: lines end with NUL
+- standard input
+
+## `last_lines`
+
+The last lines of one file.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def last_lines(self, path: PathSpec, n: int) -> bytes | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    lastLines(path: PathSpec, n: number): Promise<Uint8Array | null>
+    ```
+  </Tab>
+</Tabs>
+
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file. |
+| `n` | How many lines, 1 or more. |
+
+| Return | Mirage then |
+| --- | --- |
+| The last `n` lines, or all of them if the file is shorter | Prints them. The file is not read. |
+| `None` | Reads the file. |
+
+These commands call `last_lines`:
+
+- `tail`: the last 10 lines
+- `tail -n N`, `tail -N`: the last N lines
+
+These read the file instead:
+
+- `tail -c N`: the last N bytes
+- `tail -n +N`: from line N on
+- standard input
+
+## `line_count`
+
+The number of lines in one file.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def line_count(self, path: PathSpec) -> int | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    lineCount(path: PathSpec): Promise<number | null>
+    ```
+  </Tab>
+</Tabs>
+
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file. |
+
+| Return | Mirage then |
+| --- | --- |
+| The number of newline characters | Prints it. The file is not read. |
+| `None` | Reads the file. |
+
+This command calls `line_count`:
+
+- `wc -l`
+
+These read the file instead:
+
+- `wc` with another count: `-c`, `-w`, `-m` or `-L`
+- standard input
+
+## Example: head, tail and wc -l
+
+This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example-a-read-only-vfs):
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class LinesNotesVFS(NotesVFS):
+        async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
+            lines = self.page(path).splitlines(keepends=True)
+            return "".join(lines[:n]).encode()
+
+        async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
+            lines = self.page(path).splitlines(keepends=True)
+            return "".join(lines[max(len(lines) - n, 0) :]).encode()
+
+        async def line_count(self, path: PathSpec) -> int | None:
+            return self.page(path).count("\n")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class LinesNotesVFS extends NotesVFS {
+      override async firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
+        const lines = this.page(path).split(/(?<=\n)/)
+        return new TextEncoder().encode(lines.slice(0, n).join(''))
+      }
+
+      override async lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
+        const lines = this.page(path).split(/(?<=\n)/)
+        return new TextEncoder().encode(lines.slice(Math.max(lines.length - n, 0)).join(''))
+      }
+
+      override async lineCount(path: PathSpec): Promise<number | null> {
+        return this.page(path).split('\n').length - 1
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`head -n 1`, `tail -n 1` and `wc -l` on a page then read nothing. `head -c 3`
+still reads it.
+
+## `follow`
+
+The last lines of one file, then each new line as it arrives.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def follow(
+        self, path: PathSpec, n: int, interval: float
+    ) -> AsyncIterator[bytes] | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    follow(
+      path: PathSpec,
+      n: number,
+      interval: number,
+    ): Promise<AsyncIterable<Uint8Array> | null>
+    ```
+  </Tab>
+</Tabs>
+
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file. |
+| `n` | How many of its last lines come first, 0 for none. |
+| `interval` | Seconds between two checks for new lines (`tail -s`, 1 by default). A service that pushes new lines can ignore it. |
+
+| Return | Mirage then |
+| --- | --- |
+| A stream that yields the last `n` lines, then each new whole line in order, and never ends on its own | Prints it until the caller stops `tail -f`. If the stream ends, `tail -f` exits 1 with `tail: no files remaining`. |
+| `None` | Reads the file every `interval` seconds. |
+
+These commands call `follow`:
+
+- `tail -f`, `tail -f -n N` on one file
+
+These read the file every `interval` seconds instead:
+
+- `tail -F`, `tail --follow=name`: follow the name, not the file
+- `tail -f -c N`
+- `tail -f -n +N`
+- `tail -f` on more than one file
+
+This example extends the same `NotesVFS`. A real service would push new lines
+over a stream; this one checks the dictionary every `interval` seconds:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import asyncio
+    from collections.abc import AsyncIterator
+
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class FollowNotesVFS(NotesVFS):
+        async def follow(
+            self, path: PathSpec, n: int, interval: float
+        ) -> AsyncIterator[bytes] | None:
+            async def lines() -> AsyncIterator[bytes]:
+                seen = self.page(path)
+                old = seen.splitlines(keepends=True)
+                yield "".join(old[max(len(old) - n, 0) :]).encode()
+                while True:
+                    await asyncio.sleep(interval)
+                    page = self.page(path)
+                    if len(page) > len(seen):
+                        yield page[len(seen) :].encode()
+                        seen = page
+
+            return lines()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class FollowNotesVFS extends NotesVFS {
+      override async follow(
+        path: PathSpec,
+        n: number,
+        interval: number,
+      ): Promise<AsyncIterable<Uint8Array> | null> {
+        const page = (): string => this.page(path)
+        async function* lines(): AsyncGenerator<Uint8Array> {
+          let seen = page()
+          const old = seen.split(/(?<=\n)/)
+          yield new TextEncoder().encode(old.slice(Math.max(old.length - n, 0)).join(''))
+          for (;;) {
+            await new Promise((resolve) => setTimeout(resolve, interval * 1000))
+            const now = page()
+            if (now.length > seen.length) {
+              yield new TextEncoder().encode(now.slice(seen.length))
+              seen = now
+            }
+          }
+        }
+        return lines()
+      }
+    }
+    ```
+  </Tab>
+</Tabs>

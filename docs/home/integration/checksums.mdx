@@ -1,37 +1,92 @@
 ---
 title: Checksums
-description: Use stored hashes to get file checksums without downloading them.
+description: Answer md5sum and sha256sum from a stored hash.
 icon: fingerprint
 ---
 
-Mirage can answer checksum commands using a hash your storage service already
-keeps, or by hashing the file on a remote server.
+`md5sum`, `sha256sum` and the other hash commands can ask your VFS for a hash
+it already stores, instead of reading and hashing the file. Return `None`
+(TypeScript: `null`) and Mirage hashes the file.
 
-## Example: get a file's hash
+For example, [Google Drive](/python/vfs/gdrive) answers `md5sum`, `sha1sum`
+and `sha256sum` from the hashes Drive stores.
 
-With Google Drive mounted at `/drive/`:
+## `checksum`
 
-```bash
-md5sum /drive/report.csv
-```
+The hash of one file.
 
-Mirage uses the file's stored MD5 when available. Otherwise, it reads the file
-and computes the hash. Verification commands such as `md5sum -c checksums.md5`
-read the files to check their actual contents.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def checksum(self, path: PathSpec, algorithm: str) -> str | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    checksum(path: PathSpec, algorithm: string): Promise<string | null>
+    ```
+  </Tab>
+</Tabs>
 
-## Connect your own backend
+| Argument | Meaning |
+| --- | --- |
+| `path` | The file. |
+| `algorithm` | `md5`, `sha1`, `sha256`, `sha384` or `sha512`. |
 
-Override `checksum(path, algorithm)` on your VFS. Return the file's hash as
-lowercase hexadecimal text, matching exactly the bytes a normal read returns.
+| Return | Mirage then |
+| --- | --- |
+| The lowercase hex hash of exactly the bytes a read returns | Prints it. The file is not read. |
+| `None` | Reads the file and hashes it. |
 
-| Method | Commands | Used when |
-| --- | --- | --- |
-| `checksum` with `md5` | `md5sum`, `md5` | Getting a file's MD5 hash. |
-| `checksum` with `sha1` | `sha1sum` | Getting a file's SHA-1 hash. |
-| `checksum` with `sha256` | `sha256sum` | Getting a file's SHA-256 hash. |
-| `checksum` with `sha384` | `sha384sum` | Getting a file's SHA-384 hash. |
-| `checksum` with `sha512` | `sha512sum` | Getting a file's SHA-512 hash. |
+These commands call `checksum`, with this `algorithm`:
 
-The method name is the same in Python and TypeScript. Verification with `-c`
-reads the files instead. Return `None` in Python or `null` in TypeScript when
-the hash is unavailable, and Mirage computes it from the file.
+- `md5sum`, `md5`: `md5`
+- `sha1sum`: `sha1`
+- `sha256sum`: `sha256`
+- `sha384sum`: `sha384`
+- `sha512sum`: `sha512`
+
+This reads the file instead:
+
+- `-c`: check hashes listed in a file
+
+## Example
+
+This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example-a-read-only-vfs).
+A real service returns the hash it stores; this one computes MD5 and leaves the
+others to Mirage:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import hashlib
+
+    from mirage import PathSpec
+
+    from notes import NotesVFS
+
+
+    class HashedNotesVFS(NotesVFS):
+        async def checksum(self, path: PathSpec, algorithm: str) -> str | None:
+            if algorithm != "md5":
+                return None
+            return hashlib.md5(self.page(path).encode()).hexdigest()
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { createHash } from 'node:crypto'
+    import type { PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class HashedNotesVFS extends NotesVFS {
+      override async checksum(path: PathSpec, algorithm: string): Promise<string | null> {
+        if (algorithm !== 'md5') return null
+        return createHash('md5').update(this.page(path)).digest('hex')
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`md5sum /notes/hello.txt` then reads nothing. `sha256sum` still reads the page.
