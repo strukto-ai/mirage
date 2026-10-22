@@ -9,7 +9,7 @@ checks hides, a read-only mount and a host change through it, and that
 
 | File            | Pins                                                                             | Runs on                                          |
 | --------------- | -------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `line.json`     | echo, an exit code, an unserved cwd exits 126, quoting, a rule read where a `cd` leaves the line | every box; quoting on ssh and e2b                |
+| `line.json`     | echo, an exit code, an unserved cwd exits 126, quoting, a rule after a `cd`      | every box; quoting on ssh and e2b                |
 | `stdin.json`    | piped stdin; no input closes stdin at start; empty input                         | every box; the end-of-input cases on ssh and e2b |
 | `stream.json`   | a captured program's output and input flow as it runs; `head` ends it in the box | every box; live output on the Debian boxes       |
 | `env.json`      | config `env` reaches the line; a `PATH` with no `sh` still runs it               | every box                                        |
