@@ -13,7 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.core.google.scope import app_filename, sanitize_title
+from mirage.core.google.scope import (
+    app_filename,
+    app_scopes,
+    sanitize_title,
+)
+from mirage.core.hierarchy.codec import Codec
+from mirage.core.hierarchy.scope import match_scope
 from mirage.utils.sanitize import NAME_MAX_BYTES, byte_length
 
 SUFFIX = ".gdoc.json"
@@ -69,3 +75,34 @@ def test_app_filename_keeps_the_id_when_it_leaves_no_room():
     long_id = "v" * (NAME_MAX_BYTES - 4)
     name = app_filename("Some Title", long_id, "", suffix=SUFFIX)
     assert f"__{long_id}.gdoc.json" in name
+
+
+def test_app_scopes_keep_a_drive_id_that_holds_the_separator_whole():
+    # Drive ids are [A-Za-z0-9_-], so ``__`` turns up inside one now and
+    # then (a real deck's, below); the title never holds one, since
+    # sanitizing collapses every run of underscores. Split on the last
+    # ``__``, this name read ``OWES6...`` as the id and the deck answered
+    # ENOENT.
+    scopes = app_scopes(Codec(suffix=".gslide.json"))
+    file_id = "1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM"
+    name = app_filename(
+        "MIRAGE Slides Test",
+        file_id,
+        "2026-04-04T00:00:00Z",
+        suffix=".gslide.json",
+    )
+    matched = match_scope(scopes, ["owned", name])
+    assert matched is not None
+    assert matched[1] == {
+        "corpus": "owned",
+        "name": "2026-04-04_MIRAGE_Slides_Test",
+        "file_id": file_id,
+    }
+
+
+def test_app_scopes_keep_an_id_that_starts_with_an_underscore_whole():
+    scopes = app_scopes(Codec(suffix=".gslide.json"))
+    name = app_filename("Deck_", "_abc", suffix=".gslide.json")
+    matched = match_scope(scopes, ["shared", name])
+    assert matched is not None
+    assert matched[1]["file_id"] == "_abc"

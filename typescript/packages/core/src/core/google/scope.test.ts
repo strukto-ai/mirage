@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { appFilename } from './scope.ts'
+import { appFilename, appScopes } from './scope.ts'
+import { Codec } from '../hierarchy/codec.ts'
+import { matchScope } from '../hierarchy/scope.ts'
 import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
 
 const SUFFIX = '.gdoc.json'
@@ -52,5 +54,28 @@ describe('appFilename', () => {
     // addressing the file. Same rule as gcal's event filenames.
     const longId = 'v'.repeat(NAME_MAX_BYTES - 4)
     expect(appFilename('Some Title', longId, '', SUFFIX)).toContain(`__${longId}.gdoc.json`)
+  })
+})
+
+describe('appScopes', () => {
+  const scopes = appScopes(new Codec({ suffix: '.gslide.json' }))
+
+  it('keeps a Drive id that holds the separator whole', () => {
+    // Drive ids are [A-Za-z0-9_-], so `__` turns up inside one now and then
+    // (a real deck's, below); the title never holds one, since sanitizing
+    // collapses every run of underscores. Split on the last `__`, this name
+    // read `OWES6...` as the id and the deck answered ENOENT.
+    const id = '1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM'
+    const name = appFilename('MIRAGE Slides Test', id, '2026-04-04T00:00:00Z', '.gslide.json')
+    expect(matchScope(scopes, ['owned', name])?.[1]).toEqual({
+      corpus: 'owned',
+      name: '2026-04-04_MIRAGE_Slides_Test',
+      file_id: id,
+    })
+  })
+
+  it('keeps an id that starts with an underscore whole', () => {
+    const name = appFilename('Deck_', '_abc', '', '.gslide.json')
+    expect(matchScope(scopes, ['shared', name])?.[1]).toMatchObject({ file_id: '_abc' })
   })
 })

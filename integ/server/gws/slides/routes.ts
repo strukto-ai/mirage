@@ -33,14 +33,19 @@ export function slidesRoutes(): KitRoute<C>[] {
       'POST',
       '/v1/presentations',
       (ctx) => {
-        const title = String(asObj(ctx.json()).title ?? 'Untitled presentation')
+        const body = asObj(ctx.json())
+        const title = String(body.title ?? 'Untitled presentation')
+        // A presentationId in the body is the new presentation's id, as the
+        // real API takes it, so a case can pin the shape of a real Drive id:
+        // [A-Za-z0-9_-], which can hold the `__` a mount's filename uses.
+        const given = typeof body.presentationId === 'string' ? body.presentationId : ''
         const item = createDriveItem(
           ctx.db,
           title,
           SLIDE_MIME,
           [],
           Buffer.alloc(0),
-          ctx.db.nextId('pres'),
+          given !== '' ? given : ctx.db.nextId('pres'),
         )
         const pres = ctx.db.presentations.get(item.id)
         if (pres === undefined) return NOT_FOUND

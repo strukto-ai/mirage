@@ -38,6 +38,35 @@
         "stdout": "2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gapps_grep_reads_a_deck_whose_id_holds_the_separator",
+      "seq": 943103,
+      "targets": [
+        "gapps-fresh"
+      ],
+      "read": "fresh",
+      "scenario": [
+        {
+          "mutate": {
+            "command": "gws slides presentations create --json '{\"title\": \"Split Deck\", \"presentationId\": \"1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM\"}' > /dev/null"
+          }
+        },
+        {
+          "command": "ls /slides/owned"
+        },
+        {
+          "command": "jq -r .presentationId /slides/owned/2026-01-01_Split_Deck__1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM.gslide.json"
+        },
+        {
+          "command": "grep -rlw nowhere /slides; echo rc=$?"
+        }
+      ],
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-01-01_Launch_Deck__pres0001.gslide.json\n2026-01-01_Split_Deck__1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM.gslide.json\n1D2dqZx96t_aSHk3kLorY__OWES6DAtwNTt1_NMMVLjM\nrc=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

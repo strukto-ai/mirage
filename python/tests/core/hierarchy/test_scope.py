@@ -86,6 +86,30 @@ def test_id_key_splits_on_the_last_separator():
     assert matched[1] == {"name": "KEY__name", "file_id": "id7"}
 
 
+def test_id_split_first_splits_on_the_first_separator():
+    scopes = (
+        Scope(
+            kind="file",
+            segments=(
+                "owned",
+                Slot(
+                    "name",
+                    Codec(suffix=".json"),
+                    id_key="file_id",
+                    id_split="first",
+                ),
+            ),
+            leaf=True,
+        ),
+    )
+    # The id keeps its own separator.
+    matched = match_scope(scopes, ["owned", "Notes__ab__cd.json"])
+    assert matched is not None
+    assert matched[1] == {"name": "Notes", "file_id": "ab__cd"}
+    assert match_scope(scopes, ["owned", "__id.json"]) is None
+    assert match_scope(scopes, ["owned", "label__.json"]) is None
+
+
 def test_id_key_requires_both_halves():
     assert match_scope(ID_SCOPES, ["owned", "plain.json"]) is None
     assert match_scope(ID_SCOPES, ["owned", "__id.json"]) is None

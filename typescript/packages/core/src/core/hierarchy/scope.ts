@@ -27,6 +27,12 @@ export const INVALID = 'invalid'
  * stored under `name` and the id under `idKey`. A payload with no `__` or an
  * empty half does not match the scope.
  *
+ * `idSplit: 'first'` cuts on the FIRST `__` instead, for a label that can
+ * never hold one and an id that can: a Google app's title is sanitized, which
+ * collapses every run of underscores, while a Drive file id may carry `__`
+ * itself (`1D2dqZx96t_aSHk3kLorY__OWES6…`), and the last cut would read
+ * half of it as the label.
+ *
  * A `variadic` slot stands for a run of one or more consecutive segments
  * instead of exactly one. Segments before it anchor at the start of the
  * path, segments after it at the end, every segment in the run must decode,
@@ -40,12 +46,20 @@ export class Slot {
   readonly codec: Codec
   readonly idKey: string | null
   readonly variadic: boolean
+  readonly idSplit: 'first' | 'last'
 
-  constructor(name: string, codec: Codec = RAW, idKey: string | null = null, variadic = false) {
+  constructor(
+    name: string,
+    codec: Codec = RAW,
+    idKey: string | null = null,
+    variadic = false,
+    idSplit: 'first' | 'last' = 'last',
+  ) {
     this.name = name
     this.codec = codec
     this.idKey = idKey
     this.variadic = variadic
+    this.idSplit = idSplit
   }
 }
 
@@ -111,7 +125,7 @@ export function decodeSlot(slot: Slot, part: string): Record<string, string> | n
   const decoded = slot.codec.decode(part)
   if (decoded === null) return null
   if (slot.idKey !== null) {
-    const cut = decoded.lastIndexOf('__')
+    const cut = slot.idSplit === 'first' ? decoded.indexOf('__') : decoded.lastIndexOf('__')
     const label = cut > 0 ? decoded.slice(0, cut) : ''
     const ident = cut >= 0 ? decoded.slice(cut + 2) : ''
     if (label === '' || ident === '') return null

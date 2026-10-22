@@ -14,6 +14,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from mirage.core.hierarchy.codec import RAW, Codec
 from mirage.types import ContentType, PathSpec
@@ -42,12 +43,19 @@ class Slot:
             nest arbitrarily, and ``pages/a__1/b__2/page.json`` stores
             ``page=b, page_id=2`` because the innermost page is the one
             the path addresses. At most one variadic slot per scope.
+        id_split (Literal["first", "last"]): ``"first"`` cuts on the
+            FIRST ``__`` instead, for a label that can never hold one and
+            an id that can: a Google app's title is sanitized, which
+            collapses every run of underscores, while a Drive file id may
+            carry ``__`` itself (``1D2dqZx96t_aSHk3kLorY__OWES6...``), and
+            the last cut would read half of it as the label.
     """
 
     name: str
     codec: Codec = RAW
     id_key: str | None = None
     variadic: bool = False
+    id_split: Literal["first", "last"] = "last"
 
 
 Segment = str | Slot
@@ -118,7 +126,10 @@ def decode_slot(slot: Slot, part: str) -> dict[str, str] | None:
     if decoded is None:
         return None
     if slot.id_key is not None:
-        label, sep, ident = decoded.rpartition("__")
+        if slot.id_split == "first":
+            label, sep, ident = decoded.partition("__")
+        else:
+            label, sep, ident = decoded.rpartition("__")
         if not sep or not label or not ident:
             return None
         return {slot.name: label, slot.id_key: ident}
