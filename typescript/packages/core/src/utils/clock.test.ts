@@ -12,8 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync, readdirSync } from 'node:fs'
+import { dirname, join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { type Clock, ManualClock, SystemClock } from './clock.ts'
+
+const CACHE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'cache')
+
+const CLOCK_OWNERS = new Set(['Date', 'performance'])
+
+const DATES_CLOCK_READS = new Set(['nowIso', 'utcDateFolder'])
+
+const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
+  'index/listing_memo.ts performance.now':
+    'the trust window and row-write times are counted per key prefix across every ' +
+    'store sharing it, and those stores may hold different clocks, so they stay on ' +
+    'the process monotonic clock; listing expiry already reads the store clock',
+}
 
 describe('SystemClock', () => {
   it('satisfies the Clock interface', () => {
@@ -81,5 +98,135 @@ describe('ManualClock', () => {
     expect(() => {
       new ManualClock().advance(-1)
     }).toThrow(RangeError)
+  })
+})
+
+function clockOwner(node: ts.Expression): string | undefined {
+  if (ts.isIdentifier(node)) return CLOCK_OWNERS.has(node.text) ? node.text : undefined
+  if (
+    ts.isPropertyAccessExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'globalThis'
+  ) {
+    return CLOCK_OWNERS.has(node.name.text) ? node.name.text : undefined
+  }
+  return undefined
+}
+
+/**
+ * The clock-reading helpers `file` imports from the core dates module by name, and the
+ * local names it binds that module to as a namespace.
+ *
+ * @param file a parsed module.
+ */
+function datesImports(file: ts.SourceFile): { reads: Set<string>; namespaces: Set<string> } {
+  const reads = new Set<string>()
+  const namespaces = new Set<string>()
+  for (const statement of file.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !/utils\/dates\.[jt]s$/.test(statement.moduleSpecifier.text)
+    ) {
+      continue
+    }
+    const named = statement.importClause?.namedBindings
+    if (named === undefined) continue
+    if (ts.isNamespaceImport(named)) {
+      namespaces.add(named.name.text)
+      continue
+    }
+    for (const element of named.elements) {
+      const imported = (element.propertyName ?? element.name).text
+      if (DATES_CLOCK_READS.has(imported)) reads.add(imported)
+    }
+  }
+  return { reads, namespaces }
+}
+
+/** Every system-clock read `source` imports, calls or references. */
+function clockReads(source: string): Set<string> {
+  const file = ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest)
+  const { reads: found, namespaces } = datesImports(file)
+  const visit = (node: ts.Node): void => {
+    if (ts.isPropertyAccessExpression(node)) {
+      const owner = clockOwner(node.expression)
+      if (owner !== undefined && node.name.text === 'now') found.add(`${owner}.now`)
+      if (
+        ts.isIdentifier(node.expression) &&
+        namespaces.has(node.expression.text) &&
+        DATES_CLOCK_READS.has(node.name.text)
+      ) {
+        found.add(node.name.text)
+      }
+    }
+    if (
+      ts.isNewExpression(node) &&
+      clockOwner(node.expression) === 'Date' &&
+      (node.arguments === undefined || node.arguments.length === 0)
+    ) {
+      found.add('new Date')
+    }
+    if (ts.isCallExpression(node) && clockOwner(node.expression) === 'Date') found.add('Date()')
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return found
+}
+
+function cacheClockReads(): Set<string> {
+  return new Set(
+    readdirSync(CACHE_DIR, { recursive: true, encoding: 'utf8' })
+      .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+      .flatMap((name) => {
+        const module = name.split(sep).join('/')
+        const reads = clockReads(readFileSync(join(CACHE_DIR, name), 'utf8'))
+        return [...reads].map((read) => `${module} ${read}`)
+      }),
+  )
+}
+
+describe('the cache clock seam', () => {
+  it.each([
+    ['Date.now()', 'Date.now'],
+    ['performance.now()', 'performance.now'],
+    ['new Date()', 'new Date'],
+    ['new Date', 'new Date'],
+    ['const read = Date.now', 'Date.now'],
+    ['globalThis.performance.now()', 'performance.now'],
+    ['new globalThis.Date()', 'new Date'],
+    ['Date()', 'Date()'],
+    ['globalThis.Date()', 'Date()'],
+    ["import { nowIso } from '../utils/dates.ts'\nnowIso()", 'nowIso'],
+    ["import { utcDateFolder as folder } from '../../utils/dates.js'\nfolder()", 'utcDateFolder'],
+    ["import { nowIso } from '../../utils/dates.ts'\nconst read = nowIso\nread()", 'nowIso'],
+    ["import * as dates from '../../utils/dates.ts'\ndates.nowIso()", 'nowIso'],
+  ])('flags %j as %j', (source, expected) => {
+    expect(clockReads(source)).toEqual(new Set([expected]))
+  })
+
+  it.each([
+    'this.clock.now()',
+    'this.clock.monotonic()',
+    'new Date(this.clock.now() * 1000)',
+    'new Date(bound)',
+    'Date.parse(text)',
+    "import { isoToEpoch } from '../utils/dates.ts'\nisoToEpoch(text)",
+    "import * as dates from '../utils/dates.ts'\ndates.isoToEpoch(text)",
+    "import { nowIso } from './other.ts'\nnowIso()",
+    'nowIso()',
+  ])('allows %j', (source) => {
+    expect(clockReads(source)).toEqual(new Set())
+  })
+
+  it('no cache module reads the system clock past the injected Clock', () => {
+    const offenders = [...cacheClockReads()].filter((read) => !(read in KEPT_ON_SYSTEM_CLOCK))
+    expect(offenders).toEqual([])
+  })
+
+  it('every kept system-clock read is still made', () => {
+    const reads = cacheClockReads()
+    const stale = Object.keys(KEPT_ON_SYSTEM_CLOCK).filter((read) => !reads.has(read))
+    expect(stale).toEqual([])
   })
 })
