@@ -97,7 +97,6 @@
             "group": "VFS",
             "pages": [
               "home/setup/vfs",
-              "home/setup/custom-vfs",
               {
                 "group": "Local & Infrastructure",
                 "icon": "server",
