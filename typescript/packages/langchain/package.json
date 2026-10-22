@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-langchain",
-  "version": "0.0.8-alpha.1",
+  "version": "0.0.8-alpha.2",
   "description": "Back Deep Agents with a Mirage workspace",
   "keywords": [
     "mirage",
