@@ -193,7 +193,7 @@ This VFS serves pages from a dictionary:
 
       page(path: PathSpec): string {
         if (!Object.hasOwn(this.pages, path.vfsPath)) throw enoent(path)
-        return this.pages[path.vfsPath]
+        return this.pages[path.vfsPath]!
       }
 
       override async readdir(path: PathSpec): Promise<FileStat[]> {
