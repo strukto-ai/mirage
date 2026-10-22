@@ -418,6 +418,7 @@ def match_io(
     scope: HiddenPaths | None,
     tokens: Sequence[str],
     virtual: str,
+    subtree: bool = False,
 ) -> bool:
     """Whether a rule reaches an entry a command touches on its own,
     below its operands: the rule names the line (its command patterns
@@ -437,6 +438,9 @@ def match_io(
         tokens (Sequence[str]): the line as an admission pattern reads
             it, command name first.
         virtual (str): absolute virtual path of the entry.
+        subtree (bool): whether to ask about every entry at or under
+            ``virtual`` rather than the entry itself, as a walk does
+            before it trusts the raw tree (:func:`io_reach`).
     """
     if scope is None and not rule.mount:
         return False
@@ -445,7 +449,11 @@ def match_io(
     ):
         return False
     if scope is None:
-        return _under(virtual, rule.mount)
+        return _under(virtual, rule.mount) or (
+            subtree and _under(rule.mount, virtual)
+        )
+    if subtree:
+        return hides_intersect(scope, virtual)
     return path_hidden(scope, virtual)
 
 
@@ -468,20 +476,10 @@ def io_reach(
     """
     if rules is None:
         return False
-    for rule in (*rules.deny, *rules.ask):
-        scope = rule_scope(rule)
-        if scope is None and not rule.mount:
-            continue
-        if rule.commands and not any(
-            pattern_matches(p, tokens) for p in rule.commands
-        ):
-            continue
-        if scope is None:
-            if _under(rule.mount, virtual) or _under(virtual, rule.mount):
-                return True
-        elif hides_intersect(scope, virtual):
-            return True
-    return False
+    return any(
+        match_io(rule, rule_scope(rule), tokens, virtual, subtree=True)
+        for rule in (*rules.deny, *rules.ask)
+    )
 
 
 def io_refusal(
