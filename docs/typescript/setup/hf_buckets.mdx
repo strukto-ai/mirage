@@ -18,7 +18,7 @@ binding, which does not run in the browser.
 ## Node
 
 ```bash
-pnpm add @struktoai/mirage-node
+pnpm add @struktoai/mirage-node opendal
 ```
 
 ```ts
@@ -88,8 +88,8 @@ Large files benefit from range reads to avoid downloading entire objects.
 
 ### File Operations
 
-`rm`, `touch`, `mktemp`, `split`, `csplit`. Object stores have no real
-directories, so `rm` is file-only (no `-r`).
+`rm` (`-r` removes a subtree), `mkdir` (a no-op: a directory exists only while
+it holds a file), `touch`, `mktemp`, `split`, `csplit`.
 
 ### Path Utilities
 

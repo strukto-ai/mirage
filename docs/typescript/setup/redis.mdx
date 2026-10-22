@@ -34,8 +34,8 @@ await ws.shell('cat /r/greet')
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `url` | `redis://localhost:6379` | Standard Redis connection URL. Redacted in snapshots. |
-| `keyPrefix` | `''` | Prefix prepended to every key. Useful for multi-tenant Redis instances. |
+| `url` | `redis://localhost:6379/0` | Standard Redis connection URL. Redacted in snapshots. |
+| `keyPrefix` | `mirage:fs:` | Prefix prepended to every key. Useful for multi-tenant Redis instances. |
 
 ## Mount mode
 

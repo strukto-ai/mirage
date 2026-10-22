@@ -20,7 +20,8 @@ command takes: the installation's accessor, the operands, and the same
 `accessor.config`) and the workspace closes it when the install goes. The
 example below shows the
 registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/cli/pager.ts)
-adds a mutable incident service and shared cross-language coverage.
+adds a mutable incident service and shared cross-language coverage. The
+`@struktoai/mirage-core/...` type imports need `pnpm add @struktoai/mirage-core`.
 
 ```typescript
 import {
@@ -29,6 +30,7 @@ import {
   CLIHandler,
   CommandSpec,
   type Context,
+  FlagView,
   IOResult,
   type PathSpec,
   Workspace,
@@ -36,7 +38,6 @@ import {
   type CommandFnResult,
 } from '@struktoai/mirage-node'
 import type { NOOPAccessor } from '@struktoai/mirage-core/accessor/base'
-import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
 
 const PagerConfigSchema = z.strictObject({ account: z.enum(['engineering', 'support']) })
 type PagerConfig = z.infer<typeof PagerConfigSchema>
@@ -85,7 +86,7 @@ so a read of an undeclared option fails rather than looking like an omitted flag
 
 | Node | Declares | Handler input |
 | --- | --- | --- |
-| Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Parsed flags, paths and text on `inv` |
+| Leaf | `CommandSpec.arguments`, a `CLIHandler` binding | Paths and text as arguments, parsed flags on `ctx` |
 | Group | `subcommands`, optional inherited options | Dispatches to a leaf |
 | Script CLI | `CLI.script`, optional runtime | Raw argv, stdin and environment |
 
@@ -100,8 +101,9 @@ such as `--by` declares an option; a bare name declares a positional.
 such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
 
 Declare `configModel` on the account `CLI`. Registration validates
-each installation, and `config` holds that account's settings. Without a
-config model, a typed CLI accepts no config and receives `null`.
+each installation, and the default `NOOPAccessor` holds that account's settings
+at `accessor.config`. Without a config model, a typed CLI accepts no config and
+`accessor.config` is `null`.
 
 Mark mutating `CLIHandler` bindings `write: true`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
@@ -386,7 +388,7 @@ collects single option values, while `extend` flattens fixed groups.
 
 | Argument or field | Handler view |
 | --- | --- |
-| `config` | This installation's validated config, or `null`. |
+| `accessor` | The install's accessor. The default `NOOPAccessor` holds the validated config at `accessor.config` (`null` without a config model). |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `ctx.argv` | Verbatim words after the installed head word, including subcommands. |

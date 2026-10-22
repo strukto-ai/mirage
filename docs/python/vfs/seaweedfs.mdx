@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
 ## Notes
 
-- SeaweedFS reports `VFSName.S3` and routes through the same `core/s3`
+- SeaweedFS registers under its own `VFSName` and routes through the same `core/s3`
   implementation, so the full S3 shell-command set applies (`ls`, `cat`,
   `head`, `tail`, `grep`, `rg`, `wc`, `find`, `tree`, `jq`, `stat`). See the
   [S3 VFS](/python/vfs/s3)

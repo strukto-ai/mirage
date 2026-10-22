@@ -4,7 +4,7 @@ icon: google
 description: Mount a Gmail mailbox as a Mirage filesystem from Node or the browser.
 ---
 
-`GmailVFS` browses messages, threads, and labels via the Gmail API.
+`GmailVFS` browses labels, messages, and attachments via the Gmail API.
 
 Both runtimes share the same OAuth config: a Google Cloud `clientId` / `clientSecret` plus a long-lived `refreshToken` for the user. Setup steps live at [Google Workspace Credentials](/home/setup/google).
 
@@ -72,6 +72,6 @@ message's body.
 
 ## Mount mode
 
-`read`. Partial write (drafts, labels) is exposed via Python and may land in TS in a future release.
+`read`.
 
 For the mounted layout (labels, dates, attachments) see the [Python Gmail docs](/python/vfs/gmail).

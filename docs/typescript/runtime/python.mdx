@@ -210,8 +210,8 @@ access. Only an in-process shutdown calls its cleanup.
 
 ## E2B in browsers
 
-Import the runtime from core, which also registers `e2b` for YAML, and pass
-`apiKey`:
+Import the runtime from core (`pnpm add @struktoai/mirage-core`), which also registers `e2b` for
+YAML, and pass `apiKey`:
 
 ```ts
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
@@ -240,7 +240,7 @@ runtime class available by name in YAML. The `@external` capture is also
 exported as `EXTERNAL_COMMANDS`.
 
 A sandbox subclass that overrides `loadSdk()` imports the SDK type from the
-provider's `sdk` module:
+provider's `sdk` module. The E2B one needs `pnpm add @struktoai/mirage-core`:
 
 ```ts
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'

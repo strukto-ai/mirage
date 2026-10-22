@@ -34,16 +34,16 @@ await ws.shell('ls /remote')
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `host` | required | Host alias from `~/.ssh/config` or a real DNS name. |
-| `hostname` | `host` | Override if `host` is an alias and the actual DNS name differs. |
+| `host` | required | DNS name or IP address of the remote. |
+| `hostname` | `host` | Connect to this address instead of `host`. |
 | `port` | `22` | |
-| `username` | (from ssh-config) | |
+| `username` | the local user | |
 | `password` | none | Redacted in snapshots. Prefer `identityFile`. |
 | `identityFile` | none | Path to a private key. `~` is expanded. |
 | `passphrase` | none | Passphrase for `identityFile`. Redacted in snapshots. |
 | `root` | `/` | Path on the remote that becomes the mount root. |
-| `timeout` | `10000` | Connect timeout in ms. |
-| `knownHosts` | system | Path to a `known_hosts` file. |
+| `timeout` | `30` | Connect timeout in seconds. |
+| `knownHosts` | none | Accepted but not applied: this backend does not verify host keys. |
 
 ## Mount mode
 

@@ -60,6 +60,8 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 const ws = new Workspace({ '/jira/': new JiraVFS(cfg) }, { mode: MountMode.READ })
 ```
 
+Imports from `@struktoai/mirage-core/...` subpaths, such as `vfs/secrets`, need `pnpm add @struktoai/mirage-core`.
+
 The accessor is a type parameter, so `this.accessor` is the client your functions actually take, and `override` makes a misspelled function a compile error rather than one that is silently never called.
 
 For a smaller runnable example, see `examples/typescript/vfs/new/basevfs_views.ts`.
@@ -302,7 +304,7 @@ mount, whose IMAP search sees messages but not attachments, sets
 `override readonly searchable = ['*/*/*.email.json']`.
 
 ```ts
-import { BaseVFS, type PathSpec } from '@struktoai/mirage-core'
+import { BaseVFS, type PathSpec } from '@struktoai/mirage-node'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 
 class WikiVFS extends BaseVFS {
@@ -495,6 +497,7 @@ export class MyVFS extends BaseVFS<MyAccessor> {
   override readonly name: string = VFSName.MY_VFS
   override readonly cachesReads: boolean = true
   override readonly prompt: string = MY_PROMPT
+  private readonly config: MyConfig
   override readonly accessor: MyAccessor
   override readonly handed = { stat: ['entry'] } as const
 
@@ -589,7 +592,7 @@ places:
 | Before | Now |
 | --- | --- |
 | `new BaseVFS({ name, accessor, io: new VFSAdapter({ read: { readdir, readBytes, stat } }) })` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
-| `readBytes` and `readRange` | one `read(path, index, offset, size)`; set `readsRanges` true when it fetches only the window |
+| `readBytes` and `readRange` | one `read(path, handed, offset, size, signal)`; set `readsRanges` true when it fetches only the window |
 | `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `readTree`, `write`, ..., `search`, `searchMany`) |
 | `ops()`, `makeGenericOps`, `RegisteredOp`, `OPS` tables, `autoOps` | nothing to declare: the mount serves the functions; mark a custom one `@vfsCall({ effect })` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.ts` | `registerBackendCommands(cls, ...)` in `workspace/mount/backends.ts`; `commands()` returns only the commands the VFS was handed |

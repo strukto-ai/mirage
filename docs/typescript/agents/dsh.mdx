@@ -9,7 +9,7 @@ icon: /images/deepseek-logo.svg
 ## Install
 
 ```bash
-npm install @struktoai/mirage-dsh @struktoai/mirage-node @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill
+npm install @struktoai/mirage-dsh @struktoai/mirage-node @struktoai/mirage-core @deepseek-ai/cordis @deepseek-ai/dsh-fs @deepseek-ai/dsh-shell @deepseek-ai/dsh-spill @deepseek-ai/dsh-subprocess @pydantic/monty redis
 ```
 
 ## Compose
@@ -259,7 +259,7 @@ A mount is not limited to the builtin VFS (`ram`, `s3`, `slack`, `redis`, ...). 
 ```ts
 import { registerVfs } from '@struktoai/mirage-node'
 
-registerVfs('acme', (config) => new AcmeVFS(config))
+registerVfs('acme', (config) => Promise.resolve(new AcmeVFS(config)))
 ```
 
 ```yaml

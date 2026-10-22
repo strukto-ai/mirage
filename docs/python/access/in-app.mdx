@@ -261,7 +261,7 @@ print(result.exit_code, await result.stdout_str())
 
 ### Streaming execution
 
-`await session.shell(line, stream=True)` returns a running `ShellExecution`. Its `id` identifies this execution; `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
+`await session.shell(line, stream=True)` returns a running `ShellExecution`. `events` yields ordered `{stream, data}` events with `stream="stdout"` or `stream="stderr"` and raw `bytes`. The event iterator has one reader. A slow consumer applies backpressure: the queue defaults to 64 KiB, configurable through workspace I/O settings, with chunks no larger than 16 KiB. It runs in the calling session, so `cd`, variable updates and other session changes behave as they do in a collected call.
 
 Consume `events` while the line runs, then await `wait()` for its final `IOResult`. That result carries the exit code and refusal; its output fields are empty because the bytes were already delivered as events. `IOResult` describes a finished result; `ShellExecution` owns the running work. The default collected call consumes these same events into its result.
 
@@ -277,7 +277,7 @@ async with execution:
     async for event in execution.events:
         await send_bytes(event.stream, event.data)
     result = await execution.wait()
-print(execution.id, result.exit_code)
+print(result.exit_code)
 ```
 
 Do not await `wait()` before consuming the events: a producer may be waiting for queue space. Call `cancel()` to request cancellation; `wait()` then raises `MirageAbortError`. Use the async context manager, or `await execution.aclose()` in `finally`, to cancel unfinished work and join its cleanup when you stop reading early. Closing an execution that has finished is safe.

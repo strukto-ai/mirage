@@ -35,9 +35,11 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | --- | --- | --- |
 | `authConfig` | from `MIRAGE_AUTH_MODE` | Token or JWT [configuration](/home/access/http#configure-authentication). |
 | `allowedHosts` | `MIRAGE_ALLOWED_HOSTS`, else loopback | `Host` names the app answers. `['*']` turns the check off, safe only behind a trusted proxy. |
-| `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set, and `null` keeps it off. |
+| `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set. |
 | `snapshotStore` | none | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
 | `stateRoot` | under `$MIRAGE_HOME` | Where live state is kept. |
+| `idleGraceSeconds` | `30` | Seconds the last workspace may be gone before `onIdleExit` is called. |
+| `pidFile` | `$MIRAGE_HOME/daemon.pid` | PID file path, exposed as `app.pidFile`. Only the daemon writes it. |
 | `onIdleExit` | a no-op | Called when the last workspace has been gone `idleGraceSeconds` (30), or on `POST /v1/shutdown`. |
 
 ## Started by the CLI
@@ -77,7 +79,7 @@ const answer = await server.handle({
 The protocol is the same on both servers. These are the differences in how this one serves it:
 
 - **No legacy `scp -O`.** Modern `scp` uses SFTP, which is served; the old SCP protocol is not.
-- **`authorized_keys` options.** Only `mirage-profile` is read, which binds the key to a [profile](/home/access/ssh#auth-optional). A key line carrying any other option (`from=`, `command=`, ...) is skipped with a warning, rather than accepted as if it had none.
+- **`authorized_keys` options.** `mirage-profile` and `mirage-account` are read: the first binds the key to a [profile](/home/access/ssh#auth-optional), the second opens only that [account](/home/access/http#accounts)'s workspaces. A key line carrying any other option (`from=`, `command=`, ...) is skipped with a warning, rather than accepted as if it had none.
 - **Terminal line limit.** 1024 bytes.
 - **One event loop.** Every workspace shares Node's loop. Shell evaluation yields between steps, but a long synchronous step in a JavaScript callback or a CPU-heavy runtime holds every workspace until it returns, so run such work in a worker.
 
