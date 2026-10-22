@@ -176,6 +176,12 @@ import { DropboxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
 
+const dropbox = new DropboxVFS({
+  clientId: process.env.DROPBOX_APP_KEY!,
+  clientSecret: process.env.DROPBOX_APP_SECRET!,
+  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
+})
+
 const ws = new Workspace({ '/dropbox': dropbox }, { mode: MountMode.READ })
 const restore = patchNodeFs(ws)
 
@@ -195,7 +201,13 @@ For tools that need a real filesystem path (CLI tools, editors, system utilities
 workspace under FUSE:
 
 ```ts
-import { DropboxVFS, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
+import { DropboxVFS, Mount, MountBackend, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const dropbox = new DropboxVFS({
+  clientId: process.env.DROPBOX_APP_KEY!,
+  clientSecret: process.env.DROPBOX_APP_SECRET!,
+  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
+})
 
 const ws = new Workspace({ '/dropbox': new Mount(dropbox, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()

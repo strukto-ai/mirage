@@ -4,7 +4,7 @@ icon: google
 description: Mount Google Docs as JSON-backed files from Node or the browser.
 ---
 
-`GDocsVFS` exposes Google Docs as `.gdoc.json` files. Reads return the document's structured content; writes update the doc in place via the Google Docs API.
+`GDocsVFS` exposes Google Docs as `.gdoc.json` files. Reads return the document's structured content; `mv` retitles and `rm` deletes a document, and the [gws CLI](/typescript/cli/gws) edits its text.
 
 Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
 
@@ -58,6 +58,6 @@ A PKCE example lives at `examples/browser/vfs/gdocs/gdocs_pkce.ts`.
 
 ## Mount mode
 
-`read`, partial write (text replacements via the Docs API).
+`read`; a `MountMode.WRITE` mount adds `mv` (retitle) and `rm` (delete). Edit content through the [gws CLI](/typescript/cli/gws).
 
 For the JSON shape and supported edits see the [Python Google Docs docs](/python/vfs/gdocs).

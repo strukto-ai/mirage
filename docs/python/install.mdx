@@ -30,8 +30,8 @@ If you only want the `mirage` CLI (not the library), there are two convenient pa
 **One-shot run with `uvx`**, no install, just runs:
 
 ```bash
-uvx mirage-ai --help
-uvx mirage-ai workspace create workspace.yaml --id demo
+uvx --from mirage-ai mirage --help
+uvx --from mirage-ai mirage workspace create workspace.yaml --id demo
 ```
 
 **Persistent install with `uv tool install`**, drops `mirage` on your PATH globally:

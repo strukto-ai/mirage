@@ -57,8 +57,7 @@ const ws = new Workspace(
 Set the per-queue capacity when creating the workspace:
 
 ```ts
-import { IOConfig } from '@struktoai/mirage-core'
-import { RAMVFS, Workspace } from '@struktoai/mirage-node'
+import { IOConfig, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
 const ws = new Workspace(
   { '/': new RAMVFS() },

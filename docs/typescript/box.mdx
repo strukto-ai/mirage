@@ -69,6 +69,7 @@ pnpm add @struktoai/mirage-node
 ```
 
 ```ts
+import fs from 'node:fs/promises'
 import { BoxVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const box = new BoxVFS({
@@ -124,6 +125,8 @@ import { BoxVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-nod
 const require = createRequire(import.meta.url)
 const fs = require('fs') as typeof import('fs')
 
+const box = new BoxVFS({ accessToken: process.env.BOX_DEVELOPER_TOKEN! })
+
 const ws = new Workspace({ '/box': box }, { mode: MountMode.READ })
 const restore = patchNodeFs(ws)
 
@@ -139,7 +142,9 @@ The async forms (`fs.promises.*` and the callbacks) are routed; a sync form like
 ## FUSE mode
 
 ```ts
-import { BoxVFS, Mount, MountMode, Workspace } from '@struktoai/mirage-node'
+import { BoxVFS, Mount, MountBackend, MountMode, Workspace } from '@struktoai/mirage-node'
+
+const box = new BoxVFS({ accessToken: process.env.BOX_DEVELOPER_TOKEN! })
 
 const ws = new Workspace({ '/box': new Mount(box, { mode: MountMode.READ, backend: MountBackend.FUSE }) })
 await ws.fuseReady()

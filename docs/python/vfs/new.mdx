@@ -11,7 +11,7 @@ A VFS maps an external system to Mirage's filesystem operations and shell comman
 
 ## Ship Your Own Backend
 
-Everything an out-of-tree backend needs is exported from the `mirage` package root, the same entry point that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+The classes an out-of-tree backend builds on (`BaseVFS`, `Accessor`, `FileStat`, `PathSpec`, `SearchQuery`, `vfs_call`, `register_vfs`) are exported from the `mirage` package root, the same entry point that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. The kits below, `DirListing`, `ListingVersion` and `mounted_path` are imported from the modules named where they appear. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
 
 ```python
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -48,7 +48,7 @@ class JiraVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat]: ...
 
     async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
+        self, path: PathSpec, *, offset: int = 0, size: int | None = None
     ) -> bytes: ...
 
     async def stat(self, path: PathSpec) -> FileStat: ...
@@ -381,8 +381,8 @@ Most of a backend is already written as a kit. Reach for one before writing a la
 
 | Kit | Module | For |
 | --- | --- | --- |
-| API client | `mirage.core.api` (`api_request`, `cursor_items`, `TokenManager`, `RetryPolicy`) | every HTTP call: one status-to-error mapping (`error_of`), retry, pagination, OAuth refresh, and the mount's session pool |
-| Hierarchy | `mirage.core.hierarchy` (`Scope`, `Slot`, `make_detect_scope`, `make_readdir`, `make_stat`, `entry_stat`, `make_read`, `DirListing`, `SearchQuery`) | an API tree of `<label>__<id>` directories: one scope table classifies every path for readdir, stat, read and search |
+| API client | `mirage.core.api.client` (`api_request`, `RetryPolicy`), `mirage.core.api.paginate` (`cursor_items`), `mirage.core.api.oauth` (`TokenManager`) | every HTTP call: one status-to-error mapping (`error_of`), retry, pagination, OAuth refresh, and the mount's session pool |
+| Hierarchy | `mirage.core.hierarchy.scope` (`Scope`, `Slot`, `make_detect_scope`), `mirage.core.hierarchy.readdir` (`make_readdir`), `mirage.core.hierarchy.stat` (`make_stat`, `entry_stat`), `mirage.core.hierarchy.read` (`make_read`), with `DirListing` and `SearchQuery` from `mirage.types` | an API tree of `<label>__<id>` directories: one scope table classifies every path for readdir, stat, read and search |
 | Object store | `mirage.core.object_store` | a flat key space (S3-style buckets, GridFS) |
 | Render | `mirage.core.render` (`json_bytes`, `jsonl_bytes`) | records rendered as the bytes the tree's files hold |
 
@@ -533,7 +533,7 @@ class MyVFS(BaseVFS):
         return await _readdir(self.accessor, path)
 
     async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
+        self, path: PathSpec, *, offset: int = 0, size: int | None = None
     ) -> bytes:
         return await _read(self.accessor, path)
 
@@ -612,7 +612,7 @@ places:
 | Before | Now |
 | --- | --- |
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
-| `read_bytes` and `read_range` | one `read(path, index, offset, size)`; set `reads_ranges = True` when it fetches only the window |
+| `read_bytes` and `read_range` | one `read(path, *, offset=0, size=None)`; set `reads_ranges = True` when it fetches only the window |
 | `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `workspace/mount/backends.py`; `commands()` returns only the commands the VFS was handed |

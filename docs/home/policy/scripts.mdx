@@ -92,7 +92,7 @@ it:
   `MIRAGE_POLICY_CTX` is reserved, and the session never sees it. It is
   the only variable Mirage passes the program: the session's variables
   stay out of its environment. A runtime may add its own, as wasi adds
-  `PYTHONHOME`, `PYTHONPATH` and `PYTHONDONTWRITEBYTECODE`.
+  `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
 - **Session:** the program starts in the session's working directory, so
   `os.getcwd()` is the session's. The session's variables are in
   `ctx["env"]`, not in `os.environ`. An `import` never loads a module from

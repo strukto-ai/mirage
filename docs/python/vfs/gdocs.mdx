@@ -105,7 +105,7 @@ vfs = GDocsVFS(config=config)
 
 async def main():
     ws = Workspace({"/gdocs": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
 
     # List structure
     r = await ws.shell("ls /gdocs/")
@@ -168,7 +168,8 @@ Standard commands available on the mounted Google Docs tree:
 | `tree`                              | Directory tree view         |
 | `basename` / `dirname` / `realpath` | Path utilities              |
 | `nl`                                | Number lines                |
-| `mv`                                | Retitle a document          |
+| `mv`                                | Retitle a document (`MountMode.WRITE`) |
+| `rm`                                | Delete a document (`MountMode.WRITE`)  |
 
 
 ## grep and rg

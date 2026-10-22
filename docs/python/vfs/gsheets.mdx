@@ -105,7 +105,7 @@ vfs = GSheetsVFS(config=config)
 
 async def main():
     ws = Workspace({"/gsheets": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
 
     # List structure
     r = await ws.shell("ls /gsheets/")
@@ -174,7 +174,8 @@ Standard commands available on the mounted Google Sheets tree:
 | `tree`                              | Directory tree view            |
 | `basename` / `dirname` / `realpath` | Path utilities                 |
 | `nl`                                | Number lines                   |
-| `mv`                                | Retitle a spreadsheet          |
+| `mv`                                | Retitle a spreadsheet (`MountMode.WRITE`) |
+| `rm`                                | Delete a spreadsheet (`MountMode.WRITE`)  |
 
 
 ## grep and rg
