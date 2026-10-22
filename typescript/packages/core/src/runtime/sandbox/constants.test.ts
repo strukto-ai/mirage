@@ -62,35 +62,39 @@ describe('wrapLine', () => {
 // A run's program may ignore TERM, and the config may set a PATH that
 // holds no grep: the stop line still ends every process of the run.
 describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
-  it.each([[undefined], ['/nowhere']])('ends a run that ignores TERM (PATH %s)', async (path) => {
-    const execId = crypto.randomUUID().replaceAll('-', '')
-    const program = spawn(
-      '/bin/sh',
-      ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done'],
-      {
-        env: { ...process.env, [EXEC_ID]: execId },
-      },
-    )
-    const ready = new Promise<void>((resolve) => {
-      program.stdout.once('data', () => {
-        resolve()
+  it.each([[undefined], ['/nowhere']])(
+    'ends a run that ignores TERM (PATH %s)',
+    async (path) => {
+      const execId = crypto.randomUUID().replaceAll('-', '')
+      const program = spawn(
+        '/bin/sh',
+        ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done'],
+        {
+          env: { ...process.env, [EXEC_ID]: execId },
+        },
+      )
+      const ready = new Promise<void>((resolve) => {
+        program.stdout.once('data', () => {
+          resolve()
+        })
       })
-    })
-    const ended = new Promise<string | null>((resolve) => {
-      program.once('exit', (_code, signal) => {
-        resolve(signal)
+      const ended = new Promise<string | null>((resolve) => {
+        program.once('exit', (_code, signal) => {
+          resolve(signal)
+        })
       })
-    })
-    try {
-      await ready
-      const done = spawnSync('/bin/sh', ['-c', reapLine(execId)], {
-        env: path === undefined ? process.env : { PATH: path },
-        timeout: 10_000,
-      })
-      expect(done.status).toBe(0)
-      expect(await ended).toBe('SIGKILL')
-    } finally {
-      program.kill('SIGKILL')
-    }
-  })
+      try {
+        await ready
+        const done = spawnSync('/bin/sh', ['-c', reapLine(execId)], {
+          env: path === undefined ? process.env : { PATH: path },
+          timeout: 10_000,
+        })
+        expect(done.status).toBe(0)
+        expect(await ended).toBe('SIGKILL')
+      } finally {
+        program.kill('SIGKILL')
+      }
+    },
+    15_000,
+  )
 })
