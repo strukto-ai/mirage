@@ -355,6 +355,39 @@ async function mkdirOnReadOnly(
   if (!parents) throw eexist(path.virtual)
 }
 
+/**
+ * The directories above `path` a `mkdir -p` makes, outermost first: each
+ * missing name between the path and the nearest one that exists on its
+ * mount. Asked before the create, since after it a directory it made and
+ * one that was there look alike. A name that answers anything but ENOENT
+ * (a file in the chain) ends the walk, and the create names it. Mirrors
+ * Python's `_made_above`.
+ */
+async function madeAbove(
+  stat: (path: PathSpec) => Promise<FileStat>,
+  prefix: string,
+  path: PathSpec,
+): Promise<PathSpec[]> {
+  const base = rstripSlash(prefix)
+  const made: PathSpec[] = []
+  let node = parent(rstripSlash(path.virtual))
+  while (node.startsWith(base + '/')) {
+    const spec = PathSpec.fromStrPath(node)
+    try {
+      await stat(spec)
+    } catch (err) {
+      if (isEnoent(err)) {
+        made.push(spec)
+        node = parent(node)
+        continue
+      }
+      console.debug(`mkdir -p walk stops at ${node}: ${String(err)}`)
+    }
+    break
+  }
+  return made.reverse()
+}
+
 /** Ask a command's gate once about each distinct path an op reaches. */
 function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
   const specs = paths.filter((p): p is PathSpec => p instanceof PathSpec)
@@ -960,6 +993,10 @@ export class Dispatcher {
     const settles =
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
+    const made =
+      name === 'mkdir' && call.kwargs?.parents === true
+        ? await madeAbove(dispatchStat(this.dispatch), mount.prefix, call.path)
+        : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
     try {
       ran = call.fresh
@@ -988,6 +1025,9 @@ export class Dispatcher {
         operands(name, call.args, call.kwargs),
         answer,
       )
+    }
+    for (const dir of made) {
+      await this.changed(dir.virtual, FileChangeKind.CREATE, null, { observed: Date.now() / 1000 })
     }
     if (!CALLS.has(name)) result = this.customAnswer(call, vfs.name, result)
     // The transfer already happened, so a limit changes what the caller

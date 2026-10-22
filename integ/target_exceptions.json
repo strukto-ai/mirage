@@ -765,12 +765,6 @@
       "sharepoint-prefix": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
       "ssh": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find."
     },
-    "integ/unix/mkdir/tier2.json :: mkdir_tier2_long_aliases": {
-      "opfs": "OPFS has no permission bits, so mkdir refuses --mode there with `mkdir: --mode is not supported on this backend`; mkdir_tier2_mode_invalid still runs on opfs, because an invalid mode is refused before the backend is asked."
-    },
-    "integ/unix/mkdir/tier2.json :: mkdir_tier2_mode_applied": {
-      "opfs": "OPFS has no permission bits, so mkdir refuses --mode there with `mkdir: --mode is not supported on this backend`; mkdir_tier2_mode_invalid still runs on opfs, because an invalid mode is refused before the backend is asked."
-    },
     "integ/unix/find/empty.json :: find_empty_dir_holding_only_a_link": {
       "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file.",
       "hf-prefix": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file."

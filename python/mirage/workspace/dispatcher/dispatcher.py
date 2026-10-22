@@ -277,6 +277,41 @@ async def _mkdir_on_read_only(
         raise eexist(path)
 
 
+async def _made_above(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    prefix: str,
+    path: PathSpec,
+) -> list[PathSpec]:
+    """The directories above ``path`` a ``mkdir -p`` makes, outermost
+    first: each missing name between the path and the nearest one that
+    exists on its mount. Asked before the create, since after it a
+    directory it made and one that was there look alike. A name that
+    answers anything but ENOENT (a file in the chain) ends the walk, and
+    the create names it.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the
+            dispatcher's own stat, raising when nothing is there.
+        prefix (str): the mount prefix.
+        path (PathSpec): the directory to make.
+    """
+    base = prefix.rstrip("/")
+    made: list[PathSpec] = []
+    node = parent(path.virtual.rstrip("/"))
+    while node.startswith(base + "/"):
+        spec = PathSpec.from_str_path(node)
+        try:
+            await stat(spec)
+        except FileNotFoundError:
+            made.append(spec)
+            node = parent(node)
+            continue
+        except OSError as exc:
+            logger.debug("mkdir -p walk stops at %s: %s", node, exc)
+        break
+    return made[::-1]
+
+
 def _visible_entries(
     entries: list[str], parent: str, vis: Visibility | None
 ) -> list[str]:
@@ -1260,6 +1295,15 @@ class Dispatcher:
             name in DISPATCH_WRITE_OPS
             or (call.write and name not in POLICY_WRITE_OPS)
         ) and name not in SERIAL_WRITE_OPS
+        made = (
+            await _made_above(
+                functools.partial(self._walk_stat, caller),
+                mount.prefix,
+                call.path,
+            )
+            if name == "mkdir" and kwargs.get("parents")
+            else []
+        )
         try:
             ran = await (
                 self._fresh_call(call, mount)
@@ -1274,6 +1318,10 @@ class Dispatcher:
         if settles:
             await self._settle_write(
                 mount, name, call.path, kwargs, call.vis, created=ran
+            )
+        for made_dir in made:
+            await self._changed(
+                mount, made_dir, FileChangeKind.CREATE, observed=time.time()
             )
         if name not in CALLS:
             result = self._custom_answer(call, mount, result)

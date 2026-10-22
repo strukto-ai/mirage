@@ -69,17 +69,15 @@ async def mkdir(
         mode = parse_chmod(mode_text, DEFAULT_DIR_MODE)
         if mode is None:
             raise ValueError(f"mkdir: invalid mode '{mode_text}'")
-        if not files.answers("setattr"):
-            raise NotImplementedError(
-                "mkdir: --mode is not supported on this backend"
-            )
-    elif files.answers("setattr"):
+    else:
         # A new directory is 0777 masked by the session's umask. Only a
         # mask away from bash's default costs a setattr, because 755 is
         # what every backend already renders for a fresh directory;
         # parents made by `-p` keep that default (GNU gives them
         # `u+wx` on top of the mask, which the one backend op cannot
-        # tell apart from the named directory).
+        # tell apart from the named directory). A backend without
+        # permission bits keeps the mode in the attribute overlay, as
+        # it keeps a chmod.
         umask = session_umask(
             ctx.session.access() if ctx.session is not None else None
         )
@@ -105,7 +103,7 @@ async def mkdir(
         if failed is not None:
             errors.append(failed)
             continue
-        if mode is not None and files.answers("setattr"):
+        if mode is not None:
             # -m applies to the named directory only; any parents made by
             # -p keep the default mode (GNU).
             await files.set_attrs(path, {"mode": mode})

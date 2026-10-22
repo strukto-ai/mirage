@@ -244,10 +244,19 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
       // fine on a marker store.
       return
     }
-    // Object stores have no real directories; parents is implicit. A
-    // zero-byte marker keyed at the prefix makes the empty directory
-    // visible.
-    const pfx = kp.applyDir(driver.keyPrefixOf(accessor), path.mountPath)
+    // Object stores have no real directories. A zero-byte marker keyed at
+    // the prefix makes the empty directory visible, and `-p` keys one for
+    // every directory of the chain it makes: one only the leaf's marker
+    // implies has no time and goes with the leaf.
+    const made = [path.mountPath]
+    if (row === null && parents) {
+      for (const up of ancestors(norm(path.mountPath)).reverse()) {
+        if ((await rowAt(stat, accessor, kp.mountedPath(path, up))) !== null) break
+        made.push(up)
+      }
+    }
+    const prefix = driver.keyPrefixOf(accessor)
+    const pfx = kp.applyDir(prefix, path.mountPath)
     if (pfx === '') return
     const { conn, close } = await driver.connect(accessor)
     try {
@@ -255,7 +264,9 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
       // is: a rewrite replaces its metadata and, in a versioned bucket, adds
       // a version. A directory only a key below implies still gets one.
       if (row !== null && (await driver.head(conn, pfx)) !== null) return
-      await driver.put(conn, pfx, new Uint8Array(0))
+      for (const dir of made.reverse()) {
+        await driver.put(conn, kp.applyDir(prefix, dir), new Uint8Array(0))
+      }
     } finally {
       await close()
     }
