@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import quote
 
 import typer
+import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
@@ -89,7 +90,10 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     """
     from mirage.config import _absolutize_scripts, _interpolate_env
 
-    doc = parse_yaml(path.read_text(encoding="utf-8"))
+    try:
+        doc = parse_yaml(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        fail(f"invalid profile YAML/JSON at {path}: {e}", exit_code=2)
     if not isinstance(doc, dict):
         fail(f"profile file must hold a mapping: {path}", exit_code=2)
     try:
