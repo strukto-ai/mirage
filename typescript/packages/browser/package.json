@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-browser",
-  "version": "0.0.8-alpha.1",
+  "version": "0.0.8-alpha.2",
   "description": "A Unified Virtual Filesystem For AI Agents",
   "keywords": [
     "bash",
