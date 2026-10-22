@@ -200,6 +200,9 @@ filters live in that workflow's `changes` job, and `typescript-build` runs
 whenever a job that downloads the built packages does. `integ-ts` and
 `integ-shared-ts`, which finish last, build the packages in the job instead
 of waiting for it.
+A README under one of the filtered trees is prose that nothing loads, so a
+pull request that changes only README files selects no job; the READMEs
+under `integ/fixtures/` are fixture content and still count.
 
 ```mermaid
 flowchart LR
