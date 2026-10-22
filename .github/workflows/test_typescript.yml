@@ -23,6 +23,14 @@ permissions:
       - .github/workflows/test_typescript.yml
       - .github/actions/setup-node-pnpm/action.yml
       - .github/actions/setup-rust/action.yml
+      # README files under these trees are prose that nothing loads, so a
+      # change to one alone runs nothing. integ/fixtures/** is not listed:
+      # the fake hubs serve the READMEs there as fixture content.
+      - '!typescript/**/README.md'
+      - '!rust/**/README.md'
+      - '!examples/**/README.md'
+      - '!integ/README.md'
+      - '!integ/runtime/**/README.md'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -43,6 +51,8 @@ jobs:
       - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # A '!' rule drops a file even when another rule matched it.
+          predicate-quantifier: some-with-excludes
           filters: |
             # Keep in lockstep with `push.paths` above.
             hit:
@@ -56,6 +66,14 @@ jobs:
               - '.github/workflows/test_typescript.yml'
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-rust/action.yml'
+              # README files under these trees are prose that nothing loads, so a
+              # change to one alone runs nothing. integ/fixtures/** is not listed:
+              # the fake hubs serve the READMEs there as fixture content.
+              - '!typescript/**/README.md'
+              - '!rust/**/README.md'
+              - '!examples/**/README.md'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
 
   test:
     needs: changes
