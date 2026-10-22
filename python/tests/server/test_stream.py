@@ -90,7 +90,7 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
 
 
 @pytest.mark.asyncio
-async def test_the_final_record_waits_for_the_upload_to_end():
+async def test_the_final_record_does_not_wait_for_stdin_to_end():
     uploaded = asyncio.Event()
     incoming = asyncio.Queue()
     sent = []
@@ -117,11 +117,54 @@ async def test_the_final_record_waits_for_the_upload_to_end():
     sending = asyncio.create_task(response(scope, receive, send))
     for _ in range(50):
         await asyncio.sleep(0)
+    bodies = [m for m in sent if m["type"] == "http.response.body"]
+    assert json.loads(bodies[-1]["body"])["status"] == "done"
     assert all(message.get("more_body", True) for message in sent)
     uploaded.set()
     await asyncio.wait_for(sending, 1)
-    assert sent[-1]["more_body"] is False
-    assert json.loads(sent[-1]["body"])["status"] == "done"
+    assert sent[-1] == {
+        "type": "http.response.body",
+        "body": b"",
+        "more_body": False,
+    }
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_an_upload_that_failed_first_fails_the_final_record():
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+
+    async def bad_body():
+        raise ValueError("bad multipart body")
+
+    async def run(scope):
+        await scope.start()
+        return {"exit_code": 0}
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", run, session_id="session")
+    await table.wait(job.id)
+    upload = asyncio.create_task(bad_body())
+    await asyncio.gather(upload, return_exceptions=True)
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(), table, job, Request(scope, receive), upload, None
+    )
+    await asyncio.wait_for(response(scope, receive, send), 1)
+    bodies = [m["body"] for m in sent if m["type"] == "http.response.body"]
+    terminal = json.loads(b"".join(bodies))
+    assert terminal == {
+        "status": "failed",
+        "result": None,
+        "error": "bad multipart body",
+    }
     await table.close()
 
 
@@ -158,5 +201,6 @@ async def test_the_final_record_survives_its_eviction(monkeypatch):
     await asyncio.wait_for(sending, 1)
     with pytest.raises(KeyError):
         table.get(job.id)
-    assert json.loads(sent[-1]["body"])["status"] == "done"
+    assert json.loads(sent[-2]["body"])["status"] == "done"
+    assert sent[-1]["more_body"] is False
     await table.close()

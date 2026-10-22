@@ -43,10 +43,6 @@ describe('stream response', () => {
     record({ stream: 'stdout', data: 'YQ==' }),
     record({ status: 'done', result: {}, error: null }).subarray(0, -1),
     record({ stream: 'stdout', data: '???' }),
-    Buffer.concat([
-      record({ status: 'done', result: {}, error: null }),
-      record({ stream: 'stdout', data: 'YQ==' }),
-    ]),
     record({ status: 'done', result: {}, error: 1 }),
     Buffer.concat([
       record({ channel: 'stdout', data: 'YQ==' }),
@@ -62,6 +58,19 @@ describe('stream response', () => {
       return Promise.resolve()
     }
     await expect(consumeStream(source(), write, write)).rejects.toThrow()
+  })
+
+  it('stops reading at the completion record', async () => {
+    const pulled: string[] = []
+    async function* source() {
+      yield await Promise.resolve(record({ status: 'done', result: { exit_code: 0 }, error: null }))
+      pulled.push('past the completion')
+      await new Promise<never>(() => undefined)
+    }
+    const write = (): Promise<void> => Promise.resolve()
+    const terminal = await consumeStream(source(), write, write)
+    expect(terminal.status).toBe('done')
+    expect(pulled).toEqual([])
   })
 
   it('waits for output backpressure before pulling another record', async () => {
@@ -94,6 +103,54 @@ describe('stream response', () => {
 })
 
 describe('stream HTTP lifecycle', () => {
+  it('ends when the line does while stdin stays open', async () => {
+    let hungUp!: () => void
+    const hangUp = new Promise<void>((resolve) => {
+      hungUp = resolve
+    })
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/x-ndjson' })
+      res.write(record({ stream: 'stdout', data: 'aGkK' }))
+      res.write(record({ status: 'done', result: { kind: 'io', exit_code: 3 }, error: null }))
+      req.resume()
+      req.on('close', hungUp)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const { port } = server.address() as AddressInfo
+    const client = new DaemonClient({
+      url: `http://127.0.0.1:${String(port)}`,
+      authToken: '',
+      idleGraceSeconds: 30,
+    })
+    const stdin = new PassThrough()
+    const out: Buffer[] = []
+    const stdout = new Writable({
+      write(data: Buffer, _encoding, done) {
+        out.push(data)
+        done()
+      },
+    })
+    vi.spyOn(process, 'stdin', 'get').mockReturnValue(stdin as unknown as typeof process.stdin)
+    vi.spyOn(process, 'stdout', 'get').mockReturnValue(stdout as typeof process.stdout)
+    try {
+      expect(await streamShell(client, '/shell?stream=true', { command: 'x' }, true)).toBe(3)
+      expect(Buffer.concat(out).toString()).toBe('hi\n')
+      expect(stdin.writableEnded).toBe(false)
+      expect(stdin.destroyed).toBe(true)
+      await hangUp
+    } finally {
+      stdin.destroy()
+      vi.restoreAllMocks()
+      server.closeAllConnections()
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => {
+          if (error) reject(error)
+          else resolve()
+        }),
+      )
+    }
+  })
+
   it.each(['complete', 'cancel', 'broken'] as const)(
     'receives output while stdin is open (%s)',
     async (mode) => {

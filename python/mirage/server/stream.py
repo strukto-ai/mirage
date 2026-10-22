@@ -65,9 +65,11 @@ class ShellResponse(Response):
 
     The upload owns ASGI receive until it ends; only then does the
     disconnect watcher read it. Output and input may progress concurrently.
-    The final record waits for the rest of the upload, discarded, as the
-    foreground reply does, so the caller finishes sending before the
-    connection closes.
+    The final record goes out as soon as the job settles: stdin the line
+    did not read never ends a line, as ``ssh host cmd`` returns while its
+    input is still open. The body then ends only once the rest of the
+    upload is discarded or the caller hangs up, so the caller finishes
+    sending before the connection closes.
     """
 
     def __init__(
@@ -128,15 +130,13 @@ class ShellResponse(Response):
                 }
             )
         job = await asyncio.shield(completed)
-        upload_error: Exception | None = None
-        if self._upload is not None:
-            if self._part is not None:
-                await self._part.discard()
-            try:
-                await asyncio.shield(self._upload)
-            except Exception as exc:
-                logger.debug("streamed shell upload failed", exc_info=True)
-                upload_error = exc
+        upload_error = (
+            self._upload.exception()
+            if self._upload is not None
+            and self._upload.done()
+            and not self._upload.cancelled()
+            else None
+        )
         terminal = (
             json.dumps(
                 {
@@ -156,8 +156,18 @@ class ShellResponse(Response):
             {
                 "type": "http.response.body",
                 "body": terminal,
-                "more_body": False,
+                "more_body": True,
             }
+        )
+        if self._upload is not None:
+            if self._part is not None:
+                await self._part.discard()
+            try:
+                await asyncio.shield(self._upload)
+            except Exception:
+                logger.debug("streamed shell upload failed", exc_info=True)
+        await send(
+            {"type": "http.response.body", "body": b"", "more_body": False}
         )
 
     async def __call__(

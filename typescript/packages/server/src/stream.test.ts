@@ -130,7 +130,7 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   await table.close()
 })
 
-it('the final record waits for the upload to end', async () => {
+it('the final record does not wait for stdin to end', async () => {
   const uploaded = gate()
   const table = new ExecutionTable()
   const job = table.submit(
@@ -159,15 +159,55 @@ it('the final record waits for the upload to end', async () => {
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
+  let ended = false
   const reading = (async () => {
     for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    ended = true
   })()
   for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
-  expect(records.join('')).not.toContain('"status"')
-  uploaded.release()
-  await reading
   expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
     status: 'done',
+  })
+  expect(ended).toBe(false)
+  uploaded.release()
+  await reading
+  expect(ended).toBe(true)
+  await table.close()
+})
+
+it('an upload that failed first fails the final record', async () => {
+  const table = new ExecutionTable()
+  const job = table.submit(
+    'workspace',
+    'true',
+    async (_signal, scope) => {
+      await scope.start()
+      return { exit_code: 0 }
+    },
+    'session',
+  )
+  await table.wait(job.id)
+  let source: Readable | undefined
+  const reply = {
+    raw: new EventEmitter(),
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  const failed = Promise.resolve(new Error('bad multipart body'))
+  await failed
+  shellResponse(new ShellOutput(), table, job, reply, failed, undefined)
+  if (source === undefined) throw new Error('response did not send a stream')
+  const records: string[] = []
+  for await (const chunk of source) records.push(Buffer.from(chunk as Uint8Array).toString())
+  expect(JSON.parse(records.join(''))).toEqual({
+    status: 'failed',
+    result: null,
+    error: 'bad multipart body',
   })
   await table.close()
 })
