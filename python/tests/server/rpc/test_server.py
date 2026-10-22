@@ -46,47 +46,35 @@ async def test_shell_answers_like_session_shell():
     assert result["exit_code"] == 0
     assert result["stdout"] == "hi\n"
     assert result["stderr"] == "err\n"
-    stdin = await call(
-        rpc, "shell", {"command": "wc -c", "stdin_base64": b64("abc")}
-    )
+    stdin = await call(rpc, "shell", {"command": "wc -c", "stdin": b64("abc")})
     assert stdin["result"]["stdout"].strip() == "3"
 
 
 @pytest.mark.asyncio
 async def test_vfs_methods_mirror_the_ops():
     rpc = server()
-    assert (await call(rpc, "vfs/mkdir", {"path": "/d"}))["result"] == {}
-    await call(
-        rpc, "vfs/write", {"path": "/d/a.txt", "data_base64": b64("one\n")}
-    )
-    await call(
-        rpc, "vfs/append", {"path": "/d/a.txt", "data_base64": b64("two\n")}
-    )
+    assert (await call(rpc, "vfs/mkdir", {"path": "/d"}))["result"] is None
+    await call(rpc, "vfs/write", {"path": "/d/a.txt", "data": b64("one\n")})
+    await call(rpc, "vfs/append", {"path": "/d/a.txt", "data": b64("two\n")})
     read = (await call(rpc, "vfs/read", {"path": "/d/a.txt"}))["result"]
-    assert base64.b64decode(read["data_base64"]) == b"one\ntwo\n"
+    assert base64.b64decode(read) == b"one\ntwo\n"
     sliced = await call(
         rpc, "vfs/read", {"path": "/d/a.txt", "offset": 4, "size": 3}
     )
-    assert base64.b64decode(sliced["result"]["data_base64"]) == b"two"
-    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"][
-        "stat"
-    ]
+    assert base64.b64decode(sliced["result"]) == b"two"
+    stat = (await call(rpc, "vfs/stat", {"path": "/d/a.txt"}))["result"]
     assert stat["type"] == "file"
     assert stat["size"] == 8
     listed = (await call(rpc, "vfs/readdir", {"path": "/d"}))["result"]
-    assert [name.rsplit("/", 1)[-1] for name in listed["entries"]] == ["a.txt"]
+    assert [name.rsplit("/", 1)[-1] for name in listed] == ["a.txt"]
     await call(rpc, "vfs/rename", {"src": "/d/a.txt", "dst": "/d/b.txt"})
     await call(rpc, "vfs/truncate", {"path": "/d/b.txt", "length": 3})
-    assert (await call(rpc, "vfs/exists", {"path": "/d/b.txt"}))["result"] == {
-        "exists": True
-    }
+    assert (await call(rpc, "vfs/exists", {"path": "/d/b.txt"}))["result"]
     globbed = (await call(rpc, "glob", {"pattern": "/d/*.txt"}))["result"]
-    assert globbed == {"paths": ["/d/b.txt"]}
+    assert globbed == ["/d/b.txt"]
     await call(rpc, "vfs/unlink", {"path": "/d/b.txt"})
     await call(rpc, "vfs/rmdir", {"path": "/d"})
-    assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] == {
-        "exists": False
-    }
+    assert (await call(rpc, "vfs/exists", {"path": "/d"}))["result"] is False
 
 
 @pytest.mark.asyncio
@@ -141,16 +129,14 @@ async def test_unknown_failure_is_redacted_in_message_and_data(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_message_without_jsonrpc_2_0_runs_nothing():
     rpc = server()
-    await call(
-        rpc, "vfs/write", {"path": "/keep.txt", "data_base64": b64("x")}
-    )
+    await call(rpc, "vfs/write", {"path": "/keep.txt", "data": b64("x")})
     refused = await rpc.handle(
         {"id": 2, "method": "vfs/unlink", "params": {"path": "/keep.txt"}}
     )
     assert refused is not None
     assert refused["error"]["code"] == -32600
     kept = await call(rpc, "vfs/exists", {"path": "/keep.txt"})
-    assert kept["result"] == {"exists": True}
+    assert kept["result"] is True
 
 
 @pytest.mark.asyncio

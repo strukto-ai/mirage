@@ -1,56 +1,133 @@
 ---
 title: HTTP
-description: The Mirage server's HTTP routes, request formats, and responses.
+description: Run the Mirage server and call a workspace over HTTP.
 icon: globe
 ---
 
-Use the Mirage server's HTTP API to create workspaces, run shell lines, access files, and manage sessions and jobs. Python and TypeScript servers speak the same protocol, and the CLI is a client of it. API routes are under `/v1` except for OAuth discovery. Most responses are JSON; snapshots, generated documents, and streamed shell output use other formats.
+The Mirage server holds workspaces and serves them over HTTP. The Python and
+TypeScript servers speak the same protocol. Routes are under `/v1` and answer
+JSON.
 
-## Make a request
+## Launch a server
 
-Start a local server with the [CLI quickstart](/home/access/cli#quickstart), or connect to a server someone runs for you. If you follow the quickstart, leave its `demo` workspace running until you finish these requests; deleting the last workspace stops the CLI-started server after 30 seconds.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import uvicorn
 
-The requests below use a CLI-started local server, which creates a token file when no token is configured. For another server, use its URL and the token its operator provides. See [Auth](#auth) for the local-mode exception.
+    from mirage.server.app import build_app
 
-```bash
-TOKEN="$(cat "${MIRAGE_HOME:-$HOME/.mirage}/auth_token")"
-curl -i http://127.0.0.1:8765/v1/workspaces \
-  -H "Authorization: Bearer $TOKEN"
-```
+    uvicorn.run(build_app(), host="127.0.0.1", port=8765)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { buildApp } from '@struktoai/mirage-server'
 
-The response is `200` with a JSON list of workspaces, which may be empty. To create one and run a line in its default session:
+    await buildApp().listen({ host: '127.0.0.1', port: 8765 })
+    ```
+  </Tab>
+</Tabs>
 
-```bash
-curl -i http://127.0.0.1:8765/v1/workspaces \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"id":"http-demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
-
-curl -i http://127.0.0.1:8765/v1/workspaces/http-demo/shell \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"command":"echo hello"}'
-```
-
-Creation answers `201` with a workspace whose `id` is `http-demo`. The shell call answers `200` with `exit_code: 0` and `stdout: "hello\n"`. A nonzero `exit_code` means the line failed even if the HTTP request succeeded. The [workspace](#create-a-workspace) and [shell](#run-a-shell-line) sections describe the full contracts.
+The server answers only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
+`localhost` and `::1` by default. Add the name your clients use. Other options
+are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
+server pages.
 
 ## Auth
 
-When the server has a token configured, send it as `Authorization: Bearer <token>` on API requests. The CLI creates or reuses a local token when it starts the server without one configured. A directly started server in default `local` mode accepts requests without a token if neither an environment token nor a token file exists. `GET /v1/health` and `GET /.well-known/oauth-protected-resource` are public. See [Configure authentication](#configure-authentication) for shared tokens, JWTs, CLI login, and account access.
+Set a token in the server's environment before you launch it:
+
+```bash
+export MIRAGE_AUTH_MODE=token
+export MIRAGE_AUTH_TOKEN=my-secret
+```
+
+Clients send it on every request as `Authorization: Bearer my-secret`.
+`GET /v1/health` needs no token.
+
+Without a token, the default `local` mode accepts every request, so set one
+before anyone else can reach the server. For JWTs and per-account workspaces,
+see [Configure authentication](#configure-authentication).
+
+## Make a request
+
+Create a workspace with an in-memory mount, then run a line in it:
+
+<Tabs>
+  <Tab title="Terminal" icon="terminal">
+    ```bash
+    curl http://127.0.0.1:8765/v1/workspaces \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"id":"demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
+
+    curl http://127.0.0.1:8765/v1/workspaces/demo/shell \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"command":"echo hello"}'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import os
+
+    import httpx
+
+    headers = {"Authorization": f"Bearer {os.environ['MIRAGE_AUTH_TOKEN']}"}
+    with httpx.Client(base_url="http://127.0.0.1:8765/v1", headers=headers) as client:
+        client.post("/workspaces", json={
+            "id": "demo",
+            "config": {"mounts": {"/": {"vfs": "ram", "mode": "write"}}},
+        }).raise_for_status()
+        result = client.post("/workspaces/demo/shell", json={"command": "echo hello"}).json()
+        print(result["stdout"], end="")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const base = 'http://127.0.0.1:8765/v1'
+    const headers = {
+      Authorization: `Bearer ${process.env.MIRAGE_AUTH_TOKEN}`,
+      'Content-Type': 'application/json',
+    }
+
+    await fetch(`${base}/workspaces`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'demo', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }),
+    })
+    const res = await fetch(`${base}/workspaces/demo/shell`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ command: 'echo hello' }),
+    })
+    const result = await res.json()
+    process.stdout.write(result.stdout)
+    ```
+  </Tab>
+</Tabs>
+
+The shell call answers:
+
+```json
+{"kind": "io", "exit_code": 0, "stdout": "hello\n", "stderr": "", "refusal": null}
+```
 
 ## Errors
 
-Check the HTTP status and `Content-Type` before parsing an error response. Route errors generally include `detail` in JSON, but middleware errors such as authentication or an invalid `Host` can be plain text. Schema validation can return `422` with structured details. Limits vary by route.
+A `200` means the server ran the line, not that the line succeeded: check
+`exit_code`. An error answer is JSON with a `detail` message.
 
-A successful HTTP response does not always mean the operation succeeded: check `exit_code` for shell results, `is_error` for tools, and `status` and `error` for job details. A job can be `done` with no `error` even when its shell command fails, so also check `result.exit_code` on completed shell jobs. For a streamed shell line, check the terminal record. If you receive `401`, check that the request sent a nonempty bearer token from the intended server or login; see [Configure authentication](#configure-authentication).
-
-| Status | When |
+| Status | Means |
 | --- | --- |
-| `400` | A malformed request or a `Host` the server does not allow. |
-| `401` | A missing or rejected token when authentication is configured. |
-| `403` | A VFS call a policy or a mount mode refuses, or an account asked to shut the server down. |
-| `404` | An unknown workspace, session, job or ask, one of another account's, or a path a VFS call does not find. |
-| `409` | A taken id, an ask already answered, or a workspace whose lines did not end for a snapshot or clone. |
-| `413` | A request or upload exceeds that route's limit. |
-| `422` | A schema validation error, unknown profile, or bad mode. |
+| `400` | The request is malformed, or its host is not allowed. |
+| `401` | The token is missing or wrong. |
+| `403` | A policy or mount mode refused the call. |
+| `404` | The workspace, session, job or file does not exist. |
+| `409` | The id is taken, or the workspace is busy. |
+| `413` | The request is too large. |
+| `422` | The request body is invalid. |
 | `499` | The job was canceled. |
 | `500` | The job failed inside the server. |
 
@@ -66,33 +143,28 @@ Answers `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}`, without a token.
 
 <Badge color="green">POST</Badge> `/v1/shutdown`
 
-Asks the server to stop. The daemon the CLI starts closes its workspaces and exits; a server you run yourself stops only if you gave it `on_idle_exit` (`onIdleExit` in TypeScript).
-
-<a id="run-it" />
-
-## Run your own server
-
-The server is a FastAPI app in Python and a Fastify app in TypeScript. Run it as your own service:
-
-<CodeGroup>
-```python Python
-import uvicorn
-
-from mirage.server.app import build_app
-
-uvicorn.run(build_app(), host="127.0.0.1", port=8765)
-```
-
-```ts TypeScript
-import { buildApp } from '@struktoai/mirage-server'
-
-await buildApp().listen({ host: '127.0.0.1', port: 8765 })
-```
-</CodeGroup>
-
-It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `127.0.0.1`, `localhost` and `::1` by default, so add the name your clients use. Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` before starting it if clients should authenticate with a fixed token. In default `local` mode, a directly started server with no token configured accepts unauthenticated requests. Options are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server) server pages.
+Asks the server to stop, and answers `{"status": "shutting_down", "pid": 4242}`.
+A server you launch stops only if you gave it `on_idle_exit` (`onIdleExit` in
+TypeScript).
 
 ## Workspaces
+
+Routes that answer a workspace answer this object:
+
+<ResponseField name="id" type="string">The workspace id.</ResponseField>
+<ResponseField name="mode" type="string">The default mount mode: `read`, `write` or `exec`.</ResponseField>
+<ResponseField name="created_at" type="number">Unix time, in seconds.</ResponseField>
+<ResponseField name="sessions" type="Session[]">Its [sessions](#sessions).</ResponseField>
+<ResponseField name="mounts" type="object[]">
+  <Expandable title="mount">
+    <ResponseField name="prefix" type="string">Where it is mounted, such as `/data/`.</ResponseField>
+    <ResponseField name="vfs" type="string">The VFS, such as `s3`.</ResponseField>
+    <ResponseField name="mode" type="string">`read`, `write` or `exec`.</ResponseField>
+    <ResponseField name="description" type="string">What the agent is told about the mount.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="fuse_mountpoints" type="object">Mount prefix to local folder, for [FUSE](/home/setup/fuse) mounts.</ResponseField>
+<ResponseField name="internals" type="object | null">With `?verbose=true`: `cache_bytes`, `cache_entries`, `history_length`, `in_flight_jobs`.</ResponseField>
 
 ### Create a workspace
 
@@ -101,22 +173,18 @@ It answers only the `Host` names in `allowed_hosts` (`MIRAGE_ALLOWED_HOSTS`), `1
 <ParamField body="config" type="object" required>The workspace YAML as JSON.</ParamField>
 <ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
 
-Answers `201` and the workspace. The same id and config again answers `200` and that workspace; another config under a taken id answers `409`.
-
-```bash
-curl -i http://127.0.0.1:8765/v1/workspaces \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"id":"http-demo","config":{"mounts":{"/":{"vfs":"ram","mode":"write"}}}}'
-```
-
-Set the queue capacity in the creation payload's `config.io` block. For
-example, `{"config":{"io":{"buffer_bytes":262144},"mounts":{"/":{"vfs":"ram"}}}}`
-sets 256 KiB per queue. Shell upload/output streams and MCP on this workspace
-inherit it; there is no buffer-size query parameter.
+Answers `201` and the workspace. The same id and config again answers `200` and
+that workspace; another config under a taken id answers `409`.
 
 ### List workspaces
 
 <Badge color="blue">GET</Badge> `/v1/workspaces`
+
+Answers a summary of each workspace:
+
+```json
+[{"id": "demo", "mode": "write", "mount_count": 2, "session_count": 1, "created_at": 1792630121.06}]
+```
 
 ### Get a workspace
 
@@ -124,23 +192,27 @@ inherit it; there is no buffer-size query parameter.
 
 <ParamField query="verbose" type="boolean" default="false">Add cache and job internals.</ParamField>
 
+Answers the workspace.
+
 ### Delete a workspace
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`
 
-Closes the workspace and deletes its state.
+Closes the workspace, deletes its state, and answers `{"id": "demo", "closed_at": 1792630121.33}`.
 
 ### Close a workspace
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/close`
 
-Stops the workspace and keeps its state: creating the same id again picks up its sessions, history and disk files. RAM mounts are lost unless you snapshot first.
+Stops the workspace, keeps its state, and answers `{"id": "demo", "closed_at": 1792630121.32}`.
+Creating the same id again picks up its sessions, history and disk files. RAM
+mounts are lost unless you snapshot first.
 
 ### Cancel a workspace's lines
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/cancel`
 
-Cancels the running and queued lines of every session, from HTTP, the CLI and SSH alike, and answers `{"canceled": 2}` once they have ended. The sessions stay open.
+Cancels the running and queued lines of every session, however they came in, and answers `{"canceled": 2}` once they have ended. The sessions stay open.
 
 ### Kill a workspace's jobs
 
@@ -154,6 +226,8 @@ Kills every session's background jobs (`cmd &`) and the processes runtimes start
 
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
 <ParamField body="override" type="object">A config whose mounts replace the source's.</ParamField>
+
+Answers `201` and the new workspace.
 
 ### Snapshot a workspace
 
@@ -175,9 +249,12 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 <ParamField body="id" type="string">The new workspace's id.</ParamField>
 <ParamField body="override" type="object">A config that re-supplies the redacted credentials.</ParamField>
 
+Answers `201` and the new workspace.
+
 ## Sessions
 
 A session keeps its own working directory, environment, and history. Requests use the workspace's default session unless they specify `session_id`.
+Routes that answer a session answer `{"session_id": "agent", "cwd": "/"}`.
 
 ### Create a session
 
@@ -187,15 +264,19 @@ A session keeps its own working directory, environment, and history. Requests us
 <ParamField body="profile" type="string">A [profile](/home/policy/overview) from the workspace's `profiles`.</ParamField>
 <ParamField body="mounts" type="object">Prefix to mode (`read`, `write`, `exec`) to narrow those mounts, such as `{"/data": "read"}`.</ParamField>
 
+Answers `201` and the session.
+
 ### List sessions
 
 <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/sessions`
+
+Answers a list of sessions.
 
 ### Delete a session
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/sessions/{session_id}`
 
-Cancels its lines, kills its jobs and closes it.
+Cancels its lines, kills its jobs, closes it, and answers `{"session_id": "agent"}`.
 
 ### Cancel a session's lines
 
@@ -215,7 +296,8 @@ Kills the session's background jobs and the processes its runtimes started, and 
 
 <ParamField body="profile" type="string | null" required>A [profile](/home/policy/overview) from the workspace's `profiles`; `null` for the workspace default.</ParamField>
 
-Replaces the session's modes, hides and rules. Its cwd, env and history stay.
+Replaces the session's modes, hides and rules, and answers the session. Its cwd,
+env and history stay.
 
 ### VFS.md and SKILL.md
 
@@ -243,18 +325,63 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 <ParamField query="explain" type="boolean" default="false">Answer the line's explanation; run nothing.</ParamField>
 <ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with background or explain.</ParamField>
 
-Answers `{kind, exit_code, stdout, stderr, refusal}` when the line finishes, with the job id in `X-Mirage-Job-Id`. A dropped request cancels its job. With `explain`, only the line is read: stdin, `cwd`, `runtime` and `background` are refused.
+Answers `{kind, exit_code, stdout, stderr, refusal}` when the line ends, with
+the job id in the `X-Mirage-Job-Id` header. Closing the request cancels the
+line. With `explain`, send only `command`.
 
-To send stdin, post `multipart/form-data` with a `request` part holding the JSON body, then a `stdin` part of up to 64 MiB. Excess input cancels the line and returns `413` in collected mode, or a failed terminal record in streaming mode. The line starts when the `stdin` part begins and reads it as it arrives. A body that stops before its closing boundary cancels the line and answers `400` in collected mode. With `?background=true`, the whole upload is read before the `202`.
+**Stdin.** Post `multipart/form-data`: a `request` part with the JSON body, then
+a `stdin` part of up to 64 MiB. The line reads it as it arrives.
 
-With `?stream=true`, the response uses `application/x-ndjson` and retains the same `X-Mirage-Job-Id`. Each output record is `{"stream":"stdout","data":"..."}` or `{"stream":"stderr","data":"..."}`, with base64 bytes in `data`. Decoded chunks are at most 8 KiB; the transport applies backpressure when its configured byte queue fills (64 KiB by default). A final `{"status":"done","result":{...},"error":null}` record follows execution cleanup. The result contains the exit code and refusal metadata with empty stdout and stderr, since those bytes have already streamed. Failures and cancellation use `failed` and `canceled`, respectively. A closed stream without a final record is incomplete.
+<Tabs>
+  <Tab title="Terminal" icon="terminal">
+    ```bash
+    printf 'b\na\n' | curl http://127.0.0.1:8765/v1/workspaces/demo/shell \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -F 'request={"command":"sort"};type=application/json' \
+      -F 'stdin=@-'
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    import json
+    import os
 
-Streaming input and output can overlap. When a command finishes before stdin ends, the server discards the remaining input and waits for the closing multipart boundary before sending the terminal record. A disconnected client cancels its job and the server joins cleanup; streaming output is not retained for replay by this endpoint.
+    import httpx
 
-```bash
-curl -i http://127.0.0.1:8765/v1/workspaces/http-demo/shell \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"command": "ls / | wc -l"}'
+    headers = {"Authorization": f"Bearer {os.environ['MIRAGE_AUTH_TOKEN']}"}
+    with httpx.Client(base_url="http://127.0.0.1:8765/v1", headers=headers) as client:
+        result = client.post("/workspaces/demo/shell", files={
+            "request": (None, json.dumps({"command": "sort"}), "application/json"),
+            "stdin": ("stdin", b"b\na\n"),
+        }).json()
+        print(result["stdout"], end="")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const form = new FormData()
+    form.append('request', new Blob([JSON.stringify({ command: 'sort' })], { type: 'application/json' }))
+    form.append('stdin', new Blob(['b\na\n']))
+
+    const res = await fetch('http://127.0.0.1:8765/v1/workspaces/demo/shell', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.MIRAGE_AUTH_TOKEN}` },
+      body: form,
+    })
+    const result = await res.json()
+    process.stdout.write(result.stdout)
+    ```
+  </Tab>
+</Tabs>
+
+**Streaming.** With `?stream=true`, the answer is NDJSON: one record per output
+chunk, with base64 `data`, then a final record whose `status` is `done`,
+`failed` or `canceled`. A stream without that record was cut off.
+
+```json
+{"stream":"stdout","data":"aGVsbG8K"}
+{"stream":"stderr","data":"b29wcwo="}
+{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null},"error":null}
 ```
 
 ### Call the VFS
@@ -264,29 +391,67 @@ curl -i http://127.0.0.1:8765/v1/workspaces/http-demo/shell \
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField query="explain" type="boolean" default="false">Answer the call's explanation; run nothing.</ParamField>
 
-The body is the call's arguments, up to 4 MiB; bytes travel base64. Each call answers one field, or `{}`.
+The body is the call's arguments, up to 4 MiB. A call answers what
+[`session.vfs`](/python/access/in-app#session-vfs) returns, as JSON, and `null`
+when it returns nothing. Bytes are base64 strings, both ways.
 
-| Call | Arguments | Answers |
+**Read**
+
+| Call | Arguments | Returns |
 | --- | --- | --- |
-| `read` | `path`, `offset?`, `size?` | `data_base64` |
-| `write`, `append` | `path`, `data_base64` | `{}` |
-| `pwrite` | `path`, `data_base64`, `offset` | `{}` |
-| `stat` | `path`, `nofollow?` | `stat` |
-| `readdir` | `path` | `entries` |
-| `exists`, `is_dir`, `is_file` | `path` | `exists`, `is_dir`, `is_file` |
-| `list_files` | `path` | `files` |
-| `mkdir`, `rmdir`, `unlink`, `create` | `path` | `{}` |
-| `rename` | `src`, `dst` | `{}` |
-| `symlink` | `path`, `target` | `{}` |
-| `readlink` | `path` | `target` |
-| `setattr` | `path`, `mode?`, `uid?`, `gid?`, `atime?`, `mtime?`, `nofollow?` | `changed` |
-| `getxattr` | `path`, `name`, `nofollow?` | `value_base64` |
-| `listxattr` | `path`, `nofollow?` | `names` |
-| `setxattr` | `path`, `name`, `value_base64`, `create?`, `replace?`, `nofollow?` | `{}` |
-| `removexattr` | `path`, `name`, `nofollow?` | `{}` |
-| `truncate` | `path`, `length` | `{}` |
+| `read` | `path`, `offset?`, `size?` | `string`, the bytes |
+| `stat` | `path`, `nofollow?` | `FileStat` |
+| `readdir` | `path` | `string[]`, full paths |
+| `list_files` | `path` | `string[]`, file names only |
+| `exists` | `path` | `boolean` |
+| `is_dir` | `path` | `boolean` |
+| `is_file` | `path` | `boolean` |
 
-A failed call answers `{detail, errno}`, and a policy's refusal adds its `refusal` record. The errno picks the status: `404` for `ENOENT` and `NO_XATTR`, `403` for `EACCES`, `EPERM` and `EROFS`, `409` for `EEXIST`, `ENOTEMPTY` and `EBUSY`, `400` for `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP` and `ENOTSUP`, and `500` for anything else, such as `EIO`.
+**Write**
+
+| Call | Arguments | Returns |
+| --- | --- | --- |
+| `write` | `path`, `data` | `null` |
+| `append` | `path`, `data` | `null` |
+| `pwrite` | `path`, `data`, `offset` | `null` |
+| `truncate` | `path`, `length` | `null` |
+| `create` | `path` | `null` |
+| `mkdir` | `path` | `null` |
+| `rmdir` | `path` | `null` |
+| `unlink` | `path` | `null` |
+| `rename` | `src`, `dst` | `null` |
+
+**Links**
+
+| Call | Arguments | Returns |
+| --- | --- | --- |
+| `symlink` | `path`, `target` | `null` |
+| `readlink` | `path` | `string`, the target |
+
+**Attributes**
+
+| Call | Arguments | Returns |
+| --- | --- | --- |
+| `setattr` | `path`, `mode?`, `uid?`, `gid?`, `atime?`, `mtime?`, `nofollow?` | `object`, the fields the backend could not keep, which Mirage stores instead |
+| `getxattr` | `path`, `name`, `nofollow?` | `string`, the bytes |
+| `listxattr` | `path`, `nofollow?` | `string[]` |
+| `setxattr` | `path`, `name`, `value`, `create?`, `replace?`, `nofollow?` | `null` |
+| `removexattr` | `path`, `name`, `nofollow?` | `null` |
+
+`FileStat` has the fields listed under [`session.vfs`](/python/access/in-app#session-vfs).
+
+**Errors**
+
+A failed call answers `{detail, errno}`, plus a `refusal` record when a policy
+refused it. The errno picks the status:
+
+| Status | Errno |
+| --- | --- |
+| `400` | `ENOTDIR`, `EISDIR`, `EINVAL`, `EXDEV`, `ELOOP`, `ENOTSUP` |
+| `403` | `EACCES`, `EPERM`, `EROFS` |
+| `404` | `ENOENT`, `NO_XATTR` |
+| `409` | `EEXIST`, `ENOTEMPTY`, `EBUSY` |
+| `500` | Anything else, such as `EIO` |
 
 ### Match paths
 
@@ -295,7 +460,7 @@ A failed call answers `{detail, errno}`, and a policy's refusal adds its `refusa
 <ParamField body="pattern" type="string" required>A pathname pattern, such as `/src/**/*.py`.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-Answers `{paths}`, every path the session sees that matches.
+Answers a list of every path the session sees that matches.
 
 ### Call a tool
 
@@ -303,23 +468,25 @@ Answers `{paths}`, every path the session sees that matches.
 
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-The [agent tools](/home/access/mcp#tools); the body is the tool's input:
-
-| Tool | Required | Optional |
-| --- | --- | --- |
-| `shell` | `command` | |
-| `read` | `path` | `offset`, `limit` |
-| `write` | `path`, `content` | |
-| `edit` | `path`, `old_string`, `new_string` | `replace_all` |
-| `ls` | `path` | |
-| `grep` | `pattern`, `path` | `ignore_case`, `fixed_strings`, `include`, `context`, `files_with_matches`, `count`, `max_count` |
-| `glob` | `pattern` | `path` |
+Runs one of the [agent tools](/home/access/mcp#tools); the body is the tool's
+input.
 
 Answers `{text, is_error}`. A tool that fails is still `200`, with `is_error` set.
 
 ## Jobs
 
 Every shell line is a job: `pending`, `running`, then `done`, `failed` or `canceled`.
+Routes that answer a job answer this object:
+
+<ResponseField name="job_id" type="string">The job id.</ResponseField>
+<ResponseField name="workspace_id" type="string">Its workspace.</ResponseField>
+<ResponseField name="session_id" type="string">Its session.</ResponseField>
+<ResponseField name="command" type="string">The line.</ResponseField>
+<ResponseField name="status" type="string">`pending`, `running`, `done`, `failed` or `canceled`.</ResponseField>
+<ResponseField name="cancel_requested" type="boolean">Whether a cancel was asked for.</ResponseField>
+<ResponseField name="submitted_at, started_at, finished_at" type="number | null">Unix times, in seconds; `null` until reached.</ResponseField>
+<ResponseField name="result" type="object | null">Get and wait only: the line's [shell result](#run-a-shell-line) once it ends.</ResponseField>
+<ResponseField name="error" type="string | null">Get and wait only: why the job failed.</ResponseField>
 
 ### List jobs
 
@@ -327,9 +494,13 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 <ParamField query="workspace_id" type="string">Only this workspace's jobs.</ParamField>
 
+Answers a list of jobs, without `result` and `error`.
+
 ### Get a job
 
 <Badge color="blue">GET</Badge> `/v1/jobs/{job_id}`
+
+Answers the job.
 
 ### Wait for a job
 
@@ -337,13 +508,29 @@ Every shell line is a job: `pending`, `running`, then `done`, `failed` or `cance
 
 <ParamField body="timeout_s" type="number">Seconds to wait. A timeout answers the job as it is, without canceling it.</ParamField>
 
+Answers the job.
+
 ### Cancel a job
 
 <Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
 
+Answers `{"job_id": "exec_01a1...", "canceled": true}`.
+
 ## Asks
 
 An ask refuses the current action and records a pending decision. List pending asks, allow or deny one, then retry the refused line or VFS call in the same session; answering alone does not resume the original request. See [Asks](/home/policy/policies#asks).
+Routes that answer an ask answer this object:
+
+<ResponseField name="id" type="string">The ask id, also in the refused line's `refusal.ask_id`.</ResponseField>
+<ResponseField name="session_id" type="string">The session that asked.</ResponseField>
+<ResponseField name="command" type="string">The command, such as `rm`.</ResponseField>
+<ResponseField name="argv" type="string[]">Its arguments.</ResponseField>
+<ResponseField name="cwd" type="string">Its working directory.</ResponseField>
+<ResponseField name="paths" type="string[]">The paths it touches.</ResponseField>
+<ResponseField name="reason" type="string">The rule's reason.</ResponseField>
+<ResponseField name="outcome" type="string | null">`allow` or `deny`; `null` until answered.</ResponseField>
+<ResponseField name="scope" type="string">`once` or `session`.</ResponseField>
+<ResponseField name="note" type="string">A note left with the answer.</ResponseField>
 
 ### List asks
 
@@ -352,6 +539,8 @@ An ask refuses the current action and records a pending decision. List pending a
 <ParamField query="session_id" type="string">Only this session's asks.</ParamField>
 <ParamField query="all" type="boolean" default="false">Include settled ones.</ParamField>
 
+Answers a list of asks.
+
 ### Answer an ask
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/asks/{ask_id}`
@@ -359,59 +548,82 @@ An ask refuses the current action and records a pending decision. List pending a
 <ParamField body="answer" type="string" required>`allow` or `deny`.</ParamField>
 <ParamField body="scope" type="string" default="once">`once`, or `session` to allow every matching line in the session.</ParamField>
 
+Answers the ask, with its `outcome` set.
+
 ## Configure authentication
 
-`MIRAGE_AUTH_MODE` controls which credentials the server accepts. These settings apply to its HTTP, MCP, and RPC routes; the CLI uses the same HTTP API.
+`MIRAGE_AUTH_MODE` picks what the server accepts on its HTTP, MCP and RPC routes.
 
-| Mode | Accepts | Server configuration |
+| Mode | Accepts | Set on the server |
 | --- | --- | --- |
-| `local` (default) | A configured token or the local token file, if either exists | `MIRAGE_AUTH_TOKEN` or `~/.mirage/auth_token` (`MIRAGE_HOME` relocates it) |
-| `token` | One fixed token shared by clients | `MIRAGE_AUTH_TOKEN` |
-| `jwt` | A JWT signed with the configured key | `MIRAGE_JWT_ALG` and a fixed key (`MIRAGE_JWT_PUBKEY` or `MIRAGE_JWT_PUBKEY_FILE`) or `MIRAGE_JWT_JWKS_URL`; do not combine a fixed key with JWKS |
-
-### Local mode
-
-When the CLI starts a local server without a configured token, it creates or reuses `$MIRAGE_HOME/auth_token` (`~/.mirage/auth_token` by default). A server started directly in `local` mode accepts requests without a token if neither that file nor `MIRAGE_AUTH_TOKEN` exists. Set a token before exposing a server to other clients.
-
-### Shared token
-
-Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` in the server's environment before starting it. Clients send that value in the bearer header. The CLI reads its client-side token from `MIRAGE_TOKEN` or `auth_token` in its [configuration](/home/access/cli#config); `MIRAGE_AUTH_TOKEN` configures the server, not the client.
+| `local` (default) | The configured token or `~/.mirage/auth_token` if either exists, otherwise any request | `MIRAGE_AUTH_TOKEN` (optional) |
+| `token` | One shared token | `MIRAGE_AUTH_TOKEN` |
+| `jwt` | A signed JWT, whose `sub` is the caller's [account](#accounts) | the [JWT settings](#jwt) |
 
 ### JWT
 
-In `jwt` mode, the server verifies signatures with either a fixed key or the key set at `MIRAGE_JWT_JWKS_URL`. It caches that set and refetches it for a key id it does not hold, so a JWKS key rotation needs no server restart; replacing a fixed key does.
-
-The server accepts only the algorithm named by `MIRAGE_JWT_ALG` and requires `exp` and `sub`. It checks `iss` when `MIRAGE_JWT_ISSUER` is set. A token with `aud` must name an entry in the comma-separated `MIRAGE_JWT_AUDIENCE`. A token without `aud` needs an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that setting is present, and is refused when only an audience is configured. This lets one server accept an app's session tokens and an OAuth client's access tokens, as Clerk issues them.
-
-For example, configure the server to use an issuer's JWKS and accept both token types:
+Point the server at your issuer's keys:
 
 ```bash
 export MIRAGE_AUTH_MODE=jwt
 export MIRAGE_JWT_ALG=RS256
-export MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
-export MIRAGE_JWT_ISSUER=https://clerk.example.com
-export MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com
-export MIRAGE_JWT_AUDIENCE=client_cli
-export MIRAGE_LOGIN_CLIENT_ID=client_cli
+export MIRAGE_JWT_JWKS_URL=https://issuer.example.com/.well-known/jwks.json
+export MIRAGE_JWT_ISSUER=https://issuer.example.com
 ```
 
-### CLI login
+Every token needs `exp` and `sub`.
 
-With `MIRAGE_LOGIN_CLIENT_ID` set, `GET /.well-known/oauth-protected-resource` tells [`mirage login`](/home/access/cli#log-in) where to sign in: the issuer (`MIRAGE_JWT_ISSUER`) and the OAuth client. The CLI reads the issuer's endpoints from its `/.well-known/oauth-authorization-server`, opens the browser for sign-in, and exchanges the returned code for tokens with PKCE. This setting needs `jwt` mode and an issuer, and `MIRAGE_JWT_AUDIENCE` must list the client. Without it, the route answers `404` and `mirage login` reports that the server needs no login.
+| Setting | Does |
+| --- | --- |
+| `MIRAGE_JWT_ALG` | The one algorithm accepted, such as `RS256`. Required. |
+| `MIRAGE_JWT_JWKS_URL` | Fetch the signing keys from this URL. Rotating them needs no restart. |
+| `MIRAGE_JWT_PUBKEY`, `MIRAGE_JWT_PUBKEY_FILE` | A fixed key instead of a JWKS URL. Changing it needs a restart. |
+| `MIRAGE_JWT_ISSUER` | Require this `iss`. |
+| `MIRAGE_JWT_AUDIENCE` | The `aud` values a token may name, comma-separated. |
+| `MIRAGE_JWT_AUTHORIZED_PARTIES` | The `azp` values a token without `aud` may name, comma-separated. |
+| `MIRAGE_JWT_CLOCK_SKEW_SECONDS` | Clock difference allowed when checking times. Default `5`. |
 
-In Clerk, create an OAuth application with no client secret and PKCE enabled. Add the redirect `http://127.0.0.1/callback` (the CLI chooses a free port), allow the `offline_access` scope for a refresh token, and turn the consent screen off so a signed-in user returns directly to the CLI. The CLI refreshes access tokens as they expire and asks the user to log in again after 30 days.
+Set one of the JWKS URL or a fixed key, not both.
+
+<Accordion title="Accept both app session tokens and OAuth access tokens">
+  A token with `aud` must name an entry in `MIRAGE_JWT_AUDIENCE`. A token
+  without `aud` needs an `azp` in `MIRAGE_JWT_AUTHORIZED_PARTIES` when that is
+  set, and is refused when only an audience is set. So one server can accept an
+  app's session tokens (`azp`) and an OAuth client's access tokens (`aud`), as
+  Clerk issues them:
+
+  ```bash
+  export MIRAGE_AUTH_MODE=jwt
+  export MIRAGE_JWT_ALG=RS256
+  export MIRAGE_JWT_JWKS_URL=https://clerk.example.com/.well-known/jwks.json
+  export MIRAGE_JWT_ISSUER=https://clerk.example.com
+  export MIRAGE_JWT_AUTHORIZED_PARTIES=https://app.example.com
+  export MIRAGE_JWT_AUDIENCE=client_cli
+  ```
+
+  To let `mirage login` sign in to this server, see
+  [Log in](/home/access/cli#log-in).
+</Accordion>
 
 ### Accounts
 
-In `jwt` mode the token's `sub` identifies the caller's account. An account reaches only the workspaces it created:
+In `jwt` mode, a token's `sub` is its account, and an account reaches only the
+workspaces it created. Another account's workspace, session, job or ask answers
+`404`, like a missing one. An [SSH key](/home/access/ssh#auth-optional)
+joins an account with its `mirage-account` option.
 
-- Another account's workspace, session, job, or ask answers `404`, like a missing one. `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
-- The owner is kept under the state root. After a restart, a stored workspace reopens only for its owner. A workspace stored before the server used `jwt` mode has no owner, and no account can create its id.
-- Snapshot keys live under `accounts/<account>/` in the snapshot store.
-- `POST /v1/shutdown` answers `403`.
-
-An [SSH key](/home/access/ssh#bind-a-key-to-an-account) belongs to an account through its `mirage-account` option.
+<Accordion title="What else an account changes">
+  - `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
+  - A stored workspace reopens after a restart only for its owner. One stored
+    before the server used `jwt` mode has no owner, and no account can create
+    its id.
+  - Snapshot keys live under `accounts/<account>/` in the snapshot store.
+  - `POST /v1/shutdown` answers `403`.
+</Accordion>
 
 <Warning>
-  Accounts keep workspaces apart, not the host: a workspace config can still mount a host directory or run the `local` runtime. In `local` and `token` mode any accepted token can use every route and every workspace, including `POST /v1/shutdown`.
+  Accounts keep workspaces apart, not the host: a workspace config can still
+  mount a host directory or run the `local` runtime. In `local` and `token`
+  mode, any accepted token can use every route and every workspace, including
+  `POST /v1/shutdown`.
 </Warning>

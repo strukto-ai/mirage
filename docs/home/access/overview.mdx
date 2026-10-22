@@ -1,11 +1,9 @@
 ---
 title: Access
 sidebarTitle: Overview
-description: How agents and people reach a Mirage virtual terminal.
+description: How agents, and sometimes humans, reach a Mirage virtual terminal.
 icon: cube
 ---
-
-A Mirage virtual terminal is a workspace: one virtual terminal over your mounted backends, with sessions inside it and [profiles](/home/policy/overview) and [policies](/home/policy/overview) that decide what each agent may see and run. Its core is the Mirage library in Python and TypeScript, running in your app. Every other way in reaches that same core.
 
 <div className="my-6">
   <img noZoom src="/images/access-light.svg" alt="Every client reaches one core, the Workspace. An app calls it directly. The mirage CLI, MCP clients and RPC clients reach the server's HTTP routes. SSH clients reach its SSH server. Both servers call the Workspace." className="block dark:hidden w-full" />
@@ -20,10 +18,9 @@ A Mirage virtual terminal is a workspace: one virtual terminal over your mounted
 | [RPC](/home/access/rpc) | programs that run lines and move bytes | `/v1/workspaces/{id}/rpc`, or `mirage rpc` on stdio |
 | [CLI](/home/access/cli) | people and scripts | `mirage <verb>` |
 | [SSH](/home/access/ssh) | people and tools that speak SSH | `ssh`, `sftp`, `scp`, on the SSH port or through `mirage ssh-proxy` |
+| [FUSE](/home/setup/fuse) | editors, language servers and other host programs | a folder on the machine running Mirage |
 
 HTTP, MCP, RPC, CLI and SSH connections go through the Mirage server, a FastAPI app in [Python](/python/access/server) and a Fastify app in [TypeScript](/typescript/access/server) that speak the same protocol. It serves HTTP, and SSH on its own port when `ssh_port` is set or over HTTP through `mirage ssh-proxy`. The CLI starts the server on your machine when it needs one. In-app access reaches the workspace directly.
-
-To expose a VFS directly from your own app, see [FUSE](/home/setup/fuse).
 
 ## What each one exposes
 
@@ -47,12 +44,51 @@ Each way in exposes what its own protocol defines. A dash means the protocol has
 
 ## Sessions
 
-Server operations run in a session, with its own working directory and environment, under the [profile](/home/policy/overview) it was created with. HTTP, MCP and RPC pick the session with `?session_id=` (or `-s` on stdio), and the CLI with `-s`; each SSH login, an `sshfs` mount among them, gets a fresh session under its key's profile. Without one, a call runs in the workspace's default session, under the default profile: the one the config's `profile:` names, else the profile called `default`, else none.
+A session is one shell inside a workspace. It keeps its own working directory,
+environment variables and history, and runs under one [agent profile](/home/profiles).
+Agents in different sessions share the workspace's files but not their shell
+state.
+
+| Way in | Specify the session with |
+| --- | --- |
+| HTTP, MCP, RPC | `?session_id=` |
+| MCP or RPC over stdio | `-s` |
+| CLI | `-s` |
+| SSH, `sshfs` included | Each login opens a new session under its key's profile. |
+
+A call that specifies no session runs in the workspace's default session. Its
+profile is the one the config's `profile:` names, else the one called
+`default`, else none.
 
 ## Cancel
 
-Each way in stops a running line as its clients do: Ctrl-C in the CLI and SSH, `notifications/cancelled` in MCP, `$/cancelRequest` in RPC, and a dropped request or `DELETE /v1/jobs/{id}` over HTTP. Through the server every line runs as a job, listed by `GET /v1/jobs`, and a cancelled one ends `canceled`. To stop everything a session or a workspace is running, whichever way it came in, HTTP and the CLI cancel its lines and kill its background jobs (`mirage session cancel`, `mirage workspace kill`).
+Through the server, every line runs as a job. `GET /v1/jobs` lists them, and a cancelled one ends as `canceled`.
+
+| Way in | Cancel a running line with |
+| --- | --- |
+| CLI, SSH | Ctrl-C |
+| MCP | `notifications/cancelled` |
+| RPC | `$/cancelRequest` |
+| HTTP | A dropped request, or `DELETE /v1/jobs/{id}` |
+
+To stop a whole session or workspace, whichever way its lines came in:
+
+| Stop | HTTP | CLI |
+| --- | --- | --- |
+| A session's running lines | `POST /v1/workspaces/{id}/sessions/{session_id}/cancel` | `mirage session cancel ID S` |
+| A session's background jobs | `POST /v1/workspaces/{id}/sessions/{session_id}/kill` | `mirage session kill ID S` |
+| Every session's running lines | `POST /v1/workspaces/{id}/cancel` | `mirage workspace cancel ID` |
+| Every session's background jobs | `POST /v1/workspaces/{id}/kill` | `mirage workspace kill ID` |
 
 ## Auth
 
-When authentication is configured, HTTP requests need a bearer token except for health and OAuth discovery. The CLI reads the local token file for you; a directly started server in default local mode accepts requests without a token if none is configured. See [Auth](/home/access/http#auth). SSH logins on the SSH port use public keys instead; through `mirage ssh-proxy` they use the CLI's token. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`.
+When authentication is configured, every way in proves who is calling. `GET /v1/health` and OAuth discovery stay public.
+
+| Way in | Authenticates with |
+| --- | --- |
+| HTTP, MCP, RPC | A bearer token: `Authorization: Bearer <token>` |
+| CLI, and MCP or RPC over stdio | The CLI's local token, sent for you |
+| SSH on the SSH port | A public key |
+| SSH through `mirage ssh-proxy` | The CLI's token |
+
+A server you start directly in `local` mode, with no token configured, accepts requests without one. In `jwt` mode a token's `sub` is an [account](/home/access/http#accounts) that reaches only its own workspaces, and an SSH key names its account with `mirage-account`. See [Auth](/home/access/http#auth).

@@ -146,7 +146,7 @@ describe('the MCP endpoint over HTTP', () => {
     const url = `${base}/v1/workspaces/${await createWorkspace(base)}/mcp`
     const client = await connect(`${url}?calls=all`)
     const names = (await client.listTools()).tools.map((t) => t.name)
-    await client.callTool({ name: 'vfs_write', arguments: { path: '/a.txt', data_base64: 'aGk=' } })
+    await client.callTool({ name: 'vfs_write', arguments: { path: '/a.txt', data: 'aGk=' } })
     const read = await client.callTool({ name: 'vfs_read', arguments: { path: '/a.txt' } })
     const said = await client.callTool({
       name: 'shell',
@@ -160,7 +160,7 @@ describe('the MCP endpoint over HTTP', () => {
     const text = (result: typeof read): string =>
       (result.content as { text: string }[])[0]?.text ?? ''
     expect(names).toHaveLength(30)
-    expect(JSON.parse(text(read))).toEqual({ data_base64: 'aGk=' })
+    expect(JSON.parse(text(read))).toBe('aGk=')
     expect(JSON.parse(text(said))).toMatchObject({ outcome: 'allow' })
     expect(refused.status).toBe(400)
     expect(await refused.json()).toEqual({ detail: 'calls must be tools or all' })

@@ -4,7 +4,10 @@ description: Drive a workspace session from a program over JSON-RPC 2.0.
 icon: brackets-curly
 ---
 
-RPC is a workspace session's in-app API over [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each method is named after the call it makes: `shell` is `session.shell`, `vfs/read` is `session.vfs.read`. Use it when a program drives the virtual terminal: it moves bytes, and gets a line's stdout, stderr and exit code apart.
+RPC is a session's in-app API over [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
+Each method is named after the call it makes: `shell` is `session.shell`,
+`vfs/read` is `session.vfs.read`. Use it when a program drives the workspace and
+needs exact bytes, with stdout, stderr and the exit code apart.
 
 Every workspace on the Mirage server answers RPC at:
 
@@ -17,54 +20,76 @@ http://127.0.0.1:8765/v1/workspaces/{id}/rpc
 These examples use the `demo` workspace from the [CLI quickstart](/home/access/cli#quickstart).
 
 <Tabs>
-  <Tab title="stdio">
-    `mirage rpc` reads one message per line on stdin and writes one answer per line on stdout. It starts the server if needed and sends your token.
+  <Tab title="stdio" icon="terminal">
+    `mirage rpc` reads one message per line on stdin and writes one answer per
+    line on stdout. It starts the server if needed and sends your token.
 
     ```bash
     echo '{"jsonrpc": "2.0", "id": 1, "method": "shell", "params": {"command": "ls / | wc -l"}}' | mirage rpc -w demo
     ```
-    ```json
-    {"jsonrpc": "2.0", "id": 1, "result": {"kind": "io", "exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
-    ```
   </Tab>
-  <Tab title="HTTP">
+  <Tab title="HTTP" icon="globe">
     One message, or a batch, per `POST`. The answer is the body.
 
     ```bash
     curl -s http://127.0.0.1:8765/v1/workspaces/demo/rpc \
-      -H "Authorization: Bearer $MIRAGE_TOKEN" -H 'Content-Type: application/json' \
-      -d '{"jsonrpc": "2.0", "id": 1, "method": "vfs/stat", "params": {"path": "/data"}}'
+      -H "Authorization: Bearer $MIRAGE_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc": "2.0", "id": 1, "method": "shell", "params": {"command": "ls / | wc -l"}}'
     ```
   </Tab>
 </Tabs>
+
+Both answer:
+
+```json
+{"jsonrpc": "2.0", "id": 1, "result": {"kind": "io", "exit_code": 0, "stdout": "3\n", "stderr": "", "refusal": null}}
+```
 
 Answers come back as calls finish, so match them by `id`.
 
 ## Auth
 
-The same [authentication](/home/access/http#auth) as the HTTP API. `mirage rpc` uses the CLI's selected token, including a saved [login](/home/access/cli#log-in) for a hosted server, `MIRAGE_TOKEN`, or the local token file. A direct client sends the bearer header when the server requires authentication.
+RPC uses the same bearer token as [HTTP](/home/access/http#auth). `mirage rpc`
+sends the CLI's token for you: a saved [login](/home/access/cli#log-in),
+`MIRAGE_TOKEN`, or the local token file. A client that posts to the URL sends
+the header itself.
 
 ## Methods
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `initialize` | | `server_info`, `protocol_version`, `workspace_id`, `session_id`, `methods` |
-| `shell` | `command`, `cwd?`, `env?`, `stdin_base64?`, `explain?` | `exit_code`, `stdout`, `stderr`, `refusal` |
-| `glob` | `pattern` | `paths` |
-| `vfs/<call>` | the call's arguments, `explain?` | the call's answer |
-| `tools/<tool>` | the tool's input | `text`, `is_error` |
-| `tools/list` | | `tools`, as MCP lists them |
-| `tools/call` | `name`, `arguments` | `text`, `is_error` |
+| `initialize` | | `{server_info, protocol_version, workspace_id, session_id, methods}` |
+| `shell` | `command`, `cwd?`, `env?`, `stdin?`, `explain?` | `{kind, exit_code, stdout, stderr, refusal}` |
+| `glob` | `pattern` | `string[]`, the matching paths |
+| `vfs/<call>` | the call's arguments, `explain?` | what the call returns |
+| `tools/<tool>` | the tool's input | `{text, is_error}` |
+| `tools/list` | | `{tools}`, as MCP lists them |
+| `tools/call` | `name`, `arguments` | `{text, is_error}` |
 
-`vfs/<call>` is each of the 23 [VFS calls](/home/access/http#call-the-vfs), with the same arguments and answers as over HTTP. `explain: true` on `shell` or a VFS call answers what it would do instead of doing it; see [Explain](/home/policy/explain). `?` marks an optional param. `initialize` creates nothing and is optional: it reports the server and the workspace and session this connection is bound to. Bytes travel base64 in the `*_base64` fields, and a message is at most 4 MiB, so stream larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH. A non-zero exit is a result, not an error; a failed call's error carries its `errno` and, for a policy's refusal, its `refusal` record in `data`. The [tools](/home/access/mcp#tools) take the inputs listed under [Call a tool](/home/access/http#call-a-tool).
+- `?` marks an optional param.
+- `initialize` is optional and creates nothing: it reports the server, and the
+  workspace and session the connection uses.
+- `vfs/<call>` is each of the 23 [VFS calls](/home/access/http#call-the-vfs),
+  with the same arguments and results as HTTP. The [tools](/home/access/mcp#tools)
+  take the inputs listed on the MCP page.
+- `explain: true` on `shell` or `vfs/<call>` says what it would do and runs
+  nothing; see [Explain](/home/policy/explain).
+- Bytes, `stdin` included, are base64 strings. A message is at most 4 MiB, so
+  send larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH.
+- A line that exits non-zero is a result, not an error.
 
 ## Sessions
 
-Calls run in the workspace's default session. To use another, add `?session_id=<id>` to the URL, or `-s <id>` to `mirage rpc`. The session's [profile](/home/policy/overview) applies to every method.
+Calls run in the workspace's default session. To use another, add
+`?session_id=<id>` to the URL, or `-s <id>` to `mirage rpc`. The session's
+[agent profile](/home/profiles) applies to every method.
 
 ## Cancel
 
-Send the notification `$/cancelRequest` with the id of a running request. That request answers `-32800`, and its job ends `canceled`. A dropped HTTP request cancels its calls too.
+Send the notification `$/cancelRequest` with the id of a running request. That
+request answers `-32800`, and its job ends `canceled`. A dropped HTTP request
+cancels its calls too.
 
 ```json
 {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 7}}
@@ -72,14 +97,19 @@ Send the notification `$/cancelRequest` with the id of a running request. That r
 
 ## Errors
 
-| Code | When |
+| Code | Means |
 | --- | --- |
-| `-32700` | Not JSON. |
+| `-32700` | The message is not JSON. |
 | `-32600` | Not a JSON-RPC 2.0 request: no `"jsonrpc": "2.0"`, or no method. |
 | `-32601` | No such method. |
 | `-32602` | Bad params. |
 | `-32004` | No such path (`ENOENT`). |
 | `-32603` | Anything else, such as a refused path. |
-| `-32800` | Cancelled. |
+| `-32800` | Canceled. |
 
-A file error carries `data: {"detail": "...", "errno": "EACCES"}`.
+A file error carries its errno in `data`, plus a `refusal` record when a policy
+refused it:
+
+```json
+{"jsonrpc": "2.0", "id": 2, "error": {"code": -32004, "message": "No such file or directory", "data": {"detail": "No such file or directory", "errno": "ENOENT"}}}
+```

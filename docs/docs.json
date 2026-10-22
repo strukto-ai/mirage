@@ -62,14 +62,35 @@
             "group": "Getting Started",
             "pages": [
               "home/introduction",
-              "home/install",
-              "home/docs-mcp"
+              "home/install"
             ]
           },
           {
             "group": "Agents",
             "pages": [
-              "home/agents"
+              "home/agents",
+              {
+                "group": "Access",
+                "icon": "plug",
+                "pages": [
+                  "home/access/overview",
+                  "home/access/http",
+                  "home/access/mcp",
+                  "home/access/rpc",
+                  "home/access/ssh",
+                  "home/access/cli",
+                  {
+                    "group": "FUSE",
+                    "icon": "folder-open",
+                    "pages": [
+                      "home/setup/fuse",
+                      "home/setup/macos",
+                      "home/setup/linux",
+                      "home/setup/windows"
+                    ]
+                  }
+                ]
+              }
             ]
           },
           {
@@ -160,16 +181,6 @@
                 "pages": [
                   "home/setup/notion",
                   "home/setup/trello"
-                ]
-              },
-              {
-                "group": "FUSE",
-                "icon": "folder-open",
-                "pages": [
-                  "home/setup/fuse",
-                  "home/setup/macos",
-                  "home/setup/linux",
-                  "home/setup/windows"
                 ]
               }
             ]
@@ -282,17 +293,6 @@
             "pages": [
               "home/notifications",
               "home/notifications/support"
-            ]
-          },
-          {
-            "group": "Access",
-            "pages": [
-              "home/access/overview",
-              "home/access/http",
-              "home/access/mcp",
-              "home/access/rpc",
-              "home/access/ssh",
-              "home/access/cli"
             ]
           },
           {

@@ -232,11 +232,11 @@ describe('createMirageMcpServer', () => {
     expect(tools.get('read')).not.toHaveProperty('explain')
     const call = async (name: string, args: Record<string, unknown>) =>
       client.callTool({ name, arguments: args })
-    await call('vfs_write', { path: '/a', data_base64: 'aGk=' })
+    await call('vfs_write', { path: '/a', data: 'aGk=' })
     const read = await call('vfs_read', { path: '/a' })
     const missing = await call('vfs_read', { path: '/nope' })
     const line = await call('shell', { command: 'rm /a', explain: true })
-    expect(JSON.parse(firstText(read.content))).toEqual({ data_base64: 'aGk=' })
+    expect(JSON.parse(firstText(read.content))).toBe('aGk=')
     expect(missing.isError).toBe(true)
     expect(JSON.parse(firstText(missing.content))).toMatchObject({ errno: 'ENOENT' })
     expect(JSON.parse(firstText(line.content))).toMatchObject({ outcome: 'allow' })

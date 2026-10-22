@@ -141,7 +141,7 @@ export class MirageRpcServer {
           methods: this.methods,
         }),
       shell: (params, signal) => this.shell(params, signal),
-      glob: async (params) => ({ paths: await this.session.glob(text(params, 'pattern')) }),
+      glob: async (params) => await this.session.glob(text(params, 'pattern')),
       ...Object.fromEntries(
         VFS_CALLS.map((call) => [`vfs/${call.name}`, (params: Params) => this.vfs(call, params)]),
       ),
@@ -289,7 +289,7 @@ export class MirageRpcServer {
       {
         ...(cwd === undefined ? {} : { cwd }),
         ...(env === undefined ? {} : { env: env as Record<string, string> }),
-        ...('stdin_base64' in params ? { stdin: bytes(params, 'stdin_base64') } : {}),
+        ...('stdin' in params ? { stdin: bytes(params, 'stdin') } : {}),
       },
       signal,
     )

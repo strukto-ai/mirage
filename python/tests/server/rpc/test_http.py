@@ -66,7 +66,7 @@ async def test_answers_a_request_and_a_batch(tmp_path):
             ],
         )
         answers = batch.json()
-        assert answers[0]["result"] == {"exists": True}
+        assert answers[0]["result"] is True
         assert answers[1]["error"]["code"] == -32601
         assert len(answers) == 2
 

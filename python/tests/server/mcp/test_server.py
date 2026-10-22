@@ -238,13 +238,13 @@ async def test_all_calls_serves_the_vfs_calls_and_explain(workspace):
     assert len(tools) == 7 + len(VFS_CALLS)
     assert "explain" in tools["shell"] and "explain" in tools["vfs_write"]
     assert "explain" not in tools["read"]
-    await call_tool(server, "vfs_write", {"path": "/a", "data_base64": "aGk="})
+    await call_tool(server, "vfs_write", {"path": "/a", "data": "aGk="})
     read = await call_tool(server, "vfs_read", {"path": "/a"})
     missing = await call_tool(server, "vfs_read", {"path": "/nope"})
     line = await call_tool(
         server, "shell", {"command": "rm /a", "explain": True}
     )
-    assert json.loads(read.content[0].text) == {"data_base64": "aGk="}
+    assert json.loads(read.content[0].text) == "aGk="
     assert missing.is_error is True
     assert json.loads(missing.content[0].text)["errno"] == "ENOENT"
     assert json.loads(line.content[0].text)["outcome"] == "allow"

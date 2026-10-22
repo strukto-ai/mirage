@@ -30,10 +30,9 @@ export const OWNER: Schema = { type: ['integer', 'string'] }
 
 /**
  * One `session.vfs` call as the remote entry points carry it: its arguments as
- * JSON schemas, the method it calls on `session.vfs` (or on
- * `session.explain.vfs` to explain it) and the key its result is answered
- * under. `<name>_base64` carries the bytes `<name>` takes. Mirrors
- * Python's `VfsCall`.
+ * JSON schemas and the method it calls on `session.vfs` (or on
+ * `session.explain.vfs` to explain it), whose return value it answers. Bytes
+ * travel as base64, both ways. Mirrors Python's `VfsCall`.
  */
 export interface VfsCall {
   /** The call's name; `vfs/<name>` on every entry point. */
@@ -44,8 +43,6 @@ export interface VfsCall {
   readonly params: Readonly<Record<string, Schema>>
   /** The arguments it cannot do without. */
   readonly required: readonly string[]
-  /** The key its result is answered under; null for a call that answers nothing. */
-  readonly answer: string | null
   /** The call on `session.vfs`, or on `session.explain.vfs`. */
   readonly run: (target: Files | VfsExplainer, a: Args) => Promise<unknown>
 }
@@ -55,10 +52,9 @@ function row(
   description: string,
   params: Readonly<Record<string, Schema>>,
   required: readonly string[],
-  answer: string | null,
   run: VfsCall['run'],
 ): VfsCall {
-  return { name, description, params, required, answer, run }
+  return { name, description, params, required, run }
 }
 
 const str = (a: Args, key: string): string => a[key] as string
@@ -89,7 +85,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
     "Read a file's bytes, from an offset.",
     { path: PATH, offset: INTEGER, size: SIZE },
     ['path'],
-    'data_base64',
     (t, a) =>
       t.read(str(a, 'path'), {
         offset: (a.offset as number | undefined) ?? 0,
@@ -99,61 +94,49 @@ export const VFS_CALLS: readonly VfsCall[] = [
   row(
     'write',
     "Write a file's bytes, replacing what it held.",
-    { path: PATH, data_base64: BYTES },
-    ['path', 'data_base64'],
-    null,
+    { path: PATH, data: BYTES },
+    ['path', 'data'],
     (t, a) => t.write(str(a, 'path'), bin(a, 'data')),
   ),
-  row(
-    'append',
-    'Append bytes to a file.',
-    { path: PATH, data_base64: BYTES },
-    ['path', 'data_base64'],
-    null,
-    (t, a) => t.append(str(a, 'path'), bin(a, 'data')),
+  row('append', 'Append bytes to a file.', { path: PATH, data: BYTES }, ['path', 'data'], (t, a) =>
+    t.append(str(a, 'path'), bin(a, 'data')),
   ),
   row(
     'pwrite',
     'Write bytes into a file at an offset.',
-    { path: PATH, data_base64: BYTES, offset: INTEGER },
-    ['path', 'data_base64', 'offset'],
-    null,
+    { path: PATH, data: BYTES, offset: INTEGER },
+    ['path', 'data', 'offset'],
     (t, a) => t.pwrite(str(a, 'path'), bin(a, 'data'), int(a, 'offset')),
   ),
-  row('stat', "A path's metadata.", { path: PATH, nofollow: FLAG }, ['path'], 'stat', (t, a) =>
+  row('stat', "A path's metadata.", { path: PATH, nofollow: FLAG }, ['path'], (t, a) =>
     'sessionId' in t
       ? t.stat(str(a, 'path'), undefined, nofollow(a))
       : t.stat(str(a, 'path'), nofollow(a)),
   ),
-  row('readdir', "A directory's entries.", PATH_ONLY, ['path'], 'entries', (t, a) =>
+  row('readdir', "A directory's entries.", PATH_ONLY, ['path'], (t, a) =>
     t.readdir(str(a, 'path')),
   ),
-  row('exists', 'Whether a path exists.', PATH_ONLY, ['path'], 'exists', (t, a) =>
-    t.exists(str(a, 'path')),
-  ),
-  row('is_dir', 'Whether a path is a directory.', PATH_ONLY, ['path'], 'is_dir', (t, a) =>
+  row('exists', 'Whether a path exists.', PATH_ONLY, ['path'], (t, a) => t.exists(str(a, 'path'))),
+  row('is_dir', 'Whether a path is a directory.', PATH_ONLY, ['path'], (t, a) =>
     t.isDir(str(a, 'path')),
   ),
-  row('is_file', 'Whether a path is a file.', PATH_ONLY, ['path'], 'is_file', (t, a) =>
+  row('is_file', 'Whether a path is a file.', PATH_ONLY, ['path'], (t, a) =>
     t.isFile(str(a, 'path')),
   ),
-  row('list_files', "The names of a directory's files.", PATH_ONLY, ['path'], 'files', (t, a) =>
+  row('list_files', "The names of a directory's files.", PATH_ONLY, ['path'], (t, a) =>
     t.listFiles(str(a, 'path')),
   ),
-  row('mkdir', 'Make a directory.', PATH_ONLY, ['path'], null, (t, a) => t.mkdir(str(a, 'path'))),
-  row('rmdir', 'Remove an empty directory.', PATH_ONLY, ['path'], null, (t, a) =>
+  row('mkdir', 'Make a directory.', PATH_ONLY, ['path'], (t, a) => t.mkdir(str(a, 'path'))),
+  row('rmdir', 'Remove an empty directory.', PATH_ONLY, ['path'], (t, a) =>
     t.rmdir(str(a, 'path')),
   ),
-  row('unlink', 'Remove a file.', PATH_ONLY, ['path'], null, (t, a) => t.unlink(str(a, 'path'))),
-  row('create', 'Create an empty file.', PATH_ONLY, ['path'], null, (t, a) =>
-    t.create(str(a, 'path')),
-  ),
+  row('unlink', 'Remove a file.', PATH_ONLY, ['path'], (t, a) => t.unlink(str(a, 'path'))),
+  row('create', 'Create an empty file.', PATH_ONLY, ['path'], (t, a) => t.create(str(a, 'path'))),
   row(
     'rename',
     'Rename a path within its mount.',
     { src: PATH, dst: PATH },
     ['src', 'dst'],
-    null,
     (t, a) => t.rename(str(a, 'src'), str(a, 'dst')),
   ),
   row(
@@ -161,10 +144,9 @@ export const VFS_CALLS: readonly VfsCall[] = [
     'Make a symbolic link at a path.',
     { path: PATH, target: TEXT },
     ['path', 'target'],
-    null,
     (t, a) => t.symlink(str(a, 'path'), str(a, 'target')),
   ),
-  row('readlink', 'Where a symbolic link points.', PATH_ONLY, ['path'], 'target', (t, a) =>
+  row('readlink', 'Where a symbolic link points.', PATH_ONLY, ['path'], (t, a) =>
     t.readlink(str(a, 'path')),
   ),
   row(
@@ -172,7 +154,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
     "Change a path's mode, owner or times.",
     { path: PATH, mode: INTEGER, uid: OWNER, gid: OWNER, atime: TEXT, mtime: TEXT, nofollow: FLAG },
     ['path'],
-    'changed',
     (t, a) => t.setattr(str(a, 'path'), attrs(a)),
   ),
   row(
@@ -180,7 +161,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
     "One extended attribute's value.",
     { path: PATH, name: TEXT, nofollow: FLAG },
     ['path', 'name'],
-    'value_base64',
     (t, a) => t.getxattr(str(a, 'path'), str(a, 'name'), nofollow(a)),
   ),
   row(
@@ -188,15 +168,13 @@ export const VFS_CALLS: readonly VfsCall[] = [
     "A path's extended attribute names.",
     { path: PATH, nofollow: FLAG },
     ['path'],
-    'names',
     (t, a) => t.listxattr(str(a, 'path'), nofollow(a)),
   ),
   row(
     'setxattr',
     'Set an extended attribute.',
-    { path: PATH, name: TEXT, value_base64: BYTES, create: FLAG, replace: FLAG, nofollow: FLAG },
-    ['path', 'name', 'value_base64'],
-    null,
+    { path: PATH, name: TEXT, value: BYTES, create: FLAG, replace: FLAG, nofollow: FLAG },
+    ['path', 'name', 'value'],
     (t, a) =>
       t.setxattr(str(a, 'path'), str(a, 'name'), bin(a, 'value'), {
         create: flag(a, 'create'),
@@ -209,7 +187,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
     'Remove an extended attribute.',
     { path: PATH, name: TEXT, nofollow: FLAG },
     ['path', 'name'],
-    null,
     (t, a) => t.removexattr(str(a, 'path'), str(a, 'name'), nofollow(a)),
   ),
   row(
@@ -217,7 +194,6 @@ export const VFS_CALLS: readonly VfsCall[] = [
     'Cut or extend a file to a length.',
     { path: PATH, length: INTEGER },
     ['path', 'length'],
-    null,
     (t, a) => t.truncate(str(a, 'path'), int(a, 'length')),
   ),
 ]

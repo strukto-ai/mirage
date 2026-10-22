@@ -11,18 +11,23 @@ such as `http://localhost:16686`.
 
 <Tabs>
   <Tab title="Python">
-    Run inside an async function or a Jupyter notebook:
-
     ```python
+    import asyncio
+
     from mirage import Workspace
     from mirage.vfs.jaeger import JaegerConfig, JaegerVFS
 
-    ws = Workspace({
-        "/jaeger": JaegerVFS(JaegerConfig(host="http://localhost:16686")),
-    })
-    result = await ws.shell("ls /jaeger/services")
-    print(await result.stdout_str(), end="")
-    await ws.close()
+
+    async def main() -> None:
+        ws = Workspace({
+            "/jaeger": JaegerVFS(JaegerConfig(host="http://localhost:16686")),
+        })
+        result = await ws.shell("ls /jaeger/services")
+        print(await result.stdout_str(), end="")
+        await ws.close()
+
+
+    asyncio.run(main())
     ```
   </Tab>
   <Tab title="TypeScript">

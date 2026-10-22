@@ -141,7 +141,7 @@ async def test_calls_all_serves_the_vfs_calls_and_explain(tmp_path):
         async with Client(f"{url}?calls=all") as client:
             names = [t.name for t in (await client.list_tools()).tools]
             await client.call_tool(
-                "vfs_write", {"path": "/a.txt", "data_base64": "aGk="}
+                "vfs_write", {"path": "/a.txt", "data": "aGk="}
             )
             read = await client.call_tool("vfs_read", {"path": "/a.txt"})
             said = await client.call_tool(
@@ -150,7 +150,7 @@ async def test_calls_all_serves_the_vfs_calls_and_explain(tmp_path):
         async with httpx.AsyncClient() as http:
             refused = await http.post(f"{url}?calls=some", json={})
     assert len(names) == 30
-    assert json.loads(read.content[0].text) == {"data_base64": "aGk="}
+    assert json.loads(read.content[0].text) == "aGk="
     assert json.loads(said.content[0].text)["outcome"] == "allow"
     assert refused.status_code == 400
     assert refused.json() == {"detail": "calls must be tools or all"}

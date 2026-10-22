@@ -130,7 +130,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
           logger.debug('vfs/%s failed', call.name, err)
           return failure(reply, err)
         }
-        return reply.send(body)
+        return reply.type('application/json; charset=utf-8').send(JSON.stringify(body))
       },
     )
   }
@@ -172,7 +172,9 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
       try {
         const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
         const session = await sessionOf(ws, req.query.session_id)
-        return await reply.send(await customAnswer(session, req.params.name, req.body))
+        return reply
+          .type('application/json; charset=utf-8')
+          .send(JSON.stringify(await customAnswer(session, req.params.name, req.body)))
       } catch (err) {
         logger.debug('vfs/%s failed', req.params.name, err)
         return failure(reply, err)
@@ -198,7 +200,7 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
         logger.debug('glob failed', err)
         return failure(reply, err)
       }
-      return reply.send({ paths })
+      return reply.type('application/json; charset=utf-8').send(JSON.stringify(paths))
     },
   )
 }

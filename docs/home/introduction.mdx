@@ -1,12 +1,22 @@
 ---
 title: Introduction
-description: Give AI agents one shell for files, tools and code.
+description: A composable, scriptable and durable virtual terminal for AI agents.
 icon: /images/mirage-icon-light.svg
 ---
 
-Connect data sources as files, add commands for your services, and choose where
-code runs. Agents work through familiar shell commands, with profiles and
-policies controlling what they can access and execute.
+Mirage is a virtual terminal for AI agents, with a unified virtual filesystem,
+virtual CLIs and a router that picks where each command runs.
+
+- **Composable.** The filesystem, CLIs, shell and compute are separate parts you
+  put together. Run the terminal in your app or a FastAPI or Fastify server, and
+  send programs to a microVM or sandbox.
+- **Scriptable.** A scriptable policy engine, written in code or as scripts, hides files per
+  agent profile, refuses commands, asks for approval, caps output and routes
+  commands to runtimes.
+- **Durable.** Each part can live in your own storage: sessions in RAM, and the
+  observer's history of every command and each shell job's output in Redis.
+
+## Architecture
 
 <img noZoom src="/images/mirage-overview-light.svg" alt="Mirage connects agents to files, tools and runtimes, with access controls and notifications" className="block dark:hidden w-full" />
 <img noZoom src="/images/mirage-overview-dark.svg" alt="Mirage connects agents to files, tools and runtimes, with access controls and notifications" className="hidden dark:block w-full" />
@@ -20,23 +30,41 @@ policies controlling what they can access and execute.
 - **[Service credentials](/home/authentication).** Connect credentials from environment variables, dotenv, AWS Secrets Manager or 1Password.
 - **[Notifications](/home/notifications).** Notify agents about external file or directory changes in the virtual filesystem.
 
+## Benefits
+
+- **Fewer tokens.** One shell interface replaces a tool per service. Across 200
+  tasks, it used 52% fewer tokens per task than MCP tools
+  ([AgentVFS](https://agentvfs.org/blogs/agentvfs-1)).
+- **Cloud search through shell commands.** `grep -r refund /knowledge/` asks the
+  backend's search API for matches instead of downloading every file. See
+  [Search](/home/integration/search).
+- **Full control.** Choose which files each agent can see and which commands it
+  can run with [agent profiles](/home/profiles) and
+  [policies](/home/policy/overview).
+
 ## Try Mirage
 
 [Install Mirage](/home/install), then create a workspace with an in-memory
-filesystem, write a file, and search it. No credentials or services are needed.
+filesystem, write a file with a POSIX-style call, and search it with the shell.
+No credentials or services are needed.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
-    Run inside an async function or a Jupyter notebook:
-
     ```python
+    import asyncio
+
     from mirage import MountMode, RAMVFS, Workspace
 
-    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell('echo "hello mirage" > /data/hello.txt')
-    result = await ws.shell("grep -n hello /data/hello.txt")
-    print(await result.stdout_str(), end="")
-    await ws.close()
+
+    async def main() -> None:
+        ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+        await ws.vfs.write("/data/hello.txt", b"hello mirage\n")
+        result = await ws.shell("grep -n hello /data/hello.txt")
+        print(await result.stdout_str(), end="")
+        await ws.close()
+
+
+    asyncio.run(main())
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -44,7 +72,7 @@ filesystem, write a file, and search it. No credentials or services are needed.
     import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    await ws.shell('echo "hello mirage" > /data/hello.txt')
+    await ws.vfs.write('/data/hello.txt', new TextEncoder().encode('hello mirage\n'))
     const result = await ws.shell('grep -n hello /data/hello.txt')
     process.stdout.write(result.stdoutText)
     await ws.close()
@@ -62,7 +90,7 @@ filesystem, write a file, and search it. No credentials or services are needed.
     EOF
 
     mirage workspace create workspace.yaml --id hello
-    mirage shell -w hello -c 'echo "hello mirage" > /data/hello.txt'
+    echo "hello mirage" | mirage vfs write /data/hello.txt -w hello
     mirage shell -w hello -c 'grep -n hello /data/hello.txt'
     ```
   </Tab>
@@ -78,7 +106,7 @@ The search prints:
 to use the same commands on your own data. Continue with the
 [Python](/python/quickstart) or [TypeScript](/typescript/quickstart) quickstart.
 
-## Use Cases
+## Example Use Cases
 
 - **Respond to changes.** React to Slack replies or GitHub pushes through file notifications.
 - **Search connected data.** Use `grep` for text search and `search` for semantic matches in vector stores.
@@ -131,6 +159,8 @@ to use the same commands on your own data. Continue with the
 </CardGroup>
 
 ## Community & Support
+
+To let your coding agent search these docs, connect it to the docs MCP server at `https://docs.mirage.strukto.ai/mcp`.
 
 <CardGroup cols={2}>
   <Card title="Need Help?" icon="circle-question" href="/home/troubleshooting">

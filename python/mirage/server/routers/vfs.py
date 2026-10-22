@@ -193,7 +193,7 @@ async def glob(
     except Exception as exc:
         logger.debug("glob failed", exc_info=True)
         return failure(exc)
-    return JSONResponse(content={"paths": list(paths)})
+    return JSONResponse(content=list(paths))
 
 
 @router.post("/vfs/read_stream")

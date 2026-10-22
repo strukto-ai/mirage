@@ -110,7 +110,7 @@ function callParams(step: Json): Json {
 async function bytes(session: Session, step: Json): Promise<Answer> {
   const params = callParams(step)
   try {
-    if (step.call === 'glob') return { paths: await session.glob(params.pattern as string) }
+    if (step.call === 'glob') return (await session.glob(params.pattern as string)) as Answer
     const call = VFS_CALL_BY_NAME.get(step.call as string)
     if (call === undefined) throw new Error(`unknown call ${String(step.call)}`)
     return (await answered(session, call, await checked(call, params), false)) as Answer

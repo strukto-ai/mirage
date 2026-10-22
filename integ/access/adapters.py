@@ -467,7 +467,7 @@ class Gate:
         async with self.server.client() as http:
             reply = await http.post(
                 f"/v1/workspaces/{self.wid}/vfs/write",
-                json={"path": self.path, "data_base64": "cmVhZHk="},
+                json={"path": self.path, "data": "cmVhZHk="},
             )
             reply.raise_for_status()
 
@@ -1211,27 +1211,27 @@ def _type(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
-LISTED = {"list_files": "files", "listxattr": "names", "glob": "paths"}
+LISTED = frozenset({"list_files", "listxattr", "glob"})
 
 
-def bytes_answer(step: dict[str, Any], wire: dict[str, Any]) -> Answer:
+def bytes_answer(step: dict[str, Any], wire: Any) -> Any:
     """One VFS call's answer as every access must give it: the call's
     JSON, a stat narrowed to its type and size and a listing sorted, or
     the errno a failure names.
 
     Args:
         step (dict[str, Any]): the case's input, naming the call.
-        wire (dict[str, Any]): the call's JSON, or ``{"errno": ...}``.
+        wire (Any): the call's JSON, or ``{"errno": ...}``.
     """
-    if "errno" in wire:
+    if isinstance(wire, dict) and "errno" in wire:
         return {"error": wire["errno"]}
     call = step["call"]
     if call == "stat":
-        return {"type": wire["stat"]["type"], "size": wire["stat"]["size"]}
+        return {"type": wire["type"], "size": wire["size"]}
     if call == "readdir":
-        return {"entries": _entries(step["path"], wire["entries"])}
+        return _entries(step["path"], wire)
     if call in LISTED:
-        return {LISTED[call]: sorted(wire[LISTED[call]])}
+        return sorted(wire)
     return wire
 
 
@@ -1457,7 +1457,7 @@ class InAppPython:
         params = call_params(step)
         try:
             if step["call"] == "glob":
-                wire = {"paths": list(await session.glob(params["pattern"]))}
+                wire = list(await session.glob(params["pattern"]))
             else:
                 call = VFS_CALL_BY_NAME[step["call"]]
                 wire = await answered(
@@ -1637,7 +1637,7 @@ class Http:
                     return bytes_answer(
                         step, wire_failure(reply.status_code, reply.json())
                     )
-                return {"data_base64": base64.b64encode(data).decode()}
+                return base64.b64encode(data).decode()
         if op in ("bytes", "explain"):
             explain = {"explain": "true"} if op == "explain" else {}
             reply = await http.post(
@@ -1821,7 +1821,7 @@ class Cli:
                 return bytes_answer(
                     step, {"errno": named.group(1) if named else err.strip()}
                 )
-            return bytes_answer(step, json.loads(out))
+            return bytes_answer(step, json.loads(out) if out.strip() else None)
         if op == "explain":
             words, stdin = (
                 (["shell", "-c", step["command"]], b"")
@@ -2078,7 +2078,7 @@ async def mcp_progress(
             async with server.client() as http:
                 reply = await http.post(
                     f"/v1/workspaces/{wid}/vfs/write",
-                    json={"path": gate, "data_base64": "cmVhZHk="},
+                    json={"path": gate, "data": "cmVhZHk="},
                 )
                 reply.raise_for_status()
         result = await asyncio.wait_for(pending, STREAM_WAIT)
@@ -2217,7 +2217,7 @@ async def rpc_case(
         return io_answer(
             rpc_result(
                 await call(
-                    "shell", {"command": step["command"], "stdin_base64": data}
+                    "shell", {"command": step["command"], "stdin": data}
                 )
             )
         )
@@ -2393,7 +2393,7 @@ class Ssh:
         call, path = step["call"], step.get("path", "")
         local = scratch / "transfer.bin"
         if call == "write":
-            local.write_bytes(base64.b64decode(step["data_base64"]))
+            local.write_bytes(base64.b64decode(step["data"]))
             if step.get("via") == "scp":
                 code, _, err = await self.run(
                     [*self.argv("scp", key), str(local), f"{login}:{path}"]
@@ -2402,7 +2402,7 @@ class Ssh:
                 code, _, err = await self.sftp(
                     login, f"put {local} {path}\n", key
                 )
-            return {} if code == 0 else _sftp_error(err)
+            return None if code == 0 else _sftp_error(err)
         if call == "read":
             local.unlink(missing_ok=True)
             if step.get("via") == "scp":
@@ -2415,9 +2415,7 @@ class Ssh:
                 )
             if code != 0:
                 return _sftp_error(err)
-            return {
-                "data_base64": base64.b64encode(local.read_bytes()).decode()
-            }
+            return base64.b64encode(local.read_bytes()).decode()
         if call == "stat":
             code, out, err = await self.sftp(login, f"ls -ln {path}\n", key)
             if code != 0:
@@ -2440,18 +2438,14 @@ class Ssh:
                 for line in out.splitlines()
                 if line.strip() and not line.startswith("sftp>")
             ]
-            return {
-                "entries": _entries(
-                    path, [n.rsplit("/", 1)[-1] for n in names]
-                )
-            }
+            return _entries(path, [n.rsplit("/", 1)[-1] for n in names])
         command = {
             "mkdir": f"mkdir {path}",
             "rename": f"rename {step.get('src')} {step.get('dst')}",
             "unlink": f"rm {path}",
         }[call]
         code, out, err = await self.sftp(login, command + "\n", key)
-        return {} if code == 0 else _sftp_error(err)
+        return None if code == 0 else _sftp_error(err)
 
     async def interrupt(self, login: str, command: str) -> str:
         process = await asyncio.create_subprocess_exec(

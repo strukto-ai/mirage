@@ -1,81 +1,68 @@
 ---
 title: Overview
-description: Expose a VFS as a local folder through FUSE.
+description: Expose a VFS as a folder on the machine running Mirage.
 icon: folder-open
 ---
 
-A local FUSE mount exposes a VFS as a folder on the machine running your
-Mirage workspace. Editors, scripts and other programs can use it like any
-other folder, even when the data lives in S3 or another remote service.
+A FUSE mount shows a VFS as a folder on the machine running Mirage, so editors,
+language servers and scripts use it like any other folder, even when the data
+lives in S3 or another service. Mount from your [Python](/python/setup/fuse) or
+[TypeScript](/typescript/setup/fuse) app, or through the CLI. To mount a
+workspace from another machine, use [SSHFS](/home/access/ssh#connect).
 
-Use it directly in your [Python](/python/setup/fuse) or
-[TypeScript](/typescript/setup/fuse) app, or configure it through the Mirage CLI.
-A server is not required when you use the SDK in your own app.
+## Support
 
-## Support matrix
-
-| OS | Python | TypeScript (Node) | Notes |
+| OS | Python | TypeScript (Node) | Setup |
 | --- | --- | --- | --- |
-| Linux | Supported | Supported | `fuse3`; multiple mounts per process |
-| macOS | Supported | Supported | macFUSE; one mount per process |
-| Windows | Experimental | Not supported | Python via [WinFsp](/home/setup/windows); write-heavy use and symlinks are not yet proven |
-| Browser | Not supported | Not supported | Use Mirage's shell and file APIs instead |
+| Linux | Supported | Supported | [Linux](/home/setup/linux) |
+| macOS | Supported, one mount per process | Supported, one mount per process | [macOS](/home/setup/macos) |
+| Windows | Experimental | Not supported | [Windows](/home/setup/windows) |
 
-### Platform differences
+A browser cannot mount a folder; use Mirage's shell and file APIs there.
 
 | | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| Unmount | `fusermount -u` or `ws.close()` | `diskutil unmount` or `ws.close()` | At process exit |
-| Files with unknown size | Full content on read | Full content on read | Size fetched when opened |
-| Mountpoint folder | Must exist | Must exist | Must not exist; created automatically |
+| Unmount | `fusermount3 -u` or closing the workspace | `diskutil unmount` or closing the workspace | When the process exits |
+| A file whose size is unknown | Reads in full | Reads in full | Size fetched when opened |
+| Mountpoint folder | Must exist | Must exist | Must not exist; created for you |
 
-## Install FUSE
+## Set up
 
-Follow the
-[Linux](/home/setup/linux), [macOS](/home/setup/macos) or
-[Windows](/home/setup/windows) setup guide.
-
-Install your SDK's FUSE binding using the
-[Python](/python/setup/fuse#install-mirage-with-the-fuse-extra) or
-[TypeScript](/typescript/setup/fuse) instructions.
+<Steps>
+  <Step title="Install FUSE for your OS">
+    Follow the [Linux](/home/setup/linux), [macOS](/home/setup/macos) or
+    [Windows](/home/setup/windows) guide.
+  </Step>
+  <Step title="Install your SDK's FUSE binding">
+    Follow the [Python](/python/setup/fuse#install-mirage-with-the-fuse-extra)
+    or [TypeScript](/typescript/setup/fuse) guide.
+  </Step>
+</Steps>
 
 ## Try it with the CLI
 
-On Linux or macOS, create a folder for the mount:
-
-```bash
-mkdir -p /tmp/mirage-data
-```
-
-Set `backend: fuse` and the local folder in your workspace config:
+Set `backend: fuse` and a local folder on a mount:
 
 ```yaml workspace.yaml
 mounts:
   /data:
     vfs: ram
-    mode: WRITE
+    mode: write
     backend: fuse
     mountpoint: /tmp/mirage-data
 ```
 
-Create the workspace, write a file through Mirage, and read it from the local folder:
+Write a file through Mirage, then read it from the folder:
 
 ```bash
+mkdir -p /tmp/mirage-data
 mirage workspace create workspace.yaml --id demo
 mirage shell -w demo -c 'echo "hello mirage" > /data/hello.txt'
 cat /tmp/mirage-data/hello.txt
 ```
 
-```text Output
-hello mirage
-```
+This prints `hello mirage`. `mirage workspace delete demo` unmounts the folder.
 
-Replace RAM with a [supported VFS](/home/setup/vfs) to expose your own data.
-The mount follows its configured access mode; a `READ` mount cannot be written to.
-Mounts configured this way are not tied to an agent session or profile.
-
-The folder is unmounted when the workspace closes. With the CLI:
-
-```bash
-mirage workspace delete demo
-```
+- Replace RAM with any [supported VFS](/home/setup/vfs) to expose your own data.
+- The folder follows the mount's mode: a `read` mount cannot be written.
+- A mount set up this way is not tied to an agent session or profile.
