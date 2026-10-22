@@ -27,6 +27,8 @@ import {
 } from './client.ts'
 import type { TokenManager } from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
+import { concat } from '../../utils/bytes.ts'
+import { sha256Hex } from '../../utils/hash.ts'
 
 // md5Checksum and headRevisionId are a file's token (driveFingerprint).
 const FIELDS =
@@ -360,16 +362,17 @@ function escapeQueryValue(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 }
 
-function multipartRelated(
+async function multipartRelated(
   metadata: unknown,
   data: Uint8Array,
   mimeType: string,
-): { body: Uint8Array; contentType: string } {
-  const boundary = crypto.randomUUID().replaceAll('-', '')
+): Promise<{ body: Uint8Array; contentType: string }> {
   const enc = new TextEncoder()
+  const meta = JSON.stringify(metadata)
+  const boundary = (await sha256Hex(concat([enc.encode(meta), data]))).slice(0, 32)
   const head = enc.encode(
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
-      `${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
+      `${meta}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,
   )
   const tail = enc.encode(`\r\n--${boundary}--\r\n`)
   const body = new Uint8Array(head.length + data.length + tail.length)
@@ -493,7 +496,11 @@ export async function uploadFile(
       )) as DriveFile
     data = await data.read(0, data.size)
   }
-  const { body, contentType } = multipartRelated({ name, parents: [parentId] }, data, mimeType)
+  const { body, contentType } = await multipartRelated(
+    { name, parents: [parentId] },
+    data,
+    mimeType,
+  )
   const url = `${driveUploadBase(tm)}/files`
   return (await googleSendBytes(tm, 'POST', url, body, contentType, {
     uploadType: 'multipart',

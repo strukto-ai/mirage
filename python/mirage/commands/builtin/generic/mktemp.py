@@ -1,4 +1,3 @@
-import random
 import string
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eexist, fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.ids import IdSource, SystemIdSource, random_below
 
 _ALPHABET = string.ascii_letters + string.digits
 DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
@@ -22,8 +22,10 @@ DEFAULT_TEMPLATE = "tmp.XXXXXXXXXX"
 ATTEMPTS = 100
 
 
-def _random_suffix(length: int) -> str:
-    return "".join(random.choices(_ALPHABET, k=length))
+def _random_suffix(ids: IdSource, length: int) -> str:
+    return "".join(
+        _ALPHABET[random_below(ids, len(_ALPHABET))] for _ in range(length)
+    )
 
 
 def _typed(value: PathSpec | None) -> str:
@@ -122,6 +124,7 @@ async def mktemp(
     env_tmpdir: str = "",
     cwd: str = "/",
     exists_fn: Callable[[PathSpec], Awaitable[bool]] | None = None,
+    ids: IdSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Create a temporary file or directory and print its name.
 
@@ -151,6 +154,8 @@ async def mktemp(
         cwd (str): the working directory a relative name resolves in.
         exists_fn (Callable[[PathSpec], Awaitable[bool]] | None): whether
             a name is taken, asked of the mount that owns it.
+        ids (IdSource | None): where the name's random characters are
+            drawn; None means the system source.
     """
     if len(texts) > 1:
         raise extra_operand_error(CommandName.MKTEMP, texts[1])
@@ -168,11 +173,12 @@ async def mktemp(
         (not texts or use_dest_dir or t) and not dest_dir and not env_tmpdir
     )
     end = len(template) - suffix_len
+    source = ids if ids is not None else SystemIdSource()
 
     def draw() -> str:
         return (
             template[: end - x_count]
-            + _random_suffix(x_count)
+            + _random_suffix(source, x_count)
             + template[end:]
         )
 
@@ -274,4 +280,5 @@ async def mktemp_generic(
         env_tmpdir=(ctx.env or {}).get("TMPDIR", ""),
         cwd=ctx.cwd.virtual,
         exists_fn=exists_fn,
+        ids=ctx.ids,
     )

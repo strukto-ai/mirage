@@ -16,6 +16,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 import { IOConfig } from '../../io/config.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { ExecutionScope } from '../execution.ts'
+import { newExecutionId } from '../../execution/context.ts'
 
 import { ParseScope } from '../../shell/parse/scope.ts'
 
@@ -143,7 +144,7 @@ import {
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { type Clock, SystemClock } from '../../utils/clock.ts'
-import { newSessionId, newWorkspaceId } from '../../utils/ids.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { resolveControlStores } from './build.ts'
@@ -193,10 +194,11 @@ export class Workspace {
   private shellParser: ShellParser | null
   private readonly shellParserFactory: (() => Promise<ShellParser>) | null
   private shellParserPromise: Promise<ShellParser> | null = null
-  readonly processes = new ProcessSupervisor(runWithExecution)
+  readonly processes: ProcessSupervisor
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
   private readonly clock: Clock
+  private readonly ids: IdSource
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
@@ -278,7 +280,12 @@ export class Workspace {
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
     // Before the mounts: the write verdict asks whether the cache keeps anything.
     this.clock = options.clock ?? new SystemClock()
-    this.wsId = options.workspaceId ?? newWorkspaceId()
+    this.ids = options.ids ?? new SystemIdSource()
+    // Minted before any mount, so a seeded source hands out the same draws in
+    // the same order on both hosts.
+    this.wsId = options.workspaceId ?? this.ids.uuid7()
+    const sessionId = options.sessionId ?? this.ids.uuid7()
+    this.processes = new ProcessSupervisor(runWithExecution, this.ids)
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,
@@ -302,6 +309,7 @@ export class Workspace {
       },
       this.io,
       this.clock,
+      this.ids,
     )
     this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
@@ -350,11 +358,7 @@ export class Workspace {
         sourceFor(seeded.managed.source)
       }
     }
-    this.sessionManager = new SessionManager(
-      options.sessionId ?? newSessionId(),
-      stores.sessions,
-      seedVars,
-    )
+    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars)
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,
@@ -1734,7 +1738,7 @@ export class Workspace {
           signal,
           executionScope,
         }),
-      options.executionScope ?? new ExecutionScope(),
+      options.executionScope ?? new ExecutionScope(undefined, newExecutionId(this.ids)),
       options.signal,
       this.io.bufferBytes,
     )
@@ -2109,6 +2113,7 @@ export class Workspace {
       // own default.
       secrets: options.secrets ?? this.declaredSecretSources,
       clock: options.clock ?? this.clock,
+      ids: options.ids ?? this.ids,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),

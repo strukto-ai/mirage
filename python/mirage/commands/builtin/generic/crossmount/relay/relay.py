@@ -39,6 +39,7 @@ from mirage.io.types import ByteSource
 from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.types import CheckFn, PathSpec
+from mirage.utils.ids import IdSource
 from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 
@@ -58,6 +59,7 @@ async def run_relay(
     argv: tuple[str, ...] = (),
     check_unlink: CheckFn | None = None,
     diff: DiffComputer | None = None,
+    ids: IdSource | None = None,
 ) -> CrossResult:
     """Run a command whose work must see every operand at once.
 
@@ -166,5 +168,6 @@ async def run_relay(
             stdin,
             argv,
             diff=diff,
+            ids=ids,
         )
     raise ValueError(f"No cross-mount composition for {cmd_name}")

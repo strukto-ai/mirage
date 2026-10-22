@@ -23,10 +23,18 @@ from mirage.cache.index.config import LookupStatus
 from mirage.context import reset_current_session, set_current_session
 from mirage.types import MountMode
 from mirage.utils.clock import ManualClock
+from mirage.utils.ids import SeededIdSource, SystemIdSource
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
 from mirage.workspace.snapshot import apply_state_dict, read_tar
+
+SEED_5_IDS = [
+    "00000000-0000-709b-a78b-37e02557f3ef",
+    "00000000-0000-709c-a45f-a2ddcbf27499",
+    "00000000-0000-709d-8a25-2d58fd25f996",
+    "00000000-0000-709e-b168-26af1c8ce177",
+]
 
 PROFILES = {"reviewer": {"paths": {"hide": ["/repo/secrets"]}}}
 
@@ -407,5 +415,89 @@ async def test_one_clock_ages_the_file_cache_and_every_mount_index():
             assert (
                 await store.list_dir(prefix)
             ).status == LookupStatus.EXPIRED
+    finally:
+        await ws.close()
+
+
+async def _replay(seed: int) -> list[str]:
+    ws = Workspace(
+        {"/data": RAMVFS(), "/more": RAMVFS()},
+        mode=MountMode.WRITE,
+        ids=SeededIdSource(seed),
+    )
+    try:
+        await ws.shell("seq 1 20 > /data/n.txt && seq 30 40 > /more/m.txt")
+        seen = [
+            ws.workspace_id,
+            ws.default_session_id,
+            ws.mount("/data").mount_id,
+        ]
+        for line in (
+            "mktemp -u /data/t.XXXXXX",
+            "shuf -n 3 /data/n.txt",
+            "shuf -i 1-9",
+            "cat /data/n.txt | shuf -n 2",
+            "shuf -n 4 /data/n.txt /more/m.txt",
+        ):
+            result = await ws.shell(line)
+            assert result.exit_code == 0, line
+            seen.append(await result.stdout_str())
+        seen.extend(
+            str(event.get("execution_id"))
+            for event in await ws.observer.events()
+        )
+        copy = await ws.copy()
+        try:
+            seen.append(copy.mount("/data").mount_id)
+        finally:
+            await copy.close()
+        return seen
+    finally:
+        await ws.close()
+
+
+def _refuse_system_draws(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(self):
+        raise AssertionError("a seeded workspace drew from the system")
+
+    monkeypatch.setattr(SystemIdSource, "uuid7", refuse)
+    monkeypatch.setattr(SystemIdSource, "random_u32", refuse)
+
+
+@pytest.mark.asyncio
+async def test_one_id_source_replays_every_id_and_draw_of_a_run(monkeypatch):
+    _refuse_system_draws(monkeypatch)
+    first = await _replay(5)
+    assert first == await _replay(5)
+    assert first != await _replay(6)
+
+
+@pytest.mark.asyncio
+async def test_a_seeded_workspace_mints_its_ids_in_a_fixed_order():
+    # Pinned by workspace.test.ts too: the workspace id, the default
+    # session id, then each mount, on both hosts.
+    ws = Workspace({"/data": RAMVFS()}, ids=SeededIdSource(5))
+    try:
+        assert [
+            ws.workspace_id,
+            ws.default_session_id,
+            ws.mount("/dev").mount_id,
+            ws.mount("/data").mount_id,
+        ] == SEED_5_IDS
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_given_id_outranks_the_id_source():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        workspace_id="ws-given",
+        session_id="sess-given",
+        ids=SeededIdSource(5),
+    )
+    try:
+        assert ws.workspace_id == "ws-given"
+        assert ws.default_session_id == "sess-given"
     finally:
         await ws.close()

@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from mirage.commands.builtin.utils.limit import guard_output
 from mirage.context import reset_admission, set_admission
+from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import (
@@ -114,7 +115,8 @@ async def run_command_tree(
         cancel=cancel,
         handed=handed,
         sink=sink,
-        execution_scope=execution_scope or ExecutionScope(),
+        execution_scope=execution_scope
+        or ExecutionScope(execution_id=new_execution_id(registry.ids)),
     )
     redirect = (
         input_substitution_redirect(ast) if command_substitution else None

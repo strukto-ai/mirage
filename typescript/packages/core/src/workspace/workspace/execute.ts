@@ -17,6 +17,7 @@ import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
+import { newExecutionId } from '../../execution/context.ts'
 import { PathSpec } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS } from '../../shell/constants.ts'
@@ -312,7 +313,8 @@ async function runLine(
     options = { ...options }
     delete options.sink
   }
-  const executionScope = options.executionScope ?? new ExecutionScope()
+  const executionScope =
+    options.executionScope ?? new ExecutionScope(undefined, newExecutionId(env.registry.ids))
   await executionScope.start()
   // A typed line writes to its session's terminal, and so do the jobs it
   // starts, as they write; the line answers with whatever reached the
@@ -765,7 +767,9 @@ async function runPreparedLine(
             jobTable: options.jobTable ?? env.jobTable,
             executeFn,
             workspaceId: env.workspaceId,
-            executionScope: options.executionScope ?? new ExecutionScope(),
+            executionScope:
+              options.executionScope ??
+              new ExecutionScope(undefined, newExecutionId(env.registry.ids)),
             registerCloser: (fn: () => Promise<void>) => {
               env.registerCloser(fn)
             },

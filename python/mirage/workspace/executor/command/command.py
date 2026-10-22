@@ -801,6 +801,7 @@ async def handle_command(
             ),
             check_unlink=make_check_unlink(registry),
             diff=registry.diff,
+            ids=registry.ids,
             follow=follow,
         )
         if find_expr_tokens is not None:

@@ -4,6 +4,7 @@ import { ProcessHandle } from './handle.ts'
 import type { ExecutionBind, ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
 import { newExecutionId } from '../execution/context.ts'
+import type { IdSource } from '../utils/ids.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessSupervisor {
@@ -17,7 +18,15 @@ export class ProcessSupervisor {
    *   records names it; the workspace hands over the caller's
    *   `runWithExecution`. Without one a runner runs as it is.
    */
-  constructor(private readonly bind: ExecutionBind = (_id, run) => run()) {}
+  /**
+   * @param bind runs a process's body under its execution id.
+   * @param ids where a process's execution id is drawn when its caller names
+   *   none; omitted means the system source.
+   */
+  constructor(
+    private readonly bind: ExecutionBind = (_id, run) => run(),
+    private readonly ids?: IdSource,
+  ) {}
 
   /**
    * Host-only: the supplied runner must admit commands before effects.
@@ -52,7 +61,7 @@ export class ProcessSupervisor {
     const handle = new ProcessHandle(
       {
         pid,
-        executionId: init.executionId ?? newExecutionId(),
+        executionId: init.executionId ?? newExecutionId(this.ids),
         parentPid: init.parentPid ?? null,
         groupId:
           (init.parentPid == null

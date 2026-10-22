@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import json
-import uuid
 from collections.abc import AsyncGenerator
 from enum import Enum
 from typing import Any
@@ -471,8 +471,10 @@ DEFAULT_UPLOAD_MIME = "application/octet-stream"
 def _multipart_related(
     metadata: dict[str, Any], data: bytes, mime_type: str
 ) -> tuple[bytes, str]:
-    boundary = uuid.uuid4().hex
     meta = json.dumps(metadata).encode()
+    digest = hashlib.sha256(meta)
+    digest.update(data)
+    boundary = digest.hexdigest()[:32]
     body = (
         (
             f"--{boundary}\r\n"

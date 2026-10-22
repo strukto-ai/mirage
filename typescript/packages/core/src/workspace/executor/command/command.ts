@@ -711,6 +711,7 @@ export async function handleCommand(
       makeCheckUnlink(registry, sessionAccess(session)),
       follow,
       registry.diff,
+      registry.ids,
       mergeSignals(signal, context.frame.abortSignal),
     )
     const csExec = new ExecutionNode({

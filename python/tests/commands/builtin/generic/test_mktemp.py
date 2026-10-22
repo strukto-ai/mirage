@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.commands.builtin.generic.mktemp import mktemp
+from mirage.utils.ids import SeededIdSource
 
 
 @pytest.mark.asyncio
@@ -75,3 +76,22 @@ async def test_mktemp_gives_up_when_every_name_is_taken():
     assert io.stderr == (
         b"mktemp: failed to create file via template 'x.XXX': File exists\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_mktemp_draws_its_name_from_the_id_source():
+    # Pinned by mktemp.test.ts too: one seed names the same file on both
+    # hosts.
+    async def refuse(path, *_):
+        raise AssertionError("-u creates nothing")
+
+    for _ in range(2):
+        out, io = await mktemp(
+            "x.XXXXXX",
+            mkdir_fn=refuse,
+            write_bytes_fn=refuse,
+            dry_run=True,
+            ids=SeededIdSource(5),
+        )
+        assert io.exit_code == 0
+        assert out == b"x.MNjKYk\n"

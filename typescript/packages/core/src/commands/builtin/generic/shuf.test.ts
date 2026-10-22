@@ -20,6 +20,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
 import { UINTMAX } from '../constants.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
+import { SeededIdSource } from '../../../utils/ids.ts'
 import {
   MAX_OUTPUT_LINES,
   MEMORY_EXHAUSTED,
@@ -557,5 +558,49 @@ describe('shuf over several files', () => {
     const [out] = result
     const text = out === null ? '' : DEC.decode(await materialize(out))
     expect(text.split('\n').sort()).toEqual(['', 'a', 'b'])
+  })
+})
+
+async function seededRun(
+  flags: Record<string, FlagValue>,
+  texts: string[],
+  stdinText = '',
+): Promise<string> {
+  const ctx = {
+    stdin: stdinText === '' ? null : stdinOf(stdinText),
+    flags,
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+    ids: new SeededIdSource(5),
+  } as Context
+  const result = await shufGeneric([], texts, ctx, stubStream, stubWrite)
+  if (result === null) throw new Error('shuf declined to handle its own operands')
+  const [out, io] = result
+  expect(io.exitCode).toBe(0)
+  return out === null ? '' : DEC.decode(await materialize(out))
+}
+
+// Pinned by tests/commands/builtin/generic/test_shuf.py too: one seed
+// shuffles the same way on both hosts.
+describe('shuf draws from the context id source', () => {
+  it.each<[Record<string, FlagValue>, string[], string]>([
+    [{ input_range: '1-1000', head_count: '5' }, [], '263\n510\n609\n684\n499\n'],
+    [
+      { input_range: '1-18446744073709551615', head_count: '3' },
+      [],
+      '11217175675983945601\n2690887512640883574\n14695936735223002468\n',
+    ],
+    [{ echo: true }, ['a', 'b', 'c', 'd', 'e'], 'd\na\nc\nb\ne\n'],
+    [{ echo: true, repeat: true, head_count: '4' }, ['a', 'b', 'c', 'd', 'e'], 'e\ne\nb\ne\n'],
+  ])('replays %j', async (flags, texts, expected) => {
+    expect(await seededRun(flags, texts)).toBe(expected)
+    expect(await seededRun(flags, texts)).toBe(expected)
+  })
+
+  it.each<[Record<string, FlagValue>, string]>([
+    [{}, '4\n1\n3\n2\n6\n5\n'],
+    [{ repeat: true, head_count: '4' }, '5\n5\n2\n5\n'],
+  ])('replays records with %j', async (flags, expected) => {
+    expect(await seededRun(flags, [], '1\n2\n3\n4\n5\n6\n')).toBe(expected)
   })
 })

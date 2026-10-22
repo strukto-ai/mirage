@@ -19,6 +19,7 @@ import pytest
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import (
+    _multipart_related,
     delete_file,
     download_file,
     download_revision,
@@ -431,3 +432,16 @@ async def test_storage_quota_reads_the_about_resource(
         assert await storage_quota(token_manager) == quota
     assert get.await_args.args[1].endswith("/about")
     assert get.await_args.kwargs["params"] == {"fields": "storageQuota"}
+
+
+def test_multipart_boundary_depends_only_on_the_parts():
+    metadata = {"name": "a.txt", "parents": ["root"]}
+    first, first_type = _multipart_related(metadata, b"payload", "text/plain")
+    again, again_type = _multipart_related(metadata, b"payload", "text/plain")
+    other, other_type = _multipart_related(metadata, b"other", "text/plain")
+    assert (first, first_type) == (again, again_type)
+    assert other_type != first_type
+    boundary = first_type.removeprefix("multipart/related; boundary=")
+    assert len(boundary) == 32
+    assert boundary.encode() not in b"payload"
+    assert first.count(f"--{boundary}".encode()) == 3
