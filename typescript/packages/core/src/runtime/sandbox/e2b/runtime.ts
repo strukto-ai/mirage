@@ -170,6 +170,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         // Process RPCs still throw this SDK class; no process-specific replacement exists.
         // eslint-disable-next-line @typescript-eslint/no-deprecated
         if (!closed && !(error instanceof sdk.NotFoundError)) throw error
+        console.debug(`e2b input after the command ended: ${String(error)}`)
       }
     }
     try {

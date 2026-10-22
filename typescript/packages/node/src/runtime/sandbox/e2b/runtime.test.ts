@@ -87,7 +87,7 @@ class FakeHandle {
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
     if (this.command === 'exit 3') {
-      await this.sent.promise
+      if (!this.eof) await Promise.race([this.sent.promise, this.closed.promise])
       await new Promise((resolve) => setTimeout(resolve, 0))
       throw new FakeExitError(3, 'partial', 'boom-err')
     }
