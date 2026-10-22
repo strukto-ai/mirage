@@ -17,7 +17,12 @@ import sys
 
 from mirage.runtime.sandbox.e2b import sdk
 
-NAMES = ("AsyncSandbox", "CommandExitException", "NotFoundException")
+NAMES = (
+    "AsyncSandbox",
+    "CommandExitException",
+    "NotFoundException",
+    "SandboxException",
+)
 
 
 def test_the_extra_resolves_as_a_unit():

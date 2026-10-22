@@ -23,7 +23,7 @@ import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
 import { wrapLine } from '../constants.ts'
-import { PTY_MARK, PTY_RAW } from './constants.ts'
+import { BROKEN_PIPE, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
@@ -163,11 +163,14 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         }
         if (!state.exited) await abortable(handle.closeStdin(), signal)
       } catch (error) {
-        // The command may exit before the input RPC arrives. Wait for its
-        // real exit status rather than reporting the missing process as I/O.
+        // The command may exit before the input RPC arrives, or close its
+        // input while it runs (head). Wait for its real exit status rather
+        // than reporting either as I/O.
+        const closed = error instanceof sdk.SandboxError && error.message.includes(BROKEN_PIPE)
         // Process RPCs still throw this SDK class; no process-specific replacement exists.
         // eslint-disable-next-line @typescript-eslint/no-deprecated
-        if (!(error instanceof sdk.NotFoundError)) throw error
+        if (!closed && !(error instanceof sdk.NotFoundError)) throw error
+        console.debug(`e2b input after the command ended: ${String(error)}`)
       }
     }
     try {
