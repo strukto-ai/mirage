@@ -144,6 +144,11 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
             (141, "", ""),
         ),
         (
+            'f() { ln -s "$1" /data/p; printf %200000s x > /data/p; }; '
+            "f >(head -c 1 > /dev/null); echo after",
+            (141, "", ""),
+        ),
+        (
             "printf 'outer\\n' | cat <(echo one) - <(echo two)",
             (0, "one\nouter\ntwo\n", ""),
         ),

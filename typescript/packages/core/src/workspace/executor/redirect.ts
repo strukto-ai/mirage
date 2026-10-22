@@ -793,6 +793,13 @@ async function runRedirects(
         try {
           await writeDescription(dispatch, session, file, data, replace)
         } catch (error) {
+          // The deferred open reached a pipe (a link to one): its closed
+          // reader is the writer's SIGPIPE, as an open would be.
+          if (error instanceof PipeClosed && file === deferred) {
+            if (forked) io.exitCode = 141
+            else unwound ??= new ExitSignal(141)
+            return false
+          }
           if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
           const [out, refusal] = await failed(redirectFailure(file.scope, error), file)
           if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])

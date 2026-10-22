@@ -124,6 +124,10 @@ it.each([
   ['printf data > >(cat > /dev/null); echo after:$?', [0, 'after:0\n', '']],
   ['head -c 200000 /dev/zero > >(head -c 1 > /dev/null); echo st:$?', [0, 'st:141\n', '']],
   ["printf '%0200000d' 0 > >(head -c 1 > /dev/null); echo after", [141, '', '']],
+  [
+    'f() { ln -s "$1" /data/p; printf %200000s x > /data/p; }; f >(head -c 1 > /dev/null); echo after',
+    [141, '', ''],
+  ],
   ["printf 'outer\\n' | cat <(echo one) - <(echo two)", [0, 'one\nouter\ntwo\n', '']],
   [
     'exec 3< <(printf a); echo st:$?',

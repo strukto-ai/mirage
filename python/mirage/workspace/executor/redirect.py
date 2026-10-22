@@ -961,10 +961,21 @@ async def _handle_redirect(
         async def write(
             file: FileDescription, data: ByteSource, *, replace: bool = False
         ) -> bool:
+            nonlocal unwound
             try:
                 await write_description(
                     dispatch, session, file, data, replace=replace
                 )
+            except PipeClosed:
+                # The deferred open reached a pipe (a link to one): its
+                # closed reader is the writer's SIGPIPE, as an open would be.
+                if file is not deferred:
+                    raise
+                if forked:
+                    io.exit_code = 141
+                elif unwound is None:
+                    unwound = ExitSignal(141)
+                return False
             except OSError as exc:
                 out, error, _ = await failed(
                     _redirect_failure(file.scope, exc), failed_file=file
