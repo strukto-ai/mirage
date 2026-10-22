@@ -955,19 +955,20 @@ def _walk_node(
 
 def _moves(node: Any, session: SessionState, home: str | None) -> bool:
     """Whether a command in a scope may move the shell's cwd, outside the
-    child shells it forks: what a loop or a function body carries into its
-    next run. Read off the tree, so a nested scope costs one more scan,
-    not another walk.
+    child shells it forks (a subshell, a substitution, a pipeline's
+    stages, a job sent to the background), as ``_walk_node`` reads them:
+    what a loop or a function body carries into its next run. Read off
+    the tree, so a nested scope costs one more scan, not another walk.
 
     Args:
         node (Any): the scope's tree-sitter node.
         session (SessionState): the session the scope begins in.
         home (str | None): the home directory a leading ``~`` names.
     """
-    stack = list(node.children)
+    stack = [node]
     while stack:
         current = stack.pop()
-        if current.type in FORK_SCOPES:
+        if current.type in FORK_SCOPES or current.type == NodeType.PIPELINE:
             continue
         if current.type == NodeType.COMMAND:
             words = _words_of(current, home)
@@ -975,7 +976,12 @@ def _moves(node: Any, session: SessionState, home: str | None) -> bool:
                 moved, lost, _ = _after_cd(words, session, False, ())
                 if lost or moved is not session:
                     return True
-        stack.extend(current.children)
+        children = current.children
+        stack.extend(
+            child
+            for child, after in zip(children, [*children[1:], None])
+            if after is None or after.type != "&"
+        )
     return False
 
 

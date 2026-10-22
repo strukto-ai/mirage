@@ -914,7 +914,8 @@ describe('prejudge', () => {
     // A cd may be skipped or fail, and a loop runs its body again from where
     // it ended: the gate judged each command only where the walk predicted it
     // stood, and admitted a read of the secret the box made from the cwd the
-    // cd never left.
+    // cd never left. A cd in a pipeline or sent to the background moves no
+    // later run of the loop.
     const box = new LineBox()
     const w = new Workspace(
       { '/data': new RAMVFS() },
@@ -924,7 +925,7 @@ describe('prejudge', () => {
         profiles: {
           r: parseSessionProfile({
             commands: {
-              allow: ['cat', 'cd', 'false', 'grep'],
+              allow: ['cat', 'cd', 'false', 'grep', 'true'],
               deny: [
                 {
                   reason: 'sealed',
@@ -955,6 +956,11 @@ describe('prejudge', () => {
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
     }
     expect(box.lines).toEqual([])
+    const line = 'for i in 1 2; do cd /data | true; cd /data & cat notes; done'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.exitCode, ran.refusal ?? null]).toEqual([0, null])
+    expect(box.lines).toEqual([line])
   })
 
   it('has a coded policy judge a whole line where it may stand', async () => {

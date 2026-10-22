@@ -716,13 +716,15 @@ function* walkNode(
 
 /**
  * Whether a command in a scope may move the shell's cwd, outside the child
- * shells it forks: what a loop or a function body carries into its next run.
- * Read off the tree, so a nested scope costs one more scan, not another walk.
+ * shells it forks (a subshell, a substitution, a pipeline's stages, a job sent
+ * to the background), as `walkNode` reads them: what a loop or a function
+ * body carries into its next run. Read off the tree, so a nested scope costs
+ * one more scan, not another walk.
  */
 function moves(node: TSNodeLike, session: SessionState, home: string | null): boolean {
-  const stack = [...node.children]
+  const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-    if (FORK_SCOPES.has(current.type)) continue
+    if (FORK_SCOPES.has(current.type) || current.type === NodeType.PIPELINE) continue
     if (current.type === NodeType.COMMAND) {
       const words = wordsOf(current, home)
       if (words.length > 0) {
@@ -730,7 +732,8 @@ function moves(node: TSNodeLike, session: SessionState, home: string | null): bo
         if (lost || moved !== session) return true
       }
     }
-    stack.push(...current.children)
+    const children = current.children
+    stack.push(...children.filter((_, index) => children[index + 1]?.type !== '&'))
   }
   return false
 }

@@ -1113,7 +1113,8 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
     # A cd may be skipped or fail, and a loop runs its body again from
     # where it ended: the gate judged each command only where the walk
     # predicted it stood, and admitted a read of the secret the box made
-    # from the cwd the cd never left.
+    # from the cwd the cd never left. A cd in a pipeline or sent to the
+    # background moves no later run of the loop.
     box = _LineBox()
     ws = Workspace(
         {"/data/": RAMVFS()},
@@ -1121,7 +1122,7 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
         profiles={
             "r": {
                 "commands": {
-                    "allow": ["cat", "cd", "false", "grep"],
+                    "allow": ["cat", "cd", "false", "grep", "true"],
                     "deny": SEALED_READS["commands"]["deny"],
                 }
             }
@@ -1145,6 +1146,11 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
             assert ran.refusal is not None and ran.refusal.reason == reason
             assert (said.outcome, said.reason) == (Outcome.DENY, reason)
         assert box.lines == []
+        line = "for i in 1 2; do cd /data | true; cd /data & cat notes; done"
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert (said.exit_code, ran.refusal) == (0, None)
+        assert box.lines == [line]
     finally:
         await ws.close()
 
