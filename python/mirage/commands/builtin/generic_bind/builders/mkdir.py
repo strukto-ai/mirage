@@ -97,14 +97,18 @@ async def mkdir(
         names = (
             await created_names(path, parents, links, probe) if verbose else []
         )
-        existed = mode is not None and await files.exists(path)
+        existed = mode is not None and (await entry_kind(files.stat, path))[0]
         failed = await make_directory(
             files.mkdir, path, parents, mount_root(ctx), links, probe
         )
         if failed is not None:
             errors.append(failed)
             continue
-        if mode is not None and not existed and await files.exists(path):
+        if (
+            mode is not None
+            and not existed
+            and (await entry_kind(files.stat, path))[0]
+        ):
             # -m applies to the named directory only, and only when this
             # mkdir made it: parents made by -p keep the default mode, a
             # directory -p found keeps its own (GNU), and a store that

@@ -53,6 +53,23 @@ class _Halting(_Unattributed):
         raise eacces(path)
 
 
+class _Unanswering(_Halting):
+    """A store that stops answering stat once its chain has failed."""
+
+    failed = False
+
+    async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
+        try:
+            return await super().mkdir(path, parents)
+        finally:
+            self.failed = parents
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        if self.failed:
+            raise RuntimeError("stat stopped answering")
+        return await super().stat(path)
+
+
 @pytest.mark.asyncio
 async def test_a_mode_lands_where_a_chmod_would():
     ws = Workspace({"/d": _Unattributed()}, mode=MountMode.WRITE)
@@ -120,5 +137,37 @@ async def test_a_chain_that_fails_partway_times_what_it_made():
             "find /d/p -newer /d/ref"
         )
         assert result.stdout == b"rc=1\n/d/p\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["mkdir -p -m 700 {}", "(umask 077; mkdir -p {})"]
+)
+async def test_a_bad_operand_leaves_the_next_one_made(line):
+    ws = Workspace({"/d": _Unattributed()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("touch /d/file")
+        result = await ws.shell(line.format("/d/file/sub /d/good"))
+        assert (result.exit_code, result.stderr) == (
+            1,
+            b"mkdir: cannot create directory '/d/file': Not a directory\n",
+        )
+        mode = await ws.shell("stat -c %a /d/good")
+        assert mode.stdout == b"700\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_create_error_outlives_timing_cleanup():
+    ws = Workspace({"/d": _Unanswering()}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell("mkdir -p /d/p/a/b")
+        assert (result.exit_code, result.stderr) == (
+            1,
+            b"mkdir: cannot create directory '/d/p/a/b': Permission denied\n",
+        )
     finally:
         await ws.close()

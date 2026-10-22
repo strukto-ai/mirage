@@ -65,6 +65,26 @@
       }
     },
     {
+      "id": "mkdir_p_m_reports_a_bad_operand_and_makes_the_next",
+      "seq": 601088,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "touch /data/pmkd10f && mkdir -p -m 700 /data/pmkd10f/sub /data/pmkd10g; echo rc=$?; stat -c %a /data/pmkd10g",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n700\n",
+        "stderr": "mkdir: cannot create directory '/data/pmkd10f': Not a directory\n"
+      },
+      "flags": [
+        "p",
+        "m"
+      ]
+    },
+    {
       "id": "mkdir_p_onto_a_file_target_is_eexist",
       "seq": 601074,
       "targets": [

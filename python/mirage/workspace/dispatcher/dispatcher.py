@@ -1313,7 +1313,10 @@ class Dispatcher:
         except BaseException:
             if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
-            await self._date_made(caller, mount, made, failed=True)
+            try:
+                await self._date_made(caller, mount, made, failed=True)
+            except Exception as exc:
+                logger.debug("timing after a failed %s: %s", name, exc)
             raise
         result = self._filter(call, ran)
         if settles:

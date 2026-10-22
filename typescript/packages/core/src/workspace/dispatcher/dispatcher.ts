@@ -43,6 +43,7 @@ import {
   erofs,
   isEnoent,
   isEnotdir,
+  isFsError,
   isMissError,
   isMissingOp,
   eloop,
@@ -1012,7 +1013,11 @@ export class Dispatcher {
           lostPaths(activeRecords()),
         )
       }
-      await this.dateMade(made, true)
+      try {
+        await this.dateMade(made, true)
+      } catch (cleanup) {
+        console.debug(`timing after a failed ${name}: ${String(cleanup)}`)
+      }
       throw err
     }
     const [answer, dst, fullArgs] = ran
@@ -3580,6 +3585,7 @@ export class Dispatcher {
           const [row] = await this.dispatch('stat', spec, [], { fresh: true })
           if (row === null || row === undefined) return
         } catch (err) {
+          if (!isFsError(err)) throw err
           console.debug(`mkdir -p stopped at ${spec.virtual}: ${String(err)}`)
           return
         }

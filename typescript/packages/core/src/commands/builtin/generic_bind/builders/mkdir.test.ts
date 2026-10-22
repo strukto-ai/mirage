@@ -55,6 +55,24 @@ class Halting extends Unattributed {
   }
 }
 
+// A store that stops answering stat once its chain has failed.
+class Unanswering extends Halting {
+  failed = false
+
+  override async mkdir(path: PathSpec, parents = false): Promise<void> {
+    try {
+      await super.mkdir(path, parents)
+    } finally {
+      this.failed = parents
+    }
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    if (this.failed) throw new Error('stat stopped answering')
+    return super.stat(path)
+  }
+}
+
 async function run(line: string, vfs: RAMVFS = new Unattributed()): Promise<[number, string]> {
   const ws = new Workspace(
     { '/d': vfs },
@@ -110,5 +128,42 @@ describe('mkdir on a store without attributes', () => {
         new Halting(),
       ),
     ).toEqual([0, 'rc=1\n/d/p\n'])
+  })
+
+  it.each(['mkdir -p -m 700 {}', '(umask 077; mkdir -p {})'])(
+    'makes the next operand after a bad one (%s)',
+    async (line) => {
+      const ws = new Workspace(
+        { '/d': new Unattributed() },
+        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      )
+      try {
+        await ws.shell('touch /d/file')
+        const result = await ws.shell(line.replace('{}', '/d/file/sub /d/good'))
+        expect([result.exitCode, result.stderrText]).toEqual([
+          1,
+          "mkdir: cannot create directory '/d/file': Not a directory\n",
+        ])
+        expect((await ws.shell('stat -c %a /d/good')).stdoutText).toBe('700\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('keeps the create error when timing cleanup fails', async () => {
+    const ws = new Workspace(
+      { '/d': new Unanswering() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell('mkdir -p /d/p/a/b')
+      expect([result.exitCode, result.stderrText]).toEqual([
+        1,
+        "mkdir: cannot create directory '/d/p/a/b': Permission denied\n",
+      ])
+    } finally {
+      await ws.close()
+    }
   })
 })
