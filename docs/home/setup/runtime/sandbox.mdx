@@ -76,9 +76,11 @@ inside is the Python build, whichever SDK the host uses.
 output.
 
 <Warning>
-  A timeout stops Mirage waiting; it does not always stop the program.
-  Sandlock kills it. E2B tries to kill the command, but its child processes
-  may survive. The other providers leave it running, and a Daytona sandbox has no timeout of its
+  A timeout stops the program. Sandlock kills it. For the other providers,
+  Mirage sends TERM, then KILL a second later, to every process in the
+  sandbox that carries the run's `MIRAGE_EXEC_ID`; that needs `/bin/sh`,
+  `grep` and `/proc` in the sandbox, and Mirage gives up after 5 seconds
+  if the sandbox stops answering. A Daytona sandbox has no timeout of its
   own, so it keeps running and billing. Use the provider's own limits.
 </Warning>
 

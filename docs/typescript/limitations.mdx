@@ -153,7 +153,7 @@ The browser SDK runs entirely in-page: no kernel, no subprocesses, no Node `fs`.
 
 ### 1. No FUSE
 
-Browsers can't mount filesystems. The browser `Workspace` takes plain mounts: there is no `Mount` backend option and no `addFuseMount`. Use `ws.shell(...)` (virtual executor) and `ws.vfs.read`/`write` instead. Every builtin (`cat`, `grep`, `jq`, `awk`, `python3`, etc.) is reimplemented in-process, so most agent code paths work unchanged from Node.
+Browsers can't mount filesystems. The browser `Workspace` takes plain mounts: there is no `Mount` backend option and no `addFuseMount`. Use `ws.shell(...)` (virtual executor) and `ws.vfs.read`/`write` instead. Every builtin (`cat`, `grep`, `jq`, `awk`, etc.) is reimplemented in-process, so most agent code paths work unchanged from Node; `python3` runs on Pyodide (see below).
 
 ### 2. OPFS quotas and persistence
 
@@ -184,7 +184,7 @@ for its limitations.
 
 ### 5. Some VFS drivers remain Node-only
 
-SSH, LanceDB, Email, Disk, and the Hugging Face mounts are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
+SSH, LanceDB, Email, Disk, GridFS, Databricks Volumes, Nextcloud, Jaeger, and the Hugging Face mounts are only exposed by `@struktoai/mirage-node` because their drivers need Node APIs or raw TCP. Importing them from `@struktoai/mirage-browser` is a build error.
 
 Postgres and MongoDB do have browser implementations:
 
@@ -209,10 +209,10 @@ Those HTTP drivers still need a browser-reachable endpoint with the correct CORS
 | OPFS reads/writes within quota | Browser | ✅ works |
 | OPFS over quota | Browser | ❌ `QuotaExceededError`; check `navigator.storage.estimate()` |
 | HTTP-backed mounts without CORS allow-list | Browser | ❌ blocked; use PKCE, presigned URLs, or a same-origin proxy |
-| Python `open()` writes back through mount | Browser | ✅ on any engine |
+| Python `open()` writes back through mount | Browser | ✅ with workers and `SharedArrayBuffer` or the service worker |
 | Postgres through `NeonPgDriver` | Browser | ✅ over HTTP; endpoint must allow the browser origin |
 | MongoDB through `HttpMongoDriver` | Browser | ✅ through an HTTP proxy; direct MongoDB sockets are unavailable |
-| Node-only VFS types (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, FUSE) | Browser | ❌ Node APIs or raw TCP required |
+| Node-only VFS types (SSH, LanceDB, Email, Disk, Hugging Face, GridFS, Databricks Volumes, Nextcloud, Jaeger, FUSE) | Browser | ❌ Node APIs or raw TCP required |
 
 The Node limitations are runtime-level, not Mirage design decisions. Python's equivalent behavior is strictly better in each case, so if a workflow absolutely requires ESM-level `fs` patching or large API-backed FUSE reads, consider whether the Python SDK fits better for that specific piece. The Browser limitations are by design (no kernel, no subprocess), so the workarounds there are about choosing the right runtime for the task.
 

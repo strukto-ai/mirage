@@ -158,8 +158,8 @@ modifiers are listed separately; for example, `rb` combines `r` and `b`.
     | --- | --- |
     | `file.printf()` | Not available in the TypeScript SDK. |
     | `file.tello()` | Not available in the TypeScript SDK. |
-    | `file.puts()`, `file.write()` | Written at `close`, or when the run ends. |
-    | `file.flush()`, `file.close()` | Flushes pending writes to the mount. |
+    | `file.puts()`, `file.write()` | Reach the mount at `close`, or when the run ends. |
+    | `file.flush()` | Sends pending writes to the mount in the TypeScript SDK; in the Python SDK they wait for `close`. |
   </Accordion>
 </AccordionGroup>
 

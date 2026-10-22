@@ -26,7 +26,7 @@ Install the OS-level FUSE kernel support first (see the
 
 ## Install the Node Binding
 
-The Node package (`@struktoai/mirage-node`) ships FUSE support via an **optional peer dependency** on [`@zkochan/fuse-native`](https://www.npmjs.com/package/@zkochan/fuse-native), the pnpm author's actively-maintained fork that works on Node 20+ and supports both macOS and Linux (thanks to [@zkochan](https://github.com/fuse-friends/fuse-native/issues/36#issuecomment-3089754579)).
+The Node package (`@struktoai/mirage-node`) ships FUSE support via an **optional peer dependency** on [`@zkochan/fuse-native`](https://www.npmjs.com/package/@zkochan/fuse-native), the pnpm author's actively-maintained fork that supports both macOS and Linux (thanks to [@zkochan](https://github.com/fuse-friends/fuse-native/issues/36#issuecomment-3089754579)).
 
 ```bash
 pnpm add @struktoai/mirage-node @zkochan/fuse-native
@@ -55,11 +55,11 @@ Or, if you're not using a pnpm workspace, in `package.json`:
 }
 ```
 
-## macOS 4+ Symlink Workaround
+## macFUSE 4+ Symlink Workaround
 
 <Tabs>
   <Tab title="macOS">
-    macFUSE 4 ships `libfuse.2.dylib` instead of the legacy `libosxfuse.2.dylib` that `@zkochan/fuse-native` was built against. Create a one-time symlink:
+    macFUSE 4 ships `libfuse.2.dylib` instead of the legacy `libosxfuse.2.dylib` that `@zkochan/fuse-native` links against when it builds; the built `fuse.node` then loads `/usr/local/lib/libfuse.2.dylib`. Create a one-time symlink before the build:
 
     ```bash
     sudo ln -sf /usr/local/lib/libfuse.2.dylib /usr/local/lib/libosxfuse.2.dylib
@@ -88,7 +88,7 @@ console.log('mountpoints:', ws.fuseMountpoints)
 await ws.close() // auto-unmounts
 ```
 
-If `ws.fuseMountpoints` prints a `/tmp/mirage-fuse-XXXXXX` path and no error is thrown, the binding is wired up correctly.
+If `ws.fuseMountpoints` prints a `mirage-fuse-XXXXXX` path under `os.tmpdir()` and no error is thrown, the binding is wired up correctly.
 
 Mounts are async, so `await ws.fuseReady()` once after constructing the workspace; it resolves when every kernel mount is live (and rejects if one fails to mount). Until then `ws.fuseMountpoints` may be empty. (In Python, where mounts are synchronous, the constructor blocks until ready instead.)
 

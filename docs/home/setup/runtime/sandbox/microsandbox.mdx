@@ -10,7 +10,7 @@ it through the `msb` CLI. Python SDK and Node.
 
 ## Installation
 
-Install `msb` 0.7.8 or later on the host and put it on `PATH`. Create a
+Install `msb` on the host and put it on `PATH`. Create a
 sandbox from an image with `sh`, your programs, and the tools needed for
 [connecting the workspace](#connecting-the-workspace):
 
@@ -124,8 +124,8 @@ to use the same backend.
 
 - Keep the sandbox running while Mirage is connected. Reconnect after a restart.
 - Closing the runtime leaves the sandbox running.
-- A [timeout](/home/setup/runtime/sandbox#timeouts) cancels the CLI call.
-  The guest agent cleans up that call's commands; filesystem cleanup may take longer.
+- A [timeout](/home/setup/runtime/sandbox#timeouts) cancels the CLI call and
+  stops that run's processes in the sandbox.
 - Commands share the sandbox's files and processes. Use one sandbox per tenant.
 - Environment values are passed as CLI arguments. Avoid secrets on hosts shared
   with untrusted users.

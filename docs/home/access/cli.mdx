@@ -61,8 +61,9 @@ See [Workspace configuration](/home/configuration) for YAML settings and default
 | --- | --- |
 | `0` | Success. |
 | `1` | A tool failed, a VFS call was refused or failed, or the server could not be reached. |
-| `2` | A usage error, a bad config, or a refusal from the server. |
-| `130` | The line was interrupted with Ctrl-C or canceled. |
+| `2` | A usage error, a bad config, a refusal from the server, or a failed or canceled job from `job wait` or `job get`. |
+| `130` | The line was interrupted with Ctrl-C, or a streamed `shell` line was canceled. |
+| `141` | `shell` output went to a pipe that closed, as with `\| head`. |
 | `N` | `shell`, `job wait` and `job get` exit with the line's own status. |
 
 ## Run lines, VFS calls and tools

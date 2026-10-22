@@ -18,7 +18,8 @@ specific to the Python SDK.
   defaults to the core count, and `TOKIO_WORKER_THREADS` raises it.
 - **QuickJS:** the real quickjs-ng `std` and `os`. The first run compiles
   `qjs-wasi.wasm` and caches `qjs-wasi.cwasm` beside it. A write shows to
-  every command at once, and a timeout stops the run.
+  other commands once the file is closed or the run ends, and a timeout
+  stops the run.
 - **Local:** with neither `home` nor `MIRAGE_LOCAL_HOME`, `python3` is the
   interpreter running Mirage.
 - **Sandboxes:** `mount_type: ssh` needs `pip install 'mirage-ai[ssh]'` on

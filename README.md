@@ -161,7 +161,7 @@ in Mirage can resolve straight to a credential held in one of them.
 ## Installation
 
 - **Python** ≥ 3.11 for the `mirage-ai` package and the `mirage` CLI
-- **Node.js** ≥ 20 for the TypeScript SDK
+- **Node.js** 22.20+ on Node 22, 24.12+ on Node 24, or 25+ for the TypeScript SDK
 
 ### Python
 

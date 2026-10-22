@@ -14,10 +14,11 @@ Both runtimes expose the same filesystem shape (`/slack/channels/`, `/slack/dms/
 ## Get a bot token
 
 1. Visit the [Slack API basics page](https://api.slack.com/authentication/basics) and create an app for your workspace.
-2. Under **OAuth & Permissions**, add the bot scopes you need. The minimum for read access is:
+2. Under **OAuth & Permissions**, add the bot scopes you need. For read access:
    - `channels:history`, `channels:read`
-   - `groups:history`, `groups:read`
-   - `im:history`, `im:read`
+   - `groups:history`, `groups:read` (optional, private channels)
+   - `im:history`, `im:read` (optional, direct messages)
+   - `mpim:history`, `mpim:read` (optional, group direct messages)
    - `users:read`
 3. For the CLI `send-message` command, also add `chat:write`. The mount never posts.
 4. For [`search.messages`](https://api.slack.com/methods/search.messages), Slack requires a **user token** (`xoxp-…`) with `search:read`. Bot tokens (`xoxb-…`) get `not_allowed_token_type`. Provide it via the optional `searchToken` field.
@@ -178,8 +179,8 @@ file-type or URL word, a join or leave message word, or part of a user's name
 or of the workspace's domain, and when a search fails, returns more than 1,000
 messages or finds nothing. With a separate `searchToken`, every day is also read
 when the scope holds a private channel that token's user is not in, since their
-search never sees it; that token needs `channels:read` and `groups:read` to list
-the channels it sees. It is off by default: Slack indexes a message some
+search never sees it; that token needs `channels:read`, `groups:read`, `im:read`
+and `mpim:read` to list the channels and DMs it sees. It is off by default: Slack indexes a message some
 time after it is posted, and a word held only in another field of a message (a
 bot's username, an unfurled link) is not searched.
 
