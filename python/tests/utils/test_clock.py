@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import ast
+import importlib.util
 import time
 from pathlib import Path
 
@@ -124,11 +125,13 @@ def test_manual_clock_repr_names_both_readings():
     assert repr(SystemClock()) == "SystemClock()"
 
 
-def _bindings(tree: ast.Module) -> dict[str, str]:
+def _bindings(tree: ast.Module, package: str) -> dict[str, str]:
     """Each name an import binds, mapped to the dotted name it stands for.
 
     Args:
         tree (ast.Module): a parsed module.
+        package (str): the module's package, which relative imports
+            resolve against.
     """
     bound: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -138,13 +141,12 @@ def _bindings(tree: ast.Module) -> dict[str, str]:
                 bound[alias.asname or top] = (
                     alias.name if alias.asname else top
                 )
-        elif (
-            isinstance(node, ast.ImportFrom) and node.module and not node.level
-        ):
+        elif isinstance(node, ast.ImportFrom):
+            module = importlib.util.resolve_name(
+                "." * node.level + (node.module or ""), package
+            )
             for alias in node.names:
-                bound[alias.asname or alias.name] = (
-                    f"{node.module}.{alias.name}"
-                )
+                bound[alias.asname or alias.name] = f"{module}.{alias.name}"
     return bound
 
 
@@ -169,14 +171,16 @@ def _dotted(node: ast.expr, bound: dict[str, str]) -> str | None:
     return None
 
 
-def clock_reads(source: str) -> set[str]:
+def clock_reads(source: str, package: str) -> set[str]:
     """Every system-clock read ``source`` imports or references.
 
     Args:
         source (str): a module's Python source.
+        package (str): the module's package, which relative imports
+            resolve against.
     """
     tree = ast.parse(source)
-    bound = _bindings(tree)
+    bound = _bindings(tree, package)
     named = set(bound.values()) | {
         name
         for node in ast.walk(tree)
@@ -190,7 +194,12 @@ def _cache_clock_reads() -> set[tuple[str, str]]:
     return {
         (path.relative_to(CACHE_DIR).as_posix(), name)
         for path in CACHE_DIR.rglob("*.py")
-        for name in clock_reads(path.read_text())
+        for name in clock_reads(
+            path.read_text(),
+            ".".join(
+                (cache_pkg.__name__, *path.relative_to(CACHE_DIR).parent.parts)
+            ),
+        )
     }
 
 
@@ -234,10 +243,18 @@ def _cache_clock_reads() -> set[tuple[str, str]]:
             "folder()",
             {"mirage.utils.dates.utc_date_folder"},
         ),
+        (
+            "from ...utils.dates import now_iso\nnow_iso()",
+            {"mirage.utils.dates.now_iso"},
+        ),
+        (
+            "from ...utils import dates\ndates.now_iso()",
+            {"mirage.utils.dates.now_iso"},
+        ),
     ],
 )
 def test_the_detector_catches_a_planted_clock_read(source, expected):
-    assert clock_reads(source) == expected
+    assert clock_reads(source, "mirage.cache.file") == expected
 
 
 @pytest.mark.parametrize(
@@ -254,7 +271,7 @@ def test_the_detector_catches_a_planted_clock_read(source, expected):
     ],
 )
 def test_the_detector_leaves_what_reads_the_injected_clock(allowed):
-    assert clock_reads(allowed) == set()
+    assert clock_reads(allowed, "mirage.cache.file") == set()
 
 
 def test_no_cache_module_reads_the_system_clock_past_the_seam():

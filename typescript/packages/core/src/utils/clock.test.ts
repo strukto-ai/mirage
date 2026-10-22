@@ -114,12 +114,14 @@ function clockOwner(node: ts.Expression): string | undefined {
 }
 
 /**
- * Each local name `file` binds to a clock-reading export of the core dates module.
+ * The clock-reading helpers `file` imports from the core dates module by name, and the
+ * local names it binds that module to as a namespace.
  *
  * @param file a parsed module.
  */
-function datesClockBindings(file: ts.SourceFile): Map<string, string> {
-  const bound = new Map<string, string>()
+function datesImports(file: ts.SourceFile): { reads: Set<string>; namespaces: Set<string> } {
+  const reads = new Set<string>()
+  const namespaces = new Set<string>()
   for (const statement of file.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
@@ -129,24 +131,34 @@ function datesClockBindings(file: ts.SourceFile): Map<string, string> {
       continue
     }
     const named = statement.importClause?.namedBindings
-    if (named === undefined || !ts.isNamedImports(named)) continue
+    if (named === undefined) continue
+    if (ts.isNamespaceImport(named)) {
+      namespaces.add(named.name.text)
+      continue
+    }
     for (const element of named.elements) {
       const imported = (element.propertyName ?? element.name).text
-      if (DATES_CLOCK_READS.has(imported)) bound.set(element.name.text, imported)
+      if (DATES_CLOCK_READS.has(imported)) reads.add(imported)
     }
   }
-  return bound
+  return { reads, namespaces }
 }
 
-/** Every system-clock read in `source`, called or referenced. */
+/** Every system-clock read `source` imports, calls or references. */
 function clockReads(source: string): Set<string> {
   const file = ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest)
-  const dates = datesClockBindings(file)
-  const found = new Set<string>()
+  const { reads: found, namespaces } = datesImports(file)
   const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAccessExpression(node) && node.name.text === 'now') {
+    if (ts.isPropertyAccessExpression(node)) {
       const owner = clockOwner(node.expression)
-      if (owner !== undefined) found.add(`${owner}.now`)
+      if (owner !== undefined && node.name.text === 'now') found.add(`${owner}.now`)
+      if (
+        ts.isIdentifier(node.expression) &&
+        namespaces.has(node.expression.text) &&
+        DATES_CLOCK_READS.has(node.name.text)
+      ) {
+        found.add(node.name.text)
+      }
     }
     if (
       ts.isNewExpression(node) &&
@@ -155,13 +167,7 @@ function clockReads(source: string): Set<string> {
     ) {
       found.add('new Date')
     }
-    if (ts.isCallExpression(node)) {
-      if (clockOwner(node.expression) === 'Date') found.add('Date()')
-      const imported = ts.isIdentifier(node.expression)
-        ? dates.get(node.expression.text)
-        : undefined
-      if (imported !== undefined) found.add(imported)
-    }
+    if (ts.isCallExpression(node) && clockOwner(node.expression) === 'Date') found.add('Date()')
     ts.forEachChild(node, visit)
   }
   visit(file)
@@ -193,6 +199,8 @@ describe('the cache clock seam', () => {
     ['globalThis.Date()', 'Date()'],
     ["import { nowIso } from '../utils/dates.ts'\nnowIso()", 'nowIso'],
     ["import { utcDateFolder as folder } from '../../utils/dates.js'\nfolder()", 'utcDateFolder'],
+    ["import { nowIso } from '../../utils/dates.ts'\nconst read = nowIso\nread()", 'nowIso'],
+    ["import * as dates from '../../utils/dates.ts'\ndates.nowIso()", 'nowIso'],
   ])('flags %j as %j', (source, expected) => {
     expect(clockReads(source)).toEqual(new Set([expected]))
   })
@@ -204,6 +212,7 @@ describe('the cache clock seam', () => {
     'new Date(bound)',
     'Date.parse(text)',
     "import { isoToEpoch } from '../utils/dates.ts'\nisoToEpoch(text)",
+    "import * as dates from '../utils/dates.ts'\ndates.isoToEpoch(text)",
     "import { nowIso } from './other.ts'\nnowIso()",
     'nowIso()',
   ])('allows %j', (source) => {
