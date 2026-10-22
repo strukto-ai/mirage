@@ -1,10 +1,12 @@
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from mirage.accessor.base import Accessor
+from mirage.accessor.responses import ResponseCache
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.config import LookupStatus
 from mirage.cache.index.ram import RAMIndexCacheStore
@@ -40,6 +42,7 @@ class FakeMountEntry:
     prefix: str
     vfs: object
     cache_manager: object = None
+    accessor: Accessor = field(default_factory=Accessor)
 
 
 @dataclass
@@ -227,6 +230,38 @@ async def test_failed_removal_cleans_ancestors_without_delivery():
                 await pending
         finally:
             await stream.aclose()
+
+
+class _Keeping(Accessor):
+    def __init__(self, answers: ResponseCache[str, str]) -> None:
+        self.answers = answers
+
+    def caches(self) -> tuple[ResponseCache[str, str]]:
+        return (self.answers,)
+
+
+@pytest.mark.asyncio
+async def test_notify_drops_the_answers_the_client_keeps_of_its_own():
+    # An event is often the only word that the service changed, and no
+    # path names a client's own answers (a repository's tree, a
+    # database's names), so they answered the old service until the
+    # mount dropped its caches for some other reason.
+    answers: ResponseCache[str, str] = ResponseCache()
+    entry = FakeMountEntry(
+        prefix="/nc/", vfs=PlainVFS(), accessor=_Keeping(answers)
+    )
+    hub = EventHub(FakeRegistry(entry))
+
+    async def before() -> str:
+        return "before"
+
+    async def after() -> str:
+        return "after"
+
+    await answers.get("names", before)
+    await hub.notify(_change(FileChangeKind.CREATE, "/nc/data/new.txt"))
+    assert await answers.get("names", after) == "after"
+    await hub.close()
 
 
 @pytest.mark.asyncio

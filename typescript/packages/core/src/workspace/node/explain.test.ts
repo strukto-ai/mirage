@@ -18,7 +18,14 @@ import { z } from 'zod'
 import { runExplaining, runWithRefusalSink } from '../../context/session_context.ts'
 import { Outcome, Scope } from '../../policy/index.ts'
 import { DryRun } from '../../policy/types.ts'
-import type { Action, AskHandler, CommandContext, Policy } from '../../policy/index.ts'
+import type {
+  Action,
+  AskHandler,
+  CommandContext,
+  CommandExplanation,
+  Policy,
+  ShellNode,
+} from '../../policy/index.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
@@ -179,6 +186,13 @@ class LineBox extends Runtime implements LineExecutor {
     this.lines.push(line)
     return Promise.resolve({ stdout: ENC.encode(`box:${line}`), stderr: null, exitCode: 0 })
   }
+}
+
+/** Every command an explained tree holds, nested scopes included. */
+function commands(node: ShellNode): CommandExplanation[] {
+  return node.children.flatMap((child) =>
+    'command' in child ? [child, ...child.children.flatMap(commands)] : commands(child),
+  )
 }
 
 /** A host answering every question the same way, counting what it was asked. */
@@ -842,6 +856,75 @@ describe('prejudge', () => {
         [126, DEC.decode(ran.stderr)],
       ])
     }
+  })
+
+  it('says what a whole-line gate refuses past the chain', async () => {
+    // A runtime that takes the line whole walks, globs and changes directory
+    // where no gate follows, so under a path rule its gate refuses a walk, a
+    // glob and a command after a cd it cannot follow; explain said each
+    // would run. A cd it can follow moves the path the rule reads, which the
+    // gate read in the session's cwd and ran.
+    const box = new LineBox()
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        profiles: {
+          r: parseSessionProfile({
+            commands: {
+              allow: ['cat', 'cd', 'grep'],
+              deny: [
+                {
+                  reason: 'sealed',
+                  commands: { cat: ['/data/secret*'], grep: ['/data/secret*'] },
+                },
+              ],
+            },
+          }),
+        },
+        runtimes: [box, 'workspace'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    for (const [line, reason] of [
+      ['grep -r x /data', 'walks a tree the gate cannot follow'],
+      ['cat /data/*.txt', 'expands a pattern only the runtime can read'],
+      ['cd "$D" && cat notes', 'runs after a cd the gate cannot follow'],
+      ['cd /data && cat secret', 'sealed'],
+    ] as const) {
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect(ran.refusal?.reason).toBe(reason)
+      expect([said.outcome, said.reason]).toEqual([Outcome.DENY, reason])
+      expect([said.exitCode, said.stderr]).toEqual([ran.exitCode, DEC.decode(ran.stderr)])
+    }
+    expect(box.lines).toEqual([])
+  })
+
+  it('reads a line as the runtime it is placed on', async () => {
+    // A line placed on the workspace meets the per-command gate, which reads
+    // a name once expanded, though the default runtime takes lines whole;
+    // explain read the default and refused the name as unreadable.
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        profiles: { r: PROFILE },
+        runtimes: [new LineBox(), 'workspace'],
+        routePolicy: () => 'workspace',
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const line = 'X=echo; "$X" hi'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([0, 'hi\n'])
+    expect(said.exitCode).toBe(0)
+    expect(commands(said.node).map((c) => c.exitCode)).toEqual(commands(said.node).map(() => 0))
   })
 
   it('leaves a path the pass cannot read to the gate', async () => {

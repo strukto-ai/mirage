@@ -1183,25 +1183,17 @@ export class Workspace {
     try {
       const reparse = (text: string): TSNodeLike => parser.parse(text)
       const root = parser.parse(line)
-      const wholeLine = wholeLineRuntime(this.registry.runtimeBindings) !== null
-      const judged = await explainLine(
-        root,
-        session,
-        this.registry,
-        this.namespace,
-        reparse,
-        wholeLine,
-      )
       const verdicts = await explainLine(
         root,
         session,
         this.registry,
         this.namespace,
         reparse,
-        wholeLine,
+        false,
         false,
       )
       if (holds(verdicts.map((one) => one.judgment))) {
+        const judged = await explainLine(root, session, this.registry, this.namespace, reparse)
         return explainedLine(line, judged, verdicts, () => '', reparse)
       }
       const [answers, placed] = await this.router.placement(line, session, () =>
@@ -1213,6 +1205,17 @@ export class Workspace {
           { claimed: [], parent: null, origin: null },
           reparse,
         ),
+      )
+      // The run reads a line its placed runtime takes whole as typed, and
+      // that reading is its only gate (`admitLine`).
+      const wholeLine = !('kind' in placed) && wholeLineRuntime(placed.bindings) !== null
+      const judged = await explainLine(
+        root,
+        session,
+        this.registry,
+        this.namespace,
+        reparse,
+        wholeLine,
       )
       if ('kind' in placed) {
         const refused = placementRefused(placed, line)
@@ -1230,9 +1233,10 @@ export class Workspace {
       const said = explainedLine(
         line,
         judged,
-        verdicts,
+        wholeLine ? judged : verdicts,
         (command) => this.router.runtimeFor(command, placed),
         reparse,
+        wholeLine,
       )
       return { ...said, answers }
     } finally {

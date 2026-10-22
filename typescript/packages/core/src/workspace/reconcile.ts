@@ -95,6 +95,25 @@ export class Reconciler {
     this.namespace = namespace
   }
 
+  // Drop what the backend no longer vouches for at `path` as a remove drops
+  // it (CacheManager.invalidate), under this mount's name only: its body, its
+  // own listing, its row in its parent's and what is cached below a folder,
+  // not every listing the mount holds. `keep`: the probe's backend answer
+  // still stands, so the command's own stat of `path` reuses it past the
+  // drop.
+  private async drop(mount: MountEntry, path: string, keep = false): Promise<void> {
+    const manager = mount.cacheManager
+    if (manager === null) {
+      await this.cache.remove(path)
+      return
+    }
+    const scope = scopeOf(mount, path)
+    await manager.invalidate(scope, FileChangeKind.DELETE, null, {
+      probed: keep ? manager.probedStat(scope) : null,
+      own: true,
+    })
+  }
+
   // Re-stat the backend and apply the matching cache/overlay reaction. A
   // missing path GCs (evict cache + drop overlay); a fingerprint mismatch
   // evicts the stale cache entry. Non-ENOENT errors propagate.
@@ -115,8 +134,8 @@ export class Reconciler {
         remoteStat = await mount.callKeyed('stat', scope, [], { index: scratch })
       } catch (err) {
         if (isEnoent(err) || isEnotdir(err)) {
-          await this.onMissing(path)
-          await mount.index.clear()
+          await this.drop(mount, path)
+          await this.namespace.dropOverlay(path)
           return Verdict.GONE
         }
         // A backend that registers no stat op cannot be revalidated at all.
@@ -127,8 +146,7 @@ export class Reconciler {
         // dispatcher raises, and `stat` is the only op probed here -- so a backend
         // that stamps ENOTSUP itself takes the logged path on both sides.
         if (isMissingOp(err, 'stat')) {
-          await this.cache.remove(path)
-          await mount.index.clear()
+          await this.drop(mount, path)
           return Verdict.UNKNOWN
         }
         throw err
@@ -139,13 +157,11 @@ export class Reconciler {
     }
     const fp = remoteStat instanceof FileStat ? remoteStat.fingerprint : null
     if (fp === null) {
-      await this.cache.remove(path)
-      await mount.index.clear()
+      await this.drop(mount, path, true)
       return Verdict.UNKNOWN
     }
     if (!(await this.cache.isFresh(path, fp))) {
-      await this.cache.remove(path)
-      await mount.index.clear()
+      await this.drop(mount, path, true)
       return Verdict.STALE
     }
     const predecessor = scratch?.hintedRows.get(path)
@@ -177,8 +193,7 @@ export class Reconciler {
       // is another, and degrading it to "cannot verify" would hide it behind
       // a log line and a lifetime of cold reads.
       if (err instanceof TypeError || err instanceof ReferenceError) throw err
-      await this.cache.remove(path)
-      await mount.index.clear()
+      await this.drop(mount, path)
       console.warn(`probe failed for ${path}: ${String(err)}`)
       return Verdict.UNKNOWN
     }
@@ -297,8 +312,7 @@ export class Reconciler {
     try {
       await this.probeOrUnknown(mount, path)
     } catch (err) {
-      await this.cache.remove(path)
-      await mount.index.clear()
+      await this.drop(mount, path)
       console.warn(`reconcile probe failed for ${path}: ${String(err)}`)
     }
   }

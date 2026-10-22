@@ -63,18 +63,3 @@ def pattern_reaches(pattern: str, path: Sequence[str]) -> bool:
     """
     want = split_pattern(pattern)
     return all(w == WILDCARD or w == t for w, t in zip(want, path))
-
-
-def pattern_names(pattern: str, name: str) -> bool:
-    """Whether a pattern can match some line of a command.
-
-    Visibility asks this: a name is installed for the session when a
-    pattern of every allow list starts with it (or with the wildcard),
-    whatever the rest of the pattern requires of the line. The one-word
-    case of :func:`pattern_reaches`.
-
-    Args:
-        pattern (str): the pattern as written.
-        name (str): the command name.
-    """
-    return pattern_reaches(pattern, (name,))

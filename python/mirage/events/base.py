@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator, Sequence
 from typing import Protocol
 
+from mirage.accessor.base import Accessor
 from mirage.cache.manager import CacheManager
 from mirage.types import Delta, FileEvent, PathSpec
 
@@ -33,6 +34,9 @@ class EventMount(Protocol):
 
     @property
     def cache_manager(self) -> CacheManager | None: ...
+
+    @property
+    def accessor(self) -> Accessor: ...
 
 
 class EventRegistry(Protocol):

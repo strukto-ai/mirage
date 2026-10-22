@@ -47,9 +47,10 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     law lives: the allow list first (a line it does not cover is
     refused whole, though its head was visible), then the winning rule,
     refused whole or per operand by whether it names paths, or taken to
-    the approval ledger when it asks. ``pre_vfs`` walks the deny rules
-    that are pure paths, so FUSE, programmatic ops and the warm cache
-    cannot bypass a path the profile protects. A path rule that asks is
+    the approval ledger when it asks. ``pre_vfs`` reads the rules that
+    are pure paths, deny and ask alike (``op_ruling``), so FUSE,
+    programmatic ops and the warm cache cannot bypass a path the profile
+    protects. A path rule that asks is
     a question only where no line is running (a file tool, the host's
     facade), which the entry point puts to the approval ledger keyed by rule
     and path; inside a line it refuses, since the line was admitted

@@ -1946,7 +1946,12 @@ export class MountEntry {
   async dropCaches(bodies = true): Promise<void> {
     if (this.cacheManager !== null) await this.cacheManager.drop(bodies)
     else await this.indexStore.invalidate()
-    this.vfs.accessor.forget?.()
+    this.accessor.forget?.()
+  }
+
+  /** The client this mount's VFS reaches its backend with. */
+  get accessor(): Accessor {
+    return this.vfs.accessor
   }
 
   /**

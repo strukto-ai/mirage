@@ -85,6 +85,32 @@ class Reconciler:
         self._cache = cache
         self._namespace = namespace
 
+    async def _drop(
+        self, mount: MountEntry, path: str, keep: bool = False
+    ) -> None:
+        """Drop what the backend no longer vouches for at ``path`` as a
+        remove drops it (``CacheManager.invalidate``), under this mount's
+        name only: its body, its own listing, its row in its parent's and
+        what is cached below a folder, not every listing the mount holds.
+
+        Args:
+            mount (MountEntry): the resolved mount for ``path``.
+            path (str): absolute virtual path.
+            keep (bool): the probe's backend answer still stands, so the
+                command's own stat of ``path`` reuses it past the drop.
+        """
+        manager = mount.cache_manager
+        if manager is None:
+            await self._cache.remove(path)
+            return
+        spec = PathSpec.from_str_path(path)
+        await manager.invalidate(
+            spec,
+            FileChangeKind.DELETE,
+            probed=manager.probed_stat(spec) if keep else None,
+            own=True,
+        )
+
     async def _probe(self, mount: MountEntry, path: str) -> Verdict:
         """Re-stat the backend and apply the matching cache/overlay reaction.
 
@@ -111,8 +137,8 @@ class Reconciler:
             try:
                 remote_stat = await mount.call("stat", path, index=scratch)
             except (FileNotFoundError, NotADirectoryError):
-                await self.on_missing(path)
-                await mount.index.clear()
+                await self._drop(mount, path)
+                await self._namespace.drop_overlay(path)
                 return Verdict.GONE
             except OperationNotSupportedError:
                 # A backend that registers no stat op cannot be revalidated
@@ -120,8 +146,7 @@ class Reconciler:
                 # but it would also log every read: this is a permanent
                 # capability of the mount, not an anomaly worth a log line
                 # each time.
-                await self._cache.remove(path)
-                await mount.index.clear()
+                await self._drop(mount, path)
                 return Verdict.UNKNOWN
             if (
                 manager is not None
@@ -130,12 +155,10 @@ class Reconciler:
             ):
                 manager.note_probed(spec, remote_stat)
         if remote_stat is None or remote_stat.fingerprint is None:
-            await self._cache.remove(path)
-            await mount.index.clear()
+            await self._drop(mount, path, keep=True)
             return Verdict.UNKNOWN
         if not await self._cache.is_fresh(path, remote_stat.fingerprint):
-            await self._cache.remove(path)
-            await mount.index.clear()
+            await self._drop(mount, path, keep=True)
             return Verdict.STALE
         predecessor = (
             None if scratch is None else scratch.hinted_rows.get(path)
@@ -187,8 +210,7 @@ class Reconciler:
             # re-reads.
             raise
         except Exception as exc:
-            await self._cache.remove(path)
-            await mount.index.clear()
+            await self._drop(mount, path)
             logger.warning("probe failed for %s: %s", path, exc)
             return Verdict.UNKNOWN
 
@@ -347,8 +369,7 @@ class Reconciler:
         try:
             await self._probe_or_unknown(mount, path)
         except Exception as exc:
-            await self._cache.remove(path)
-            await mount.index.clear()
+            await self._drop(mount, path)
             logger.warning("reconcile probe failed for %s: %s", path, exc)
 
     async def on_enoent(self, mount: MountEntry, name: str, path: str) -> None:

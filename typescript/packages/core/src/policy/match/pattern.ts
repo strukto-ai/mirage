@@ -47,13 +47,3 @@ export function patternReaches(pattern: string, path: readonly string[]): boolea
   const want = splitPattern(pattern)
   return want.slice(0, path.length).every((w, i) => w === WILDCARD || w === path[i])
 }
-
-/**
- * Whether a pattern can match some line of a command. Visibility asks
- * this: a name is installed for the session when a pattern of every
- * allow list starts with it (or with the wildcard), whatever the rest of
- * the pattern requires of the line. The one-word case of `patternReaches`.
- */
-export function patternNames(pattern: string, name: string): boolean {
-  return patternReaches(pattern, [name])
-}

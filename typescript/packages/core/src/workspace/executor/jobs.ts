@@ -38,7 +38,7 @@ import {
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { abortable, mergeSignals } from '../../utils/abort.ts'
 import type { SessionView } from '../../view/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
+import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Refusal } from '../../types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
@@ -227,7 +227,7 @@ export async function handleBackground(
     // The line still hears of every refusal; a question left waiting also
     // holds the job.
     const note = (refusal: Refusal): void => {
-      hold.held ||= refusal.kind === 'pending'
+      hold.held ||= isPending(refusal)
       lineSink?.(refusal)
     }
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
@@ -288,7 +288,7 @@ export async function handleBackground(
       if (stderr.byteLength > 0) {
         await console_.emit(Channel.STDERR, stderr)
       }
-      hold.ended = hold.held || io.refusal?.kind === 'pending'
+      hold.ended = hold.held || isPending(io.refusal)
       return [io, execNode]
     }
     // The job's own layer of the caller: its fork, so dispatcher and host

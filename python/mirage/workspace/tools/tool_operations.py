@@ -289,7 +289,8 @@ class MirageToolOperations:
             session = self._session.state
         except KeyError:
             return TOOL_NAMES
-        allow = session.visibility.commands
+        rules = session.commands
+        allow = rules.allow if rules is not None else None
         offered = {
             "shell": allow is None or len(allow) > 0,
             "read": True,

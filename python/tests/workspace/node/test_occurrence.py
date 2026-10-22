@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import HandOff, Occurrence
-from mirage.runtime.routing import command_nodes
 from mirage.shell import parse
 from mirage.shell.types import NodeType
 from mirage.workspace.node.occurrence import (
@@ -48,12 +47,29 @@ def _first(node, kind: str):
     raise AssertionError(kind)
 
 
+def _commands(node) -> list:
+    """Every command node of a parse, in source order, nested ones
+    included.
+
+    Args:
+        node: the tree to scan.
+    """
+    out = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current.type in (NodeType.COMMAND, NodeType.TEST_COMMAND):
+            out.append(current)
+        stack.extend(reversed(current.children))
+    return out
+
+
 def test_a_command_stands_at_its_span_in_the_line():
     line = "touch /tmp/x && cat /data/secret.txt"
     ast = parse(line)
     frame = root_frame(ast, None)
     assert frame == Frame(line, 0, None)
-    first, second = command_nodes(ast)
+    first, second = _commands(ast)
     assert occurrence_in(first, frame) == Occurrence(None, line, 0, 12)
     assert occurrence_in(second, frame) == Occurrence(None, line, 16, 36)
 
@@ -62,7 +78,7 @@ def test_the_gate_and_the_pass_compute_one_occurrence():
     # The gate builds the frame from the node it runs and the pass from
     # the tree it walks; on one parse they have to agree.
     ast = parse("cat /data/secret.txt")
-    node = list(command_nodes(ast))[0]
+    node = _commands(ast)[0]
     handed = HandOff()
     assert occurrence_of(node, handed) == occurrence_in(
         node, root_frame(ast, None)
@@ -78,15 +94,15 @@ def test_a_nested_line_stands_under_the_node_that_ran_it():
     # A nested line's hand-off carries the node its text came from, and
     # every command of the nested parse stands under it.
     outer = parse("eval 'cat /data/secret.txt'")
-    origin = occurrence_of(list(command_nodes(outer))[0], HandOff())
+    origin = occurrence_of(_commands(outer)[0], HandOff())
     inner = parse("cat /data/secret.txt")
     nested = HandOff(origin=origin)
-    at = occurrence_of(list(command_nodes(inner))[0], nested)
+    at = occurrence_of(_commands(inner)[0], nested)
     assert at == Occurrence(origin, "cat /data/secret.txt", 0, 20)
     # The pass reads the line the word runs in a frame of its own, and
     # places the same command at the same occurrence.
     frame = line_frame("cat /data/secret.txt", origin)
-    assert occurrence_in(list(command_nodes(inner))[0], frame) == at
+    assert occurrence_in(_commands(inner)[0], frame) == at
 
 
 def test_a_substitution_body_is_read_as_the_nested_line_parses_it():
@@ -100,13 +116,13 @@ def test_a_substitution_body_is_read_as_the_nested_line_parses_it():
     assert body.parent == occurrence_in(sub, frame)
     inner = next(
         c
-        for c in command_nodes(ast)
+        for c in _commands(ast)
         if c.start_byte > sub.start_byte and c.end_byte <= sub.end_byte
     )
     walked = occurrence_in(inner, body)
     # What the nested line computes when it parses the body alone.
     nested = HandOff(origin=occurrence_in(sub, frame))
-    ran = occurrence_of(list(command_nodes(parse(body.text)))[0], nested)
+    ran = occurrence_of(_commands(parse(body.text))[0], nested)
     assert walked == ran
 
 
@@ -163,7 +179,7 @@ def test_words_a_command_hands_on_are_spelled_as_it_spells_them():
     parent = Occurrence(None, "command cat '/data/secret file'", 0, 31)
     frame = argv_frame(["cat", "/data/secret file"], parent)
     assert frame.text == "cat '/data/secret file'"
-    node = list(command_nodes(parse(frame.text)))[0]
+    node = _commands(parse(frame.text))[0]
     assert occurrence_in(node, frame) == whole_occurrence(frame)
 
 
@@ -176,7 +192,7 @@ def test_words_holding_a_multibyte_character_end_where_the_parse_ends():
     frame = argv_frame(["cat", "/data/secrét"], parent)
     whole = whole_occurrence(frame)
     assert whole.end == len(frame.text.encode()) > len(frame.text)
-    node = list(command_nodes(parse(frame.text)))[0]
+    node = _commands(parse(frame.text))[0]
     assert occurrence_in(node, frame) == whole
 
 
@@ -201,12 +217,12 @@ def test_a_line_read_from_a_node_stands_under_it():
     # that named it, and the line it runs as hands up to the line's own
     # hand-off.
     handed = HandOff()
-    first, second = command_nodes(parse("c && c"))
+    first, second = _commands(parse("c && c"))
     under_first = evaluated_from(first, handed)
     under_second = evaluated_from(second, handed)
     assert under_first.parent is handed and under_second.parent is handed
     assert under_first.origin == occurrence_of(first, handed)
     assert under_first.origin != under_second.origin
-    cat = list(command_nodes(parse("cat /data/secret.txt")))[0]
+    cat = _commands(parse("cat /data/secret.txt"))[0]
     assert occurrence_of(cat, under_first).parent == under_first.origin
     assert occurrence_of(cat, under_first) != occurrence_of(cat, under_second)

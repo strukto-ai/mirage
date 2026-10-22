@@ -478,16 +478,11 @@ export function sessionVisibility(access?: SessionAccess): Visibility | null {
   const patterns = hiding.flatMap((vis) => vis.paths?.patterns ?? [])
   const names = live.flatMap((vis) => vis.vars?.names ?? [])
   const varPatterns = live.flatMap((vis) => vis.vars?.patterns ?? [])
-  const lists = live.flatMap((vis) => (vis.commands === null ? [] : [vis.commands]))
   return {
     paths: hiding.length === 0 ? null : { paths, patterns },
     shown: shown.length === 0 ? null : { entries: shown },
     vars: names.length + varPatterns.length === 0 ? null : { names, patterns: varPatterns },
     processes: live.every((vis) => vis.processes === 'workspace') ? 'workspace' : 'session',
-    commands:
-      lists.length === 0
-        ? null
-        : (lists[0] ?? []).filter((pattern) => lists.every((list) => list.includes(pattern))),
   }
 }
 

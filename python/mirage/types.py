@@ -681,8 +681,8 @@ class Visibility:
     """What exists for one session, compiled once from its profile.
 
     The one answer to "is this here?" for everything a session touches:
-    paths (hides, re-opened by deeper shows), variables, processes and
-    commands. The views filter what they list through it and the op
+    paths (hides, re-opened by deeper shows), variables and processes.
+    The views filter what they list through it and the op
     boundary answers a hidden path as absent from it; nothing else asks
     the profile what exists. The default hides nothing.
 
@@ -692,15 +692,12 @@ class Visibility:
             hidden subtree and state a subtree's mode.
         vars (HiddenVars | None): the hidden variable names.
         processes (ProcessScope): whose processes the session sees.
-        commands (tuple[str, ...] | None): the allow patterns that
-            install commands, None installing every one.
     """
 
     paths: HiddenPaths | None = None
     shown: ShownPaths | None = None
     vars: HiddenVars | None = None
     processes: ProcessScope = "session"
-    commands: tuple[str, ...] | None = None
 
 
 DEFAULT_VISIBILITY = Visibility()

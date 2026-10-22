@@ -48,7 +48,6 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
     if (
       vis.paths === null &&
       vis.shown === null &&
-      vis.commands === null &&
       session.commands === null &&
       mode === mount.mode
     ) {

@@ -77,23 +77,6 @@ export interface Deny {
 }
 
 /**
- * Answer as though the path did not exist.
- *
- * Outranks every other answer: a hidden path is absent, so there is
- * nothing left to allow, refuse or ask about. Never rendered as a
- * refusal: no reason, no `refusal` record, no explain line. The entry point
- * throws `error` as the terminal would for a missing name (ENOENT, or
- * EACCES for a create landing in a visible directory). The dispatcher's
- * walk answers a hidden path itself (`sees`), before any policy is asked;
- * no policy method returns one. `kind` is the wire discriminant shared
- * with Python.
- */
-export interface Hide {
-  kind: 'hide'
-  error: Error
-}
-
-/**
  * Place a line on a runtime, the answer `preExecute` gives beside a Deny.
  *
  * The runtime serves every command it captures on the line, as a
@@ -225,15 +208,14 @@ export interface Ask {
 }
 
 /**
- * The closed vocabulary of policy answers, ranked by kind: Hide (the
- * built-in's, the path is absent), then Deny (first opinion wins), then
- * Ask (defers to the host; a Deny anywhere in the chain still wins),
- * then Route and Limit (every Route has to agree; every Limit merges to
- * the tightest, Limit.aggr). A method returns an Action to state an
- * opinion or null to stay silent; each method accepts a fixed set of kinds
- * (VALIDITY), enforced at the seam.
+ * The closed vocabulary of policy answers, ranked by kind: Deny (first
+ * opinion wins), then Ask (defers to the host; a Deny anywhere in the
+ * chain still wins), then Route and Limit (every Route has to agree; every
+ * Limit merges to the tightest, Limit.aggr). A method returns an Action to
+ * state an opinion or null to stay silent; each method accepts a fixed set
+ * of kinds (VALIDITY), enforced at the seam.
  */
-export type Action = Hide | Deny | Limit | Ask | Route
+export type Action = Deny | Limit | Ask | Route
 
 /**
  * How far an answer reaches.

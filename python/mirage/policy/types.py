@@ -98,27 +98,6 @@ class Deny:
 
 
 @dataclass(frozen=True, slots=True)
-class Hide:
-    """Answer as though the path did not exist.
-
-    Outranks every other answer: a hidden path is absent, so there is
-    nothing left to allow, refuse or ask about. Never rendered as a
-    refusal: no reason, no ``refusal`` record, no explain line. The
-    entry point raises ``error`` as the terminal would for a missing name
-    (ENOENT, or EACCES for a create landing in a visible directory). The
-    dispatcher's walk answers a hidden path itself (``sees``), before
-    any policy is asked; no policy method returns one.
-
-    Args:
-        error (OSError): what the entry point raises.
-    """
-
-    kind: ClassVar[str] = "hide"
-
-    error: OSError
-
-
-@dataclass(frozen=True, slots=True)
 class Route:
     """Place a line on a runtime, the answer ``pre_execute`` gives
     beside a Deny.
@@ -279,14 +258,13 @@ class Ask:
     policy: str = ""
 
 
-# The closed vocabulary of policy answers, ranked by kind: Hide (the
-# built-in's, the path is absent), then Deny (first opinion wins), then
-# Ask (defers to the host; a Deny anywhere in the chain still wins), then
-# Route and Limit (every Route has to agree; every Limit merges to the
-# tightest, Limit.aggr). A method returns an Action to state an opinion or
-# None to stay silent; each method accepts a fixed set of kinds
-# (VALIDITY), enforced loud.
-Action = Hide | Deny | Limit | Ask | Route
+# The closed vocabulary of policy answers, ranked by kind: Deny (first
+# opinion wins), then Ask (defers to the host; a Deny anywhere in the
+# chain still wins), then Route and Limit (every Route has to agree;
+# every Limit merges to the tightest, Limit.aggr). A method returns an
+# Action to state an opinion or None to stay silent; each method accepts
+# a fixed set of kinds (VALIDITY), enforced loud.
+Action = Deny | Limit | Ask | Route
 
 
 class Answer(BaseModel):

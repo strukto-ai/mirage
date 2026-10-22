@@ -824,6 +824,8 @@ class CacheManager:
         row: FileStat | None = None,
         *,
         leaf: bool = False,
+        probed: FileStat | None = None,
+        own: bool = False,
     ) -> None:
         """Drop what a change at ``path`` made stale, under every name its
         store has here.
@@ -858,7 +860,8 @@ class CacheManager:
         listings: a keyed store materializes every missing level of a key
         in one put, so those listings gained entries too. Each affected
         listing becomes partial and keeps its unaffected siblings. Every
-        change retires this mount's in-flight reads and probe answers.
+        change retires this mount's in-flight reads and probe answers, all
+        but ``probed``.
 
         Args:
             path (PathSpec): the changed path; only ``virtual`` is read.
@@ -867,12 +870,20 @@ class CacheManager:
                 parent's listing; None drops that entry.
             leaf (bool): a DELETE whose remover knows nothing was below
                 the path.
+            probed (FileStat | None): the backend's answer the change was
+                found by, which this command's probe keeps serving for
+                ``path`` (``probed_stat``) past the retire.
+            own (bool): only this mount's name, as a freshness probe drops
+                what it found: the store's other names answer to their own
+                mount's read policy.
         """
         key = mount_key(path.virtual, self._prefix)
-        for manager in (self, *self._aliases()):
+        for manager in (self,) if own else (self, *self._aliases()):
             name = manager._name(key)
             if manager is self or manager._owns_path(name):
-                await manager._invalidate(name, kind, row, leaf)
+                await manager._invalidate(
+                    name, kind, row, leaf, probed if manager is self else None
+                )
 
     async def _invalidate(
         self,
@@ -880,9 +891,13 @@ class CacheManager:
         kind: FileChangeKind,
         row: FileStat | None,
         leaf: bool,
+        probed: FileStat | None,
     ) -> None:
         try:
             self.retire()
+            started = command_started()
+            if probed is not None and started is not None:
+                self._probed[key] = (started, self._read_generation, probed)
             if self._caches_reads and self._file_cache is not None:
                 await self._file_cache.remove(key)
             if kind is FileChangeKind.UNKNOWN:

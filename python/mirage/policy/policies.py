@@ -18,7 +18,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import fields, replace
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.context import (
@@ -325,8 +325,7 @@ async def _explained_op(
     """
     said = await policies.answers("pre_vfs", ctx)
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask)))
-    first = answers[0] if answers else None
-    winner = next((a for a in answers if isinstance(a, Deny)), first)
+    winner = settled(answers)
     base = VfsExplanation(
         call=ctx.call.name, paths=(ctx.path.virtual,), answers=answers
     )
@@ -569,6 +568,16 @@ def agreed(routes: list[Route]) -> Deny | Route | None:
         f"policies place the line on different runtimes: {said}",
         policy=", ".join(dict.fromkeys(r.policy for r in routes)),
     )
+
+
+@overload
+def settled(answers: tuple[Deny | Ask, ...]) -> Deny | Ask | None: ...
+
+
+@overload
+def settled(
+    answers: tuple[Deny | Ask | Route, ...],
+) -> Deny | Ask | Route | None: ...
 
 
 def settled(
@@ -889,12 +898,11 @@ class Policies:
                 ``_chain`` takes it.
         """
         said, limits = await self._said(method, ctx, False, placed, rules_only)
-        deny = next((a for a in said if isinstance(a, Deny)), None)
-        if deny is not None:
-            return deny, None, ()
-        asked = next((a for a in said if isinstance(a, Ask)), None)
+        action = settled(tuple(a for a in said if isinstance(a, (Deny, Ask))))
+        if isinstance(action, Deny):
+            return action, None, ()
         routes = tuple(a for a in said if isinstance(a, Route))
-        return asked, Limit.aggr(limits), routes
+        return action, Limit.aggr(limits), routes
 
     async def answers(
         self,

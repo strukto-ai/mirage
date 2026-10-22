@@ -80,6 +80,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import { withHandOff } from '../node/execute_node.ts'
 import type { ExecuteNodeDeps } from '../node/execute_node.ts'
 import {
+  admitLine,
   lineHeld,
   lineJudgments,
   prejudgeLine,
@@ -99,7 +100,7 @@ import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { cliEnvNames, fillEnv, fillNames, guestBound, lineNodes } from './fill.ts'
-import { admitLine, isPending, isPendingRefusal } from '../node/admission.ts'
+import { isPending } from '../../policy/decisions.ts'
 import { claimantFor, evaluatedFrom } from '../node/occurrence.ts'
 import { runWholeLine } from './line.ts'
 import type { WorkspaceMeta } from './meta.ts'
@@ -977,7 +978,7 @@ async function runParsedLine(
         handed,
       )
       if (refused !== null) {
-        held = isPending(refused)
+        held = isPending(refused.refusal)
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
           await joinOrAbort(
@@ -1067,7 +1068,7 @@ async function runParsedLine(
       }
       env.records.push(...lineRecords)
       const refusal = result.refusal ?? nested.latest
-      held = isPendingRefusal(refusal)
+      held = isPending(refusal)
       recordStatus(targetSession, result.exitCode)
       if (isLine) {
         await logLine(
@@ -1109,7 +1110,7 @@ async function runParsedLine(
       // A question left waiting holds the line for its retry, which has
       // to find the grants standing, so they are released rather than
       // spent; any other refusal ends the line.
-      held = isPending(prejudged)
+      held = isPending(prejudged.refusal)
       recordStatus(targetSession, prejudged.exitCode)
       return new ExecuteResult(
         new Uint8Array(),
@@ -1179,7 +1180,7 @@ async function runParsedLine(
       // reads.
       const treeIo = execResult[0][1]
       treeIo.refusal ??= nested.latest
-      held = isPendingRefusal(treeIo.refusal)
+      held = isPending(treeIo.refusal)
     } catch (err) {
       // Abort (cancellation) and content drift are control-flow signals
       // that must propagate, mirroring the Python workspace. Any other

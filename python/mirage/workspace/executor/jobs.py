@@ -34,7 +34,7 @@ from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
-from mirage.policy.decisions import Decisions
+from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.process.view import ProcessView
@@ -267,7 +267,7 @@ async def handle_background(
             # The line still hears of every refusal; a question left
             # waiting also holds the job.
             nonlocal held
-            held = held or refusal.kind == "pending"
+            held = held or is_pending(refusal)
             if line_sink is not None:
                 line_sink(refusal)
 
@@ -358,9 +358,7 @@ async def handle_background(
             stderr = await io.materialize_stderr()
             if stderr:
                 await console.emit(Channel.STDERR, stderr)
-            ended_held = held or (
-                io.refusal is not None and io.refusal.kind == "pending"
-            )
+            ended_held = held or is_pending(io.refusal)
             return io, exec_node
         finally:
             release_job()

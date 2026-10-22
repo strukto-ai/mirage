@@ -33,6 +33,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
+from mirage.policy.decisions import is_pending
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.base import Runtime
 from mirage.runtime.routing import RouteDecision, RouteError
@@ -67,14 +68,10 @@ from mirage.workspace.executor.statement import (
 from mirage.workspace.executor.traps import finish_shell, inherit_traps
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.node.admission import (
-    admit_line,
-    is_pending,
-    is_pending_refusal,
-)
 from mirage.workspace.node.explain import (
     Judged,
     Walked,
+    admit_line,
     line_held,
     line_judgments,
     prejudge_line,
@@ -855,7 +852,7 @@ async def run_prepared_line(
                     handed,
                 )
                 if refused is not None:
-                    held = is_pending(refused)
+                    held = is_pending(refused.refusal)
                     io = IOResult(
                         exit_code=refused.exit_code,
                         stderr=refused.stderr,
@@ -906,7 +903,7 @@ async def run_prepared_line(
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
-                held = is_pending_refusal(io.refusal)
+                held = is_pending(io.refusal)
                 record_status(session, io.exit_code)
                 return io
             # The line is the unit a rule judges, so every command in it is
@@ -933,7 +930,7 @@ async def run_prepared_line(
                 # which has to find the grants standing, so they are
                 # released rather than spent; any other refusal ends
                 # the line.
-                held = is_pending(refused)
+                held = is_pending(refused.refusal)
                 io = IOResult(
                     exit_code=refused.exit_code,
                     stderr=refused.stderr,
@@ -1042,7 +1039,7 @@ async def run_prepared_line(
             # grants the pass claimed for the other commands standing,
             # or it asks for them again, and the answer to this one
             # would be taken by the first spelling the pass reads.
-            held = is_pending_refusal(io.refusal)
+            held = is_pending(io.refusal)
         finally:
             reset_caller(line_token)
             if held:

@@ -124,7 +124,11 @@ class EventHub:
         reports (IMAP IDLE says a mailbox changed, not which message), and
         every ancestor's entry goes too, since a nested create or delete
         implies levels appeared or vanished with it (a consumer forwarding
-        only file events from a Nextcloud webhook hits exactly this).
+        only file events from a Nextcloud webhook hits exactly this). The
+        answers the mount's client keeps of its own go with them
+        (``Accessor.forget``: a repository's tree, a site's ids, a
+        database's names), since no path names them and nothing else
+        tells the client its service changed.
 
         Args:
             entry (EventMount): Mount owning the path.
@@ -134,6 +138,7 @@ class EventHub:
         manager = entry.cache_manager
         if manager is not None:
             await manager.invalidate(path, kind)
+        entry.accessor.forget()
 
     async def _invalidate(self, entry: EventMount, change: FileEvent) -> None:
         """Evict cache for one change before it is delivered.

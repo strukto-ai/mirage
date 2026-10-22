@@ -21,7 +21,8 @@ import { classifyParts } from '../expand/classify/parts.ts'
 import { getTestParser, voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import { Admitted, admit, admitLine, policyScopes } from './admission.ts'
+import { Admitted, admit, policyScopes } from './admission.ts'
+import { admitLine } from './explain.ts'
 import { PolicyDenied } from '../../policy/index.ts'
 import type { CommandContext, CommandRule, AdmissionRules } from '../../policy/types.ts'
 import type { Action } from '../../policy/index.ts'
@@ -455,7 +456,6 @@ describe('admission', () => {
       ctx: gateCtx(['grep', '-r', 'x', '/data']),
       judged: new Set(['/data']),
       granted: [],
-      scoped: true,
     })
     gate.check('/data')
     gate.check('/data/open/o')
@@ -484,7 +484,6 @@ describe('admission', () => {
       ctx: gateCtx(['grep', 'x', '/data/asked/a']),
       judged: new Set(['/data/asked/a']),
       granted: [],
-      scoped: true,
     })
     judged.check('/data/asked/a')
     const granted = new Admitted({
@@ -492,7 +491,6 @@ describe('admission', () => {
       ctx: gateCtx(['grep', '-r', 'x', '/data/asked']),
       judged: new Set(['/data/asked']),
       granted: [ask],
-      scoped: true,
     })
     granted.check('/data/asked/a')
   })
@@ -510,7 +508,6 @@ describe('admission', () => {
       ctx: gateCtx(['find', '/data', '/other']),
       judged: new Set(['/data', '/other']),
       granted: [],
-      scoped: true,
     })
     expect(['/data', '/data/sealed/s', '/other'].map((p) => gate.scopes(p))).toEqual([
       true,
@@ -519,22 +516,16 @@ describe('admission', () => {
     ])
   })
 
-  it('admit reports the grant the line runs under and its scope', async () => {
+  it('admit reports the grant the line runs under', async () => {
     const w = await ws()
     const session = w.sessionManager.get(w.sessionManager.defaultId)
-    let words = classifyParts(['rm', '/data/x'], w.registry, session.cwd)
+    const words = classifyParts(['rm', '/data/x'], w.registry, session.cwd)
     const verdict = await admit('rm', ['/data/x'], words.slice(1), session, w.registry, w.namespace)
     expect(verdict).toBeInstanceOf(Admitted)
     const admitted = verdict as Admitted
     expect(admitted.ctx.tokens).toEqual(['rm', '/data/x'])
     expect([...admitted.judged]).toEqual(['/data/x'])
     expect(admitted.granted).toEqual([])
-    // `rm` is under no path rule in this document; `cat` is.
-    expect(admitted.scoped).toBe(false)
-    words = classifyParts(['cat', '/data/a'], w.registry, session.cwd)
-    const scoped = await admit('cat', ['/data/a'], words.slice(1), session, w.registry, w.namespace)
-    expect(scoped).toBeInstanceOf(Admitted)
-    expect((scoped as Admitted).scoped).toBe(true)
   })
 })
 

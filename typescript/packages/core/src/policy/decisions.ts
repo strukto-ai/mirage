@@ -22,6 +22,7 @@ import {
   runWithCaller,
 } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
+import type { Refusal } from '../types.ts'
 import { PolicyDenied } from './errors.ts'
 import { Outcome } from './types.ts'
 import type {
@@ -215,6 +216,15 @@ export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): bool
     y = y.parent
   }
   return x === null && y === null
+}
+
+/**
+ * Whether a refusal record is a question the host has not answered yet,
+ * which holds the line for its retry rather than ending it. Mirrors the
+ * Python `is_pending`.
+ */
+export function isPending(refusal: Refusal | null | undefined): boolean {
+  return refusal?.kind === 'pending'
 }
 
 /**
@@ -531,7 +541,7 @@ export class Decisions {
     try {
       return await runWithOpCall(this, handed, sessionId, () => run(handed))
     } catch (err) {
-      const held = err instanceof PolicyDenied && err.refusal?.kind === 'pending'
+      const held = err instanceof PolicyDenied && isPending(err.refusal)
       if (held && asyncContextIsolatesTasks) this.release(sessionId, handed)
       throw err
     } finally {

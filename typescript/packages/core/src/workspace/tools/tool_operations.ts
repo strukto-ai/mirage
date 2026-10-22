@@ -227,7 +227,7 @@ export class MirageToolOperations {
       if (err instanceof Error && err.message.startsWith('unknown session:')) return TOOL_NAMES
       throw err
     }
-    const allow = session.visibility.commands
+    const allow = session.commands?.allow ?? null
     const writable = writes(session, this.session.mounts())
     const offered: Record<string, boolean> = {
       shell: allow === null || allow.length > 0,

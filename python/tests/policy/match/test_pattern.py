@@ -15,7 +15,6 @@
 from mirage.policy.constants import WILDCARD
 from mirage.policy.match.pattern import (
     pattern_matches,
-    pattern_names,
     pattern_reaches,
     split_pattern,
 )
@@ -50,10 +49,10 @@ def test_pattern_matches_is_a_token_prefix():
     assert pattern_matches("*", ("anything", "at", "all"))
 
 
-def test_pattern_names_starts_a_line_of_the_command():
-    assert pattern_names("git log", "git")
-    assert not pattern_names("git log", "log")
-    assert pattern_names("*", "rm")
+def test_pattern_reaches_a_command_a_line_of_it_starts():
+    assert pattern_reaches("git log", ("git",))
+    assert not pattern_reaches("git log", ("log",))
+    assert pattern_reaches("*", ("rm",))
 
 
 def test_pattern_reaches_reads_only_the_words_the_two_share():
