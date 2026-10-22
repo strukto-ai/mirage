@@ -197,8 +197,6 @@
         "s3-prefix",
         "databricks-prefix",
         "gridfs-prefix",
-        "dropbox",
-        "dropbox-root",
         "onedrive",
         "sharepoint",
         "ssh",
