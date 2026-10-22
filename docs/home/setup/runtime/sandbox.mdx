@@ -80,8 +80,9 @@ output.
   Mirage sends TERM, then KILL a second later, to every process in the
   sandbox that carries the run's `MIRAGE_EXEC_ID`; that needs `/bin/sh`,
   `grep` and `/proc` in the sandbox, and Mirage gives up after 5 seconds
-  if the sandbox stops answering. A Daytona sandbox has no timeout of its
-  own, so it keeps running and billing. Use the provider's own limits.
+  if the sandbox stops answering. In TypeScript, a Daytona command keeps
+  running after a timeout. A Daytona sandbox has no timeout of its own, so
+  it keeps running and billing. Use the provider's own limits.
 </Warning>
 
 

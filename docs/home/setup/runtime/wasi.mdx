@@ -341,6 +341,6 @@ Network connections are unavailable in this runtime.
 - Exit codes are limited to 0–255.
 - Empty-path behavior depends on the Python build. Use `.` for the current
   directory.
-- A workspace mount at `/lib` or under `/lib/python` hides the interpreter's
-  standard library, so `python3` exits 126. Mounts elsewhere under `/lib`
-  (`/lib/app`) are fine.
+- A workspace mount at `/lib` or any path starting with `/lib/python`
+  makes `python3` exit 126 to protect the interpreter's standard library.
+  Other paths under `/lib`, such as `/lib/app`, are fine.
