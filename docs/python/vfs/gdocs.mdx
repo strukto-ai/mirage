@@ -105,7 +105,7 @@ vfs = GDocsVFS(config=config)
 
 async def main():
     ws = Workspace({"/gdocs": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config)
+    ws.register_cli("gws", GWS, config.model_dump())
 
     # List structure
     r = await ws.shell("ls /gdocs/")
