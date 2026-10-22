@@ -661,10 +661,26 @@ class Workspace:
             ast, session, self._registry, self._namespace, every=False
         )
         if holds([one.judgment for one in verdicts]):
-            judged = await explain_line(
-                ast, session, self._registry, self._namespace
+            # The run leaves a held line on its static bindings for the
+            # gate to answer (``Router.decide``), whole when they take it
+            # whole.
+            whole_line = (
+                whole_line_runtime(self._registry.runtime_bindings) is not None
             )
-            return explained_line(line, judged, verdicts, lambda command: "")
+            judged = await explain_line(
+                ast,
+                session,
+                self._registry,
+                self._namespace,
+                whole_line=whole_line,
+            )
+            return explained_line(
+                line,
+                judged,
+                judged if whole_line else verdicts,
+                lambda command: "",
+                whole_line,
+            )
         answers, placed = await self._router.placement(
             line,
             session,
