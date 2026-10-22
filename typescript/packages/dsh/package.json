@@ -80,7 +80,7 @@
     "@deepseek-ai/dsh-spill": "0.2.0-rc.2",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "@deepseek-ai/dsh-subprocess": "0.2.0-rc.2"
   }
 }
