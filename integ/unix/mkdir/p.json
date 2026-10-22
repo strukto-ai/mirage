@@ -148,6 +148,143 @@
         "stdout": "mkdir: created directory 'r10new'\nmkdir: created directory 'r10new/nope'\nmkdir: created directory 'r10new/nope/../m'\nrc=0\nmkdir: created directory 'r10new/nope2'\nrc=0\nmkdir: created directory 'r10a'\nmkdir: created directory 'r10a/../r10a/b'\nrc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "mkdir_p_parents_outlive_the_leaf",
+      "seq": 601065,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pmkd6/a/b && rmdir /data/pmkd6/a/b && ls -d /data/pmkd6/a",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/pmkd6/a\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "mkdir_p_dates_every_made_directory",
+      "seq": 601066,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "touch -d '2000-01-01' /data/pmkd7ref && mkdir -p /data/pmkd7/a/b && find /data/pmkd7 -newer /data/pmkd7ref | sort",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/pmkd7\n/data/pmkd7/a\n/data/pmkd7/a/b\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
+    },
+    {
+      "id": "mkdir_p_leaves_an_existing_directory_its_mode",
+      "seq": 601067,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir /data/pmkd8 && chmod 750 /data/pmkd8 && (umask 077; mkdir -p /data/pmkd8) && mkdir -p -m 700 /data/pmkd8 && stat -c %a /data/pmkd8",
+      "expect": {
+        "exit": 0,
+        "stdout": "750\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "id": "mkdir_p_under_a_mask_then_writes_below",
+      "seq": 601087,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "(umask 077; mkdir -p /data/pmkd9/new) && echo x > /data/pmkd9/new/f && cat /data/pmkd9/new/f",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\n",
+        "stderr": ""
+      },
+      "flags": [
+        "p"
+      ]
     }
   ]
 }

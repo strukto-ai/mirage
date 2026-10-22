@@ -122,7 +122,6 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "exec",
                 "box",
                 "--quiet",
-                "--no-tty",
                 "-w",
                 "/",
                 "-e",

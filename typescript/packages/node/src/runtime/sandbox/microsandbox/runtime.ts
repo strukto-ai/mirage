@@ -131,7 +131,7 @@ export class MicrosandboxRuntime
   }
 
   private head(): string[] {
-    return ['exec', this.config.sandbox, '--quiet', '--no-tty']
+    return ['exec', this.config.sandbox, '--quiet']
   }
 }
 

@@ -166,6 +166,24 @@ def test_mkdir_parents_keeps_an_existing_marker(accessor):
     assert store.puts == [("imp/", b"")]
 
 
+def test_mkdir_parents_keys_every_directory_it_makes(accessor):
+    # A directory only the leaf's marker implies has no time and goes
+    # with the leaf, where GNU keeps every directory `-p` made; one that
+    # was there, marked or implied by a key, is left as it is.
+    store = FakeStore({"a/": b"", "imp/x.txt": b"x"})
+    mkdir = make_mkdir(make_driver(store))
+    for path in ("/a/b/c", "/imp/d/e", "/n/m"):
+        asyncio.run(mkdir(accessor, spec(path), parents=True))
+    assert store.puts == [
+        ("a/b/", b""),
+        ("a/b/c/", b""),
+        ("imp/d/", b""),
+        ("imp/d/e/", b""),
+        ("n/", b""),
+        ("n/m/", b""),
+    ]
+
+
 def test_mkdir_refuses_a_missing_parent_without_parents(accessor):
     # mkdir(2) makes one directory under one that exists; only `-p`
     # makes the chain, so a guest's os.mkdir under a missing parent is

@@ -214,6 +214,23 @@ describe('object_store write', () => {
     expect(store.puts.map(([key]) => key)).toEqual(['imp/'])
   })
 
+  // A directory only the leaf's marker implies has no time and goes with
+  // the leaf, where GNU keeps every directory `-p` made; one that was
+  // there, marked or implied by a key, is left as it is.
+  it('mkdir -p keys every directory it makes', async () => {
+    const store = new FakeStore({ 'a/': '', 'imp/x.txt': 'x' })
+    const mkdir = makeMkdir(makeDriver(store))
+    for (const path of ['/a/b/c', '/imp/d/e', '/n/m']) await mkdir(accessor, spec(path), true)
+    expect(store.puts.map(([key]) => key)).toEqual([
+      'a/b/',
+      'a/b/c/',
+      'imp/d/',
+      'imp/d/e/',
+      'n/',
+      'n/m/',
+    ])
+  })
+
   it('mkdir refuses a missing parent without parents', async () => {
     // mkdir(2) makes one directory under one that exists; only `-p` makes
     // the chain, so a guest's os.mkdir under a missing parent is ENOENT

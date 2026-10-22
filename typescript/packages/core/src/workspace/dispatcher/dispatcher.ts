@@ -43,6 +43,7 @@ import {
   erofs,
   isEnoent,
   isEnotdir,
+  isFsError,
   isMissError,
   isMissingOp,
   eloop,
@@ -353,6 +354,39 @@ async function mkdirOnReadOnly(
     }
   }
   if (!parents) throw eexist(path.virtual)
+}
+
+/**
+ * The directories above `path` a `mkdir -p` makes, outermost first: each
+ * missing name between the path and the nearest one that exists on its
+ * mount. Asked before the create, since after it a directory it made and
+ * one that was there look alike. A name that answers anything but ENOENT
+ * (a file in the chain) ends the walk, and the create names it. Mirrors
+ * Python's `_made_above`.
+ */
+async function madeAbove(
+  stat: (path: PathSpec) => Promise<FileStat>,
+  prefix: string,
+  path: PathSpec,
+): Promise<PathSpec[]> {
+  const base = rstripSlash(prefix)
+  const made: PathSpec[] = []
+  let node = parent(rstripSlash(path.virtual))
+  while (node.startsWith(base + '/')) {
+    const spec = PathSpec.fromStrPath(node)
+    try {
+      await stat(spec)
+    } catch (err) {
+      if (isEnoent(err)) {
+        made.push(spec)
+        node = parent(node)
+        continue
+      }
+      console.debug(`mkdir -p walk stops at ${node}: ${String(err)}`)
+    }
+    break
+  }
+  return made.reverse()
 }
 
 /** Ask a command's gate once about each distinct path an op reaches. */
@@ -960,6 +994,10 @@ export class Dispatcher {
     const settles =
       (DISPATCH_WRITE_OPS.has(name) || (call.write && !POLICY_WRITE_OPS.has(name))) &&
       !SERIAL_WRITE_OPS.has(name)
+    const made =
+      name === 'mkdir' && call.kwargs?.parents === true
+        ? await madeAbove(dispatchStat(this.dispatch), mount.prefix, call.path)
+        : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
     try {
       ran = call.fresh
@@ -975,6 +1013,11 @@ export class Dispatcher {
           lostPaths(activeRecords()),
         )
       }
+      try {
+        await this.dateMade(made, true)
+      } catch (cleanup) {
+        console.debug(`timing after a failed ${name}: ${String(cleanup)}`)
+      }
       throw err
     }
     const [answer, dst, fullArgs] = ran
@@ -989,6 +1032,7 @@ export class Dispatcher {
         answer,
       )
     }
+    await this.dateMade(made, false)
     if (!CALLS.has(name)) result = this.customAnswer(call, vfs.name, result)
     // The transfer already happened, so a limit changes what the caller
     // receives, not what the backend moved; the report above already
@@ -3528,6 +3572,30 @@ export class Dispatcher {
    * new entry, kept in its parent's listing; null drops that entry. Mirrors
    * Python's Dispatcher._changed.
    */
+  /**
+   * Time the directories a `mkdir -p` made above its path, as the path
+   * itself is timed. After a failure only those that now exist are: a chain
+   * is made outermost first, so the first one missing ends it. Mirrors
+   * Python's `_date_made`.
+   */
+  private async dateMade(made: readonly PathSpec[], failed: boolean): Promise<void> {
+    for (const spec of made) {
+      if (failed) {
+        try {
+          const [row] = await this.dispatch('stat', spec, [], { fresh: true })
+          if (row === null || row === undefined) return
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          console.debug(`mkdir -p stopped at ${spec.virtual}: ${String(err)}`)
+          return
+        }
+      }
+      await this.changed(spec.virtual, FileChangeKind.CREATE, null, {
+        observed: Date.now() / 1000,
+      })
+    }
+  }
+
   private async changed(
     rawPath: string,
     kind: FileChangeKind,

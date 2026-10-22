@@ -11,7 +11,7 @@ wheel_name="$(basename "$wheel")"
 msb copy --quiet "$wheel" "$sandbox:/tmp/$wheel_name"
 msb copy --quiet "$test_dir/guest_ops.py" "$sandbox:/tmp/mirage_e2e_ops.py"
 msb copy --quiet "$test_dir/guest.yaml" "$sandbox:/tmp/mirage-e2e.yaml"
-msb exec "$sandbox" --quiet --no-tty -w / -e "MIRAGE_E2E_WHEEL=/tmp/$wheel_name" -- sh -eu -c '
+msb exec "$sandbox" --quiet -w / -e "MIRAGE_E2E_WHEEL=/tmp/$wheel_name" -- sh -eu -c '
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs fuse3 libfuse2 procps
   mkdir -p /tmp/e2e-ro /data /e2e-guest /boxdata
@@ -24,4 +24,4 @@ msb exec "$sandbox" --quiet --no-tty -w / -e "MIRAGE_E2E_WHEEL=/tmp/$wheel_name"
   test -c /dev/fuse
   mountpoint -q /e2e-guest
   mountpoint -q /data
-'
+' </dev/null

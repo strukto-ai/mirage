@@ -401,20 +401,23 @@ export function ruleScope(rule: CommandRule): HiddenPaths | null {
  * entries inside it (`cp -r`, `chmod -R`, a runtime's `open`) where no
  * admission asked its rule. The directory holding a scope is not in it,
  * so a listing still shows a refused entry's name, which is what deny
- * means: present, and refused.
+ * means: present, and refused. With `subtree`, it asks about every entry
+ * at or under `virtual` rather than the entry itself, as a walk does
+ * before it trusts the raw tree (`ioReach`).
  */
 export function matchIo(
   rule: CommandRule,
   scope: HiddenPaths | null,
   tokens: readonly string[],
   virtual: string,
+  subtree = false,
 ): boolean {
   const mount = rule.mount ?? ''
   if (scope === null && mount === '') return false
   const commands = rule.commands ?? []
   if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) return false
-  if (scope === null) return under(virtual, mount)
-  return pathHidden(scope, virtual)
+  if (scope === null) return under(virtual, mount) || (subtree && under(mount, virtual))
+  return subtree ? hidesIntersect(scope, virtual) : pathHidden(scope, virtual)
 }
 
 /**
@@ -461,17 +464,9 @@ export function ioReach(
   virtual: string,
 ): boolean {
   if (rules === null) return false
-  for (const rule of [...rules.deny, ...rules.ask]) {
-    const scope = ruleScope(rule)
-    const mount = rule.mount ?? ''
-    if (scope === null && mount === '') continue
-    const commands = rule.commands ?? []
-    if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) continue
-    if (scope === null) {
-      if (under(mount, virtual) || under(virtual, mount)) return true
-    } else if (hidesIntersect(scope, virtual)) return true
-  }
-  return false
+  return [...rules.deny, ...rules.ask].some((rule) =>
+    matchIo(rule, ruleScope(rule), tokens, virtual, true),
+  )
 }
 
 /**

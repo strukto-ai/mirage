@@ -345,11 +345,23 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
             # has nothing to write: `mkdir x` then `rmdir x` is ENOENT
             # here but fine on a marker store.
             return
-        # Object stores have no real directories; parents is implicit. A
-        # zero-byte marker keyed at the prefix makes the empty directory
-        # visible.
-        path = path_spec.mount_path
-        pfx = kp.apply_dir(driver.key_prefix_of(accessor), path)
+        # Object stores have no real directories. A zero-byte marker keyed
+        # at the prefix makes the empty directory visible, and `-p` keys
+        # one for every directory of the chain it makes: one only the
+        # leaf's marker implies has no time and goes with the leaf.
+        made = [path_spec.mount_path]
+        if row is None and parents:
+            for up in reversed(ancestors(norm(path_spec.mount_path))):
+                if (
+                    await _row_at(
+                        stat, accessor, kp.mounted_path(path_spec, up)
+                    )
+                    is not None
+                ):
+                    break
+                made.append(up)
+        prefix = driver.key_prefix_of(accessor)
+        pfx = kp.apply_dir(prefix, path_spec.mount_path)
         if pfx:
             async with driver.connect(accessor) as conn:
                 if (
@@ -361,6 +373,7 @@ def make_mkdir(driver: ObjectStoreDriver[A, C]) -> MkdirFn[A]:
                     # in a versioned bucket, adds a version. A directory
                     # only a key below implies still gets one.
                     return
-                await driver.put(conn, pfx, b"")
+                for path in reversed(made):
+                    await driver.put(conn, kp.apply_dir(prefix, path), b"")
 
     return mkdir

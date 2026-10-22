@@ -218,14 +218,12 @@ const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
     // umask does not reach it, which is GNU's rule too.
     mode = parseChmod(modeText, DEFAULT_DIR_MODE)
     if (mode === null) throw new Error(`mkdir: invalid mode '${modeText}'`)
-    if (!files.answers('setattr')) {
-      throw new Error('mkdir: --mode is not supported on this backend')
-    }
-  } else if (files.answers('setattr')) {
+  } else {
     // A new directory is 0777 masked by the session's umask. Only a
     // mask away from bash's default costs a setattr, since 755 is what
     // every backend already renders for a fresh directory; parents
-    // made by `-p` keep that default.
+    // made by `-p` keep that default. A backend without permission
+    // bits keeps the mode in the attribute overlay, as it keeps a chmod.
     const umask = sessionUmask(ctx.session?.access())
     if (umask !== DEFAULT_UMASK) mode = 0o777 & ~umask
   }
@@ -244,14 +242,19 @@ const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
       continue
     }
     const names = verbose ? await createdNames(p, parents, links, probe) : []
+    const existed = mode !== null && (await entryKind(files.stat, p)).exists
     const failed = await makeDirectory(files.mkdir, p, parents, mountRoot(ctx), links, probe)
     if (failed !== null) {
       errors.push(failed)
       continue
     }
-    // -m applies to the named directory only; any parents made by -p keep
-    // the default mode (GNU).
-    if (mode !== null && files.answers('setattr')) await files.setAttrs(p, { mode })
+    // -m applies to the named directory only, and only when this mkdir made
+    // it: parents made by -p keep the default mode, a directory -p found
+    // keeps its own (GNU), and a store that keeps no empty directory (hf)
+    // has none to set it on.
+    if (mode !== null && !existed && (await entryKind(files.stat, p)).exists) {
+      await files.setAttrs(p, { mode })
+    }
     lines.push(...createdLines(names))
   }
   return [formatOptionalRecords(lines), operandsIo(errors.map((line) => `${line}\n`).join(''))]

@@ -277,6 +277,41 @@ async def _mkdir_on_read_only(
         raise eexist(path)
 
 
+async def _made_above(
+    stat: Callable[[PathSpec], Awaitable[FileStat]],
+    prefix: str,
+    path: PathSpec,
+) -> list[PathSpec]:
+    """The directories above ``path`` a ``mkdir -p`` makes, outermost
+    first: each missing name between the path and the nearest one that
+    exists on its mount. Asked before the create, since after it a
+    directory it made and one that was there look alike. A name that
+    answers anything but ENOENT (a file in the chain) ends the walk, and
+    the create names it.
+
+    Args:
+        stat (Callable[[PathSpec], Awaitable[FileStat]]): the
+            dispatcher's own stat, raising when nothing is there.
+        prefix (str): the mount prefix.
+        path (PathSpec): the directory to make.
+    """
+    base = prefix.rstrip("/")
+    made: list[PathSpec] = []
+    node = parent(path.virtual.rstrip("/"))
+    while node.startswith(base + "/"):
+        spec = PathSpec.from_str_path(node)
+        try:
+            await stat(spec)
+        except FileNotFoundError:
+            made.append(spec)
+            node = parent(node)
+            continue
+        except OSError as exc:
+            logger.debug("mkdir -p walk stops at %s: %s", node, exc)
+        break
+    return made[::-1]
+
+
 def _visible_entries(
     entries: list[str], parent: str, vis: Visibility | None
 ) -> list[str]:
@@ -1260,6 +1295,15 @@ class Dispatcher:
             name in DISPATCH_WRITE_OPS
             or (call.write and name not in POLICY_WRITE_OPS)
         ) and name not in SERIAL_WRITE_OPS
+        made = (
+            await _made_above(
+                functools.partial(self._walk_stat, caller),
+                mount.prefix,
+                call.path,
+            )
+            if name == "mkdir" and kwargs.get("parents")
+            else []
+        )
         try:
             ran = await (
                 self._fresh_call(call, mount)
@@ -1269,12 +1313,17 @@ class Dispatcher:
         except BaseException:
             if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
+            try:
+                await self._date_made(caller, mount, made, failed=True)
+            except Exception as exc:
+                logger.debug("timing after a failed %s: %s", name, exc)
             raise
         result = self._filter(call, ran)
         if settles:
             await self._settle_write(
                 mount, name, call.path, kwargs, call.vis, created=ran
             )
+        await self._date_made(caller, mount, made, failed=False)
         if name not in CALLS:
             result = self._custom_answer(call, mount, result)
         result = await boundary.complete(mark, call.path, call.write, result)
@@ -3685,6 +3734,39 @@ class Dispatcher:
             return _facts_of(mount if original is mount else None)
 
         return facts
+
+    async def _date_made(
+        self,
+        caller: Caller,
+        mount: MountEntry,
+        made: list[PathSpec],
+        failed: bool,
+    ) -> None:
+        """Time the directories a ``mkdir -p`` made above its path, as
+        the path itself is timed.
+
+        After a failure only those that now exist are: a chain is made
+        outermost first, so the first one missing ends it.
+
+        Args:
+            caller (Caller): who made them.
+            mount (MountEntry): the mount they are on.
+            made (list[PathSpec]): what :func:`_made_above` found
+                missing, outermost first.
+            failed (bool): whether the create raised.
+        """
+        for spec in made:
+            if failed:
+                try:
+                    await self._walk_stat(caller, spec, fresh=True)
+                except OSError as exc:
+                    logger.debug(
+                        "mkdir -p stopped at %s: %s", spec.virtual, exc
+                    )
+                    return
+            await self._changed(
+                mount, spec, FileChangeKind.CREATE, observed=time.time()
+            )
 
     async def _changed(
         self,
