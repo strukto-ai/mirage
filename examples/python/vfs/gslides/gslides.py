@@ -37,7 +37,7 @@ vfs = GSlidesVFS(config=config)
 async def main() -> None:
     ws = Workspace({"/gslides": vfs}, mode=MountMode.WRITE)
     # The gws verbs are a CLI install, separate from the mounts.
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
 
     print("=== not-found errors show the full virtual path ===")
     for cmd in (

@@ -151,6 +151,31 @@ def test_an_instance_of_the_model_installs_as_it_is():
     assert reg.install("prog", tree(TokenConfig), config).config is config
 
 
+class ScopedTokenConfig(TokenConfig):
+    scope: str = "all"
+
+
+def test_an_instance_of_a_subclass_is_narrowed_to_the_model():
+    reg = CLIRegistry()
+    config = ScopedTokenConfig(token="eng")
+    stored = reg.install("prog", tree(TokenConfig), config).config
+    assert type(stored) is TokenConfig
+    assert stored == TokenConfig(token="eng")
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        ScopedTokenConfig(token="eng", scope="read"),
+        ScopedTokenConfig(token="eng").model_dump(),
+    ],
+)
+def test_a_subclass_field_the_caller_set_is_refused(config):
+    reg = CLIRegistry()
+    with pytest.raises(ValueError, match="unknown config keys: scope"):
+        reg.install("prog", tree(TokenConfig), config)
+
+
 @pytest.mark.parametrize(
     "config,message",
     [

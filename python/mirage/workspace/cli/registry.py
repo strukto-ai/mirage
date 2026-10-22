@@ -82,7 +82,8 @@ class CLIRegistry:
             spec (CLI): the program tree.
             config (Mapping[str, JsonValue] | BaseModel | None):
                 installation config: a mapping, validated through the
-                spec's ``config_model``, or an instance of that model.
+                spec's ``config_model``, or an instance of that model or
+                of a subclass of it, narrowed to the model's fields.
         """
         if not name or any(ch.isspace() for ch in name):
             raise ValueError(f"CLI name {name!r} must be a single word")
@@ -120,19 +121,35 @@ class CLIRegistry:
         """Validate an installation config against the spec's model.
 
         An instance of the spec's own ``config_model`` is taken as it is,
-        since pydantic validated it when it was built; any other value
-        that is not a mapping is refused by type, rather than having its
-        iteration read as a list of unknown keys.
+        since pydantic validated it when it was built. An instance of a
+        subclass (a mount config such as ``GDocsConfig`` handed to
+        ``gws``) is narrowed to the fields ``config_model`` declares:
+        kept whole, its extra fields would ride into every snapshot and
+        copy, whose reinstall validates them as a mapping and refuses
+        them. A subclass field the caller set is refused as an unknown
+        key, as the mapping arm and the TypeScript twin refuse it, so a
+        setting the CLI cannot honor is never dropped silently. Any other
+        value that is not a mapping is refused by type, rather than
+        having its iteration read as a list of unknown keys.
 
         Args:
             name (str): installed head word, for error attribution.
             spec (CLI): the program tree carrying ``config_model``.
             config (Mapping[str, JsonValue] | BaseModel | None): a raw
-                config mapping, or an instance of ``config_model``.
+                config mapping, or an instance of ``config_model`` or
+                of a subclass of it.
         """
         model = spec.config_model
         if model is not None and isinstance(config, model):
-            return config
+            if type(config) is model:
+                return config
+            unknown = config.model_fields_set - model.model_fields.keys()
+            if unknown:
+                names = ", ".join(sorted(unknown))
+                raise ValueError(f"CLI {name!r}: unknown config keys: {names}")
+            config = {
+                field: getattr(config, field) for field in model.model_fields
+            }
         if config is not None and not isinstance(config, Mapping):
             expected = (
                 "a mapping"

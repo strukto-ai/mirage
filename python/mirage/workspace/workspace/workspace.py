@@ -1060,7 +1060,9 @@ class Workspace:
             config (Mapping[str, JsonValue] | BaseModel | None):
                 installation config: a mapping, validated through the
                 spec's ``config_model`` (fail loud at install time), or
-                an instance of that model.
+                an instance of that model or of a subclass of it (a
+                mount config on the same account) that sets none of the
+                subclass's own fields, narrowed to the model's fields.
         """
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")

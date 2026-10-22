@@ -15,6 +15,7 @@ import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 
 import { BoxVFS } from '../vfs/box/box.ts'
+import type { GDocsConfig } from '../vfs/gdocs/config.ts'
 import { setCwd } from './session/shell_dirs.ts'
 import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { Mount } from './mount/spec.ts'
@@ -29,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
+import { GWS } from '../commands/cli/builtin/gws/index.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 import { PolicyDenied } from '../policy/errors.ts'
@@ -654,6 +656,21 @@ describe('cli registry snapshot', () => {
     const r = await clone.shell('snapcli run')
     expect(r.exitCode).toBe(0)
     expect(r.stdoutText).toBe('tok=sek\n')
+    await ws.close()
+    await clone.close()
+  })
+
+  it('copies gws installed from a gdocs config and refuses one with mount-only keys', async () => {
+    // A mount-only key is refused at install, never at a copy, as python
+    // refuses a subclass field the caller set.
+    const ws = buildWorkspace()
+    const config: GDocsConfig = { clientId: 'id', clientSecret: 'sec', refreshToken: 'tok' }
+    expect(() => ws.registerCli('gws', GWS, { ...config, contentSearch: true })).toThrow(
+      "CLI 'gws': unknown config keys: contentSearch",
+    )
+    ws.registerCli('gws', GWS, { ...config })
+    const clone = await ws.copy()
+    expect(clone.clis().get('gws')?.config).toEqual(config)
     await ws.close()
     await clone.close()
   })
