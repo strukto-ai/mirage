@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import Any
+
 from mirage.policy import HandOff, Occurrence
 from mirage.shell import parse
 from mirage.shell.types import NodeType
@@ -47,14 +49,14 @@ def _first(node, kind: str):
     raise AssertionError(kind)
 
 
-def _commands(node) -> list:
+def _commands(node: Any) -> list[Any]:
     """Every command node of a parse, in source order, nested ones
     included.
 
     Args:
-        node: the tree to scan.
+        node (Any): the tree-sitter tree to scan.
     """
-    out = []
+    out: list[Any] = []
     stack = [node]
     while stack:
         current = stack.pop()

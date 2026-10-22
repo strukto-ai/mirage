@@ -232,6 +232,14 @@ async def test_failed_removal_cleans_ancestors_without_delivery():
             await stream.aclose()
 
 
+async def _before() -> str:
+    return "before"
+
+
+async def _after() -> str:
+    return "after"
+
+
 class _Keeping(Accessor):
     def __init__(self, answers: ResponseCache[str, str]) -> None:
         self.answers = answers
@@ -251,16 +259,9 @@ async def test_notify_drops_the_answers_the_client_keeps_of_its_own():
         prefix="/nc/", vfs=PlainVFS(), accessor=_Keeping(answers)
     )
     hub = EventHub(FakeRegistry(entry))
-
-    async def before() -> str:
-        return "before"
-
-    async def after() -> str:
-        return "after"
-
-    await answers.get("names", before)
+    await answers.get("names", _before)
     await hub.notify(_change(FileChangeKind.CREATE, "/nc/data/new.txt"))
-    assert await answers.get("names", after) == "after"
+    assert await answers.get("names", _after) == "after"
     await hub.close()
 
 

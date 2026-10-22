@@ -959,8 +959,9 @@ describe('prejudge', () => {
 
   it('has a coded policy judge a whole line where it may stand', async () => {
     // With no rule in force a coded policy is a whole line's only gate: it
-    // was shown only the cwd a skipped cd predicted, and nothing at all for a
-    // name only the runtime expands.
+    // was shown only the cwd a skipped cd predicted, nothing at all for a name
+    // only the runtime expands, and none of the words after a line that may
+    // move the cwd.
     const box = new LineBox()
     const w = new Workspace(
       { '/data': new RAMVFS() },
@@ -973,13 +974,33 @@ describe('prejudge', () => {
     )
     open.push(w)
     w.getSession(w.defaultSessionId).cwd = '/data'
-    for (const line of ['false && cd /data/public; cat secret.txt', '"$CMD" /data/secret.txt']) {
+    for (const line of [
+      'false && cd /data/public; cat secret.txt',
+      '"$CMD" /data/secret.txt',
+      "eval ':'; cat secret.txt",
+    ]) {
       const said = await w.explain(line)
       const ran = await w.shell(line)
       expect(ran.refusal?.reason).toBe('sealed')
       expect([said.outcome, said.reason]).toEqual([Outcome.DENY, 'sealed'])
     }
     expect(box.lines).toEqual([])
+  })
+
+  it('reads nested loops once each', async () => {
+    // A loop is read for a cd before it is walked; walking it to find out
+    // doubled the work at every level, so 22 nested loops walked the innermost
+    // command four million times before the line ran.
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    open.push(w)
+    const line = `${'for a in; do '.repeat(22)}true${'; done'.repeat(22)}`
+    const started = performance.now()
+    const said = await w.explain(line)
+    expect(said.exitCode).toBe(0)
+    expect(performance.now() - started).toBeLessThan(2000)
   })
 
   it('judges a held line as its runtime takes it', async () => {

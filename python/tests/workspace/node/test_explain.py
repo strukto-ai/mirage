@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+import time
 
 import pytest
 import pytest_asyncio
@@ -1158,8 +1159,9 @@ class _SealedSecret(Policy):
 @pytest.mark.asyncio
 async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
     # With no rule in force a coded policy is a whole line's only gate:
-    # it was shown only the cwd a skipped cd predicted, and nothing at
-    # all for a name only the runtime expands.
+    # it was shown only the cwd a skipped cd predicted, nothing at all
+    # for a name only the runtime expands, and none of the words after a
+    # line that may move the cwd.
     box = _LineBox()
     ws = Workspace(
         {"/data/": RAMVFS()},
@@ -1172,12 +1174,29 @@ async def test_a_coded_policy_judges_a_whole_line_where_it_may_stand():
         for line in (
             "false && cd /data/public; cat secret.txt",
             '"$CMD" /data/secret.txt',
+            "eval ':'; cat secret.txt",
         ):
             said = await ws.explain(line)
             ran = await ws.shell(line)
             assert ran.refusal is not None and ran.refusal.reason == "sealed"
             assert (said.outcome, said.reason) == (Outcome.DENY, "sealed")
         assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_nested_loops_are_read_once_each():
+    # A loop is read for a cd before it is walked; walking it to find
+    # out doubled the work at every level, so 22 nested loops walked the
+    # innermost command four million times before the line ran.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        line = "for a in; do " * 22 + "true" + "; done" * 22
+        started = time.perf_counter()
+        said = await ws.explain(line)
+        assert said.exit_code == 0
+        assert time.perf_counter() - started < 2
     finally:
         await ws.close()
 
