@@ -47,7 +47,8 @@ class FakeExitError extends Error {
     super(`exit ${String(exitCode)}`)
   }
 }
-class FakeNotFoundError extends Error {}
+class FakeSandboxError extends Error {}
+class FakeNotFoundError extends FakeSandboxError {}
 
 /** The line `wrapLine` dressed, or the one word of its argv, unquoted. */
 function lineOf(command: string): string {
@@ -64,12 +65,14 @@ class FakeHandle {
   inputError: Error | null = null
   private readonly received = deferred<undefined>()
   private readonly closed = deferred<undefined>()
+  private readonly sent = deferred<undefined>()
   constructor(
     readonly command: string,
     public eof: boolean,
   ) {}
 
   sendStdin(data: Uint8Array): Promise<void> {
+    this.sent.resolve(undefined)
     if (this.inputError) return Promise.reject(this.inputError)
     this.input = new Uint8Array([...this.input, ...data])
     this.received.resolve(undefined)
@@ -83,7 +86,11 @@ class FakeHandle {
   async wait(): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     if (this.command === 'sleep' || this.command === 'native-sleep')
       return new Promise<{ stdout: string; stderr: string; exitCode: number }>(() => undefined)
-    if (this.command === 'exit 3') throw new FakeExitError(3, 'partial', 'boom-err')
+    if (this.command === 'exit 3') {
+      await this.sent.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      throw new FakeExitError(3, 'partial', 'boom-err')
+    }
     const hex = (): string => Buffer.from(this.input).toString('hex')
     if (this.command === 'head') {
       await this.received.promise
@@ -182,6 +189,7 @@ class FakedE2BRuntime extends E2BRuntime {
       Sandbox: FakeSandbox,
       CommandExitError: FakeExitError,
       NotFoundError: FakeNotFoundError,
+      SandboxError: FakeSandboxError,
     } as unknown as E2bSdk)
   }
 }
@@ -273,29 +281,32 @@ describe('E2BRuntime', () => {
       killed: false,
     })
   })
-  it.each([false, true])(
-    'preserves a nonzero exit when stdin races exit: %s',
-    async (earlyExit) => {
-      const runtime = makeRuntime()
-      await runtime.connect()
-      if (earlyExit) FakeSandbox.last.commands.inputError = new FakeNotFoundError('process exited')
-      const result = await runtime.execLine(
-        'exit 3',
-        new TextEncoder().encode('input'),
-        {},
-        '/workspace',
-      )
-      expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
-        3,
-        'partial',
-        'boom-err',
-      ])
-      expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
-        disconnected: true,
-        killed: false,
-      })
-    },
-  )
+  it.each([
+    null,
+    new FakeNotFoundError('process exited'),
+    new FakeSandboxError(
+      "13: [internal] error writing to stdin of process '2815': write |1: broken pipe",
+    ),
+  ])('preserves a nonzero exit when stdin races exit: %s', async (inputError) => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    FakeSandbox.last.commands.inputError = inputError
+    const result = await runtime.execLine(
+      'exit 3',
+      new TextEncoder().encode('input'),
+      {},
+      '/workspace',
+    )
+    expect([result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]).toEqual([
+      3,
+      'partial',
+      'boom-err',
+    ])
+    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+      disconnected: true,
+      killed: false,
+    })
+  })
   it('connects once and keeps parallel input separate', async () => {
     const runtime = makeRuntime()
     const payloads = Array.from({ length: 6 }, (_, i) => new Uint8Array(100).fill(i))
@@ -325,10 +336,13 @@ describe('E2BRuntime', () => {
       disconnected: true,
     })
   })
-  it('kills its command and disconnects when sending stdin fails', async () => {
+  it.each([
+    new Error('stdin transport failed'),
+    new FakeSandboxError('13: [internal] stdin transport failed'),
+  ])('kills its command and disconnects when sending stdin fails: %s', async (inputError) => {
     const runtime = makeRuntime()
     await runtime.connect()
-    FakeSandbox.last.commands.inputError = new Error('stdin transport failed')
+    FakeSandbox.last.commands.inputError = inputError
     await expect(runtime.execLine('cat', new Uint8Array([1]), {}, '/workspace')).rejects.toThrow(
       'stdin transport failed',
     )

@@ -162,7 +162,8 @@
   },
   "runtime/sandbox/e2b/sdk": {
    "python_only": {
-    "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields."
+    "PtySize": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and passes the PTY's size as plain fields.",
+    "SandboxException": "Python's guarded SDK import names each class it uses; TypeScript loads the e2b module and reads SandboxError off it."
    }
   },
   "runtime/sandbox/mixin": {

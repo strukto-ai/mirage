@@ -23,7 +23,7 @@ from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import sdk_install_hint, wrap_line
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
-from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
+from mirage.runtime.sandbox.e2b.constants import BROKEN_PIPE, PTY_MARK, PTY_RAW
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
@@ -164,6 +164,10 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                 # A command may exit before the input RPC arrives. Its exit
                 # status, including nonzero exits, still determines the result.
                 logger.debug("e2b command exited before its input arrived")
+            except sdk.SandboxException as exc:
+                if BROKEN_PIPE not in str(exc):
+                    raise
+                logger.debug("e2b command closed its input")
 
         feeding = asyncio.create_task(feed())
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from e2b import CommandExitException, NotFoundException
+from e2b import CommandExitException, NotFoundException, SandboxException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
@@ -208,16 +208,23 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("early_exit", [False, True])
+@pytest.mark.parametrize(
+    "input_error",
+    [
+        None,
+        NotFoundException("process exited"),
+        SandboxException(
+            "Code.INTERNAL: error writing to stdin of process '2815': "
+            "write |1: broken pipe"
+        ),
+    ],
+)
 async def test_nonzero_exit_preserves_output_even_when_stdin_loses_exit_race(
-    early_exit,
+    input_error,
 ):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    if early_exit:
-        FakeSandbox.last.commands.input_error = NotFoundException(
-            "process exited"
-        )
+    FakeSandbox.last.commands.input_error = input_error
     result = await runtime.exec_line("exit 3", b"input", {}, "/workspace")
     assert (result.exit_code, result.stdout, result.stderr) == (
         3,
@@ -260,13 +267,20 @@ async def test_parallel_calls_connect_once_and_keep_input_separate():
 
 
 @pytest.mark.asyncio
-async def test_input_transport_failure_kills_only_its_command_and_disconnects():
+@pytest.mark.parametrize(
+    "input_error",
+    [
+        RuntimeError("stdin transport failed"),
+        SandboxException("Code.INTERNAL: stdin transport failed"),
+    ],
+)
+async def test_input_transport_failure_kills_only_its_command_and_disconnects(
+    input_error,
+):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
-    FakeSandbox.last.commands.input_error = RuntimeError(
-        "stdin transport failed"
-    )
-    with pytest.raises(RuntimeError, match="stdin transport failed"):
+    FakeSandbox.last.commands.input_error = input_error
+    with pytest.raises(type(input_error), match="stdin transport failed"):
         await runtime.exec_line("cat", b"input", {}, "/workspace")
     handle = FakeSandbox.last.commands.handles[0]
     assert handle.killed and handle.disconnected

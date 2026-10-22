@@ -17,3 +17,7 @@
 // and the marker ends the shell's own output before sshfs starts.
 export const PTY_MARK = new Uint8Array([1, ...new TextEncoder().encode('mirage-sftp'), 2])
 export const PTY_RAW = "stty raw -echo -iexten; printf '\\001mirage-sftp\\002'; "
+
+// envd reports a write to an input the command has closed (head) as the
+// EPIPE text inside a generic INTERNAL error, with no class of its own.
+export const BROKEN_PIPE = 'broken pipe'
