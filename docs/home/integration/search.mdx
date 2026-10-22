@@ -100,7 +100,7 @@ This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example
             if ignore_case:
                 return None
             return [
-                mounted_path(path, name)
+                mounted_path(path, "/" + name)
                 for name, page in self.pages.items()
                 if text in page
             ]
@@ -121,7 +121,7 @@ This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example
         if (opts.ignoreCase) return null
         return Object.entries(this.pages)
           .filter(([, page]) => page.includes(text))
-          .map(([name]) => mountedPath(path, name))
+          .map(([name]) => mountedPath(path, `/${name}`))
       }
     }
     ```
@@ -140,7 +140,7 @@ Which lines of one file may contain a text.
     ```python
     async def lines_containing(
         self, path: PathSpec, text: str, *, ignore_case: bool
-    ) -> bytes | None: ...
+    ) -> bytes | AsyncIterator[bytes] | None: ...
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -149,7 +149,7 @@ Which lines of one file may contain a text.
       path: PathSpec,
       text: string,
       opts: { ignoreCase: boolean },
-    ): Promise<Uint8Array | null>
+    ): Promise<Uint8Array | AsyncIterable<Uint8Array> | null>
     ```
   </Tab>
 </Tabs>
@@ -162,7 +162,7 @@ Which lines of one file may contain a text.
 
 | Return | Mirage then |
 | --- | --- |
-| The lines that may contain `text`, in their order | Matches them instead of reading the file, or reads the file if they hold a match. See the lists below. |
+| The lines that may contain `text`, in their order, as bytes or as a stream of byte chunks | Matches them instead of reading the file, or reads the file if they hold a match. See the lists below. |
 | Empty bytes | The file has no match. It is not read. |
 | `None` | Reads the file. Return it for a file that may hold a NUL byte. |
 
@@ -198,6 +198,8 @@ This example extends the same `NotesVFS`:
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    import io
+
     from mirage import PathSpec
 
     from notes import NotesVFS
@@ -207,9 +209,10 @@ This example extends the same `NotesVFS`:
         async def lines_containing(
             self, path: PathSpec, text: str, *, ignore_case: bool
         ) -> bytes | None:
-            if ignore_case:
+            page = self.page(path)
+            if ignore_case or "\0" in page:
                 return None
-            lines = self.page(path).splitlines(keepends=True)
+            lines = io.StringIO(page, newline="\n").readlines()
             return "".join(line for line in lines if text in line).encode()
     ```
   </Tab>
@@ -224,8 +227,9 @@ This example extends the same `NotesVFS`:
         text: string,
         opts: { ignoreCase: boolean },
       ): Promise<Uint8Array | null> {
-        if (opts.ignoreCase) return null
-        const lines = this.page(path).split(/(?<=\n)/).filter((line) => line.includes(text))
+        const page = this.page(path)
+        if (opts.ignoreCase || page.includes('\0')) return null
+        const lines = page.split(/(?<=\n)/).filter((line) => line.includes(text))
         return new TextEncoder().encode(lines.join(''))
       }
     }

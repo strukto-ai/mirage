@@ -131,6 +131,8 @@ This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
+    import io
+
     from mirage import PathSpec
 
     from notes import NotesVFS
@@ -138,11 +140,11 @@ This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example
 
     class LinesNotesVFS(NotesVFS):
         async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
-            lines = self.page(path).splitlines(keepends=True)
+            lines = io.StringIO(self.page(path), newline="\n").readlines()
             return "".join(lines[:n]).encode()
 
         async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
-            lines = self.page(path).splitlines(keepends=True)
+            lines = io.StringIO(self.page(path), newline="\n").readlines()
             return "".join(lines[max(len(lines) - n, 0) :]).encode()
 
         async def line_count(self, path: PathSpec) -> int | None:
@@ -222,12 +224,16 @@ These read the file every `interval` seconds instead:
 - `tail -f` on more than one file
 
 This example extends the same `NotesVFS`. A real service would push new lines
-over a stream; this one checks the dictionary every `interval` seconds:
+over a stream; this one checks the dictionary every `interval` seconds. It
+yields on every check, an empty chunk when nothing is new, so a stopped
+`tail -f` closes it within one interval, and it starts over when the page
+shrinks:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     import asyncio
+    import io
     from collections.abc import AsyncIterator
 
     from mirage import PathSpec
@@ -241,14 +247,15 @@ over a stream; this one checks the dictionary every `interval` seconds:
         ) -> AsyncIterator[bytes] | None:
             async def lines() -> AsyncIterator[bytes]:
                 seen = self.page(path)
-                old = seen.splitlines(keepends=True)
+                old = io.StringIO(seen, newline="\n").readlines()
                 yield "".join(old[max(len(old) - n, 0) :]).encode()
                 while True:
                     await asyncio.sleep(interval)
                     page = self.page(path)
-                    if len(page) > len(seen):
-                        yield page[len(seen) :].encode()
-                        seen = page
+                    if len(page) < len(seen):
+                        seen = ""
+                    yield page[len(seen) :].encode()
+                    seen = page
 
             return lines()
     ```
@@ -272,10 +279,9 @@ over a stream; this one checks the dictionary every `interval` seconds:
           for (;;) {
             await new Promise((resolve) => setTimeout(resolve, interval * 1000))
             const now = page()
-            if (now.length > seen.length) {
-              yield new TextEncoder().encode(now.slice(seen.length))
-              seen = now
-            }
+            if (now.length < seen.length) seen = ''
+            yield new TextEncoder().encode(now.slice(seen.length))
+            seen = now
           }
         }
         return lines()
