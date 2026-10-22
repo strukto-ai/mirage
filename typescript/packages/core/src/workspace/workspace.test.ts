@@ -26,6 +26,7 @@ import {
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { PolicyError } from '../policy/errors.ts'
 import { vfsCall } from '../vfs/call.ts'
 import { Effect } from '../vfs/types.ts'
 import {
@@ -1170,6 +1171,68 @@ it('updates default-profile policy for unbound ops without replacing the session
     expect(ws.getSession(ws.defaultSessionId)).toBe(session)
     expect(new TextDecoder().decode(await ws.vfs.read('/data/file'))).toBe('kept')
   } finally {
+    await ws.close()
+  }
+})
+
+it('setProfile redefines a name the next setSessionProfile applies', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      shellParser: await getTestParser(),
+      profiles: { user: { commands: { allow: ['whoami'] } } },
+    },
+  )
+  try {
+    await ws.vfs.write('/data/file', new TextEncoder().encode('kept'))
+    ws.createSession('a', { profile: 'user' })
+    expect((await ws.shell('cat /data/file', { sessionId: 'a' })).exitCode).not.toBe(0)
+    ws.setProfile('user', {
+      commands: { allow: ['whoami', 'cat'] },
+      paths: { hide: ['/data/secret'] },
+    })
+    expect((await ws.shell('cat /data/file', { sessionId: 'a' })).exitCode).not.toBe(0)
+    await ws.setSessionProfile('a', 'user')
+    const moved = await ws.shell('cat /data/file; whoami', { sessionId: 'a' })
+    expect(new TextDecoder().decode(moved.stdout)).toBe('keptuser\n')
+    ws.setProfile('guest', { paths: { hide: ['/data'] } })
+    ws.createSession('b', { profile: 'guest' })
+    const added = await ws.shell('whoami; ls /data', { sessionId: 'b' })
+    expect(new TextDecoder().decode(added.stdout)).toBe('guest\n')
+    expect(added.exitCode).not.toBe(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('setProfile refuses before the table changes', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { profiles: { user: {} } })
+  try {
+    expect(() => {
+      ws.setProfile('user', {
+        commands: { allow: ['ls'], deny: [{ commands: ['cat *'], reason: 'sealed' }] },
+      })
+    }).toThrow(PolicyError)
+    expect(ws.profiles.user).toEqual({})
+  } finally {
+    await ws.close()
+  }
+})
+
+it('setProfile keeps any name as an entry through a copy', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  const copies: Workspace[] = []
+  try {
+    expect(() => ws.createSession('t', { profile: 'toString' })).toThrow(PolicyError)
+    ws.setProfile('__proto__', { paths: { hide: ['/data/secret'] } })
+    copies.push(await ws.copy())
+    for (const each of [ws, ...copies]) {
+      expect(Object.keys(each.profiles)).toEqual(['__proto__'])
+      expect(each.profiles.__proto__).toEqual({ paths: { hide: ['/data/secret'] } })
+    }
+  } finally {
+    for (const each of copies) await each.close()
     await ws.close()
   }
 })

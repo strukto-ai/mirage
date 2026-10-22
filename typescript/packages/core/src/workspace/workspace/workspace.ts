@@ -249,8 +249,10 @@ export class Workspace {
   private secretSourcesPending: Promise<Record<string, ResolvedSource>> | null = null
   private readonly router: Router
   private readonly scriptPolicy: ScriptPolicy
-  /** The profile table every session here runs under, and its default. */
-  readonly profiles: Readonly<Record<string, SessionProfile>>
+  // No prototype, so every name is an own entry: `__proto__` is stored
+  // rather than reparenting the table, and `toString` resolves to nothing.
+  private readonly profilesInternal = Object.create(null) as Record<string, SessionProfile>
+  /** The profile table's default. */
   readonly defaultProfileName: string | null
   // True when the workspace auto-added an empty `/` anchor (no user `/` mount).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
@@ -369,38 +371,12 @@ export class Workspace {
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
     // session runs under, so there is no workspace-wide block above it.
-    this.profiles = { ...(options.profiles ?? {}) }
+    for (const [name, profile] of Object.entries(options.profiles ?? {})) {
+      this.setProfile(name, profile)
+    }
     this.defaultProfileName = options.profile ?? null
     if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
       throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
-    }
-    // The config loader validates the pairing too, but a typed caller
-    // does not pass that entry point, and the python host refuses the same
-    // profiles at construction.
-    for (const [name, profile] of Object.entries(this.profiles)) {
-      // A typed caller does not pass the parser, so this entry point repeats
-      // its two checks: the old keys are told where they went, and a
-      // policy block is whole.
-      const legacy = profile as { script?: unknown; runtime?: unknown }
-      if (legacy.script !== undefined || legacy.runtime !== undefined) {
-        throw new PolicyError(
-          `profile '${name}': script and runtime are now a policy block, ` +
-            `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
-        )
-      }
-      if (profile.policy != null) {
-        parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
-      }
-      // Its env names pointers in the workspace env grammar, so the
-      // sources it names are checked here too, before a session runs.
-      for (const entry of Object.values(varsFromEntries(profile.env ?? {}))) {
-        if (
-          entry.managed !== undefined &&
-          !Object.hasOwn(this.declaredSecretSources, entry.managed.source)
-        ) {
-          sourceFor(entry.managed.source)
-        }
-      }
     }
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
@@ -1072,6 +1048,48 @@ export class Workspace {
 
   getSession(sessionId: string): SessionState {
     return this.sessionManager.get(sessionId)
+  }
+
+  /** The profile table every session here runs under. */
+  get profiles(): Readonly<Record<string, SessionProfile>> {
+    return this.profilesInternal
+  }
+
+  /**
+   * Define a named profile, or replace the one the name has.
+   *
+   * Compilation succeeds before the table changes. A session created or
+   * set to the name afterwards runs the new document under that name;
+   * a live session keeps the rules it was compiled with until
+   * `setSessionProfile` moves it. This is a host-side operation, like
+   * creating a session.
+   */
+  setProfile(name: string, profile: SessionProfile): void {
+    // A typed caller does not pass the parser, so this entry point repeats
+    // its two checks: the old keys are told where they went, and a
+    // policy block is whole.
+    const legacy = profile as { script?: unknown; runtime?: unknown }
+    if (legacy.script !== undefined || legacy.runtime !== undefined) {
+      throw new PolicyError(
+        `profile '${name}': script and runtime are now a policy block, ` +
+          `policy: {pre_command: [{script: <file>, runtime: <runtime>}]}`,
+      )
+    }
+    if (profile.policy != null) {
+      parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
+    }
+    // Its env names pointers in the workspace env grammar, so the
+    // sources it names are checked here too, before a session runs.
+    for (const entry of Object.values(varsFromEntries(profile.env ?? {}))) {
+      if (
+        entry.managed !== undefined &&
+        !Object.hasOwn(this.declaredSecretSources, entry.managed.source)
+      ) {
+        sourceFor(entry.managed.source)
+      }
+    }
+    checkCliVerbs(compileProfile(profile, name).policies.commands, this.cliVerbs())
+    this.profilesInternal[name] = profile
   }
 
   /**

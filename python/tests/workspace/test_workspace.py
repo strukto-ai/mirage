@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
+from mirage.policy import PolicyError, SessionProfile
 from mirage.runtime.python import LocalRuntime
 from mirage.types import FileType, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
@@ -3110,6 +3111,55 @@ async def test_live_default_profile_updates_unbound_policy():
         await ws.set_session_profile(ws.default_session_id, {})
         assert ws.get_session(ws.default_session_id) is session
         assert await ws.vfs.read("/data/file") == b"kept"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_set_profile_redefines_a_name():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"user": {"commands": {"allow": ["whoami"]}}},
+    )
+    try:
+        await ws.vfs.write("/data/file", b"kept")
+        ws.create_session("a", profile="user")
+        assert (await ws.shell("cat /data/file", session_id="a")).exit_code
+        ws.set_profile(
+            "user",
+            {
+                "commands": {"allow": ["whoami", "cat"]},
+                "paths": {"hide": ["/data/secret"]},
+            },
+        )
+        assert (await ws.shell("cat /data/file", session_id="a")).exit_code
+        await ws.set_session_profile("a", "user")
+        result = await ws.shell("cat /data/file; whoami", session_id="a")
+        assert result.stdout == b"keptuser\n"
+        ws.set_profile("guest", {"paths": {"hide": ["/data"]}})
+        ws.create_session("b", profile="guest")
+        result = await ws.shell("whoami; ls /data", session_id="b")
+        assert result.stdout == b"guest\n" and result.exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_set_profile_refuses_before_the_table_changes():
+    ws = Workspace({"/data": RAMVFS()}, profiles={"user": {}})
+    try:
+        with pytest.raises(PolicyError):
+            ws.set_profile(
+                "user",
+                {
+                    "commands": {
+                        "allow": ["ls"],
+                        "deny": [{"commands": ["cat *"], "reason": "sealed"}],
+                    }
+                },
+            )
+        assert ws.profiles["user"] == SessionProfile()
     finally:
         await ws.close()
 

@@ -278,19 +278,6 @@ class Workspace:
         self._registry.process_view = self._process_view
         self._registry.fill_env = self._fill_tree_env
         self._registry.command_limits = dict(command_limits or {})
-        # The permission profiles: one per name, and the one a session
-        # gets when it names none. A profile is the whole document a
-        # session runs under, so there is no workspace-wide block
-        # above it. Both accept the plain mapping a YAML file or the
-        # TypeScript constructor would hold; model_validate is a no-op
-        # on an already-built model.
-        self._profiles: dict[str, SessionProfile] = {
-            name: SessionProfile.model_validate(doc)
-            for name, doc in (profiles or {}).items()
-        }
-        self._default_profile_name = profile
-        if profile is not None and profile not in self._profiles:
-            raise PolicyError(f"unknown profile {profile!r}")
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -379,19 +366,22 @@ class Workspace:
         for block in self._declared_sources.values():
             source_for(block.source)
         seed_vars = vars_from_entries(env) if env else None
-        # A profile's env names pointers in the same grammar, so the
-        # sources it names are checked here too, before a session runs.
-        profile_vars = [
-            var
-            for doc in self._profiles.values()
-            for var in vars_from_entries(doc.env or {}).values()
-        ]
-        for var in [*(seed_vars or {}).values(), *profile_vars]:
+        for var in (seed_vars or {}).values():
             if (
                 var.managed is not None
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
+        # The permission profiles: one per name, and the one a session
+        # gets when it names none. A profile is the whole document a
+        # session runs under, so there is no workspace-wide block
+        # above it.
+        self._profiles: dict[str, SessionProfile] = {}
+        for name, doc in (profiles or {}).items():
+            self.set_profile(name, doc)
+        self._default_profile_name = profile
+        if profile is not None and profile not in self._profiles:
+            raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
             session_id, store=stores.sessions, seed_vars=seed_vars
         )
@@ -2119,6 +2109,42 @@ class Workspace:
 
     def get_session(self, session_id: str) -> SessionState:
         return self._session_mgr.get(session_id)
+
+    @property
+    def profiles(self) -> Mapping[str, SessionProfile]:
+        """The profile table every session here runs under."""
+        return self._profiles
+
+    def set_profile(
+        self, name: str, profile: SessionProfile | Mapping[str, Any]
+    ) -> None:
+        """Define a named profile, or replace the one the name has.
+
+        Compilation succeeds before the table changes. A session created
+        or set to the name afterwards runs the new document under that
+        name; a live session keeps the rules it was compiled with until
+        ``set_session_profile`` moves it. This is a host-side operation,
+        like creating a session.
+
+        Args:
+            name (str): the profile's name.
+            profile (SessionProfile | Mapping[str, Any]): the document,
+                or the plain mapping a YAML file or the TypeScript
+                constructor would hold.
+        """
+        doc = SessionProfile.model_validate(profile)
+        # Its env names pointers in the workspace env grammar, so the
+        # sources it names are checked here too, before a session runs.
+        for var in vars_from_entries(doc.env or {}).values():
+            if (
+                var.managed is not None
+                and var.managed.source not in self._declared_sources
+            ):
+                source_for(var.managed.source)
+        check_cli_verbs(
+            compile_profile(doc, name).policies.commands, self._cli_verbs()
+        )
+        self._profiles[name] = doc
 
     async def set_session_profile(
         self,
