@@ -21,19 +21,47 @@ import { chunks } from '../../io/cooperative.ts'
 // error; the engine here calls it, each backend supplies one.
 export type ErrorOf = (response: Response, body: string) => Error
 
-/** Pull a GET response in bounded chunks, cancelling its body on early exit. */
+/**
+ * Pull a GET response in bounded chunks, cancelling its body on early exit.
+ * `retry` applies to opening the response only: once a chunk has reached the
+ * caller a failure propagates, since a second attempt would hand it the same
+ * bytes twice.
+ */
 export async function* apiStream(
   url: string,
-  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn'> & { signal?: AbortSignal },
+  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep'> & {
+    signal?: AbortSignal
+  },
 ): AsyncGenerator<Uint8Array, void> {
-  const response = await (options.fetchFn ?? fetch)(url, {
-    method: 'GET',
-    ...(options.headers === undefined ? {} : { headers: options.headers }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  })
-  if (response.status >= 400) throw options.errorOf(response, await response.text())
-  if (response.body === null) return
-  yield* bodyChunks(response.body, options.signal)
+  const retry = options.retry ?? NO_RETRY
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
+  for (let attempt = 0; ; attempt += 1) {
+    const last = attempt >= retry.maxRetries
+    let response: Response
+    try {
+      response = await (options.fetchFn ?? fetch)(url, {
+        method: 'GET',
+        ...(options.headers === undefined ? {} : { headers: options.headers }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (err) {
+      // a caller's abort is not a transport failure worth another attempt
+      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      await wait(Math.min(2 ** attempt, retry.maxBackoff))
+      continue
+    }
+    if (response.status >= 400) {
+      const text = await response.text()
+      if (last || !worthRetrying(response.status, text, retry)) {
+        throw options.errorOf(response, text)
+      }
+      await wait(retryDelay(response, text, attempt, retry))
+      continue
+    }
+    if (response.body === null) return
+    yield* bodyChunks(response.body, options.signal)
+    return
+  }
 }
 
 /** Pull a response body in bounded chunks, cancelling it on early exit. */
@@ -191,6 +219,9 @@ export interface ApiRequestOptions {
   timeoutSeconds?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
   fetchFn?: typeof fetch | undefined
+  /** The wait between attempts, in seconds, injectable so a test or a
+   * simulated clock spends no real time; absent is a real timer. */
+  sleep?: ((seconds: number) => Promise<void>) | undefined
 }
 
 /**
@@ -239,6 +270,12 @@ export function flooredDelay(delay: number, status: number, retry: RetryPolicy):
   return Math.min(Math.max(delay, floor), retry.maxBackoff)
 }
 
+function worthRetrying(status: number, text: string, retry: RetryPolicy): boolean {
+  return (
+    retry.statuses.has(status) && (retry.retryable === undefined || retry.retryable(status, text))
+  )
+}
+
 function retryDelay(response: Response, text: string, attempt: number, retry: RetryPolicy): number {
   const delay =
     retry.delaySource === 'body' ? bodyDelay(text, retry) : headerDelay(response, attempt, retry)
@@ -266,6 +303,7 @@ export async function apiRequest(
     if (range !== null) headers.Range = range
   }
   const retry = options.retry ?? NO_RETRY
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000))
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -280,7 +318,7 @@ export async function apiRequest(
     } catch (err) {
       // a rejection is connection-level: HTTP errors resolve normally
       if (retry.retryTransport === true && attempt < retry.maxRetries) {
-        await sleep(Math.min(2 ** attempt, retry.maxBackoff) * 1000)
+        await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue
       }
@@ -288,9 +326,8 @@ export async function apiRequest(
     }
     if (retry.statuses.has(response.status)) {
       const text = await response.text()
-      const retryable = retry.retryable === undefined || retry.retryable(response.status, text)
-      if (retryable && attempt < retry.maxRetries) {
-        await sleep(retryDelay(response, text, attempt, retry) * 1000)
+      if (worthRetrying(response.status, text, retry) && attempt < retry.maxRetries) {
+        await wait(retryDelay(response, text, attempt, retry))
         attempt += 1
         continue
       }

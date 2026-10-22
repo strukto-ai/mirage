@@ -16,10 +16,9 @@ import asyncio
 import json
 import logging
 import math
-from collections.abc import AsyncGenerator, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass, field
-from functools import partial
 from typing import Any, Literal, TypeAlias
 
 import aiohttp
@@ -195,6 +194,8 @@ async def api_stream(
     error_of: ErrorOf,
     headers: Mapping[str, str] | None = None,
     session: SessionArg = None,
+    retry: RetryPolicy = NO_RETRY,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Pull a GET response in bounded chunks, closing it on early exit.
 
@@ -203,17 +204,40 @@ async def api_stream(
         error_of (ErrorOf): maps an HTTP failure to the backend's error.
         headers (Mapping[str, str] | None): request headers.
         session (SessionArg): pool or live session to borrow, else owned here.
+        retry (RetryPolicy): applied to opening the response only. Once a
+            chunk has reached the caller a failure propagates, since a
+            second attempt would hand it the same bytes twice.
+        sleep (Callable[[float], Awaitable[None]] | None): the wait
+            between attempts; None is ``asyncio.sleep``.
     """
+    wait = asyncio.sleep if sleep is None else sleep
+    yielded = False
     sess, own = resolve_session(session)
     try:
-        async with sess.get(url, headers=headers) as response:
-            if response.status >= 400:
-                raise error_of(response, await response.text())
-            async with aclosing(
-                chunks(response.content.iter_chunked(CHUNK_SIZE))
-            ) as source:
-                async for chunk in source:
-                    yield chunk
+        for attempt in range(retry.max_retries + 1):
+            last = attempt == retry.max_retries
+            try:
+                async with sess.get(url, headers=headers) as response:
+                    if response.status >= 400:
+                        text = await response.text()
+                        if last or not _worth_retrying(
+                            response.status, text, retry
+                        ):
+                            raise error_of(response, text)
+                        delay = _retry_delay(response, text, attempt, retry)
+                    else:
+                        async with aclosing(
+                            chunks(response.content.iter_chunked(CHUNK_SIZE))
+                        ) as source:
+                            async for chunk in source:
+                                yielded = True
+                                yield chunk
+                        return
+            except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+                if yielded or last or not retry.retry_transport:
+                    raise
+                delay = min(2.0**attempt, retry.max_backoff)
+            await wait(delay)
     finally:
         if own:
             await sess.close()
@@ -333,17 +357,28 @@ def _body_delay(text: str, retry: RetryPolicy) -> float:
     return min(1.0, retry.max_backoff)
 
 
-def _retry_delay(retry_state: RetryCallState, retry: RetryPolicy) -> float:
-    outcome = retry_state.outcome
-    error = outcome.exception() if outcome is not None else None
-    if not isinstance(error, _RetryableStatus):
-        # a transport failure carries no response to read a delay from
-        return min(2.0 ** (retry_state.attempt_number - 1), retry.max_backoff)
+def _retry_delay(
+    resp: aiohttp.ClientResponse, text: str, attempt: int, retry: RetryPolicy
+) -> float:
+    """The wait before retrying a retryable response.
+
+    Args:
+        resp (aiohttp.ClientResponse): the retryable response.
+        text (str): its body, for a policy that reads the delay there.
+        attempt (int): zero-based attempt number.
+        retry (RetryPolicy): supplies the delay source, floor and cap.
+    """
     if retry.delay_source == "body":
-        delay = _body_delay(error.text, retry)
+        delay = _body_delay(text, retry)
     else:
-        delay = header_delay(error.resp, retry_state.attempt_number - 1, retry)
-    return floored_delay(delay, error.resp.status, retry)
+        delay = header_delay(resp, attempt, retry)
+    return floored_delay(delay, resp.status, retry)
+
+
+def _worth_retrying(status: int, text: str, retry: RetryPolicy) -> bool:
+    return status in retry.statuses and (
+        retry.retryable is None or retry.retryable(status, text)
+    )
 
 
 def floored_delay(delay: float, status: int, retry: RetryPolicy) -> float:
@@ -428,7 +463,7 @@ async def _attempt(
     async with request as resp:
         if resp.status in retry.statuses:
             text = await resp.text()
-            if retry.retryable is None or retry.retryable(resp.status, text):
+            if _worth_retrying(resp.status, text, retry):
                 raise _RetryableStatus(resp, text)
             raise error_of(resp, text)
         if resp.status >= 400:
@@ -481,6 +516,7 @@ async def api_request(
     window: ByteWindow | None = None,
     session: SessionArg = None,
     timeout: aiohttp.ClientTimeout | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> Any:
     """One round-trip against an HTTP API, with retry and error mapping.
 
@@ -517,11 +553,25 @@ async def api_request(
             kit opens and closes its own when absent.
         timeout (aiohttp.ClientTimeout | None): timeout for a kit-owned
             session; a reused session already carries its own.
+        sleep (Callable[[float], Awaitable[None]] | None): the wait
+            between attempts, in seconds, injectable so a test or a
+            simulated clock spends no real time; None is ``asyncio.sleep``.
     """
+
+    def wait(state: RetryCallState) -> float:
+        outcome = state.outcome
+        error = outcome.exception() if outcome is not None else None
+        if not isinstance(error, _RetryableStatus):
+            # a transport failure carries no response to read a delay from
+            return min(2.0 ** (state.attempt_number - 1), retry.max_backoff)
+        return _retry_delay(
+            error.resp, error.text, state.attempt_number - 1, retry
+        )
+
     retrying = AsyncRetrying(
-        sleep=asyncio.sleep,
+        sleep=asyncio.sleep if sleep is None else sleep,
         stop=stop_after_attempt(retry.max_retries + 1),
-        wait=partial(_retry_delay, retry=retry),
+        wait=wait,
         retry=_retry_condition(retry),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True,

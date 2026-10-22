@@ -128,6 +128,25 @@ async def test_header_delay_retries_on_retry_after():
 
 
 @pytest.mark.asyncio
+async def test_an_injected_sleep_takes_every_wait():
+    waits: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    retry = RetryPolicy(statuses=frozenset({503}), max_retries=2)
+    with aioresponses() as m:
+        m.get(TARGET, status=503, headers={"Retry-After": "30"})
+        m.get(TARGET, status=503)
+        m.get(TARGET, payload={"ok": 5})
+        result = await api_request(
+            "GET", TARGET, error_of=_error_of, retry=retry, sleep=_record
+        )
+    assert result == {"ok": 5}
+    assert waits == [30.0, 2.0]
+
+
+@pytest.mark.asyncio
 async def test_no_retry_by_default():
     with aioresponses() as m:
         m.get(TARGET, status=429, payload={"retry_after": 30})
@@ -680,3 +699,53 @@ async def test_stream_maps_http_errors_before_yielding():
             await anext(api_stream(TARGET, error_of=_error_of))
     assert exc.value.status == 403
     assert exc.value.body == "denied"
+
+
+@pytest.mark.asyncio
+async def test_stream_retries_opening_the_response():
+    waits: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    retry = RetryPolicy(
+        statuses=frozenset({503}), max_retries=2, retry_transport=True
+    )
+    with aioresponses() as mocked:
+        mocked.get(TARGET, status=503, headers={"Retry-After": "3"})
+        mocked.get(TARGET, exception=aiohttp.ServerDisconnectedError())
+        mocked.get(TARGET, body=b"done")
+        parts = [
+            part
+            async for part in api_stream(
+                TARGET, error_of=_error_of, retry=retry, sleep=_record
+            )
+        ]
+    assert parts == [b"done"]
+    assert waits == [3.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_stream_never_retries_once_a_chunk_reached_the_caller(
+    monkeypatch,
+):
+    async def body(size):
+        yield b"first"
+        raise aiohttp.ServerDisconnectedError()
+
+    response = MagicMock(status=200)
+    response.content.iter_chunked = body
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = response
+    monkeypatch.setattr(
+        "mirage.core.api.client.resolve_session",
+        lambda value: (session, False),
+    )
+    retry = RetryPolicy(max_retries=2, retry_transport=True)
+    source = api_stream(TARGET, error_of=_error_of, retry=retry)
+    assert await anext(source) == b"first"
+    with pytest.raises(aiohttp.ServerDisconnectedError):
+        await anext(source)
+    assert session.get.call_count == 1

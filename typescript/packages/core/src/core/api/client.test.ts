@@ -349,6 +349,27 @@ describe('retry delays', () => {
     }
   })
 
+  it('an injected sleep takes every wait, in seconds', async () => {
+    const waits: number[] = []
+    const retry: RetryPolicy = { ...NO_RETRY, statuses: new Set([503]), maxRetries: 2 }
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 503, headers: { 'Retry-After': '30' } }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: 5 }))
+    const result = await apiRequest('GET', TARGET, {
+      errorOf,
+      fetchFn: fakeFetch,
+      retry,
+      sleep: (seconds) => {
+        waits.push(seconds)
+        return Promise.resolve()
+      },
+    })
+    expect(result).toEqual({ ok: 5 })
+    expect(waits).toEqual([30, 2])
+  })
+
   it('flooredDelay raises to the status floor under the cap', () => {
     const retry: RetryPolicy = {
       ...NO_RETRY,
@@ -409,6 +430,45 @@ describe('a repeated header', () => {
 })
 
 describe('apiStream', () => {
+  it('retries opening the response, never a body already yielded', async () => {
+    const waits: number[] = []
+    const retry: RetryPolicy = {
+      ...NO_RETRY,
+      statuses: new Set([503]),
+      maxRetries: 2,
+      retryTransport: true,
+    }
+    const record = (seconds: number): Promise<void> => {
+      waits.push(seconds)
+      return Promise.resolve()
+    }
+    const opening = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 503, headers: { 'Retry-After': '3' } }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(new Response('done'))
+    const parts: Uint8Array[] = []
+    for await (const part of apiStream(TARGET, { errorOf, fetchFn: opening, retry, sleep: record }))
+      parts.push(part)
+    expect(new TextDecoder().decode(parts[0])).toBe('done')
+    expect(waits).toEqual([3, 2])
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (pulls++ === 0) controller.enqueue(new Uint8Array([1]))
+          else controller.error(new TypeError('terminated'))
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const midway = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    const source = apiStream(TARGET, { errorOf, fetchFn: midway, retry, sleep: record })
+    expect((await source.next()).value).toEqual(new Uint8Array([1]))
+    await expect(source.next()).rejects.toThrow('terminated')
+    expect(midway).toHaveBeenCalledOnce()
+  })
+
   it('bounds chunks, pulls on demand and cancels an abandoned response', async () => {
     let pulls = 0
     const cancel = vi.fn()
