@@ -19,6 +19,15 @@ permissions:
       - .github/actions/setup-rust/action.yml
       - .github/actions/integ-battery-setup/action.yml
       - .github/actions/nextcloud-tune/action.yml
+      # README files under these trees are prose that nothing loads, so a
+      # change to one alone runs nothing. integ/fixtures/** is not listed:
+      # the fake hubs serve the READMEs there as fixture content.
+      - '!integ/README.md'
+      - '!integ/runtime/**/README.md'
+      - '!data/**/README.md'
+      - '!python/**/README.md'
+      - '!typescript/**/README.md'
+      - '!rust/**/README.md'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -90,6 +99,14 @@ jobs:
               - '.github/actions/setup-node-pnpm/action.yml'
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+              # README files under these trees are prose that nothing loads, so a
+              # change to one alone runs nothing. integ/fixtures/** is not listed:
+              # the fake hubs serve the READMEs there as fixture content.
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!data/**/README.md'
+              - '!python/**/README.md'
+              - '!rust/**/README.md'
             ts:
               - 'integ/**'
               - 'typescript/**'
@@ -100,6 +117,10 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!typescript/**/README.md'
+              - '!rust/**/README.md'
             database:
               - 'integ/vfs/mongodb/**'
               - 'integ/vfs/postgres/**'
@@ -135,6 +156,8 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/setup-rust/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
+              - '!typescript/**/README.md'
+              - '!rust/**/README.md'
             data:
               - 'integ/**'
               - 'python/**'
@@ -146,6 +169,11 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
+              - '!integ/README.md'
+              - '!integ/runtime/**/README.md'
+              - '!python/**/README.md'
+              - '!typescript/**/README.md'
+              - '!rust/**/README.md'
             observability:
               - 'integ/server/langfuse_compose.yml'
               - 'integ/server/langfuse_seed.py'
