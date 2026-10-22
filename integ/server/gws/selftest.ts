@@ -425,6 +425,25 @@ async function compatibilityHttp(at: string): Promise<void> {
     't1',
   )
   eq('HTTP Drive accepts value-first membership', field(obj(member.body).files, 'id'), [id])
+  // A pinned presentationId is the deck's id, a taken one is refused rather
+  // than replacing the file, and a minted id steps over a pinned one.
+  const presentations = `${base}/v1/presentations`
+  const pinned = await post(presentations, 't1', { title: 'Split', presentationId: 'ab__cd' })
+  eq('HTTP Slides takes a pinned presentationId', obj(pinned.body).presentationId ?? null, 'ab__cd')
+  const again = await post(presentations, 't1', { title: 'Other', presentationId: 'ab__cd' })
+  eq('HTTP Slides refuses a taken presentationId', again.status, 409)
+  eq(
+    'HTTP Slides keeps the first deck',
+    obj((await api(`${presentations}/ab__cd`, 't1')).body).title ?? null,
+    'Split',
+  )
+  const ahead = await post(presentations, 't1', { title: 'Ahead', presentationId: 'pres0002' })
+  check('HTTP Slides pins an id the mint would reach', ahead.status === 200)
+  const minted = [
+    obj((await post(presentations, 't1', { title: 'M1' })).body).presentationId ?? null,
+    obj((await post(presentations, 't1', { title: 'M2' })).body).presentationId ?? null,
+  ]
+  eq('HTTP Slides mints past a pinned id', minted, ['pres0001', 'pres0003'])
   const written = await api(`${base}/v4/spreadsheets/${id}/values/Sheet1!A1`, 't1', {
     method: 'PUT',
     body: JSON.stringify({ values: [['a long headline for sizing', 'untouched']] }),

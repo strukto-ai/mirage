@@ -34,7 +34,8 @@ def app_scopes(file_name: Codec) -> tuple[Scope, ...]:
     One description per app: readdir, stat, read and unlink all classify
     through it, so the file surface and the write surface cannot disagree
     about what a path means. Sheets, Docs and Slides differ only in the
-    pattern a file name matches.
+    pattern a file name matches. The name splits on its first ``__``: the
+    title is sanitized and holds none, and a Drive file id can.
 
     Args:
         file_name (Codec): the codec of the app's file names.
@@ -45,7 +46,7 @@ def app_scopes(file_name: Codec) -> tuple[Scope, ...]:
             kind="file",
             segments=(
                 Slot("corpus", CORPUS),
-                Slot("name", file_name, id_key="file_id"),
+                Slot("name", file_name, id_key="file_id", id_split="first"),
             ),
             leaf=True,
             filetype=ContentType.JSON,

@@ -108,6 +108,24 @@ describe('hierarchy matchScope', () => {
     expect(matchScope(idScopes, ['owned', 'label__.json'])).toBeNull()
   })
 
+  it('splits an idSplit first slot on the first separator', () => {
+    const idScopes: readonly Scope[] = [
+      new Scope({
+        kind: 'file',
+        segments: [
+          'owned',
+          new Slot('name', new Codec({ suffix: '.json' }), 'file_id', false, 'first'),
+        ],
+        leaf: true,
+      }),
+    ]
+    // The id keeps its own separator.
+    const matched = matchScope(idScopes, ['owned', 'Notes__ab__cd.json'])
+    expect(matched?.[1]).toEqual({ name: 'Notes', file_id: 'ab__cd' })
+    expect(matchScope(idScopes, ['owned', '__id.json'])).toBeNull()
+    expect(matchScope(idScopes, ['owned', 'label__.json'])).toBeNull()
+  })
+
   it('stores the deepest segment of a variadic run', () => {
     let matched = matchScope(VARIADIC_SCOPES, ['pages', 'a__1'])
     expect(matched?.[0].kind).toBe('page')

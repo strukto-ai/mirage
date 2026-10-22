@@ -29,14 +29,15 @@ const sanitizeTitle = (title: string, maxBytes: number): string =>
  * description per app: readdir, stat, read and unlink all classify through
  * it, so the file surface and the write surface cannot disagree about what a
  * path means. Sheets, Docs and Slides differ only in the codec of a file
- * name. Mirrors Python's `app_scopes`.
+ * name. The name splits on its first `__`: the title is sanitized and holds
+ * none, and a Drive file id can. Mirrors Python's `app_scopes`.
  */
 export function appScopes(fileName: Codec): readonly Scope[] {
   return [
     new Scope({ kind: 'corpus', segments: [new Slot('corpus', CORPUS)], probed: false }),
     new Scope({
       kind: 'file',
-      segments: [new Slot('corpus', CORPUS), new Slot('name', fileName, 'file_id')],
+      segments: [new Slot('corpus', CORPUS), new Slot('name', fileName, 'file_id', false, 'first')],
       leaf: true,
       filetype: ContentType.JSON,
     }),
