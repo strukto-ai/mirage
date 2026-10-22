@@ -35,8 +35,9 @@ virtual CLIs and a router that picks where each command runs.
 - **Fewer tokens.** One shell interface replaces a tool per service. Across 200
   tasks, it used 52% fewer tokens per task than MCP tools
   ([AgentVFS](https://agentvfs.org/blogs/agentvfs-1)).
-- **Cloud search through shell commands.** `grep -r refund /knowledge/` asks the
-  backend's search API for matches instead of downloading every file. See
+- **Cloud search through shell commands.** With Chroma at `/knowledge/`,
+  `grep -r refund /knowledge/` asks Chroma which documents match, then reads
+  only those. A backend without search reads its files. See
   [Search](/home/integration/search).
 - **Full control.** Choose which files each agent can see and which commands it
   can run with [agent profiles](/home/profiles) and

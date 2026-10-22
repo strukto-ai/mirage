@@ -117,7 +117,8 @@ The shell call answers:
 ## Errors
 
 A `200` means the server ran the line, not that the line succeeded: check
-`exit_code`. An error answer is JSON with a `detail` message.
+`exit_code`. Most errors answer JSON with a `detail` message, but an auth or
+`Host` refusal can be plain text, so check `Content-Type` before parsing.
 
 | Status | Means |
 | --- | --- |
@@ -569,9 +570,11 @@ export MIRAGE_AUTH_MODE=jwt
 export MIRAGE_JWT_ALG=RS256
 export MIRAGE_JWT_JWKS_URL=https://issuer.example.com/.well-known/jwks.json
 export MIRAGE_JWT_ISSUER=https://issuer.example.com
+export MIRAGE_JWT_AUDIENCE=https://mirage.example.com
 ```
 
-Every token needs `exp` and `sub`.
+Every token needs `exp` and `sub`. A token with `aud` must name an entry in
+`MIRAGE_JWT_AUDIENCE`; with none set, every such token is refused.
 
 | Setting | Does |
 | --- | --- |
