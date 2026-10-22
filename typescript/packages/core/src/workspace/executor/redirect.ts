@@ -74,6 +74,7 @@ import {
   TO_STDOUT as EXEC_TO_STDOUT,
 } from './builtins/exec/constants.ts'
 import { drained, pump } from './jobs.ts'
+import { DEV_PREFIX } from '../mount/registry.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
@@ -307,7 +308,10 @@ type Input = ByteSource | null | typeof UNREADABLE
 /** Ordered descriptor bindings for one command, restored after execution.
  * Each target expands, is admitted, and opens before the next target expands.
  * Earlier opens affect later globs and substitutions; a failure stops the
- * remaining redirects. Descriptors share file descriptions and offsets. A
+ * remaining redirects. The last target of an output-only builtin, a `>` one,
+ * is opened by the write of its output instead (`outputOnly`), so a store
+ * that replaces whole objects takes one write and never shows the file
+ * emptied. Descriptors share file descriptions and offsets. A
  * stream the statement redirects is its own while it runs, in the lines it
  * runs too (`eval`, `exec CMD`, `bash -c`): an earlier `exec >` binding of it
  * waits until the statement ends. What the command wrote on its way out goes
@@ -412,6 +416,8 @@ async function runRedirects(
     outputs.set(fd, descriptorOutput(descriptor))
     if (descriptor.identity === EXEC_CLOSED) closed.add(fd)
   }
+  let deferred: FileDescription | null = null
+  let openingStderr: FdDest | undefined = TO_STDERR
   const failed = async (
     result: Result,
     failedFile: FileDescription | null = null,
@@ -419,7 +425,10 @@ async function runRedirects(
     let [stdout] = result
     const [, io, node] = result
     const data = await io.materializeStderr()
-    const target = outputs.get(2)
+    const target =
+      failedFile !== null && failedFile === deferred && !failedFile.opened
+        ? openingStderr
+        : outputs.get(2)
     if (target === TO_STDERR) return result
     io.stderr = null
     if (target === TO_STDOUT) stdout = data
@@ -562,24 +571,37 @@ async function runRedirects(
         inputs.set(r.fd, reading)
       }
     } else {
-      let pipe: PathSpec | null
-      try {
-        const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
-        pipe =
-          command !== null && guard !== undefined
-            ? await runWithRedirectPaths(command, targets, open)
-            : await open()
-      } catch (error) {
-        if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
-        return failed(redirectFailure(scope, error))
+      const last = expanded.length === redirects.length && outputOnly(name, args)
+      let file: FileDescription
+      if (
+        last &&
+        !r.append &&
+        !scope.virtual.startsWith(DEV_PREFIX) &&
+        piped.size === 0 &&
+        !files.some((f) => f.pipe)
+      ) {
+        file = deferred = new FileDescription(scope)
+        openingStderr = outputs.get(2)
+      } else {
+        let pipe: PathSpec | null
+        try {
+          const open = () => createFile(dispatch, session, scope, new Uint8Array(), r.append)
+          pipe =
+            command !== null && guard !== undefined
+              ? await runWithRedirectPaths(command, targets, open)
+              : await open()
+        } catch (error) {
+          if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+          return failed(redirectFailure(scope, error))
+        }
+        file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
+        file.opened = true
       }
       if (!r.append) {
         const emptied = new SharedInput(new Uint8Array())
         for (const [fd, path] of readPaths) if (path === scope.virtual) inputs.set(fd, emptied)
       }
-      const file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
-      file.opened = true
-      if (expanded.length === redirects.length && outputOnly(name, args)) completeOutput = file
+      if (last) completeOutput = file
       files.push(file)
       for (const fd of fds) {
         closed.delete(fd)
@@ -763,7 +785,11 @@ async function runRedirects(
     }
     const routed: [Channel | Inherited, ByteSource][] = []
     const writeFiles = async () => {
-      const write = async (file: FileDescription, data: ByteSource, replace = false) => {
+      const write = async (
+        file: FileDescription,
+        data: ByteSource,
+        replace = false,
+      ): Promise<boolean> => {
         try {
           await writeDescription(dispatch, session, file, data, replace)
         } catch (error) {
@@ -773,7 +799,17 @@ async function runRedirects(
           const diagnostic = await materialize(refusal.stderr)
           if (diagnostic.byteLength > 0) routed.push([Channel.STDERR, diagnostic])
           io.exitCode = 1
+          return false
         }
+        return true
+      }
+      if (
+        deferred !== null &&
+        !(chunks.length > 0 && !refused && chunks.every(([key]) => dest(key) === deferred)) &&
+        !(await write(deferred, new Uint8Array()))
+      ) {
+        await discardStreams(...chunks.map(([, data]) => data))
+        chunks.length = 0
       }
       const pending = chunks.values()
       let chunk = pending.next()

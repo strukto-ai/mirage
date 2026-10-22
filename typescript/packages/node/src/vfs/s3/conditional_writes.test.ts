@@ -147,41 +147,29 @@ describe('conditional writes on an S3 mount', () => {
       ['sed -i s/one/ONE/ /s3/f'],
       'echo x > /s3/f',
       'PutObject',
-      [{ IfMatch: etag('ONE\n') }, EMPTY],
+      [{ IfMatch: etag('ONE\n') }],
     ],
-    ['grep', ['grep o /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
-    ['head', ['head -n1 /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
-    ['wc', ['wc -l /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE, EMPTY]],
-    [
-      'append',
-      ['echo a >> /s3/f'],
-      'echo z > /s3/f',
-      'PutObject',
-      [{ IfMatch: etag('one\na\n') }, EMPTY],
-    ],
-    [
-      'truncate',
-      ['truncate -s 2 /s3/f'],
-      'echo z > /s3/f',
-      'PutObject',
-      [{ IfMatch: etag('on') }, EMPTY],
-    ],
+    ['grep', ['grep o /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
+    ['head', ['head -n1 /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
+    ['wc', ['wc -l /s3/f'], 'echo z > /s3/f', 'PutObject', [ONE]],
+    ['append', ['echo a >> /s3/f'], 'echo z > /s3/f', 'PutObject', [{ IfMatch: etag('one\na\n') }]],
+    ['truncate', ['truncate -s 2 /s3/f'], 'echo z > /s3/f', 'PutObject', [{ IfMatch: etag('on') }]],
     [
       'cross-cp',
       ['echo hi > /ram/x; cp /ram/x /s3/y'],
       'echo z > /s3/y',
       'PutObject',
-      [{ IfMatch: etag('hi\n') }, EMPTY],
+      [{ IfMatch: etag('hi\n') }],
     ],
-    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{}, EMPTY]],
+    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{}]],
     ['unread-tee', [], 'echo y | tee /s3/g', 'PutObject', [{}]],
     ['unread-cross-cp', [], 'echo r > /ram/r; cp /ram/r /s3/g', 'PutObject', [{}]],
     ['unread-cp', [], 'cp /s3/f /s3/g', 'CopyObject', [{}]],
-    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{}, EMPTY]],
-    ['mv-on-line', [], 'cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g', 'PutObject', [{}, EMPTY]],
-    ['rm-r-on-line', [], 'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
-    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
-    ['dir-mv', ['cat /s3/d/a; mv /s3/d /s3/e'], 'echo x > /s3/d/a', 'PutObject', [{}, EMPTY]],
+    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{}]],
+    ['mv-on-line', [], 'cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g', 'PutObject', [{}]],
+    ['rm-r-on-line', [], 'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a', 'PutObject', [{}]],
+    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{}]],
+    ['dir-mv', ['cat /s3/d/a; mv /s3/d /s3/e'], 'echo x > /s3/d/a', 'PutObject', [{}]],
     [
       'dir-mv-copies',
       [],
@@ -995,6 +983,29 @@ describe('conditional writes on an S3 mount', () => {
       expect(object('d/a')).toBe('newest\n')
     },
   )
+
+  it.each(
+    [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL].flatMap((write) => [
+      [write, 'cat /s3/f; echo x > /s3/f', 'f', 'x\n'],
+      [write, 'cat /s3/f; printf x > /s3/f', 'f', 'x'],
+      [write, 'cat /s3/f; : > /s3/f', 'f', ''],
+      [write, 'echo x > /s3/new', 'new', 'x\n'],
+    ]),
+  )('lands an output-only redirect in one put (%s): %s', async (write, line, key, after) => {
+    // The output's write opens the target: no empty object in between.
+    const ws = workspace(write as WritePolicy)
+    const [code, , err] = await run(ws, line)
+    expect([code, err]).toEqual([0, ''])
+    expect([sent('PutObject').length, object(key)]).toEqual([1, after])
+  })
+
+  it('never shows a reader the object emptied by a redirect', async () => {
+    const seen: (string | undefined)[] = []
+    for (let i = 0; i < 2; i++) mock.before('PutObject', () => void seen.push(object('f')))
+    const ws = workspace(WritePolicy.UNCONDITIONAL)
+    expect(await run(ws, 'echo x > /s3/f')).toEqual([0, '', ''])
+    expect([seen, object('f')]).toEqual([[SEED.f], 'x\n'])
+  })
 
   it.each([
     'cat /s3/f; echo x > /s3/f',

@@ -86,6 +86,7 @@ from mirage.workspace.executor.control import (
 )
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
+from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -438,7 +439,10 @@ async def handle_redirect(
 
     Each target expands, is admitted, and opens before the next target
     expands. Earlier opens therefore affect later globs and substitutions,
-    and a failure stops the remaining redirects. Descriptors alias shared
+    and a failure stops the remaining redirects. The last target of an
+    output-only builtin, a ``>`` one, is opened by the write of its output
+    instead (``_output_only``), so a store that replaces whole objects
+    takes one write and never shows the file emptied. Descriptors alias shared
     file descriptions, including their read/write offsets. A stream the
     statement redirects is its own while it runs, in the lines it runs too
     (``eval``, ``exec CMD``, ``bash -c``): an earlier ``exec >`` binding
@@ -553,13 +557,22 @@ async def _handle_redirect(
         if descriptor.identity == CLOSED:
             closed.add(fd)
 
+    deferred: FileDescription | None = None
+    opening_stderr: _Fd | FileDescription | Inherited = _TO_STDERR
+
     async def failed(
         result: RedirectResult,
         failed_file: FileDescription | None = None,
     ) -> RedirectResult:
         stdout, io, node = result
         data = await io.materialize_stderr()
-        target = outputs[2]
+        target = (
+            opening_stderr
+            if failed_file is not None
+            and failed_file is deferred
+            and not failed_file.opened
+            else outputs[2]
+        )
         if target is _TO_STDERR:
             return result
         io.stderr = None
@@ -713,32 +726,44 @@ async def _handle_redirect(
                     continue
                 inputs[r.fd] = reading
         else:
-            token = (
-                set_redirect_paths(command.id, targets)
-                if command is not None and guard is not None
-                else None
-            )
-            try:
-                pipe = await create_file(
-                    dispatch, session, scope, b"", append=r.append
+            last = len(expanded) == len(redirects) and _output_only(name, args)
+            pipe = None
+            if (
+                last
+                and not r.append
+                and not scope.virtual.startswith(DEV_PREFIX)
+                and not piped
+                and not any(f.pipe for f in files)
+            ):
+                file = deferred = FileDescription(scope)
+                opening_stderr = outputs[2]
+            else:
+                token = (
+                    set_redirect_paths(command.id, targets)
+                    if command is not None and guard is not None
+                    else None
                 )
-            except OSError as exc:
-                return await failed(_redirect_failure(scope, exc))
-            finally:
-                if token is not None:
-                    reset_redirect_paths(token)
+                try:
+                    pipe = await create_file(
+                        dispatch, session, scope, b"", append=r.append
+                    )
+                except OSError as exc:
+                    return await failed(_redirect_failure(scope, exc))
+                finally:
+                    if token is not None:
+                        reset_redirect_paths(token)
+                file = FileDescription(
+                    pipe or scope,
+                    append=r.append or pipe is not None,
+                    opened=True,
+                    pipe=pipe is not None,
+                )
             if not r.append:
                 emptied = SharedInput(b"")
                 for fd, path in read_paths.items():
                     if path == scope.virtual:
                         inputs[fd] = emptied
-            file = FileDescription(
-                pipe or scope,
-                append=r.append or pipe is not None,
-                opened=True,
-                pipe=pipe is not None,
-            )
-            if len(expanded) == len(redirects) and _output_only(name, args):
+            if last:
                 complete_output = file
             files.append(file)
             for fd in fds:
@@ -935,7 +960,7 @@ async def _handle_redirect(
 
         async def write(
             file: FileDescription, data: ByteSource, *, replace: bool = False
-        ) -> None:
+        ) -> bool:
             try:
                 await write_description(
                     dispatch, session, file, data, replace=replace
@@ -952,8 +977,21 @@ async def _handle_redirect(
                 if diagnostic:
                     routed.append((Channel.STDERR, diagnostic))
                 io.exit_code = 1
+                return False
+            return True
 
         try:
+            if (
+                deferred is not None
+                and not (
+                    chunks
+                    and not refused
+                    and all(dest(key) is deferred for key, _ in chunks)
+                )
+                and not await write(deferred, b"")
+            ):
+                await discard_streams(*(data for _, data in chunks))
+                chunks = []
             pending = iter(chunks)
             chunk = next(pending, None)
             while chunk is not None:

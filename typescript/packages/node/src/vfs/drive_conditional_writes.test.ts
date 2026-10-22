@@ -376,11 +376,11 @@ describe('conditional writes only Box has', () => {
 
   // A plain write uploads to the id the listing named; a held version is
   // checked live first, by that id, so a changed file is refused before its
-  // body goes out. The redirect truncates, then writes: two uploads.
+  // body goes out. The redirect's write is its open: one upload.
   it('a conditional write asks by id before each upload', async () => {
     // Every write first asks, by the id the listing named, that the file is
     // still at the path; a held version is checked against that answer. The
-    // redirect truncates, then writes: two uploads.
+    // redirect's write is its open: one upload.
     const logs: string[][] = []
     const fid = drive.box.idOf('f')
     for (const policy of [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL]) {
@@ -392,7 +392,7 @@ describe('conditional writes only Box has', () => {
       drive.put('f', SEED.f ?? '')
     }
     const upload = `upload:${fid}`
-    const asked = [`info:${fid}`, upload, `info:${fid}`, upload]
+    const asked = [`info:${fid}`, upload]
     expect(logs).toEqual([asked, asked])
   })
 
@@ -582,10 +582,7 @@ describe('conditional writes only Dropbox has', () => {
       routes.push(drive.dropbox.log.slice(before).filter((r) => r !== 'token'))
       drive.put('f', SEED.f ?? '')
     }
-    expect(routes).toEqual([
-      ['upload', 'upload'],
-      ['get_metadata', 'upload', 'get_metadata', 'upload'],
-    ])
+    expect(routes).toEqual([['upload'], ['get_metadata', 'upload']])
   })
 
   it.each([
