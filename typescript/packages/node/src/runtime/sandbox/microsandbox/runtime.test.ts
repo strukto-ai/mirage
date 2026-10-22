@@ -131,7 +131,6 @@ describe('MicrosandboxRuntime', () => {
             'exec',
             'box',
             '--quiet',
-            '--no-tty',
             '-w',
             '/',
             '-e',

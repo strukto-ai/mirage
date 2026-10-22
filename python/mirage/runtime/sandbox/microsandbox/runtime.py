@@ -126,4 +126,4 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
         )
 
     def _head(self) -> tuple[str, ...]:
-        return ("exec", self.config.sandbox, "--quiet", "--no-tty")
+        return ("exec", self.config.sandbox, "--quiet")
