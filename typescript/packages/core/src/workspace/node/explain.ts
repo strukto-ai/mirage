@@ -426,7 +426,9 @@ function lineRefusal(
  * (`xargs`) is completed with them. `wholeLine` is whether a runtime takes
  * the line whole, where this is the only gate; the executor judges each
  * command again once its words are expanded. `lost` is whether a `cd` the
- * walk could not follow ran before the command, as `Walked` carries it.
+ * walk could not follow ran before the command, as `Walked` carries it; a
+ * whole line still shows the chain what its words name where the walk last
+ * knew the shell, since no gate judges them once it runs.
  * `every` asks every policy past a Deny, for `explain`; `rulesOnly` asks the
  * profile's rules alone, for a pass that judges a line before it runs, since
  * a policy's own `preCommand` is asked once, by the gate that runs the
@@ -474,7 +476,7 @@ async function* judgeWords(
     ...classified.slice(1),
     ...redirectWords.map((w) => classifyBarePath(wordValue(w), registry, session.cwd)),
   ]
-  const unread = unreadPaths(readWords, kinds, session.cwd, lost)
+  const unread = unreadPaths(readWords, kinds, session.cwd, lost && !wholeLine)
   const redirects = redirectPaths(redirectWords, registry, session.cwd)
   const wordsRead = commandWords(
     registry,
@@ -708,31 +710,29 @@ function* walkNode(
     }
     return [session, lost, elsewhere]
   }
-  if (
-    REPEATED_SCOPES.has(node.type) &&
-    moves(walkChildren(node, session, home, frame, reparse, lost, elsewhere), [
-      session,
-      lost,
-      elsewhere,
-    ])
-  ) {
-    lost = true
-  }
+  if (REPEATED_SCOPES.has(node.type) && moves(node, session, home)) lost = true
   return yield* walkChildren(node, session, home, frame, reparse, lost, elsewhere)
 }
 
 /**
- * Whether a scope leaves the shell anywhere but where it began, found by
- * walking it without judging any of it.
+ * Whether a command in a scope may move the shell's cwd, outside the child
+ * shells it forks: what a loop or a function body carries into its next run.
+ * Read off the tree, so a nested scope costs one more scan, not another walk.
  */
-function moves(walk: Walk, began: Stand): boolean {
-  for (;;) {
-    const step = walk.next()
-    if (step.done === true) {
-      const [session, lost, elsewhere] = step.value
-      return lost !== began[1] || session !== began[0] || elsewhere !== began[2]
+function moves(node: TSNodeLike, session: SessionState, home: string | null): boolean {
+  const stack = [...node.children]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (FORK_SCOPES.has(current.type)) continue
+    if (current.type === NodeType.COMMAND) {
+      const words = wordsOf(current, home)
+      if (words.length > 0) {
+        const [moved, lost] = afterCd(words, session, false, [])
+        if (lost || moved !== session) return true
+      }
     }
+    stack.push(...current.children)
   }
+  return false
 }
 
 /**

@@ -489,7 +489,9 @@ async def _judge_words(
             this is the only gate; the executor judges each command
             again once its words are expanded.
         lost (bool): whether a ``cd`` the walk could not follow ran
-            before the command, as ``Walked`` carries it.
+            before the command, as ``Walked`` carries it. A whole line
+            still shows the chain what its words name where the walk last
+            knew the shell, since no gate judges them once it runs.
         every (bool): ask every policy past a Deny, for ``explain``.
         rules_only (bool): ask the profile's rules alone, for a pass
             that judges a line before it runs; a policy's own
@@ -537,7 +539,9 @@ async def _judge_words(
             for w in redirect_words
         ),
     ]
-    unread = _unread_paths(read_words, kinds, session.cwd, lost)
+    unread = _unread_paths(
+        read_words, kinds, session.cwd, lost and not whole_line
+    )
     redirects = redirect_paths(redirect_words, registry, session.cwd)
     words_read = command_words(
         registry,
@@ -942,34 +946,37 @@ def _walk_node(
         for child in node.children:
             yield from _walk_node(child, session, home, frame, lost, elsewhere)
         return session, lost, elsewhere
-    if node.type in REPEATED_SCOPES and _moves(
-        _walk_children(node, session, home, frame, lost, elsewhere),
-        (session, lost, elsewhere),
-    ):
+    if node.type in REPEATED_SCOPES and _moves(node, session, home):
         lost = True
     return (
         yield from _walk_children(node, session, home, frame, lost, elsewhere)
     )
 
 
-def _moves(walk: Walk, began: Stand) -> bool:
-    """Whether a scope leaves the shell anywhere but where it began,
-    found by walking it without judging any of it.
+def _moves(node: Any, session: SessionState, home: str | None) -> bool:
+    """Whether a command in a scope may move the shell's cwd, outside the
+    child shells it forks: what a loop or a function body carries into its
+    next run. Read off the tree, so a nested scope costs one more scan,
+    not another walk.
 
     Args:
-        walk (Walk): the scope's walk, not yet started.
-        began (Stand): where the scope begins.
+        node (Any): the scope's tree-sitter node.
+        session (SessionState): the session the scope begins in.
+        home (str | None): the home directory a leading ``~`` names.
     """
-    while True:
-        try:
-            next(walk)
-        except StopIteration as ended:
-            session, lost, elsewhere = ended.value
-            return (
-                lost != began[1]
-                or session is not began[0]
-                or elsewhere is not began[2]
-            )
+    stack = list(node.children)
+    while stack:
+        current = stack.pop()
+        if current.type in FORK_SCOPES:
+            continue
+        if current.type == NodeType.COMMAND:
+            words = _words_of(current, home)
+            if words:
+                moved, lost, _ = _after_cd(words, session, False, ())
+                if lost or moved is not session:
+                    return True
+        stack.extend(current.children)
+    return False
 
 
 def _walk_children(
