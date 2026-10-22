@@ -106,13 +106,13 @@ Writes need a writable mount: `MountMode.WRITE`, or `mode: write` in YAML.
 | `write` | `>`, `tee`, `touch` and `sed -i` work. | They fail. |
 | `append` | `>>` calls it. | `>>` reads the file and calls `write`. |
 | `copy` | `cp` calls it. | `cp` reads the file and calls `write`. |
-| `truncate` | `truncate` calls it. | `truncate` calls `write`. |
+| `truncate` | `truncate` calls it. | `truncate` calls `write`, and `truncate -c` fails with `Operation not supported`. |
 | `rename` | `mv` works. | `mv` fails with `Operation not supported`. |
 | `unlink` | `rm` works. | `rm` fails with `Operation not supported`. |
 | `mkdir` | `mkdir` works. | `mkdir` fails with `Operation not supported`. |
 | `rmdir` | `rmdir` works. | `rmdir` fails with `Operation not supported`. |
 | `rm_r` | `rm -r` calls it once. | `rm -r` calls `unlink` and `rmdir` for each entry. |
-| `dir_copy` | `cp -r` calls it once. | `cp -r` calls `mkdir` for each folder and `copy` for each file. |
+| `dir_copy` | `cp -r` calls it once when it copies a folder to a new place and `copy` is overridden too. | `cp -r` calls `mkdir` for each folder and `copy`, or a read and `write`, for each file. |
 | `setattr` | `chmod` and `touch -d` call it. | Mirage keeps the mode and times itself. |
 
 ### Answer commands with your service
@@ -156,25 +156,32 @@ This VFS serves pages from a dictionary:
             super().__init__(name="notes")
             self.pages = pages
 
+        def page(self, path: PathSpec) -> str:
+            if path.vfs_path not in self.pages:
+                raise FileNotFoundError(path.virtual)
+            return self.pages[path.vfs_path]
+
         async def readdir(self, path: PathSpec) -> list[FileStat]:
+            if path.vfs_path:
+                self.page(path)
+                raise NotADirectoryError(path.virtual)
             return [FileStat(name=name, type=FileType.FILE) for name in self.pages]
 
         async def stat(self, path: PathSpec) -> FileStat:
             if not path.vfs_path:
                 return FileStat(name="/", type=FileType.DIRECTORY)
-            if path.vfs_path not in self.pages:
-                raise FileNotFoundError(path.virtual)
+            self.page(path)
             return FileStat(name=path.vfs_path, type=FileType.FILE)
 
         async def read(
             self, path: PathSpec, *, offset: int = 0, size: int | None = None
         ) -> bytes:
-            return self.pages[path.vfs_path].encode()
+            return self.page(path).encode()
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript notes.ts
-    import { BaseVFS, enoent, FileStat, FileType, type PathSpec } from '@struktoai/mirage-node'
+    import { BaseVFS, enoent, enotdir, FileStat, FileType, type PathSpec } from '@struktoai/mirage-node'
 
     export class NotesVFS extends BaseVFS {
       readonly pages: Record<string, string>
@@ -184,18 +191,27 @@ This VFS serves pages from a dictionary:
         this.pages = config.pages
       }
 
-      override async readdir(): Promise<FileStat[]> {
+      page(path: PathSpec): string {
+        if (!Object.hasOwn(this.pages, path.vfsPath)) throw enoent(path)
+        return this.pages[path.vfsPath]
+      }
+
+      override async readdir(path: PathSpec): Promise<FileStat[]> {
+        if (path.vfsPath !== '') {
+          this.page(path)
+          throw enotdir(path)
+        }
         return Object.keys(this.pages).map((name) => new FileStat({ name, type: FileType.FILE }))
       }
 
       override async stat(path: PathSpec): Promise<FileStat> {
         if (path.vfsPath === '') return new FileStat({ name: '/', type: FileType.DIRECTORY })
-        if (!Object.hasOwn(this.pages, path.vfsPath)) throw enoent(path)
+        this.page(path)
         return new FileStat({ name: path.vfsPath, type: FileType.FILE })
       }
 
       override async read(path: PathSpec): Promise<Uint8Array> {
-        return new TextEncoder().encode(this.pages[path.vfsPath])
+        return new TextEncoder().encode(this.page(path))
       }
     }
     ```
@@ -356,7 +372,7 @@ Override `line_count`:
 
     class CountedNotesVFS(NotesVFS):
         async def line_count(self, path: PathSpec) -> int | None:
-            return self.pages[path.vfs_path].count("\n")
+            return self.page(path).count("\n")
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
@@ -366,7 +382,7 @@ Override `line_count`:
 
     export class CountedNotesVFS extends NotesVFS {
       override async lineCount(path: PathSpec): Promise<number | null> {
-        return this.pages[path.vfsPath].split('\n').length - 1
+        return this.page(path).split('\n').length - 1
       }
     }
     ```
