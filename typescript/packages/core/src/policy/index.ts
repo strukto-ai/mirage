@@ -17,18 +17,6 @@ export { PolicyDenied } from './errors.ts'
 export { Decisions, askRule, covers, decisionId, type AskHandler } from './decisions.ts'
 export { MountRootPolicy } from './builtin/mount_root.ts'
 export { PermissionsPolicy } from './builtin/permissions.ts'
-export { decide, outranks, ruleAt, sourceOf } from './match/decide.ts'
-export { anchorDepth } from '../utils/hidden.ts'
-export {
-  betterMatch,
-  coversDepth,
-  hiddenDepth,
-  matchedOperand,
-  ruleApplies,
-  ruleReach,
-  subjects,
-  type Subject,
-} from './match/rule.ts'
 export { resolveProducer, resolveLimit } from './builtin/output_cap.ts'
 export { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, POLICY_DENIED_EXIT } from './constants.ts'
 export {

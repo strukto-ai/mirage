@@ -25,7 +25,7 @@ from mirage.context import (
     reset_caller,
     session_visibility,
 )
-from mirage.context.session_context import calls_as
+from mirage.context.session_context import calls_as, effective_path_mode
 from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
@@ -1088,6 +1088,33 @@ def reader_of(files: Files) -> NamespaceReader:
         files (Files): the session's files.
     """
     return files._reader()
+
+
+async def path_mode(
+    files: Files, path: str, follow: bool = True
+) -> MountMode | None:
+    """The mode a write at ``path`` meets, for the session ``files`` runs
+    as (``effective_path_mode``): asked under the binding its ops run
+    under, so a default session's profile counts, at the path a link
+    leads to, where the write lands. None where no mount owns it.
+
+    Args:
+        files (Files): the session's files.
+        path (str): absolute virtual path.
+        follow (bool): whether a link at the final name is followed.
+    """
+
+    async def mode() -> MountMode | None:
+        reader = files._reader()
+        virtual = reader.follow(path) if follow else reader.follow_parent(path)
+        owner = reader.owner(virtual)
+        if owner is None:
+            return None
+        return effective_path_mode(virtual, owner.prefix, owner.mode)
+
+    if files._bind is None:
+        return await mode()
+    return await files._bind(files._session_id, mode)
 
 
 def operands_of(files: Files) -> FollowOperands | None:

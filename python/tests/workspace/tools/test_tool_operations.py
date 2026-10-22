@@ -531,6 +531,17 @@ def test_the_tool_list_follows_the_profile(profile, mode, names):
     assert session.tools.names() == names
 
 
+def test_a_deny_written_under_one_mount_keeps_the_tool():
+    # `deny: [ls]` under /data refuses ls on a line inside /data only,
+    # so the ls tool still runs elsewhere; under / it is every line.
+    ws = Workspace({"/": RAMVFS(), "/data": RAMVFS()}, mode=MountMode.WRITE)
+    no_ls = {"commands": {"deny": [{"reason": "no", "commands": ["ls"]}]}}
+    ws.create_session("scoped", profile={"mounts": {"/data": no_ls}})
+    ws.create_session("rooted", profile={"mounts": {"/": no_ls}})
+    assert "ls" in Session(ws, "scoped").tools.names()
+    assert "ls" not in Session(ws, "rooted").tools.names()
+
+
 @pytest.mark.asyncio
 async def test_a_tool_the_profile_does_not_offer_is_no_tool():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)

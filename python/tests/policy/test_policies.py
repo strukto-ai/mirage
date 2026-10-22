@@ -41,7 +41,6 @@ from mirage.policy import (
     render_deny,
 )
 from mirage.policy.mixin import SessionScopedMixin
-from mirage.policy.rule import RulePolicy
 from mirage.policy.types import RouteContext, SessionContext
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.ram import RAMVFS
@@ -146,10 +145,17 @@ async def test_registry_seeds_the_mount_root_policy():
     assert "cannot remove '/data'" in deny.reason
 
 
+class UserRule(Policy):
+    """A user policy refusing every rm."""
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        return Deny("user rule") if ctx.command == "rm" else None
+
+
 @pytest.mark.asyncio
 async def test_builtin_runs_first_then_user_policies_in_order():
     policies = Policies([MountRootPolicy(_registry())])
-    policies.add(RulePolicy(CommandRule(reason="user rule", commands=("rm",))))
+    policies.add(UserRule())
     # Both match `rm /data`; the built-in GNU message wins by order.
     deny = await policies.pre_command(_ctx("rm", [_path("/data")]))
     assert deny is not None
@@ -157,7 +163,7 @@ async def test_builtin_runs_first_then_user_policies_in_order():
     # Only the user rule matches `rm /data/x`.
     deny = await policies.pre_command(_ctx("rm", [_path("/data/x")]))
     assert deny is not None
-    assert deny == Deny("user rule", policy="RulePolicy")
+    assert deny == Deny("user rule", policy="UserRule")
     # The command plane renders a whole-command refusal at 126, one
     # about a path in the GNU voice at 1, and one carrying an error as
     # the command's own line, whoever produced it.

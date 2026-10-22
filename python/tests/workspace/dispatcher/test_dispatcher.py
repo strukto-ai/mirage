@@ -43,6 +43,7 @@ from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
     Action,
+    AdmissionRules,
     CommandRule,
     Deny,
     Policies,
@@ -51,7 +52,7 @@ from mirage.policy import (
     VfsContext,
     VfsResultContext,
 )
-from mirage.policy.rule import RulePolicy
+from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
     FileStat,
@@ -246,12 +247,21 @@ async def test_readlink_answers_from_the_namespace():
     ns.follow.assert_not_called()
 
 
+class _OneRule:
+    """Every session's compiled profile: one deny rule."""
+
+    def __init__(self, rule: CommandRule) -> None:
+        self.rules = AdmissionRules(deny=(rule,))
+
+    def commands_of(self, session_id: str) -> AdmissionRules:
+        return self.rules
+
+
 @pytest.mark.asyncio
-async def test_spec_op_twin_holds_on_the_dispatcher():
+async def test_a_profile_path_rule_holds_on_the_dispatcher():
     policies = Policies()
-    policies.add(
-        RulePolicy(CommandRule(reason="frozen", paths=("/data/locked/*",)))
-    )
+    frozen = CommandRule(reason="frozen", paths=("/data/locked/*",))
+    policies.add(PermissionsPolicy(_OneRule(frozen)))
     dispatcher, _ = _dispatcher(policies)
     with pytest.raises(PolicyDenied) as excinfo:
         await dispatcher.dispatch("read", _path("/data/locked/a.txt"))
@@ -3223,3 +3233,64 @@ async def test_streamed_writes_never_reread_or_reopen_their_output(
         assert all(streamed.count(path) <= 1 for path in expected)
     finally:
         await ws.close()
+
+
+class _SealedReads(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if not ctx.write and ctx.path.virtual == "/data/secret":
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_hide_answers_before_any_policy_and_leaves_no_record():
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[_SealedReads()]
+    )
+    try:
+        await ws.shell("echo s > /data/secret")
+        ws.create_session(
+            "veiled", profile={"paths": {"hide": ["/data/secret"]}}
+        )
+        with pytest.raises(FileNotFoundError) as hidden:
+            await ws.vfs.read("/data/secret", session_id="veiled")
+        assert getattr(hidden.value, "refusal", None) is None
+        with pytest.raises(PermissionError) as denied:
+            await ws.vfs.read("/data/secret")
+        refusal = getattr(denied.value, "refusal", None)
+        assert refusal is not None and refusal.reason == "sealed"
+    finally:
+        await ws.close()
+
+
+class _Listening(Policy):
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.asked.append(ctx.path.virtual)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_probe_of_a_hidden_path_answers_as_absent_before_any_policy():
+    # A probe reads on the caller's behalf: a path the caller cannot see
+    # is absent to it, as the walk answers, and neither a policy nor the
+    # backend hears of it.
+    listening = _Listening()
+    dispatcher, _ = _dispatcher(Policies([listening]))
+    dispatcher._namespace.symlink_targets = MagicMock(return_value={})
+    mount = dispatcher._namespace.try_mount_for.return_value
+    mount.answers_at = MagicMock(return_value=True)
+    caller = Caller(
+        session=SessionState(
+            session_id="agent",
+            visibility=Visibility(paths=HiddenPaths(paths=("/data/hid",))),
+        )
+    )
+    with pytest.raises(FileNotFoundError):
+        await dispatcher._probe_read(
+            "stat", mount, _path("/data/hid/x"), caller
+        )
+    assert listening.asked == []
+    mount.call.assert_not_called()

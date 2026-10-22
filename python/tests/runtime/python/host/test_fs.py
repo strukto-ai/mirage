@@ -315,6 +315,36 @@ class TestReads:
         assert patched.access("/ro/fixed.txt", os.R_OK) is True
         assert patched.access("/ro/fixed.txt", os.W_OK) is False
 
+    def test_access_answers_write_from_the_sessions_mode(self):
+        # W_OK answers what the write itself meets, for the session the
+        # files run as (here the default one, bound by no one): a cap to
+        # read is refused, a writable show entry below it is not, and a
+        # link answers for where it leads unless it is not followed.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.write("/data/f.txt", b"f"))
+        run(ws.vfs.mkdir("/data/out"))
+        run(ws.vfs.write("/data/out/g.txt", b"g"))
+        run(ws.vfs.symlink("/data/link", "/data/out/g.txt"))
+        patched = make_os_module(ws.vfs)
+        assert patched.access("/data/f.txt", os.W_OK) is True
+        run(
+            ws.set_session_profile(
+                ws.default_session_id,
+                {
+                    "mounts": {"/data": "read"},
+                    "paths": {"show": {"/data/out": "rw"}},
+                },
+            )
+        )
+        assert patched.access("/data/f.txt", os.W_OK) is False
+        assert patched.access("/data/f.txt", os.R_OK) is True
+        assert patched.access("/data/out/g.txt", os.W_OK) is True
+        assert patched.access("/data/link", os.W_OK) is True
+        assert (
+            patched.access("/data/link", os.W_OK, follow_symlinks=False)
+            is False
+        )
+
 
 class TestWrites:
     def test_mkdir_and_rmdir(self):

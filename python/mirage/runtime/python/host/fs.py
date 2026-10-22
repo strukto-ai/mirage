@@ -50,10 +50,11 @@ from mirage.runtime.python.host.stat import stat_result
 from mirage.runtime.python.host.syscall import as_raised, host_files, syscall
 from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
+from mirage.types import MountMode
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
-from mirage.workspace.files import WorkspaceFiles, reader_of
+from mirage.workspace.files import WorkspaceFiles, path_mode, reader_of
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -295,6 +296,7 @@ class HostFs:
         self, files: WorkspaceFiles, loop: asyncio.AbstractEventLoop | None
     ) -> None:
         self._files = files
+        self._loop = loop
         self._adapter = host_files(files, loop)
         # The host functions as they were when this router was built.
         # `patch_process` installs these wrappers onto the real os
@@ -356,23 +358,18 @@ class HostFs:
             return None
         return spelled if self._files.is_mounted(spelled) else None
 
-    def _writable(self, virtual: str) -> bool:
-        """Whether the mount owning `virtual` takes writes.
-
-        The owner is resolved over every prefix and only then looked up
-        among the writable ones: resolving over the writable subset
-        instead let the catch-all root mount answer for a path a
-        read-only mount owns, so a read-only mount reported W_OK.
+    def _writable(self, virtual: str, follow: bool) -> bool:
+        """Whether a write at `virtual` would be admitted by mode: the
+        mode the write itself meets (``path_mode``).
 
         Args:
             virtual (str): the mounted virtual path.
+            follow (bool): whether a link at the final name is followed.
         """
-        owner = owner_prefix(self._files.mount_prefixes(), virtual)
-        if owner is None:
-            return False
-        return any(
-            prefix == owner for prefix, _ in self._files.writable_mounts()
+        mode = run_async_from_sync(
+            path_mode(self._files, virtual, follow), self._loop
         )
+        return mode is not None and mode is not MountMode.READ
 
     def _stat_of(
         self, virtual: str, st: VFSStat, unlinked: bool = False
@@ -563,12 +560,12 @@ class HostFs:
     ) -> bool:
         """Whether the caller may reach `path` the requested way.
 
-        Read is granted by existence and write by the owning mount's
-        mode, because a mount mode is mirage's access control and the
-        permission bits a backend has none of are cosmetic. Execute is
-        the one question the bits answer, so it reads them. A session's
-        own narrower grant is enforced at the entry point when the write
-        actually happens, exactly as POSIX leaves access(2) advisory.
+        Read is granted by existence and write by the mode in force at
+        the path for the session, because a mode is mirage's access
+        control and the permission bits a backend has none of are
+        cosmetic: W_OK answers what the write itself would meet, as
+        access(2) refuses a write on a read-only file system. Execute
+        is the one question the bits answer, so it reads them.
 
         Args:
             path (Any): the path to test.
@@ -593,7 +590,9 @@ class HostFs:
             st = self.stat(virtual, follow_symlinks=follow_symlinks)
         except OSError:
             return False
-        if mode & _real_os.W_OK and not self._writable(virtual):
+        if mode & _real_os.W_OK and not self._writable(
+            virtual, follow_symlinks
+        ):
             return False
         if mode & _real_os.X_OK and not st.st_mode & 0o111:
             return False

@@ -397,6 +397,20 @@ describe('the tool list', () => {
     expect(session.tools.names()).toEqual(names)
   })
 
+  // `deny: [ls]` under /data refuses ls on a line inside /data only, so the
+  // ls tool still runs elsewhere; under / it is every line.
+  it('a deny written under one mount keeps the tool', () => {
+    const own = new Workspace(
+      { '/': new RAMVFS(), '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser },
+    )
+    const noLs = { commands: { deny: [{ reason: 'no', commands: ['ls'] }] } }
+    own.createSession('scoped', { profile: parseSessionProfile({ mounts: { '/data': noLs } }) })
+    own.createSession('rooted', { profile: parseSessionProfile({ mounts: { '/': noLs } }) })
+    expect(new Session(own, 'scoped').tools.names()).toContain('ls')
+    expect(new Session(own, 'rooted').tools.names()).not.toContain('ls')
+  })
+
   it('a tool the profile does not offer is no tool', async () => {
     const own = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, shellParser })
     own.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })

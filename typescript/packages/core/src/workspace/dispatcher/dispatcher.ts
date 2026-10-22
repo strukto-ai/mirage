@@ -97,6 +97,7 @@ import {
   VFSName,
   WritePolicy,
 } from '../../types.ts'
+import { sees } from './reader.ts'
 import { LentPayload, memoryAnswered, primed, served } from './stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -941,12 +942,11 @@ export class Dispatcher {
     const mount = this.namespace.mountFor(call.path.virtual)
     const scope = (name === 'readdir' ? globScope(call.path, mount.prefix) : null) ?? resolvedScope
     if (mount !== owner) throw ebusy(call.path.virtual)
-    const links = this.namespace.symlinkTargets()
     if (
       name === 'rmdir' &&
       this.namespace
         .linkStatsBelow(call.path.virtual)
-        .some(([link]) => pathVisible(call.vis, link) && !leadsHidden(call.vis, link, links))
+        .some(([link]) => sees(call.vis, this.namespace, link))
     ) {
       throw enotempty(call.path.virtual)
     }
@@ -1081,13 +1081,7 @@ export class Dispatcher {
     // A name the caller cannot see, or one whose walk crosses hidden space,
     // stays missing: probing past it, to its link's target, would tell that
     // it is there.
-    const vis = sessionVisibility(this.access)
-    if (
-      !pathVisible(vis, path.virtual) ||
-      leadsHidden(vis, path.virtual, this.namespace.symlinkTargets())
-    ) {
-      return false
-    }
+    if (!sees(sessionVisibility(this.access), this.namespace, path.virtual)) return false
     const prober = this.caller === null ? undefined : { ...this.caller, ruleGate: null }
     // A read follows a final link, so the kind is its target's, as GNU's cat
     // calls a link to a directory one; the error keeps the name as typed.
@@ -2326,11 +2320,7 @@ export class Dispatcher {
     if (result === null || result === undefined) return result
     const named = answerPaths(result)
     if (named !== null) {
-      const links = this.namespace.symlinkTargets()
-      return (result as unknown[]).filter(
-        (_, i) =>
-          pathVisible(call.vis, named[i] ?? '') && !leadsHidden(call.vis, named[i] ?? '', links),
-      )
+      return (result as unknown[]).filter((_, i) => sees(call.vis, this.namespace, named[i] ?? ''))
     }
     if (hiddenUnder(call.vis, call.path.virtual)) throw walkDeclined(vfs, call.name, call.path)
     return result
@@ -2558,9 +2548,8 @@ export class Dispatcher {
         // must not take it too.
         const arrived = new Set<string>()
         const vis = sessionVisibility(this.access)
-        const links = this.namespace.symlinkTargets()
         for (const [link] of this.namespace.linkStatsBelow(p.virtual)) {
-          if (pathVisible(vis, link) && !leadsHidden(vis, link, links)) arrived.add(link)
+          if (sees(vis, this.namespace, link)) arrived.add(link)
         }
         await this.namespace.purgeUnder(p.virtual, arrived)
       }
@@ -2811,7 +2800,7 @@ export class Dispatcher {
       // caller folds the denial into its original refusal, so a
       // policy's protection of a hidden path never surfaces as its own
       // denial.
-      await boundary.admit(mark, spec, true, { checkHidden: false }, issuer)
+      await boundary.admit(mark, spec, true, {}, issuer)
     }
     // The fence reruns backend ops outside `dispatch`, so the revision
     // pins have to ride here as on the main path above, or a cascade
@@ -2971,11 +2960,8 @@ export class Dispatcher {
     // purge also drops the attr overlays of paths the cascade just
     // destroyed, as `rm` does.
     const base = rstripSlash(path.virtual) + '/'
-    const links = this.namespace.symlinkTargets()
-    for (const link of links.keys()) {
-      if (link.startsWith(base) && pathVisible(vis, link) && !leadsHidden(vis, link, links)) {
-        throw refusal
-      }
+    for (const link of this.namespace.symlinkTargets().keys()) {
+      if (link.startsWith(base) && sees(vis, this.namespace, link)) throw refusal
     }
     await this.namespace.purgeUnder(path.virtual)
   }
@@ -3272,10 +3258,11 @@ export class Dispatcher {
    * Run one read op for a probe, or null when it found nothing.
    *
    * The probe reads on the caller's behalf but not at its request, so it
-   * passes the same admission gate the op would at the dispatcher: a policy
-   * that denies `stat` must not be reachable through a readlink. That
-   * refusal is raised, not swallowed, because only the caller knows what
-   * to answer when a channel goes dark.
+   * meets what the op would at the dispatcher: a path the caller cannot
+   * see answers as the walk answers it (`sees`), and a policy that denies
+   * `stat` must not be reachable through a readlink. That refusal is
+   * raised, not swallowed, because only the caller knows what to answer
+   * when a channel goes dark.
    *
    * The index and the path's filetype are the two kwargs that decide
    * which registered op answers, so a probe that omitted them would ask
@@ -3299,6 +3286,10 @@ export class Dispatcher {
     if (mount === null) return null
     const mark = declared(vfs.constructor, name) ?? CALLS.get(name) ?? null
     if (mark === null) throw enotsup(vfs.name, name, scope)
+    const vis = sessionVisibility(this.access)
+    if (!sees(vis, this.namespace, scope.virtual)) {
+      throw hiddenRefusal(vis, scope.virtual, false, this.namespace.symlinkTargets())
+    }
     const boundary = this.boundary(mount)
     await boundary.admit(mark, scope, false, {}, issuer)
     await mount.ensureReady()

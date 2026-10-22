@@ -28,6 +28,7 @@ import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
 import { entryName } from '@struktoai/mirage-core/utils/remnants'
+import { pathMode } from '@struktoai/mirage-core/workspace/files'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   DESCRIPTOR_CALLS,
@@ -445,18 +446,26 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     }
   }
 
+  /**
+   * Whether a write at `path` would be admitted by mode: the mode the write
+   * itself meets (`pathMode`). Mirrors Python's `_writable`.
+   */
+  private async writable(path: string): Promise<boolean> {
+    const mode = await pathMode(this.ws.vfs, path)
+    return mode !== null && mode !== MountMode.READ
+  }
+
   private nativeCall(name: string, ...args: unknown[]): Promise<unknown> {
     return ((this.native.promises as FsObject)[name] as Fn)(...args) as Promise<unknown>
   }
 
   async access(path: string, mode = 0): Promise<void> {
     const st = await this.files.stat(path)
-    // Write is the mount's mode, mirage's access control; a session's own
-    // narrower grant answers when the write happens, as POSIX leaves
-    // access(2) advisory. Execute is the one question the bits answer.
-    if (mode & W_OK && this.ws.registry.tryMountFor(path)?.mode === MountMode.READ) {
-      throw refusal('EACCES', 'access', path)
-    }
+    // Write is the mode in force at the path for the session, mirage's
+    // access control: W_OK answers what the write itself would meet, as
+    // access(2) refuses a write on a read-only file system. Execute is the
+    // one question the bits answer.
+    if (mode & W_OK && !(await this.writable(path))) throw refusal('EACCES', 'access', path)
     if (mode & X_OK && (st.mode & 0o111) === 0) throw refusal('EACCES', 'access', path)
   }
 

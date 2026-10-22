@@ -172,7 +172,10 @@ async def missing(vfs: Files, path: str) -> bool:
 
 def runs(name: str, session: SessionState) -> bool:
     """Whether a session can run a command at all: its allow list
-    allows the name and no rule refuses the bare command whole.
+    allows the name and no rule refuses the bare command everywhere. A
+    rule written under one mount refuses it only on a line working
+    inside that mount, which the shell judges line by line, so the
+    command still runs; one written under ``/`` covers every line.
 
     Args:
         name (str): the command name.
@@ -185,6 +188,7 @@ def runs(name: str, session: SessionState) -> bool:
         return True
     return not any(
         not rule.paths
+        and rule.mount in ("", "/")
         and (
             not rule.commands
             or any(pattern_matches(p, (name,)) for p in rule.commands)

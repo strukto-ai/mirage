@@ -80,6 +80,7 @@ async function du(
       {
         prefix: '/',
         kind: 'fake',
+        mode: MountMode.WRITE,
         maxDuEntries:
           table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries,
         calls: new Set(table.readTree === undefined ? [] : ['read_tree']),

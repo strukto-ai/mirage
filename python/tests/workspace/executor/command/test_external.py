@@ -25,9 +25,9 @@ from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
-from mirage.policy import CommandRule
+from mirage.policy import AdmissionRules, CommandRule
 from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
-from mirage.policy.rule import RulePolicy
+from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -79,6 +79,20 @@ class InProcessPython(PythonRuntime):
 
     async def interpret(self, engine, program: Program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class _OneRule:
+    """Every session's compiled profile: one deny rule."""
+
+    def __init__(self, rule: CommandRule) -> None:
+        self.rules = AdmissionRules(deny=(rule,))
+
+    def commands_of(self, session_id: str) -> AdmissionRules:
+        return self.rules
+
+
+def _profile_rule(rule: CommandRule) -> PermissionsPolicy:
+    return PermissionsPolicy(_OneRule(rule))
 
 
 @asynccontextmanager
@@ -424,7 +438,7 @@ async def test_boundary_expansion_preserves_command_tokens(
 )
 async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
     probe = kind(captures=("cat", "grep", "tar"))
-    policy = RulePolicy(
+    policy = _profile_rule(
         CommandRule(
             reason="protected",
             commands=("cat", "grep", "tar"),
@@ -453,7 +467,7 @@ async def test_named_external_capture_cannot_bypass_path_policy(kind, line):
 @pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
 async def test_external_spec_preserves_text_words_and_shell_globs(kind):
     probe = kind(captures=("grep",))
-    policy = RulePolicy(
+    policy = _profile_rule(
         CommandRule(
             reason="protected", commands=("grep",), paths=("/work/secret.txt",)
         )
@@ -544,7 +558,7 @@ async def test_external_text_slot_glob_obeys_failglob(kind):
 @pytest.mark.parametrize("kind", [ProcessProbe, ShellProbe])
 async def test_external_admission_reads_the_expanded_argv(kind):
     probe = kind(captures=("grep", "python3"))
-    policy = RulePolicy(
+    policy = _profile_rule(
         CommandRule(
             reason="protected",
             commands=("grep", "python3"),
@@ -609,7 +623,7 @@ async def test_interpreter_script_cannot_bypass_path_policy(kind, line):
     # (`python3 steal.py` reads /work/steal.py exactly as `cat steal.py`
     # does), whatever option run precedes it.
     probe = kind(captures=("python", "python3", "js", "node"))
-    policy = RulePolicy(CommandRule(reason="protected", paths=("/work/*",)))
+    policy = _profile_rule(CommandRule(reason="protected", paths=("/work/*",)))
     async with workspace(
         {"/work": RAMVFS()},
         runtimes=[probe],
@@ -637,7 +651,7 @@ async def test_interpreter_program_operands_are_not_paths(kind):
     # program's argv, as are the words after a script; none is a file
     # the rule reads, and each reaches the runtime as typed.
     probe = kind(captures=("python", "python3", "js", "node"))
-    policy = RulePolicy(CommandRule(reason="protected", paths=("/work/*",)))
+    policy = _profile_rule(CommandRule(reason="protected", paths=("/work/*",)))
     lines = [
         ("python - /work/arg", ("python", "-", "/work/arg")),
         ("python3 -u -- - -c x", ("python3", "-u", "--", "-", "-c", "x")),

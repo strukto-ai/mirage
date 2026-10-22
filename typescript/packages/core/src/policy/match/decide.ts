@@ -14,22 +14,16 @@
 
 import type { Ruling } from '../types.ts'
 import { VERB_ORDER } from '../constants.ts'
-import {
-  Outcome,
-  type CommandContext,
-  type CommandRule,
-  type AdmissionRules,
-  type LiveRules,
-} from '../types.ts'
+import { Outcome, type CommandContext, type CommandRule, type AdmissionRules } from '../types.ts'
 import { lineAllowed } from './allow.ts'
 import {
-  betterMatch,
   matchedOperand,
   ruleApplies,
+  ruleAt,
   ruleReach,
   ruleScope,
   subjects,
-  type Subject,
+  written,
 } from './rule.ts'
 
 /**
@@ -46,27 +40,6 @@ export function outranks(current: readonly [number, number], verb: number, depth
   const [bestVerb, bestDepth] = current
   if (verb !== bestVerb) return verb < bestVerb
   return depth > bestDepth
-}
-
-/**
- * The rule that speaks about one subject of a line, null when none does:
- * the deepest anchor, deny before ask at equal depth, the earlier rule
- * on a full tie.
- */
-export function ruleAt(
-  live: LiveRules,
-  subject: Subject,
-): readonly [Outcome, CommandRule, number] | null {
-  let best: [number, number] | null = null
-  let chosen: readonly [Outcome, CommandRule, number] | null = null
-  for (const [outcome, rule] of live) {
-    const depth = ruleReach(rule, ruleScope(rule), subject)
-    const verb = VERB_ORDER[outcome] ?? 0
-    if (depth === null || !betterMatch(best, depth, verb)) continue
-    best = [depth, verb]
-    chosen = [outcome, rule, depth]
-  }
-  return chosen
 }
 
 /**
@@ -130,15 +103,7 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       asks: [],
     }
   }
-  const live: (readonly [Outcome, CommandRule])[] = []
-  for (const [outcome, written] of [
-    [Outcome.DENY, rules.deny],
-    [Outcome.ASK, rules.ask],
-  ] as const) {
-    for (const rule of written) {
-      if (ruleApplies(rule, ctx)) live.push([outcome, rule])
-    }
-  }
+  const live = written(rules).filter(([, rule]) => ruleApplies(rule, ctx))
   let best: [number, number] | null = null
   let chosen: Ruling = {
     outcome: Outcome.ALLOW,
@@ -149,7 +114,7 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
   }
   const asked: CommandRule[] = []
   for (const subject of subjects(ctx)) {
-    const spoke = ruleAt(live, subject)
+    const spoke = ruleAt(live, (rule) => ruleReach(rule, ruleScope(rule), subject))
     if (spoke === null) continue
     const [outcome, rule, depth] = spoke
     if (outcome === Outcome.ASK && !asked.includes(rule)) asked.push(rule)

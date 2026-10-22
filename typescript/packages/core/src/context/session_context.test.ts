@@ -402,7 +402,6 @@ describe('the per-operand hide gate', () => {
 describe('the admission binding', () => {
   it('is scoped to one command and hands the outer one back', async () => {
     const gate = (scoped: boolean) => ({
-      scoped,
       scopes: () => scoped,
       granted: [],
       judged: new Set<string>(),

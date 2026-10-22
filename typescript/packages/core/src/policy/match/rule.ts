@@ -21,14 +21,15 @@ import {
   pathCovers,
   pathHidden,
 } from '../../utils/hidden.ts'
+import { METADATA_OPS, SUBTREE_COMMANDS, SUBTREE_OPS, VERB_ORDER } from '../constants.ts'
 import {
-  ASK_SECOND,
-  DENY_FIRST,
-  METADATA_OPS,
-  SUBTREE_COMMANDS,
-  SUBTREE_OPS,
-} from '../constants.ts'
-import type { CommandContext, CommandRule, AdmissionRules, VfsContext } from '../types.ts'
+  Outcome,
+  type AdmissionRules,
+  type CommandContext,
+  type CommandRule,
+  type LiveRules,
+  type VfsContext,
+} from '../types.ts'
 import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
@@ -40,8 +41,7 @@ import { patternMatches } from './pattern.ts'
  * the stronger verb, then the earlier rule (which is why this is
  * strict).
  *
- * Shared by `decide` and `ioRefusal` so a line and the entries it
- * reaches mid-walk are read by one law.
+ * The order `ruleAt` reads every candidate by.
  */
 export function betterMatch(
   current: readonly [number, number] | null,
@@ -55,25 +55,56 @@ export function betterMatch(
 }
 
 /**
- * A rule that applies to a line, and how far it reaches. `matchRule`
- * returns null when the rule does not apply, `{operand: null}` when the
- * rule refuses (or asks about) the whole line, and the operand as typed
- * when the rule is path-scoped and one operand fell under its paths, so
- * the refusal is scoped to that operand (`rm: cannot remove 'x':
- * Permission denied`, exit 1)
- * rather than to the command (`rm: Permission denied`, 126).
+ * A profile's rules as `ruleAt` reads them: every deny, then every ask,
+ * each in the order written.
  */
-export interface RuleMatch {
-  operand: string | null
-  /**
-   * The anchor depth of the deepest entry that actually covered the
-   * operand, which is what the path axis orders by. Scoring the rule's
-   * deepest entry instead would lend an unrelated entry's depth to this
-   * match: an ask on `/repo/*` and `/else/very/deep/*` would outrank a
-   * deny anchored at `/repo/private/*` and reopen it. 0 when the rule
-   * names no paths, which is off the path axis entirely.
-   */
-  depth: number
+export function written(rules: AdmissionRules): LiveRules {
+  return [
+    ...rules.deny.map((rule) => [Outcome.DENY, rule] as const),
+    ...rules.ask.map((rule) => [Outcome.ASK, rule] as const),
+  ]
+}
+
+/**
+ * The rule that speaks about one thing, null when none does: the deepest
+ * anchor, deny before ask at equal depth, the earlier rule on a full tie
+ * (`betterMatch`).
+ *
+ * The one law a line's subjects (`decide`), the entries a walk reaches
+ * below them (`ioRefusal`) and a bare op (`opRuling`) are all read by;
+ * each says how far a rule reaches its thing, since a line, an entry and
+ * an op carry different facts.
+ */
+export function ruleAt(
+  live: LiveRules,
+  reach: (rule: CommandRule) => number | null,
+): readonly [Outcome, CommandRule, number] | null {
+  let best: [number, number] | null = null
+  let chosen: readonly [Outcome, CommandRule, number] | null = null
+  for (const [outcome, rule] of live) {
+    const depth = reach(rule)
+    const verb = VERB_ORDER[outcome] ?? 0
+    if (depth === null || !betterMatch(best, depth, verb)) continue
+    best = [depth, verb]
+    chosen = [outcome, rule, depth]
+  }
+  return chosen
+}
+
+/**
+ * The rule that still holds an entry or an op back, and whether it asks:
+ * the one `ruleAt` chose, unless it is an ask the running line already
+ * holds a grant under (the nod the gate took for `rm -r /x` covers the
+ * entries under `/x`).
+ */
+export function ungranted(
+  spoke: readonly [Outcome, CommandRule, number] | null,
+  granted: readonly CommandRule[],
+): [CommandRule, boolean] | null {
+  if (spoke === null) return null
+  const [outcome, rule] = spoke
+  if (outcome === Outcome.ASK && granted.includes(rule)) return null
+  return [rule, outcome === Outcome.ASK]
 }
 
 /**
@@ -247,29 +278,6 @@ export function matchedOperand(rule: CommandRule, subject: Subject): string | nu
   return subject.path.rawPath || subject.path.virtual
 }
 
-/**
- * Whether one rule applies to a line, and to which operand: the first
- * subject it reaches, which is what a single rule read as a policy of
- * its own has to answer.
- *
- * `decide` does not use this, because a line is more than its first
- * match: it reads every rule at every subject (`subjects`, `ruleReach`)
- * so one operand's ask cannot speak for another operand's deny.
- */
-export function matchRule(
-  rule: CommandRule,
-  scope: HiddenPaths | null,
-  ctx: CommandContext,
-): RuleMatch | null {
-  if (!ruleApplies(rule, ctx)) return null
-  for (const subject of subjects(ctx)) {
-    const depth = ruleReach(rule, scope, subject)
-    if (depth === null) continue
-    return { operand: matchedOperand(rule, subject), depth }
-  }
-  return null
-}
-
 const entryScopes = new Map<string, HiddenPaths | null>()
 
 /**
@@ -340,11 +348,6 @@ export function opReach(
   return null
 }
 
-/** Whether a rule refuses an op. The boolean case of `opReach`. */
-export function matchOp(rule: CommandRule, scope: HiddenPaths | null, ctx: VfsContext): boolean {
-  return opReach(rule, scope, ctx) !== null
-}
-
 /**
  * The rule an op meets and whether it asks, null when the op may run.
  *
@@ -367,22 +370,10 @@ export function opRuling(
   granted: readonly CommandRule[],
 ): [CommandRule, boolean] | null {
   if (rules === null) return null
-  let best: [number, number] | null = null
-  let chosen: { rule: CommandRule; verb: number } | null = null
-  for (const [verb, written] of [
-    [DENY_FIRST, rules.deny],
-    [ASK_SECOND, rules.ask],
-  ] as const) {
-    for (const rule of written) {
-      const depth = opReach(rule, ruleScope(rule), ctx)
-      if (depth === null || !betterMatch(best, depth, verb)) continue
-      best = [depth, verb]
-      chosen = { rule, verb }
-    }
-  }
-  if (chosen === null) return null
-  if (chosen.verb === ASK_SECOND && granted.includes(chosen.rule)) return null
-  return [chosen.rule, chosen.verb === ASK_SECOND]
+  return ungranted(
+    ruleAt(written(rules), (rule) => opReach(rule, ruleScope(rule), ctx)),
+    granted,
+  )
 }
 
 const scopes = new WeakMap<CommandRule, HiddenPaths | null>()
@@ -488,7 +479,7 @@ export function ioReach(
  * null when it may.
  *
  * The same law the admission gate applies to a line, and literally the
- * same comparison (`betterMatch`): anchor depth first, deny before ask
+ * same loop (`ruleAt`): anchor depth first, deny before ask
  * at equal depth. Reading every deny before any ask instead would let a
  * broad deny on `/repo/*` overrule an approved ask on `/repo/sealed/*`
  * that the gate had just admitted the line under, so the carve-out
@@ -508,21 +499,7 @@ export function ioRefusal(
   granted: readonly CommandRule[],
 ): string | null {
   if (rules === null) return null
-  let best: [number, number] | null = null
-  let chosen: { rule: CommandRule; verb: number } | null = null
-  for (const [verb, written] of [
-    [DENY_FIRST, rules.deny],
-    [ASK_SECOND, rules.ask],
-  ] as const) {
-    for (const rule of written) {
-      if (!matchIo(rule, ruleScope(rule), tokens, virtual)) continue
-      const depth = hiddenDepth(rule, virtual)
-      if (!betterMatch(best, depth, verb)) continue
-      best = [depth, verb]
-      chosen = { rule, verb }
-    }
-  }
-  if (chosen === null) return null
-  if (chosen.verb === ASK_SECOND && granted.includes(chosen.rule)) return null
-  return chosen.rule.reason
+  const reach = (rule: CommandRule): number | null =>
+    matchIo(rule, ruleScope(rule), tokens, virtual) ? hiddenDepth(rule, virtual) : null
+  return ungranted(ruleAt(written(rules), reach), granted)?.[0].reason ?? null
 }

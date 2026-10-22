@@ -20,7 +20,8 @@ import {
 import { CycleError, dottedSpelling, resolvePath } from '../../../../utils/path.ts'
 import { materialize, type ByteSource } from '../../../../io/types.ts'
 import { ArithError } from '../../../../shell/errors.ts'
-import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
+import { type FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
+import { effectivePathMode, sessionAccess } from '../../../../context/session_context.ts'
 import { isoTimestamp } from '../../../../utils/dates.ts'
 import { isEfbig } from '../../../../errors/fs.ts'
 import { followPaths } from '../links/links.ts'
@@ -146,11 +147,12 @@ export async function applyUnary(
       }
       return (await materialize(data as ByteSource | null)).length > 0
     }
-    if (op === '-r' || op === '-w') {
+    if (op === '-r') {
       // Mirage has no per-user access model: whatever exists in a
-      // mount is readable and writable through it.
+      // mount is readable through it.
       return kind !== null
     }
+    if (op === '-w') return kind !== null && writable(ctx, val)
     if (op === '-x') {
       if (kind === 'dir') return true
       if ((kind !== 'file' && kind !== 'fifo') || stat === null) return false
@@ -161,6 +163,21 @@ export async function applyUnary(
     throw new CondError(`${ctx.name}: ${op}: unsupported operator`)
   }
   throw new CondError(`${ctx.name}: ${op}: unary operator expected`)
+}
+
+/**
+ * Whether a write at an operand would be admitted by mode: the mode in
+ * force there for the session (`effectivePathMode`), which is what the
+ * write itself meets, so `test -w` never says yes to a write that then
+ * answers EROFS, as access(2) answers on a read-only file system. A path
+ * no mount owns takes no write. Mirrors Python's `writable`.
+ */
+function writable(ctx: CondContext, val: string | PathSpec): boolean {
+  const virtual = operandScope(ctx, val).virtual
+  const mount = ctx.namespace.tryMountFor(virtual)
+  if (mount === null) return false
+  const access = sessionAccess(ctx.session)
+  return effectivePathMode(virtual, mount.prefix, mount.mode, access) !== MountMode.READ
 }
 
 function toInt(ctx: CondContext, text: string): bigint {

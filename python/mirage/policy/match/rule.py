@@ -13,18 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import WordKind
 from mirage.policy.constants import (
-    ASK_SECOND,
-    DENY_FIRST,
     METADATA_OPS,
     SUBTREE_COMMANDS,
     SUBTREE_OPS,
+    VERB_ORDER,
 )
 from mirage.policy.match.allow import line_tokens
 from mirage.policy.match.pattern import pattern_matches
@@ -32,6 +31,8 @@ from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRule,
+    LiveRules,
+    Outcome,
     VfsContext,
 )
 from mirage.types import HiddenPaths, PathSpec
@@ -52,8 +53,7 @@ def better_match(
     then the stronger verb, then the earlier rule (which is why this is
     strict).
 
-    Shared by ``decide`` and :func:`io_refusal` so a line and the
-    entries it reaches mid-walk are read by one law.
+    The order :func:`rule_at` reads every candidate by.
 
     Args:
         current (tuple[int, int] | None): the best (depth, verb) so far.
@@ -68,32 +68,70 @@ def better_match(
     return verb < best_verb
 
 
-@dataclass(frozen=True, slots=True)
-class RuleMatch:
-    """A rule that applies to a line, and how far it reaches.
-
-    ``match_rule`` returns None when the rule does not apply, a
-    RuleMatch with ``operand`` None when the rule refuses (or asks
-    about) the whole line, and a RuleMatch naming the operand when the
-    rule is path-scoped and one operand fell under its paths, so the
-    refusal is scoped to that operand (``rm: cannot remove 'x':
-    Permission denied``, exit 1)
-    rather than to the command (``rm: Permission denied``, 126).
+def written(rules: AdmissionRules) -> LiveRules:
+    """A profile's rules as :func:`rule_at` reads them: every deny, then
+    every ask, each in the order written.
 
     Args:
-        operand (str | None): the operand as typed that a path-scoped
-            rule matched; None when the rule reaches the whole line.
-        depth (int): the anchor depth of the deepest entry that
-            actually covered the operand, which is what the path axis
-            orders by. Scoring the rule's deepest entry instead would
-            lend an unrelated entry's depth to this match: an ask on
-            ``/repo/*`` and ``/else/very/deep/*`` would outrank a deny
-            anchored at ``/repo/private/*`` and reopen it. 0 when the
-            rule names no paths, which is off the path axis entirely.
+        rules (AdmissionRules): the session's admission rules.
     """
+    return [
+        *((Outcome.DENY, rule) for rule in rules.deny),
+        *((Outcome.ASK, rule) for rule in rules.ask),
+    ]
 
-    operand: str | None
-    depth: int = 0
+
+def rule_at(
+    live: LiveRules, reach: Callable[[CommandRule], int | None]
+) -> tuple[Outcome, CommandRule, int] | None:
+    """The rule that speaks about one thing, None when none does: the
+    deepest anchor, deny before ask at equal depth, the earlier rule on
+    a full tie (:func:`better_match`).
+
+    The one law a line's subjects (``decide``), the entries a walk
+    reaches below them (:func:`io_refusal`) and a bare op
+    (:func:`op_ruling`) are all read by; each says how far a rule reaches
+    its thing, since a line, an entry and an op carry different facts.
+
+    Args:
+        live (LiveRules): the candidate rules, deny before ask, in the
+            order written.
+        reach (Callable[[CommandRule], int | None]): a rule's anchor
+            depth at the thing, None when it says nothing about it.
+    """
+    best: tuple[int, int] | None = None
+    chosen: tuple[Outcome, CommandRule, int] | None = None
+    for outcome, rule in live:
+        depth = reach(rule)
+        verb = VERB_ORDER[outcome]
+        if depth is None or not better_match(best, depth, verb):
+            continue
+        best = (depth, verb)
+        chosen = (outcome, rule, depth)
+    return chosen
+
+
+def ungranted(
+    spoke: tuple[Outcome, CommandRule, int] | None,
+    granted: Collection[CommandRule],
+) -> tuple[CommandRule, bool] | None:
+    """The rule that still holds an entry or an op back, and whether it
+    asks: the one :func:`rule_at` chose, unless it is an ask the running
+    line already holds a grant under (the nod the gate took for
+    ``rm -r /x`` covers the entries under ``/x``).
+
+    Args:
+        spoke (tuple[Outcome, CommandRule, int] | None): what
+            :func:`rule_at` chose.
+        granted (Collection[CommandRule]): the ask rules the line runs
+            under a grant for.
+    """
+    if spoke is None:
+        return None
+    outcome, rule, _ = spoke
+    if outcome is Outcome.ASK and rule in granted:
+        return None
+    return rule, outcome is Outcome.ASK
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,34 +348,6 @@ def matched_operand(rule: CommandRule, subject: Subject) -> str | None:
     return subject.path.raw_path or subject.path.virtual
 
 
-def match_rule(
-    rule: CommandRule, scope: HiddenPaths | None, ctx: CommandContext
-) -> RuleMatch | None:
-    """Whether one rule applies to a line, and to which operand: the
-    first subject it reaches, which is what a single rule read as a
-    policy of its own has to answer.
-
-    ``decide`` does not use this, because a line is more than its first
-    match: it reads every rule at every subject
-    (:func:`subjects`, :func:`rule_reach`) so one operand's ask cannot
-    speak for another operand's deny.
-
-    Args:
-        rule (CommandRule): the rule.
-        scope (HiddenPaths | None): the rule's paths, classified once
-            through ``classify_paths``; None when the rule names none.
-        ctx (CommandContext): the classified command.
-    """
-    if not rule_applies(rule, ctx):
-        return None
-    for subject in subjects(ctx):
-        depth = rule_reach(rule, scope, subject)
-        if depth is None:
-            continue
-        return RuleMatch(operand=matched_operand(rule, subject), depth=depth)
-    return None
-
-
 @functools.lru_cache(maxsize=1024)
 def _entry_scope(entry: str) -> HiddenPaths | None:
     """One document entry, classified alone so it can be scored on its
@@ -484,7 +494,7 @@ def io_refusal(
     own, None when it may.
 
     The same law the admission gate applies to a line, and literally
-    the same comparison (:func:`better_match`): anchor depth first,
+    the same loop (:func:`rule_at`): anchor depth first,
     deny before ask at equal depth. Reading every deny before any ask
     instead would let a broad deny on ``/repo/*`` overrule an approved
     ask on ``/repo/sealed/*`` that the gate had just admitted the line
@@ -506,23 +516,14 @@ def io_refusal(
     """
     if rules is None:
         return None
-    best: tuple[int, int] | None = None
-    chosen: tuple[CommandRule, int] | None = None
-    for verb, written in ((DENY_FIRST, rules.deny), (ASK_SECOND, rules.ask)):
-        for rule in written:
-            if not match_io(rule, rule_scope(rule), tokens, virtual):
-                continue
-            depth = hidden_depth(rule, virtual)
-            if not better_match(best, depth, verb):
-                continue
-            best = (depth, verb)
-            chosen = (rule, verb)
-    if chosen is None:
-        return None
-    rule, verb = chosen
-    if verb == ASK_SECOND and rule in granted:
-        return None
-    return rule.reason
+
+    def reach(rule: CommandRule) -> int | None:
+        if not match_io(rule, rule_scope(rule), tokens, virtual):
+            return None
+        return hidden_depth(rule, virtual)
+
+    refused = ungranted(rule_at(written(rules), reach), granted)
+    return None if refused is None else refused[0].reason
 
 
 def posix_level(rule: CommandRule) -> bool:
@@ -594,20 +595,6 @@ def op_reach(
     return None
 
 
-def match_op(
-    rule: CommandRule, scope: HiddenPaths | None, ctx: VfsContext
-) -> bool:
-    """Whether a rule refuses an op. The boolean case of
-    :func:`op_reach`.
-
-    Args:
-        rule (CommandRule): the rule.
-        scope (HiddenPaths | None): the rule's classified paths.
-        ctx (VfsContext): the op about to run.
-    """
-    return op_reach(rule, scope, ctx) is not None
-
-
 def op_ruling(
     rules: AdmissionRules | None,
     ctx: VfsContext,
@@ -637,18 +624,9 @@ def op_ruling(
     """
     if rules is None:
         return None
-    best: tuple[int, int] | None = None
-    chosen: tuple[CommandRule, int] | None = None
-    for verb, written in ((DENY_FIRST, rules.deny), (ASK_SECOND, rules.ask)):
-        for rule in written:
-            depth = op_reach(rule, rule_scope(rule), ctx)
-            if depth is None or not better_match(best, depth, verb):
-                continue
-            best = (depth, verb)
-            chosen = (rule, verb)
-    if chosen is None:
-        return None
-    rule, verb = chosen
-    if verb == ASK_SECOND and rule in granted:
-        return None
-    return rule, verb == ASK_SECOND
+    return ungranted(
+        rule_at(
+            written(rules), lambda rule: op_reach(rule, rule_scope(rule), ctx)
+        ),
+        granted,
+    )

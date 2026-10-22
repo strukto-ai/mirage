@@ -19,10 +19,14 @@ from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     resolve_path_stat,
 )
+from mirage.context.session_context import (
+    effective_path_mode,
+    session_access,
+)
 from mirage.errors.types import FileTooLargeError
 from mirage.io.types import materialize
 from mirage.shell.errors import ArithError
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import CycleError, dotted_spelling, resolve_path
 from mirage.workspace.executor.builtins.condition.constants import (
@@ -186,10 +190,12 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
                 # table past max_read_records) is certainly not empty
                 return True
             return len(await materialize(data)) > 0
-        if op in ("-r", "-w"):
+        if op == "-r":
             # Mirage has no per-user access model: whatever exists in a
-            # mount is readable and writable through it.
+            # mount is readable through it.
             return kind is not None
+        if op == "-w":
+            return kind is not None and writable(ctx, val)
         if op == "-x":
             if kind == "dir":
                 return True
@@ -199,6 +205,27 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
     if op in UNSUPPORTED_UNARY:
         raise CondError(f"{ctx.name}: {op}: unsupported operator")
     raise CondError(f"{ctx.name}: {op}: unary operator expected")
+
+
+def writable(ctx: CondContext, val: str | PathSpec) -> bool:
+    """Whether a write at an operand would be admitted by mode: the mode
+    in force there for the session (``effective_path_mode``), which is
+    what the write itself meets, so ``test -w`` never says yes to a
+    write that then answers EROFS, as access(2) answers on a read-only
+    file system. A path no mount owns takes no write.
+
+    Args:
+        ctx (CondContext): evaluation context.
+        val (str | PathSpec): operand as typed or classified.
+    """
+    virtual = operand_scope(ctx, val).virtual
+    mount = ctx.namespace.try_mount_for(virtual)
+    if mount is None:
+        return False
+    mode = effective_path_mode(
+        virtual, mount.prefix, mount.mode, session_access(ctx.session)
+    )
+    return mode is not MountMode.READ
 
 
 def to_int(ctx: CondContext, text: str) -> int:

@@ -3353,3 +3353,73 @@ it('path admission checks aliases without backend I/O', async () => {
     await ws.close()
   }
 })
+
+describe('hides answer before any policy', () => {
+  it('a hide answers before any policy and leaves no record', async () => {
+    const sealedReads: Policy = {
+      preVfs: (c: VfsContext): Action | null =>
+        !c.write && c.path.virtual === '/data/secret' ? { kind: 'deny', reason: 'sealed' } : null,
+    }
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [sealedReads], shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('echo s > /data/secret')
+      ws.createSession('veiled', { profile: { paths: { hide: ['/data/secret'] } } })
+      const hidden: unknown = await ws.vfs
+        .read('/data/secret', {}, 'veiled')
+        .catch((e: unknown) => e)
+      expect((hidden as { code?: string }).code).toBe('ENOENT')
+      expect((hidden as { refusal?: unknown }).refusal ?? null).toBeNull()
+      const denied: unknown = await ws.vfs.read('/data/secret').catch((e: unknown) => e)
+      expect((denied as { refusal?: { reason: string } }).refusal?.reason).toBe('sealed')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A probe reads on the caller's behalf: a path the caller cannot see is
+  // absent to it, as the walk answers, and neither a policy nor the backend
+  // hears of it.
+  it('a probe of a hidden path answers as absent before any policy', async () => {
+    const asked: string[] = []
+    const listening: Policy = {
+      preVfs: (c: VfsContext): Action | null => {
+        asked.push(c.path.virtual)
+        return null
+      },
+    }
+    const ram = new RAMVFS()
+    const ws = new Workspace(
+      { '/data': ram },
+      { mode: MountMode.WRITE, policies: [listening], shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('mkdir /data/hid && echo k > /data/hid/x')
+      const internals = ws as unknown as {
+        dispatcher: {
+          probeRead(name: string, resolved: [BaseVFS, PathSpec, MountMode]): Promise<unknown>
+        }
+      }
+      const sess = new SessionState({
+        sessionId: 'agent',
+        visibility: { paths: { paths: ['/data/hid'] } },
+      })
+      const stat = vi.spyOn(ram, 'stat')
+      asked.length = 0
+      const probe = runWithSession(sess, () =>
+        internals.dispatcher.probeRead('stat', [
+          ram,
+          PathSpec.fromStrPath('/data/hid/x'),
+          MountMode.WRITE,
+        ]),
+      )
+      await expect(probe).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(asked).toEqual([])
+      expect(stat).not.toHaveBeenCalled()
+    } finally {
+      await ws.close()
+    }
+  })
+})

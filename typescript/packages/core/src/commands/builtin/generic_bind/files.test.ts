@@ -146,7 +146,7 @@ describe('commandFiles', () => {
 
   it('resolves a glob under its mount cap, across mounts the default, none as stdin', async () => {
     const dispatch = keyed({ stored: { '/f0.txt': '', '/f1.txt': '', '/f2.txt': '' } })
-    const row = { prefix: '/', kind: 'ram', maxGlobMatches: 2 }
+    const row = { prefix: '/', kind: 'ram', mode: MountMode.WRITE, maxGlobMatches: 2 }
     const word = new PathSpec({
       virtual: '/*.txt',
       directory: '/',

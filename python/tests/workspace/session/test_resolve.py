@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.policy.errors import PolicyError
-from mirage.policy.match.rule import match_op, rule_scope
+from mirage.policy.match.rule import op_ruling
 from mirage.policy.profile import (
     CommandsBlock,
     MountCommandsBlock,
@@ -226,9 +226,11 @@ def test_compile_commands_anchors_a_name_pattern_to_its_mount():
     # The stamp scopes the rule at admission, but the dispatcher reads the
     # paths alone, so a raw name pattern refused a read in every other
     # mount too.
-    scope = rule_scope(rule)
-    assert match_op(rule, scope, _read_op("/repo/deep/key.pem"))
-    assert not match_op(rule, scope, _read_op("/other/key.pem"))
+    assert op_ruling(rules, _read_op("/repo/deep/key.pem"), ()) == (
+        rule,
+        False,
+    )
+    assert op_ruling(rules, _read_op("/other/key.pem"), ()) is None
 
 
 def _read_op(virtual: str) -> VfsContext:

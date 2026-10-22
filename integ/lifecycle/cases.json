@@ -1785,6 +1785,101 @@
       ]
     },
     {
+      "id": "test-w-answers-what-a-write-meets",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/work": {
+            "vfs": "ram",
+            "config": {}
+          }
+        },
+        "runtimes": [
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "mkdir -p /work/out && echo x > /work/f && echo y > /work/out/g",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "[ -w /work/f ]; echo $?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "0\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "session",
+          "id": "capped",
+          "profile": {
+            "mounts": {
+              "/work": {
+                "mode": "read"
+              }
+            },
+            "paths": {
+              "show": {
+                "/work/out": "rw"
+              }
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "[ -w /work/f ]; echo $?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            }
+          },
+          "session": "capped"
+        },
+        {
+          "op": "exec",
+          "command": "[ -w /work/out/g ]; echo $?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "0\n",
+              "stderr": ""
+            }
+          },
+          "session": "capped"
+        },
+        {
+          "op": "set_mode",
+          "path": "/work",
+          "mode": "read"
+        },
+        {
+          "op": "exec",
+          "command": "[ -w /work/f ]; echo $?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "live-hide-patterns-session-isolation-and-state",
       "settings": {
         "mode": "write",
