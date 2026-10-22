@@ -21,15 +21,18 @@ import tarfile
 import pytest
 from pydantic import BaseModel, SecretStr
 
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
+from mirage.core.google.config import GoogleConfig
 from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.box import BoxConfig, BoxVFS
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
@@ -645,6 +648,48 @@ async def test_copy_carries_a_directly_installed_spec():
     io = await clone.shell("snapcli run")
     assert io.exit_code == 0
     assert io.stdout == b"tok=sek\n"
+    await ws.close()
+    await clone.close()
+
+
+class _MountCliCfg(_CliCfg):
+    content_search: bool = False
+
+
+@pytest.mark.asyncio
+async def test_a_subclass_config_instance_survives_snapshot_and_copy():
+    # A mount config subclassing the CLI's model (GDocsConfig for gws)
+    # carries fields the CLI does not declare, at their defaults here;
+    # the install keeps only the model's, so neither the snapshot nor
+    # the copy's reinstall meets an unknown key.
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws.register_cli("snapcli", _CLI_SPEC, _MountCliCfg(token="sek"))
+    state = await to_state_dict(ws)
+    assert state[StateKey.CLIS][0][CLIKey.CONFIG] == {
+        "token": REDACTED_SECRET,
+        "channel": "general",
+    }
+    clone = await ws.copy()
+    io = await clone.shell("snapcli run")
+    assert io.exit_code == 0
+    assert io.stdout == b"tok=sek\n"
+    await ws.close()
+    await clone.close()
+
+
+@pytest.mark.asyncio
+async def test_gws_installed_with_a_gdocs_config_copies():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws.register_cli(
+        "gws",
+        GWS,
+        GDocsConfig(client_id="id", client_secret="sec", refresh_token="tok"),
+    )
+    clone = await ws.copy()
+    config = clone.registry.clis.get("gws").config
+    assert type(config) is GoogleConfig
+    assert config.client_secret.get_secret_value() == "sec"
+    assert config.refresh_token.get_secret_value() == "tok"
     await ws.close()
     await clone.close()
 

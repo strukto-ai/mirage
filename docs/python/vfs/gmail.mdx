@@ -123,7 +123,7 @@ vfs = GmailVFS(config=config)
 
 async def main():
     ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
-    ws.register_cli("gws", GWS, config.model_dump())
+    ws.register_cli("gws", GWS, config)
 
     # List labels
     r = await ws.shell("ls /gmail/")

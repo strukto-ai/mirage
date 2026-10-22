@@ -93,8 +93,11 @@ export class CLIRegistry {
   private validateConfig(name: string, spec: CLI, config: Record<string, unknown> | null): unknown {
     // A config that is not an object is refused by type, rather than having
     // its entries read as unknown keys. One the schema already parsed is
-    // still an object with the schema's own keys, so it installs as given,
-    // which is what the python arm does with an instance of its model.
+    // still an object with the schema's own keys, so it parses again to
+    // the same config, as the python arm takes an instance of its model. A
+    // mount config on the same account (a gdocs config handed to gws) is
+    // an object too: a mount-only key it carries is refused like any
+    // unknown key, as python refuses a subclass field the caller set.
     if (config !== null && (typeof config !== 'object' || Array.isArray(config))) {
       const kind = Array.isArray(config) ? 'array' : typeof config
       throw new Error(`CLI '${name}': config must be an object, got ${kind}`)
