@@ -38,7 +38,7 @@ The methods you can override, with the arguments you normally use:
         async def setattr(self, path: PathSpec, *, mode: int | None = None, uid: int | str | None = None, gid: int | str | None = None, atime: str | None = None, mtime: str | None = None) -> dict[str, int | str]: ...
 
         async def files_containing(self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool) -> list[PathSpec] | None: ...
-        async def lines_containing(self, path: PathSpec, text: str, *, ignore_case: bool) -> bytes | None: ...
+        async def lines_containing(self, path: PathSpec, text: str, *, ignore_case: bool) -> bytes | AsyncIterator[bytes] | None: ...
         async def first_lines(self, path: PathSpec, n: int) -> bytes | None: ...
         async def last_lines(self, path: PathSpec, n: int) -> bytes | None: ...
         async def line_count(self, path: PathSpec) -> int | None: ...
@@ -73,7 +73,7 @@ The methods you can override, with the arguments you normally use:
       setattr(path: PathSpec, fields: SetAttrFields): Promise<Record<string, number | string>>
 
       filesContaining(path: PathSpec, text: string, opts: { wholeWord: boolean; ignoreCase: boolean }): Promise<PathSpec[] | null>
-      linesContaining(path: PathSpec, text: string, opts: { ignoreCase: boolean }): Promise<Uint8Array | null>
+      linesContaining(path: PathSpec, text: string, opts: { ignoreCase: boolean }): Promise<Uint8Array | AsyncIterable<Uint8Array> | null>
       firstLines(path: PathSpec, n: number): Promise<Uint8Array | null>
       lastLines(path: PathSpec, n: number): Promise<Uint8Array | null>
       lineCount(path: PathSpec): Promise<number | null>
@@ -319,7 +319,7 @@ Override `files_containing` to name the files that may contain the text
             if ignore_case:
                 return None
             return [
-                mounted_path(path, name)
+                mounted_path(path, "/" + name)
                 for name, page in self.pages.items()
                 if text in page
             ]
@@ -340,7 +340,7 @@ Override `files_containing` to name the files that may contain the text
         if (opts.ignoreCase) return null
         return Object.entries(this.pages)
           .filter(([, page]) => page.includes(text))
-          .map(([name]) => mountedPath(path, name))
+          .map(([name]) => mountedPath(path, `/${name}`))
       }
     }
     ```

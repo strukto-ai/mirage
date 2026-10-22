@@ -1,43 +1,93 @@
 ---
 title: Walks
-description: Use recursive cloud listings to browse directories with fewer requests.
+description: Answer find, du, ls -R and tree from one listing.
 icon: folder-tree
 ---
 
-Mirage connects recursive listings and batch APIs to `find`, `du`, `ls -R`
-and `tree`. Your backend can list a whole folder tree together, saving a
-separate request for every directory.
+`find`, `du`, `ls -R`, `tree`, `grep -r` and `rg` can ask your VFS for a whole
+folder tree in one call, instead of listing each folder. Return `None`
+(TypeScript: `null`) and Mirage lists each folder.
 
-## Example: browse an object store
+For example, [S3](/python/vfs/s3) answers `find /data/` from one recursive
+listing of the prefix.
 
-With an S3 bucket mounted at `/data/`:
+## `read_tree`
 
-```bash
-find /data/knowledge/ -type f
-du /data/knowledge/
-```
+Every file and folder below one folder.
 
-Mirage lists the keys under the object prefix, then uses their paths and
-metadata to find files or total their sizes. Large listings may take several
-API pages.
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    readTree(path: PathSpec): Promise<Map<string, FileStat> | null>
+    ```
+  </Tab>
+</Tabs>
 
-## Connect your own backend
+| Argument | Meaning |
+| --- | --- |
+| `path` | The folder. |
 
-Override `read_tree(path)` in Python or `readTree(path)` in TypeScript.
-Return a mapping of relative paths, such as `guides/start.md`, to their
-`FileStat` metadata. Include the full tree below the requested directory,
-with the same metadata a normal listing would show.
+| Return | Mirage then |
+| --- | --- |
+| Every file and folder below `path`, keyed by its path below it (`guides`, `guides/start.md`), each with the `FileStat` that `stat` gives | Walks it without listing any folder. |
+| `None` | Lists each folder with `readdir`. |
 
-| Method | Commands using your method | Uses normal listings instead |
-| --- | --- | --- |
-| `read_tree` | `find`, `du`, `ls -R`, `tree` | A depth limit (`find -maxdepth`, `tree -L`), or plain `ls` for one directory. |
-| `read_tree` | `grep -r`, `grep -R`, `grep -d recurse`, `rg` | `rg --max-depth` limits the levels to visit. |
-| `read_tree` | `cp -r` | The backend cannot return a complete source tree. |
+For a path that is not a folder, raise what `readdir` raises.
 
-Return `None` in Python or `null` in TypeScript when a complete tree is
-unavailable, and Mirage lists directories individually. Commands with depth
-limits, such as `find -maxdepth 1`, also list only the levels they need.
+These commands call `read_tree`:
 
-Mirage applies options such as `find -name`, `find -type` and `ls -lR` to
-the returned metadata. For search, `read_tree` discovers files and
-[`files_containing`](/home/integration/search) selects which ones to read.
+- `find`
+- `du`
+- `ls -R`
+- `tree`
+- `grep -r`, `rg`
+- `cp -r` inside the mount, when your VFS overrides `copy`
+
+These list each folder instead:
+
+- `find -maxdepth N`
+- `tree -L N`
+- `rg --max-depth N`
+- `ls` without `-R`
+- `cp -r` to another mount
+
+## Example
+
+This example extends `NotesVFS` from [Custom VFS](/home/setup/custom-vfs#example-a-read-only-vfs).
+Its pages sit in one folder, so one `readdir` is the whole tree; a service with
+nested folders would return them all from one recursive call:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage import FileStat, PathSpec
+
+    from notes import NotesVFS
+
+
+    class TreeNotesVFS(NotesVFS):
+        async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
+            return {entry.name: entry for entry in await self.readdir(path)}
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import type { FileStat, PathSpec } from '@struktoai/mirage-node'
+    import { NotesVFS } from './notes.ts'
+
+    export class TreeNotesVFS extends NotesVFS {
+      override async readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+        return new Map((await this.readdir(path)).map((entry) => [entry.name, entry]))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`find /notes`, `du -a /notes`, `ls -R /notes` and `tree /notes` then call
+`read_tree` once. `find /notes -maxdepth 1` lists the folder instead.
