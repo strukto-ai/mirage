@@ -4,7 +4,7 @@ icon: google
 description: Mount Google Sheets spreadsheets as Mirage files from Node or the browser.
 ---
 
-`GSheetsVFS` exposes Google Sheets as `.gsheet.json` files. Reads return cell values; `mv` retitles and `rm` deletes a spreadsheet, and the [gws CLI](/typescript/cli/gws) edits cells.
+`GSheetsVFS` exposes Google Sheets as `.gsheet.json` files. Reads return cell values; `mv` retitles and `rm` deletes a spreadsheet, and the [gws CLI](/typescript/cli/gws) writes cells.
 
 Setup steps for OAuth credentials live at [Google Workspace Credentials](/home/setup/google).
 
@@ -54,6 +54,6 @@ const sheets = new GSheetsVFS({
 
 ## Mount mode
 
-`read`; a `MountMode.WRITE` mount adds `mv` (retitle) and `rm` (delete). Edit cells through the [gws CLI](/typescript/cli/gws).
+`read`; a `MountMode.WRITE` mount adds `mv` (retitle) and `rm` (delete). Write cells through the [gws CLI](/typescript/cli/gws).
 
 For the layout and sheet/tab structure see the [Python Sheets docs](/python/vfs/gsheets).

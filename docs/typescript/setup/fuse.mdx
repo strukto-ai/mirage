@@ -115,7 +115,7 @@ mounts:
     mountpoint: /tmp/data-repo   # explicit path
   /s3:
     vfs: s3
-    backend: fuse                          # temp directory
+    backend: fuse                # temp directory
 ```
 
 Programmatically, set `backend` per mount: `{ '/data': new Mount(dataVfs, { backend: MountBackend.FUSE, mountpoint: '/tmp/data-repo' }), '/s3': new Mount(s3Vfs, { backend: MountBackend.FUSE }) }`.
@@ -140,8 +140,9 @@ flowchart LR
 ```
 
 ```ts
-import { Mount, MountBackend, Workspace } from '@struktoai/mirage-node'
+import { Mount, MountBackend, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
+const dataVfs = new RAMVFS()
 const ws = new Workspace({
   '/data': new Mount(dataVfs, { backend: MountBackend.FSKIT }),
 })

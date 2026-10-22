@@ -300,7 +300,10 @@ and `>>` reads the page and writes it back. `mv` still answers
 
 ## Example: let grep use your search
 
-Override `files_containing` to name the files that may contain the text:
+Override `files_containing` to name the files that may contain the text. The
+TypeScript sample imports `mountedPath` from a `@struktoai/mirage-core` subpath,
+which needs that package installed beside `@struktoai/mirage-node` (`pnpm add
+@struktoai/mirage-core`):
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

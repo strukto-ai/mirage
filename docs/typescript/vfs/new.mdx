@@ -11,7 +11,7 @@ A VFS maps an external system to Mirage's filesystem operations and shell comman
 
 ## Ship Your Own Backend
 
-Extend `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops. A subpath import such as `@struktoai/mirage-core/vfs/secrets` needs `@struktoai/mirage-core` installed beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`):
+Extend `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution and the VFS/FUSE ops.:
 
 ```ts
 import {
@@ -59,6 +59,8 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
 
 const ws = new Workspace({ '/jira/': new JiraVFS(cfg) }, { mode: MountMode.READ })
 ```
+
+A subpath import such as `@struktoai/mirage-core/vfs/secrets` needs `@struktoai/mirage-core` installed beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`).
 
 The accessor is a type parameter, so `this.accessor` is the client your functions actually take, and `override` makes a misspelled function a compile error rather than one that is silently never called.
 

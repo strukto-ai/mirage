@@ -11,7 +11,7 @@ A VFS maps an external system to Mirage's filesystem operations and shell comman
 
 ## Ship Your Own Backend
 
-The classes an out-of-tree backend builds on (`BaseVFS`, `Accessor`, `FileStat`, `PathSpec`, `SearchQuery`, `vfs_call`, `register_vfs`) are exported from the `mirage` package root, the same entry point that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. The kits below, `DirListing`, `ListingVersion` and `mounted_path` are imported from the modules named where they appear. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
+The classes an out-of-tree backend builds on (`BaseVFS`, `Accessor`, `FileStat`, `PathSpec`, `SearchQuery`, `vfs_call`, `register_vfs`) are exported from the `mirage` package root, the same entry point that hands out `Workspace` and the twin of what `@struktoai/mirage-core` gives a TypeScript backend; there is no separate SDK module. `DirListing` and `ListingVersion` come from `mirage.types`, `mounted_path` from `mirage.utils.key_prefix`, and the kits from the modules the kit table below names. Subclass `BaseVFS` and define the functions your data source supports. `readdir`, `read` and `stat` are enough for the full generic command set (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) plus glob resolution:
 
 ```python
 from pydantic import BaseModel, ConfigDict, SecretStr

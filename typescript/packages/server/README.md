@@ -185,7 +185,7 @@ curl -fsSL https://strukto.ai/mirage/install.sh | sh
 # or
 npm install -g @struktoai/mirage-cli
 # or
-uvx mirage-ai
+uvx --from mirage-ai mirage
 # or
 npx @struktoai/mirage-cli
 ```

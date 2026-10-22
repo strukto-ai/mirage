@@ -21,7 +21,8 @@ command takes: the installation's accessor, the operands, and the same
 example below shows the
 registration and parsing contract; the runnable [pager example](https://github.com/strukto-ai/mirage/blob/main/examples/typescript/cli/pager.ts)
 adds a mutable incident service and shared cross-language coverage. A type-only
-import from a `@struktoai/mirage-core/...` subpath needs `@struktoai/mirage-core` installed beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`).
+import from a `@struktoai/mirage-core/...` subpath needs `@struktoai/mirage-core`
+installed beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`).
 
 ```typescript
 import {
@@ -101,8 +102,9 @@ such as `--by` declares an option; a bare name declares a positional.
 such as `"ack"`, `"incident ack"`, or `""` for a single-command program.
 
 Declare `configModel` on the account `CLI`. Registration validates
-each installation, and `accessor.config` holds that account's settings. Without
-a config model, a typed CLI accepts no config and `accessor.config` is `null`.
+each installation, and the default `NOOPAccessor` holds that account's settings
+at `accessor.config`. Without a config model, a typed CLI accepts no config and
+`accessor.config` is `null`.
 
 Mark mutating `CLIHandler` bindings `write: true`. This classifies the command for policy and
 cache invalidation; it does not grant permission or perform the mutation.
@@ -387,7 +389,7 @@ collects single option values, while `extend` flattens fixed groups.
 
 | Argument or field | Handler view |
 | --- | --- |
-| `accessor` | This installation's accessor, built from its validated config; `accessor.config` holds that config, or `null`. |
+| `accessor` | This installation's accessor, built from its validated config; the default `NOOPAccessor` holds that config at `accessor.config`, or `null`. |
 | `paths` | Cwd-resolved path operands. |
 | `texts` | Textual and numeric operands in declaration order. |
 | `ctx.argv` | Verbatim words after the installed head word, including subcommands. |

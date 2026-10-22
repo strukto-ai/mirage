@@ -40,7 +40,7 @@ await ws.shell('ls /mail/INBOX/')
 | `smtpPort` | `587` | |
 | `username` | required | Mailbox login. |
 | `password` | required | App password. Redacted in snapshots. |
-| `useSsl` | `true` | Implicit TLS for IMAP. SMTP uses implicit TLS on port 465 and STARTTLS on any other port. |
+| `useSsl` | `true` | Implicit TLS for IMAP. SMTP uses implicit TLS on port 465; on any other port it upgrades with STARTTLS when the server offers it. |
 | `maxMessages` | `200` | Hard ceiling per folder listing. |
 | `contentSearch` | `false` | Narrow `grep -r` and `rg` with IMAP search ([below](#grep-and-rg)). |
 

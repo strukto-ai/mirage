@@ -240,8 +240,9 @@ runtime class available by name in YAML. The `@external` capture is also
 exported as `EXTERNAL_COMMANDS`.
 
 A sandbox subclass that overrides `loadSdk()` imports the SDK type from the
-provider's `sdk` module. The core one needs `@struktoai/mirage-core` installed
-beside `@struktoai/mirage-node` (`pnpm add @struktoai/mirage-core`):
+provider's `sdk` module. The E2B type lives in core, so that import needs
+`@struktoai/mirage-core` installed beside `@struktoai/mirage-node` (`pnpm add
+@struktoai/mirage-core`):
 
 ```ts
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
