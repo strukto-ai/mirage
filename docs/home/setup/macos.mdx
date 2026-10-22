@@ -1,51 +1,46 @@
 ---
 title: macOS
 icon: apple
-description: Set up FUSE on macOS for MIRAGE.
+description: Install macFUSE for Mirage's FUSE mounts.
 ---
 
-## Install macFUSE
-
-```bash
-brew install --cask macfuse
-```
-
-## Enable Kernel Extension
-
 <Steps>
-  <Step title="Allow the Extension">
-    Open **System Settings - Privacy & Security**. Scroll to the bottom, you will see:
-
-    > "System software from developer 'Benjamin Fleischer' was blocked from loading."
-
-    Click **Allow**.
+  <Step title="Install macFUSE">
+    ```bash
+    brew install --cask macfuse
+    ```
+  </Step>
+  <Step title="Allow the system extension">
+    Open **System Settings → Privacy & Security**. At the bottom, next to
+    "System software from developer 'Benjamin Fleischer' was blocked from
+    loading", click **Allow**.
   </Step>
   <Step title="Restart">
-    Restart your Mac. macOS requires a reboot to load the kernel extension.
+    macOS loads the extension after a restart.
   </Step>
   <Step title="Verify">
     ```bash
     ls /Library/Filesystems/macfuse.fs
     ```
-    If this directory exists, macFUSE is installed.
+    The folder exists when macFUSE is installed.
   </Step>
 </Steps>
 
-## Apple Silicon (M1/M2/M3/M4)
-
-If you don't see the **Allow** button:
-
-<Steps>
-  <Step title="Shut Down">
-    Shut down your Mac completely.
-  </Step>
-  <Step title="Enter Recovery Mode">
-    Hold the power button until "Loading startup options" appears. Click **Options - Continue**.
-  </Step>
-  <Step title="Enable Kernel Extensions">
-    In Recovery: **Utilities - Startup Security Utility**. Set to **Reduced Security** and check **"Allow user management of kernel extensions"**.
-  </Step>
-  <Step title="Restart">
-    Restart, then go back to **System Settings - Privacy & Security** to allow the extension.
-  </Step>
-</Steps>
+<Accordion title="No Allow button on Apple silicon">
+  <Steps>
+    <Step title="Shut down">
+      Shut down your Mac completely.
+    </Step>
+    <Step title="Open Recovery">
+      Hold the power button until "Loading startup options" appears, then
+      click **Options → Continue**.
+    </Step>
+    <Step title="Allow kernel extensions">
+      Open **Utilities → Startup Security Utility**, set **Reduced Security**
+      and check **Allow user management of kernel extensions**.
+    </Step>
+    <Step title="Restart">
+      Restart, then allow the extension in **System Settings → Privacy & Security**.
+    </Step>
+  </Steps>
+</Accordion>

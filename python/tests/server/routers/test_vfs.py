@@ -101,7 +101,7 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 base + "/peek?session_id=agent", json={"path": "/data/visible"}
             )
             assert reply.status_code == 200, reply.text
-            assert reply.json() == {"value": "/data/visible"}
+            assert reply.json() == "/data/visible"
             reply = await client.post(
                 base + "/peek?session_id=agent", json={"path": "/data/secret"}
             )

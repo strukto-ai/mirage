@@ -83,21 +83,18 @@ function explained(said: Answer): string {
   return line
 }
 
-const text =
-  (key: string) =>
-  (result: Answer): string =>
-    Buffer.from(String(result[key]), 'base64').toString('utf-8')
+const text = (result: unknown): string => Buffer.from(String(result), 'base64').toString('utf-8')
 
-const HUMAN: Readonly<Record<string, (result: Answer) => string>> = {
-  read: text('data_base64'),
-  getxattr: text('value_base64'),
-  readdir: (result) => (result.entries as string[]).join('\n'),
-  list_files: (result) => (result.files as string[]).join('\n'),
-  listxattr: (result) => (result.names as string[]).join('\n'),
-  readlink: (result) => String(result.target),
+const lines = (result: unknown): string => (result as string[]).join('\n')
+
+const HUMAN: Readonly<Record<string, (result: unknown) => string>> = {
+  read: text,
+  getxattr: text,
+  readdir: lines,
+  list_files: lines,
+  listxattr: lines,
+  readlink: String,
 }
-
-const flagName = (name: string): string => name.replace(/_base64$/, '')
 
 async function value(call: VfsCall, name: string, given: unknown): Promise<unknown> {
   if (call.params[name] === BYTES) {
@@ -127,8 +124,7 @@ function command(vfs: Command, call: VfsCall): void {
   for (const name of Object.keys(call.params)) {
     if (positional.includes(name)) continue
     if (call.params[name] === BYTES) {
-      const flag = flagName(name)
-      cmd.option(`--${flag} <text>`, `The ${flag} as text; stdin when absent`)
+      cmd.option(`--${name} <text>`, `The ${name} as text; stdin when absent`)
     } else if (call.params[name] === FLAG) {
       cmd.option(`--${name}`)
     } else if (call.params[name] === INTEGER || call.params[name] === SIZE) {
@@ -149,12 +145,13 @@ function command(vfs: Command, call: VfsCall): void {
       }
       for (const name of Object.keys(call.params)) {
         if (positional.includes(name)) continue
-        const raw = opts[camel(call.params[name] === BYTES ? flagName(name) : name)]
+        const raw = opts[camel(name)]
         if (call.params[name] === BYTES || raw !== undefined)
           body[name] = await value(call, name, raw)
       }
-      const result = (await answer(await post(opts, `vfs/${call.name}`, body))) as Answer
-      emit(result, opts.explain === true ? explained : HUMAN[call.name])
+      const result = await answer(await post(opts, `vfs/${call.name}`, body))
+      if (result !== null)
+        emit(result, opts.explain === true ? (r) => explained(r as Answer) : HUMAN[call.name])
     })
 }
 
@@ -171,9 +168,6 @@ export function registerVfsCommands(program: Command): void {
     .requiredOption('-w, --workspace <id>', 'Workspace id')
     .option('-s, --session <id>', 'Session id')
     .action(async (pattern: string, opts: Target) => {
-      const result = (await answer(await post(opts, 'glob', { pattern }))) as {
-        paths: string[]
-      }
-      emit(result, (r) => r.paths.join('\n'))
+      emit(await answer(await post(opts, 'glob', { pattern })), lines)
     })
 }

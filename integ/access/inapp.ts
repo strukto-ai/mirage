@@ -21,6 +21,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
 import { classify } from '@struktoai/mirage-core/errors/classify'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { answered, checked, explanationToDict } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
@@ -32,7 +33,7 @@ import {
 } from '@struktoai/mirage-node'
 
 type Json = Record<string, unknown>
-type Answer = Record<string, unknown>
+type Answer = Json | JsonValue
 type Session = Awaited<ReturnType<Workspace['session']>>
 interface Case {
   id: string
@@ -110,10 +111,10 @@ function callParams(step: Json): Json {
 async function bytes(session: Session, step: Json): Promise<Answer> {
   const params = callParams(step)
   try {
-    if (step.call === 'glob') return { paths: await session.glob(params.pattern as string) }
+    if (step.call === 'glob') return await session.glob(params.pattern as string)
     const call = VFS_CALL_BY_NAME.get(step.call as string)
     if (call === undefined) throw new Error(`unknown call ${String(step.call)}`)
-    return (await answered(session, call, await checked(call, params), false)) as Answer
+    return await answered(session, call, await checked(call, params), false)
   } catch (error) {
     const condition = classify(error)
     if (condition === null) throw error
@@ -128,7 +129,7 @@ async function explain(session: Session, step: Json): Promise<Answer> {
   }
   const call = VFS_CALL_BY_NAME.get(step.call as string)
   if (call === undefined) throw new Error(`unknown call ${String(step.call)}`)
-  return (await answered(session, call, await checked(call, callParams(step)), true)) as Answer
+  return await answered(session, call, await checked(call, callParams(step)), true)
 }
 
 async function caseAnswer(

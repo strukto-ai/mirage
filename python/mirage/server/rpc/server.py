@@ -362,11 +362,7 @@ class MirageRpcServer:
             and all(isinstance(v, str) for v in env.values())
         ):
             raise RpcError(RPC_INVALID_PARAMS, "env must map names to strings")
-        stdin = (
-            _bytes(params, "stdin_base64")
-            if "stdin_base64" in params
-            else None
-        )
+        stdin = _bytes(params, "stdin") if "stdin" in params else None
         return await self.run_line(
             _text(params, "command"),
             cwd,
@@ -376,7 +372,7 @@ class MirageRpcServer:
 
     async def _glob(self, params: Params) -> JsonValue:
         paths = await self.hop(self._session.glob(_text(params, "pattern")))
-        return {"paths": list(paths)}
+        return list(paths)
 
     async def _vfs(self, call: VfsCall, params: Params) -> JsonValue:
         explain = _flag(params, "explain")

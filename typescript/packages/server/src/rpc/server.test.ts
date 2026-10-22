@@ -51,36 +51,34 @@ describe('MirageRpcServer', () => {
     const result = (await call(rpc, 'shell', { command: 'echo hi; echo err >&2' }))
       .result as Record<string, unknown>
     expect([result.exit_code, result.stdout, result.stderr]).toEqual([0, 'hi\n', 'err\n'])
-    const stdin = (await call(rpc, 'shell', { command: 'wc -c', stdin_base64: b64('abc') }))
-      .result as { stdout: string }
+    const stdin = (await call(rpc, 'shell', { command: 'wc -c', stdin: b64('abc') })).result as {
+      stdout: string
+    }
     expect(stdin.stdout.trim()).toBe('3')
   })
 
   it('vfs methods mirror the ops', async () => {
     const rpc = server()
-    expect((await call(rpc, 'vfs/mkdir', { path: '/d' })).result).toEqual({})
-    await call(rpc, 'vfs/write', { path: '/d/a.txt', data_base64: b64('one\n') })
-    await call(rpc, 'vfs/append', { path: '/d/a.txt', data_base64: b64('two\n') })
-    const read = (await call(rpc, 'vfs/read', { path: '/d/a.txt' })).result as {
-      data_base64: string
-    }
-    expect(Buffer.from(read.data_base64, 'base64').toString()).toBe('one\ntwo\n')
+    expect((await call(rpc, 'vfs/mkdir', { path: '/d' })).result).toBeNull()
+    await call(rpc, 'vfs/write', { path: '/d/a.txt', data: b64('one\n') })
+    await call(rpc, 'vfs/append', { path: '/d/a.txt', data: b64('two\n') })
+    const read = (await call(rpc, 'vfs/read', { path: '/d/a.txt' })).result as string
+    expect(Buffer.from(read, 'base64').toString()).toBe('one\ntwo\n')
     const sliced = (await call(rpc, 'vfs/read', { path: '/d/a.txt', offset: 4, size: 3 }))
-      .result as { data_base64: string }
-    expect(Buffer.from(sliced.data_base64, 'base64').toString()).toBe('two')
-    const { stat } = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as {
-      stat: Record<string, unknown>
-    }
+      .result as string
+    expect(Buffer.from(sliced, 'base64').toString()).toBe('two')
+    const stat = (await call(rpc, 'vfs/stat', { path: '/d/a.txt' })).result as Record<
+      string,
+      unknown
+    >
     expect([stat.type, stat.size]).toEqual(['file', 8])
     await call(rpc, 'vfs/rename', { src: '/d/a.txt', dst: '/d/b.txt' })
     await call(rpc, 'vfs/truncate', { path: '/d/b.txt', length: 3 })
-    expect((await call(rpc, 'vfs/exists', { path: '/d/b.txt' })).result).toEqual({ exists: true })
-    expect((await call(rpc, 'glob', { pattern: '/d/*.txt' })).result).toEqual({
-      paths: ['/d/b.txt'],
-    })
+    expect((await call(rpc, 'vfs/exists', { path: '/d/b.txt' })).result).toBe(true)
+    expect((await call(rpc, 'glob', { pattern: '/d/*.txt' })).result).toEqual(['/d/b.txt'])
     await call(rpc, 'vfs/unlink', { path: '/d/b.txt' })
     await call(rpc, 'vfs/rmdir', { path: '/d' })
-    expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toEqual({ exists: false })
+    expect((await call(rpc, 'vfs/exists', { path: '/d' })).result).toBe(false)
   })
 
   it('tools are the MCP tools', async () => {
@@ -139,16 +137,14 @@ describe('MirageRpcServer', () => {
 
   it('runs nothing for a message without jsonrpc 2.0', async () => {
     const rpc = server()
-    await call(rpc, 'vfs/write', { path: '/keep.txt', data_base64: b64('x') })
+    await call(rpc, 'vfs/write', { path: '/keep.txt', data: b64('x') })
     const refused = await rpc.handle({
       id: 2,
       method: 'vfs/unlink',
       params: { path: '/keep.txt' },
     })
     expect((refused?.error as { code: number } | undefined)?.code).toBe(-32600)
-    expect((await call(rpc, 'vfs/exists', { path: '/keep.txt' })).result).toEqual({
-      exists: true,
-    })
+    expect((await call(rpc, 'vfs/exists', { path: '/keep.txt' })).result).toBe(true)
   })
 
   it('starts nothing for a request cancelled before it runs', async () => {
@@ -158,14 +154,12 @@ describe('MirageRpcServer', () => {
         jsonrpc: '2.0',
         id: 3,
         method: 'vfs/write',
-        params: { path: '/late.txt', data_base64: b64('x') },
+        params: { path: '/late.txt', data: b64('x') },
       },
       AbortSignal.abort(),
     )
     expect((cancelled?.error as { code: number } | undefined)?.code).toBe(-32800)
-    expect((await call(rpc, 'vfs/exists', { path: '/late.txt' })).result).toEqual({
-      exists: false,
-    })
+    expect((await call(rpc, 'vfs/exists', { path: '/late.txt' })).result).toBe(false)
   })
 
   it('serve answers lines and cancels a running request', async () => {

@@ -152,7 +152,7 @@ export class CallArgsError extends Error {}
 
 /**
  * A VFS call's arguments, held to its schema, as its method takes them:
- * each `<name>_base64` decoded to the bytes `<name>` takes. Throws
+ * each bytes argument decoded from base64. Throws
  * `CallArgsError` when they do not fit. Mirrors Python's `checked`.
  */
 export async function checked(call: VfsCall, params: unknown): Promise<Record<string, unknown>> {
@@ -171,7 +171,7 @@ export async function checked(call: VfsCall, params: unknown): Promise<Record<st
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) {
       throw new CallArgsError(`${name} must be base64`)
     }
-    args[name.replace(/_base64$/, '')] = new Uint8Array(Buffer.from(text, 'base64'))
+    args[name] = new Uint8Array(Buffer.from(text, 'base64'))
   }
   return args
 }
@@ -214,7 +214,7 @@ export async function answered(
     return explanationToDict((await call.run(session.explain.vfs, args)) as VfsExplanation)
   }
   const result = await call.run(session.vfs, args)
-  return call.answer === null ? {} : { [call.answer]: toJson(result) }
+  return toJson(result)
 }
 
 /** Validate a remote function call without accepting host context overrides. */
@@ -246,5 +246,5 @@ export async function customAnswer(
 ): Promise<JsonValue> {
   if (CALLS.has(name)) throw new CallArgsError(`${name} is not a custom VFS function`)
   const { path, kwargs } = customArgs(params)
-  return { value: toJson((await session.vfs.dispatch(name, path, [], kwargs))[0]) }
+  return toJson((await session.vfs.dispatch(name, path, [], kwargs))[0])
 }

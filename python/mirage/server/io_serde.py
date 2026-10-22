@@ -190,7 +190,7 @@ def answer_to_dict(action: Deny | Ask | Route) -> dict[str, JsonValue]:
 
 def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
     """A VFS call's arguments, held to its schema, as its method takes
-    them: each ``<name>_base64`` decoded to the bytes ``<name>`` takes.
+    them: each bytes argument decoded from base64.
 
     Args:
         call (VfsCall): the call.
@@ -211,9 +211,7 @@ def checked(call: VfsCall, params: Mapping[str, JsonValue]) -> dict[str, Any]:
             args[name] = value
             continue
         try:
-            args[name.removesuffix("_base64")] = base64.b64decode(
-                str(value), validate=True
-            )
+            args[name] = base64.b64decode(str(value), validate=True)
         except (binascii.Error, ValueError) as exc:
             raise CallArgsError(f"{name} must be base64") from exc
     return args
@@ -251,7 +249,7 @@ async def answered(
     result = await getattr(target, call.name)(**args)
     if explain:
         return explanation_to_dict(result)
-    return {} if call.answer is None else {call.answer: _to_json(result)}
+    return _to_json(result)
 
 
 def custom_args(
@@ -292,4 +290,4 @@ async def custom_answer(
     result, _ = await session.vfs.dispatch(
         name, PathSpec.from_str_path(path, cwd="/"), **kwargs
     )
-    return {"value": _to_json(result)}
+    return _to_json(result)

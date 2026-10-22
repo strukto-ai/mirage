@@ -92,11 +92,11 @@ async def test_a_refused_result_carries_the_record():
 async def test_a_vfs_call_runs_or_explains_as_json():
     session = Session(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE), None)
     write, read = VFS_CALL_BY_NAME["write"], VFS_CALL_BY_NAME["read"]
-    args = checked(write, {"path": "/a", "data_base64": "aGk="})
+    args = checked(write, {"path": "/a", "data": "aGk="})
     assert args == {"path": "/a", "data": b"hi"}
-    assert await answered(session, write, args, False) == {}
+    assert await answered(session, write, args, False) is None
     said = await answered(session, read, {"path": "/a"}, False)
-    assert said == {"data_base64": "aGk="}
+    assert said == "aGk="
     unlink = VFS_CALL_BY_NAME["unlink"]
     explained = await answered(session, unlink, {"path": "/a"}, True)
     assert (explained["call"], explained["outcome"]) == ("unlink", "allow")
@@ -105,7 +105,7 @@ async def test_a_vfs_call_runs_or_explains_as_json():
 
 def test_arguments_outside_the_schema_are_refused():
     write = VFS_CALL_BY_NAME["write"]
-    with pytest.raises(CallArgsError, match="data_base64 must be base64"):
-        checked(write, {"path": "/a", "data_base64": "%%"})
+    with pytest.raises(CallArgsError, match="data must be base64"):
+        checked(write, {"path": "/a", "data": "%%"})
     with pytest.raises(CallArgsError, match="invalid arguments for vfs/write"):
         checked(write, {"path": "/a"})

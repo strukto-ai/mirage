@@ -21,7 +21,7 @@
     {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "no deletes"}}},
     {"op": "explain", "session": "agent", "command": "echo first; rm /data/f", "expect": {"value": {"outcome": "deny", "reason": "no deletes", "answers": [], "refusal": "deny", "exit_code": 126, "stderr": "rm: Permission denied\n", "commands": [{"command": "echo", "outcome": "allow", "answers": [], "runtime": ""}, {"command": "rm", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "no deletes"}], "runtime": ""}]}}},
-    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/f"}, "expect": {"value": {"exists": true}}}
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/f"}, "expect": {"value": true}}
    ]
   },
   {
@@ -91,9 +91,9 @@
     {"op": "exec", "session": "agent", "command": "cat /data/app.env", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/app.env: No such file or directory\n", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/private/s"}, "expect": {"errno": "ENOENT"}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/private/s"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "allow", "reason": "", "answers": [], "refusal": null, "error": ""}}},
-    {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data"}, "expect": {"value": {"entries": ["/data/open", "/data/private"]}}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/pub/q", "data_base64": "eA=="}, "expect": {"errno": "EROFS"}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/new", "data_base64": "eA=="}, "expect": {"errno": "EACCES"}},
+    {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data"}, "expect": {"value": ["/data/open", "/data/private"]}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/pub/q", "data": "eA=="}, "expect": {"errno": "EROFS"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/new", "data": "eA=="}, "expect": {"errno": "EACCES"}},
     {"op": "exec", "session": "agent", "command": "echo ${SECRET_TOKEN:-unset} $OPEN", "expect": {"value": {"exit_code": 0, "stdout": "unset yes\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "SECRET_KEY=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "SECRET_KEY: permission denied\n", "refusal": null}}}
    ]
@@ -139,8 +139,8 @@
     {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "cat /data/f", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "echo y > /data/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "/data/f: Read-only file system\n", "refusal": null}}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data_base64": "eQ=="}, "expect": {"errno": "EROFS"}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data_base64": "eQ=="}, "explain": true, "expect": {"value": {"call": "write", "outcome": "deny", "reason": "Read-only file system", "answers": [{"kind": "deny", "policy": "MountModePolicy", "reason": "Read-only file system"}], "refusal": null, "error": "EROFS"}}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data": "eQ=="}, "expect": {"errno": "EROFS"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data": "eQ=="}, "explain": true, "expect": {"value": {"call": "write", "outcome": "deny", "reason": "Read-only file system", "answers": [{"kind": "deny", "policy": "MountModePolicy", "reason": "Read-only file system"}], "refusal": null, "error": "EROFS"}}},
     {"op": "vfs", "session": "agent", "call": "mkdir", "args": {"path": "/data/d"}, "expect": {"errno": "EROFS"}},
     {"op": "tools", "session": "agent", "expect": {"value": ["shell", "read", "write", "edit", "ls", "grep", "glob"]}}
    ]
@@ -193,9 +193,9 @@
     {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
     {"op": "exec", "command": "mkdir -p /data/sec/e; echo k > /data/sec/k; echo o > /data/o; ln -s /data/o /data/sec/m", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "append", "args": {"path": "/data/sec/k", "data_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "pwrite", "args": {"path": "/data/sec/k", "data_base64": "eA==", "offset": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/sec/k", "data": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "append", "args": {"path": "/data/sec/k", "data": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "pwrite", "args": {"path": "/data/sec/k", "data": "eA==", "offset": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "truncate", "args": {"path": "/data/sec/k", "length": 0}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "unlink", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "create", "args": {"path": "/data/sec/new"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
@@ -203,7 +203,7 @@
     {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/o", "dst": "/data/sec/o"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/sec/k", "dst": "/data/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "symlink", "args": {"path": "/data/sec/l", "target": "/data/o"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "setxattr", "args": {"path": "/data/sec/k", "name": "user.a", "value_base64": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
+    {"op": "vfs", "session": "agent", "call": "setxattr", "args": {"path": "/data/sec/k", "name": "user.a", "value": "eA=="}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "getxattr", "args": {"path": "/data/sec/k", "name": "user.a"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "setattr", "args": {"path": "/data/sec/k", "mode": 420}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data/sec/e"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
@@ -212,12 +212,12 @@
     {"op": "vfs", "session": "agent", "call": "readlink", "args": {"path": "/data/sec/m"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "listxattr", "args": {"path": "/data/sec/k"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
     {"op": "vfs", "session": "agent", "call": "removexattr", "args": {"path": "/data/sec/k", "name": "user.a"}, "expect": {"errno": "EACCES", "reason": "sealed"}},
-    {"op": "vfs", "session": "agent", "call": "stat", "args": {"path": "/data/sec/k"}, "expect": {"value": {"stat": {"type": "file", "size": 2}}}},
-    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/sec/k"}, "expect": {"value": {"exists": true}}},
-    {"op": "vfs", "session": "agent", "call": "is_dir", "args": {"path": "/data/sec/e"}, "expect": {"value": {"is_dir": true}}},
-    {"op": "vfs", "session": "agent", "call": "is_file", "args": {"path": "/data/sec/k"}, "expect": {"value": {"is_file": true}}},
+    {"op": "vfs", "session": "agent", "call": "stat", "args": {"path": "/data/sec/k"}, "expect": {"value": {"type": "file", "size": 2}}},
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/sec/k"}, "expect": {"value": true}},
+    {"op": "vfs", "session": "agent", "call": "is_dir", "args": {"path": "/data/sec/e"}, "expect": {"value": true}},
+    {"op": "vfs", "session": "agent", "call": "is_file", "args": {"path": "/data/sec/k"}, "expect": {"value": true}},
     {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/data/o", "dst": "/data/sec/o"}, "explain": true, "expect": {"value": {"call": "rename", "outcome": "deny", "reason": "sealed", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "refusal": "deny", "error": "EACCES"}}},
-    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/o"}, "expect": {"value": {"exists": true}}}
+    {"op": "vfs", "session": "agent", "call": "exists", "args": {"path": "/data/o"}, "expect": {"value": true}}
    ]
   },
   {
@@ -299,16 +299,16 @@
     {"op": "asks", "expect": {"value": [{"command": "", "paths": ["/data/held"], "reason": "held needs a nod"}]}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/held"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "ask", "reason": "held needs a nod", "answers": [{"kind": "ask", "policy": "RulePolicy", "reason": "held needs a nod"}], "refusal": "pending", "error": "EACCES"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "vfs", "call": "read", "args": {"path": "/data/held"}, "expect": {"value": {"data_base64": "aAo="}}},
+    {"op": "vfs", "call": "read", "args": {"path": "/data/held"}, "expect": {"value": "aAo="}},
     {"op": "exec", "command": "cat /data/held", "expect": {"value": {"exit_code": 0, "stdout": "h\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/k"}, "expect": {"errno": "EACCES", "reason": "k is withheld"}},
-    {"op": "vfs", "call": "write", "args": {"path": "/data/k", "data_base64": "bmV3Cg=="}, "expect": {"errno": "EACCES", "reason": "k is withheld"}},
+    {"op": "vfs", "call": "write", "args": {"path": "/data/k", "data": "bmV3Cg=="}, "expect": {"errno": "EACCES", "reason": "k is withheld"}},
     {"op": "exec", "command": "cat /data/k", "expect": {"value": {"exit_code": 0, "stdout": "new\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "call": "read", "args": {"path": "/data/w"}, "expect": {"errno": "EACCES", "reason": "w needs review"}},
     {"op": "asks", "expect": {"value": [{"command": "", "paths": ["/data/w"], "reason": "w needs review"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "vfs", "call": "read", "args": {"path": "/data/w"}, "expect": {"value": {"data_base64": "dwo="}}},
-    {"op": "vfs", "call": "read", "args": {"path": "/data/big"}, "expect": {"value": {"data_base64": "MDEyMzQ1Njc4OQo="}}},
+    {"op": "vfs", "call": "read", "args": {"path": "/data/w"}, "expect": {"value": "dwo="}},
+    {"op": "vfs", "call": "read", "args": {"path": "/data/big"}, "expect": {"value": "MDEyMzQ1Njc4OQo="}},
     {"op": "exec", "command": "cat /data/big", "expect": {"value": {"exit_code": 0, "stdout": "0123456789\n", "stderr": "", "refusal": null}}}
    ]
   },
@@ -389,7 +389,7 @@
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/held"}, "expect": {"errno": "EACCES", "reason": "held needs a nod"}},
     {"op": "asks", "session": "agent", "expect": {"value": [{"command": "", "paths": ["/data/held"], "reason": "held needs a nod"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/held"}, "expect": {"value": {"data_base64": "aAo="}}},
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/held"}, "expect": {"value": "aAo="}},
     {"op": "exec", "session": "agent", "command": "cat /data/held", "expect": {"value": {"exit_code": 0, "stdout": "h\n", "stderr": "", "refusal": null}}}
    ]
   },
@@ -407,7 +407,7 @@
     {"op": "exec", "session": "agent", "command": "echo $TEAM", "expect": {"value": {"exit_code": 0, "stdout": "core\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "echo ${MIRAGE_POLICY_CTX:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "unset\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/x"}, "expect": {"errno": "EACCES", "reason": "secret text"}},
-    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": {"data_base64": "cGxhaW4K"}}}
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": "cGxhaW4K"}}
    ]
   },
   {
@@ -445,7 +445,7 @@
     {"op": "explain", "session": "agent", "command": "echo blocked", "expect": {"value": {"outcome": "deny", "exit_code": 126, "stderr": "echo: Permission denied\n", "answers": [{"kind": "deny", "reason": "blocked here"}]}}},
     {"op": "explain", "session": "agent", "command": "echo hi", "expect": {"value": {"outcome": "allow", "exit_code": 0, "answers": [], "commands": [{"command": "echo", "runtime": ""}]}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/sec/k"}, "explain": true, "expect": {"value": {"outcome": "deny", "error": "EACCES", "refusal": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}]}}},
-    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/out/a", "data_base64": "eA=="}, "explain": true, "expect": {"value": {"outcome": "ask", "error": "EACCES", "refusal": "pending"}}},
+    {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/out/a", "data": "eA=="}, "explain": true, "expect": {"value": {"outcome": "ask", "error": "EACCES", "refusal": "pending"}}},
     {"op": "vfs", "session": "agent", "call": "rename", "args": {"src": "/a", "dst": "/sec/b"}, "explain": true, "expect": {"value": {"call": "rename", "outcome": "deny", "error": "EACCES"}}},
     {"op": "asks", "expect": {"value": []}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/vault/k"}, "explain": true, "expect": {"value": {"outcome": "allow", "error": "", "answers": []}}}

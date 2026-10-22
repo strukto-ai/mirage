@@ -107,12 +107,10 @@ describe('checked and answered', () => {
     const ram = new RAMVFS()
     const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
     const session = new Session(ws, null)
-    const args = await checked(byName('write'), { path: '/a', data_base64: 'aGk=' })
+    const args = await checked(byName('write'), { path: '/a', data: 'aGk=' })
     expect(args).toEqual({ path: '/a', data: new Uint8Array([104, 105]) })
-    expect(await answered(session, byName('write'), args, false)).toEqual({})
-    expect(await answered(session, byName('read'), { path: '/a' }, false)).toEqual({
-      data_base64: 'aGk=',
-    })
+    expect(await answered(session, byName('write'), args, false)).toBeNull()
+    expect(await answered(session, byName('read'), { path: '/a' }, false)).toBe('aGk=')
     const said = await answered(session, byName('unlink'), { path: '/a' }, true)
     expect(said).toMatchObject({ call: 'unlink', outcome: 'allow' })
     expect(await session.vfs.exists('/a')).toBe(true)
@@ -120,8 +118,8 @@ describe('checked and answered', () => {
   })
 
   it('refuses arguments outside the schema', async () => {
-    await expect(checked(byName('write'), { path: '/a', data_base64: '%%' })).rejects.toThrow(
-      new CallArgsError('data_base64 must be base64'),
+    await expect(checked(byName('write'), { path: '/a', data: '%%' })).rejects.toThrow(
+      new CallArgsError('data must be base64'),
     )
     await expect(checked(byName('write'), { path: '/a' })).rejects.toThrow(
       /invalid arguments for vfs\/write/,

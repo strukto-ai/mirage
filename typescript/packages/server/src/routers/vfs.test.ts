@@ -89,7 +89,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ value: '/data/visible' })
+    expect(reply.json()).toBe('/data/visible')
     reply = await app.inject({
       method: 'POST',
       url: base + '/peek?session_id=agent',
@@ -103,7 +103,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
       payload: { path: '/data/visible' },
     })
     expect(reply.statusCode, reply.body).toBe(200)
-    expect(reply.json()).toEqual({ value: null })
+    expect(reply.json()).toBeNull()
     expect(backend.calls).toBe(2)
     for (const reserved of ['session_id', 'report', 'admit_only', 'stream']) {
       reply = await app.inject({

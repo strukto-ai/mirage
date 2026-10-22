@@ -109,33 +109,30 @@ def _explained(said: dict[str, Any]) -> str:
     return line
 
 
-def _text(key: str) -> Callable[[dict[str, Any]], str]:
-    return lambda result: base64.b64decode(result[key]).decode(
-        errors="replace"
-    )
+def _text(result: str) -> str:
+    return base64.b64decode(result).decode(errors="replace")
 
 
-HUMAN: dict[str, Callable[[dict[str, Any]], str]] = {
-    "read": _text("data_base64"),
-    "getxattr": _text("value_base64"),
-    "readdir": lambda result: "\n".join(result["entries"]),
-    "list_files": lambda result: "\n".join(result["files"]),
-    "listxattr": lambda result: "\n".join(result["names"]),
-    "readlink": lambda result: result["target"],
+def _lines(result: list[str]) -> str:
+    return "\n".join(result)
+
+
+HUMAN: dict[str, Callable[[Any], str]] = {
+    "read": _text,
+    "getxattr": _text,
+    "readdir": _lines,
+    "list_files": _lines,
+    "listxattr": _lines,
+    "readlink": str,
 }
-
-
-def _flag_name(name: str) -> str:
-    return name.removesuffix("_base64")
 
 
 def _parameter(call: VfsCall, name: str) -> inspect.Parameter:
     schema = call.params[name]
     default: Any
     if schema is BYTES:
-        flag = _flag_name(name)
         default = typer.Option(
-            None, f"--{flag}", help=f"The {flag} as text; stdin when absent."
+            None, f"--{name}", help=f"The {name} as text; stdin when absent."
         )
         kind: Any = str | None
     elif schema is FLAG:
@@ -185,7 +182,8 @@ def command(call: VfsCall) -> Callable[..., None]:
         result = answer(
             post(workspace_id, f"vfs/{call.name}", body, session_id, explain)
         )
-        emit(result, human=_explained if explain else HUMAN.get(call.name))
+        if result is not None:
+            emit(result, human=_explained if explain else HUMAN.get(call.name))
 
     parameters = [_parameter(call, name) for name in call.params] + [
         inspect.Parameter(
@@ -221,4 +219,4 @@ def glob_cmd(
     result = answer(
         post(workspace_id, "glob", {"pattern": pattern}, session_id)
     )
-    emit(result, human=lambda r: "\n".join(r["paths"]))
+    emit(result, human=_lines)

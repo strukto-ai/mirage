@@ -65,7 +65,7 @@ too, through MCP, HTTP, RPC or the CLI:
 | Entry point | A line | A VFS call |
 | --- | --- | --- |
 | In-app | `session.explain.shell(line)` | `session.explain.vfs.<call>(...)` |
-| [MCP](/home/access/mcp#vfs-calls-and-explain), with `?calls=all` | `shell` with `explain: true` | `vfs_<call>` with `explain: true` |
+| [MCP](/home/access/mcp#vfs-calls), with `?calls=all` | `shell` with `explain: true` | `vfs_<call>` with `explain: true` |
 | [HTTP](/home/access/http#shell-vfs-calls-and-tools) | `POST /shell?explain=true` | `POST /vfs/<call>?explain=true` |
 | [RPC](/home/access/rpc) | `shell` with `explain: true` | `vfs/<call>` with `explain: true` |
 | [CLI](/home/access/cli#run-lines-vfs-calls-and-tools) | `mirage shell -w ID -s SESSION -c LINE --explain` | `mirage vfs CALL ARGS -w ID -s SESSION --explain` |

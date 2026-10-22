@@ -71,7 +71,7 @@ describe('the RPC endpoint', () => {
       request(2, 'nope', {}),
     ])
     const answers = (await batch.json()) as { result?: unknown; error?: { code: number } }[]
-    expect(answers[0]?.result).toEqual({ exists: true })
+    expect(answers[0]?.result).toBe(true)
     expect(answers[1]?.error?.code).toBe(-32601)
     expect(answers).toHaveLength(2)
     const parse = await fetch(`${base}/v1/workspaces/${id}/rpc`, {

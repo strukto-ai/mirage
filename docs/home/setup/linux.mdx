@@ -1,46 +1,35 @@
 ---
 title: Linux
 icon: linux
-description: Set up FUSE on Linux for MIRAGE.
+description: Install FUSE 3 for Mirage's FUSE mounts.
 ---
 
-## FUSE Setup
-
-FUSE mode mounts virtual filesystems as real directories,
-allowing any tool (not just MIRAGE commands) to access mounted data.
-
-### Install FUSE
-
-<Tabs>
-  <Tab title="Ubuntu / Debian">
+<Steps>
+  <Step title="Install FUSE 3">
+    <Tabs>
+      <Tab title="Ubuntu / Debian">
+        ```bash
+        sudo apt-get install fuse3 libfuse3-dev
+        ```
+      </Tab>
+      <Tab title="Fedora / RHEL">
+        ```bash
+        sudo dnf install fuse3 fuse3-devel
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo pacman -S fuse3
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+  <Step title="Verify">
     ```bash
-    sudo apt-get install fuse3 libfuse3-dev
+    fusermount3 --version
     ```
-  </Tab>
-  <Tab title="Fedora / RHEL">
-    ```bash
-    sudo dnf install fuse3 fuse3-devel
-    ```
-  </Tab>
-  <Tab title="Arch Linux">
-    ```bash
-    sudo pacman -S fuse3
-    ```
-  </Tab>
-</Tabs>
+  </Step>
+</Steps>
 
-### Allow User Mounts
-
-Edit `/etc/fuse.conf` and uncomment `user_allow_other`:
-
-```bash
-sudo sed -i 's/#user_allow_other/user_allow_other/' /etc/fuse.conf
-```
-
-### Verify
-
-```bash
-fusermount3 --version
-```
-
-Only `fusermount3` is required: MIRAGE unmounts with `fusermount3` when the legacy `fusermount` is absent, as on Fedora, RHEL, Amazon Linux 2023, openSUSE and Alpine.
+Mirage needs only `fusermount3`, so it works where the older `fusermount` is
+missing, as on Fedora, RHEL, Amazon Linux 2023, openSUSE and Alpine.

@@ -10,6 +10,9 @@ Every workspace on the Mirage server is an [MCP](https://modelcontextprotocol.io
 http://127.0.0.1:8765/v1/workspaces/{id}/mcp
 ```
 
+An agent connected to it gets a shell and six file tools over the workspace's
+files.
+
 ## Connect
 
 On your own machine, let the client launch `mirage mcp`. It starts the server if needed and sends your token.
@@ -93,31 +96,132 @@ For a server elsewhere, give the client the URL and a token:
 
 ## Auth
 
-The endpoint uses the same [authentication](/home/access/http#auth) as the HTTP API. `mirage mcp` uses the CLI's selected token, including a saved [login](/home/access/cli#log-in) for a hosted server, `MIRAGE_TOKEN`, or the local token file. The MCP endpoint does not start an OAuth sign-in; when the server requires authentication, a direct client must send the bearer header.
+MCP uses the same bearer token as [HTTP](/home/access/http#auth). `mirage mcp`
+sends the CLI's token for you: a saved [login](/home/access/cli#log-in),
+`MIRAGE_TOKEN`, or the local token file. A client that connects by URL sends the
+header itself; the endpoint does not start an OAuth sign-in.
 
 ## Tools
 
-| Tool | Does |
-| --- | --- |
-| `shell` | Run a bash line. |
-| `read` | Read a file, or a range of its lines. |
-| `write` | Write a file. |
-| `edit` | Replace a string in a file. |
-| `ls` | List a directory. |
-| `grep` | Search file contents. |
-| `glob` | Find paths by pattern. |
+Every tool answers text, with `isError` set when it fails.
 
-Their inputs are listed under [Call a tool](/home/access/http#call-a-tool). `read`, `ls`, `grep` and `glob` are marked read-only. A session is offered the ones its [profile](/home/policy/explain#which-tools-the-agent-gets) leaves it: `shell` needs a command the allow list allows, `ls` and `grep` those commands, `write` and `edit` a mount the session may write. A tool it is not offered is `not found`.
+| Tool | Does | Read-only |
+| --- | --- | --- |
+| [`shell`](#shell) | Run a shell line. | |
+| [`read`](#read) | Read a file as numbered lines. | yes |
+| [`write`](#write) | Write a file. | |
+| [`edit`](#edit) | Replace a string in a file. | |
+| [`ls`](#ls) | List a directory. | yes |
+| [`grep`](#grep) | Search file contents. | yes |
+| [`glob`](#glob) | Find paths by pattern. | yes |
 
-MCP uses the workspace's I/O buffer capacity.
-Set `io: {buffer_bytes: 262144}` in the YAML passed to
-`mirage mcp workspace.yaml`, or in the config used to create the workspace
-referenced by `-w`. This applies to both SSE and stdio; buffer size is not a
-`shell` tool argument. Progress preview limits remain separate from the byte queue.
+A session sees only the tools its [agent profile](/home/policy/explain#which-tools-the-agent-gets)
+allows: `shell` needs a command the allow list allows, `ls` and `grep` need
+those commands, and `write` and `edit` need a mount the session may write. A
+tool it does not see answers `not found`.
+
+### shell
+
+Runs a shell line in the session's working directory. A `cd` or `export` holds
+for the next call.
+
+<ParamField body="command" type="string" required>The line to run.</ParamField>
+
+Answers stdout, then stderr. `isError` is set when the line exits non-zero.
+
+```text
+x = 2
+print(x)
+
+ls: cannot access '/nope': No such file or directory
+```
+
+### read
+
+Reads a file as numbered lines.
+
+<ParamField body="path" type="string" required>Absolute path of the file.</ParamField>
+<ParamField body="offset" type="integer" default="0">First line to return, zero-based.</ParamField>
+<ParamField body="limit" type="integer" default="2000">Most lines to return.</ParamField>
+
+```text
+     1	x = 1
+     2	print(x)
+```
+
+### write
+
+Writes a file, creating missing parent directories. To replace a file that
+exists, `read` all of it first; the write fails if it changed since. Use
+[`edit`](#edit) to change part of a file.
+
+<ParamField body="path" type="string" required>Absolute path of the file.</ParamField>
+<ParamField body="content" type="string" required>The text to write.</ParamField>
+
+```text
+Written: /data/a.py
+```
+
+### edit
+
+Replaces a string in a file. Fails if the file changed since it was read, or if
+`old_string` is missing or appears more than once without `replace_all`.
+
+<ParamField body="path" type="string" required>Absolute path of the file.</ParamField>
+<ParamField body="old_string" type="string" required>The exact text to replace.</ParamField>
+<ParamField body="new_string" type="string" required>The text to put in its place.</ParamField>
+<ParamField body="replace_all" type="boolean" default="false">Replace every occurrence.</ParamField>
+
+```text
+Edited: /data/a.py (1 occurrence(s))
+```
+
+### ls
+
+Lists a directory, one name per line.
+
+<ParamField body="path" type="string" required>Absolute path of the directory.</ParamField>
+
+```text
+a.py
+sub
+```
+
+### grep
+
+Searches files under a path for a regular expression, as `grep -rn` does.
+Finding nothing is not an error.
+
+<ParamField body="pattern" type="string" required>The regular expression.</ParamField>
+<ParamField body="path" type="string" required>Absolute path of the file or directory to search.</ParamField>
+<ParamField body="ignore_case" type="boolean" default="false">Match case-insensitively (`-i`).</ParamField>
+<ParamField body="fixed_strings" type="boolean" default="false">Read the pattern as plain text (`-F`).</ParamField>
+<ParamField body="include" type="string">Search only files whose name matches this glob, such as `*.py` (`--include`).</ParamField>
+<ParamField body="context" type="integer">Lines of context around each match (`-C`).</ParamField>
+<ParamField body="files_with_matches" type="boolean" default="false">Print only the names of matching files (`-l`).</ParamField>
+<ParamField body="count" type="boolean" default="false">Print only a count of matching lines per file (`-c`).</ParamField>
+<ParamField body="max_count" type="integer">Stop each file after this many matches (`-m`).</ParamField>
+
+```text
+/data/a.py:2:print(x)
+```
+
+### glob
+
+Finds files whose path matches a pattern, sorted. `**` matches any number of
+directories.
+
+<ParamField body="pattern" type="string" required>The pattern, such as `**/*.py`. A relative one is matched under `path`.</ParamField>
+<ParamField body="path" type="string" default="/">The directory a relative pattern is matched under.</ParamField>
+
+```text
+/data/a.py
+```
 
 ## Output progress
 
-A `shell` tool call can receive output previews while it runs. Supply a progress token in the MCP request's metadata:
+A `shell` call can send output previews while it runs. Pass a progress token in
+the request's `_meta`:
 
 ```json
 {
@@ -132,14 +236,23 @@ A `shell` tool call can receive output previews while it runs. Supply a progress
 }
 ```
 
-The existing HTTP endpoint sends `notifications/progress` over its SSE response, using that token and an increasing progress counter. Messages start with `[stdout]` or `[stderr]` and contain bounded UTF-8 previews. Mirage coalesces previews to avoid a notification for every write; their counter is not a percentage or byte count. `mirage mcp` forwards them over stdio too.
+Mirage then sends `notifications/progress` messages that start with `[stdout]`
+or `[stderr]`, over HTTP and `mirage mcp` alike. Previews are trimmed and
+batched, so take the full output from the final result.
 
-The final `CallToolResult` still contains the complete tool output and `isError`. Previews may be truncated, so use the final result when collecting text. Clients that omit a progress token receive the final result as usual. For exact bytes and separate output streams, use [SDK streaming](/python/access/in-app#streaming-execution) or [HTTP streaming](/home/access/http#run-a-shell-line).
+## VFS calls
 
-## VFS calls and explain
-
-Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, to also list each of the 23 [VFS calls](/home/access/http#call-the-vfs) as a tool named `vfs_<call>` (`vfs_read`, `vfs_is_dir`), with the same arguments. Each answers the route's JSON as text; a failed one answers `{detail, errno, refusal}` with `isError` set. `shell` and every `vfs_<call>` then take `explain: true`, which answers what the call would do and runs nothing; see [Explain](/home/policy/explain).
+Add `?calls=all` to the URL, or `--all-calls` to `mirage mcp`, for 23 more
+tools: `vfs_read`, `vfs_is_dir` and the rest, one per
+[VFS call](/home/access/http#call-the-vfs). They take the same arguments and
+answer the same JSON as HTTP. With them on, `shell` and every `vfs_<call>` also
+take `explain: true`, which says what the call would do and runs nothing; see
+[Explain](/home/policy/explain).
 
 ## Sessions
 
-Calls run in the workspace's default session. To use another, add `?session_id=<id>` to the URL, or `-s <id>` to `mirage mcp`. The session's [profile](/home/policy/overview) applies as it does to a shell line: a path hidden from `cat` is hidden from `read`. Command rules apply only to `shell`, `ls` and `grep`.
+Calls run in the workspace's default session. To use another, add
+`?session_id=<id>` to the URL, or `-s <id>` to `mirage mcp`. The session's
+[agent profile](/home/profiles) applies as it does to a shell line: a path
+hidden from `cat` is hidden from `read`. Command rules apply only to `shell`,
+`ls` and `grep`.

@@ -35,8 +35,8 @@ PATH_ONLY: dict[str, Schema] = {"path": PATH}
 class VfsCall:
     """One ``session.vfs`` call as the remote endpoints carry it. An endpoint
     calls the method of the same name on ``session.vfs``, or on
-    ``session.explain.vfs`` to explain it, passing each argument by name;
-    ``<name>_base64`` carries the bytes ``<name>`` takes.
+    ``session.explain.vfs`` to explain it, passing each argument by name,
+    and answers what it returns. Bytes travel as base64, both ways.
 
     Args:
         name (str): the call's name; ``vfs/<name>`` on every entry point.
@@ -44,15 +44,12 @@ class VfsCall:
         params (Mapping[str, Schema]): each argument's JSON schema, in
             the order the call takes them.
         required (tuple[str, ...]): the arguments it cannot do without.
-        answer (str | None): the key its result is answered under; None
-            for a call that answers nothing.
     """
 
     name: str
     description: str
     params: Mapping[str, Schema]
     required: tuple[str, ...]
-    answer: str | None
 
 
 VFS_CALLS: tuple[VfsCall, ...] = (
@@ -61,91 +58,77 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         "Read a file's bytes, from an offset.",
         {"path": PATH, "offset": INTEGER, "size": SIZE},
         ("path",),
-        "data_base64",
     ),
     VfsCall(
         "write",
         "Write a file's bytes, replacing what it held.",
-        {"path": PATH, "data_base64": BYTES},
-        ("path", "data_base64"),
-        None,
+        {"path": PATH, "data": BYTES},
+        ("path", "data"),
     ),
     VfsCall(
         "append",
         "Append bytes to a file.",
-        {"path": PATH, "data_base64": BYTES},
-        ("path", "data_base64"),
-        None,
+        {"path": PATH, "data": BYTES},
+        ("path", "data"),
     ),
     VfsCall(
         "pwrite",
         "Write bytes into a file at an offset.",
-        {"path": PATH, "data_base64": BYTES, "offset": INTEGER},
-        ("path", "data_base64", "offset"),
-        None,
+        {"path": PATH, "data": BYTES, "offset": INTEGER},
+        ("path", "data", "offset"),
     ),
     VfsCall(
         "stat",
         "A path's metadata.",
         {"path": PATH, "nofollow": FLAG},
         ("path",),
-        "stat",
     ),
     VfsCall(
         "readdir",
         "A directory's entries.",
         PATH_ONLY,
         ("path",),
-        "entries",
     ),
-    VfsCall(
-        "exists", "Whether a path exists.", PATH_ONLY, ("path",), "exists"
-    ),
+    VfsCall("exists", "Whether a path exists.", PATH_ONLY, ("path",)),
     VfsCall(
         "is_dir",
         "Whether a path is a directory.",
         PATH_ONLY,
         ("path",),
-        "is_dir",
     ),
     VfsCall(
         "is_file",
         "Whether a path is a file.",
         PATH_ONLY,
         ("path",),
-        "is_file",
     ),
     VfsCall(
         "list_files",
         "The names of a directory's files.",
         PATH_ONLY,
         ("path",),
-        "files",
     ),
-    VfsCall("mkdir", "Make a directory.", PATH_ONLY, ("path",), None),
-    VfsCall("rmdir", "Remove an empty directory.", PATH_ONLY, ("path",), None),
-    VfsCall("unlink", "Remove a file.", PATH_ONLY, ("path",), None),
-    VfsCall("create", "Create an empty file.", PATH_ONLY, ("path",), None),
+    VfsCall("mkdir", "Make a directory.", PATH_ONLY, ("path",)),
+    VfsCall("rmdir", "Remove an empty directory.", PATH_ONLY, ("path",)),
+    VfsCall("unlink", "Remove a file.", PATH_ONLY, ("path",)),
+    VfsCall("create", "Create an empty file.", PATH_ONLY, ("path",)),
     VfsCall(
         "rename",
         "Rename a path within its mount.",
         {"src": PATH, "dst": PATH},
         ("src", "dst"),
-        None,
     ),
     VfsCall(
         "symlink",
         "Make a symbolic link at a path.",
         {"path": PATH, "target": TEXT},
         ("path", "target"),
-        None,
     ),
     VfsCall(
         "readlink",
         "Where a symbolic link points.",
         PATH_ONLY,
         ("path",),
-        "target",
     ),
     VfsCall(
         "setattr",
@@ -160,21 +143,18 @@ VFS_CALLS: tuple[VfsCall, ...] = (
             "nofollow": FLAG,
         },
         ("path",),
-        "changed",
     ),
     VfsCall(
         "getxattr",
         "One extended attribute's value.",
         {"path": PATH, "name": TEXT, "nofollow": FLAG},
         ("path", "name"),
-        "value_base64",
     ),
     VfsCall(
         "listxattr",
         "A path's extended attribute names.",
         {"path": PATH, "nofollow": FLAG},
         ("path",),
-        "names",
     ),
     VfsCall(
         "setxattr",
@@ -182,27 +162,24 @@ VFS_CALLS: tuple[VfsCall, ...] = (
         {
             "path": PATH,
             "name": TEXT,
-            "value_base64": BYTES,
+            "value": BYTES,
             "create": FLAG,
             "replace": FLAG,
             "nofollow": FLAG,
         },
-        ("path", "name", "value_base64"),
-        None,
+        ("path", "name", "value"),
     ),
     VfsCall(
         "removexattr",
         "Remove an extended attribute.",
         {"path": PATH, "name": TEXT, "nofollow": FLAG},
         ("path", "name"),
-        None,
     ),
     VfsCall(
         "truncate",
         "Cut or extend a file to a length.",
         {"path": PATH, "length": INTEGER},
         ("path", "length"),
-        None,
     ),
 )
 
