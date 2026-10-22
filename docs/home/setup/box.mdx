@@ -28,6 +28,8 @@ Four credential modes are supported:
 - **PKCE flow**, for browsers. Needs only `client_id` and `refresh_token` (no secret in the bundle).
 - **Client credentials (service account)**, for headless servers. Needs `client_id`,
   `client_secret`, `enterprise_id`; no refresh token, expired tokens are re-fetched.
+  Follow the [service-account setup](/typescript/box#service-account-client-credentials-no-refresh-token)
+  to create a Server Authentication app and authorize it in the Box admin console.
 
 <Note>
 **Box rotates the refresh token on every refresh.** The token you copy out of the initial code
