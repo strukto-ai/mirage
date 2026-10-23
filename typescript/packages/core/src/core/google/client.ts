@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSpool } from '../../io/spool.ts'
-import type { ApiResponse } from '../api/client.ts'
+import type { ApiRequestOptions, ApiResponse, ErrorOf, RetryPolicy } from '../api/client.ts'
 import type { GoogleConfig } from './config.ts'
 import {
   CALENDAR_API_BASE,
@@ -22,10 +22,15 @@ import {
   DRIVE_UPLOAD_BASE,
   FORMS_API_BASE,
   GMAIL_API_BASE,
+  MAX_BACKOFF,
+  MAX_RETRIES,
+  RATE_LIMIT_REASONS,
+  RETRY_STATUSES,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
+  WRITE_RETRY_STATUSES,
 } from './constants.ts'
 import { apiRequest, apiStream } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
@@ -75,6 +80,58 @@ export function formsBase(tokenManager: TokenManager): string {
   return base !== undefined ? `${base}/v1` : FORMS_API_BASE
 }
 
+/**
+ * Whether a retryable status is worth waiting out. Google answers both "slow
+ * down" and "you may not" with a 403, and only its error reason tells them
+ * apart: the APIs list the reasons in `error.errors`. Every other listed
+ * status is transient as it is.
+ */
+export function transient(status: number, text: string): boolean {
+  if (status !== 403) return true
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text) as unknown
+  } catch {
+    return false
+  }
+  const error =
+    typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as { error?: unknown }).error
+      : undefined
+  const errors =
+    typeof error === 'object' && error !== null && !Array.isArray(error)
+      ? (error as { errors?: unknown }).errors
+      : undefined
+  if (!Array.isArray(errors)) return false
+  return errors.some((item: unknown) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return false
+    const reason = (item as { reason?: unknown }).reason
+    return typeof reason === 'string' && RATE_LIMIT_REASONS.has(reason)
+  })
+}
+
+// A read, the token exchange and the start of a resumable upload retry every
+// transient status and a dropped connection: none of them changes anything a
+// second attempt could repeat, since an upload session creates no file until
+// its last chunk commits.
+export const READ_RETRY: RetryPolicy = {
+  statuses: RETRY_STATUSES,
+  maxRetries: MAX_RETRIES,
+  maxBackoff: MAX_BACKOFF,
+  delaySource: 'header',
+  retryTransport: true,
+  retryable: transient,
+}
+
+// Every other write retries only a rate-limit refusal. A 5xx or a dropped
+// connection may come after the change landed, and a retried create, append
+// or upload chunk would apply it twice.
+export const WRITE_RETRY: RetryPolicy = {
+  ...READ_RETRY,
+  statuses: WRITE_RETRY_STATUSES,
+  retryTransport: false,
+}
+
 export class GoogleApiError extends Error {
   readonly status: number
   constructor(message: string, status: number) {
@@ -84,7 +141,10 @@ export class GoogleApiError extends Error {
   }
 }
 
-export async function refreshAccessToken(config: GoogleConfig): Promise<[string, number]> {
+export async function refreshAccessToken(
+  config: GoogleConfig,
+  sleep?: (seconds: number) => Promise<void>,
+): Promise<[string, number]> {
   if (config.clientId === undefined || config.refreshToken === undefined) {
     throw new Error(
       'refreshAccessToken needs clientId and refreshToken; this config authenticates with a ' +
@@ -104,16 +164,23 @@ export async function refreshAccessToken(config: GoogleConfig): Promise<[string,
       new GoogleApiError(`Google token refresh → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
+    retry: READ_RETRY,
+    sleep,
   })) as { access_token: string; expires_in: number }
   return [data.access_token, data.expires_in]
 }
 
 export class TokenManager extends OAuthTokenManager {
   readonly config: GoogleConfig
+  /** The wait between retries of every call made with this manager, in
+   * seconds, injectable so a test spends no real time; absent is a real
+   * timer. */
+  readonly sleep: ((seconds: number) => Promise<void>) | undefined
 
-  constructor(config: GoogleConfig) {
+  constructor(config: GoogleConfig, sleep?: (seconds: number) => Promise<void>) {
     super(TOKEN_BUFFER_SECONDS)
     this.config = config
+    this.sleep = sleep
   }
 
   /**
@@ -136,7 +203,7 @@ export class TokenManager extends OAuthTokenManager {
       const result = await this.config.refreshFn(this.config.refreshToken)
       return [result.accessToken, result.expiresIn]
     }
-    return refreshAccessToken(this.config)
+    return refreshAccessToken(this.config, this.sleep)
   }
 }
 
@@ -145,26 +212,47 @@ export async function googleHeaders(tm: TokenManager): Promise<Record<string, st
   return { Authorization: `Bearer ${token}` }
 }
 
+/**
+ * One Google API call: the door every request but a stream takes. It signs
+ * the call, rides the manager's sleep and picks the retry policy from the
+ * method, so a new call site cannot forget any of them: absent `retry`, GET
+ * and HEAD read and everything else writes. A write that is safe to repeat
+ * (the start of a resumable upload) passes READ_RETRY.
+ */
+export async function googleRequest(
+  tm: TokenManager,
+  method: string,
+  url: string,
+  options: Omit<ApiRequestOptions, 'errorOf' | 'retry' | 'sleep'> & {
+    retry?: RetryPolicy | undefined
+    errorOf?: ErrorOf | undefined
+  } = {},
+): Promise<unknown> {
+  const verb = method.toUpperCase()
+  const headers: Record<string, string> = { ...(await googleHeaders(tm)) }
+  if (options.json !== undefined) headers['Content-Type'] = 'application/json'
+  return apiRequest(method, url, {
+    ...options,
+    headers: { ...headers, ...options.headers },
+    errorOf:
+      options.errorOf ??
+      ((r, text) =>
+        new GoogleApiError(`Google ${verb} ${url} → ${String(r.status)} ${text}`, r.status)),
+    retry: options.retry ?? (verb === 'GET' || verb === 'HEAD' ? READ_RETRY : WRITE_RETRY),
+    sleep: tm.sleep,
+  })
+}
+
 export async function googleGet(
   tm: TokenManager,
   url: string,
   params?: Record<string, string | number>,
 ): Promise<unknown> {
-  return apiRequest('GET', url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: await googleHeaders(tm),
-    params,
-  })
+  return googleRequest(tm, 'GET', url, { params })
 }
 
 export async function googlePost(tm: TokenManager, url: string, json: unknown): Promise<unknown> {
-  return apiRequest('POST', url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google POST ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
-    json,
-  })
+  return googleRequest(tm, 'POST', url, { json })
 }
 
 export async function googlePatch(
@@ -173,13 +261,7 @@ export async function googlePatch(
   json: unknown,
   params?: Record<string, string>,
 ): Promise<unknown> {
-  return apiRequest('PATCH', url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google PATCH ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
-    params,
-    json,
-  })
+  return googleRequest(tm, 'PATCH', url, { params, json })
 }
 
 // Raw byte payloads (upload endpoints).
@@ -191,22 +273,15 @@ export async function googleSendBytes(
   contentType: string,
   params?: Record<string, string>,
 ): Promise<unknown> {
-  return apiRequest(method, url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google ${method} ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: { ...(await googleHeaders(tm)), 'Content-Type': contentType },
+  return googleRequest(tm, method, url, {
+    headers: { 'Content-Type': contentType },
     params,
     body: data as unknown as BodyInit,
   })
 }
 
 export async function googleDelete(tm: TokenManager, url: string): Promise<void> {
-  await apiRequest('DELETE', url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google DELETE ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: await googleHeaders(tm),
-    read: 'none',
-  })
+  await googleRequest(tm, 'DELETE', url, { read: 'none' })
 }
 
 export async function googleGetBytes(
@@ -214,14 +289,7 @@ export async function googleGetBytes(
   url: string,
   window?: ByteWindow,
 ): Promise<Uint8Array> {
-  const data = await apiRequest('GET', url, {
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
-    headers: await googleHeaders(tm),
-    read: 'bytes',
-    window,
-  })
-  return data as Uint8Array
+  return (await googleRequest(tm, 'GET', url, { read: 'bytes', window })) as Uint8Array
 }
 
 /** GET a URL's raw bytes as they arrive. Mirrors Python's `google_get_stream`. */
@@ -233,6 +301,8 @@ export async function* googleGetStream(
     errorOf: (r, text) =>
       new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
     headers: await googleHeaders(tm),
+    retry: READ_RETRY,
+    sleep: tm.sleep,
   })
 }
 
@@ -247,27 +317,25 @@ export async function googleResumable(
 ): Promise<unknown> {
   const errorOf = (r: Response, text: string) =>
     new GoogleApiError(`Google upload → ${String(r.status)} ${text}`, r.status)
-  const location = await apiRequest(method, url, {
+  const location = await googleRequest(tm, method, url, {
     errorOf,
     headers: {
-      ...(await googleHeaders(tm)),
-      'Content-Type': 'application/json',
       'X-Upload-Content-Type': mimeType,
       'X-Upload-Content-Length': String(spool.size),
     },
     params: { ...params, uploadType: 'resumable' },
     json: metadata,
     read: 'location',
+    retry: READ_RETRY,
   })
   if (typeof location !== 'string' || location === '')
     throw new Error('Drive upload session returned no Location')
   let offset = 0
   while (offset < spool.size) {
     const data = await spool.read(offset, 8 * 1024 * 1024)
-    const response = (await apiRequest('PUT', location, {
+    const response = (await googleRequest(tm, 'PUT', location, {
       errorOf,
       headers: {
-        ...(await googleHeaders(tm)),
         'Content-Type': mimeType,
         'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,
       },

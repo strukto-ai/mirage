@@ -16,23 +16,35 @@ import { ByteSpool } from '../../io/spool.ts'
 import { googleResumable } from './client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  READ_RETRY,
   TokenManager,
   docsBase,
   calendarBase,
   driveBase,
   formsBase,
   driveUploadBase,
+  googleDelete,
+  googleGet,
+  googleGetBytes,
+  googleGetStream,
+  googlePatch,
+  googlePost,
+  googleRequest,
+  googleSendBytes,
   refreshAccessToken,
   sheetsBase,
   slidesBase,
   tokenUrl,
+  transient,
 } from './client.ts'
+import { appendValues, updateValues } from '../gsheets/write.ts'
 import {
   DOCS_API_BASE,
   CALENDAR_API_BASE,
   DRIVE_API_BASE,
   FORMS_API_BASE,
   DRIVE_UPLOAD_BASE,
+  MAX_RETRIES,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
   TOKEN_URL,
@@ -253,4 +265,224 @@ it.each([true, false])('resumable upload honors acknowledged ranges: %s', async 
     globalThis.fetch = previous
     await spool.close()
   }
+})
+
+const FILES = 'https://drive.test/drive/v3/files'
+
+function reason(code: number, why: string): string {
+  return JSON.stringify({
+    error: { code, message: why, errors: [{ domain: 'usageLimits', reason: why }] },
+  })
+}
+
+function reply(status: number, body = '', headers: Record<string, string> = {}): Response {
+  return new Response(body, { status, headers })
+}
+
+type Call = (tm: TokenManager) => Promise<unknown>
+
+const READS: [string, Call][] = [
+  ['googleGet', (tm) => googleGet(tm, FILES)],
+  ['googleGetBytes', (tm) => googleGetBytes(tm, FILES)],
+  [
+    'googleGetStream',
+    async (tm) => {
+      for await (const _chunk of googleGetStream(tm, FILES)) void _chunk
+    },
+  ],
+]
+
+const WRITES: [string, Call][] = [
+  ['googlePost', (tm) => googlePost(tm, FILES, { name: 'a' })],
+  ['googlePatch', (tm) => googlePatch(tm, FILES, { name: 'a' })],
+  [
+    'googleSendBytes',
+    (tm) => googleSendBytes(tm, 'POST', FILES, new Uint8Array([1]), 'text/plain'),
+  ],
+  ['googleDelete', (tm) => googleDelete(tm, FILES)],
+  ['appendValues', (tm) => appendValues(tm, 's1', 'A1', '[[1]]')],
+  ['updateValues', (tm) => updateValues(tm, 's1', 'A1', '[[1]]')],
+]
+
+function dropped(): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError('terminated'))
+      },
+    }),
+  )
+}
+
+function serve(...replies: (Response | Error)[]): ReturnType<typeof vi.fn> {
+  const fake = vi.fn()
+  for (const r of replies) {
+    if (r instanceof Error) fake.mockRejectedValueOnce(r)
+    else fake.mockResolvedValueOnce(r)
+  }
+  globalThis.fetch = fake as unknown as typeof fetch
+  return fake
+}
+
+describe('google retry policy', () => {
+  let previous: typeof fetch
+  let tm: TokenManager
+  let waits: number[]
+
+  beforeEach(() => {
+    previous = globalThis.fetch
+    waits = []
+    tm = new TokenManager({ clientId: 'c', refreshToken: 'r' }, (seconds) => {
+      waits.push(seconds)
+      return Promise.resolve()
+    })
+    vi.spyOn(tm, 'getToken').mockResolvedValue('tok')
+  })
+
+  afterEach(() => {
+    globalThis.fetch = previous
+  })
+
+  it('a 403 waits only for a rate-limit reason', () => {
+    expect(transient(403, reason(403, 'userRateLimitExceeded'))).toBe(true)
+    expect(transient(403, reason(403, 'rateLimitExceeded'))).toBe(true)
+    expect(transient(403, reason(403, 'insufficientFilePermissions'))).toBe(false)
+    expect(transient(403, reason(403, 'dailyLimitExceeded'))).toBe(false)
+    expect(transient(403, 'Forbidden')).toBe(false)
+    expect(transient(403, '{"error": "denied"}')).toBe(false)
+    expect(transient(403, '{"error": {"errors": [{"reason": ["x"]}]}}')).toBe(false)
+    expect(transient(429, '')).toBe(true)
+    expect(transient(503, '')).toBe(true)
+  })
+
+  it.each(READS)('%s retries a 5xx and a dropped connection', async (_name, call) => {
+    const fake = serve(
+      reply(503, '', { 'Retry-After': '2' }),
+      new TypeError('fetch failed'),
+      reply(200, '{}'),
+    )
+    await call(tm)
+    expect(fake).toHaveBeenCalledTimes(3)
+    expect(waits).toEqual([2, 2])
+  })
+
+  it.each(WRITES)('%s retries a throttle but never a 5xx', async (_name, call) => {
+    const fake = serve(
+      reply(429, '', { 'Retry-After': '0' }),
+      reply(403, reason(403, 'userRateLimitExceeded'), { 'Retry-After': '0' }),
+      reply(503),
+    )
+    await expect(call(tm)).rejects.toMatchObject({ status: 503 })
+    expect(fake).toHaveBeenCalledTimes(3)
+    expect(waits).toEqual([0, 0])
+  })
+
+  it.each(WRITES)('%s never retries a dropped connection', async (_name, call) => {
+    const fake = serve(new TypeError('fetch failed'))
+    await expect(call(tm)).rejects.toThrow('fetch failed')
+    expect(fake).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([...READS, ...WRITES])('%s treats a permission 403 as final', async (_name, call) => {
+    const fake = serve(reply(403, reason(403, 'insufficientFilePermissions')))
+    await expect(call(tm)).rejects.toMatchObject({ status: 403 })
+    expect(fake).toHaveBeenCalledTimes(1)
+    expect(waits).toEqual([])
+  })
+
+  it.each([
+    ['GET', undefined],
+    ['HEAD', undefined],
+    ['POST', READ_RETRY],
+  ] as [string, typeof READ_RETRY | undefined][])(
+    'the request door retries a read by method: %s',
+    async (method, retry) => {
+      const fake = serve(reply(503), reply(200, '{"ok":true}'))
+      await expect(googleRequest(tm, method, FILES, { retry })).resolves.toEqual({ ok: true })
+      expect(fake).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it.each(['POST', 'PATCH', 'PUT', 'DELETE'])(
+    'the request door never retries a write 5xx: %s',
+    async (method) => {
+      const fake = serve(reply(503), reply(200, '{"ok":true}'))
+      await expect(googleRequest(tm, method, FILES)).rejects.toMatchObject({ status: 503 })
+      expect(fake).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('a persistent 5xx surfaces after the budget', async () => {
+    const fake = serve(
+      ...Array.from({ length: MAX_RETRIES + 1 }, () =>
+        reply(500, '{"error": {"message": "boom"}}'),
+      ),
+    )
+    await expect(googleGet(tm, FILES)).rejects.toMatchObject({ status: 500 })
+    expect(fake).toHaveBeenCalledTimes(MAX_RETRIES + 1)
+    expect(waits).toEqual([1, 2, 4])
+  })
+
+  it('a read timeout is retried', async () => {
+    serve(new DOMException('timed out', 'TimeoutError'), reply(200, '{"files":[]}'))
+    await expect(googleGet(tm, FILES)).resolves.toEqual({ files: [] })
+    expect(waits).toEqual([1])
+  })
+
+  it('the token exchange retries a 5xx', async () => {
+    serve(
+      reply(503, '', { 'Retry-After': '3' }),
+      reply(200, '{"access_token":"t","expires_in":60}'),
+    )
+    const record = (seconds: number): Promise<void> => {
+      waits.push(seconds)
+      return Promise.resolve()
+    }
+    await expect(refreshAccessToken({ clientId: 'c', refreshToken: 'r' }, record)).resolves.toEqual(
+      ['t', 60],
+    )
+    expect(waits).toEqual([3])
+  })
+
+  it('the token exchange and an upload start retry a body that drops', async () => {
+    serve(dropped(), reply(200, '{"access_token":"t","expires_in":60}'))
+    await expect(
+      refreshAccessToken({ clientId: 'c', refreshToken: 'r' }, tm.sleep),
+    ).resolves.toEqual(['t', 60])
+    const spool = new ByteSpool()
+    await spool.append(new TextEncoder().encode('abc'))
+    const fake = serve(
+      dropped(),
+      reply(200, '', { Location: 'https://example.test/upload' }),
+      reply(200, '{"id":"up"}'),
+    )
+    try {
+      await expect(
+        googleResumable(tm, 'POST', 'https://example.test/start', {}, spool, 'text/plain', {}),
+      ).resolves.toEqual({ id: 'up' })
+      expect(fake).toHaveBeenCalledTimes(3)
+    } finally {
+      await spool.close()
+    }
+  })
+
+  it('a resumable upload retries its start but not a chunk', async () => {
+    const spool = new ByteSpool()
+    await spool.append(new TextEncoder().encode('abc'))
+    const fake = serve(
+      reply(503, '', { 'Retry-After': '1' }),
+      reply(200, '', { Location: 'https://example.test/upload' }),
+      reply(503),
+    )
+    try {
+      await expect(
+        googleResumable(tm, 'POST', 'https://example.test/start', {}, spool, 'text/plain', {}),
+      ).rejects.toMatchObject({ status: 503 })
+      const methods = (fake.mock.calls as [string, RequestInit][]).map((c) => c[1].method)
+      expect(methods).toEqual(['POST', 'POST', 'PUT'])
+      expect(waits).toEqual([1])
+    } finally {
+      await spool.close()
+    }
+  })
 })

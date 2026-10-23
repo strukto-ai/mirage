@@ -21,19 +21,73 @@ import { chunks } from '../../io/cooperative.ts'
 // error; the engine here calls it, each backend supplies one.
 export type ErrorOf = (response: Response, body: string) => Error
 
-/** Pull a GET response in bounded chunks, cancelling its body on early exit. */
+/**
+ * Pull a GET response in bounded chunks, cancelling its body on early exit.
+ * `retry` applies to opening the response only: once a chunk has reached the
+ * caller a failure propagates, since a second attempt would hand it the same
+ * bytes twice.
+ */
 export async function* apiStream(
   url: string,
-  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn'> & { signal?: AbortSignal },
+  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep'> & {
+    signal?: AbortSignal
+    /** Told the answering response's headers, lower-cased, once and before
+     * the first chunk, so an empty body reports them too. */
+    onResponse?: (headers: Record<string, string>) => void
+  },
 ): AsyncGenerator<Uint8Array, void> {
-  const response = await (options.fetchFn ?? fetch)(url, {
-    method: 'GET',
-    ...(options.headers === undefined ? {} : { headers: options.headers }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  })
-  if (response.status >= 400) throw options.errorOf(response, await response.text())
-  if (response.body === null) return
-  yield* bodyChunks(response.body, options.signal)
+  const retry = options.retry ?? NO_RETRY
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
+  for (let attempt = 0; ; attempt += 1) {
+    const last = attempt >= retry.maxRetries
+    let response: Response
+    try {
+      response = await (options.fetchFn ?? fetch)(url, {
+        method: 'GET',
+        ...(options.headers === undefined ? {} : { headers: options.headers }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      })
+    } catch (err) {
+      // a caller's abort is not a transport failure worth another attempt
+      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      await wait(Math.min(2 ** attempt, retry.maxBackoff))
+      continue
+    }
+    let text = ''
+    let chunksOf: AsyncGenerator<Uint8Array, void> | null = null
+    let first: IteratorResult<Uint8Array, void> | null = null
+    // Reading the error body or the first chunk is still opening the
+    // response: nothing has reached the caller, so a drop here retries.
+    try {
+      if (response.status >= 400) text = await response.text()
+      else if (response.body !== null) {
+        chunksOf = bodyChunks(response.body, options.signal)
+        first = await chunksOf.next()
+      }
+    } catch (err) {
+      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      await wait(Math.min(2 ** attempt, retry.maxBackoff))
+      continue
+    }
+    if (response.status >= 400) {
+      if (last || !worthRetrying(response.status, text, retry)) {
+        throw options.errorOf(response, text)
+      }
+      await wait(retryDelay(response, text, attempt, retry))
+      continue
+    }
+    options.onResponse?.(loweredHeaders(response.headers))
+    if (chunksOf === null || first === null || first.done === true) return
+    try {
+      yield first.value
+      yield* chunksOf
+    } finally {
+      // a caller that stops at the first chunk never entered the delegation,
+      // so the body is released here rather than by it
+      await chunksOf.return()
+    }
+    return
+  }
 }
 
 /** Pull a response body in bounded chunks, cancelling it on early exit. */
@@ -191,6 +245,9 @@ export interface ApiRequestOptions {
   timeoutSeconds?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
   fetchFn?: typeof fetch | undefined
+  /** The wait between attempts, in seconds, injectable so a test or a
+   * simulated clock spends no real time; absent is a real timer. */
+  sleep?: ((seconds: number) => Promise<void>) | undefined
 }
 
 /**
@@ -239,6 +296,12 @@ export function flooredDelay(delay: number, status: number, retry: RetryPolicy):
   return Math.min(Math.max(delay, floor), retry.maxBackoff)
 }
 
+function worthRetrying(status: number, text: string, retry: RetryPolicy): boolean {
+  return (
+    retry.statuses.has(status) && (retry.retryable === undefined || retry.retryable(status, text))
+  )
+}
+
 function retryDelay(response: Response, text: string, attempt: number, retry: RetryPolicy): number {
   const delay =
     retry.delaySource === 'body' ? bodyDelay(text, retry) : headerDelay(response, attempt, retry)
@@ -266,6 +329,14 @@ export async function apiRequest(
     if (range !== null) headers.Range = range
   }
   const retry = options.retry ?? NO_RETRY
+  const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000))
+  const read = options.read ?? 'json'
+  // Every mode but these reads the body as text. The byte modes, and the
+  // ones that do not consume the body, still have to release it, or
+  // Node/undici holds the connection until GC; python's api_request drains
+  // it the same way when its `async with` response context exits.
+  const asBytes =
+    read === 'none' || read === 'location' || read === 'bytes' || read === 'bytes_response'
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -280,17 +351,32 @@ export async function apiRequest(
     } catch (err) {
       // a rejection is connection-level: HTTP errors resolve normally
       if (retry.retryTransport === true && attempt < retry.maxRetries) {
-        await sleep(Math.min(2 ** attempt, retry.maxBackoff) * 1000)
+        await wait(Math.min(2 ** attempt, retry.maxBackoff))
+        attempt += 1
+        continue
+      }
+      throw err
+    }
+    let text = ''
+    let data = new Uint8Array()
+    // A body that drops mid-read is a transport failure like one before the
+    // answer: a policy with retryTransport resends on either, so a write that
+    // must never repeat rides a policy without it. Nothing past this block
+    // touches the network.
+    try {
+      if (response.status >= 400 || !asBytes) text = await response.text()
+      else data = new Uint8Array(await response.arrayBuffer())
+    } catch (err) {
+      if (retry.retryTransport === true && attempt < retry.maxRetries) {
+        await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue
       }
       throw err
     }
     if (retry.statuses.has(response.status)) {
-      const text = await response.text()
-      const retryable = retry.retryable === undefined || retry.retryable(response.status, text)
-      if (retryable && attempt < retry.maxRetries) {
-        await sleep(retryDelay(response, text, attempt, retry) * 1000)
+      if (worthRetrying(response.status, text, retry) && attempt < retry.maxRetries) {
+        await wait(retryDelay(response, text, attempt, retry))
         attempt += 1
         continue
       }
@@ -298,46 +384,32 @@ export async function apiRequest(
       // through the same hook a plain error status does
       throw options.errorOf(response, text)
     }
-    if (response.status >= 400) throw options.errorOf(response, await response.text())
-    const read = options.read ?? 'json'
-    // The reads that do not consume the body still have to release it, or
-    // Node/undici holds the connection until GC; python's api_request drains
-    // it the same way when its `async with` response context exits.
-    if (read === 'none') {
-      await response.arrayBuffer()
-      return null
-    }
-    if (read === 'location') {
-      const location = response.headers.get('Location')
-      await response.arrayBuffer()
-      return location
-    }
-    if (read === 'bytes') {
-      const data = new Uint8Array(await response.arrayBuffer())
-      return windowOf(data, response.status, options.window)
-    }
+    if (response.status >= 400) throw options.errorOf(response, text)
+    if (read === 'none') return null
+    if (read === 'location') return response.headers.get('Location')
+    if (read === 'bytes') return windowOf(data, response.status, options.window)
     if (read === 'bytes_response') {
-      const headers = loweredHeaders(response.headers)
-      const data = windowOf(
-        new Uint8Array(await response.arrayBuffer()),
-        response.status,
-        options.window,
-      )
-      return { data, status: response.status, headers } satisfies ApiResponse
+      return {
+        data: windowOf(data, response.status, options.window),
+        status: response.status,
+        headers: loweredHeaders(response.headers),
+      } satisfies ApiResponse
     }
-    const text = await response.text()
     if (read === 'text') return text
     if (read === 'response') {
-      const headers = loweredHeaders(response.headers)
-      let data: unknown = null
+      let decoded: unknown = null
       if (text !== '') {
         try {
-          data = JSON.parse(text) as unknown
+          decoded = JSON.parse(text) as unknown
         } catch {
-          data = text
+          decoded = text
         }
       }
-      return { data, status: response.status, headers } satisfies ApiResponse
+      return {
+        data: decoded,
+        status: response.status,
+        headers: loweredHeaders(response.headers),
+      } satisfies ApiResponse
     }
     return text === '' ? null : (JSON.parse(text) as unknown)
   }

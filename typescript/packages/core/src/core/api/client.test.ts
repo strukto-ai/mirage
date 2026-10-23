@@ -39,6 +39,20 @@ function errorOf(response: Response, body: string): Error {
   return new Boom(response.status, body)
 }
 
+function noWait(): Promise<void> {
+  return Promise.resolve()
+}
+
+function dropped(): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError('terminated'))
+      },
+    }),
+  )
+}
+
 function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -349,6 +363,80 @@ describe('retry delays', () => {
     }
   })
 
+  it('retries a body that drops mid-read, never a mapped error or a bad parse', async () => {
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(dropped())
+      .mockResolvedValueOnce(jsonResponse({ ok: 6 }))
+    expect(
+      await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait }),
+    ).toEqual({
+      ok: 6,
+    })
+    expect(fakeFetch).toHaveBeenCalledTimes(2)
+    const bad = vi.fn<typeof fetch>().mockResolvedValue(new Response('{not json'))
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, fetchFn: bad, retry, sleep: noWait }),
+    ).rejects.toThrow(SyntaxError)
+    expect(bad).toHaveBeenCalledOnce()
+    const refused = vi.fn<typeof fetch>().mockResolvedValue(new Response('denied', { status: 404 }))
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, fetchFn: refused, retry, sleep: noWait }),
+    ).rejects.toMatchObject({ status: 404 })
+    expect(refused).toHaveBeenCalledOnce()
+  })
+
+  it('a dropped body is a transport failure, resent only under retryTransport', async () => {
+    const once = vi.fn<typeof fetch>().mockResolvedValueOnce(dropped())
+    const noTransport: RetryPolicy = { ...NO_RETRY, maxRetries: 2 }
+    await expect(
+      apiRequest('POST', TARGET, {
+        errorOf,
+        fetchFn: once,
+        retry: noTransport,
+        sleep: noWait,
+        json: {},
+      }),
+    ).rejects.toThrow('terminated')
+    expect(once).toHaveBeenCalledOnce()
+    const resent = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(dropped())
+      .mockResolvedValueOnce(jsonResponse({ ok: 7 }))
+    expect(
+      await apiRequest('POST', TARGET, {
+        errorOf,
+        fetchFn: resent,
+        retry: { ...noTransport, retryTransport: true },
+        sleep: noWait,
+        json: {},
+      }),
+    ).toEqual({ ok: 7 })
+    expect(resent).toHaveBeenCalledTimes(2)
+  })
+
+  it('an injected sleep takes every wait, in seconds', async () => {
+    const waits: number[] = []
+    const retry: RetryPolicy = { ...NO_RETRY, statuses: new Set([503]), maxRetries: 2 }
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 503, headers: { 'Retry-After': '30' } }))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse({ ok: 5 }))
+    const result = await apiRequest('GET', TARGET, {
+      errorOf,
+      fetchFn: fakeFetch,
+      retry,
+      sleep: (seconds) => {
+        waits.push(seconds)
+        return Promise.resolve()
+      },
+    })
+    expect(result).toEqual({ ok: 5 })
+    expect(waits).toEqual([30, 2])
+  })
+
   it('flooredDelay raises to the status floor under the cap', () => {
     const retry: RetryPolicy = {
       ...NO_RETRY,
@@ -409,6 +497,71 @@ describe('a repeated header', () => {
 })
 
 describe('apiStream', () => {
+  it('retries a first chunk that drops and releases a body abandoned after it', async () => {
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 1, retryTransport: true }
+    const cancel = vi.fn()
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(dropped())
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array([7]))
+              },
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      )
+    const source = apiStream(TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait })
+    expect((await source.next()).value).toEqual(new Uint8Array([7]))
+    expect(fakeFetch).toHaveBeenCalledTimes(2)
+    await source.return()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('retries opening the response, never a body already yielded', async () => {
+    const waits: number[] = []
+    const retry: RetryPolicy = {
+      ...NO_RETRY,
+      statuses: new Set([503]),
+      maxRetries: 2,
+      retryTransport: true,
+    }
+    const record = (seconds: number): Promise<void> => {
+      waits.push(seconds)
+      return Promise.resolve()
+    }
+    const opening = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('', { status: 503, headers: { 'Retry-After': '3' } }))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(new Response('done'))
+    const parts: Uint8Array[] = []
+    for await (const part of apiStream(TARGET, { errorOf, fetchFn: opening, retry, sleep: record }))
+      parts.push(part)
+    expect(new TextDecoder().decode(parts[0])).toBe('done')
+    expect(waits).toEqual([3, 2])
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (pulls++ === 0) controller.enqueue(new Uint8Array([1]))
+          else controller.error(new TypeError('terminated'))
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const midway = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    const source = apiStream(TARGET, { errorOf, fetchFn: midway, retry, sleep: record })
+    expect((await source.next()).value).toEqual(new Uint8Array([1]))
+    await expect(source.next()).rejects.toThrow('terminated')
+    expect(midway).toHaveBeenCalledOnce()
+  })
+
   it('bounds chunks, pulls on demand and cancels an abandoned response', async () => {
     let pulls = 0
     const cancel = vi.fn()

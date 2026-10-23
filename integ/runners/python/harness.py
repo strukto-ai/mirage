@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
+import aiohttp
+
 from mirage.policy import CommandExplanation, Scope, ShellNode
 from mirage.policy.match import Outcome
 from mirage.types import FileStat, PathSpec
@@ -227,7 +229,8 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
     without a word. A target id that matches no manifest entry means the
     case never runs anywhere, which reads as "passing" everywhere. A
     `mount_read` or a `write` without a `read` is routed as an ordinary
-    case, where the selector is never applied.
+    case, where the selector is never applied, and ``faults`` beside a
+    ``read`` goes to the scenario runner, which never arms them.
 
     Args:
         root (Path): the integ directory.
@@ -256,6 +259,11 @@ def validate_cases(root: Path, cases: list[dict]) -> None:
             raise ValueError(
                 f"case {case['id']}: write needs read, "
                 "which routes a case to the scenario runner"
+            )
+        if "faults" in case and "read" in case:
+            raise ValueError(
+                f"case {case['id']}: faults ride plain cases only; "
+                "the scenario runner never arms them"
             )
         first = seen.get(case["id"])
         if first is not None:
@@ -628,8 +636,55 @@ def undecodable(streams: dict[str, bytes]) -> list[str]:
     ]
 
 
+async def arm_faults(base: str, plans: list[dict]) -> None:
+    """Arm a case's fault plans on its target's kit fake.
+
+    Args:
+        base (str): the fake's base URL for this run, ``/_run/<id>``
+            included, so the plans land on this run's world only.
+        plans (list[dict]): the case's ``faults``, as the kit reads them.
+
+    Raises:
+        ValueError: the fake refused the plans; it names why.
+    """
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{base}/_kit/faults", json={"plans": plans}
+        ) as resp:
+            if resp.status != 200:
+                raise ValueError(f"fault plans refused: {await resp.text()}")
+
+
+async def disarm_faults(base: str) -> list[str]:
+    """Disarm every plan on the fake, naming each one that went unspent.
+
+    A plan that served fewer requests than it was armed for means the
+    command never made the call the case meant to fault, and an output
+    that matches anyway proves nothing about the fault.
+
+    Args:
+        base (str): the fake's base URL for this run.
+
+    Returns:
+        list[str]: one note per plan that did not serve every request.
+    """
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(f"{base}/_kit/faults") as resp:
+            resp.raise_for_status()
+            plans = (await resp.json())["plans"]
+    return [
+        f"faults: {p['method']} {p['route']} served {p['served']}"
+        f" of {p['times']}"
+        for p in plans
+        if p["served"] != p["times"]
+    ]
+
+
 async def run_case(
-    ws, case: dict, reasons: tuple[str, ...] = ()
+    ws,
+    case: dict,
+    reasons: tuple[str, ...] = (),
+    faults: str | None = None,
 ) -> tuple[int, str, str, float, str | None, list[str]]:
     """Run one case and return what it produced.
 
@@ -646,6 +701,9 @@ async def run_case(
             verdict exists to predict. A case whose verdict the command
             plane cannot reach says so in ``explain_blind`` and is left
             out, never silently.
+        faults (str | None): the target's kit fake for this run, where
+            a case's ``faults`` are armed for the length of its command;
+            None for a target with none.
 
     Returns:
         tuple: exit code, stdout, stderr, elapsed seconds, the stat line
@@ -685,13 +743,29 @@ async def run_case(
         recorded = len(ws.decisions.pending()) - before
     read_paths = case.get("check", {}).get("read_paths") is True
     record_start = len(ws.vfs.records) if read_paths else 0
-    result = await ws.shell(case["command"], session_id=case.get("session"))
-    elapsed = time.monotonic() - start
-    raw_out = await result.materialize_stdout()
-    raw_err = await result.materialize_stderr()
+    plans = case.get("faults")
+    if plans is not None:
+        if faults is None:
+            raise ValueError(
+                f"case {case['id']}: faults need a target on a kit fake"
+            )
+        await arm_faults(faults, plans)
+    unspent: list[str] = []
+    try:
+        result = await ws.shell(
+            case["command"], session_id=case.get("session")
+        )
+        elapsed = time.monotonic() - start
+        # Read before disarming: output can stream, and a request made
+        # while it is read is one the plans were armed for.
+        raw_out = await result.materialize_stdout()
+        raw_err = await result.materialize_stderr()
+    finally:
+        if plans is not None and faults is not None:
+            unspent = await disarm_faults(faults)
     out = raw_out.decode(errors="replace")
     err = raw_err.decode(errors="replace")
-    notes = undecodable({"stdout": raw_out, "stderr": raw_err})
+    notes = undecodable({"stdout": raw_out, "stderr": raw_err}) + unspent
     if reasons and not case.get("explain_blind"):
         notes += explain_notes(predicted, recorded, result.exit_code, out, err)
     check_out = None

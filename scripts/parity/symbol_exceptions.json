@@ -50,6 +50,9 @@
    }
   },
   "core/api/client": {
+   "python_only": {
+    "_TRANSPORT": "The aiohttp exception types a transport failure raises, shared by api_request and api_stream; fetch rejects with one error shape, so TypeScript has no list to name."
+   },
    "typescript_only": {
     "bodyChunks": "Reads a fetch ReadableStream, shared by apiStream and the GitHub transport's stream; Python's api_stream reads aiohttp's iter_chunked."
    }

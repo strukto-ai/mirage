@@ -299,7 +299,8 @@ export function loadCases(root: string): Case[] {
  * word. A target id that matches no manifest entry means the case never runs
  * anywhere, which reads as "passing" everywhere. A `mount_read` or a `write`
  * without a `read` is routed as an ordinary case, where the selector is never
- * applied.
+ * applied, and `faults` beside a `read` goes to the scenario runner, which
+ * never arms them.
  */
 export function validateCases(root: string, cases: Case[]): void {
   const known = new Set(loadTargets(root).keys())
@@ -319,6 +320,11 @@ export function validateCases(root: string, cases: Case[]): void {
     }
     if (c.write !== undefined && c.read === undefined) {
       throw new Error(`case ${c.id}: write needs read, which routes a case to the scenario runner`)
+    }
+    if (c.faults !== undefined && c.read !== undefined) {
+      throw new Error(
+        `case ${c.id}: faults ride plain cases only; the scenario runner never arms them`,
+      )
     }
     const first = seen.get(c.id)
     if (first !== undefined) duplicates.push(`${c.id} (${first} and ${c._source ?? '?'})`)

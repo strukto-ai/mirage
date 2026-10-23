@@ -16,6 +16,7 @@ from typing import Any
 
 from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.client import (
+    WRITE_RETRY,
     HfHubError,
     hub_get,
     hub_post,
@@ -88,7 +89,7 @@ async def create_repo(
         body["resourceGroupId"] = resource_group_id
     url = f"{account.endpoint.rstrip('/')}/api/repos/create"
     try:
-        data = await hub_post(account, url, body)
+        data = await hub_post(account, url, body, retry=WRITE_RETRY)
     except HfHubError as err:
         if not exist_ok or err.status != HTTP_CONFLICT:
             raise
@@ -128,7 +129,7 @@ async def create_tag(
     url = repo_api_url(
         account, repo_type, repo_id, f"/tag/{rev_segment(revision)}"
     )
-    await hub_post(account, url, body)
+    await hub_post(account, url, body, retry=WRITE_RETRY)
 
 
 async def delete_tag(

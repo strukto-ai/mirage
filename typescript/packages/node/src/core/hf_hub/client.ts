@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest, loweredHeaders } from '@struktoai/mirage-core/core/api/client'
+import { apiRequest, apiStream } from '@struktoai/mirage-core/core/api/client'
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import type { ApiResponse, RetryPolicy } from '@struktoai/mirage-core/core/api/client'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
@@ -26,6 +26,11 @@ export const RETRY: RetryPolicy = {
   delaySource: 'header',
   retryTransport: true,
 }
+
+// A write (a commit, a repository or a tag) retries only the statuses the
+// Hub answers before it acts. A dropped connection may come after the write
+// landed, and a resent commit would land twice.
+export const WRITE_RETRY: RetryPolicy = { ...RETRY, retryTransport: false }
 
 /** A Hub call that answered with a status the caller cannot use. */
 export class HfHubError extends Error {
@@ -264,11 +269,14 @@ export async function hubGetResponse(
   })) as ApiResponse
 }
 
+/** One JSON POST; `retry` is RETRY for a POST that only reads (paths-info,
+ * preupload) and WRITE_RETRY for one that changes the Hub. */
 export async function hubPost(
   account: HfAccountAccessor,
   url: string,
   body: unknown,
   params?: Record<string, string>,
+  retry: RetryPolicy = RETRY,
 ): Promise<unknown> {
   // fetch labels an untyped string body text/plain, and the Hub answers a
   // paths-info body without a JSON type with 400; python's aiohttp sets it.
@@ -277,7 +285,7 @@ export async function hubPost(
     headers: { ...hubHeaders(account.token), 'Content-Type': 'application/json' },
     params,
     json: body,
-    retry: RETRY,
+    retry,
     fetchFn: stallFetch(account.timeoutMs),
   })
 }
@@ -294,7 +302,7 @@ export async function hubRequest(
     errorOf,
     headers: hubHeaders(account.token),
     params,
-    retry: RETRY,
+    retry: WRITE_RETRY,
     fetchFn: stallFetch(account.timeoutMs),
   }
   if (body !== null && body !== undefined) options.json = body
@@ -313,7 +321,7 @@ export async function hubPostNdjson(
     headers: { ...hubHeaders(account.token), 'Content-Type': 'application/x-ndjson' },
     params,
     body: payload,
-    retry: RETRY,
+    retry: WRITE_RETRY,
     fetchFn: stallFetch(account.timeoutMs),
   })
 }
@@ -372,27 +380,21 @@ export function etagValue(raw: string): string {
 /**
  * Stream file content without holding it whole in memory.
  *
- * Not routed through `apiRequest`: that reads the body to completion before
- * returning, which is the opposite of what a stream is for. `onResponse` is
- * told the final response's headers, lower-cased, once and before the first
- * chunk, so an empty file reports them too.
+ * Routed through `apiStream`, which retries opening the response under RETRY
+ * and never once a chunk has reached the caller. `onResponse` is told the
+ * final response's headers, lower-cased, once and before the first chunk, so
+ * an empty file reports them too.
  */
 export async function* hubStream(
   account: HfAccountAccessor,
   url: string,
   onResponse?: (headers: Record<string, string>) => void,
 ): AsyncIterable<Uint8Array> {
-  const response = await stallFetch(account.timeoutMs)(url, { headers: hubHeaders(account.token) })
-  if (response.status >= 400) throw errorOf(response, await response.text())
-  if (onResponse !== undefined) {
-    onResponse(loweredHeaders(response.headers))
-  }
-  const body = response.body
-  if (body === null) return
-  const reader = body.getReader()
-  for (;;) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    if (chunk.value !== undefined) yield chunk.value
-  }
+  yield* apiStream(url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    fetchFn: stallFetch(account.timeoutMs),
+    retry: RETRY,
+    ...(onResponse === undefined ? {} : { onResponse }),
+  })
 }

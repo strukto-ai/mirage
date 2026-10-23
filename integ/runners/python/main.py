@@ -145,7 +145,7 @@ async def run_target(
     emit: list[dict] | None,
 ) -> None:
     selected = [c for c in cases if target["id"] in c["targets"]]
-    ws, cleanup = await adapters.open_target(target)
+    ws, cleanup, faults = await adapters.open_target(target)
     try:
         for mount in target["mounts"]:
             await harness.seed_fixture(
@@ -186,7 +186,7 @@ async def run_target(
             if "read" in case:
                 continue
             bound = harness.bind_mount(case, primary)
-            ran = await harness.run_case(ws, bound, reasons)
+            ran = await harness.run_case(ws, bound, reasons, faults)
             exit_code, out, err, elapsed, check_out, notes = ran
             _emit_or_record(
                 emit,

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runFaultTests } from './faults.ts'
 import { runLifecycleTests } from './runs.ts'
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -1052,3 +1053,4 @@ async function main(): Promise<void> {
 
 await main()
 await runLifecycleTests()
+await runFaultTests()

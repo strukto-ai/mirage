@@ -18,10 +18,12 @@ from unittest.mock import MagicMock
 import pytest
 import pytest_asyncio
 from aiohttp import web
+from aiohttp.test_utils import TestServer
 from pydantic import SecretStr
 
 from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.core.hf_hub.client import (
+    WRITE_RETRY,
     HfHubError,
     _error_of,
     api_url,
@@ -29,12 +31,15 @@ from mirage.core.hf_hub.client import (
     hub_bytes_tagged,
     hub_headers,
     hub_post,
+    hub_post_ndjson,
+    hub_request,
     hub_stream,
     quote_path,
     resolve_url,
     rev_segment,
 )
 from mirage.core.hf_hub.config import HfConfig
+from mirage.core.hf_hub.constants import MAX_RETRIES
 from mirage.utils.ranges import ByteWindow
 
 
@@ -321,3 +326,69 @@ async def test_a_download_that_stops_flowing_fails_at_the_bound(hub_url):
         with pytest.raises(asyncio.TimeoutError):
             async for _ in hub_stream(account, hub_url + "/stall", 2):
                 pass
+
+
+async def _no_sleep(seconds: float) -> None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("send", "sent"),
+    [
+        (lambda a, url: hub_post(a, url, {}), MAX_RETRIES + 1),
+        (lambda a, url: hub_post(a, url, {}, retry=WRITE_RETRY), 1),
+        (lambda a, url: hub_post_ndjson(a, url, b"{}"), 1),
+        (lambda a, url: hub_request(a, "DELETE", url, None), 1),
+    ],
+)
+async def test_a_dropped_connection_is_resent_for_a_read_never_a_write(
+    monkeypatch, send, sent
+):
+    hits: list[str] = []
+
+    async def drop(request: web.Request) -> web.Response:
+        hits.append(request.method)
+        assert request.transport is not None
+        request.transport.close()
+        return web.Response()
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    app = web.Application()
+    app.router.add_route("*", "/x", drop)
+    async with TestServer(app) as server:
+        async with HfAccountAccessor(HfConfig()) as account:
+            with pytest.raises(Exception):
+                await send(account, str(server.make_url("/x")))
+    assert len(hits) == sent
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reopens_after_a_dropped_connection(monkeypatch):
+    hits: list[str] = []
+    seen: list[str] = []
+
+    async def first_drops(request: web.Request) -> web.Response:
+        hits.append(request.method)
+        if len(hits) == 1:
+            assert request.transport is not None
+            request.transport.close()
+        return web.Response(body=b"abcd", headers={"ETag": '"v1"'})
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    app = web.Application()
+    app.router.add_get("/f", first_drops)
+    async with TestServer(app) as server:
+        async with HfAccountAccessor(HfConfig()) as account:
+            chunks = [
+                c
+                async for c in hub_stream(
+                    account,
+                    str(server.make_url("/f")),
+                    2,
+                    on_response=lambda h: seen.append(h["etag"]),
+                )
+            ]
+    assert b"".join(chunks) == b"abcd"
+    assert len(hits) == 2
+    assert seen == ['"v1"']

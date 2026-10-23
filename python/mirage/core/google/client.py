@@ -13,13 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import aclosing
+from dataclasses import replace
 from typing import Any, cast
 
 import aiohttp
 
-from mirage.core.api.client import api_request, api_stream
+from mirage.core.api.client import (
+    ErrorOf,
+    ReadMode,
+    RetryPolicy,
+    SessionPool,
+    api_request,
+    api_stream,
+)
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import (
@@ -29,12 +37,18 @@ from mirage.core.google.constants import (
     DRIVE_UPLOAD_BASE,
     FORMS_API_BASE,
     GMAIL_API_BASE,
+    MAX_BACKOFF,
+    MAX_RETRIES,
+    RATE_LIMIT_REASONS,
+    RETRY_STATUSES,
     SHEETS_API_BASE,
     SLIDES_API_BASE,
     TOKEN_BUFFER_SECONDS,
     TOKEN_URL,
+    WRITE_RETRY_STATUSES,
 )
 from mirage.io.spool import ByteSpool
+from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.secrets import reveal_secret
 
@@ -64,6 +78,57 @@ def google_error_message(body: str, status: int, reason: str | None) -> str:
             description = parsed.get("error_description")
             return f"{error}: {description}" if description else error
     return body.strip() or reason or f"HTTP {status}"
+
+
+def transient(status: int, text: str) -> bool:
+    """Whether a retryable status is worth waiting out.
+
+    Google answers both "slow down" and "you may not" with a 403, and
+    only its error reason tells them apart: the APIs list the reasons in
+    ``error.errors``. Every other listed status is transient as it is.
+
+    Args:
+        status (int): HTTP status code.
+        text (str): the raw response body.
+    """
+    if status != 403:
+        return True
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    error = parsed.get("error") if isinstance(parsed, dict) else None
+    errors = error.get("errors") if isinstance(error, dict) else None
+    if not isinstance(errors, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and isinstance(reason := item.get("reason"), str)
+        and reason in RATE_LIMIT_REASONS
+        for item in errors
+    )
+
+
+# A read, the token exchange and the start of a resumable upload retry
+# every transient status and a dropped connection: none of them changes
+# anything a second attempt could repeat, since an upload session creates
+# no file until its last chunk commits.
+READ_RETRY = RetryPolicy(
+    statuses=RETRY_STATUSES,
+    max_retries=MAX_RETRIES,
+    max_backoff=MAX_BACKOFF,
+    retry_transport=True,
+    retryable=transient,
+)
+
+# Every other write retries only a rate-limit refusal. A 5xx or a dropped
+# connection may come after the change landed, and a retried create,
+# append or upload chunk would apply it twice.
+WRITE_RETRY = replace(
+    READ_RETRY,
+    statuses=WRITE_RETRY_STATUSES,
+    retry_transport=False,
+)
 
 
 def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
@@ -130,11 +195,14 @@ def forms_base(token_manager: "TokenManager") -> str:
 
 async def refresh_access_token(
     config: GoogleConfig,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> tuple[str, int]:
     """Exchange refresh token for a new access token.
 
     Args:
         config (GoogleConfig): OAuth2 credentials.
+        sleep (Callable[[float], Awaitable[None]] | None): the wait
+            between retries; None is ``asyncio.sleep``.
 
     Returns:
         tuple[str, int]: (access_token, expires_in_seconds)
@@ -153,20 +221,43 @@ async def refresh_access_token(
     if client_secret:
         data["client_secret"] = client_secret
     body = await api_request(
-        "POST", token_url(config), error_of=_error_of, data=data
+        "POST",
+        token_url(config),
+        error_of=_error_of,
+        data=data,
+        retry=READ_RETRY,
+        sleep=sleep,
     )
     return body["access_token"], body["expires_in"]
 
 
 class TokenManager(OAuthTokenManager):
-    """Manages OAuth2 access token lifecycle."""
+    """Manages OAuth2 access token lifecycle.
 
-    def __init__(self, config: GoogleConfig) -> None:
+    Args:
+        config (GoogleConfig): OAuth2 credentials and API base.
+        sleep (Callable[[float], Awaitable[None]] | None): the wait
+            between retries of every call made with this manager,
+            injectable so a test spends no real time; None is
+            ``asyncio.sleep``.
+    """
+
+    def __init__(
+        self,
+        config: GoogleConfig,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
         super().__init__(TOKEN_BUFFER_SECONDS)
+        # aiohttp replays an idempotent request whose connection dropped,
+        # PUT and DELETE included, beneath any policy; READ_RETRY and
+        # WRITE_RETRY decide alone, so an upload chunk or a values update
+        # is never sent twice.
+        self.pool = SessionPool(retry_connection=False)
         self.config = config
+        self.sleep = sleep
 
     async def refresh_pair(self) -> tuple[str, int]:
-        return await refresh_access_token(self.config)
+        return await refresh_access_token(self.config, self.sleep)
 
     async def get_token(self) -> str:
         # A supplied token short-circuits the grant entirely, and is read
@@ -190,18 +281,67 @@ async def google_headers(
     return {"Authorization": f"Bearer {token}"}
 
 
+async def google_request(
+    token_manager: TokenManager,
+    method: str,
+    url: str,
+    *,
+    params: Mapping[str, Any] | None = None,
+    json_body: JsonValue = None,
+    data: bytes | None = None,
+    headers: Mapping[str, str] | None = None,
+    read: ReadMode = "json",
+    window: ByteWindow | None = None,
+    retry: RetryPolicy | None = None,
+    error_of: ErrorOf = _error_of,
+) -> Any:
+    """One Google API call: the door every request but a stream takes.
+
+    It signs the call, rides the manager's pool and sleep, and picks the
+    retry policy from the method, so a new call site cannot forget any of
+    them: GET and HEAD read, everything else writes. A write that is safe
+    to repeat (the start of a resumable upload) passes READ_RETRY.
+
+    Args:
+        token_manager (TokenManager): OAuth2 token manager.
+        method (str): HTTP method.
+        url (str): API URL.
+        params (Mapping[str, Any] | None): query parameters.
+        json_body (JsonValue): JSON body; None sends none.
+        data (bytes | None): raw body, for the upload endpoints.
+        headers (Mapping[str, str] | None): headers beside the bearer.
+        read (ReadMode): how to read the reply, as for api_request.
+        window (ByteWindow | None): the byte range to request.
+        retry (RetryPolicy | None): None picks by method.
+        error_of (ErrorOf): maps a failed response to the raised error.
+    """
+    if retry is None:
+        retry = (
+            READ_RETRY if method.upper() in ("GET", "HEAD") else WRITE_RETRY
+        )
+    return await api_request(
+        method,
+        url,
+        error_of=error_of,
+        headers={**await google_headers(token_manager), **(headers or {})},
+        params=params,
+        json_body=json_body,
+        data=data,
+        read=read,
+        window=window,
+        retry=retry,
+        session=token_manager.pool,
+        sleep=token_manager.sleep,
+    )
+
+
 async def google_get(
     token_manager: TokenManager,
     url: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "GET",
-        url,
-        error_of=_error_of,
-        headers=await google_headers(token_manager),
-        params=params,
-        session=token_manager.pool,
+    data: dict[str, Any] = await google_request(
+        token_manager, "GET", url, params=params
     )
     return data
 
@@ -211,13 +351,8 @@ async def google_post(
     url: str,
     json: dict[str, Any],
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "POST",
-        url,
-        error_of=_error_of,
-        headers=await google_headers(token_manager),
-        json_body=json,
-        session=token_manager.pool,
+    data: dict[str, Any] = await google_request(
+        token_manager, "POST", url, json_body=json
     )
     return data
 
@@ -228,14 +363,8 @@ async def google_patch(
     json: dict[str, Any],
     params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await api_request(
-        "PATCH",
-        url,
-        error_of=_error_of,
-        headers=await google_headers(token_manager),
-        params=params,
-        json_body=json,
-        session=token_manager.pool,
+    data: dict[str, Any] = await google_request(
+        token_manager, "PATCH", url, params=params, json_body=json
     )
     return data
 
@@ -258,16 +387,13 @@ async def google_send_bytes(
         content_type (str): Content-Type header for the body.
         params (dict | None): query parameters.
     """
-    headers = await google_headers(token_manager)
-    headers["Content-Type"] = content_type
-    payload: dict[str, Any] = await api_request(
+    payload: dict[str, Any] = await google_request(
+        token_manager,
         method,
         url,
-        error_of=_error_of,
-        headers=headers,
         params=params,
         data=data,
-        session=token_manager.pool,
+        headers={"Content-Type": content_type},
     )
     return payload
 
@@ -276,14 +402,7 @@ async def google_delete(
     token_manager: TokenManager,
     url: str,
 ) -> None:
-    await api_request(
-        "DELETE",
-        url,
-        error_of=_error_of,
-        headers=await google_headers(token_manager),
-        read="none",
-        session=token_manager.pool,
-    )
+    await google_request(token_manager, "DELETE", url, read="none")
 
 
 async def google_get_bytes(
@@ -299,14 +418,8 @@ async def google_get_bytes(
         window (ByteWindow | None): the byte window, or None for the
             whole body.
     """
-    data: bytes = await api_request(
-        "GET",
-        url,
-        error_of=_error_of,
-        headers=await google_headers(token_manager),
-        read="bytes",
-        window=window,
-        session=token_manager.pool,
+    data: bytes = await google_request(
+        token_manager, "GET", url, read="bytes", window=window
     )
     return data
 
@@ -325,6 +438,8 @@ async def google_get_stream(
         error_of=_error_of,
         headers=await google_headers(token_manager),
         session=token_manager.pool,
+        retry=READ_RETRY,
+        sleep=token_manager.sleep,
     )
     async with aclosing(source):
         async for chunk in source:
@@ -340,31 +455,29 @@ async def google_resumable(
     mime_type: str,
     params: dict[str, str],
 ) -> dict[str, Any]:
-    location = await api_request(
+    location = await google_request(
+        tm,
         method,
         url,
-        error_of=_error_of,
         headers={
-            **await google_headers(tm),
             "X-Upload-Content-Type": mime_type,
             "X-Upload-Content-Length": str(spool.size),
         },
         params={**params, "uploadType": "resumable"},
         json_body=metadata,
         read="location",
-        session=tm.pool,
+        retry=READ_RETRY,
     )
     if not location:
         raise RuntimeError("Drive upload session returned no Location")
     offset = 0
     while offset < spool.size:
         data = await spool.read(offset, 8 * 1024 * 1024)
-        response = await api_request(
+        response = await google_request(
+            tm,
             "PUT",
             location,
-            error_of=_error_of,
             headers={
-                **await google_headers(tm),
                 "Content-Type": mime_type,
                 "Content-Range": (
                     f"bytes {offset}-{offset + len(data) - 1}/{spool.size}"
@@ -372,7 +485,6 @@ async def google_resumable(
             },
             data=data,
             read="response",
-            session=tm.pool,
         )
         if response.status in (200, 201):
             return cast(dict[str, Any], response.data)

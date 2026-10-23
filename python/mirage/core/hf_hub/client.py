@@ -14,6 +14,8 @@
 
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import aclosing
+from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
@@ -25,7 +27,7 @@ from mirage.core.api.client import (
     ApiResponse,
     RetryPolicy,
     api_request,
-    lowered_headers,
+    api_stream,
     status_error,
 )
 from mirage.core.hf_hub.constants import (
@@ -47,6 +49,11 @@ RETRY = RetryPolicy(
     delay_source="header",
     retry_transport=True,
 )
+
+# A write (a commit, a repository or a tag) retries only the statuses the
+# Hub answers before it acts. A dropped connection may come after the write
+# landed, and a resent commit would land twice.
+WRITE_RETRY = replace(RETRY, retry_transport=False)
 
 
 class HfHubError(Exception):
@@ -254,8 +261,18 @@ async def hub_post(
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
+    retry: RetryPolicy = RETRY,
 ) -> JsonValue:
-    """One JSON POST against the Hub API."""
+    """One JSON POST against the Hub API.
+
+    Args:
+        account (HfAccountAccessor): the token and pool the call rides.
+        url (str): the absolute URL.
+        body (JsonValue): the JSON body.
+        params (dict[str, Any] | None): query parameters.
+        retry (RetryPolicy): RETRY for a POST that only reads (paths-info,
+            preupload), WRITE_RETRY for one that changes the Hub.
+    """
     data: JsonValue = await api_request(
         "POST",
         url,
@@ -264,7 +281,7 @@ async def hub_post(
         params=params,
         json_body=body,
         json_body_present=True,
-        retry=RETRY,
+        retry=retry,
         session=account.pool,
     )
     return data
@@ -302,7 +319,7 @@ async def hub_request(
         params=params,
         json_body=body,
         json_body_present=body is not None,
-        retry=RETRY,
+        retry=WRITE_RETRY,
         session=account.pool,
     )
     return data
@@ -336,7 +353,7 @@ async def hub_post_ndjson(
         headers=headers,
         params=params,
         data=payload,
-        retry=RETRY,
+        retry=WRITE_RETRY,
         session=account.pool,
     )
     return data
@@ -432,8 +449,8 @@ async def hub_stream(
 ) -> AsyncIterator[bytes]:
     """Stream file content without holding it whole in memory.
 
-    Not routed through ``api_request``: that reads the body to completion
-    before returning, which is the opposite of what a stream is for. The
+    Routed through ``api_stream``, which retries opening the response
+    under RETRY and never once a chunk has reached the caller. The
     redirect to the CDN is followed by aiohttp itself.
 
     Args:
@@ -450,13 +467,17 @@ async def hub_stream(
     Raises:
         HfHubError: the Hub or the CDN refused.
     """
-    session = account.pool.get()
-    async with session.get(url, headers=hub_headers(account.token)) as resp:
-        if resp.status >= 400:
-            raise _error_of(resp, await resp.text())
-        if on_response is not None:
-            on_response(lowered_headers(resp.headers))
-        async for chunk in resp.content.iter_chunked(chunk_size):
+    source = api_stream(
+        url,
+        error_of=_error_of,
+        headers=hub_headers(account.token),
+        session=account.pool,
+        retry=RETRY,
+        chunk_size=chunk_size,
+        on_response=on_response,
+    )
+    async with aclosing(source):
+        async for chunk in source:
             yield chunk
 
 

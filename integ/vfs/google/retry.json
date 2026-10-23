@@ -1,0 +1,278 @@
+{
+  "cases": [
+    {
+      "id": "g_retry_read_429",
+      "seq": 943200,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "times": 2,
+          "status": 429,
+          "headers": {
+            "Retry-After": "0"
+          }
+        }
+      ],
+      "command": "cat /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_403_rate_limit",
+      "seq": 943201,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "status": 403,
+          "headers": {
+            "Retry-After": "0"
+          },
+          "body": {
+            "error": {
+              "code": 403,
+              "message": "User rate limit exceeded.",
+              "errors": [
+                {
+                  "domain": "usageLimits",
+                  "reason": "userRateLimitExceeded",
+                  "message": "User rate limit exceeded."
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "command": "cat /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_403_permission_is_final",
+      "seq": 943202,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": 403,
+              "message": "The user does not have sufficient permissions for this file.",
+              "errors": [
+                {
+                  "domain": "global",
+                  "reason": "insufficientFilePermissions",
+                  "message": "The user does not have sufficient permissions for this file."
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "command": "cat /data/a.txt 2>/dev/null; echo \"cat=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_500_spends_the_budget",
+      "seq": 943203,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "times": 4,
+          "status": 500,
+          "headers": {
+            "Retry-After": "0"
+          },
+          "body": {
+            "error": {
+              "code": 500,
+              "message": "Internal Error",
+              "status": "INTERNAL"
+            }
+          }
+        }
+      ],
+      "command": "cat /data/a.txt 2>/dev/null; echo \"cat=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_write_429",
+      "seq": 943204,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/upload/drive/v3/files",
+          "status": 429,
+          "headers": {
+            "Retry-After": "0"
+          }
+        }
+      ],
+      "command": "echo retried > /data/retry_429.txt && cat /data/retry_429.txt && rm /data/retry_429.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "retried\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_write_503_is_final",
+      "seq": 943205,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/upload/drive/v3/files",
+          "status": 503,
+          "headers": {
+            "Retry-After": "0"
+          },
+          "body": {
+            "error": {
+              "code": 503,
+              "message": "Service Unavailable",
+              "status": "UNAVAILABLE"
+            }
+          }
+        }
+      ],
+      "command": "echo once | tee /data/retry_503.txt >/dev/null 2>&1; echo \"tee=$?\"; ls /data/retry_503.txt 2>/dev/null; echo \"ls=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "tee=1\nls=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_media_503",
+      "seq": 943207,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files/:id",
+          "times": 2,
+          "status": 503,
+          "headers": {
+            "Retry-After": "0"
+          }
+        }
+      ],
+      "command": "cat /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_read_dropped",
+      "seq": 943208,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "delay_ms": 0
+        }
+      ],
+      "command": "cat /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_write_dropped_is_final",
+      "seq": 943209,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/upload/drive/v3/files",
+          "delay_ms": 0
+        }
+      ],
+      "command": "echo once | tee /data/retry_dropped.txt >/dev/null 2>&1; echo \"tee=$?\"; ls /data/retry_dropped.txt 2>/dev/null; echo \"ls=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "tee=1\nls=2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "g_retry_sheets_503",
+      "seq": 520040,
+      "targets": [
+        "gapps"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/v4/spreadsheets/:id",
+          "status": 503,
+          "headers": {
+            "Retry-After": "0"
+          }
+        }
+      ],
+      "command": "cat /sheets/owned/*__sheet0001.gsheet.json | jq -c '{spreadsheetId, title: .properties.title}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"spreadsheetId\":\"sheet0001\",\"title\":\"Revenue\"}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

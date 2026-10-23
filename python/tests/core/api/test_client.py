@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -125,6 +126,25 @@ async def test_header_delay_retries_on_retry_after():
             "GET", TARGET, error_of=_error_of, retry=retry
         )
     assert result == {"ok": 2}
+
+
+@pytest.mark.asyncio
+async def test_an_injected_sleep_takes_every_wait():
+    waits: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    retry = RetryPolicy(statuses=frozenset({503}), max_retries=2)
+    with aioresponses() as m:
+        m.get(TARGET, status=503, headers={"Retry-After": "30"})
+        m.get(TARGET, status=503)
+        m.get(TARGET, payload={"ok": 5})
+        result = await api_request(
+            "GET", TARGET, error_of=_error_of, retry=retry, sleep=_record
+        )
+    assert result == {"ok": 5}
+    assert waits == [30.0, 2.0]
 
 
 @pytest.mark.asyncio
@@ -680,3 +700,103 @@ async def test_stream_maps_http_errors_before_yielding():
             await anext(api_stream(TARGET, error_of=_error_of))
     assert exc.value.status == 403
     assert exc.value.body == "denied"
+
+
+@pytest.mark.asyncio
+async def test_stream_retries_opening_the_response():
+    waits: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    retry = RetryPolicy(
+        statuses=frozenset({503}), max_retries=2, retry_transport=True
+    )
+    with aioresponses() as mocked:
+        mocked.get(TARGET, status=503, headers={"Retry-After": "3"})
+        mocked.get(TARGET, exception=aiohttp.ServerDisconnectedError())
+        mocked.get(TARGET, body=b"done")
+        parts = [
+            part
+            async for part in api_stream(
+                TARGET, error_of=_error_of, retry=retry, sleep=_record
+            )
+        ]
+    assert parts == [b"done"]
+    assert waits == [3.0, 2.0]
+
+
+async def _first_then_drop(size: int) -> AsyncGenerator[bytes, None]:
+    yield b"first"
+    raise aiohttp.ServerDisconnectedError()
+
+
+@pytest.mark.asyncio
+async def test_stream_never_retries_once_a_chunk_reached_the_caller(
+    monkeypatch,
+):
+    response = MagicMock(status=200)
+    response.content.iter_chunked = _first_then_drop
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock()
+    session.get.return_value = response
+    monkeypatch.setattr(
+        "mirage.core.api.client.resolve_session",
+        lambda value: (session, False),
+    )
+    retry = RetryPolicy(max_retries=2, retry_transport=True)
+    source = api_stream(TARGET, error_of=_error_of, retry=retry)
+    assert await anext(source) == b"first"
+    with pytest.raises(aiohttp.ServerDisconnectedError):
+        await anext(source)
+    assert session.get.call_count == 1
+
+
+async def _no_wait(seconds: float) -> None:
+    return None
+
+
+async def _answer_then_cut(request: web.Request) -> web.StreamResponse:
+    response = web.StreamResponse(headers={"Content-Length": "100"})
+    await response.prepare(request)
+    await response.write(b"{")
+    assert request.transport is not None
+    request.transport.close()
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "retry_transport", "sent"),
+    [
+        ("GET", True, 3),
+        ("POST", True, 3),
+        ("GET", False, 1),
+        ("POST", False, 1),
+    ],
+)
+async def test_a_body_cut_short_is_a_transport_failure(
+    method, retry_transport, sent
+):
+    app = web.Application()
+    app.router.add_route("*", "/answer", _answer_then_cut)
+    hits: list[str] = []
+
+    @web.middleware
+    async def count(request: web.Request, handler):
+        hits.append(request.method)
+        return await handler(request)
+
+    app.middlewares.append(count)
+    retry = RetryPolicy(max_retries=2, retry_transport=retry_transport)
+    async with TestServer(app) as server:
+        with pytest.raises(aiohttp.ClientPayloadError):
+            await api_request(
+                method,
+                str(server.make_url("/answer")),
+                error_of=_error_of,
+                retry=retry,
+                sleep=_no_wait,
+            )
+    assert len(hits) == sent
