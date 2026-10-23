@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.errors.types import CommandTimeoutError
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import PathSpec
@@ -913,3 +914,157 @@ async def test_a_job_write_under_way_when_the_route_releases_lands():
     gate.set()
     await asyncio.gather(writing, releasing)
     assert landed == [b"job\n"]
+
+
+class RejectingVFS(RAMVFS):
+    """A store whose uploads fail with its own error, no ``OSError``: a
+    Drive 503 or a botocore ``ClientError`` on commit.
+
+    Args:
+        error (Exception): what an upload fails with.
+        empty_ok (bool): an empty upload (the open) lands.
+        reads (bool): reads fail with it too.
+    """
+
+    def __init__(
+        self, error: Exception, empty_ok: bool = False, reads: bool = False
+    ):
+        super().__init__()
+        self._store.files["/r.txt"] = b"old\n"
+        self.error = error
+        self.empty_ok = empty_ok
+        self.reads = reads
+
+    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+        if self.reads:
+            raise self.error
+        async for chunk in super().read_stream(path):
+            yield chunk
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        if self.empty_ok and not data:
+            return await super().write(path, data)
+        raise self.error
+
+    async def append(self, path: PathSpec, data: bytes) -> None:
+        if self.empty_ok and not data:
+            return await super().append(path, data)
+        raise self.error
+
+    async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
+        raise self.error
+
+
+def _rejecting(vfs: RejectingVFS) -> Workspace:
+    src = RAMVFS()
+    src._store.files["/s"] = b"src\n"
+    return Workspace({"/data": vfs, "/src": src}, mode=MountMode.WRITE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "stdout", "stderr"),
+    [
+        (
+            'echo once > /data/r.txt 2>/dev/null; echo "s=$?"',
+            "s=1\n",
+            "/data/r.txt: upload refused: 503\n",
+        ),
+        ('echo once 2>/dev/null > /data/r.txt; echo "s=$?"', "s=1\n", ""),
+        (
+            'echo once > /data/r.txt; echo "s=$?"',
+            "s=1\n",
+            "/data/r.txt: upload refused: 503\n",
+        ),
+        (
+            'cat /src/s > /data/r.txt; echo "s=$?"',
+            "s=1\n",
+            "/data/r.txt: upload refused: 503\n",
+        ),
+        (
+            "echo once >> /data/r.txt || echo ran",
+            "ran\n",
+            "/data/r.txt: upload refused: 503\n",
+        ),
+        (
+            'exec 3> /data/r.txt; echo "s=$?"',
+            "s=1\n",
+            "/data/r.txt: upload refused: 503\n",
+        ),
+    ],
+)
+async def test_a_failed_upload_fails_its_redirect_and_the_line_goes_on(
+    line: str, stdout: str, stderr: str
+):
+    # bash 5.2 in debian:stable-slim: a target it cannot open fails the
+    # command that owns it with status 1, before any later `2>` of that
+    # command applies, and the list goes on.
+    ws = _rejecting(RejectingVFS(RuntimeError("upload refused: 503")))
+    try:
+        io = await ws.shell(line)
+        assert (
+            io.exit_code,
+            await io.stdout_str(),
+            await io.stderr_str(),
+        ) == (
+            0,
+            stdout,
+            stderr,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["cat /src/s > /data/r.txt", "cat /src/s >> /data/r.txt"]
+)
+async def test_a_streamed_write_failing_past_its_open_fails_its_redirect(
+    line: str,
+):
+    ws = _rejecting(
+        RejectingVFS(RuntimeError("upload refused: 503"), empty_ok=True)
+    )
+    try:
+        io = await ws.shell(f'{line}; echo "s=$?"')
+        assert (await io.stdout_str(), await io.stderr_str()) == (
+            "s=1\n",
+            "/data/r.txt: upload refused: 503\n",
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", ["<", "<>"])
+async def test_a_store_refusing_a_read_fails_its_redirect(op: str):
+    ws = _rejecting(
+        RejectingVFS(RuntimeError("download refused: 503"), reads=True)
+    )
+    try:
+        io = await ws.shell(f'cat {op} /data/r.txt; echo "s=$?"')
+        assert (await io.stdout_str(), await io.stderr_str()) == (
+            "s=1\n",
+            "/data/r.txt: download refused: 503\n",
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "echo once > /data/r.txt; echo after",
+        "echo once > /data/r.txt 2>/dev/null; echo after",
+        "exec 3> /data/r.txt; echo after",
+    ],
+)
+async def test_a_timeout_on_upload_still_ends_the_line(line: str):
+    ws = _rejecting(RejectingVFS(CommandTimeoutError("write", 1)))
+    try:
+        io = await ws.shell(line)
+        assert io.exit_code == 124
+        assert await io.stdout_str() == ""
+    finally:
+        await ws.close()

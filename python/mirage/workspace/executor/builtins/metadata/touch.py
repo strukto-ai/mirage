@@ -19,7 +19,12 @@ from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.fs import (
+    fs_strerror,
+    is_aborting,
+    strerror_of,
+    walk_refusal,
+)
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
@@ -226,15 +231,19 @@ async def handle_touch(
             errors.append(
                 permission_error("touch", action, target.raw_path, exc)
             )
-        except FS_ERRORS as exc:
+        except Exception as exc:
             # A destination whose parent chain is not all directories is one
             # failed operand, not an aborted command: GNU reports it and
             # touches the rest. Caught here rather than around the write
             # because backends disagree about which call refuses first (an
             # object store answers stat with ENOENT and fails the write; a
             # filesystem or a keyed store answers stat itself with ENOTDIR).
+            # A store's own error (an upload's HTTP status) is one failed
+            # operand too, worded by its message.
+            if is_aborting(exc):
+                raise
             errors.append(
                 f"touch: cannot touch '{target.raw_path}': "
-                f"{fs_strerror(exc)}\n"
+                f"{strerror_of(exc)}\n"
             )
     return finish("touch", errors, io=IOResult())

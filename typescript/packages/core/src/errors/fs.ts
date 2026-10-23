@@ -14,6 +14,7 @@
 
 import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
+import { CommandTimeoutError } from './types.ts'
 import type {
   DotWalkError,
   FsError,
@@ -337,6 +338,29 @@ export function walkDeclined(
 export function isMissingOp(err: unknown, op: string): boolean {
   const stamped = err as { code?: unknown; op?: unknown }
   return stamped.code === 'ENOTSUP' && stamped.op === op
+}
+
+/**
+ * The reason a failed write's line ends with, whatever threw it: the shared
+ * phrase for a filesystem condition, and a store's own error (an SDK's, an
+ * HTTP status on upload) by its message, the only cause it carries. Mirrors
+ * Python's `strerror_of`.
+ */
+export function strerrorOf(err: unknown): string {
+  const phrase = fsStrerror(err)
+  if (phrase !== null) return phrase
+  if (err instanceof Error) return err.message || err.name
+  return String(err)
+}
+
+/**
+ * Whether a failure ends the invocation rather than one write. A catch that
+ * reports a failed write and keeps the line going takes whatever the backend
+ * threw (an SDK's own error carries no code) except this: an abort or a
+ * timeout is the caller's outcome. Mirrors Python's `is_aborting`.
+ */
+export function isAborting(err: unknown): boolean {
+  return err instanceof CommandTimeoutError || (err instanceof Error && err.name === 'AbortError')
 }
 
 // The phrase a command line ends with for a failed operand, read from the

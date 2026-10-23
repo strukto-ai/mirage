@@ -36,6 +36,7 @@ from mirage.errors.fs import (
     exdev,
     fs_error,
     fs_strerror,
+    is_aborting,
     listing_error,
     no_mount,
     readdir_error,
@@ -46,6 +47,7 @@ from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import (
     BadDescriptorError,
+    CommandTimeoutError,
     DotWalkLoop,
     DotWalkMissing,
     DotWalkNotDir,
@@ -56,6 +58,7 @@ from mirage.errors.types import (
     StaleWriteError,
 )
 from mirage.types import PathSpec
+from mirage.utils.abort import MirageAbortError
 
 
 @pytest.mark.parametrize(
@@ -279,3 +282,16 @@ def test_walk_refusal_names_the_operand_as_typed(raw, walk_error, cmd, line):
     assert isinstance(exc, FS_ERRORS)
     assert error_path(exc) == raw
     assert fs_error_line(cmd, spec, exc) == line
+
+
+@pytest.mark.parametrize(
+    ("exc", "aborting"),
+    [
+        (CommandTimeoutError("write", 1), True),
+        (MirageAbortError(), True),
+        (RuntimeError("upload refused: 503"), False),
+        (enoent(PathSpec.from_str_path("/f")), False),
+    ],
+)
+def test_only_an_abort_or_a_timeout_ends_the_invocation(exc, aborting):
+    assert is_aborting(exc) is aborting

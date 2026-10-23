@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.errors.types import CommandTimeoutError
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -14,6 +15,18 @@ class _StatOnlyRAMVFS(RAMVFS):
 
     setattr = BaseVFS.setattr
     write = BaseVFS.write
+
+
+class _RejectingRAMVFS(RAMVFS):
+    """RAM VFS whose upload fails with the store's own error, no
+    ``OSError``: a Drive 503 or a botocore ``ClientError`` on commit."""
+
+    def __init__(self, error: Exception):
+        super().__init__()
+        self.error = error
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        raise self.error
 
 
 @pytest.mark.asyncio
@@ -74,3 +87,24 @@ async def test_touch_r_relative_reference_resolves_against_cwd():
     assert code == 0, err
     _, out, _ = await _run(ws, "ls -l /data")
     assert out.count("Mar  4  2026") == 2
+
+
+@pytest.mark.asyncio
+async def test_touch_reports_a_failed_upload_and_the_line_goes_on():
+    vfs = _RejectingRAMVFS(RuntimeError("upload refused: 503"))
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    code, out, err = await _run(ws, 'touch /data/new.txt; echo "s=$?"')
+    assert (code, out) == (0, "s=1\n")
+    assert err == "touch: cannot touch '/data/new.txt': upload refused: 503\n"
+    code, out, err = await _run(
+        ws, "touch /data/new.txt 2>/dev/null || echo ran"
+    )
+    assert (code, out, err) == (0, "ran\n", "")
+
+
+@pytest.mark.asyncio
+async def test_touch_lets_a_timeout_on_upload_end_the_line():
+    vfs = _RejectingRAMVFS(CommandTimeoutError("write", 1))
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    code, out, _ = await _run(ws, "touch /data/new.txt; echo after")
+    assert (code, out) == (124, "")

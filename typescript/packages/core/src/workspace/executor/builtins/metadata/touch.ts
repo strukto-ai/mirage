@@ -21,10 +21,12 @@ import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { PathSpec } from '../../../../types.ts'
 import {
   fsStrerror,
+  isAborting,
   isEnoent,
   isEnotdir,
   isFsError,
   isMissingOp,
+  strerrorOf,
   walkRefusal,
 } from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
@@ -233,9 +235,10 @@ export async function handleTouch(
       // the rest. Caught here rather than around the write because backends
       // disagree about which call refuses first (an object store answers
       // stat with ENOENT and fails the write; a filesystem or a keyed store
-      // answers stat itself with ENOTDIR).
-      if (!isFsError(err)) throw err
-      errors.push(`touch: cannot touch '${target.rawPath}': ${String(fsStrerror(err))}\n`)
+      // answers stat itself with ENOTDIR). A store's own error (an upload's
+      // HTTP status) is one failed operand too, worded by its message.
+      if (isAborting(err)) throw err
+      errors.push(`touch: cannot touch '${target.rawPath}': ${strerrorOf(err)}\n`)
     }
   }
   return finish('touch', errors, new IOResult())

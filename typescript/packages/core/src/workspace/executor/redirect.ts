@@ -25,7 +25,7 @@ import {
   runWithCaller,
   runWithRedirectPaths,
 } from '../../context/session_context.ts'
-import { fsStrerror, isFsError, isMissingPath } from '../../errors/fs.ts'
+import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
 import { ownerPrefix } from '../../utils/slash.ts'
 import { toScope } from './builtins/scope.ts'
 import { endsAtDot } from '../../utils/path.ts'
@@ -139,7 +139,7 @@ class PipeRecorder extends Recorder {
     try {
       await this.writer?.finish()
     } catch (error) {
-      if (!isFsError(error)) throw error
+      if (error instanceof PipeClosed || isAborting(error)) throw error
       this.failure = error
     }
   }
@@ -164,7 +164,7 @@ class PipeRecorder extends Recorder {
           await this.writer.write(data)
           if (this.file !== null) this.file.offset += data.length
         } catch (error) {
-          if (!isFsError(error)) throw error
+          if (error instanceof PipeClosed || isAborting(error)) throw error
           this.failure = error
         }
       }
@@ -445,7 +445,7 @@ async function runRedirects(
           else io.stderr = data
         }
       } catch (error) {
-        if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+        if (error instanceof PipeClosed || isAborting(error)) throw error
         logger.debug(`redirect error reporting failed: ${String(error)}`)
       }
     }
@@ -532,7 +532,7 @@ async function runRedirects(
       } catch (error) {
         if (r.kind === RedirectKind.READWRITE && isMissingPath(error)) source = new Uint8Array()
         else {
-          if (!isFsError(error)) throw error
+          if (isAborting(error)) throw error
           return failed(redirectFailure(scope, error))
         }
       }
@@ -548,7 +548,7 @@ async function runRedirects(
         try {
           await createFile(dispatch, session, scope, new Uint8Array(), true)
         } catch (error) {
-          if (!isFsError(error)) throw error
+          if (error instanceof PipeClosed || isAborting(error)) throw error
           return failed(redirectFailure(scope, error))
         }
         files.push(file)
@@ -591,7 +591,7 @@ async function runRedirects(
               ? await runWithRedirectPaths(command, targets, open)
               : await open()
         } catch (error) {
-          if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+          if (error instanceof PipeClosed || isAborting(error)) throw error
           return failed(redirectFailure(scope, error))
         }
         file = new FileDescription(pipe ?? scope, r.append || pipe !== null, pipe !== null)
@@ -800,7 +800,7 @@ async function runRedirects(
             else unwound ??= new ExitSignal(141)
             return false
           }
-          if (typeof (error as { code?: unknown } | null)?.code !== 'string') throw error
+          if (error instanceof PipeClosed || isAborting(error)) throw error
           const [out, refusal] = await failed(redirectFailure(file.scope, error), file)
           if (out !== null) routed.push([Channel.STDOUT, await materialize(out)])
           const diagnostic = await materialize(refusal.stderr)
@@ -955,9 +955,7 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
  * exist: /nodir`), which used to reach the user as the path.
  */
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
-  const strerror = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
-  const label = scope.rawPath
-  return encodeText(strerror ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(`${scope.rawPath}: ${strerrorOf(err)}\n`)
 }
 
 /**

@@ -20,6 +20,7 @@ from mirage.errors.constants import CONDITION_CLASS, OPERAND_CONDITIONS
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import (
     BadDescriptorError,
+    CommandTimeoutError,
     DotWalkError,
     DotWalkLoop,
     DotWalkMissing,
@@ -33,6 +34,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.types import PathSpec
+from mirage.utils.abort import MirageAbortError
 
 E = TypeVar("E", bound=OSError)
 
@@ -422,6 +424,39 @@ def fs_strerror(exc: BaseException) -> str | None:
     if condition is None or condition not in OPERAND_CONDITIONS:
         return None
     return posix_phrase(condition)
+
+
+def strerror_of(exc: BaseException) -> str:
+    """The reason a failed write's line ends with, whatever raised it.
+
+    The shared phrase for a filesystem condition, the kernel's words for
+    any other ``OSError``, and a store's own error (an SDK's, an HTTP
+    status on upload) by its message, the only cause it carries. Mirrors
+    TS ``strerrorOf``.
+
+    Args:
+        exc (BaseException): the failure.
+    """
+    phrase = fs_strerror(exc)
+    if phrase is not None:
+        return phrase
+    if isinstance(exc, OSError) and exc.strerror:
+        return exc.strerror
+    return str(exc) or type(exc).__name__
+
+
+def is_aborting(exc: BaseException) -> bool:
+    """Whether a failure ends the invocation rather than one write.
+
+    A catch that reports a failed write and keeps the line going takes
+    whatever the backend raised (an SDK's own error is no ``OSError``)
+    except this: an abort or a timeout is the caller's outcome. Mirrors
+    TS ``isAborting``.
+
+    Args:
+        exc (BaseException): the failure.
+    """
+    return isinstance(exc, (CommandTimeoutError, MirageAbortError))
 
 
 def error_path(exc: BaseException) -> str:
