@@ -77,6 +77,22 @@ describe('joinOrAbort', () => {
     await expect(pending).resolves.toBe('done')
   })
 
+  it('asks a grace function for the grace once the signal fires', async () => {
+    const controller = new AbortController()
+    let grace = 30
+    const tree = new Promise<string>((resolve) => {
+      controller.signal.addEventListener('abort', () => {
+        setTimeout(() => {
+          resolve('done')
+        }, 80)
+      })
+    })
+    const pending = joinOrAbort(tree, controller.signal, () => grace)
+    grace = 400
+    controller.abort()
+    await expect(pending).resolves.toBe('done')
+  })
+
   it('releases the caller once a stalled tree outlives the grace', async () => {
     const controller = new AbortController()
     const t0 = Date.now()

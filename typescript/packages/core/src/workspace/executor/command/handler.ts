@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CommandFnResult } from '../../../commands/config.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
@@ -24,8 +25,9 @@ import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
-import { joinOrAbort } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, joinOrAbort } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
 
@@ -210,8 +212,14 @@ export async function runHandler(
   // finishes late hands back output nobody reads.
   const answer = rendered(body, opts.vfs ?? null, name)
   if (opts.settle !== undefined) void answer.then(opts.settle, opts.settle)
+  // A `kill` names a signal, and the program the command started gets the
+  // stop bound to answer it (a handler, a sandbox reap), as Python joins
+  // the cancelled handler whole; any other abort releases the caller soon.
+  const runner = currentCaller().process
+  const grace = (): number =>
+    (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   try {
-    out = await runWithTimeout(joinOrAbort(answer, opts.signal), timeout, name)
+    out = await runWithTimeout(joinOrAbort(answer, opts.signal, grace), timeout, name)
   } catch (err) {
     if (err instanceof CommandTimeoutError) opts.abort?.abort()
     abandon(answer, err, name)

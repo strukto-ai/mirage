@@ -22,6 +22,7 @@ export class ProcessHandle {
   readonly task: Promise<number>
   private current: ProcessInfo
   private stopSignal: number | null = null
+  private exitedCode: number | null = null
   private readonly completion: Promise<ProcessInfo>
 
   constructor(
@@ -55,6 +56,22 @@ export class ProcessHandle {
   /** The signal the runner was stopped with, null while it runs. */
   get signal(): number | null {
     return this.stopSignal
+  }
+
+  /** The status a program the runner started exited with on its own after the stop signal, null unless one did. */
+  get programCode(): number | null {
+    return this.exitedCode
+  }
+
+  /**
+   * Record that a program the runner started handled the stop signal and
+   * exited: a job that is that one program reports its status, as bash
+   * reports a child that handled the signal.
+   *
+   * @param code the program's exit status.
+   */
+  programExited(code: number): void {
+    this.exitedCode = code
   }
 
   /**

@@ -37,7 +37,9 @@ export type ConsoleFactory = (jobId: number) => JobConsole
  * One background command, and everything it has printed.
  *
  * Output lives in `console` rather than in byte fields, so a reader can
- * watch a job while it runs instead of waiting for it to end.
+ * watch a job while it runs instead of waiting for it to end. A `simple`
+ * job is one simple command, which the job is, so a program it ran that
+ * handled a `kill` leaves the job its own status.
  */
 export class Job {
   readonly id: number
@@ -50,6 +52,7 @@ export class Job {
   readonly sessionId: string
   readonly createdAt: number
   readonly console: JobConsole
+  readonly simple: boolean
 
   status: JobStatus = JobStatus.RUNNING
   exitCode = 0
@@ -65,6 +68,7 @@ export class Job {
     status?: JobStatus
     exitCode?: number
     console?: JobConsole
+    simple?: boolean
   }) {
     this.id = init.id
     this.command = init.command
@@ -74,6 +78,7 @@ export class Job {
     this.sessionId = init.sessionId ?? ''
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.console = init.console ?? new JobConsole()
+    this.simple = init.simple ?? false
     if (init.status !== undefined) this.status = init.status
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
   }

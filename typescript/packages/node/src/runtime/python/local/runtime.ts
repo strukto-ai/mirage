@@ -241,6 +241,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     const { stdout, stderr, code } = await runCli(program, missing, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
+      direct: true,
       ...(output === undefined ? {} : { output }),
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),

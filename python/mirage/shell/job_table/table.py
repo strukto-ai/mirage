@@ -23,7 +23,10 @@ from mirage.shell.console import (
     JobConsole,
     exit_outcome,
 )
-from mirage.shell.job_table.constants import KILLED_EXIT_CODE
+from mirage.shell.job_table.constants import (
+    KILLED_EXIT_CODE,
+    STOP_WAIT_SECONDS,
+)
 from mirage.shell.job_table.types import (
     ConsoleFactory,
     Job,
@@ -68,6 +71,23 @@ async def _mark_killed(console: JobConsole) -> None:
     await console.finish(KILLED_OUTCOME)
 
 
+def _stopped_status(job: Job) -> int:
+    """The status a stopped job answers: the one its program exited with
+    after handling the signal, when the job is that one program, else
+    128 plus the signal, KILL's 137 without one.
+
+    Args:
+        job (Job): the stopped job.
+    """
+    if job.process is None:
+        return KILLED_EXIT_CODE
+    code = job.process.program_code
+    if job.simple and code is not None:
+        return code
+    signal = job.process.signal
+    return KILLED_EXIT_CODE if signal is None else 128 + signal
+
+
 async def _settle(run: JobRunner, job: Job) -> int:
     """Run a job to completion and record how it ended.
 
@@ -91,8 +111,7 @@ async def _settle(run: JobRunner, job: Job) -> int:
         if job.status != JobStatus.RUNNING:
             raise
         job.status = JobStatus.KILLED
-        signal = job.process.signal if job.process is not None else None
-        job.exit_code = KILLED_EXIT_CODE if signal is None else 128 + signal
+        job.exit_code = _stopped_status(job)
         # This task is already unwinding from a cancel, and a store that
         # suspends (Redis) would take a second cancellation mid-write
         # and lose the marker readers are parked on. The shielded task
@@ -214,6 +233,7 @@ class JobTable:
         session_id: str = "",
         parent_pid: int | None = None,
         limit: int | None = None,
+        simple: bool = False,
     ) -> Job:
         """Register a job in its session's list and start it.
 
@@ -230,6 +250,7 @@ class JobTable:
             parent_pid (int | None): the runner that started the job.
             limit (int | None): the session's process cap
                 (``processes.max``); None for no cap.
+            simple (bool): the job is one simple command (``Job.simple``).
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -272,6 +293,7 @@ class JobTable:
                 cwd=cwd,
                 session_id=session_id,
                 console=console,
+                simple=simple,
             )
         except Exception:
             process.terminate()
@@ -453,6 +475,12 @@ class JobTable:
         suspends tomorrow). A restored job has no task and its console
         already holds the ending chunk, so it returns without waiting.
 
+        A killed job's console ends at the kill, so its runner is joined
+        too, for at most ``STOP_WAIT_SECONDS``: what it started stops in
+        that time (a handler finishes, a sandbox is reaped) and the
+        status it leaves is the one answered, as bash's ``wait`` answers
+        once the child has gone.
+
         Args:
             job_id (int): the job to wait for.
             session_id (str): the session whose list names it.
@@ -461,6 +489,15 @@ class JobTable:
         if job.task is None:
             return job
         await job.console.wait_finished()
+        if job.process is not None:
+            try:
+                async with asyncio.timeout(STOP_WAIT_SECONDS):
+                    await job.process.join()
+            except TimeoutError:
+                logger.debug("job %d still stopping after wait", job.id)
+            else:
+                if job.status == JobStatus.KILLED:
+                    job.exit_code = _stopped_status(job)
         return job
 
     async def wait_all(self, session_id: str = "") -> list[Job]:

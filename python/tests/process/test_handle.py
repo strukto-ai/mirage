@@ -99,3 +99,27 @@ async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
     assert handle.terminate(signal) is True
     info = await handle.join()
     assert (info.exit_code, handle.signal, seen) == (code, signal, [signal])
+
+
+# What a program the runner started exited with after handling the signal
+# is the program's, kept apart from the runner's own 128 plus the signal.
+@pytest.mark.asyncio
+async def test_a_program_that_handled_the_signal_keeps_its_own_status():
+    started = asyncio.Event()
+
+    async def run() -> int:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            runner = current_caller().process
+            assert runner is not None
+            runner.program_exited(3)
+        return 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    await started.wait()
+    assert handle.program_code is None
+    assert handle.terminate(15) is True
+    info = await handle.join()
+    assert (info.exit_code, handle.program_code) == (143, 3)

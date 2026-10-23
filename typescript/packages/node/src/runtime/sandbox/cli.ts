@@ -49,6 +49,10 @@ export interface CliOptions {
   // Where the child is kept while it runs, for `closeChildren`.
   children?: Set<ChildProcess>
   output?: (chunk: Uint8Array) => Promise<void>
+  // The child is the program itself, not a client that runs it elsewhere
+  // and exits on its own terms (`docker exec` answers a TERM with 0 and
+  // leaves the program running).
+  direct?: boolean
 }
 
 async function untilInputCloses<T>(
@@ -73,8 +77,8 @@ async function untilInputCloses<T>(
  * it exited on its own, and the call rejects with an AbortError at once.
  * When a `kill` stopped the runner with a signal other than KILL, the
  * group gets that signal first (`endTree`), so the program's handlers get
- * to run. A
- * missing executable rejects with `hint` when one is given, else with
+ * to run, and a `direct` child that exits on its own then leaves its status
+ * with the runner. A missing executable rejects with `hint` when one is given, else with
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
  * when the child exits is left to close on its own. Mirrors Python's
@@ -178,7 +182,12 @@ export async function runCli(
   try {
     await pumps
     const code = await exited
-    if (signal?.aborted === true) throw makeAbortError(signal)
+    if (signal?.aborted === true) {
+      const signum = runner?.signal ?? 9
+      if (options.direct === true && signum !== 9 && child.exitCode !== null)
+        runner?.programExited(child.exitCode)
+      throw makeAbortError(signal)
+    }
     return { stdout: Buffer.concat(out), stderr: Buffer.concat(err), code }
   } finally {
     if (stopping !== null) await stopping
@@ -242,7 +251,9 @@ export async function cwdRefusal(name: string, cwd: string): Promise<RunResult |
 /**
  * Signal a child and everything it started: its process group. Windows has
  * no process group to signal, and no signal but a kill, so only the child
- * goes there, killed. Mirrors Python's `kill_tree`.
+ * goes there, killed. A group whose members have all exited but are not
+ * yet reaped answers EPERM on macOS where Linux answers ESRCH; either way
+ * nothing in it is left to signal. Mirrors Python's `kill_tree`.
  *
  * @param signum the signal, KILL (9) by default.
  */
@@ -255,7 +266,8 @@ export function killTree(child: ChildProcess, signum = 9): void {
     process.kill(-child.pid, signum)
     child.kill(signum)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ESRCH' && code !== 'EPERM') throw err
     debuglog('mirage')('process group %d has already exited', child.pid)
   }
 }
@@ -278,7 +290,8 @@ export async function endTree(child: ChildProcess, signum: number): Promise<void
       try {
         process.kill(-child.pid, 0)
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ESRCH') return
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ESRCH' || code === 'EPERM') return
         throw err
       }
     }

@@ -39,7 +39,9 @@ arguments, input, environment and working directory; a working directory
 the sandbox lacks fails the program with exit 126. Each run also gets
 `MIRAGE_EXEC_ID`: when a run is cut short, by a `head` that has read enough,
 a timeout or `kill`, Mirage stops every process in the sandbox that carries
-the run's id, with the signal `kill` named or TERM. Each provider's
+the run's id, with the signal `kill` named or TERM. `wait` returns once
+they have stopped and reports 128 plus the signal, since a sandbox does
+not report the program's own status. Each provider's
 **Runtime behavior** table describes that boundary.
 
 File operations reach workspace mounts through the connection configured

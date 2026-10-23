@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { spawnSync, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -59,7 +59,11 @@ async function escapedPid(pidFile: string): Promise<number> {
 }
 
 // A runner whose run is `sh -c script`, stopped through its abort.
-function shRunner(script: string, output?: (chunk: Uint8Array) => Promise<void>): ProcessHandle {
+function shRunner(
+  script: string,
+  output?: (chunk: Uint8Array) => Promise<void>,
+  direct = false,
+): ProcessHandle {
   const abort = new AbortController()
   return new ProcessSupervisor(runWithExecution).start({
     sessionId: 's',
@@ -72,6 +76,7 @@ function shRunner(script: string, output?: (chunk: Uint8Array) => Promise<void>)
       (
         await runCli('sh', null, ['-c', script], null, {
           signal: abort.signal,
+          direct,
           ...(output === undefined ? {} : { output }),
         })
       ).code,
@@ -106,6 +111,59 @@ describe('runCli', () => {
     expect((await runner.join()).exitCode).toBe(137)
     expect(existsSync(said)).toBe(false)
     expect(await ended(child)).toBe(true)
+  })
+
+  // A child that is the program itself and exits on its own after a gentler
+  // signal leaves its status with the runner; a client's (`docker exec`)
+  // says nothing about the program, and a child the signal ended has none.
+  it.each([
+    [true, "trap 'exit 3' TERM; ", 15, 3],
+    [false, "trap 'exit 3' TERM; ", 15, null],
+    [true, '', 15, null],
+    [true, "trap 'exit 3' TERM; ", 9, null],
+  ] as const)(
+    'leaves the status of a direct child that handled the signal (direct %s, %j, %d)',
+    async (direct, trap, signum, code) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+      const pidFile = join(dir, 'pid')
+      const runner = shRunner(
+        `${trap}echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
+        undefined,
+        direct,
+      )
+      await escapedPid(pidFile)
+      expect(runner.terminate(signum)).toBe(true)
+      expect((await runner.join()).exitCode).toBe(128 + signum)
+      expect(runner.programCode).toBe(code)
+    },
+  )
+
+  // macOS answers EPERM where Linux answers ESRCH for a group whose members
+  // have all exited but are not yet reaped; either way the group is gone,
+  // and the stop must not fail on it.
+  it('treats a group that answers EPERM as gone', async () => {
+    const kill = process.kill.bind(process)
+    const spy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      try {
+        return kill(pid, signal)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+      }
+    })
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+      const pidFile = join(dir, 'pid')
+      const runner = shRunner(
+        `trap 'exit 0' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
+      )
+      await escapedPid(pidFile)
+      expect(runner.terminate(15)).toBe(true)
+      const info = await runner.join()
+      expect([info.exitCode, info.failure]).toEqual([143, null])
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   // The grace is the group's: a descendant still handling the signal after

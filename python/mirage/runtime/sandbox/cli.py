@@ -54,6 +54,7 @@ async def run_cli(
     env: dict[str, str] | None = None,
     children: Children | None = None,
     output: Callable[[bytes], Awaitable[None]] | None = None,
+    direct: bool = False,
 ) -> tuple[bytes, bytes, int]:
     """One process run to its end: its output and its exit status.
 
@@ -64,7 +65,8 @@ async def run_cli(
     on its own. A line abandoned to a timeout returns at once. When a
     ``kill`` stopped the runner with a signal other than KILL, the group
     gets that signal first (``end_tree``), so the program's handlers get
-    to run.
+    to run, and a ``direct`` child that exits on its own then leaves its
+    status with the runner.
 
     Args:
         executable (str): the program (``docker``, ``sandlock``, a host
@@ -82,6 +84,9 @@ async def run_cli(
             runs, for ``close_children``.
         output (Callable[[bytes], Awaitable[None]] | None): receives
             stdout as it arrives instead of returning it.
+        direct (bool): the child is the program itself, not a client
+            that runs it elsewhere and exits on its own terms (``docker
+            exec`` answers a TERM with 0 and leaves the program running).
 
     Raises:
         RuntimeError: the executable is missing and ``hint`` names it.
@@ -164,6 +169,15 @@ async def run_cli(
         finally:
             stop_tree(process, transport)
             await process.wait()
+        code = process.returncode
+        if (
+            direct
+            and runner is not None
+            and signum not in (None, 9)
+            and code is not None
+            and code >= 0
+        ):
+            runner.program_exited(code)
         raise
     finally:
         for task in (feeding, reading, errors, waiting):
@@ -281,7 +295,9 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
     """Signal a child and everything it started: its process group.
 
     Windows has no process group to signal, and no signal but a kill, so
-    only the child goes there, killed.
+    only the child goes there, killed. A group whose members have all
+    exited but are not yet reaped answers EPERM on macOS where Linux
+    answers ESRCH; either way nothing in it is left to signal.
 
     Args:
         process (asyncio.subprocess.Process): a child ``run_cli`` started.
@@ -293,7 +309,7 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
         return
     try:
         os.killpg(process.pid, signum)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         logger.debug("process group %d has already exited", process.pid)
 
 
@@ -325,7 +341,7 @@ async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
                 else:
                     try:
                         os.killpg(process.pid, 0)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, PermissionError):
                         return
                 await asyncio.sleep(STOP_POLL_SECONDS)
     except TimeoutError:

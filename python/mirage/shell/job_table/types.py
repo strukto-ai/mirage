@@ -36,7 +36,9 @@ class Job:
     """One background command, and everything it has printed.
 
     Output lives in ``console`` rather than in byte fields, so a reader
-    can watch a job while it runs instead of waiting for it to end.
+    can watch a job while it runs instead of waiting for it to end. A
+    ``simple`` job is one simple command, which the job is, so a program
+    it ran that handled a ``kill`` leaves the job its own status.
     """
 
     id: int
@@ -49,6 +51,7 @@ class Job:
     created_at: float = field(default_factory=time.time)
     session_id: str = ""
     process: ProcessHandle | None = None
+    simple: bool = False
 
     @property
     def execution_id(self) -> str | None:

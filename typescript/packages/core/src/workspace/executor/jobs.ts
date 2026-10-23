@@ -339,6 +339,7 @@ export async function handleBackground(
       sessionId: session.sessionId,
       parentPid: session.processId,
       limit: session.processes.max,
+      simple: simpleCommand(left),
     })
   } catch (err) {
     releaseProgram()

@@ -21,6 +21,7 @@ import type { CommandRuntime, RunResult } from '../../../runtime/types.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import { hasAborted } from '../../../utils/abort.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 
 /**
@@ -159,6 +160,7 @@ export async function runInterpreter(
     return runOutput(await runtime.execute(paths, texts, ctx))
   } catch (err) {
     if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(label, err.seconds)
+    if ((err instanceof Error && err.name === 'AbortError') || hasAborted(ctx.signal)) throw err
     if (script !== null && isFsError(err) && errorVirtualPath(err) === script.virtual) throw err
     const message = err instanceof Error ? err.message : String(err)
     return failed(label, message, runtimeUnavailable(err) ? 127 : 1)

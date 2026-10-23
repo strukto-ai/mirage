@@ -123,4 +123,32 @@ describe('ProcessHandle', () => {
     const done = await handle.join()
     expect([done.exitCode, handle.signal, bound]).toEqual([code, signal, [handle]])
   })
+
+  // What a program the runner started exited with after handling the
+  // signal is the program's, kept apart from the runner's own 128 plus it.
+  it('keeps the status of a program that handled the signal', async () => {
+    const abort = new AbortController()
+    let handle: ProcessHandle | null = null
+    const run = (): Promise<number> =>
+      new Promise((_resolve, reject) => {
+        const stop = (): void => {
+          handle?.programExited(3)
+          reject(new DOMException('aborted', 'AbortError'))
+        }
+        if (abort.signal.aborted) stop()
+        else abort.signal.addEventListener('abort', stop)
+      })
+    handle = new ProcessHandle(
+      info(),
+      run,
+      () => {
+        abort.abort()
+      },
+      ignore,
+    )
+    expect(handle.programCode).toBeNull()
+    expect(handle.terminate(15)).toBe(true)
+    const done = await handle.join()
+    expect([done.exitCode, handle.programCode]).toEqual([143, 3])
+  })
 })

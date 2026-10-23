@@ -114,12 +114,13 @@ export const ABORT_JOIN_MS = 250
  * promise cannot be cancelled, so once `signal` fires the tree is given
  * `graceMs` to reach a checkpoint, close its producers and settle with
  * its own error (which keeps the caller's abort reason); a leaf that is
- * blocked past that is left running and the caller is released.
+ * blocked past that is left running and the caller is released. A
+ * function is asked for the grace when the signal fires.
  */
 export async function joinOrAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
-  graceMs = ABORT_JOIN_MS,
+  graceMs: number | (() => number) = ABORT_JOIN_MS,
 ): Promise<T> {
   if (signal === undefined) return promise
   try {
@@ -127,10 +128,11 @@ export async function joinOrAbort<T>(
   } catch (error) {
     if (!signal.aborted) throw error
     let timer: ReturnType<typeof setTimeout> | undefined
+    const ms = typeof graceMs === 'function' ? graceMs() : graceMs
     const grace = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         reject(makeAbortError(signal))
-      }, graceMs)
+      }, ms)
     })
     try {
       return await Promise.race([promise, grace])

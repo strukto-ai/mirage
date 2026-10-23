@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { ExecutionNode } from '../../workspace/types.ts'
 import {
@@ -23,6 +23,7 @@ import {
   RAMConsoleStore,
   type ReadResult,
 } from '../console/index.ts'
+import { STOP_WAIT_SECONDS } from './constants.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 
@@ -172,6 +173,63 @@ describe('JobTable.kill', () => {
     expect(await jt.kill(j.id, '', signal)).toBe(true)
     expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
     expect((await j.process?.join())?.exitCode).toBe(code)
+  })
+
+  // bash's `wait` returns once a killed child has gone, with the status it
+  // exited with when it handled the signal; a compound job is a shell the
+  // signal ends.
+  it.each([
+    [true, 3],
+    [false, 143],
+  ])('wait joins a killed job (simple %s) and answers %i', async (simple, code) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const stopped: string[] = []
+    let started = (): void => undefined
+    const up = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const run: JobRunner = (job) =>
+      new Promise((_resolve, reject) => {
+        started()
+        abort.signal.addEventListener('abort', () => {
+          setTimeout(() => {
+            job.process?.programExited(3)
+            stopped.push('handled')
+            reject(new DOMException('aborted', 'AbortError'))
+          }, 50)
+        })
+      })
+    const j = jt.submit({ command: 'prog', run, abort, cwd: '/', simple })
+    await up
+    expect(await jt.kill(j.id, '', 15)).toBe(true)
+    expect([j.exitCode, stopped]).toEqual([143, []])
+    const waited = await jt.wait(j.id)
+    expect([waited.exitCode, stopped]).toEqual([code, ['handled']])
+  })
+
+  it('wait answers the kill once a runner outlasts the bound', async () => {
+    vi.useFakeTimers()
+    try {
+      const jt = new JobTable()
+      const abort = new AbortController()
+      let started = (): void => undefined
+      const up = new Promise<void>((resolve) => {
+        started = resolve
+      })
+      const run: JobRunner = () =>
+        new Promise(() => {
+          started()
+        })
+      const j = jt.submit({ command: 'deaf', run, abort, cwd: '/', simple: true })
+      await up
+      expect(await jt.kill(j.id, '', 15)).toBe(true)
+      const waiting = jt.wait(j.id)
+      await vi.advanceTimersByTimeAsync(STOP_WAIT_SECONDS * 1000)
+      expect((await waiting).exitCode).toBe(143)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('aborts, marks killed, and keeps output produced before the kill', async () => {

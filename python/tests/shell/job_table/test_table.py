@@ -255,6 +255,68 @@ async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     assert (await job.process.join()).exit_code == code
 
 
+def _submit_handling(
+    table: JobTable, simple: bool, stopped: list[str]
+) -> tuple[Job, asyncio.Event]:
+    started = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.05)
+            assert job.process is not None
+            job.process.program_exited(3)
+            stopped.append("handled")
+        return IOResult(), ExecutionNode()
+
+    return table.submit("prog", run, "/", simple=simple), started
+
+
+# bash's `wait` returns once a killed child has gone, with the status it
+# exited with when it handled the signal; a compound job is a shell the
+# signal ends.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("simple,code", [(True, 3), (False, 143)])
+async def test_wait_joins_a_killed_job_and_takes_its_program_status(
+    simple, code
+):
+    table = JobTable()
+    stopped: list[str] = []
+    job, started = _submit_handling(table, simple, stopped)
+    await started.wait()
+    assert await table.kill(job.id, "", 15)
+    assert (job.exit_code, stopped) == (143, [])
+    waited = await table.wait(job.id)
+    assert (waited.exit_code, stopped) == (code, ["handled"])
+
+
+@pytest.mark.asyncio
+async def test_wait_answers_the_kill_once_a_runner_outlasts_the_bound(
+    monkeypatch,
+):
+    monkeypatch.setattr("mirage.shell.job_table.table.STOP_WAIT_SECONDS", 0.05)
+    table = JobTable()
+    release = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(release.wait())
+        return IOResult(), ExecutionNode()
+
+    job = table.submit("deaf", run, "/", simple=True)
+    await asyncio.sleep(0)
+    assert await table.kill(job.id, "", 15)
+    async with asyncio.timeout(2):
+        assert (await table.wait(job.id)).exit_code == 143
+    release.set()
+    assert job.process is not None
+    await job.process.join()
+
+
 @pytest.mark.asyncio
 async def test_numbering_resets_per_session_when_its_list_empties():
     table = JobTable()

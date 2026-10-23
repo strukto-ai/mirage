@@ -387,6 +387,7 @@ async def handle_background(
             session_id=session.session_id,
             parent_pid=session.process_id,
             limit=session.processes.max,
+            simple=simple_command(left),
         )
     except Exception as exc:
         release_job()

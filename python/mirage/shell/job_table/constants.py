@@ -13,3 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 KILLED_EXIT_CODE = 137
+
+# How long `wait` gives a killed job's runner to stop what it started (a
+# sandbox reaps for up to 5 s after a 1 s grace) before it answers with
+# the status the kill recorded.
+STOP_WAIT_SECONDS = 10.0
