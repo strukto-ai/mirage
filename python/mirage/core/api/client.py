@@ -196,6 +196,8 @@ async def api_stream(
     session: SessionArg = None,
     retry: RetryPolicy = NO_RETRY,
     sleep: Callable[[float], Awaitable[None]] | None = None,
+    chunk_size: int = CHUNK_SIZE,
+    on_response: Callable[[Mapping[str, str]], None] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Pull a GET response in bounded chunks, closing it on early exit.
 
@@ -209,6 +211,10 @@ async def api_stream(
             second attempt would hand it the same bytes twice.
         sleep (Callable[[float], Awaitable[None]] | None): the wait
             between attempts; None is ``asyncio.sleep``.
+        chunk_size (int): the most bytes a yielded chunk carries.
+        on_response (Callable[[Mapping[str, str]], None] | None): told the
+            answering response's headers, lower-cased, once and before the
+            first chunk, so an empty body reports them too.
     """
     wait = asyncio.sleep if sleep is None else sleep
     yielded = False
@@ -227,11 +233,17 @@ async def api_stream(
                         delay = _retry_delay(response, text, attempt, retry)
                     else:
                         async with aclosing(
-                            chunks(response.content.iter_chunked(CHUNK_SIZE))
+                            chunks(response.content.iter_chunked(chunk_size))
                         ) as source:
                             async for chunk in source:
+                                if not yielded and on_response is not None:
+                                    on_response(
+                                        lowered_headers(response.headers)
+                                    )
                                 yielded = True
                                 yield chunk
+                        if not yielded and on_response is not None:
+                            on_response(lowered_headers(response.headers))
                         return
             except _TRANSPORT:
                 if yielded or last or not retry.retry_transport:

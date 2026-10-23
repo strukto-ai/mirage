@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest, loweredHeaders } from '@struktoai/mirage-core/core/api/client'
+import { apiRequest, apiStream } from '@struktoai/mirage-core/core/api/client'
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import type { ApiResponse, RetryPolicy } from '@struktoai/mirage-core/core/api/client'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
@@ -380,27 +380,21 @@ export function etagValue(raw: string): string {
 /**
  * Stream file content without holding it whole in memory.
  *
- * Not routed through `apiRequest`: that reads the body to completion before
- * returning, which is the opposite of what a stream is for. `onResponse` is
- * told the final response's headers, lower-cased, once and before the first
- * chunk, so an empty file reports them too.
+ * Routed through `apiStream`, which retries opening the response under RETRY
+ * and never once a chunk has reached the caller. `onResponse` is told the
+ * final response's headers, lower-cased, once and before the first chunk, so
+ * an empty file reports them too.
  */
 export async function* hubStream(
   account: HfAccountAccessor,
   url: string,
   onResponse?: (headers: Record<string, string>) => void,
 ): AsyncIterable<Uint8Array> {
-  const response = await stallFetch(account.timeoutMs)(url, { headers: hubHeaders(account.token) })
-  if (response.status >= 400) throw errorOf(response, await response.text())
-  if (onResponse !== undefined) {
-    onResponse(loweredHeaders(response.headers))
-  }
-  const body = response.body
-  if (body === null) return
-  const reader = body.getReader()
-  for (;;) {
-    const chunk = await reader.read()
-    if (chunk.done) break
-    if (chunk.value !== undefined) yield chunk.value
-  }
+  yield* apiStream(url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    fetchFn: stallFetch(account.timeoutMs),
+    retry: RETRY,
+    ...(onResponse === undefined ? {} : { onResponse }),
+  })
 }

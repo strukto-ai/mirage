@@ -391,17 +391,24 @@ describe('google retry policy', () => {
   })
 
   it.each([
-    ['GET', undefined, 2],
-    ['HEAD', undefined, 2],
-    ['POST', undefined, 1],
-    ['PATCH', undefined, 1],
-    ['POST', READ_RETRY, 2],
-  ] as [string, typeof READ_RETRY | undefined, number][])(
-    'the request door picks the policy by method: %s',
-    async (method, retry, sent) => {
-      const fake = serve(reply(503), reply(200, '{}'))
-      await googleRequest(tm, method, FILES, { retry }).catch((err: unknown) => err)
-      expect(fake).toHaveBeenCalledTimes(sent)
+    ['GET', undefined],
+    ['HEAD', undefined],
+    ['POST', READ_RETRY],
+  ] as [string, typeof READ_RETRY | undefined][])(
+    'the request door retries a read by method: %s',
+    async (method, retry) => {
+      const fake = serve(reply(503), reply(200, '{"ok":true}'))
+      await expect(googleRequest(tm, method, FILES, { retry })).resolves.toEqual({ ok: true })
+      expect(fake).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it.each(['POST', 'PATCH', 'PUT', 'DELETE'])(
+    'the request door never retries a write 5xx: %s',
+    async (method) => {
+      const fake = serve(reply(503), reply(200, '{"ok":true}'))
+      await expect(googleRequest(tm, method, FILES)).rejects.toMatchObject({ status: 503 })
+      expect(fake).toHaveBeenCalledOnce()
     },
   )
 

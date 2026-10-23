@@ -31,6 +31,9 @@ export async function* apiStream(
   url: string,
   options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep'> & {
     signal?: AbortSignal
+    /** Told the answering response's headers, lower-cased, once and before
+     * the first chunk, so an empty body reports them too. */
+    onResponse?: (headers: Record<string, string>) => void
   },
 ): AsyncGenerator<Uint8Array, void> {
   const retry = options.retry ?? NO_RETRY
@@ -73,6 +76,7 @@ export async function* apiStream(
       await wait(retryDelay(response, text, attempt, retry))
       continue
     }
+    options.onResponse?.(loweredHeaders(response.headers))
     if (chunksOf === null || first === null || first.done === true) return
     try {
       yield first.value

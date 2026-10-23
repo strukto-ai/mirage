@@ -420,6 +420,27 @@ describe('a transport failure', () => {
     },
   )
 
+  it('reopens a stream whose first attempt never answered', async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', () => {
+      calls += 1
+      return calls === 1
+        ? Promise.reject(failed)
+        : Promise.resolve(new Response('abcd', { headers: { ETag: '"v1"' } }))
+    })
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    const seen: string[] = []
+    const done = drain(
+      hubStream(anonymous(), 'http://127.0.0.1:1/x', (headers) => {
+        seen.push(headers.etag ?? '')
+      }),
+    )
+    await vi.runAllTimersAsync()
+    expect(await done).toBe('abcd')
+    expect(calls).toBe(2)
+    expect(seen).toEqual(['"v1"'])
+  })
+
   it('leaves any other rejection as it was', async () => {
     const aborted = new DOMException('no progress', 'TimeoutError')
     vi.stubGlobal('fetch', () => Promise.reject(aborted))

@@ -361,3 +361,34 @@ async def test_a_dropped_connection_is_resent_for_a_read_never_a_write(
             with pytest.raises(Exception):
                 await send(account, str(server.make_url("/x")))
     assert len(hits) == sent
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reopens_after_a_dropped_connection(monkeypatch):
+    hits: list[str] = []
+    seen: list[str] = []
+
+    async def first_drops(request: web.Request) -> web.Response:
+        hits.append(request.method)
+        if len(hits) == 1:
+            assert request.transport is not None
+            request.transport.close()
+        return web.Response(body=b"abcd", headers={"ETag": '"v1"'})
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    app = web.Application()
+    app.router.add_get("/f", first_drops)
+    async with TestServer(app) as server:
+        async with HfAccountAccessor(HfConfig()) as account:
+            chunks = [
+                c
+                async for c in hub_stream(
+                    account,
+                    str(server.make_url("/f")),
+                    2,
+                    on_response=lambda h: seen.append(h["etag"]),
+                )
+            ]
+    assert b"".join(chunks) == b"abcd"
+    assert len(hits) == 2
+    assert seen == ['"v1"']

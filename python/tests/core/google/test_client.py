@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import contextlib
 import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -484,23 +483,30 @@ async def test_a_dropped_write_is_sent_once():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("method", "retry", "sent"),
-    [
-        ("GET", None, 2),
-        ("HEAD", None, 2),
-        ("POST", None, 1),
-        ("PATCH", None, 1),
-        ("POST", READ_RETRY, 2),
-    ],
+    ("method", "retry"),
+    [("GET", None), ("HEAD", None), ("POST", READ_RETRY)],
 )
-async def test_the_request_door_picks_the_policy_by_method(
-    method, retry, sent
-):
+async def test_the_request_door_retries_a_read_by_method(method, retry):
     tm = _signed_in([])
     with aioresponses() as mock:
         mock.add(FILES, method, status=503)
-        mock.add(FILES, method, body=b"{}")
-        with contextlib.suppress(aiohttp.ClientResponseError):
-            await google_request(tm, method, FILES, retry=retry)
-        assert len(mock.requests[(method, URL(FILES))]) == sent
+        mock.add(FILES, method, payload={"ok": True})
+        assert await google_request(tm, method, FILES, retry=retry) == {
+            "ok": True
+        }
+        assert len(mock.requests[(method, URL(FILES))]) == 2
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
+async def test_the_request_door_never_retries_a_write_5xx(method):
+    tm = _signed_in([])
+    with aioresponses() as mock:
+        mock.add(FILES, method, status=503)
+        mock.add(FILES, method, payload={"ok": True})
+        with pytest.raises(aiohttp.ClientResponseError) as raised:
+            await google_request(tm, method, FILES)
+        assert len(mock.requests[(method, URL(FILES))]) == 1
+    assert raised.value.status == 503
     await tm.pool.close()
