@@ -187,6 +187,18 @@ unaffected. A bare reset remembers the last successful fixture **for that
 run**; a new or deleted run starts from the process's `--fixture` choice.
 `GET /_kit/health` reports `runs` as a count, never run identifiers.
 
+`/_kit/faults` arms fault plans on the tenant a request resolves to, under the
+same run prefix and tenant selectors as an API call. `POST {"plans": [...]}`
+appends plans; each names a `method` and a declared `route` (`/drive/v3/files`,
+`/v1/documents/:id`) and answers the next `times` (default 1) matching requests
+with `status`, optional `headers` and `body`, after `delay_ms`. A plan with no
+`status` never answers: the socket closes after `delay_ms`, which is a hang past
+the client's timeout or a reset connection. `GET` lists the plans with how many
+requests each served; `DELETE` disarms them and returns that list. A reset of
+the tenant disarms them too. A case's `faults` field arms its plans for the
+length of its command and fails the case when one is left unspent; only gws
+targets wire it today (`vfs/google/retry.json`).
+
 Stores the fakes do not own are namespaced per run by the runner's adapters
 and torn down after: S3 buckets `mirage-integ-<run>-...` (moto in-process by
 default), a Mongo database `mirage_integ_<run>`, redis key prefixes, and temp

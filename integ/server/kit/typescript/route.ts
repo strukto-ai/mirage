@@ -107,6 +107,13 @@ export class Router<C> {
     this.routes = routes
   }
 
+  // Whether a route is declared under exactly this method and path, which is
+  // how a fault plan names the route it fires on.
+  declares(method: string, path: string): boolean {
+    const want = method.toUpperCase()
+    return this.routes.some((spec) => spec.method === want && spec.path === path)
+  }
+
   match(method: string, pathname: string): Matched<C> | null {
     const want = method.toUpperCase()
     for (const spec of this.routes) {

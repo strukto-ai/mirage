@@ -18,3 +18,4 @@ export class TenantError extends KitError {}
 export class SeedError extends KitError {}
 export class FixtureError extends KitError {}
 export class RouteError extends KitError {}
+export class FaultError extends KitError {}

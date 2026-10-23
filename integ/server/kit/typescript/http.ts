@@ -14,10 +14,13 @@
 
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
+import { setTimeout as delay } from 'node:timers/promises'
 import { makePool, makeState } from './base.ts'
 import type { Fake, Runtime, RunState } from './base.ts'
 import type { MinimalClient } from './db.ts'
-import { FixtureError, KitError, ResetBodyError, TenantError } from './errors.ts'
+import { FaultError, FixtureError, KitError, ResetBodyError, TenantError } from './errors.ts'
+import { FAULTS_PATH, parseFaultBody } from './fault.ts'
+import type { Faults } from './fault.ts'
 import { Router } from './route.ts'
 import type { Ctx } from './route.ts'
 import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT } from './fixture.ts'
@@ -124,6 +127,51 @@ function parseResetRequest(raw: Buffer): JsonValue {
   }
 }
 
+// The same rule /reset's body follows: a malformed list of plans is the
+// caller's mistake, not a crashed fake.
+function parseFaultRequest(raw: Buffer): JsonValue {
+  try {
+    return parseBody(raw)
+  } catch (err: unknown) {
+    throw new FaultError(`${FAULTS_PATH} body is not JSON: ${(err as Error).message}`)
+  }
+}
+
+// The fault-plan hook every kit fake gets, on the tenant the request resolves
+// to exactly as an API request would. POST arms the listed plans after any
+// already armed, GET lists them with how many requests each has served, and
+// DELETE disarms them and answers that same list, so a harness clears a
+// case's faults and learns whether every one fired in one call. A /reset of
+// the tenant disarms them too.
+function faultsEndpoint<C extends MinimalClient>(
+  router: Router<C>,
+  faults: Faults,
+  method: string,
+  raw: Buffer,
+): Reply {
+  if (method === 'GET') return { status: 200, body: { plans: faults.report() } }
+  if (method === 'DELETE') {
+    const plans = faults.report()
+    faults.clear()
+    return { status: 200, body: { plans } }
+  }
+  if (method !== 'POST') {
+    return { status: 405, body: { error: 'method_not_allowed', method, path: FAULTS_PATH } }
+  }
+  try {
+    faults.arm(parseFaultBody(parseFaultRequest(raw), (m, r) => router.declares(m, r)))
+  } catch (err: unknown) {
+    if (err instanceof FaultError) {
+      return {
+        status: 400,
+        body: { error: 'bad_faults', kind: err.constructor.name, message: err.message },
+      }
+    }
+    throw err
+  }
+  return { status: 200, body: { plans: faults.report() } }
+}
+
 function send(res: ServerResponse, reply: Reply, head: boolean): void {
   const headers: Record<string, string> = { ...(reply.headers ?? {}) }
   let payload: Buffer
@@ -160,6 +208,7 @@ function envelope(service: string, err: unknown): Reply {
 // so, so the body is the fake's whenever it declares one. The fallback is a
 // 401 rather than a 404 because the tenant is reached through a credential in
 // every fake that has one, and refusing the credential is what the vendor does.
+// A null answer is an armed fault that leaves the request unanswered.
 async function answer<C extends MinimalClient>(
   rt: Runtime<C>,
   router: Router<C>,
@@ -167,7 +216,7 @@ async function answer<C extends MinimalClient>(
   url: URL,
   headers: Headers,
   raw: Buffer,
-): Promise<Reply> {
+): Promise<Reply | null> {
   const { service, tenantKind } = rt.fake.config
   // Stripped FIRST, so every path below is the one the fake declares. A run
   // prefix is transport, not routing: `/_run/h1/v1/users/me` is the same route
@@ -267,8 +316,20 @@ async function answer<C extends MinimalClient>(
     }
     throw err
   }
+  if (path === FAULTS_PATH)
+    return faultsEndpoint(router, rt.state(run).of(tenant).faults, method, raw)
   const hit = router.match(method, path)
   if (hit === null) return unrouted(service, method, path)
+  // Ahead of the run's queue and of the handler: a faulted request touches
+  // no row, so it neither waits behind a write nor holds one up while it
+  // hangs, and a write route faulted with a 5xx has provably not applied.
+  const fault = rt.state(run).peek(tenant)?.faults.take(hit.spec.method, hit.spec.path) ?? null
+  if (fault !== null) {
+    // Unreferenced, so a hang still pending when the server closes does not
+    // keep the process alive past its own teardown.
+    if (fault.delayMs > 0) await delay(fault.delayMs, undefined, { ref: false })
+    return fault.reply
+  }
   const work = (): Promise<Reply> | Reply => {
     const runState = rt.state(run)
     const refuse = rt.fake.unknownTenant
@@ -324,7 +385,8 @@ export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server
       }
       void answer(rt, router, method, url, req.headers as Headers, Buffer.concat(chunks))
         .then((reply) => {
-          send(res, reply, method === 'HEAD')
+          if (reply === null) res.destroy()
+          else send(res, reply, method === 'HEAD')
         })
         .catch((err: unknown) => {
           send(res, envelope(service, err), method === 'HEAD')

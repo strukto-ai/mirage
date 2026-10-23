@@ -131,6 +131,10 @@ import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 export interface Open {
   ws: ExecWorkspace
   cleanup: () => Promise<void>
+  // The target's kit fake for this run, where a case arms fault plans. Only
+  // gws sets it today; a case naming faults on any other target is refused
+  // rather than run unfaulted.
+  faults?: string
   shadow?: () => ExecWorkspace
   mutate?: (path: string, content: Uint8Array) => Promise<void>
   remove?: (path: string) => Promise<void>
@@ -1998,7 +2002,7 @@ async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   const cleanup = async (): Promise<void> => {
     await opened.closeAll()
   }
-  return { ws: opened.ws, shadow: () => install(opened.shadow()), cleanup }
+  return { ws: opened.ws, shadow: () => install(opened.shadow()), cleanup, faults: base }
 }
 
 // The fake Slack Web API server is external and shared across both hosts;

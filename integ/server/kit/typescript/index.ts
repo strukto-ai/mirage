@@ -29,6 +29,7 @@ export type { KitConfig } from './config.ts'
 export { ClientPool, prepareTemplate } from './db.ts'
 export type { ClientCtor, MinimalClient, PoolOptions } from './db.ts'
 export {
+  FaultError,
   FixtureError,
   KitError,
   ResetBodyError,

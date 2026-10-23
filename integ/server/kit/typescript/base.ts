@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Clock } from './clock.ts'
+import { Faults } from './fault.ts'
 import { Minter } from './mint.ts'
 import { ClientPool } from './db.ts'
 import type { ClientCtor, MinimalClient } from './db.ts'
@@ -83,10 +84,12 @@ export interface Fake<C extends MinimalClient> {
 // called `minter.reset()` on the counters the first host was still minting
 // from, so that host's next id repeated one it had already handed out, and
 // `clock.setEpoch()` rebased its timestamps backwards mid-run. A tenant is one
-// caller's whole world, so its clock and its minter are its own.
+// caller's whole world, so its clock and its minter are its own. Its armed
+// fault plans are too, and a reset forgets them with the rest.
 export interface TenantState {
   clock: Clock
   minter: Minter
+  faults: Faults
 }
 
 // Per-run mutable state: the tenants living in one SQLite file. A run is still
@@ -113,6 +116,7 @@ export class RunState {
     const made = {
       clock: new Clock(),
       minter: new Minter(this.sharing, this.format),
+      faults: new Faults(),
     }
     this.tenants.set(tenant, made)
     return made
@@ -127,7 +131,15 @@ export class RunState {
     const st = this.of(tenant)
     st.clock.setEpoch(epoch)
     st.minter.reset()
+    st.faults.clear()
     this.seeded.delete(tenant)
+  }
+
+  // The tenant's state if any request or reset has made it, without making
+  // it: a lookup on every request must not mint a world for each name a
+  // refused caller tries.
+  peek(tenant: string): TenantState | undefined {
+    return this.tenants.get(tenant)
   }
 
   markSeeded(tenant: string): void {

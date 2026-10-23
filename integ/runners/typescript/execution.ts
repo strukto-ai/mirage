@@ -15,6 +15,7 @@
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/index'
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import type { FaultReport } from '../../server/kit/typescript/fault.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -71,6 +72,9 @@ export interface Case {
   // defines. Named rather than silently omitted.
   explain_blind?: string
   scenario?: ScenarioStep[]
+  // Fault plans armed on the target's kit fake for the length of the
+  // command, in the shape its /_kit/faults reads; every plan must be spent.
+  faults?: Record<string, unknown>[]
   expect: Expect
   _source?: string
 }
@@ -393,10 +397,36 @@ export function undecodable(streams: Record<string, Uint8Array>): string[] {
     .map(([name]) => `${name}: not UTF-8; pin the bytes with od -An -tx1`)
 }
 
+/** Arm a case's fault plans on its target's kit fake, scoped to this run. */
+async function armFaults(base: string, plans: Record<string, unknown>[]): Promise<void> {
+  const r = await fetch(`${base}/_kit/faults`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ plans }),
+  })
+  if (r.status !== 200) throw new Error(`fault plans refused: ${await r.text()}`)
+}
+
+/**
+ * Disarm every plan on the fake, naming each one that went unspent. A plan
+ * that served fewer requests than it was armed for means the command never
+ * made the call the case meant to fault, and an output that matches anyway
+ * proves nothing about the fault.
+ */
+async function disarmFaults(base: string): Promise<string[]> {
+  const r = await fetch(`${base}/_kit/faults`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`fault plans not disarmed: ${String(r.status)}`)
+  const { plans } = (await r.json()) as { plans: FaultReport[] }
+  return plans
+    .filter((p) => p.served !== p.times)
+    .map((p) => `faults: ${p.method} ${p.route} served ${String(p.served)} of ${String(p.times)}`)
+}
+
 export async function runCase(
   ws: ExecWorkspace,
   c: Case,
   reasons: readonly string[] = [],
+  faults?: string,
 ): Promise<{
   exitCode: number
   out: string
@@ -438,8 +468,19 @@ export async function runCase(
     recorded = ws.decisions.pending().length - before
   }
   const recordStart = c.check?.read_paths === true ? ws.vfs.records.length : 0
-  const result = await ws.shell(c.command, c.session === undefined ? {} : { sessionId: c.session })
-  const elapsed = (performance.now() - start) / 1000
+  if (c.faults !== undefined) {
+    if (faults === undefined) throw new Error(`case ${c.id}: faults need a target on a kit fake`)
+    await armFaults(faults, c.faults)
+  }
+  let unspent: string[] = []
+  let result: ExecResult
+  let elapsed: number
+  try {
+    result = await ws.shell(c.command, c.session === undefined ? {} : { sessionId: c.session })
+    elapsed = (performance.now() - start) / 1000
+  } finally {
+    if (c.faults !== undefined && faults !== undefined) unspent = await disarmFaults(faults)
+  }
   const out = DEC.decode(result.stdout)
   const err = DEC.decode(result.stderr)
   const checkOut =
@@ -461,6 +502,7 @@ export async function runCase(
     checkOut,
     notes: [
       ...undecodable({ stdout: result.stdout, stderr: result.stderr }),
+      ...unspent,
       ...(checks ? explainNotes(predicted, recorded, result.exitCode, out, err) : []),
     ],
   }

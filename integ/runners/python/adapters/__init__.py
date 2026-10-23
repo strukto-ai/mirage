@@ -3351,7 +3351,7 @@ def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
 
 async def open_target(
     target: dict, read: ReadSpec | None = None
-) -> tuple[Workspace, Callable[[], Awaitable[None]]]:
+) -> tuple[Workspace, Callable[[], Awaitable[None]], str | None]:
     run_id = uuid.uuid4().hex[:8]
     service = await make_service(target, run_id)
     mounts, cleanups = await build_mounts(target, run_id, service)
@@ -3404,7 +3404,15 @@ async def open_target(
     # attributes.
     if target.get("env"):
         ws.env = {**ws.env, **target["env"]}
-    return ws, functools.partial(teardown_target, [ws], cleanups, service)
+    # Where a case arms fault plans: the target's kit fake, scoped to this
+    # run. Only gws is wired today; a case naming faults on any other
+    # target is refused rather than run unfaulted.
+    faults = service.url if isinstance(service, GwsService) else None
+    return (
+        ws,
+        functools.partial(teardown_target, [ws], cleanups, service),
+        faults,
+    )
 
 
 def apply_mount_read(

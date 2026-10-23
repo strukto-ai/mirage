@@ -222,7 +222,7 @@ export async function runTarget(
   if (declaresProfiles && !PROFILE_OPENERS.includes(target.mounts[0].vfs)) {
     throw new Error(`target ${target.id}: profiles ride ${PROFILE_OPENERS.join(', ')} mounts`)
   }
-  const { ws, cleanup } = await ADAPTERS[target.mounts[0].vfs](target)
+  const { ws, cleanup, faults } = await ADAPTERS[target.mounts[0].vfs](target)
   try {
     // A target's declared environment. A CLI whose spec reads a variable
     // (ntn's --notion-version off NOTION_API_VERSION) behaves differently with
@@ -271,7 +271,12 @@ export async function runTarget(
       if (!c.targets.includes(target.id)) continue
       if (c.read !== undefined) continue
       const bound = bindMount(c, target.mounts[0].path)
-      const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(ws, bound, reasons)
+      const { exitCode, out, err, elapsed, checkOut, notes } = await runCase(
+        ws,
+        bound,
+        reasons,
+        faults,
+      )
       if (emit !== null) {
         emit.push({
           target: target.id,
