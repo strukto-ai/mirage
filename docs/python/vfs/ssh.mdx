@@ -29,18 +29,20 @@ ws = Workspace({"/remote": vfs}, mode=MountMode.WRITE)
 ```
 
 {/* generated: config-table ssh start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `host` | yes |  | Host name, IP address or `~/.ssh/config` alias of the remote. |
-| `hostname` | no |  | Address to connect to instead of `host`. |
-| `port` | no |  | SSH port; unset uses the client's default, `22` unless `~/.ssh/config` sets one for the host. |
-| `username` | no |  | Login user; unset uses the local user name unless `~/.ssh/config` sets one for the host. |
-| `identity_file` | no |  | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh`. |
-| `password` | no |  | Password for password authentication; prefer `identity_file`. Redacted in snapshots. |
-| `passphrase` | no |  | Passphrase of an encrypted `identity_file`; ignored when `identity_file` is unset. Redacted in snapshots. |
-| `root` | no | `'/'` | Path on the remote that becomes the mount root. |
-| `timeout` | no | `30` | Seconds to wait for the TCP connection, and again for authentication. |
-| `known_hosts` | no |  | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Host name, IP address or `~/.ssh/config` alias of the remote. |
+| <code style={{ whiteSpace: 'nowrap' }}>hostname</code> | Address to connect to instead of `host`. |
+| <code style={{ whiteSpace: 'nowrap' }}>port</code> | SSH port; unset uses the client's default, `22` unless `~/.ssh/config` sets one for the host. |
+| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name unless `~/.ssh/config` sets one for the host. |
+| <code style={{ whiteSpace: 'nowrap' }}>identity_file</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh`. |
+| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identity_file`. |
+| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted `identity_file`; ignored when `identity_file` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the TCP connection, and again for authentication. |
+| <code style={{ whiteSpace: 'nowrap' }}>known_hosts</code> | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table ssh end */}
 
 The `host` field matches entries in `~/.ssh/config`, so existing SSH

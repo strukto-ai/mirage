@@ -50,10 +50,10 @@ console.log(text)
 {/* generated: exports vercel start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
-| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
-| `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
-| `mirageTools` | Returns Mirage's tool table as AI SDK tools, `{ shell, read, write, edit, ls, grep, glob }` as far as the session's profile allows them (`MirageToolOperations.names`), to spread into `tools`; `options` takes `sessionId` and `staleWriteProtection`. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>BuildSystemPromptOptions</code> | Options for `buildSystemPrompt`: which mounts to describe and what to append. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageTools</code> | Returns Mirage's tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`) as AI SDK tools to spread into `tools`, limited to what the session's profile allows. |
 {/* generated: exports vercel end */}
 
 `read` uses AI SDK 7's `toModelOutput`: text files come back as numbered lines, PDFs and supported images become file content parts, and other binary formats return a metadata note.

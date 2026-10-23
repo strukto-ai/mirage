@@ -26,10 +26,11 @@ import { type ConfigShape, configShapes, fieldDoc, moduleFile, parse } from './v
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 const PACKAGES = resolve(ROOT, 'typescript', 'packages')
 const DOCS = resolve(ROOT, 'docs', 'typescript')
-const SECRET_NOTE = 'Redacted in snapshots.'
+const SECRET_NOTE = 'Fields marked secret are redacted in snapshots.'
+const MIB = 1024 * 1024
 const MARKER =
-  /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+) start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
-const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+) (start|end) \*\/\}/g
+  /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+)(?: omit=(?<omit>[\w,]+))? start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
+const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+)(?: omit=[\w,]+)? (start|end) \*\/\}/g
 const CODE_SPAN = /(`+)(.+?)\1/g
 const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'node', 'server'])
 
@@ -83,8 +84,30 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
   { feature: '1Password', packages: ['@1password/sdk'], needs: 'The `1password` secret source.' },
 ]
 
-type Rendered = [body: string, bare: string[]]
-type Renderers = Map<string, Map<string, () => Rendered>>
+interface Rendered {
+  body: string
+  bare: string[]
+  unknown: string[]
+}
+type Renderer = (omit: ReadonlySet<string>) => Rendered
+type Renderers = Map<string, Map<string, Renderer>>
+
+// A field or symbol name that the table never breaks mid-token.
+function nameCell(name: string): string {
+  return `<code style={{ whiteSpace: 'nowrap' }}>${name}</code>`
+}
+
+// A default as written in the schema; a constant product such as
+// `10 * 1024 * 1024` is shown as its value, with MiB when it is whole.
+function defaultText(text: string): string {
+  if (!/^[\d_\s*]+$/.test(text)) return `default \`${text.replaceAll('|', '\\|')}\``
+  const value = text
+    .split('*')
+    .map((part) => Number(part.trim().replaceAll('_', '')))
+    .reduce((a, b) => a * b, 1)
+  const mib = value >= MIB && value % MIB === 0 ? ` (${String(value / MIB)} MiB)` : ''
+  return `default \`${String(value)}\`${mib}`
+}
 
 function escapeProse(text: string): string {
   return text
@@ -108,18 +131,32 @@ function cell(text: string): string {
   return out + escapeProse(flat.slice(last))
 }
 
-function configTable(shape: ConfigShape): Rendered {
-  const rows = ['| Field | Required | Default | Description |', '| --- | --- | --- | --- |']
+// Two columns: the name cell carries whether the field is required, its
+// default and whether it is secret, so the description gets the width.
+// `omit` drops fields the page's mount ignores.
+function configTable(shape: ConfigShape, omit: ReadonlySet<string>): Rendered {
+  const rows = ['| Field | Description |', '| --- | --- |']
   const bare: string[] = []
+  let showsSecret = false
   for (const [name, field] of Object.entries(shape.fields)) {
+    if (omit.has(name)) continue
     const doc = fieldDoc(field, PACKAGES)
     const description = doc.description?.trim() ?? ''
     if (description === '') bare.push(name)
-    const text = doc.secret ? `${description} ${SECRET_NOTE}`.trim() : description
-    const fallback = doc.default === undefined ? '' : `\`${doc.default.replaceAll('|', '\\|')}\``
-    rows.push(`| \`${name}\` | ${field.required ? 'yes' : 'no'} | ${fallback} | ${cell(text)} |`)
+    const tags = [
+      ...(field.required ? ['required'] : []),
+      ...(!field.required && doc.default !== undefined ? [defaultText(doc.default)] : []),
+      ...(doc.secret ? ['secret'] : []),
+    ]
+    if (doc.secret) showsSecret = true
+    const head = tags.length > 0 ? `${nameCell(name)}<br />${tags.join(', ')}` : nameCell(name)
+    rows.push(`| ${head} | ${cell(description)} |`)
   }
-  return [rows.join('\n'), bare]
+  return {
+    body: rows.join('\n') + (showsSecret ? `\n\n${SECRET_NOTE}` : ''),
+    bare,
+    unknown: [...omit].filter((name) => !(name in shape.fields)),
+  }
 }
 
 function sameFields(a: ConfigShape | null | undefined, b: ConfigShape | null): boolean {
@@ -130,16 +167,16 @@ function sameFields(a: ConfigShape | null | undefined, b: ConfigShape | null): b
 // Node's schemas under their registry names. A browser schema whose field
 // set differs from node's (the presigned S3 aliases, the proxied Slack,
 // Discord and Notion) gets a key of its own, `browser/<name>`.
-function configRenderers(): Map<string, () => Rendered> {
+function configRenderers(): Map<string, Renderer> {
   const node = configShapes(resolve(PACKAGES, 'node', 'src', 'vfs', 'registry.ts'), PACKAGES)
   const browser = configShapes(resolve(PACKAGES, 'browser', 'src', 'vfs', 'registry.ts'), PACKAGES)
-  const out = new Map<string, () => Rendered>()
+  const out = new Map<string, Renderer>()
   for (const [name, shape] of Object.entries(node)) {
-    if (shape !== null) out.set(name, () => configTable(shape))
+    if (shape !== null) out.set(name, (omit) => configTable(shape, omit))
   }
   for (const [name, shape] of Object.entries(browser)) {
     if (shape !== null && !sameFields(node[name], shape))
-      out.set(`browser/${name}`, () => configTable(shape))
+      out.set(`browser/${name}`, (omit) => configTable(shape, omit))
   }
   return out
 }
@@ -181,7 +218,7 @@ function peersTable(): Rendered {
       .join(', ')
     rows.push(`| ${feature} | ${listed.replaceAll('|', '\\|')} | ${needs} |`)
   }
-  return [rows.join('\n'), []]
+  return { body: rows.join('\n'), bare: [], unknown: [] }
 }
 
 // The first paragraph of the `/** */` block right above a declaration.
@@ -315,14 +352,26 @@ function exportsOf(file: string): [string, string][] {
   return out
 }
 
-function exportsTable(file: string): Rendered {
-  const rows = ['| Symbol | Purpose |', '| --- | --- |']
+// One row per distinct summary: names documented alike, such as a family
+// of constants, share a row.
+function exportsTable(file: string, omit: ReadonlySet<string>): Rendered {
+  const exports = exportsOf(file)
+  const groups = new Map<string, string[]>()
   const bare: string[] = []
-  for (const [name, text] of exportsOf(file)) {
-    if (text === '') bare.push(name)
-    rows.push(`| \`${name}\` | ${cell(text)} |`)
+  for (const [name, text] of exports) {
+    if (omit.has(name)) continue
+    if (text === '') {
+      bare.push(name)
+      continue
+    }
+    groups.set(text, [...(groups.get(text) ?? []), name])
   }
-  return [rows.join('\n'), bare]
+  const rows = ['| Symbol | Purpose |', '| --- | --- |']
+  for (const [text, names] of groups) {
+    rows.push(`| ${names.map(nameCell).join('<br />')} | ${cell(text)} |`)
+  }
+  const known = new Set(exports.map(([name]) => name))
+  return { body: rows.join('\n'), bare, unknown: [...omit].filter((name) => !known.has(name)) }
 }
 
 function renderers(): Renderers {
@@ -333,14 +382,14 @@ function renderers(): Renderers {
     .sort(compareCodePoints)
   return new Map([
     ['config-table', configRenderers()],
-    ['peers', new Map([['optional', peersTable]])],
+    ['peers', new Map<string, Renderer>([['optional', peersTable]])],
     [
       'exports',
       new Map(
         adapters.flatMap((pkg) =>
-          [...entriesOf(pkg)].map(([key, file]): [string, () => Rendered] => [
+          [...entriesOf(pkg)].map(([key, file]): [string, Renderer] => [
             key,
-            () => exportsTable(file),
+            (omit) => exportsTable(file, omit),
           ]),
         ),
       ),
@@ -385,6 +434,7 @@ function selftest(): void {
   const table = '| a |\n| --- |'
   const good = `${start}\n${table}\n${end}\n`
   assert.ok(markersPaired(good))
+  assert.ok(markersPaired(good.replace(' x start', ' x omit=a,b start')))
   assert.ok(markersPaired('no markers\n'))
   for (const broken of [
     `${table}\n${end}\n`,
@@ -411,14 +461,17 @@ function regenerate(
       `${page}: generated markers must pair up, each start followed by its own end on a line of its own`,
     )
   }
-  return text.replace(MARKER, (whole: string, kind: string, key: string) => {
+  return text.replace(MARKER, (whole: string, kind: string, key: string, omitted?: string) => {
     const render = kinds.get(kind)?.get(key)
     if (render === undefined) {
       errors.push(`${page}: nothing generates \`${kind} ${key}\``)
       return whole
     }
     seen.add(`${kind} ${key}`)
-    const [body, bare] = render()
+    const omit = new Set((omitted ?? '').split(',').filter(Boolean))
+    const { body, bare, unknown } = render(omit)
+    if (unknown.length > 0)
+      errors.push(`${page}: \`${kind} ${key}\` omits ${unknown.join(', ')}, which it does not have`)
     if (bare.length > 0) {
       errors.push(
         `${page}: \`${kind} ${key}\` renders without a description for ${bare.join(', ')}; ` +

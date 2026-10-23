@@ -43,22 +43,24 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 `group_by` at different columns and the folder tree changes.
 
 {/* generated: config-table lancedb start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `uri` | yes |  | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
-| `api_key` | no |  | API key for LanceDB Cloud or Enterprise. Redacted in snapshots. |
-| `region` | no | `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
-| `host_override` | no |  | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
-| `storage_options` | no |  | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
-| `table` | no |  | Table the mount root shows; unset lists every table as a top-level folder. |
-| `group_by` | no | `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
-| `id_column` | no | `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blob_ext>`). |
-| `title_column` | no |  | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
-| `blob_column` | no |  | Column of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the card; unset adds no blob file. |
-| `blob_ext` | no | `'bin'` | File extension of the blob file, without the dot. |
-| `vector_column` | no |  | Embedding column left out of cards and listings. |
-| `search_limit` | no | `10` | Results `search` returns when `--top-k` is not given. |
-| `max_rows` | no | `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />secret | API key for LanceDB Cloud or Enterprise. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
+| <code style={{ whiteSpace: 'nowrap' }}>host_override</code> | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
+| <code style={{ whiteSpace: 'nowrap' }}>storage_options</code> | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
+| <code style={{ whiteSpace: 'nowrap' }}>table</code> | Table the mount root shows; unset lists every table as a top-level folder. |
+| <code style={{ whiteSpace: 'nowrap' }}>group_by</code><br />default `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
+| <code style={{ whiteSpace: 'nowrap' }}>id_column</code><br />default `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blob_ext>`). |
+| <code style={{ whiteSpace: 'nowrap' }}>title_column</code> | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
+| <code style={{ whiteSpace: 'nowrap' }}>blob_column</code> | Column of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the card; unset adds no blob file. |
+| <code style={{ whiteSpace: 'nowrap' }}>blob_ext</code><br />default `'bin'` | File extension of the blob file, without the dot. |
+| <code style={{ whiteSpace: 'nowrap' }}>vector_column</code> | Embedding column left out of cards and listings. |
+| <code style={{ whiteSpace: 'nowrap' }}>search_limit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_rows</code><br />default `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table lancedb end */}
 
 ## Filesystem layout

@@ -22,6 +22,7 @@ from collections.abc import Callable
 from enum import Enum
 from functools import partial
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
@@ -32,18 +33,38 @@ from mirage.vfs.secrets import secret_field_names
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs" / "python"
 AGENTS = ROOT / "python" / "mirage" / "agents"
-SECRET_NOTE = "Redacted in snapshots."
+SECRET_NOTE = "Fields marked secret are redacted in snapshots."
+MIB = 1024 * 1024
 MARKER = re.compile(
-    r"^\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+) start \*/\}\n"
+    r"^\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+)"
+    r"(?: omit=(?P<omit>[\w,]+))? start \*/\}\n"
     r"(?P<body>.*?)"
     r"^\{/\* generated: (?P=kind) (?P=key) end \*/\}$",
     re.M | re.S,
 )
 TOKEN = re.compile(
-    r"\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+) "
-    r"(?P<edge>start|end) \*/\}"
+    r"\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+)"
+    r"(?: omit=[\w,]+)? (?P<edge>start|end) \*/\}"
 )
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
+
+
+class Rendered(NamedTuple):
+    body: str
+    bare: list[str]
+    unknown: list[str]
+
+
+Renderer = Callable[[frozenset[str]], Rendered]
+
+
+def name_cell(name: str) -> str:
+    """A field or symbol name that the table never breaks mid-token.
+
+    Args:
+        name (str): The identifier, made of word characters and dots.
+    """
+    return f"<code style={{{{ whiteSpace: 'nowrap' }}}}>{name}</code>"
 
 
 def cell(text: str) -> str:
@@ -155,45 +176,57 @@ def description(model: type[BaseModel], name: str) -> str:
     return ""
 
 
-def _default_cell(field: FieldInfo) -> str:
+def _default_text(field: FieldInfo) -> str:
     if field.is_required():
-        return ""
+        return "required"
     value = field.get_default(call_default_factory=True)
     if value is None:
         return ""
     if isinstance(value, Enum):
         value = value.value
-    return f"`{value!r}`".replace("|", "\\|")
+    text = f"default `{value!r}`".replace("|", "\\|")
+    if type(value) is int and value >= MIB and value % MIB == 0:
+        text += f" ({value // MIB} MiB)"
+    return text
 
 
-def config_table(model: type[BaseModel]) -> tuple[str, list[str]]:
-    """Render a config model as a Markdown table.
+def config_table(
+    model: type[BaseModel], omit: frozenset[str] = frozenset()
+) -> Rendered:
+    """Render a config model as a two-column Markdown table.
+
+    The name cell carries whether the field is required, its default and
+    whether it is secret, so the description gets the width.
 
     Args:
         model (type[BaseModel]): The VFS config model.
-
-    Returns:
-        tuple[str, list[str]]: The table, and the wire names of the fields
-            that carry no description.
+        omit (frozenset[str]): Wire names this page leaves out, because
+            the mount it documents ignores them.
     """
     secrets = set(secret_field_names(model))
-    rows = [
-        "| Field | Required | Default | Description |",
-        "| --- | --- | --- | --- |",
-    ]
+    rows = ["| Field | Description |", "| --- | --- |"]
     bare: list[str] = []
+    wires: set[str] = set()
+    shows_secret = False
     for name, field in model.model_fields.items():
         wire = field.alias or name
+        wires.add(wire)
+        if wire in omit:
+            continue
         text = description(model, name)
         if not text:
             bare.append(wire)
+        tags = [t for t in (_default_text(field),) if t]
         if name in secrets:
-            text = f"{text} {SECRET_NOTE}".strip()
+            tags.append("secret")
+            shows_secret = True
         rows.append(
-            f"| `{wire}` | {'yes' if field.is_required() else 'no'} "
-            f"| {_default_cell(field)} | {cell(text)} |"
+            f"| {name_cell(wire)}<br />{', '.join(tags)} | {cell(text)} |"
+            if tags
+            else f"| {name_cell(wire)} | {cell(text)} |"
         )
-    return "\n".join(rows), bare
+    note = f"\n\n{SECRET_NOTE}" if shows_secret else ""
+    return Rendered("\n".join(rows) + note, bare, sorted(omit - wires))
 
 
 def _module_file(module: str) -> Path:
@@ -310,25 +343,46 @@ def adapters() -> list[str]:
     )
 
 
-def exports_table(name: str) -> tuple[str, list[str]]:
+def exports_rows(
+    exports: list[tuple[str, str]], omit: frozenset[str]
+) -> Rendered:
+    """Render public names as a table, one row per distinct summary.
+
+    Names whose summaries are identical share a row, so a family of
+    constants documented alike reads as one entry.
+
+    Args:
+        exports (list[tuple[str, str]]): Names in order, with summaries.
+        omit (frozenset[str]): Names this page leaves out.
+    """
+    groups: dict[str, list[str]] = {}
+    bare: list[str] = []
+    for symbol, text in exports:
+        if symbol in omit:
+            continue
+        if not text:
+            bare.append(symbol)
+            continue
+        groups.setdefault(text, []).append(symbol)
+    rows = ["| Symbol | Purpose |", "| --- | --- |"]
+    for text, symbols in groups.items():
+        names = "<br />".join(name_cell(s) for s in symbols)
+        rows.append(f"| {names} | {cell(text)} |")
+    known = {symbol for symbol, _ in exports}
+    return Rendered("\n".join(rows), bare, sorted(omit - known))
+
+
+def exports_table(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
     """Render an adapter's public names as a Markdown table.
 
     Args:
         name (str): The adapter package under ``mirage.agents``.
-
-    Returns:
-        tuple[str, list[str]]: The table, and the names with no summary.
+        omit (frozenset[str]): Names this page leaves out.
     """
-    rows = ["| Symbol | Purpose |", "| --- | --- |"]
-    bare: list[str] = []
-    for symbol, text in adapter_exports(name):
-        if not text:
-            bare.append(symbol)
-        rows.append(f"| `{symbol}` | {cell(text)} |")
-    return "\n".join(rows), bare
+    return exports_rows(adapter_exports(name), omit)
 
 
-def renderers() -> dict[str, dict[str, Callable[[], tuple[str, list[str]]]]]:
+def renderers() -> dict[str, dict[str, Renderer]]:
     """Each marker kind's keys, mapped to the function rendering one."""
     models = config_models()
     return {
@@ -373,6 +427,7 @@ def selftest() -> None:
     table = "| a |\n| --- |"
     good = f"{start}\n{table}\n{end}\n"
     assert markers_paired(good)
+    assert markers_paired(good.replace(" x start", " x omit=a,b start"))
     assert markers_paired("no markers\n")
     for broken in (
         f"{table}\n{end}\n",
@@ -389,7 +444,7 @@ def selftest() -> None:
 def regenerate(
     text: str,
     page: str,
-    kinds: dict[str, dict[str, Callable[[], tuple[str, list[str]]]]],
+    kinds: dict[str, dict[str, Renderer]],
     seen: set[tuple[str, str]],
     errors: list[str],
 ) -> str:
@@ -398,8 +453,8 @@ def regenerate(
     Args:
         text (str): The page as it is on disk.
         page (str): The page's path, for messages.
-        kinds (dict[str, dict[str, Callable[[], tuple[str, list[str]]]]]):
-            The renderers, by marker kind and key.
+        kinds (dict[str, dict[str, Renderer]]): The renderers, by marker
+            kind and key.
         seen (set[tuple[str, str]]): Collects the regions found.
         errors (list[str]): Collects the problems found.
     """
@@ -416,7 +471,13 @@ def regenerate(
             errors.append(f"{page}: nothing generates `{kind} {key}`")
             return match.group(0)
         seen.add((kind, key))
-        body, bare = fn()
+        omit = frozenset((match["omit"] or "").split(",")) - {""}
+        body, bare, unknown = fn(omit)
+        if unknown:
+            errors.append(
+                f"{page}: `{kind} {key}` omits {', '.join(unknown)}, "
+                "which it does not have"
+            )
         if bare:
             errors.append(
                 f"{page}: `{kind} {key}` renders without a description "

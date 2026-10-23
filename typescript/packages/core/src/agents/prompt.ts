@@ -35,9 +35,11 @@ Use the shell tool for complex operations. Use read/write/edit for simple file o
 `
 
 /**
- * Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose
- * mounts to describe, or `mountInfo` mapping a prefix to a description when
- * there is no workspace, and `extraInstructions` to append.
+ * Options for `buildSystemPrompt`: which mounts to describe and what to append.
+ *
+ * Pass a `workspace` (and `sessionId`) whose mounts to describe, or
+ * `mountInfo` mapping a prefix to a description when there is no workspace,
+ * and `extraInstructions` to append.
  */
 export interface BuildSystemPromptOptions {
   workspace?: Workspace

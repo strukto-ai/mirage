@@ -33,18 +33,20 @@ await ws.shell('ls /remote')
 ```
 
 {/* generated: config-table ssh start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `host` | yes |  | DNS name or IP address of the remote. |
-| `hostname` | no |  | Address to connect to instead of `host`. |
-| `port` | no | `22` | SSH port. |
-| `username` | no |  | Login user; unset uses the local user name. |
-| `password` | no |  | Password for password authentication; prefer `identityFile`. Redacted in snapshots. |
-| `identityFile` | no |  | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`). |
-| `passphrase` | no |  | Passphrase of an encrypted private key, from `identityFile` or a default key. Redacted in snapshots. |
-| `root` | no | `'/'` | Path on the remote that becomes the mount root. |
-| `timeout` | no | `30` | Seconds to wait for the connection to be ready, authentication included. |
-| `knownHosts` | no |  | Accepted but not applied: this backend does not verify host keys. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | DNS name or IP address of the remote. |
+| <code style={{ whiteSpace: 'nowrap' }}>hostname</code> | Address to connect to instead of `host`. |
+| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `22` | SSH port. |
+| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name. |
+| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identityFile`. |
+| <code style={{ whiteSpace: 'nowrap' }}>identityFile</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`). |
+| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted private key, from `identityFile` or a default key. |
+| <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the connection to be ready, authentication included. |
+| <code style={{ whiteSpace: 'nowrap' }}>knownHosts</code> | Accepted but not applied: this backend does not verify host keys. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table ssh end */}
 
 ## Mount mode

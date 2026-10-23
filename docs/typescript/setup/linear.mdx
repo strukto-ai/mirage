@@ -19,7 +19,6 @@ import { LinearVFS, MountMode, Workspace } from '@struktoai/mirage-node'
 
 const linear = new LinearVFS({
   apiKey: process.env.LINEAR_API_KEY!,
-  workspace: 'strukto',
 })
 
 const ws = new Workspace({ '/linear': linear }, { mode: MountMode.READ })
@@ -43,13 +42,15 @@ const linear = new LinearVFS({
 ## Config
 
 {/* generated: config-table linear start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `apiKey` | yes |  | Linear personal API key. Redacted in snapshots. |
-| `workspace` | no |  | Accepted for compatibility; not read. |
-| `teamIds` | no |  | Only these teams are listed or readable. Unset shows every team the key can reach. |
-| `baseUrl` | no | `'https://api.linear.app/graphql'` | Linear GraphQL endpoint; override to point at a fake or proxy. |
-| `contentSearch` | no | `false` | Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Linear indexes a write some time after it lands, so a fresh edit can be missed. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Linear personal API key. |
+| <code style={{ whiteSpace: 'nowrap' }}>workspace</code> | Accepted for compatibility; not read. |
+| <code style={{ whiteSpace: 'nowrap' }}>teamIds</code> | Only these teams are listed or readable. Unset shows every team the key can reach. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.linear.app/graphql'` | Linear GraphQL endpoint; override to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Search lags writes. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table linear end */}
 
 ## Mount mode

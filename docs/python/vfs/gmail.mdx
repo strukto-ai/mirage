@@ -25,16 +25,17 @@ vfs = GmailVFS(config=config)
 ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
 ```
 
-{/* generated: config-table gmail start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `access_token` | no |  | OAuth access token, or a zero-argument callable that returns one, read on every request. Use it instead of `client_id` and `refresh_token` when your app already manages OAuth; it wins when both are set. Redacted in snapshots. |
-| `client_id` | no |  | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
-| `client_secret` | no |  | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. Redacted in snapshots. |
-| `refresh_token` | no |  | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. Redacted in snapshots. |
-| `api_base` | no |  | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| `folder_id` | no |  | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
-| `content_search` | no | `False` | Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body. |
+{/* generated: config-table gmail omit=folder_id start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
+| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table gmail end */}
 
 ## Filesystem Layout

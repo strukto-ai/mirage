@@ -44,14 +44,16 @@ memory, refreshing ~5 minutes before expiry.
 ### Config Reference
 
 {/* generated: config-table dropbox start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `client_id` | yes |  | Dropbox app key. |
-| `client_secret` | yes |  | Dropbox app secret. Redacted in snapshots. |
-| `refresh_token` | yes |  | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. Redacted in snapshots. |
-| `root_path` | no | `'/'` | Dropbox folder the mount uses as its root, such as `/Projects`; `/` is the account root. `..` segments are rejected. |
-| `content_search` | no | `False` | Let `grep -w` and `rg -w` read only the files Dropbox search (`/2/files/search_v2`) names. Full-text search needs a Professional, Essentials or Business plan or higher; leave it off on other plans, where search matches file names only. Dropbox indexes a write with a delay, so a file that holds the word can be left out. |
-| `endpoint` | no |  | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>client_id</code><br />required | Dropbox app key. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />required, secret | Dropbox app secret. |
+| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
+| <code style={{ whiteSpace: 'nowrap' }}>root_path</code><br />default `'/'` | Dropbox folder the mount uses as its root, such as `/Projects`; `/` is the account root. `..` segments are rejected. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table dropbox end */}
 
 ## Mount a subfolder

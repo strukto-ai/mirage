@@ -27,6 +27,5 @@ class NotionConfig(BaseModel):
     # travels with the config the transport already takes rather than as
     # a second argument every call site would have to thread.
     api_version: str | None = None
-    """`Notion-Version` header sent with every request. Unset uses the
-    version the client is written against; `ntn --notion-version`
-    overrides it per line."""
+    """`Notion-Version` header sent with every request. Unset sends
+    `2025-09-03`; `ntn --notion-version` overrides it per line."""

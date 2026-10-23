@@ -33,15 +33,17 @@ ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 ```
 
 {/* generated: config-table databricks_volume start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `catalog` | yes |  | Unity Catalog catalog name; one path segment, no `/`. |
-| `schema` | yes |  | Unity Catalog schema name, `schema` in a config; one path segment, no `/`. |
-| `volume` | yes |  | Unity Catalog volume name; one path segment, no `/`. |
-| `root_path` | no | `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
-| `host` | yes |  | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
-| `token` | yes |  | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. Redacted in snapshots. |
-| `timeout` | no | `30` | Seconds one request may take before it fails. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>catalog</code><br />required | Unity Catalog catalog name; one path segment, no `/`. |
+| <code style={{ whiteSpace: 'nowrap' }}>schema</code><br />required | Unity Catalog schema name, `schema` in a config; one path segment, no `/`. |
+| <code style={{ whiteSpace: 'nowrap' }}>volume</code><br />required | Unity Catalog volume name; one path segment, no `/`. |
+| <code style={{ whiteSpace: 'nowrap' }}>root_path</code><br />default `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}
 
 ## Mount mode

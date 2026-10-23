@@ -45,13 +45,15 @@ bound off.
 Both `READ` and `WRITE` modes are supported out of the box.
 
 {/* generated: config-table hf_buckets start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `bucket` | yes |  | Bucket id in `namespace/name` form. |
-| `token` | no |  | Hugging Face access token. Redacted in snapshots. |
-| `endpoint` | no | `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
-| `timeout` | no | `30` | Seconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off. |
-| `key_prefix` | no |  | Path inside the bucket that becomes the mount root; files outside it are not listed. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Bucket id in `namespace/name` form. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off. |
+| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Path inside the bucket that becomes the mount root; files outside it are not listed. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_buckets end */}
 
 ## Filesystem Layout

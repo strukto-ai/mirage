@@ -32,5 +32,4 @@ class TrelloConfig(BaseModel):
     """Trello API root; override to point at a fake or proxy."""
     content_search: bool = False
     """Let `grep -rw` and `rg -w` read only the cards Trello's search names,
-    plus those whose other fields hold the word. Trello indexes a write
-    some time after it lands, so a fresh edit can be missed."""
+    plus those whose other fields hold the word. Search lags writes."""

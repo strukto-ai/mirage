@@ -28,8 +28,9 @@ export interface BuildOptionsOptions {
 
 /**
  * Returns ready-to-use query `Options` backed by a workspace: the
- * `MirageServer` tools as the `mirage` MCP server, only those tools allowed,
- * and a system prompt describing the mounts.
+ * `MirageServer` tools as the `mirage` MCP server, preapproved, and a system
+ * prompt describing the mounts. The SDK's built-in tools stay available
+ * under its usual permission rules.
  */
 export async function buildOptions(
   workspace: Workspace,

@@ -32,12 +32,14 @@ ws = Workspace({"/mongodb": vfs}, mode=MountMode.READ)
 ```
 
 {/* generated: config-table mongodb start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `uri` | yes |  | MongoDB connection URI. Redacted in snapshots. |
-| `databases` | no |  | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
-| `max_doc_limit` | no | `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
-| `elide_fields` | no | `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI. |
+| <code style={{ whiteSpace: 'nowrap' }}>databases</code> | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_doc_limit</code><br />default `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
+| <code style={{ whiteSpace: 'nowrap' }}>elide_fields</code><br />default `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table mongodb end */}
 
 ## Filesystem Layout

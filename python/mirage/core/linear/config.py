@@ -28,6 +28,5 @@ class LinearConfig(BaseModel):
     base_url: str = "https://api.linear.app/graphql"
     """Linear GraphQL endpoint; override to point at a fake or proxy."""
     content_search: bool = False
-    """Let `grep -rw` and `rg -w` read only the issues Linear's search
-    names, plus those whose other fields hold the word. Linear indexes a
-    write some time after it lands, so a fresh edit can be missed."""
+    """Let `grep -rw` and `rg -w` read only the issues Linear's search names,
+    plus those whose other fields hold the word. Search lags writes."""

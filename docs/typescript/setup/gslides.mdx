@@ -45,17 +45,18 @@ const slides = new GSlidesVFS({
 
 ## Config
 
-{/* generated: config-table gslides start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `accessToken` | no |  | OAuth access token, or a function (sync or async) that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth; it wins when both are set. Redacted in snapshots. |
-| `clientId` | no |  | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself. |
-| `clientSecret` | no |  | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. Redacted in snapshots. |
-| `refreshToken` | no |  | User's OAuth refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
-| `refreshFn` | no |  | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Google's token endpoint, for example so the client secret stays on a backend. `clientId` and `refreshToken` are still required. Redacted in snapshots. |
-| `apiBase` | no |  | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| `folderId` | no |  | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
-| `contentSearch` | no | `false` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not the JSON the mount renders, and indexes a write with a delay, so a file that holds the word can be left out. |
+{/* generated: config-table gslides omit=folderId start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />secret | OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`. |
+| <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself. |
+| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />secret | User's OAuth refresh token. Required with `clientId` when `accessToken` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiBase</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table gslides end */}
 
 ## Mount mode

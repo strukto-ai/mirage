@@ -46,9 +46,8 @@ class BoxConfig(BaseModel):
     (`box.com/folder/<id>`); unlike a path it survives renames and moves.
     Unset mounts the account root, folder `0`."""
     content_search: bool = False
-    """Let `grep -w` and `rg -w` read only the files Box search names. Box
-    searches the text it extracted, not the bytes grep reads, and indexes a
-    write with a delay, so a file that holds the word can be left out."""
+    """Let `grep -w` and `rg -w` read only the files Box search names. Search
+    covers extracted text and lags writes, so it can miss a match."""
     refresh_fn: Callable[[str], Awaitable[tuple[str, str, int]]] | None = None
     """Async callable that takes the current refresh token and returns
     `(access_token, refresh_token, expires_in)`, called instead of Box's

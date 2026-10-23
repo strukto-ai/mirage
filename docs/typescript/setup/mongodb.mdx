@@ -62,12 +62,14 @@ The development proxy does not yet support document streaming or schema reads.
 ## Config
 
 {/* generated: config-table mongodb start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `uri` | yes |  | MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI. Redacted in snapshots. |
-| `databases` | no |  | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
-| `maxDocLimit` | no | `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
-| `elideFields` | no | `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI. |
+| <code style={{ whiteSpace: 'nowrap' }}>databases</code> | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxDocLimit</code><br />default `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
+| <code style={{ whiteSpace: 'nowrap' }}>elideFields</code><br />default `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table mongodb end */}
 
 ## Mount mode

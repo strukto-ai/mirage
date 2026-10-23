@@ -41,22 +41,24 @@ await ws.shell('search "red running shoes" /fashion') // ranked paths + score + 
 ### Config
 
 {/* generated: config-table lancedb start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `uri` | yes |  | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
-| `apiKey` | no |  | API key for LanceDB Cloud or Enterprise. Redacted in snapshots. |
-| `region` | no | `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
-| `hostOverride` | no |  | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
-| `storageOptions` | no |  | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
-| `table` | no |  | Table the mount root shows; unset lists every table as a top-level folder. |
-| `groupBy` | no | `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
-| `idColumn` | no | `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blobExt>`). |
-| `titleColumn` | no |  | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
-| `blobColumn` | no |  | Column of raw or base64 bytes served as `<id>.<blobExt>` and left out of the card; unset adds no blob file. |
-| `blobExt` | no | `'bin'` | File extension of the blob file, without the dot. |
-| `vectorColumn` | no |  | Embedding column left out of cards and listings. |
-| `searchLimit` | no | `10` | Results `search` returns when `--top-k` is not given. |
-| `maxRows` | no | `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />secret | API key for LanceDB Cloud or Enterprise. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
+| <code style={{ whiteSpace: 'nowrap' }}>hostOverride</code> | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
+| <code style={{ whiteSpace: 'nowrap' }}>storageOptions</code> | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
+| <code style={{ whiteSpace: 'nowrap' }}>table</code> | Table the mount root shows; unset lists every table as a top-level folder. |
+| <code style={{ whiteSpace: 'nowrap' }}>groupBy</code><br />default `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
+| <code style={{ whiteSpace: 'nowrap' }}>idColumn</code><br />default `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blobExt>`). |
+| <code style={{ whiteSpace: 'nowrap' }}>titleColumn</code> | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
+| <code style={{ whiteSpace: 'nowrap' }}>blobColumn</code> | Column of raw or base64 bytes served as `<id>.<blobExt>` and left out of the card; unset adds no blob file. |
+| <code style={{ whiteSpace: 'nowrap' }}>blobExt</code><br />default `'bin'` | File extension of the blob file, without the dot. |
+| <code style={{ whiteSpace: 'nowrap' }}>vectorColumn</code> | Embedding column left out of cards and listings. |
+| <code style={{ whiteSpace: 'nowrap' }}>searchLimit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxRows</code><br />default `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table lancedb end */}
 
 ## Filesystem layout

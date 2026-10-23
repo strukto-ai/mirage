@@ -33,10 +33,8 @@ class GoogleConfig(BaseModel):
     # service account cannot produce; a consumer worked around that by
     # monkeypatching `refresh_access_token`.
     access_token: SecretStr | Callable[[], str | SecretStr] | None = None
-    """OAuth access token, or a zero-argument callable that returns one,
-    read on every request. Use it instead of `client_id` and
-    `refresh_token` when your app already manages OAuth; it wins when both
-    are set."""
+    """OAuth access token, or a callable that returns one. Takes precedence
+    over `client_id` and `refresh_token`."""
     # Or the refresh-token grant, where mirage mints and renews the
     # access token itself through TokenManager.
     client_id: str | None = None
@@ -85,6 +83,5 @@ class GoogleConfig(BaseModel):
 class GoogleAppConfig(GoogleConfig):
     content_search: bool = False
     """Let `grep -w` and `rg -w` read only the files Drive full-text search
-    names. Drive searches a file's text, not the JSON the mount renders,
-    and indexes a write with a delay, so a file that holds the word can be
-    left out."""
+    names. Search covers extracted text and lags writes, so it can miss a
+    match."""

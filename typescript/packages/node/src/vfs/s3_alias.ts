@@ -59,7 +59,7 @@ export const ALIAS_SHAPE = {
   accessKeyId: secretStr()
     .optional()
     .describe(
-      'Access key ID, used only together with `secretAccessKey`. Unset falls back to the AWS SDK credential chain: `profile`, the environment, the shared credentials file, then an instance role.',
+      'Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.',
     ),
   secretAccessKey: secretStr().optional().describe('Secret access key paired with `accessKeyId`.'),
   sessionToken: secretStr()

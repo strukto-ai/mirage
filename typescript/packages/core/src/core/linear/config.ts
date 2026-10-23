@@ -35,7 +35,7 @@ export const LinearConfigSchema = z.object({
   }),
   contentSearch: z.boolean().optional().meta({
     description:
-      "Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Linear indexes a write some time after it lands, so a fresh edit can be missed.",
+      "Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Search lags writes.",
     default: false,
   }),
 })

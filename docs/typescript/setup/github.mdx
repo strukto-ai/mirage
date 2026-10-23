@@ -57,13 +57,15 @@ The token reaches the browser, so use a fine-grained PAT scoped to read-only acc
 ## Config
 
 {/* generated: config-table github start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `token` | yes |  | GitHub personal access token. Redacted in snapshots. |
-| `owner` | yes |  | Repository owner, a user or an organization. |
-| `repo` | yes |  | Repository name. |
-| `ref` | no |  | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
-| `baseUrl` | no | `'https://api.github.com'` | GitHub API root; set it for GitHub Enterprise. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | GitHub personal access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>owner</code><br />required | Repository owner, a user or an organization. |
+| <code style={{ whiteSpace: 'nowrap' }}>repo</code><br />required | Repository name. |
+| <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.github.com'` | GitHub API root; set it for GitHub Enterprise. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table github end */}
 
 ## Listings under `fresh`

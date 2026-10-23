@@ -42,19 +42,21 @@ ws = Workspace({"/data": vfs}, mode=MountMode.READ)
 Both `READ` and `WRITE` modes are supported.
 
 {/* generated: config-table backblaze start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `bucket` | yes |  | Name of the bucket to mount. |
-| `region` | yes |  | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set. |
-| `endpoint_url` | no |  | Endpoint URL that replaces the one the provider derives. |
-| `access_key_id` | no |  | Access key ID, used only together with `secret_access_key`. Unset falls back to the AWS credential chain: `aws_profile`, the environment, the shared credentials file, then an instance role. Redacted in snapshots. |
-| `secret_access_key` | no |  | Secret access key paired with `access_key_id`. Redacted in snapshots. |
-| `session_token` | no |  | Session token for temporary credentials, sent with the access key pair. Redacted in snapshots. |
-| `aws_profile` | no |  | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
-| `path_style` | no | `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| `key_prefix` | no |  | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| `timeout` | no | `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
-| `proxy` | no |  | Proxy URL for every HTTP and HTTPS request to the endpoint. Redacted in snapshots. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL that replaces the one the provider derives. |
+| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
+| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
+| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
+| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table backblaze end */}
 
 ## Example

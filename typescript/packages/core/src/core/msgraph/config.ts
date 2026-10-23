@@ -30,7 +30,7 @@ export const MSGRAPH_CONFIG_SHAPE = {
   accessToken: secretSchema(
     z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
   ).describe(
-    'Microsoft Graph bearer token, or a function (sync or async) that returns one. A function is called for every request, and once more after a `401`, so it can hand out a refreshed token.',
+    'Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`.',
   ),
   tenantHost: z
     .string()

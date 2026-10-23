@@ -64,7 +64,7 @@ const BoxConfigSchema = z.object({
   }),
   contentSearch: z.boolean().optional().meta({
     description:
-      'Let `grep -w` and `rg -w` read only the files Box search names. Box searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out.',
+      'Let `grep -w` and `rg -w` read only the files Box search names. Search covers extracted text and lags writes, so it can miss a match.',
     default: false,
   }),
   clientId: z

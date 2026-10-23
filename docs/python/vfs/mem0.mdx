@@ -36,15 +36,17 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 `user_id`, `agent_id`, or `run_id` (see [Setup](/home/setup/mem0)).
 
 {/* generated: config-table mem0 start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `api_key` | yes |  | Mem0 Platform API key. Redacted in snapshots. |
-| `host` | no | `'https://api.mem0.ai'` | Mem0 API base URL. |
-| `user_id` | no |  | Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| `agent_id` | no |  | Mount this agent's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| `run_id` | no |  | Mount this run's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
-| `default_page_size` | no | `100` | Memories fetched per request while listing the scope. |
-| `default_search_limit` | no | `10` | How many results `search` returns unless the line sets `top_k`. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Mem0 Platform API key. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
+| <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>agent_id</code> | Mount this agent's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>run_id</code> | Mount this run's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>default_page_size</code><br />default `100` | Memories fetched per request while listing the scope. |
+| <code style={{ whiteSpace: 'nowrap' }}>default_search_limit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
 
 ## Filesystem Layout

@@ -47,7 +47,7 @@ const DropboxConfigSchema = z.object({
     ),
   contentSearch: z.boolean().optional().meta({
     description:
-      'Let `grep -w` and `rg -w` read only the files Dropbox search (`/2/files/search_v2`) names. Full-text search needs a Professional, Essentials or Business plan or higher; leave it off on other plans, where search matches file names only. Dropbox indexes a write with a delay, so a file that holds the word can be left out.',
+      'Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match.',
     default: false,
   }),
   endpoint: z

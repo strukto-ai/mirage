@@ -53,7 +53,7 @@ export const BROWSER_ALIAS_FIELDS = {
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
   ).describe(
-    "Function `(path, operation, options)` that returns a signed URL for one S3 operation (`GET`, `PUT`, `HEAD`, `DELETE`, `LIST` or `COPY`). Your server signs it with the provider's keys, so the browser holds none.",
+    'Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys.',
   ),
   region: z
     .string()
@@ -75,7 +75,7 @@ export const BROWSER_ALIAS_FIELDS = {
     .string()
     .optional()
     .describe(
-      'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
+      'Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
     ),
 }
 

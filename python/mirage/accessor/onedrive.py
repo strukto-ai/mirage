@@ -37,10 +37,8 @@ class OneDriveConfig(MsGraphConfig):
     key_prefix: str | None = None
     """Folder path from the drive root that the mount uses as its root."""
     content_search: bool = False
-    """Let `grep -w` and `rg -w` read only the files Graph search names.
-    Graph searches the text it extracted, not the bytes grep reads, and
-    indexes a write with a delay, so a file that holds the word can be
-    left out."""
+    """Let `grep -w` and `rg -w` read only the files Graph search names. Search
+    covers extracted text and lags writes, so it can miss a match."""
 
     @model_validator(mode="after")
     def _one_drive_target(self) -> "OneDriveConfig":

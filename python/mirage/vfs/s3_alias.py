@@ -47,9 +47,8 @@ class S3AliasConfig(BaseModel):
     endpoint_url: str | None = None
     """Endpoint URL that replaces the one the provider derives."""
     access_key_id: SecretStr | None = None
-    """Access key ID, used only together with `secret_access_key`. Unset
-    falls back to the AWS credential chain: `aws_profile`, the environment,
-    the shared credentials file, then an instance role."""
+    """Access key ID; set it with `secret_access_key`. Unset uses the AWS
+    credential chain."""
     secret_access_key: SecretStr | None = None
     """Secret access key paired with `access_key_id`."""
     session_token: SecretStr | None = None

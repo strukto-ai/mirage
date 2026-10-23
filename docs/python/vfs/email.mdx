@@ -33,19 +33,21 @@ ws = Workspace({"/email": vfs}, mode=MountMode.READ)
 ### Config Reference
 
 {/* generated: config-table email start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `imap_host` | yes |  | IMAP server hostname. |
-| `imap_port` | no | `993` | IMAP server port. |
-| `smtp_host` | yes |  | SMTP server hostname `himalaya` sends mail through. |
-| `smtp_port` | no | `587` | SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it. |
-| `username` | yes |  | Login for both IMAP and SMTP, usually the email address. |
-| `password` | yes |  | Password or app password for `username`. Redacted in snapshots. |
-| `use_ssl` | no | `True` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtp_port` instead. |
-| `max_messages` | no | `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
-| `content_search` | no | `False` | Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which messages may match and read only those. The server searches headers and body, not the mounted JSON's keys, uids or flags. |
-| `save_copy` | no | `True` | After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
-| `sent_folder` | no |  | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>imap_host</code><br />required | IMAP server hostname. |
+| <code style={{ whiteSpace: 'nowrap' }}>imap_port</code><br />default `993` | IMAP server port. |
+| <code style={{ whiteSpace: 'nowrap' }}>smtp_host</code><br />required | SMTP server hostname `himalaya` sends mail through. |
+| <code style={{ whiteSpace: 'nowrap' }}>smtp_port</code><br />default `587` | SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it. |
+| <code style={{ whiteSpace: 'nowrap' }}>username</code><br />required | Login for both IMAP and SMTP, usually the email address. |
+| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />required, secret | Password or app password for `username`. |
+| <code style={{ whiteSpace: 'nowrap' }}>use_ssl</code><br />default `True` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtp_port` instead. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_messages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which messages may match and read only those. The server searches headers and body, not the mounted JSON's keys, uids or flags. |
+| <code style={{ whiteSpace: 'nowrap' }}>save_copy</code><br />default `True` | After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
+| <code style={{ whiteSpace: 'nowrap' }}>sent_folder</code> | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}
 
 ### Common VFS Settings

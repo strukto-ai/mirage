@@ -43,15 +43,17 @@ expiry, so cold-start API calls don't pay the refresh round-trip.
 ### Config
 
 {/* generated: config-table dropbox start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `clientId` | yes |  | Dropbox app key. |
-| `clientSecret` | yes |  | Dropbox app secret. Redacted in snapshots. |
-| `refreshToken` | yes |  | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. Redacted in snapshots. |
-| `rootPath` | no |  | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
-| `contentSearch` | no | `false` | Let `grep -w` and `rg -w` read only the files Dropbox search (`/2/files/search_v2`) names. Full-text search needs a Professional, Essentials or Business plan or higher; leave it off on other plans, where search matches file names only. Dropbox indexes a write with a delay, so a file that holds the word can be left out. |
-| `endpoint` | no |  | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
-| `refreshFn` | no |  | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. Redacted in snapshots. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>clientId</code><br />required | Dropbox app key. |
+| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />required, secret | Dropbox app secret. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
+| <code style={{ whiteSpace: 'nowrap' }}>rootPath</code> | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table dropbox end */}
 
 ## Mount a subfolder

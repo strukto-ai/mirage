@@ -24,7 +24,7 @@ const GitHubConfigSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read.",
+      "Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created.",
     ),
   baseUrl: z.string().optional().meta({
     description: 'GitHub API root; set it for GitHub Enterprise.',

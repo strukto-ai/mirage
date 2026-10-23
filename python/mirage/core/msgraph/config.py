@@ -26,9 +26,8 @@ class MsGraphConfig(BaseModel):
     )
 
     access_token: SecretStr | Callable[[], str | SecretStr]
-    """Microsoft Graph bearer token, or a zero-argument callable that
-    returns one. A callable is called for every request, and once more
-    after a `401`, so it can hand out a refreshed token."""
+    """Microsoft Graph bearer token, or a callable that returns one; it is
+    called for each request and again after a `401`."""
     tenant_host: str | None = None
     """SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint`
     mount lists only the sites whose `webUrl` is on it. The `onedrive`

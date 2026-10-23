@@ -69,7 +69,7 @@ export const S3ConfigSchema = z.object({
   accessKeyId: secretStr()
     .optional()
     .describe(
-      'Access key ID, used only together with `secretAccessKey`. Unset falls back to the AWS SDK credential chain: `profile`, the environment, the shared credentials file, then an instance role.',
+      'Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.',
     ),
   secretAccessKey: secretStr().optional().describe('Secret access key paired with `accessKeyId`.'),
   sessionToken: secretStr()
@@ -92,7 +92,7 @@ export const S3ConfigSchema = z.object({
   )
     .optional()
     .describe(
-      'Function `(path, operation, options)` that returns a signed URL for one S3 operation (`GET`, `PUT`, `HEAD`, `DELETE`, `LIST` or `COPY`). When set, the mount fetches those URLs instead of signing requests itself, so it needs no credentials.',
+      'Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.',
     ),
   httpAgentProvider: secretSchema(
     z.custom<S3HttpAgentProvider>((value) => typeof value === 'function'),

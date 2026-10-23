@@ -79,11 +79,9 @@ class HfRepoConfig(BaseModel):
     revision: str | None = None
     """Branch, tag or commit the mount reads; unset reads `main`."""
     expand_commits: bool | None = None
-    """Whether a listing asks the Hub for each file's last commit, a Hub
-    file's only source of an mtime, which cuts a listing page from 1000
-    entries to 50. Unset fetches one expanded page and keeps it if the whole
-    repository fits, otherwise lists without commits; `True` or `False`
-    forces either."""
+    """Fetch each file's last commit so listings carry modification times, at
+    50 entries per request instead of 1000. Unset does so only when the
+    whole repository fits in one page."""
 
     @field_validator("repo_id")
     @classmethod

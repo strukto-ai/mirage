@@ -65,7 +65,7 @@ export const GoogleConfigSchema = z
     )
       .optional()
       .describe(
-        'OAuth access token, or a function (sync or async) that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth; it wins when both are set.',
+        'OAuth access token, or a function (sync or async) that returns one. Takes precedence over `clientId` and `refreshToken`.',
       ),
     clientId: z
       .string()
@@ -91,7 +91,7 @@ export const GoogleConfigSchema = z
     refreshFn: secretSchema(z.custom<GoogleRefreshFn>((value) => typeof value === 'function'))
       .optional()
       .describe(
-        "Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Google's token endpoint, for example so the client secret stays on a backend. `clientId` and `refreshToken` are still required.",
+        "Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.",
       ),
     apiBase: z
       .string()
@@ -116,7 +116,7 @@ export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
 export const GoogleAppConfigSchema = GoogleConfigSchema.extend({
   contentSearch: z.boolean().optional().meta({
     description:
-      "Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not the JSON the mount renders, and indexes a write with a delay, so a file that holds the word can be left out.",
+      'Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match.',
     default: false,
   }),
 })

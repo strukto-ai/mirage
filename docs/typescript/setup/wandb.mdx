@@ -22,13 +22,15 @@ standard `fetch`. Browser access depends on the service's CORS configuration.
 ## Config
 
 {/* generated: config-table wandb start */}
-| Field | Required | Default | Description |
-| --- | --- | --- | --- |
-| `entities` | yes |  | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
-| `apiKey` | no | `''` | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. Redacted in snapshots. |
-| `baseUrl` | no | `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
-| `pageSize` | no | `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
-| `maxPages` | no | `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>entities</code><br />required | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />default `''`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
+| <code style={{ whiteSpace: 'nowrap' }}>pageSize</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxPages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table wandb end */}
 
 ## Filesystem layout

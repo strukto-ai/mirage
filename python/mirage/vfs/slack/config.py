@@ -7,6 +7,4 @@ class SlackConfig(SlackCredentials, TimeRangeConfig):
 
     content_search: bool = False
     """Let `grep -rw` and `rg -w` read only the channel and DM days Slack
-    search names. Needs a token that can search. Slack indexes a message
-    some time after it is posted, and searches only message text, file
-    names and titles and reactions."""
+    search names. Needs a token that can search; search lags new messages."""
