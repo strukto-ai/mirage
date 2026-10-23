@@ -18,8 +18,12 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK
-from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror, walk_refusal
+from mirage.errors.fs import (
+    fs_strerror,
+    is_aborting,
+    strerror_of,
+    walk_refusal,
+)
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.runtime.types import DispatchFn
@@ -94,11 +98,13 @@ async def handle_touch(
     if isinstance(ref, PathSpec):
         try:
             ref_stat, _ = await dispatch("stat", ref)
-        except FS_ERRORS as exc:
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
             return fail(
                 "touch",
                 f"touch: failed to get attributes of "
-                f"'{ref.raw_path}': {fs_strerror(exc)}\n",
+                f"'{ref.raw_path}': {strerror_of(exc)}\n",
             )
         ref_time = ref_stat.modified
     try:
@@ -152,14 +158,20 @@ async def handle_touch(
         # GNU words that refusal ("setting times of") differently from
         # its create-path one ("cannot touch").
         slashed = target.raw_path.endswith("/")
-        refusal = await dot_refusal(
-            partial(dispatch_stat, dispatch), target, links.follow
-        )
+        refusal: Exception | None
+        try:
+            refusal = await dot_refusal(
+                partial(dispatch_stat, dispatch), target, links.follow
+            )
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
+            refusal = exc
         if refusal is not None:
             action = "setting times of" if slashed else "cannot touch"
             errors.append(
                 f"touch: {action} '{target.raw_path}': "
-                f"{fs_strerror(refusal)}\n"
+                f"{strerror_of(refusal)}\n"
             )
             continue
         resolved = follow_operand(
@@ -174,10 +186,12 @@ async def handle_touch(
         if slashed:
             try:
                 await dispatch("stat", resolved)
-            except FS_ERRORS as exc:
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 errors.append(
                     f"touch: setting times of "
-                    f"'{target.raw_path}': {fs_strerror(exc)}\n"
+                    f"'{target.raw_path}': {strerror_of(exc)}\n"
                 )
                 continue
         try:
@@ -226,15 +240,19 @@ async def handle_touch(
             errors.append(
                 permission_error("touch", action, target.raw_path, exc)
             )
-        except FS_ERRORS as exc:
+        except Exception as exc:
             # A destination whose parent chain is not all directories is one
             # failed operand, not an aborted command: GNU reports it and
             # touches the rest. Caught here rather than around the write
             # because backends disagree about which call refuses first (an
             # object store answers stat with ENOENT and fails the write; a
             # filesystem or a keyed store answers stat itself with ENOTDIR).
+            # A store's own error (an upload's HTTP status) is one failed
+            # operand too, worded by its message.
+            if is_aborting(exc):
+                raise
             errors.append(
                 f"touch: cannot touch '{target.raw_path}': "
-                f"{fs_strerror(exc)}\n"
+                f"{strerror_of(exc)}\n"
             )
     return finish("touch", errors, io=IOResult())

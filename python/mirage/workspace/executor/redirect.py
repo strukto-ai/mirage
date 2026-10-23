@@ -27,7 +27,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import is_aborting, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io import IOResult
@@ -187,7 +187,7 @@ class PipeRecorder(Recorder):
         self.live = live
         self.writer: ByteWriter | None = None
         self.file: FileDescription | None = None
-        self.failure: OSError | None = None
+        self.failure: Exception | None = None
 
     async def consume(self, source: ByteSource) -> None:
         assert self.file is not None
@@ -205,7 +205,11 @@ class PipeRecorder(Recorder):
         if self.writer is not None:
             try:
                 await self.writer.finish()
-            except OSError as exc:
+            except PipeClosed:
+                raise
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 self.failure = exc
 
     async def abort(self) -> None:
@@ -219,7 +223,11 @@ class PipeRecorder(Recorder):
                     await self.writer.write(data)
                     assert self.file is not None
                     self.file.offset += len(data)
-                except OSError as exc:
+                except PipeClosed:
+                    raise
+                except Exception as exc:
+                    if is_aborting(exc):
+                        raise
                     self.failure = exc
             return
         scope = self.streams.get(channel)
@@ -596,7 +604,11 @@ async def _handle_redirect(
                             stdout = data
                         else:
                             io.stderr = data
-            except OSError as exc:
+            except PipeClosed:
+                raise
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 logger.debug("redirect error reporting failed: %s", exc)
         return stdout, io, node
 
@@ -689,7 +701,9 @@ async def _handle_redirect(
                 if r.kind != RedirectKind.READWRITE:
                     return await failed(_redirect_failure(scope, exc))
                 data = b""
-            except FS_ERRORS as exc:
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 return await failed(_redirect_failure(scope, exc))
             closed.discard(r.fd)
             read_paths.pop(r.fd, None)
@@ -702,7 +716,11 @@ async def _handle_redirect(
                     await create_file(
                         dispatch, session, scope, b"", append=True
                     )
-                except FS_ERRORS as exc:
+                except PipeClosed:
+                    raise
+                except Exception as exc:
+                    if is_aborting(exc):
+                        raise
                     return await failed(_redirect_failure(scope, exc))
                 files.append(file)
                 inputs[r.fd], outputs[r.fd] = file.source, file
@@ -747,7 +765,11 @@ async def _handle_redirect(
                     pipe = await create_file(
                         dispatch, session, scope, b"", append=r.append
                     )
-                except OSError as exc:
+                except PipeClosed:
+                    raise
+                except Exception as exc:
+                    if is_aborting(exc):
+                        raise
                     return await failed(_redirect_failure(scope, exc))
                 finally:
                     if token is not None:
@@ -976,7 +998,9 @@ async def _handle_redirect(
                 elif unwound is None:
                     unwound = ExitSignal(141)
                 return False
-            except OSError as exc:
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 out, error, _ = await failed(
                     _redirect_failure(file.scope, exc), failed_file=file
                 )
@@ -1161,7 +1185,7 @@ def _describe(
     )
 
 
-def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
+def _redirect_error_line(scope: PathSpec, exc: Exception) -> bytes:
     """GNU stderr line for a redirect target that could not be opened.
 
     GNU bash 5.2.37 answers both ``cat < missing`` and
@@ -1181,15 +1205,14 @@ def _redirect_error_line(scope: PathSpec, exc: OSError) -> bytes:
     The label is the target's own spelling, never the exception's message:
     backends raise write failures with prose in ``str(exc)`` (``parent
     directory does not exist: /nodir``), which used to reach the user as
-    the path.
+    the path. A store's own error (an SDK's, an HTTP status on upload)
+    names no condition, so its message is the only cause there is.
 
     Args:
         scope (PathSpec): The redirect target that could not be opened.
-        exc (OSError): The filesystem error raised by the read or write.
+        exc (Exception): The error raised by the read or write.
     """
-    label = scope.raw_path
-    strerror = fs_strerror(exc) or exc.strerror or str(exc)
-    return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
+    return encode_text(f"{scope.raw_path}: {strerror_of(exc)}\n")
 
 
 def _closed_write_line(
@@ -1223,13 +1246,13 @@ def _redirect_word(r: Redirect) -> str:
 
 
 def _redirect_failure(
-    scope: PathSpec, exc: OSError
+    scope: PathSpec, exc: Exception
 ) -> tuple[None, IOResult, ExecutionNode]:
     """Shell-attributed IOResult for a redirect target that cannot be opened.
 
     Args:
         scope (PathSpec): The redirect target that could not be opened.
-        exc (OSError): The filesystem error raised by the open.
+        exc (Exception): The error raised by the open.
     """
     _, io, node = _shell_failure(_redirect_error_line(scope, exc))
     node.unopened = True
@@ -1319,7 +1342,9 @@ async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:
     """
     try:
         stat, _ = await dispatch("stat", scope)
-    except FS_ERRORS as exc:
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
         logger.debug(
             "redirect probe found nothing at %s: %s", scope.raw_path, exc
         )
@@ -1403,6 +1428,10 @@ async def _open_refusal(
                     exc,
                 )
                 stat = None
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
+                return _redirect_failure(scope, exc)
             exists = stat is not None and stat.type in (
                 FileType.FILE,
                 FileType.DIRECTORY,

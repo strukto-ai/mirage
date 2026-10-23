@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
@@ -94,6 +95,26 @@ class StatOnlyRAMVFS extends OverlayRAMVFS {
       'write',
       Object.getOwnPropertyDescriptor(BaseVFS.prototype, 'write') ?? {},
     )
+  }
+}
+
+/**
+ * A store whose upload fails with its own error, no fs code: a Drive 503 or
+ * an S3 client's error on commit.
+ */
+class RejectingRAMVFS extends OverlayRAMVFS {
+  constructor(
+    private readonly error: Error,
+    private readonly stats = false,
+  ) {
+    super()
+  }
+  override stat(path: PathSpec): Promise<FileStat> {
+    if (this.stats) return Promise.reject(this.error)
+    return super.stat(path)
+  }
+  override write(): Promise<void> {
+    return Promise.reject(this.error)
   }
 }
 
@@ -249,6 +270,36 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
     expect(err).toContain("cannot touch '/data/new.txt': Read-only file system")
     const [, out] = await run(ws, 'ls /data')
     expect(out).not.toContain('new.txt')
+    await ws.close()
+  })
+
+  it('touch reports a failed upload and the line goes on', async () => {
+    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new Error('upload refused: 503')))
+    expect(await run(ws, 'touch /data/new.txt; echo "s=$?"')).toEqual([
+      0,
+      's=1\n',
+      "touch: cannot touch '/data/new.txt': upload refused: 503\n",
+    ])
+    expect(await run(ws, 'touch /data/new.txt 2>/dev/null || echo ran')).toEqual([0, 'ran\n', ''])
+    await ws.close()
+  })
+
+  it.each([
+    [
+      'touch -r /data/ref.txt /data/new.txt',
+      "touch: failed to get attributes of '/data/ref.txt': stat refused: 503\n",
+    ],
+    ['touch /data/d/', "touch: setting times of '/data/d/': stat refused: 503\n"],
+  ])('touch reports a refused stat and the line goes on: %s', async (line, stderr) => {
+    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new Error('stat refused: 503'), true))
+    expect(await run(ws, `${line}; echo "s=$?"`)).toEqual([0, 's=1\n', stderr])
+    await ws.close()
+  })
+
+  it('touch lets a timeout on upload end the line', async () => {
+    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new CommandTimeoutError('write', 1)))
+    const [code, out] = await run(ws, 'touch /data/new.txt; echo after')
+    expect([code, out]).toEqual([124, ''])
     await ws.close()
   })
 
