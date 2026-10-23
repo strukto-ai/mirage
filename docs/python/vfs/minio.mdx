@@ -13,6 +13,12 @@ mirage refuses what would copy or delete on a MinIO mount (such as a `cp` or `mv
 MinIO is self-hosted, so `endpoint_url` is **required** (there is no
 region-derived host). Uses aioboto3 against MinIO's S3-compatible API.
 
+Install the extra:
+
+```bash
+pip install "mirage-ai[s3]"
+```
+
 ## Config
 
 ```python

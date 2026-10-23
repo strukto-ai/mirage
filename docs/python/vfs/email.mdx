@@ -6,6 +6,12 @@ icon: at
 The Email VFS exposes any IMAP mailbox as a virtual filesystem
 mounted at some prefix such as `/email/`. Sending is handled via SMTP.
 
+Sending through `himalaya` needs the extra:
+
+```bash
+pip install "mirage-ai[email]"
+```
+
 ## Config
 
 ```python

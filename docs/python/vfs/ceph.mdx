@@ -11,6 +11,12 @@ commands, and behavior as S3, it just points at your Ceph Rados Gateway
 Ceph RGW is self-hosted, so `endpoint_url` is **required** (there is no
 region-derived host). Uses aioboto3 against the gateway's S3-compatible API.
 
+Install the extra:
+
+```bash
+pip install "mirage-ai[s3]"
+```
+
 ## Config
 
 ```python
