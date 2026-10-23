@@ -32,15 +32,17 @@ vfs = DatabricksVolumeVFS(DatabricksVolumeConfig(
 ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `catalog` | required | Unity Catalog catalog name. |
-| `schema` | required | Unity Catalog schema name. |
-| `volume` | required | Unity Catalog volume name. |
-| `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | required | HTTP or HTTPS workspace origin. No path, query, fragment, or userinfo. |
-| `token` | required | Access token as `str`, `SecretStr`, or a synchronous or asynchronous callback. Redacted in snapshots. |
-| `timeout` | `30` | Request timeout in seconds. |
+{/* generated: config-table databricks_volume start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `catalog` | yes |  | Unity Catalog catalog name; one path segment, no `/`. |
+| `schema` | yes |  | Unity Catalog schema name, `schema` in a config; one path segment, no `/`. |
+| `volume` | yes |  | Unity Catalog volume name; one path segment, no `/`. |
+| `root_path` | no | `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
+| `host` | yes |  | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
+| `token` | yes |  | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. Redacted in snapshots. |
+| `timeout` | no | `30` | Seconds one request may take before it fails. |
+{/* generated: config-table databricks_volume end */}
 
 ## Mount mode
 

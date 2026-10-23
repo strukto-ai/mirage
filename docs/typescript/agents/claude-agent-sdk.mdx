@@ -55,9 +55,19 @@ The server serves the session's seven tools, [`session.tools`](/typescript/acces
 
 ## Exports
 
+{/* generated: exports claude-agent-sdk start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MirageServer` | In-process MCP server exposing the Mirage tools; pass to `options.mcpServers`. |
-| `buildOptions` | Returns ready-to-use query `Options` backed by a workspace. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
-| `MIRAGE_SYSTEM_PROMPT` | The default system prompt template. |
+| `MirageServer` | An in-process MCP server exposing the Mirage tools; pass it to `options.mcpServers`. |
+| `buildOptions` | Returns ready-to-use query `Options` backed by a workspace: the `MirageServer` tools as the `mirage` MCP server, only those tools allowed, and a system prompt describing the mounts. |
+| `BuildOptionsOptions` | Options for `buildOptions`: `systemPrompt` replaces the generated prompt, and `sessionId` names the Mirage session the tools act as. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| `EDIT_DESCRIPTION` | The description the `edit` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `GLOB_DESCRIPTION` | The description the `glob` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `GREP_DESCRIPTION` | The description the `grep` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `LS_DESCRIPTION` | The description the `ls` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `READ_DESCRIPTION` | The description the `read` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `SHELL_DESCRIPTION` | The description the `shell` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+| `WRITE_DESCRIPTION` | The description the `write` tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+{/* generated: exports claude-agent-sdk end */}

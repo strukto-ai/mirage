@@ -52,11 +52,16 @@ for (const text of extractText(result.messages.slice(-1))) {
 
 ## Exports
 
+{/* generated: exports langchain start */}
 | Symbol | Purpose |
 | --- | --- |
-| `LangchainWorkspace` | `SandboxBackendProtocolV2` implementation for Deep Agents, wires reads, writes, edits, search, and shell. |
-| `extractText` | Returns `string[]` of text blocks from an array of LangChain messages. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
+| `LangchainWorkspace` | A `SandboxBackendProtocolV2` implementation for Deep Agents that runs reads, writes, edits, search and shell commands in a Mirage workspace. |
+| `LangchainWorkspaceOptions` | Options for `LangchainWorkspace`: `sandboxId` sets the backend's `id` (default `mirage`), and `sessionId` names the Mirage session it acts as. |
+| `extractText` | Returns the non-empty text blocks of an array of LangChain messages, in order, as `string[]`. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
+{/* generated: exports langchain end */}
 
 ## Examples
 

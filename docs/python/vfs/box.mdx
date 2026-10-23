@@ -71,15 +71,20 @@ The access token is cached in memory and refreshed ~5 minutes before expiry
 
 ### Config Reference
 
-| Field             | Required | Description                                                                   |
-| ----------------- | -------- | ----------------------------------------------------------------------------- |
-| `access_token`    | One of\* | Box developer token (skips the refresh flow)                                  |
-| `client_id`       | One of\* | Box app client id (with `refresh_token`, or with `client_secret`+`enterprise_id`) |
-| `client_secret`   | No       | Box app client secret                                                         |
-| `refresh_token`   | One of\* | Long-lived OAuth2 refresh token (with `client_id`)                            |
-| `enterprise_id`   | No       | Enterprise id for the client-credentials grant                                |
-| `root_folder_id`  | No       | Mount a sub-folder as the root (default `0`, the account root)                |
-| `endpoint`        | No       | Base URL overriding the real Box API and upload hosts (test fakes)            |
+{/* generated: config-table box start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | no |  | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
+| `client_id` | no |  | Box app client ID. Required with `refresh_token` (OAuth) or with `client_secret` and `enterprise_id` (client credentials). |
+| `client_secret` | no |  | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. Redacted in snapshots. |
+| `refresh_token` | no |  | OAuth refresh token; needs `client_id`. Box rotates it on every refresh, so persist the new one with `on_refresh_token_rotated`. Redacted in snapshots. |
+| `enterprise_id` | no |  | Box enterprise ID for the client-credentials grant. With `client_id` and `client_secret`, tokens are minted for the app's service account and no refresh token is involved. |
+| `access_token` | no |  | Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Redacted in snapshots. |
+| `root_folder_id` | no |  | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. Unset mounts the account root, folder `0`. |
+| `content_search` | no | `False` | Let `grep -w` and `rg -w` read only the files Box search names. Box searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out. |
+| `refresh_fn` | no |  | Async callable that takes the current refresh token and returns `(access_token, refresh_token, expires_in)`, called instead of Box's token endpoint. Needs `client_id` and `refresh_token`. Redacted in snapshots. |
+| `on_refresh_token_rotated` | no |  | Async callable given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use. Redacted in snapshots. |
+{/* generated: config-table box end */}
 
 \* Provide one of: `access_token`; `client_id` + `refresh_token`; or
 `client_id` + `client_secret` + `enterprise_id`.

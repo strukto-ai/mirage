@@ -37,6 +37,16 @@ Both `READ` and `WRITE` modes are supported. Small files are fine: a file
 smaller than the chunk size is stored as a single chunk document, so tiny
 config files and large binaries go through the same path.
 
+{/* generated: config-table gridfs start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | yes |  | MongoDB connection URI. Redacted in snapshots. |
+| `database` | yes |  | Database that holds the GridFS bucket. |
+| `bucket` | no | `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
+| `key_prefix` | no |  | Filename prefix the mount treats as its root; files outside it are not listed. |
+| `chunk_size_bytes` | no |  | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
+{/* generated: config-table gridfs end */}
+
 ## Filesystem Layout
 
 GridFS filenames are used as slash-separated keys, exactly like S3 object

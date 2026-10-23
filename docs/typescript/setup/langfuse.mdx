@@ -44,13 +44,15 @@ const lf = new LangfuseVFS({
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `publicKey` | required | Langfuse public key. |
-| `secretKey` | required | Langfuse secret key. Redacted in snapshots. |
-| `host` | `https://cloud.langfuse.com` | Override for self-hosted Langfuse. |
-| `defaultTraceLimit` | `100` | Default page size for trace listings. An older trace is still reachable by its id. |
-| `defaultFromTimestamp` | none | List only traces from this ISO 8601 timestamp on. |
+{/* generated: config-table langfuse start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `publicKey` | yes |  | Langfuse project public key. |
+| `secretKey` | yes |  | Langfuse project secret key. Redacted in snapshots. |
+| `host` | no | `'https://cloud.langfuse.com'` | Langfuse API host; override for a self-hosted or regional instance. |
+| `defaultTraceLimit` | no | `100` | The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id. |
+| `defaultFromTimestamp` | no |  | List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `defaultTraceLimit`. |
+{/* generated: config-table langfuse end */}
 
 ## Mount mode
 

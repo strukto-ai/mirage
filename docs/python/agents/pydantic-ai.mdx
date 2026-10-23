@@ -51,11 +51,14 @@ asyncio.run(main())
 
 ## Exports
 
+{/* generated: exports pydantic_ai start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MirageWorkspace` | Capability that gives runs a Mirage session as their workspace. |
-| `MirageWorkspaceBackend` | The workspace backend itself, for code that builds one directly. |
-| `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
+| `MirageWorkspace` | Give runs a Mirage session as their workspace. |
+| `MirageWorkspaceBackend` | A Mirage session as the environment a Pydantic AI run works in. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `build_system_prompt` | Build a system prompt with optional mount info and extra instructions. |
+{/* generated: exports pydantic_ai end */}
 
 `MirageWorkspace(ws, session_id="agent")` acts as that session, so its profile judges every call. Commands run in Mirage's shell, each in a clone of the session at its working directory, as a subshell does: a `cd` or an `export` in one command does not reach the next. Files go through the session's `ws.vfs`, and symlinks resolve through the namespace. The run's `WorkspaceRef` names the session; a ref in message history that names any other session is declined.
 

@@ -43,6 +43,23 @@ ws = Workspace({"/s3": vfs}, mode=MountMode.READ)
 optional credentials, endpoint, and connection settings. Both `READ` and
 `WRITE` modes are supported.
 
+{/* generated: config-table s3 start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `region` | no |  | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
+| `aws_access_key_id` | no |  | Access key ID, used only together with `aws_secret_access_key`. Unset falls back to the AWS credential chain: `aws_profile`, the environment, the shared credentials file, then an instance role. Redacted in snapshots. |
+| `aws_secret_access_key` | no |  | Secret access key paired with `aws_access_key_id`. Redacted in snapshots. |
+| `aws_session_token` | no |  | Session token for temporary credentials, sent with the access key pair. Redacted in snapshots. |
+| `aws_profile` | no |  | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| `bucket` | yes |  | Name of the bucket to mount. |
+| `endpoint_url` | no |  | Endpoint URL of an S3-compatible server. Unset uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
+| `path_style` | no | `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| `timeout` | no | `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
+| `proxy` | no |  | Proxy URL for every HTTP and HTTPS request to the endpoint. Redacted in snapshots. |
+| `key_prefix` | no |  | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| `default_content_type` | no |  | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default. |
+{/* generated: config-table s3 end */}
+
 ## Filesystem Layout
 
 The S3 VFS maps S3 object keys to virtual paths under the mount prefix.

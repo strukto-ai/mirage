@@ -60,12 +60,19 @@ This protection is enabled by default. It observes the content returned by the m
 
 ## Exports
 
-| Symbol                        | Purpose                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------- |
-| `mirageExtension(ws, opts?)`  | Returns a named Pi `InlineExtension` that registers all seven tools against `ws`. |
-| `mirageOperations(ws, opts?)` | Lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle.       |
-| `StaleMirageFileError`        | Error raised when a mutation targets content that changed after an agent read.    |
-| `buildSystemPrompt`           | Generates a system prompt that describes mounted paths to the model.              |
+{/* generated: exports pi start */}
+| Symbol | Purpose |
+| --- | --- |
+| `mirageExtension` | Returns a Pi `InlineExtension` named `mirage` that registers all seven tools against `ws` and appends a mount-aware system prompt. |
+| `MirageExtensionOptions` | Options for `mirageExtension`: `cwd` (default `/`), `systemPrompt` (a string to append, or `false` for none), plus `staleWriteProtection` and `sessionId` from `MirageOperationsOptions`. |
+| `mirageOperations` | Returns the lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle backed by `ws`, for wiring Pi tools by hand. |
+| `StaleMirageFileError` | Thrown when a write or edit targets a file that changed after the agent last read it; `path` names the file. |
+| `MirageOperationsBundle` | The operations `mirageOperations` returns, one per Pi tool: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`. |
+| `MirageOperationsOptions` | Options for `mirageOperations`: `staleWriteProtection` (default `true`) and `sessionId`, the Mirage session the operations act as. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
+{/* generated: exports pi end */}
 
 `mirageExtension` accepts:
 

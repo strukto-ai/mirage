@@ -42,13 +42,15 @@ it directly; a token in a page is visible to that page's user.
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `token` | required | Personal access token. Redacted in snapshots. |
-| `baseIds` | none | Only these bases are listed or readable. |
-| `maxReadRecords` | `10000` | The most records one file renders on a full read. |
-| `requestsPerSecond` | `5` | Pacing per base. |
-| `baseUrl` | `https://api.airtable.com/v0` | Override to point at a fake or proxy. |
+{/* generated: config-table airtable start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `token` | yes |  | Personal access token (or OAuth access token), sent as `Authorization: Bearer`. Redacted in snapshots. |
+| `baseIds` | no |  | Only these bases are listed or readable. Unset shows every base the token can reach. |
+| `baseUrl` | no | `'https://api.airtable.com/v0'` | Airtable API root; override to point at a fake or proxy. |
+| `maxReadRecords` | no | `10000` | The most records one file renders. A full read of a larger table or view fails with `File too large` once it passes the cap; `head -n N` still reads its first records. |
+| `requestsPerSecond` | no | `5` | Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty. |
+{/* generated: config-table airtable end */}
 
 ## Mount mode
 

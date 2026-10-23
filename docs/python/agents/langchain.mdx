@@ -57,11 +57,14 @@ asyncio.run(main())
 
 ## Exports
 
+{/* generated: exports langchain start */}
 | Symbol | Purpose |
 | --- | --- |
-| `LangchainWorkspace` | `SandboxBackendProtocol` implementation for Deep Agents, wires reads, writes, edits, search, and shell. |
-| `extract_text` | Pulls the text content out of LangChain messages. |
-| `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
+| `LangchainWorkspace` | Deep Agents backend backed by a Mirage Workspace. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `build_system_prompt` | Build a system prompt with optional mount info and extra instructions. |
+| `extract_text` | Extract text content from LangGraph messages. |
+{/* generated: exports langchain end */}
 
 ## Examples
 

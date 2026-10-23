@@ -22,13 +22,15 @@ vfs = AirtableVFS(config=config)
 ws = Workspace({"/airtable": vfs}, mode=MountMode.READ)
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `token` | required | Personal access token (or OAuth access token). Redacted in snapshots. |
-| `base_ids` | none | Only these bases are listed or readable; every other path is `ENOENT`. |
-| `max_read_records` | `10000` | The most records one file renders; a full read of a larger table stops at the cap. |
-| `requests_per_second` | `5` | Pacing per base. Airtable allows 5 and answers a burst with a 30 second penalty. |
-| `base_url` | `https://api.airtable.com/v0` | Override to point at a fake or proxy. |
+{/* generated: config-table airtable start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `token` | yes |  | Personal access token (or OAuth access token), sent as `Authorization: Bearer`. Redacted in snapshots. |
+| `base_ids` | no |  | Only these bases are listed or readable. Unset shows every base the token can reach. |
+| `base_url` | no | `'https://api.airtable.com/v0'` | Airtable API root; override to point at a fake or proxy. |
+| `max_read_records` | no | `10000` | The most records one file renders. A full read of a larger table or view fails with `File too large` once it passes the cap; `head -n N` still reads its first records. |
+| `requests_per_second` | no | `5.0` | Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty. |
+{/* generated: config-table airtable end */}
 
 Unknown keys are refused, so a misspelled `base_ids` fails loudly instead of
 widening the mount to every base.

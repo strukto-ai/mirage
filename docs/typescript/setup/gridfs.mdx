@@ -31,6 +31,18 @@ console.log(res.stdoutText)
 
 The `mongodb` driver is an optional peer dependency; it is only loaded when a `GridFSVFS` is constructed.
 
+### Config
+
+{/* generated: config-table gridfs start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | yes |  | MongoDB connection URI. Redacted in snapshots. |
+| `database` | yes |  | Database that holds the GridFS bucket. |
+| `bucket` | no | `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
+| `keyPrefix` | no |  | Filename prefix the mount treats as its root; files outside it are not listed. |
+| `chunkSizeBytes` | no |  | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
+{/* generated: config-table gridfs end */}
+
 ## Scoping to a key prefix
 
 ```ts

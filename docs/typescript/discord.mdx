@@ -48,6 +48,17 @@ const res = await ws.shell('ls /discord/')
 console.log(res.stdoutText)
 ```
 
+### Config
+
+{/* generated: config-table discord start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `token` | yes |  | Discord bot token, sent as `Authorization: Bot <token>`. Redacted in snapshots. |
+| `baseUrl` | no | `'https://discord.com/api/v10'` | Discord API root; override to point at a fake or proxy. |
+| `startTime` | no |  | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| `endTime` | no |  | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+{/* generated: config-table discord end */}
+
 ## Browser
 
 ```bash
@@ -55,6 +66,17 @@ pnpm add @struktoai/mirage-browser
 ```
 
 The browser package never sees the bot token. Instead, point it at a relative URL that your backend proxies to `https://discord.com/api/v10/*`, attaching the `Authorization: Bot …` header server-side.
+
+### Config
+
+{/* generated: config-table browser/discord start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `startTime` | no |  | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| `endTime` | no |  | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+| `proxyUrl` | yes |  | URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment. |
+| `getHeaders` | no |  | Function returning extra headers sent with every request to the proxy, such as your own session credential. Redacted in snapshots. |
+{/* generated: config-table browser/discord end */}
 
 ### 1. Server: minimal proxy
 

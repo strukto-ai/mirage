@@ -44,10 +44,14 @@ console.log(result.text)
 
 ## Exports
 
+{/* generated: exports mastra start */}
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each a Mastra `createTool()` with the id `mirage-<tool>`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
+| `mirageTools` | Returns Mirage's tool table as Mastra tools, `{ shell, read, write, edit, ls, grep, glob }`, each a `createTool()` with the id `mirage-<tool>`; `options` takes `sessionId` and `staleWriteProtection`. |
+{/* generated: exports mastra end */}
 
 ## Examples
 

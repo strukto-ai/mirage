@@ -49,15 +49,18 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `accessToken` | unset | An access token, or a function that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth. Redacted in snapshots. |
-| `clientId` | unset | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset. |
-| `clientSecret` | unset | Google OAuth client secret. Omit it for a PKCE client. Redacted in snapshots. |
-| `refreshToken` | unset | User's refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
-| `refreshFn` | built-in | Optional override for the access-token refresh callback. |
-| `apiBase` | Google's hosts | One host for every Google API and the OAuth token endpoint, such as a test server. |
-| `contentSearch` | `false` | Narrow `grep -r` and `rg` with the listing's message text ([below](#grep-and-rg)). |
+{/* generated: config-table gmail start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `accessToken` | no |  | OAuth access token, or a function (sync or async) that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth; it wins when both are set. Redacted in snapshots. |
+| `clientId` | no |  | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself. |
+| `clientSecret` | no |  | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. Redacted in snapshots. |
+| `refreshToken` | no |  | User's OAuth refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
+| `refreshFn` | no |  | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Google's token endpoint, for example so the client secret stays on a backend. `clientId` and `refreshToken` are still required. Redacted in snapshots. |
+| `apiBase` | no |  | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| `folderId` | no |  | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
+| `contentSearch` | no | `false` | Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body. |
+{/* generated: config-table gmail end */}
 
 ## grep and rg
 

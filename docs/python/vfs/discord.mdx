@@ -21,6 +21,15 @@ vfs = DiscordVFS(config=config)
 ws = Workspace({"/discord": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table discord start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `start_time` | no |  | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| `end_time` | no |  | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
+| `token` | yes |  | Discord bot token, sent as `Authorization: Bot <token>`. Redacted in snapshots. |
+| `base_url` | no |  | Discord API root. Unset uses `https://discord.com/api/v10`; set it to point at a fake or proxy. |
+{/* generated: config-table discord end */}
+
 ## Filesystem Layout
 
 ```text

@@ -65,9 +65,11 @@ The server serves the session's seven tools, [`session.tools`](/python/access/in
 
 ## Exports
 
+{/* generated: exports claude_agent_sdk start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MirageServer` | In-process MCP server exposing the Mirage tools; pass to `ClaudeAgentOptions(mcp_servers=...)`. |
-| `build_options` | Returns a ready-to-use `ClaudeAgentOptions` backed by a workspace. |
-| `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
-| `MIRAGE_SYSTEM_PROMPT` | The default system prompt template. |
+| `MirageServer` | Create an in-process Mirage server for the Claude Agent SDK, with the tools the session's profile leaves it. |
+| `build_options` | Build ClaudeAgentOptions backed by a Mirage Workspace. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `build_system_prompt` | Build a system prompt with optional mount info and extra instructions. |
+{/* generated: exports claude_agent_sdk end */}

@@ -24,6 +24,17 @@ vfs = SlackVFS(config=config)
 ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table slack start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `start_time` | no |  | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| `end_time` | no |  | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
+| `token` | yes |  | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). Redacted in snapshots. |
+| `search_token` | no |  | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. Redacted in snapshots. |
+| `base_url` | no | `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |
+| `content_search` | no | `False` | Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search. Slack indexes a message some time after it is posted, and searches only message text, file names and titles and reactions. |
+{/* generated: config-table slack end */}
+
 ## Filesystem Layout
 
 ```text

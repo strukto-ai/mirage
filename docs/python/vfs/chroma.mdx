@@ -39,6 +39,17 @@ ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
 
 The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so a restored mount reads current content.
 
+{/* generated: config-table chroma start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `host` | no | `'localhost'` | Host name of the Chroma HTTP server. |
+| `port` | no | `8000` | Port of the Chroma HTTP server. |
+| `ssl` | no | `False` | Connect over HTTPS instead of HTTP. |
+| `collection_name` | yes |  | Name of the existing Chroma collection to mount. |
+| `slug_field` | no | `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
+| `chunk_index_field` | no | `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
+{/* generated: config-table chroma end */}
+
 ## Filesystem Layout
 
 Chroma paths come from the path tree document stored in the collection with ID

@@ -44,6 +44,23 @@ either `account_id` (endpoint is auto-built as
 `https://{account_id}.r2.cloudflarestorage.com`) or an explicit
 `endpoint_url`. Both `READ` and `WRITE` modes are supported.
 
+{/* generated: config-table r2 start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `bucket` | yes |  | Name of the bucket to mount. |
+| `region` | no | `'auto'` | Region requests are signed for; R2 addresses a bucket by account, not by region. |
+| `endpoint_url` | no |  | Endpoint URL that replaces the one the provider derives. |
+| `access_key_id` | no |  | Access key ID, used only together with `secret_access_key`. Unset falls back to the AWS credential chain: `aws_profile`, the environment, the shared credentials file, then an instance role. Redacted in snapshots. |
+| `secret_access_key` | no |  | Secret access key paired with `access_key_id`. Redacted in snapshots. |
+| `session_token` | no |  | Session token for temporary credentials, sent with the access key pair. Redacted in snapshots. |
+| `aws_profile` | no |  | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| `path_style` | no | `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| `key_prefix` | no |  | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| `timeout` | no | `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
+| `proxy` | no |  | Proxy URL for every HTTP and HTTPS request to the endpoint. Redacted in snapshots. |
+| `account_id` | no |  | Cloudflare account ID. It builds the endpoint `https://<account_id>.r2.cloudflarestorage.com` unless `endpoint_url` is set; one of the two is required. |
+{/* generated: config-table r2 end */}
+
 ## Filesystem Layout
 
 The R2 VFS maps object keys to virtual paths under the mount

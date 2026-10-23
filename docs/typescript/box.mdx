@@ -91,6 +91,23 @@ The `BoxTokenManager` caches the access token in memory (5-minute safety buffer 
 and rotates the refresh token on every refresh. Without `onRefreshTokenRotated`, the rotation
 is in-memory only and a process restart needs a fresh refresh token.
 
+### Config
+
+{/* generated: config-table box start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `endpoint` | no |  | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
+| `rootFolderId` | no | `'0'` | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root. |
+| `contentSearch` | no | `false` | Let `grep -w` and `rg -w` read only the files Box search names. Box searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out. |
+| `clientId` | no |  | Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials). |
+| `clientSecret` | no |  | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. Redacted in snapshots. |
+| `refreshToken` | no |  | OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`. Redacted in snapshots. |
+| `enterpriseId` | no |  | Box enterprise ID for the client-credentials grant. With `clientId` and `clientSecret`, tokens are minted for the app's service account and no refresh token is involved. |
+| `accessToken` | no |  | Box developer token, used as is with no refresh flow; it expires after about 60 minutes. It wins over every other credential. Also accepted as `developer_token`. Redacted in snapshots. |
+| `refreshFn` | no |  | Function that takes the current refresh token and returns `{ accessToken, refreshToken, expiresIn }`, called instead of Box's token endpoint. Needs `clientId` and `refreshToken`. Redacted in snapshots. |
+| `onRefreshTokenRotated` | no |  | Function (sync or async) given the new refresh token whenever a refresh rotates it, to persist it; the token it replaces stops working after its first use. Redacted in snapshots. |
+{/* generated: config-table box end */}
+
 ## Browser (PKCE, no client secret)
 
 ```bash

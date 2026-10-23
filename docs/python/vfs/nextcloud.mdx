@@ -41,6 +41,16 @@ WebDAV URL plus optional Basic Auth credentials. Both `READ` and `WRITE`
 modes are supported. Use an **app password** (Settings → Security in
 Nextcloud) rather than your account password.
 
+{/* generated: config-table nextcloud start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `url` | yes |  | WebDAV URL of the user's files, such as `https://cloud.example.com/remote.php/dav/files/alice/`. |
+| `username` | no |  | Basic Auth user name; unset sends requests without credentials. |
+| `password` | no |  | Basic Auth password; use an app password (Settings → Security) rather than the account password. Redacted in snapshots. |
+| `verify_ssl` | no | `True` | Verify the server's TLS certificate on the WebDAV requests mirage sends itself (copy, checksum, quota, properties, search); reads, writes and listings go through OpenDAL, which always verifies. |
+| `timeout` | no | `30` | Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search) may take; reads, writes and listings go through OpenDAL and its own timeouts. |
+{/* generated: config-table nextcloud end */}
+
 ## Filesystem Layout
 
 WebDAV resources map directly to virtual paths under the mount prefix.

@@ -43,15 +43,17 @@ const res = await ws.shell('ls /dbx/')
 console.log(res.stdoutText)
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `catalog` | required | Unity Catalog catalog name. |
-| `schema` | required | Unity Catalog schema name. |
-| `volume` | required | Unity Catalog volume name. |
-| `root_path` | `/` | Subdirectory inside the volume to expose. |
-| `host` | required | HTTP(S) workspace origin without a path, query, fragment, or credentials. |
-| `token` | required | Static token or synchronous or asynchronous token callback. Redacted in snapshots. |
-| `timeout` | `30` | Request timeout in seconds. |
+{/* generated: config-table databricks_volume start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `catalog` | yes |  | Unity Catalog catalog name; one path segment, no `/`. |
+| `schema` | yes |  | Unity Catalog schema name; one path segment, no `/`. |
+| `volume` | yes |  | Unity Catalog volume name; one path segment, no `/`. |
+| `rootPath` | no | `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
+| `host` | yes |  | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
+| `token` | yes |  | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. Redacted in snapshots. |
+| `timeout` | no | `30` | Seconds one request may take before it fails. |
+{/* generated: config-table databricks_volume end */}
 
 Pass `host` and `token` explicitly. Mirage does not discover environment
 variables, SDK profiles, or default credentials. An application can read its

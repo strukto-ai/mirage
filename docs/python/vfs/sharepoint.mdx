@@ -46,18 +46,20 @@ drives for you. Both `READ` and `WRITE` modes are supported.
 
 ### Config Reference
 
-| Field          | Required | Description                                                       |
-| -------------- | -------- | ----------------------------------------------------------------- |
-| `access_token` | Yes      | Microsoft Graph OAuth2 bearer token (string or callable provider) |
-| `tenant_host`  | No       | Restrict resolution to a single SharePoint host                   |
-| `site_filter`  | No       | Search term passed to `/sites?search=` to narrow discovery        |
-| `site`         | No       | Scope the mount to one site; use together with `drive`            |
-| `drive`        | No       | Scope the mount to one document library; use together with `site` |
-| `key_prefix`   | No       | Folder path exposed as the mount root in a scoped library         |
-| `content_search` | No     | Let `grep -w` and `rg -w` read only the files Graph search names (default `False`; see [grep and rg](#grep-and-rg)) |
-| `graph_base_url` | No     | Full service root, for any deployment but the worldwide one       |
-| `timeout`      | No       | Request timeout in seconds (default `30`)                          |
-| `max_retries`  | No       | Max retries on `429`/`503`/`504` with backoff (default `5`)       |
+{/* generated: config-table sharepoint start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `access_token` | yes |  | Microsoft Graph bearer token, or a zero-argument callable that returns one. A callable is called for every request, and once more after a `401`, so it can hand out a refreshed token. Redacted in snapshots. |
+| `tenant_host` | no |  | SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it. |
+| `graph_base_url` | no |  | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
+| `timeout` | no | `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| `max_retries` | no | `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
+| `site_filter` | no |  | Search term passed to Graph's `/sites?search=` to choose which sites the mount lists. Unset searches `*`. |
+| `site` | no |  | Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`. |
+| `drive` | no |  | Document library in `site` that the mount uses as its root; takes effect only with `site` set. |
+| `key_prefix` | no |  | Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected. |
+| `content_search` | no | `False` | Let `grep -w` and `rg -w` read only the files Graph search names. Graph searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out. |
+{/* generated: config-table sharepoint end */}
 
 `access_token` accepts either a static string or a `Callable[[], str]` provider.
 With a callable, the VFS refreshes the token on `401`, so long-running

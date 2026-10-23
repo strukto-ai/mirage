@@ -32,17 +32,21 @@ const ws = new Workspace({ '/mail': email }, { mode: MountMode.READ })
 await ws.shell('ls /mail/INBOX/')
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `imapHost` | required | IMAP server hostname. |
-| `imapPort` | `993` | |
-| `smtpHost` | required | SMTP server hostname. |
-| `smtpPort` | `587` | `465` uses implicit TLS. Other ports use STARTTLS when the server offers it. |
-| `username` | required | Mailbox login. |
-| `password` | required | App password. Redacted in snapshots. |
-| `useSsl` | `true` | Implicit TLS for IMAP only. |
-| `maxMessages` | `200` | Hard ceiling per folder listing. |
-| `contentSearch` | `false` | Narrow `grep -r` and `rg` with IMAP search ([below](#grep-and-rg)). |
+{/* generated: config-table email start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `imapHost` | yes |  | IMAP server hostname. |
+| `imapPort` | no | `993` | IMAP server port. |
+| `smtpHost` | yes |  | SMTP server hostname `himalaya` sends mail through. |
+| `smtpPort` | no | `587` | SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it. |
+| `username` | yes |  | Login for both IMAP and SMTP, usually the email address. |
+| `password` | yes |  | Password or app password for `username`. Redacted in snapshots. |
+| `useSsl` | no | `true` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtpPort` instead. |
+| `maxMessages` | no | `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
+| `contentSearch` | no | `false` | Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which messages may match and read only those. The server searches headers and body, not the mounted JSON's keys, uids or flags. |
+| `saveCopy` | no | `true` | After `himalaya` sends a message, append a copy to `sentFolder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
+| `sentFolder` | no | `null` | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
+{/* generated: config-table email end */}
 
 ## grep and rg
 

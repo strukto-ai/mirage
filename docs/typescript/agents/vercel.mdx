@@ -47,10 +47,14 @@ console.log(text)
 
 ## Exports
 
+{/* generated: exports vercel start */}
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | `{ shell, read, write, edit, ls, grep, glob }`, each an `ai` `tool()` to spread into `tools`. They answer as the session's [`session.tools`](/typescript/access/in-app#session-tools) do; `options` takes `sessionId` and `staleWriteProtection`. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
+| `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
+| `mirageTools` | Returns Mirage's tool table as AI SDK tools, `{ shell, read, write, edit, ls, grep, glob }`, to spread into `tools`; `options` takes `sessionId` and `staleWriteProtection`. |
+{/* generated: exports vercel end */}
 
 `read` uses AI SDK 7's `toModelOutput`: text files come back as numbered lines, PDFs and supported images become file content parts, and other binary formats return a metadata note.
 

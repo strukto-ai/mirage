@@ -43,13 +43,16 @@ const trello = new TrelloVFS({
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `apiKey` | required | Trello API key. Redacted in snapshots. |
-| `apiToken` | required | Trello API token. Redacted in snapshots. |
-| `workspaceId` | none | Restrict to a single workspace. |
-| `boardIds` | none | Optional allowlist of board IDs. |
-| `baseUrl` | `https://api.trello.com/1` | Override for Enterprise instances. |
+{/* generated: config-table trello start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `apiKey` | yes |  | Trello API key. Redacted in snapshots. |
+| `apiToken` | yes |  | Trello API token. Redacted in snapshots. |
+| `workspaceId` | no |  | Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member. |
+| `boardIds` | no |  | Only these boards are listed or readable. Unset shows every open board of the shown workspaces. |
+| `baseUrl` | no | `'https://api.trello.com/1'` | Trello API root; override to point at a fake or proxy. |
+| `contentSearch` | no | `false` | Let `grep -rw` and `rg -w` read only the cards Trello's search names, plus those whose other fields hold the word. Trello indexes a write some time after it lands, so a fresh edit can be missed. |
+{/* generated: config-table trello end */}
 
 ## Mount mode
 

@@ -21,6 +21,16 @@ vfs = LinearVFS(config=config)
 ws = Workspace({"/linear": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table linear start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `api_key` | yes |  | Linear personal API key. Redacted in snapshots. |
+| `workspace` | no |  | Accepted for compatibility; not read. |
+| `team_ids` | no |  | Only these teams are listed or readable. Unset shows every team the key can reach. |
+| `base_url` | no | `'https://api.linear.app/graphql'` | Linear GraphQL endpoint; override to point at a fake or proxy. |
+| `content_search` | no | `False` | Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Linear indexes a write some time after it lands, so a fresh edit can be missed. |
+{/* generated: config-table linear end */}
+
 ## Filesystem Layout
 
 ```text

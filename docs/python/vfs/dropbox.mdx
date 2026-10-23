@@ -43,14 +43,16 @@ memory, refreshing ~5 minutes before expiry.
 
 ### Config Reference
 
-| Field            | Required | Description                                                             |
-| ---------------- | -------- | ----------------------------------------------------------------------- |
-| `client_id`      | Yes      | Dropbox app key                                                         |
-| `client_secret`  | Yes      | Dropbox app secret                                                      |
-| `refresh_token`  | Yes      | Long-lived OAuth2 refresh token                                         |
-| `root_path`      | No       | Mount a sub-folder of the account as the root (default `/`, the account root) |
-| `content_search` | No       | Let `grep`/`rg` narrow recursive scans via `/2/files/search_v2` (default `False`; see below) |
-| `endpoint`       | No       | Base URL overriding the real Dropbox hosts (test fakes)                 |
+{/* generated: config-table dropbox start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `client_id` | yes |  | Dropbox app key. |
+| `client_secret` | yes |  | Dropbox app secret. Redacted in snapshots. |
+| `refresh_token` | yes |  | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. Redacted in snapshots. |
+| `root_path` | no | `'/'` | Dropbox folder the mount uses as its root, such as `/Projects`; `/` is the account root. `..` segments are rejected. |
+| `content_search` | no | `False` | Let `grep -w` and `rg -w` read only the files Dropbox search (`/2/files/search_v2`) names. Full-text search needs a Professional, Essentials or Business plan or higher; leave it off on other plans, where search matches file names only. Dropbox indexes a write with a delay, so a file that holds the word can be left out. |
+| `endpoint` | no |  | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+{/* generated: config-table dropbox end */}
 
 ## Mount a subfolder
 

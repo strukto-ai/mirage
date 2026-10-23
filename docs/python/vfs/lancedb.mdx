@@ -42,6 +42,25 @@ ws = Workspace({"/fashion/": vfs}, mode=MountMode.READ)
 The mapping is config-driven; nothing about the dataset is hardcoded. Point
 `group_by` at different columns and the folder tree changes.
 
+{/* generated: config-table lancedb start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `uri` | yes |  | Database location: a local directory, an `s3://`, `gs://` or `az://` URI, or a `db://` URI for LanceDB Cloud or Enterprise. |
+| `api_key` | no |  | API key for LanceDB Cloud or Enterprise. Redacted in snapshots. |
+| `region` | no | `'us-east-1'` | LanceDB Cloud region of a `db://` database; ignored for other URIs. |
+| `host_override` | no |  | Endpoint of a LanceDB Enterprise deployment for a `db://` URI; ignored for other URIs. |
+| `storage_options` | no |  | Options passed to LanceDB's object-store layer, such as credentials or an endpoint for an `s3://` URI. |
+| `table` | no |  | Table the mount root shows; unset lists every table as a top-level folder. |
+| `group_by` | no | `[]` | Columns that become folder levels, one per column in order; unset puts every row's files directly under the table. |
+| `id_column` | no | `'id'` | Column whose value names each row's files (`<id>.md`, `<id>.<blob_ext>`). |
+| `title_column` | no |  | Column whose value heads a row's card as a `# ` title; unset leaves the card without one. |
+| `blob_column` | no |  | Column of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the card; unset adds no blob file. |
+| `blob_ext` | no | `'bin'` | File extension of the blob file, without the dot. |
+| `vector_column` | no |  | Embedding column left out of cards and listings. |
+| `search_limit` | no | `10` | Results `search` returns when `--top-k` is not given. |
+| `max_rows` | no | `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+{/* generated: config-table lancedb end */}
+
 ## Filesystem layout
 
 Every path is translated into a LanceDB query. Descending a folder adds one

@@ -25,12 +25,16 @@ await ws.shell('search --top-k 5 "quarterly planning" /memories/')
 
 Exactly one of `userId`, `agentId`, or `runId` is required.
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `apiKey` | required | Mem0 Platform API key. Redacted in snapshots. |
-| `host` | `https://api.mem0.ai` | Mem0 API base URL. |
-| `userId`, `agentId`, `runId` | one required | Scope filter applied to listing and search. |
-| `defaultPageSize` | `100` | Page size while listing memories. |
-| `defaultSearchLimit` | `10` | Default semantic result count. |
+{/* generated: config-table mem0 start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `apiKey` | yes |  | Mem0 Platform API key. Redacted in snapshots. |
+| `host` | no | `'https://api.mem0.ai'` | Mem0 API base URL. |
+| `userId` | no |  | Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| `agentId` | no |  | Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| `runId` | no |  | Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| `defaultPageSize` | no | `100` | Memories fetched per request while listing the scope. |
+| `defaultSearchLimit` | no | `10` | How many results `search` returns unless the line sets `top_k`. |
+{/* generated: config-table mem0 end */}
 
 The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.

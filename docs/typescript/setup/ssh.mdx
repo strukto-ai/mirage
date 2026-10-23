@@ -32,18 +32,20 @@ const ws = new Workspace({ '/remote': ssh }, { mode: MountMode.READ })
 await ws.shell('ls /remote')
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `host` | required | DNS name or IP address of the remote. |
-| `hostname` | `host` | Connect to this address instead of `host`. |
-| `port` | `22` | |
-| `username` | the local user | |
-| `password` | none | Redacted in snapshots. Prefer `identityFile`. |
-| `identityFile` | none | Path to a private key. `~` is expanded. |
-| `passphrase` | none | Passphrase for `identityFile`. Redacted in snapshots. |
-| `root` | `/` | Path on the remote that becomes the mount root. |
-| `timeout` | `30` | Connect timeout in seconds. |
-| `knownHosts` | none | Accepted but not applied: this backend does not verify host keys. |
+{/* generated: config-table ssh start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `host` | yes |  | DNS name or IP address of the remote. |
+| `hostname` | no |  | Address to connect to instead of `host`. |
+| `port` | no | `22` | SSH port. |
+| `username` | no |  | Login user; unset uses the local user name. |
+| `password` | no |  | Password for password authentication; prefer `identityFile`. Redacted in snapshots. |
+| `identityFile` | no |  | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`). |
+| `passphrase` | no |  | Passphrase of an encrypted private key, from `identityFile` or a default key. Redacted in snapshots. |
+| `root` | no | `'/'` | Path on the remote that becomes the mount root. |
+| `timeout` | no | `30` | Seconds to wait for the connection to be ready, authentication included. |
+| `knownHosts` | no |  | Accepted but not applied: this backend does not verify host keys. |
+{/* generated: config-table ssh end */}
 
 ## Mount mode
 

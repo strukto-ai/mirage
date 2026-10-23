@@ -21,68 +21,28 @@ This ships the base runtime (Workspace, RAM VFS, Disk VFS, the shell executor) a
 
 Mirage keeps native and network-heavy dependencies as **optional peers** so consumers who don't use those features don't pay the download or build cost. Mirage imports each library lazily, so unused peers cost nothing at runtime either.
 
-<Tabs>
-  <Tab title="FUSE">
-    Expose a workspace as a real OS filesystem.
+Install a peer with `pnpm add <package>` when you use the feature that needs it:
 
-    ```bash
-    pnpm add @zkochan/fuse-native
-    ```
+{/* generated: peers optional start */}
+| Feature | Packages | Needed for |
+| --- | --- | --- |
+| FUSE | `@zkochan/fuse-native@^0.1.0` | Mounting a workspace as an OS filesystem; see the [FUSE setup](/typescript/setup/fuse). |
+| Redis | `redis@^5.0.0` | `RedisVFS`, the Redis file and index cache stores, and the Redis session and history stores. |
+| Postgres | `pg@^8.13.0` | `PostgresVFS`. |
+| MongoDB | `mongodb@^6.10.0` | `MongoDBVFS` and `GridFSVFS`. |
+| LanceDB | `@lancedb/lancedb@^0.30.0` | `LanceDBVFS`. |
+| Qdrant | `@qdrant/js-client-rest@^1.18.0` | `QdrantVFS`. |
+| Chroma | `chromadb@^3.4.3` | `ChromaVFS`. |
+| SSH | `ssh2@^1.16.0` | `SSHVFS`, the SSH sandbox runtime and the SFTP mount. |
+| Email | `imapflow@^1.0.0`, `mailparser@^3.6.0`, `nodemailer@^10.0.2` | `EmailVFS` (IMAP read, MIME parsing) and sending mail with `himalaya` (SMTP). |
+| OpenDAL | `opendal@^0.49.4` | `HfBucketsVFS` and `NextcloudVFS`. |
+| Python runtimes | `pyodide@^0.29.0 \|\| ^314.0.0`, `@pydantic/monty@^1.0.0` | The Pyodide and Monty runtimes behind `python3`. |
+| JavaScript runtime | `quickjs-emscripten@^0.31.0 \|\| ^0.32.0` | The QuickJS runtime behind `js` and `node`. |
+| Sandboxes | `e2b@^2.45.0`, `@daytonaio/sdk@^0.207.0` | The E2B and Daytona sandbox runtimes. |
+| 1Password | `@1password/sdk@^0.5.0` | The `1password` secret source. |
+{/* generated: peers optional end */}
 
-    Then follow the [TypeScript FUSE setup](/typescript/setup/fuse) for the pnpm `onlyBuiltDependencies` allow-list and the macFUSE 4+ symlink workaround.
-  </Tab>
-  <Tab title="Redis">
-    Required for `RedisVFS`, `RedisFileCacheStore`, and `RedisIndexCacheStore`.
-
-    ```bash
-    pnpm add redis
-    ```
-
-    Any `redis@^5` client works.
-  </Tab>
-  <Tab title="Postgres">
-    Required for `PostgresVFS`.
-
-    ```bash
-    pnpm add pg
-    ```
-  </Tab>
-  <Tab title="MongoDB">
-    Required for `MongoDBVFS` and `GridFSVFS`.
-
-    ```bash
-    pnpm add mongodb
-    ```
-  </Tab>
-  <Tab title="LanceDB">
-    Required for `LanceDBVFS`.
-
-    ```bash
-    pnpm add @lancedb/lancedb
-    ```
-  </Tab>
-  <Tab title="Qdrant">
-    Required for `QdrantVFS`.
-
-    ```bash
-    pnpm add @qdrant/js-client-rest
-    ```
-  </Tab>
-  <Tab title="SSH">
-    Required for `SSHVFS`.
-
-    ```bash
-    pnpm add ssh2
-    ```
-  </Tab>
-  <Tab title="Email">
-    Required for `EmailVFS` (IMAP read, SMTP send, MIME parsing).
-
-    ```bash
-    pnpm add imapflow mailparser nodemailer
-    ```
-  </Tab>
-</Tabs>
+The FUSE binding also needs pnpm's `onlyBuiltDependencies` allow-list and, on macOS, the macFUSE 4+ symlink workaround described in the [TypeScript FUSE setup](/typescript/setup/fuse).
 
 For a browser application, install `@struktoai/mirage-browser` instead and
 follow the [browser quickstart](/typescript/browser-quickstart).

@@ -25,6 +25,18 @@ vfs = GSlidesVFS(config=config)
 ws = Workspace({"/gslides": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table gslides start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `access_token` | no |  | OAuth access token, or a zero-argument callable that returns one, read on every request. Use it instead of `client_id` and `refresh_token` when your app already manages OAuth; it wins when both are set. Redacted in snapshots. |
+| `client_id` | no |  | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
+| `client_secret` | no |  | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. Redacted in snapshots. |
+| `refresh_token` | no |  | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. Redacted in snapshots. |
+| `api_base` | no |  | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| `folder_id` | no |  | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
+| `content_search` | no | `False` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not the JSON the mount renders, and indexes a write with a delay, so a file that holds the word can be left out. |
+{/* generated: config-table gslides end */}
+
 ## Filesystem Layout
 
 ```text

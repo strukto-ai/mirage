@@ -40,6 +40,20 @@ console.log(res.stdoutText)
 The `DropboxTokenManager` caches the access token in memory and refreshes it ~5 minutes before
 expiry, so cold-start API calls don't pay the refresh round-trip.
 
+### Config
+
+{/* generated: config-table dropbox start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `clientId` | yes |  | Dropbox app key. |
+| `clientSecret` | yes |  | Dropbox app secret. Redacted in snapshots. |
+| `refreshToken` | yes |  | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. Redacted in snapshots. |
+| `rootPath` | no |  | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
+| `contentSearch` | no | `false` | Let `grep -w` and `rg -w` read only the files Dropbox search (`/2/files/search_v2`) names. Full-text search needs a Professional, Essentials or Business plan or higher; leave it off on other plans, where search matches file names only. Dropbox indexes a write with a delay, so a file that holds the word can be left out. |
+| `endpoint` | no |  | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+| `refreshFn` | no |  | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. Redacted in snapshots. |
+{/* generated: config-table dropbox end */}
+
 ## Mount a subfolder
 
 Pass `rootPath` to expose a single Dropbox folder as the mount root instead of the whole

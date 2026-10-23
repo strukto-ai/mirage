@@ -34,6 +34,18 @@ vfs = HfSpacesVFS(config)
 ws = Workspace({"/s": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table hf_spaces start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `repo_id` | yes |  | Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner. |
+| `token` | no |  | Hugging Face access token; unset sends anonymous requests, which reach public repositories only. Redacted in snapshots. |
+| `endpoint` | no | `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
+| `timeout` | no | `30` | Seconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off. |
+| `key_prefix` | no |  | Path inside the repository that becomes the mount root; files outside it are not listed. |
+| `revision` | no |  | Branch, tag or commit the mount reads; unset reads `main`. |
+| `expand_commits` | no |  | Whether a listing asks the Hub for each file's last commit, a Hub file's only source of an mtime, which cuts a listing page from 1000 entries to 50. Unset fetches one expanded page and keeps it if the whole repository fits, otherwise lists without commits; `True` or `False` forces either. |
+{/* generated: config-table hf_spaces end */}
+
 ## Reading, not writing
 
 This mount is read-only, the way a [`github`](/python/vfs/github) mount is. A Hub write is

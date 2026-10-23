@@ -43,3 +43,16 @@ console.log(
 
 `grep` pushes `$contains` / `$regex` filters down to ChromaDB before fine
 filtering locally, so recursive searches avoid fetching the whole collection.
+
+### Config
+
+{/* generated: config-table chroma start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `host` | no | `'localhost'` | Host name of the Chroma HTTP server. |
+| `port` | no | `8000` | Port of the Chroma HTTP server. |
+| `ssl` | no | `false` | Connect over HTTPS instead of HTTP. |
+| `collectionName` | yes |  | Name of the existing Chroma collection to mount. |
+| `slugField` | no | `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
+| `chunkIndexField` | no | `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
+{/* generated: config-table chroma end */}

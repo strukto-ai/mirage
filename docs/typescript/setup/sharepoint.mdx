@@ -30,16 +30,20 @@ new SharePointVFS({
 })
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `accessToken` | required | Token string or sync/async callback. Redacted in snapshots. |
-| `tenantHost` | unset | Keep only sites whose `webUrl` belongs to this host. |
-| `siteFilter` | `*` | Microsoft Graph site search expression. |
-| `site`, `drive` | unset | Configure both to scope the mount to one library. |
-| `keyPrefix` | unset | Folder subtree inside the scoped library. |
-| `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Graph search names; see [grep and rg](#grep-and-rg). |
-| `timeout` | `30` | Request and copy-monitor timeout in seconds. |
-| `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
+{/* generated: config-table sharepoint start */}
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `accessToken` | yes |  | Microsoft Graph bearer token, or a function (sync or async) that returns one. A function is called for every request, and once more after a `401`, so it can hand out a refreshed token. Redacted in snapshots. |
+| `tenantHost` | no |  | SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it. |
+| `graphBaseUrl` | no |  | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
+| `timeout` | no | `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| `maxRetries` | no | `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
+| `siteFilter` | no | `'*'` | Search term passed to Graph's `/sites?search=` to choose which sites the mount lists. |
+| `site` | no |  | Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`. |
+| `drive` | no |  | Document library in `site` that the mount uses as its root; takes effect only with `site` set. |
+| `keyPrefix` | no |  | Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected. |
+| `contentSearch` | no | `false` | Let `grep -w` and `rg -w` read only the files Graph search names. Graph searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out. |
+{/* generated: config-table sharepoint end */}
 
 ## grep and rg
 
