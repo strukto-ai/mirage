@@ -302,6 +302,16 @@ const WRITES: [string, Call][] = [
   ['updateValues', (tm) => updateValues(tm, 's1', 'A1', '[[1]]')],
 ]
 
+function serve(...replies: (Response | Error)[]): ReturnType<typeof vi.fn> {
+  const fake = vi.fn()
+  for (const r of replies) {
+    if (r instanceof Error) fake.mockRejectedValueOnce(r)
+    else fake.mockResolvedValueOnce(r)
+  }
+  globalThis.fetch = fake as unknown as typeof fetch
+  return fake
+}
+
 describe('google retry policy', () => {
   let previous: typeof fetch
   let tm: TokenManager
@@ -320,16 +330,6 @@ describe('google retry policy', () => {
   afterEach(() => {
     globalThis.fetch = previous
   })
-
-  function serve(...replies: (Response | Error)[]): ReturnType<typeof vi.fn> {
-    const fake = vi.fn()
-    for (const r of replies) {
-      if (r instanceof Error) fake.mockRejectedValueOnce(r)
-      else fake.mockResolvedValueOnce(r)
-    }
-    globalThis.fetch = fake as unknown as typeof fetch
-    return fake
-  }
 
   it('a 403 waits only for a rate-limit reason', () => {
     expect(transient(403, reason(403, 'userRateLimitExceeded'))).toBe(true)

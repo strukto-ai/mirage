@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -725,16 +726,17 @@ async def test_stream_retries_opening_the_response():
     assert waits == [3.0, 2.0]
 
 
+async def _first_then_drop(size: int) -> AsyncGenerator[bytes, None]:
+    yield b"first"
+    raise aiohttp.ServerDisconnectedError()
+
+
 @pytest.mark.asyncio
 async def test_stream_never_retries_once_a_chunk_reached_the_caller(
     monkeypatch,
 ):
-    async def body(size):
-        yield b"first"
-        raise aiohttp.ServerDisconnectedError()
-
     response = MagicMock(status=200)
-    response.content.iter_chunked = body
+    response.content.iter_chunked = _first_then_drop
     response.__aenter__ = AsyncMock(return_value=response)
     response.__aexit__ = AsyncMock(return_value=False)
     session = MagicMock()

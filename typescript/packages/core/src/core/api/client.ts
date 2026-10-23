@@ -333,6 +333,7 @@ export async function apiRequest(
   // it the same way when its `async with` response context exits.
   const asBytes =
     read === 'none' || read === 'location' || read === 'bytes' || read === 'bytes_response'
+  const safe = method.toUpperCase() === 'GET' || method.toUpperCase() === 'HEAD'
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -342,18 +343,28 @@ export async function apiRequest(
       init.signal = AbortSignal.timeout(Math.ceil(options.timeoutSeconds * 1000))
     }
     let response: Response
-    let text = ''
-    let data = new Uint8Array()
-    // The whole round trip, body included, is one attempt: a connection that
-    // drops while the body is read is as retryable as one that never
-    // answered. Nothing past this block touches the network.
     try {
       response = await doFetch(target.toString(), init)
-      if (response.status >= 400 || !asBytes) text = await response.text()
-      else data = new Uint8Array(await response.arrayBuffer())
     } catch (err) {
       // a rejection is connection-level: HTTP errors resolve normally
       if (retry.retryTransport === true && attempt < retry.maxRetries) {
+        await wait(Math.min(2 ** attempt, retry.maxBackoff))
+        attempt += 1
+        continue
+      }
+      throw err
+    }
+    let text = ''
+    let data = new Uint8Array()
+    // A body that drops after the response arrived is retried only for a
+    // request that cannot have changed anything: by then a write has been
+    // answered, and may have been applied. Nothing past this block touches
+    // the network.
+    try {
+      if (response.status >= 400 || !asBytes) text = await response.text()
+      else data = new Uint8Array(await response.arrayBuffer())
+    } catch (err) {
+      if (safe && retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue

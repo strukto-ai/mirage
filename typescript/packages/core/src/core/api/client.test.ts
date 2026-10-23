@@ -39,6 +39,20 @@ function errorOf(response: Response, body: string): Error {
   return new Boom(response.status, body)
 }
 
+function noWait(): Promise<void> {
+  return Promise.resolve()
+}
+
+function dropped(): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError('terminated'))
+      },
+    }),
+  )
+}
+
 function jsonResponse(body: unknown, status = 200, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -351,15 +365,6 @@ describe('retry delays', () => {
 
   it('retries a body that drops mid-read, never a mapped error or a bad parse', async () => {
     const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
-    const noWait = (): Promise<void> => Promise.resolve()
-    const dropped = (): Response =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          pull(controller) {
-            controller.error(new TypeError('terminated'))
-          },
-        }),
-      )
     const fakeFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(dropped())
@@ -380,6 +385,15 @@ describe('retry delays', () => {
       apiRequest('GET', TARGET, { errorOf, fetchFn: refused, retry, sleep: noWait }),
     ).rejects.toMatchObject({ status: 404 })
     expect(refused).toHaveBeenCalledOnce()
+  })
+
+  it('never resends a write whose answered body drops', async () => {
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(dropped())
+    await expect(
+      apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait, json: {} }),
+    ).rejects.toThrow('terminated')
+    expect(fakeFetch).toHaveBeenCalledOnce()
   })
 
   it('an injected sleep takes every wait, in seconds', async () => {
@@ -465,19 +479,10 @@ describe('a repeated header', () => {
 describe('apiStream', () => {
   it('retries a first chunk that drops and releases a body abandoned after it', async () => {
     const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 1, retryTransport: true }
-    const noWait = (): Promise<void> => Promise.resolve()
     const cancel = vi.fn()
     const fakeFetch = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(
-          new ReadableStream<Uint8Array>({
-            pull(controller) {
-              controller.error(new TypeError('terminated'))
-            },
-          }),
-        ),
-      )
+      .mockResolvedValueOnce(dropped())
       .mockResolvedValueOnce(
         new Response(
           new ReadableStream<Uint8Array>(
