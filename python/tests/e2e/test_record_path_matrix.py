@@ -125,8 +125,8 @@ _S3 = [
     ("write", C),
 ]
 
-# ssh records nothing for cat and gzip (cached), cp, mv, rm, rmdir, rm -r
-# or split's streamed read.
+# ssh records cat's read; gzip's and split's are served from cache, and cp,
+# mv, rm, rmdir and rm -r record nothing.
 _SSH = [
     ("write", K),
     ("append", K),
@@ -134,6 +134,7 @@ _SSH = [
     ("append", K),
     ("write", NEW),
     ("truncate", NEW),
+    ("read", K),
     ("write", DF),
     *_WARM_OUT,
     ("create", C),

@@ -17,6 +17,8 @@ import {
 import { read } from './read.ts'
 import { stat } from './stat.ts'
 import { DatabricksVolumeVFSBase } from '../../vfs/databricks_volume/databricks_volume.ts'
+import { MountMode } from '../../types.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { jsonResponse, spec } from '../../../tests/core/databricks_volume/_test_util.ts'
 
 const BASE = {
@@ -160,15 +162,15 @@ describe('Files client', () => {
           },
         }),
       })
+      const ws = new Workspace({ '/dbx': mount }, { mode: MountMode.WRITE })
       const path = spec('/volume/existing.txt')
       try {
         const result =
           operation === 'exists'
             ? mount.exists(path)
-            : mount.append(
-                path,
+            : ws.dispatch('append', '/dbx/volume/existing.txt', [
                 new TextEncoder().encode(operation === 'append_empty' ? '' : ' appended'),
-              )
+              ])
         await expect(result).rejects.toMatchObject({ cause: failure })
         expect(requests).toEqual([])
         expect(contents).toBe('original contents')
@@ -176,6 +178,7 @@ describe('Files client', () => {
           'original contents',
         )
       } finally {
+        await ws.close()
         await server.close()
       }
     },
