@@ -3,7 +3,7 @@ certifi==2026.10.19
 charset-normalizer==3.5.1
 click==8.5.0
 gitdb==4.0.12
-gitpython==3.1.62
+gitpython==3.2.1
 idna==3.19
 packaging==26.3
 platformdirs==4.11.7
