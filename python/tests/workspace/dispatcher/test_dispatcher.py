@@ -3047,8 +3047,9 @@ async def test_a_listing_past_the_full_scan_limit_stops_there(
             result.exit_code,
         ) == (
             out,
-            f"{name}: /ram/d: stopped after 2 files (full_scan_limit); "
-            "narrow the path\n".encode(),
+            name.encode()
+            + b": /ram/d: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n",
             code,
         )
 

@@ -61,16 +61,11 @@ const SharePointConfigSchema = z.object({
     .describe(
       'Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected.',
     ),
-  fullScanLimit: z
-    .number()
-    .int()
-    .min(-1)
-    .optional()
-    .meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Graph search, which lags writes and covers only extracted text.',
-      default: 1000,
-    }),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Graph search, which lags writes and covers only extracted text.',
+    default: 1000,
+  }),
 })
 
 export type SharePointConfigRedacted = RedactedConfig<

@@ -48,16 +48,11 @@ export const EmailConfigSchema = z.object({
     .describe(
       "How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.",
     ),
-  fullScanLimit: z
-    .number()
-    .int()
-    .min(-1)
-    .default(FULL_SCAN_LIMIT)
-    .meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON.',
-      default: 1000,
-    }),
+  fullScanLimit: z.number().int().min(-1).default(FULL_SCAN_LIMIT).meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON.',
+    default: 1000,
+  }),
   /**
    * Upstream himalaya's message.send.save-copy, whose default is true
    * since pimalaya/himalaya#536.

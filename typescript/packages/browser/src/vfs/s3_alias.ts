@@ -78,16 +78,11 @@ export const BROWSER_ALIAS_FIELDS = {
     .describe(
       'Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
     ),
-  fullScanLimit: z
-    .number()
-    .int()
-    .min(-1)
-    .optional()
-    .meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-      default: 1000,
-    }),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+    default: 1000,
+  }),
 }
 
 /**

@@ -120,16 +120,11 @@ const QdrantConfigSchema = z.object({
     .describe(
       'Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.',
     ),
-  fullScanLimit: z
-    .number()
-    .int()
-    .min(-1)
-    .optional()
-    .meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-      default: 1000,
-    }),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+    default: 1000,
+  }),
 })
 
 export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>
