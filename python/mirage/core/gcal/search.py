@@ -17,7 +17,6 @@ import logging
 import aiohttp
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import list_events
 from mirage.core.gcal.day import day_bounds
 from mirage.core.gcal.readdir import (
     bucket_zone,
@@ -129,8 +128,7 @@ async def files_containing(
             time_max = max((span[1] for span in spans), key=parse_time)
             named: dict[str, set[str]] = {}
             for word in sorted({word for words in asked for word in words}):
-                events = await list_events(
-                    accessor.token_manager,
+                events = await accessor.calendar.list_events(
                     cal_id,
                     time_min,
                     time_max,

@@ -12,17 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
-from mirage.core.gsheets.read import read, read_spreadsheet
+from mirage.core.gsheets.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
+from tests.fixtures.gsheets_api import StubSheets
 from tests.fixtures.mounted import Mounted
 
 
@@ -43,15 +45,13 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
         }
     ]
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=files[0],
-        ),
-        patch(
-            "mirage.core.gsheets.read.read_spreadsheet",
-            new_callable=AsyncMock,
-            return_value=b'{"spreadsheetId":"sheet1"}',
+        serve(
+            drive=StubDrive(get_file=AsyncMock(return_value=files[0])),
+            sheets=StubSheets(
+                read_spreadsheet=AsyncMock(
+                    return_value=b'{"spreadsheetId":"sheet1"}'
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -69,15 +69,17 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
 @pytest.mark.asyncio
 async def test_read_missing_file_raises_by_id(accessor):
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            side_effect=FileNotFoundError("missing"),
-        ),
-        patch(
-            "mirage.core.gsheets.read.read_spreadsheet",
-            new_callable=AsyncMock,
-            side_effect=AssertionError("should not call read_spreadsheet"),
+        serve(
+            drive=StubDrive(
+                get_file=AsyncMock(side_effect=FileNotFoundError("missing"))
+            ),
+            sheets=StubSheets(
+                read_spreadsheet=AsyncMock(
+                    side_effect=AssertionError(
+                        "should not call read_spreadsheet"
+                    )
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -89,27 +91,6 @@ async def test_read_missing_file_raises_by_id(accessor):
         )
         with pytest.raises(FileNotFoundError):
             await read(accessor, path)
-
-
-@pytest.mark.asyncio
-async def test_read_spreadsheet_asks_for_grid_data_and_values_only():
-    # spreadsheets.get returns no cell values unless asked, so the
-    # rendered .gsheet.json would be tab metadata without this; the mask
-    # keeps every cell's formats out of it.
-    token_manager = SimpleNamespace(config=SimpleNamespace(api_base=""))
-    with patch(
-        "mirage.core.gsheets.read.google_get",
-        new_callable=AsyncMock,
-        return_value={"spreadsheetId": "s1"},
-    ) as get:
-        await read_spreadsheet(token_manager, "s1")
-    assert get.await_args.args[1].endswith("/spreadsheets/s1")
-    assert get.await_args.args[2] == {
-        "includeGridData": "true",
-        "fields": "spreadsheetId,spreadsheetUrl,properties,namedRanges,"
-        "sheets(properties,data(startRow,startColumn,"
-        "rowData(values(formattedValue,userEnteredValue,effectiveValue))))",
-    }
 
 
 @pytest.mark.asyncio
@@ -131,20 +112,16 @@ async def test_read_records_the_token_stat_reports(accessor, stamp, token):
     scope = RecordingScope()
     try:
         with (
-            patch(
-                "mirage.core.google.readdir.list_all_files",
-                new_callable=AsyncMock,
-                return_value=([item], True),
-            ),
-            patch(
-                "mirage.core.google.entry.get_file",
-                new_callable=AsyncMock,
-                return_value=item,
-            ),
-            patch(
-                "mirage.core.gsheets.read.read_spreadsheet",
-                new_callable=AsyncMock,
-                return_value=b'{"spreadsheetId":"s1"}',
+            serve(
+                drive=StubDrive(
+                    list_all_files=AsyncMock(return_value=([item], True)),
+                    get_file=AsyncMock(return_value=item),
+                ),
+                sheets=StubSheets(
+                    read_spreadsheet=AsyncMock(
+                        return_value=b'{"spreadsheetId":"s1"}'
+                    )
+                ),
             ),
         ):
             (target,) = await mounted.readdir("/owned")

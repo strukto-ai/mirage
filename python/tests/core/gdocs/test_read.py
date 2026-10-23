@@ -13,18 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
-from mirage.core.gdocs.read import read, read_doc
+from mirage.core.gdocs.read import read
 from mirage.core.google.client import TokenManager
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
 from mirage.vfs.gdocs.config import GDocsConfig
+from tests.fixtures.gdocs_api import StubDocs
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 
@@ -54,46 +57,6 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-@pytest.mark.asyncio
-async def test_read_doc(token_manager):
-    doc_json = {
-        "documentId": "abc123",
-        "title": "Test Doc",
-        "body": {"content": []},
-    }
-    with patch(
-        "mirage.core.gdocs.read.google_get",
-        new_callable=AsyncMock,
-        return_value=doc_json,
-    ):
-        result = await read_doc(token_manager, "abc123")
-        parsed = json.loads(result)
-        assert parsed["documentId"] == "abc123"
-        assert parsed["title"] == "Test Doc"
-
-
-@pytest.mark.asyncio
-async def test_read_doc_requests_tab_content(token_manager):
-    doc_json = {
-        "documentId": "abc123",
-        "title": "Test Doc",
-        "tabs": [],
-    }
-    with patch(
-        "mirage.core.gdocs.read.google_get",
-        new_callable=AsyncMock,
-        return_value=doc_json,
-    ) as mock_get:
-        result = await read_doc(token_manager, "abc123")
-        parsed = json.loads(result)
-        assert parsed["tabs"] == []
-        mock_get.assert_called_once_with(
-            token_manager,
-            "https://docs.googleapis.com/v1/documents/abc123",
-            params={"includeTabsContent": "true"},
-        )
-
-
 def _item(stamp: str) -> dict[str, object]:
     return {
         "mimeType": "application/vnd.google-apps.document",
@@ -114,20 +77,14 @@ async def test_read_of_a_listed_file(accessor):
         "body": {"content": []},
     }
     with (
-        patch(
-            "mirage.core.google.readdir.list_all_files",
-            new_callable=AsyncMock,
-            return_value=([item], True),
-        ),
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=item,
-        ),
-        patch(
-            "mirage.core.gdocs.read.google_get",
-            new_callable=AsyncMock,
-            return_value=doc_json,
+        serve(
+            drive=StubDrive(
+                list_all_files=AsyncMock(return_value=([item], True)),
+                get_file=AsyncMock(return_value=item),
+            ),
+            docs=StubDocs(
+                read_doc=AsyncMock(return_value=json.dumps(doc_json).encode())
+            ),
         ),
     ):
         (target,) = await mounted.readdir(_spec("/gdocs/owned"))
@@ -147,15 +104,11 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
         }
     ]
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=files[0],
-        ),
-        patch(
-            "mirage.core.gdocs.read.read_doc",
-            new_callable=AsyncMock,
-            return_value=b'{"documentId":"doc1"}',
+        serve(
+            drive=StubDrive(get_file=AsyncMock(return_value=files[0])),
+            docs=StubDocs(
+                read_doc=AsyncMock(return_value=b'{"documentId":"doc1"}')
+            ),
         ),
     ):
         path = PathSpec(
@@ -172,15 +125,15 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
 @pytest.mark.asyncio
 async def test_read_missing_file_raises_by_id(accessor):
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            side_effect=FileNotFoundError("missing"),
-        ),
-        patch(
-            "mirage.core.gdocs.read.read_doc",
-            new_callable=AsyncMock,
-            side_effect=AssertionError("should not call read_doc"),
+        serve(
+            drive=StubDrive(
+                get_file=AsyncMock(side_effect=FileNotFoundError("missing"))
+            ),
+            docs=StubDocs(
+                read_doc=AsyncMock(
+                    side_effect=AssertionError("should not call read_doc")
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -197,15 +150,17 @@ async def test_read_missing_file_raises_by_id(accessor):
 @pytest.mark.asyncio
 async def test_read_propagates_metadata_failure(accessor):
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("google unavailable"),
-        ),
-        patch(
-            "mirage.core.gdocs.read.read_doc",
-            new_callable=AsyncMock,
-            side_effect=AssertionError("should not call read_doc"),
+        serve(
+            drive=StubDrive(
+                get_file=AsyncMock(
+                    side_effect=RuntimeError("google unavailable")
+                )
+            ),
+            docs=StubDocs(
+                read_doc=AsyncMock(
+                    side_effect=AssertionError("should not call read_doc")
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -232,20 +187,14 @@ async def test_read_records_the_token_stat_reports(accessor, stamp, token):
     scope = RecordingScope()
     try:
         with (
-            patch(
-                "mirage.core.google.readdir.list_all_files",
-                new_callable=AsyncMock,
-                return_value=([item], True),
-            ),
-            patch(
-                "mirage.core.google.entry.get_file",
-                new_callable=AsyncMock,
-                return_value=item,
-            ),
-            patch(
-                "mirage.core.gdocs.read.read_doc",
-                new_callable=AsyncMock,
-                return_value=b'{"documentId":"doc1"}',
+            serve(
+                drive=StubDrive(
+                    list_all_files=AsyncMock(return_value=([item], True)),
+                    get_file=AsyncMock(return_value=item),
+                ),
+                docs=StubDocs(
+                    read_doc=AsyncMock(return_value=b'{"documentId":"doc1"}')
+                ),
             ),
         ):
             (target,) = await mounted.readdir(_spec("/gdocs/owned"))

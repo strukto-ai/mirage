@@ -12,14 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { ContentType, FileType, MountMode, type PathSpec, type FileStat } from '../../types.ts'
 import { compactJsonBytes } from '../render/json.ts'
-import { API, EVENTS, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
-
-vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
+import {
+  API,
+  EVENTS,
+  installCalendar,
+  makeAccessor,
+  spec,
+} from '../../../tests/core/gcal/_test_util.ts'
 
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
 const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')
@@ -50,6 +54,7 @@ const WEEK = '/primary/2026-08-10--2026-08-16'
 
 beforeEach(() => {
   API.reset()
+  installCalendar()
 })
 
 describe('gcal stat', () => {

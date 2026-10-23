@@ -15,8 +15,9 @@
 import type { Mock } from 'vitest'
 import { vi } from 'vitest'
 import { GDriveAccessor } from '../../../src/accessor/gdrive.ts'
+import { installApi } from '../google/_test_util.ts'
 import type { DriveApi } from '../../../src/core/gdrive/api.ts'
-import type { TokenManager } from '../../../src/core/google/client.ts'
+import { GoogleApiError, type TokenManager } from '../../../src/core/google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT } from '../../../src/core/google/drive.ts'
 import type { DriveChange, DriveFile, SharedDrive } from '../../../src/core/google/drive.ts'
 import { ByteSpool } from '../../../src/io/spool.ts'
@@ -41,6 +42,25 @@ interface FakeItem {
 
 function bytesOf(data: Uint8Array | ByteSpool): Promise<Uint8Array> {
   return data instanceof ByteSpool ? data.read(0, data.size) : Promise.resolve(data)
+}
+
+/** The error Drive's client raises for a refused request. */
+export function driveError(status: number, message: string): GoogleApiError {
+  return new GoogleApiError(message, status)
+}
+
+/** The error Drive's client raises for an id it holds no file for. */
+export function notFound(fileId: string): GoogleApiError {
+  return driveError(404, `File not found: ${fileId}.`)
+}
+
+/** `call()` as a promise, rejected with whatever it throws. */
+function answer<T>(call: () => T): Promise<T> {
+  try {
+    return Promise.resolve(call())
+  } catch (err) {
+    return Promise.reject(err as Error)
+  }
 }
 
 function unserved(call: string): Error {
@@ -100,9 +120,13 @@ export class FakeDrive implements DriveApi {
     return null
   }
 
+  /**
+   * The item `id` names, as Drive answers a request for it: a 404 once it is
+   * deleted or was never there.
+   */
   private item(id: string): FakeItem {
     const item = this.items.get(id)
-    if (item === undefined) throw new Error(`no item ${id}`)
+    if (item === undefined) throw notFound(id)
     return item
   }
 
@@ -143,15 +167,34 @@ export class FakeDrive implements DriveApi {
     return Promise.resolve(out)
   }
 
+  listAllFiles(
+    opts: {
+      mimeType?: string | null
+      modifiedAfter?: string | null
+      modifiedBefore?: string | null
+    } = {},
+  ): Promise<{ files: DriveFile[]; complete: boolean }> {
+    const files: DriveFile[] = []
+    for (const item of this.items.values()) {
+      if (opts.mimeType != null && item.mimeType !== opts.mimeType) continue
+      if (opts.modifiedAfter != null && item.modifiedTime < opts.modifiedAfter) continue
+      if (opts.modifiedBefore != null && item.modifiedTime >= opts.modifiedBefore) continue
+      files.push(this.public(item.id))
+    }
+    return Promise.resolve({ files, complete: !this.incomplete })
+  }
+
   searchFiles(
     text: string,
     parentIds: readonly string[],
+    mimeType: string | null = null,
   ): Promise<{ ids: string[]; complete: boolean }> {
     this.searches.push([...parentIds])
     const needle = text.toLowerCase()
     const ids: string[] = []
     for (const item of this.items.values()) {
-      if (!item.parents.some((p) => parentIds.includes(p))) continue
+      if (parentIds.length > 0 && !item.parents.some((p) => parentIds.includes(p))) continue
+      if (mimeType !== null && item.mimeType !== mimeType) continue
       if (new TextDecoder().decode(item.content).toLowerCase().includes(needle)) ids.push(item.id)
     }
     return Promise.resolve({ ids, complete: !this.incomplete })
@@ -162,7 +205,7 @@ export class FakeDrive implements DriveApi {
   }
 
   getFile(fileId: string): Promise<DriveFile> {
-    return Promise.resolve(this.public(fileId))
+    return answer(() => this.public(fileId))
   }
 
   storageQuota(): Promise<{ limit?: string; usage?: string }> {
@@ -187,40 +230,48 @@ export class FakeDrive implements DriveApi {
   }
 
   deleteFile(fileId: string): Promise<void> {
-    const stack = [fileId]
-    for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
-      for (const item of this.items.values()) {
-        if (item.parents.includes(current)) stack.push(item.id)
+    return answer(() => {
+      this.item(fileId)
+      const stack = [fileId]
+      for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+        for (const item of this.items.values()) {
+          if (item.parents.includes(current)) stack.push(item.id)
+        }
+        this.items.delete(current)
       }
-      this.items.delete(current)
-    }
-    return Promise.resolve()
+    })
   }
 
   patchFile(
     fileId: string,
     opts: { body: Record<string, unknown>; addParents?: string; removeParents?: string },
   ): Promise<DriveFile> {
-    const item = this.item(fileId)
-    if (opts.body.name !== undefined) item.name = opts.body.name as string
-    item.modifiedTime = (opts.body.modifiedTime as string | undefined) ?? '2026-10-01T00:00:00Z'
-    if (opts.addParents !== undefined) item.parents.push(opts.addParents)
-    if (opts.removeParents !== undefined) {
-      item.parents = item.parents.filter((p) => p !== opts.removeParents)
-    }
-    return Promise.resolve(this.public(fileId))
+    return answer(() => {
+      const item = this.item(fileId)
+      if (opts.body.name !== undefined) item.name = opts.body.name as string
+      item.modifiedTime = (opts.body.modifiedTime as string | undefined) ?? '2026-10-01T00:00:00Z'
+      if (opts.addParents !== undefined) item.parents.push(opts.addParents)
+      if (opts.removeParents !== undefined) {
+        item.parents = item.parents.filter((p) => p !== opts.removeParents)
+      }
+      return this.public(fileId)
+    })
   }
 
   copyFile(fileId: string, name: string, parentId: string): Promise<DriveFile> {
-    const src = this.item(fileId)
-    return Promise.resolve(this.public(this.add(name, parentId, src.mimeType, src.content)))
+    return answer(() => {
+      const src = this.item(fileId)
+      return this.public(this.add(name, parentId, src.mimeType, src.content))
+    })
   }
 
   downloadFile(fileId: string, window?: ByteWindow): Promise<Uint8Array> {
-    const content = this.item(fileId).content
-    if (window === undefined) return Promise.resolve(content)
-    const end = window.size === null ? undefined : window.offset + window.size
-    return Promise.resolve(content.slice(window.offset, end))
+    return answer(() => {
+      const content = this.item(fileId).content
+      if (window === undefined) return content
+      const end = window.size === null ? undefined : window.offset + window.size
+      return content.slice(window.offset, end)
+    })
   }
 
   async *downloadFileStream(fileId: string): AsyncGenerator<Uint8Array, void> {
@@ -270,6 +321,7 @@ export function stubDrive(): StubDrive {
     listFiles: unarmed('listFiles'),
     listChildren: unarmed('listChildren'),
     listSharedDrives: unarmed('listSharedDrives'),
+    listAllFiles: unarmed('listAllFiles'),
     searchFiles: unarmed('searchFiles'),
     getFile: unarmed('getFile'),
     storageQuota: unarmed('storageQuota'),
@@ -316,10 +368,10 @@ export function makeScopedGDriveAccessor(folderId: string, drive: DriveApi): GDr
 }
 
 /**
- * Serve `drive` behind every GDriveAccessor, for a test whose VFS builds its
+ * Serve `drive` behind every Google accessor, for a test whose VFS builds its
  * own accessor. Undone by `vi.restoreAllMocks()`. Mirrors Python's
  * `install_drive`.
  */
 export function installDrive(drive: DriveApi): void {
-  vi.spyOn(GDriveAccessor.prototype, 'drive', 'get').mockReturnValue(drive)
+  installApi({ drive })
 }

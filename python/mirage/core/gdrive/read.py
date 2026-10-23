@@ -17,12 +17,9 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdocs.read import read_doc
 from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.fingerprint import drive_fingerprint
-from mirage.core.gsheets.read import read_spreadsheet
-from mirage.core.gslides.read import read_presentation
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import (
     active_recorder,
@@ -172,11 +169,11 @@ async def read(
         )
     timer = start_op()
     if resource_type == "gdrive/gdoc":
-        rendered = await read_doc(accessor.token_manager, file_id)
+        rendered = await accessor.docs.read_doc(file_id)
     elif resource_type == "gdrive/gsheet":
-        rendered = await read_spreadsheet(accessor.token_manager, file_id)
+        rendered = await accessor.sheets.read_spreadsheet(file_id)
     else:
-        rendered = await read_presentation(accessor.token_manager, file_id)
+        rendered = await accessor.slides.read_presentation(file_id)
     sliced = slice_window(rendered, offset, size)
     # No revision: a pin would replace the drift check a render relies on.
     fingerprint = found.fingerprint if _whole_file(offset, size) else None

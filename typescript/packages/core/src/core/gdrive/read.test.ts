@@ -37,10 +37,6 @@ vi.mock('../../observe/context.ts', async () => {
   }
 })
 
-vi.mock('../gdocs/read.ts', () => ({ readDoc: vi.fn() }))
-vi.mock('../gsheets/read.ts', () => ({ readSpreadsheet: vi.fn() }))
-vi.mock('../gslides/read.ts', () => ({ readPresentation: vi.fn() }))
-
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
@@ -51,9 +47,10 @@ import { driveFingerprint } from './fingerprint.ts'
 import { read, readFileVersioned } from './read.ts'
 import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
-import * as gdocs from '../gdocs/read.ts'
-import * as gsheets from '../gsheets/read.ts'
-import * as gslides from '../gslides/read.ts'
+import type { DocsApi } from '../gdocs/api.ts'
+import type { SheetsApi } from '../gsheets/api.ts'
+import type { SlidesApi } from '../gslides/api.ts'
+import { installApi } from '../../../tests/core/google/_test_util.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import {
   type StubDrive,
@@ -95,11 +92,16 @@ function makeAccessor(): GDriveAccessor {
   return makeGDriveAccessor(drive)
 }
 
+const docs = { readDoc: vi.fn<DocsApi['readDoc']>() }
+const sheets = { readSpreadsheet: vi.fn<SheetsApi['readSpreadsheet']>() }
+const slides = { readPresentation: vi.fn<SlidesApi['readPresentation']>() }
+
 beforeEach(() => {
   vi.clearAllMocks()
   UNRECORDED.records.length = 0
   drive = stubDrive()
   drive.listSharedDrives.mockResolvedValue([])
+  installApi({ docs, sheets, slides })
 })
 
 async function workspace(): Promise<Workspace> {
@@ -399,9 +401,9 @@ describe('the gdrive read record', () => {
 })
 
 const NATIVE: [string, string, () => { mockResolvedValue: (v: Uint8Array) => void }][] = [
-  ['gdrive/gdoc', 'doc.gdoc.json', () => vi.mocked(gdocs.readDoc)],
-  ['gdrive/gsheet', 'book.gsheet.json', () => vi.mocked(gsheets.readSpreadsheet)],
-  ['gdrive/gslide', 'deck.gslide.json', () => vi.mocked(gslides.readPresentation)],
+  ['gdrive/gdoc', 'doc.gdoc.json', () => docs.readDoc],
+  ['gdrive/gsheet', 'book.gsheet.json', () => sheets.readSpreadsheet],
+  ['gdrive/gslide', 'deck.gslide.json', () => slides.readPresentation],
 ]
 
 function nativeRow(resourceType: string, vfsName: string, headRevision?: string): FileStat {

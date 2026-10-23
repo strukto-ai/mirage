@@ -12,19 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from http import HTTPStatus
 from unittest.mock import AsyncMock
 
+import aiohttp
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive.readdir import readdir
+from mirage.core.gdrive.readdir import live_row, readdir
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
-from tests.fixtures.gdrive_api import DriveCall, StubDrive, install_drive
+from tests.fixtures.gdrive_api import (
+    DriveCall,
+    FakeDrive,
+    StubDrive,
+    drive_error,
+    install_drive,
+)
+from tests.fixtures.handed import entry_at
 
 ROOT = PathSpec(vfs_path="", virtual="/", directory="/")
 
@@ -229,8 +238,17 @@ async def test_readdir_root_uniquifies_duplicate_shared_drive_names(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        drive_error(HTTPStatus.FORBIDDEN, "Insufficient scope", "drives"),
+        aiohttp.ClientConnectionError("reset"),
+        TimeoutError(),
+    ],
+    ids=["forbidden", "dropped", "timeout"],
+)
 async def test_a_root_short_of_its_shared_drives_is_partial(
-    accessor, monkeypatch
+    accessor, monkeypatch, failure
 ):
     """A short root listing must not be kept as the directory.
 
@@ -239,9 +257,7 @@ async def test_a_root_short_of_its_shared_drives_is_partial(
     they are answered as a partial listing: kept as rows, not as the
     directory, and the next readdir retries enumeration.
     """
-    _patched(
-        monkeypatch, [_file("f1", "readme.txt")], RuntimeError("no scope")
-    )
+    _patched(monkeypatch, [_file("f1", "readme.txt")], failure)
     listed = await readdir(accessor, ROOT)
     assert isinstance(listed, DirListing)
     assert listed.partial
@@ -254,6 +270,21 @@ async def test_a_root_short_of_its_shared_drives_is_partial(
     listed = await readdir(accessor, ROOT)
     assert not isinstance(listed, DirListing)
     assert "Team" in _rows(listed)
+
+
+@pytest.mark.asyncio
+async def test_a_fault_listing_the_shared_drives_is_no_short_listing(
+    accessor, monkeypatch
+):
+    """Only Drive refusing or the network failing makes the root partial;
+    any other fault in listing the shared drives is raised, not hidden
+    behind a My-Drive-only listing.
+    """
+    _patched(
+        monkeypatch, [_file("f1", "readme.txt")], KeyError("nextPageToken")
+    )
+    with pytest.raises(KeyError):
+        await readdir(accessor, ROOT)
 
 
 @pytest.mark.asyncio
@@ -426,3 +457,51 @@ async def test_a_shared_drive_root_carries_no_content_token(
     row = _rows(await readdir(accessor, ROOT))["Team Drive"]
     assert "md5_checksum" not in row.extra
     assert row.fingerprint is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replaced", [True, False], ids=["replaced", "gone"])
+async def test_a_listed_file_deleted_since_is_looked_up_again(
+    accessor, monkeypatch, replaced
+):
+    """Drive answers 404 for the id a listing named once another client
+    deletes the file; the folder is listed again, and what it names at
+    the path now answers, None for nothing.
+    """
+    drive = FakeDrive()
+    install_drive(monkeypatch, drive)
+    folder = drive.folder("docs")
+    listed_id = drive.add("a.txt", parent=folder, content=b"old")
+    listed = await entry_at(
+        readdir, accessor, PathSpec.from_str_path("/docs/a.txt")
+    )
+    await drive.delete_file(listed_id)
+    made = (
+        drive.add("a.txt", parent=folder, content=b"new") if replaced else None
+    )
+    path = PathSpec.from_str_path("/docs/a.txt")
+    row = await live_row(accessor, path, listed)
+    if replaced:
+        assert row is not None
+        assert row.extra["file_id"] == made
+    else:
+        assert row is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_lookup_of_a_listed_file_is_raised(
+    accessor, monkeypatch
+):
+    """Only Drive's 404 sends the folder to be listed again; a refusal
+    reaches the caller as it is."""
+    drive = FakeDrive()
+    install_drive(monkeypatch, drive)
+    folder = drive.folder("docs")
+    drive.add("a.txt", parent=folder)
+    path = PathSpec.from_str_path("/docs/a.txt")
+    listed = await entry_at(readdir, accessor, path)
+    refused = drive_error(HTTPStatus.FORBIDDEN, "Forbidden", "files")
+    monkeypatch.setattr(drive, "get_file", AsyncMock(side_effect=refused))
+    with pytest.raises(aiohttp.ClientResponseError) as raised:
+        await live_row(accessor, path, listed)
+    assert raised.value is refused

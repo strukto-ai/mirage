@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -35,7 +35,9 @@ from mirage.types import FileStat, FileType, JsonValue, MountMode, PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
+from tests.fixtures.gdocs_api import StubDocs
 from tests.fixtures.gdrive_api import StubDrive, install_drive
+from tests.fixtures.google_api import StubApi, install_api, serve
 
 
 async def fail_list_files(folder_id, drive_id=None):
@@ -157,11 +159,8 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
 ):
     # A google-apps file has no bytes on Drive to range over: the JSON
     # exists only once we build it, so the window comes off the result.
-    with patch(
-        "mirage.core.gdrive.read.read_doc",
-        new_callable=AsyncMock,
-        return_value=b'{"title": "notes"}',
-    ) as mock_doc:
+    mock_doc = AsyncMock(return_value=b'{"title": "notes"}')
+    with serve(docs=StubDocs(read_doc=mock_doc)):
         result = await read(
             accessor,
             PathSpec.from_str_path("/notes.gdoc"),
@@ -170,7 +169,7 @@ async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
             entry=_row("doc1", "notes.gdoc", "gdrive/gdoc"),
         )
     assert result == b"title"
-    mock_doc.assert_awaited_once_with(accessor.token_manager, "doc1")
+    mock_doc.assert_awaited_once_with("doc1")
 
 
 @pytest.mark.asyncio
@@ -656,6 +655,12 @@ async def test_a_recorded_read_prefers_the_capture_over_the_entry(
     ]
 
 
+RENDERING_SERVICE = {
+    "read_doc": "docs",
+    "read_spreadsheet": "sheets",
+    "read_presentation": "slides",
+}
+
 NATIVE_READS = [
     ("gdrive/gdoc", "x.gdoc.json", "read_doc"),
     ("gdrive/gsheet", "x.gsheet.json", "read_spreadsheet"),
@@ -674,8 +679,13 @@ async def read_native_at(
     offset: int = 0,
     size: int | None = None,
 ):
-    monkeypatch.setitem(
-        vars(gdrive_read), renderer, AsyncMock(return_value=b'{"tabs": []}')
+    install_api(
+        monkeypatch,
+        **{
+            RENDERING_SERVICE[renderer]: StubApi(
+                **{renderer: AsyncMock(return_value=b'{"tabs": []}')}
+            )
+        },
     )
     virtual = f"{mount}/{vfs_name}"
     scope = RecordingScope()

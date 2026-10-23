@@ -16,7 +16,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { FileType, PathSpec } from '../../types.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
-import { DOC_MIME, FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
+import {
+  DOC_MIME,
+  FakeDrive,
+  driveError,
+  makeGDriveAccessor,
+} from '../../../tests/core/gdrive/_test_util.ts'
 import { readdir } from './readdir.ts'
 import { PARENTS_PER_QUERY, iterTree, listLevel, tree } from './tree.ts'
 
@@ -110,7 +115,7 @@ describe('gdrive tree', () => {
 
   it('leaves a short root listing to the walk', async () => {
     fake.folder('sub')
-    vi.spyOn(fake, 'listSharedDrives').mockRejectedValue(new Error('no shared drives scope'))
+    vi.spyOn(fake, 'listSharedDrives').mockRejectedValue(driveError(403, 'Insufficient scope'))
     expect(await tree(accessor, scope())).toBeNull()
     expect(fake.childQueries).toEqual([])
   })

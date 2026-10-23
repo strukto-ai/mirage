@@ -13,7 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import { CalendarClient, type CalendarApi } from '../core/gcal/api.ts'
+import { DocsClient, type DocsApi } from '../core/gdocs/api.ts'
+import { DriveClient, type DriveApi } from '../core/gdrive/api.ts'
+import { GmailClient, type GmailApi } from '../core/gmail/api.ts'
 import type { TokenManager } from '../core/google/client.ts'
+import { SheetsClient, type SheetsApi } from '../core/gsheets/api.ts'
+import { SlidesClient, type SlidesApi } from '../core/gslides/api.ts'
 
 export class GoogleApiAccessor extends Accessor {
   readonly tokenManager: TokenManager
@@ -21,5 +27,35 @@ export class GoogleApiAccessor extends Accessor {
   constructor(opts: { tokenManager: TokenManager }) {
     super()
     this.tokenManager = opts.tokenManager
+  }
+
+  /** The one door every Drive request goes through. */
+  get drive(): DriveApi {
+    return new DriveClient(this.tokenManager)
+  }
+
+  /** The one door every Docs request goes through. */
+  get docs(): DocsApi {
+    return new DocsClient(this.tokenManager)
+  }
+
+  /** The one door every Sheets request goes through. */
+  get sheets(): SheetsApi {
+    return new SheetsClient(this.tokenManager)
+  }
+
+  /** The one door every Slides request goes through. */
+  get slides(): SlidesApi {
+    return new SlidesClient(this.tokenManager)
+  }
+
+  /** The one door every Gmail request goes through. */
+  get gmail(): GmailApi {
+    return new GmailClient(this.tokenManager)
+  }
+
+  /** The one door every Calendar request goes through. */
+  get calendar(): CalendarApi {
+    return new CalendarClient(this.tokenManager)
   }
 }

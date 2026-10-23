@@ -19,7 +19,6 @@ import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { compactJsonBytes } from '../render/json.ts'
-import { listEvents } from './client.ts'
 import { dayBounds } from './day.ts'
 import {
   bucketZone,
@@ -76,7 +75,7 @@ async function dayEvents(
   tz: string,
 ): Promise<Record<string, JsonValue>[]> {
   const [timeMin, timeMax] = dayBounds(day, tz)
-  return listEvents(accessor.tokenManager, calId, timeMin, timeMax, tz, accessor.timeRange)
+  return accessor.calendar.listEvents(calId, timeMin, timeMax, tz, accessor.timeRange)
 }
 
 /**

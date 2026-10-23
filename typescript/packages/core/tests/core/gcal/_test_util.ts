@@ -18,6 +18,8 @@ import { type GCalConfig, normalizeGCalConfig } from '../../../src/vfs/gcal/conf
 import { TokenManager } from '../../../src/core/google/client.ts'
 import type { TimeRange } from '../../../src/core/time_range.ts'
 import { eventSpan } from '../../../src/core/gcal/day.ts'
+import type { CalendarApi } from '../../../src/core/gcal/api.ts'
+import { installApi } from '../google/_test_util.ts'
 
 export const HK = 'Asia/Hong_Kong'
 const TODAY = '2026-08-11'
@@ -91,10 +93,11 @@ function found(item: Record<string, JsonValue>, query: string): boolean {
 /**
  * The Calendar API the gcal core calls, over `EVENTS`.
  *
- * Test files mock `./client.ts` with `CLIENT`, which delegates here, and
- * reset this one instance per test. It records every events.list window,
- * every search and every deletion, so a test can pin how many requests a
- * listing cost. A test may swap the calendars and events it serves.
+ * Test files serve `CALENDAR`, which delegates here, behind every accessor
+ * (`installCalendar`) and reset this one instance per test. It records every
+ * events.list window, every search and every deletion, so a test can pin how
+ * many requests a listing cost. A test may swap the calendars and events it
+ * serves, and arms `syncs` to answer an incremental sync.
  */
 class FakeCalendarApi {
   calendars: readonly Record<string, JsonValue>[] = [PRIMARY, TEAM, SHARED]
@@ -102,6 +105,7 @@ class FakeCalendarApi {
   listed: [string, string | null, string][] = []
   asked: [string, string][] = []
   deleted: [string, string][] = []
+  syncs: CalendarApi['syncEvents'] | null = null
 
   reset(): void {
     this.calendars = [PRIMARY, TEAM, SHARED]
@@ -109,6 +113,7 @@ class FakeCalendarApi {
     this.listed = []
     this.asked = []
     this.deleted = []
+    this.syncs = null
   }
 
   listCalendars(minAccessRole?: string): Record<string, JsonValue>[] {
@@ -155,12 +160,10 @@ class FakeCalendarApi {
 
 export const API = new FakeCalendarApi()
 
-export const CLIENT = {
-  PAGE_LIMIT: 'gcal: listing exceeded 50 pages; narrow the date range',
-  listCalendars: (_tm: unknown, minAccessRole?: string) =>
-    Promise.resolve(API.listCalendars(minAccessRole)),
+/** The `CalendarApi` the fake answers. Mirrors Python's `FakeCalendarApi`. */
+export const CALENDAR: CalendarApi = {
+  listCalendars: (minAccessRole?: string) => Promise.resolve(API.listCalendars(minAccessRole)),
   listEvents: (
-    _tm: unknown,
     calendarId: string,
     timeMin: string | null,
     timeMax: string,
@@ -168,10 +171,19 @@ export const CLIENT = {
     scope?: TimeRange,
     query?: string,
   ) => Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope, query)),
-  deleteEvent: (_tm: unknown, calendarId: string, eventId: string) => {
+  syncEvents: (calendarId: string, syncToken: string | null, timeZone?: string) => {
+    if (API.syncs === null) return Promise.reject(new Error('the test reached syncEvents unarmed'))
+    return API.syncs(calendarId, syncToken, timeZone)
+  },
+  deleteEvent: (calendarId: string, eventId: string) => {
     API.deleted.push([calendarId, eventId])
     return Promise.resolve()
   },
+}
+
+/** Serve `CALENDAR` behind every Google accessor. Mirrors Python's `gcal_api` fixture. */
+export function installCalendar(): void {
+  installApi({ calendar: CALENDAR })
 }
 
 /** A mount config against the fake, today pinned to `TODAY`. */

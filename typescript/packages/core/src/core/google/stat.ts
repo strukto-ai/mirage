@@ -31,6 +31,6 @@ export function makeAppStat<A extends GoogleApiAccessor>(
   makeFilename: (title: string, id: string, modified: string) => string,
 ): ReturnType<typeof makeStat<A>> {
   const fileStat = (accessor: A, match: ScopeMatch, path: PathSpec): Promise<FileStat> =>
-    resolveAppEntry(accessor.tokenManager, match, path, mime, makeFilename)
+    resolveAppEntry(accessor.drive, match, path, mime, makeFilename)
   return makeStat(detectScope, { overrides: { file: fileStat } })
 }

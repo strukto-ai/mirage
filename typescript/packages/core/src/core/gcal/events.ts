@@ -21,7 +21,7 @@ import type { DeltaHook } from '../../events/base.ts'
 import { changesBetween, changesUnder } from '../../events/delta.ts'
 import { textField } from '../../events/payload.ts'
 import { ROOT } from '../hierarchy/scope.ts'
-import { listed, syncEvents } from './client.ts'
+import { listed } from './client.ts'
 import { bucketName, bucketStart, clampedHhmm, dayBounds, daysCovered, eventSpan } from './day.ts'
 import {
   bucketZone,
@@ -160,19 +160,19 @@ export class GCalDeltaHook implements DeltaHook {
     last: CalendarState | null,
     changes: [FileChangeKind, string][],
   ): Promise<CalendarState> {
-    const tm = this.accessor.tokenManager
+    const calendar = this.accessor.calendar
     const token = last?.[0] ?? null
     const known: Known = new Map(last?.[1] ?? [])
     let whole = token === null
     let events: Record<string, JsonValue>[]
     let next: string | null
     try {
-      ;[events, next] = await syncEvents(tm, calId, token, tz)
+      ;[events, next] = await calendar.syncEvents(calId, token, tz)
     } catch (err) {
       if ((err as { status?: unknown }).status !== 410) throw err
       console.debug(`gcal sync token for ${calId} expired: ${String(err)}`)
       whole = true
-      ;[events, next] = await syncEvents(tm, calId, null, tz)
+      ;[events, next] = await calendar.syncEvents(calId, null, tz)
     }
     const seen = new Set<string>()
     for (const event of events) {

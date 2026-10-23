@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +21,8 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.gdocs_api import StubDocs
+from tests.fixtures.google_api import serve
 from tests.fixtures.vfs_io import call_over
 
 
@@ -53,15 +55,12 @@ async def test_read_gdoc_renders_doc_json(accessor):
         extra={"file_id": "doc123", "resource_type": "gdrive/gdoc"},
     )
     doc_json = json.dumps({"documentId": "doc123"}).encode()
-    with patch(
-        "mirage.core.gdrive.read.read_doc",
-        new_callable=AsyncMock,
-        return_value=doc_json,
-    ) as mock:
+    mock = AsyncMock(return_value=doc_json)
+    with serve(docs=StubDocs(read_doc=mock)):
         result = await read(
             accessor, _scope("/docs/report.gdoc.json"), entry=row
         )
-        mock.assert_called_once_with(accessor.token_manager, "doc123")
+        mock.assert_called_once_with("doc123")
         assert json.loads(result)["documentId"] == "doc123"
 
 

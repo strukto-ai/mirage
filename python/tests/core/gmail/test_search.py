@@ -14,7 +14,7 @@
 
 import pytest
 
-from tests.core.gmail.conftest import FakeGmail
+from tests.fixtures.gmail_api import FakeGmail
 
 
 # The listing keeps each message's rendered text, so a message is read when

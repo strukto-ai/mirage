@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,7 +22,9 @@ from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, FileType
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace.files import Files
+from tests.fixtures.gdocs_api import StubDocs
 from tests.fixtures.gdrive_api import StubDrive, install_drive
+from tests.fixtures.google_api import serve
 
 
 def _make_gdrive_ops() -> tuple[Files, IndexCacheStore]:
@@ -55,11 +57,7 @@ async def test_read_gdoc_via_filetype_cascade():
         ],
     )
     doc_json = json.dumps({"documentId": "doc123", "title": "Report"}).encode()
-    with patch(
-        "mirage.core.gdrive.read.read_doc",
-        new_callable=AsyncMock,
-        return_value=doc_json,
-    ):
+    with serve(docs=StubDocs(read_doc=AsyncMock(return_value=doc_json))):
         result = await ops.read("/gdrive/docs/report.gdoc.json")
         parsed = json.loads(result)
         assert parsed["documentId"] == "doc123"

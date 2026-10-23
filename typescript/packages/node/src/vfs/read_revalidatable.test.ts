@@ -22,12 +22,11 @@ import type * as ContextModule from '@struktoai/mirage-core/observe/context'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type * as ClientModule from '../core/gridfs/client.ts'
 import type * as DriveModule from '@struktoai/mirage-core/core/google/drive'
-import * as googleDrive from '@struktoai/mirage-core/core/google/drive'
-import { GDriveAccessor } from '@struktoai/mirage-core/accessor/gdrive'
+import { GoogleApiAccessor } from '@struktoai/mirage-core/accessor/google_api'
 import type { DriveApi } from '@struktoai/mirage-core/core/gdrive/api'
-import type * as DocsReadModule from '@struktoai/mirage-core/core/gdocs/read'
-import type * as GoogleClientModule from '@struktoai/mirage-core/core/google/client'
-import type * as JsonRenderModule from '@struktoai/mirage-core/core/render/json'
+import type { DocsApi } from '@struktoai/mirage-core/core/gdocs/api'
+import type { SheetsApi } from '@struktoai/mirage-core/core/gsheets/api'
+import type { SlidesApi } from '@struktoai/mirage-core/core/gslides/api'
 import type { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { ListingCheckStore, RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
@@ -314,6 +313,19 @@ const GDRIVE_API: DriveApi = {
     ),
   listChildren: gdriveUnserved('listChildren'),
   listSharedDrives: () => Promise.resolve([]),
+  // Each of gdocs, gsheets and gslides lists only its own kind.
+  listAllFiles: async (opts = {}) => ({
+    files: await Promise.all(
+      [...H.gdrive.values()]
+        .filter(
+          (i) =>
+            i.mimeType !== GDRIVE_FOLDER &&
+            (opts.mimeType === undefined || opts.mimeType === null || i.mimeType === opts.mimeType),
+        )
+        .map(gdriveResource),
+    ),
+    complete: true,
+  }),
   searchFiles: gdriveUnserved('searchFiles'),
   getFile: (id) => gdriveResource(gdriveItem(id)),
   storageQuota: gdriveUnserved('storageQuota'),
@@ -364,70 +376,19 @@ const GDRIVE_API: DriveApi = {
   downloadRevisionStream: gdriveUnserved('downloadRevisionStream'),
 }
 
-vi.mock('@struktoai/mirage-core/core/google/drive', async (importOriginal) => {
-  const actual = await importOriginal<typeof DriveModule>()
-  return {
-    ...actual,
-    // Each of gdocs, gsheets and gslides lists only its own kind.
-    listAllFiles: async (_tm: unknown, opts: { mimeType?: string | null } = {}) => ({
-      files: await Promise.all(
-        [...H.gdrive.values()]
-          .filter(
-            (i) =>
-              i.mimeType !== GDRIVE_FOLDER &&
-              (opts.mimeType === undefined ||
-                opts.mimeType === null ||
-                i.mimeType === opts.mimeType),
-          )
-          .map(gdriveResource),
-      ),
-      complete: true,
-    }),
-    getFile: async (_tm: unknown, id: string) => gdriveResource(gdriveItem(id)),
-  }
-})
+// A native file's rendering: its stored bytes, counted as the cost a warm
+// native read avoids.
+function gdriveRender(id: string): Promise<Uint8Array> {
+  H.gdriveRenders += 1
+  return Promise.resolve(gdriveItem(id).content)
+}
 
-vi.mock('@struktoai/mirage-core/core/gdocs/read', async (importOriginal) => {
-  const actual = await importOriginal<typeof DocsReadModule>()
-  return {
-    ...actual,
-    readDoc: (_tm: unknown, id: string) => {
-      const found = H.gdrive.get(id)
-      if (found === undefined) throw new Error(`no drive item ${id}`)
-      H.gdriveRenders += 1
-      return Promise.resolve(found.content)
-    },
-  }
-})
-
-// gdocs, gsheets and gslides render inside their own module, where a mocked
-// export does not reach, so the fake stands in at the two seams the render
-// crosses: the editor API hands back the stored bytes, and the renderer passes
-// bytes through. python patches the render functions themselves.
-const EDITOR_GET = /\/(?:documents|spreadsheets|presentations)\/([^/?]+)$/
-
-vi.mock('@struktoai/mirage-core/core/google/client', async (importOriginal) => {
-  const actual = await importOriginal<typeof GoogleClientModule>()
-  return {
-    ...actual,
-    googleGet: (_tm: unknown, url: string) => {
-      const id = EDITOR_GET.exec(url)?.[1]
-      const found = id === undefined ? undefined : H.gdrive.get(id)
-      if (found === undefined) throw new Error(`unrouted google get ${url}`)
-      H.gdriveRenders += 1
-      return Promise.resolve(found.content)
-    },
-  }
-})
-
-vi.mock('@struktoai/mirage-core/core/render/json', async (importOriginal) => {
-  const actual = await importOriginal<typeof JsonRenderModule>()
-  return {
-    ...actual,
-    compactJsonBytes: (value: unknown) =>
-      value instanceof Uint8Array ? value : actual.compactJsonBytes(value),
-  }
-})
+const GDOCS_API: DocsApi = { readDoc: gdriveRender }
+const GSHEETS_API: SheetsApi = {
+  readSpreadsheet: gdriveRender,
+  readValues: () => gdriveUnserved('readValues')(),
+}
+const GSLIDES_API: SlidesApi = { readPresentation: gdriveRender }
 
 // Python declares read_revalidatable as a class attribute, so its twin asserts
 // it straight off each alias class. A TypeScript class field is per-instance,
@@ -1340,7 +1301,10 @@ describe('the read-token contract', () => {
   })
 
   beforeEach(() => {
-    vi.spyOn(GDriveAccessor.prototype, 'drive', 'get').mockReturnValue(GDRIVE_API)
+    vi.spyOn(GoogleApiAccessor.prototype, 'drive', 'get').mockReturnValue(GDRIVE_API)
+    vi.spyOn(GoogleApiAccessor.prototype, 'docs', 'get').mockReturnValue(GDOCS_API)
+    vi.spyOn(GoogleApiAccessor.prototype, 'sheets', 'get').mockReturnValue(GSHEETS_API)
+    vi.spyOn(GoogleApiAccessor.prototype, 'slides', 'get').mockReturnValue(GSLIDES_API)
     for (const b of s3.store.allBuckets()) s3.store.objects(b).clear()
     H.unrecorded = false
     H.slots.length = 0
@@ -1798,7 +1762,7 @@ describe('the read-token contract', () => {
       const fake = await makeFake(name, 'root', SEED)
       const virtual = `/m/${fake.key}`
       const ws = freshWorkspace(fake.vfs)
-      const search = vi.spyOn(googleDrive, 'listAllFiles')
+      const search = vi.spyOn(GDRIVE_API, 'listAllFiles')
       try {
         await line(ws, `cat ${virtual}`)
         await line(ws, `chmod 600 ${virtual}`)

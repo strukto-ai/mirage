@@ -12,13 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { API, EVENTS, HK, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
-
-vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
+import {
+  API,
+  EVENTS,
+  HK,
+  installCalendar,
+  makeAccessor,
+  spec,
+} from '../../../tests/core/gcal/_test_util.ts'
 
 const { readMany } = await import('./read.ts')
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
@@ -52,6 +57,7 @@ const DATED_PHD = 'aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json'
 
 beforeEach(() => {
   API.reset()
+  installCalendar()
 })
 
 function parsed(bytes: Uint8Array): Record<string, unknown> {

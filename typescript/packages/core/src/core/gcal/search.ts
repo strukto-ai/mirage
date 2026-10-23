@@ -23,7 +23,7 @@ import { GoogleApiError } from '../google/client.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { parseTime } from '../time_range.ts'
-import { PAGE_LIMIT, listEvents } from './client.ts'
+import { PAGE_LIMIT } from './client.ts'
 import { dayBounds } from './day.ts'
 import { bucketZone, calendarIndex, normalize, readdir, scopedBucket } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -102,8 +102,7 @@ export async function filesContaining(
       const [, timeMax] = spans.reduce((a, b) => (parseTime(b[1]) > parseTime(a[1]) ? b : a))
       const named = new Map<string, Set<string>>()
       for (const word of [...new Set(asked.flat())].sort(compareCodePoints)) {
-        const events = await listEvents(
-          accessor.tokenManager,
+        const events = await accessor.calendar.listEvents(
           calId,
           timeMin,
           timeMax,

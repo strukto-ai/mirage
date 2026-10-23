@@ -23,6 +23,7 @@ from tests.fixtures.gcal_api import (
     make_accessor,
     spec,
 )
+from tests.fixtures.google_api import install_api
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,12 +32,7 @@ DAY = "2026-08-11"
 
 def _api(monkeypatch: pytest.MonkeyPatch, events: list) -> FakeCalendarApi:
     fake = FakeCalendarApi([PRIMARY], events)
-    for target, fn in (
-        ("readdir.list_calendars", fake.list_calendars),
-        ("readdir.list_events", fake.list_events),
-        ("search.list_events", fake.list_events),
-    ):
-        monkeypatch.setattr(f"mirage.core.gcal.{target}", fn)
+    install_api(monkeypatch, calendar=fake)
     return fake
 
 
@@ -117,13 +113,14 @@ async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
 )
 async def test_a_failed_search_reads_every_file(monkeypatch, error):
     fake = _api(monkeypatch, EVENTS)
+    listing = fake.list_events
 
     async def refused(*args, query=None, **kwargs):
         if query is not None:
             raise error
-        return await fake.list_events(*args, **kwargs)
+        return await listing(*args, **kwargs)
 
-    monkeypatch.setattr("mirage.core.gcal.search.list_events", refused)
+    monkeypatch.setattr(fake, "list_events", refused)
     assert await _ids("lunch") is None
 
 

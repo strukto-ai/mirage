@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 import pytest
@@ -22,6 +23,7 @@ from mirage.core.google.client import TokenManager
 from mirage.core.time_range import TimeRange
 from mirage.types import JsonValue, PathSpec
 from mirage.vfs.gcal.config import GCalConfig
+from tests.fixtures.google_api import install_api
 
 HK = "Asia/Hong_Kong"
 TODAY = "2026-08-11"
@@ -127,9 +129,16 @@ class FakeCalendarApi:
         self.listed: list[tuple[str, str | None, str]] = []
         self.asked: list[tuple[str, str]] = []
         self.deleted: list[tuple[str, str]] = []
+        # Calendar's incremental sync, armed by a test that pulls events.
+        self.syncs: (
+            Callable[
+                ..., Awaitable[tuple[list[dict[str, JsonValue]], str | None]]
+            ]
+            | None
+        ) = None
 
     async def list_calendars(
-        self, token_manager: TokenManager, min_access_role: str | None = None
+        self, min_access_role: str | None = None
     ) -> list[dict[str, JsonValue]]:
         if not min_access_role:
             return list(self.calendars)
@@ -139,7 +148,6 @@ class FakeCalendarApi:
 
     async def list_events(
         self,
-        token_manager: TokenManager,
         calendar_id: str,
         time_min: str | None,
         time_max: str,
@@ -186,23 +194,24 @@ class FakeCalendarApi:
             out.append(item)
         return out
 
-    async def delete_event(
-        self, token_manager: TokenManager, calendar_id: str, event_id: str
-    ) -> None:
+    async def sync_events(
+        self,
+        calendar_id: str,
+        sync_token: str | None,
+        time_zone: str | None = None,
+    ) -> tuple[list[dict[str, JsonValue]], str | None]:
+        if self.syncs is None:
+            raise AssertionError("the test reached sync_events unarmed")
+        return await self.syncs(calendar_id, sync_token, time_zone)
+
+    async def delete_event(self, calendar_id: str, event_id: str) -> None:
         self.deleted.append((calendar_id, event_id))
 
 
 @pytest.fixture
 def gcal_api(monkeypatch: pytest.MonkeyPatch) -> FakeCalendarApi:
     fake = FakeCalendarApi([PRIMARY, TEAM, SHARED], EVENTS)
-    for target, fn in (
-        ("readdir.list_calendars", fake.list_calendars),
-        ("readdir.list_events", fake.list_events),
-        ("read.list_events", fake.list_events),
-        ("search.list_events", fake.list_events),
-        ("unlink.delete_event", fake.delete_event),
-    ):
-        monkeypatch.setattr(f"mirage.core.gcal.{target}", fn)
+    install_api(monkeypatch, calendar=fake)
     return fake
 
 

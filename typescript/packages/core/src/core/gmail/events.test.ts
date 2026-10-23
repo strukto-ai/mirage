@@ -12,41 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { expect, it, vi } from 'vitest'
-import type * as MessagesModule from './messages.ts'
+import { expect, it } from 'vitest'
 
-const box = vi.hoisted(() => {
-  const labels = [
-    { id: 'INBOX', name: 'INBOX', type: 'system' },
-    { id: 'TRASH', name: 'TRASH', type: 'system' },
-    { id: 'Label_1', name: 'Work', type: 'user' },
-  ]
-  return {
-    history: new Map<string, unknown>(),
-    now: '100',
-    messages: new Map<string, unknown>(),
-    LABELS: labels,
-    labels,
-  }
-})
+const LABELS = [
+  { id: 'INBOX', name: 'INBOX', type: 'system' },
+  { id: 'TRASH', name: 'TRASH', type: 'system' },
+  { id: 'Label_1', name: 'Work', type: 'user' },
+]
 
-vi.mock('./history.ts', () => ({
+const box = {
+  history: new Map<string, unknown>(),
+  now: '100',
+  messages: new Map<string, unknown>(),
+  LABELS,
+  labels: LABELS,
+}
+
+/** Gmail's history and messages, scripted per pull. Mirrors Python's `Mailbox`. */
+const MAILBOX: GmailApi = {
   currentHistoryId: () => Promise.resolve(box.now),
-  listHistory: (_tm: unknown, start: string) => {
+  listHistory: (start: string) => {
     const answer = box.history.get(start)
-    return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer)
+    return answer instanceof Error
+      ? Promise.reject(answer)
+      : Promise.resolve(answer as [Record<string, unknown>[], string])
   },
-}))
-vi.mock('./labels.ts', () => ({ listLabels: () => Promise.resolve(box.labels) }))
-vi.mock('./messages.ts', async () => {
-  const actual = await vi.importActual<typeof MessagesModule>('./messages.ts')
-  return {
-    ...actual,
-    getMessageRaw: (_tm: unknown, id: string) => Promise.resolve(box.messages.get(id)),
-  }
-})
+  listMessages: () => Promise.reject(new Error('the test Mailbox lists no messages')),
+  getAttachment: () => Promise.reject(new Error('the test Mailbox holds no attachments')),
+  listLabels: () => Promise.resolve(box.labels),
+  getMessageRaw: (id: string) => Promise.resolve(box.messages.get(id) as GmailMessageRaw),
+}
 
 import type { GmailAccessor } from '../../accessor/gmail.ts'
+import type { GmailApi } from './api.ts'
+import type { GmailMessageRaw } from './messages.ts'
 import { FileChangeKind, PathSpec } from '../../types.ts'
 import type { Delta } from '../../types.ts'
 import { buildDeltaHook } from './events.ts'
@@ -85,7 +84,7 @@ function pairs(delta: Delta): [string, string][] {
 it("follows each message's labels", async () => {
   box.messages.set('a1', message('a1', ['TRASH'], '2026-01-05', 'Budget review', 'plan.txt'))
   box.messages.set('n3', message('n3', ['INBOX'], '2026-01-07', 'Hi'))
-  const hook = buildDeltaHook({ tokenManager: {} } as unknown as GmailAccessor)
+  const hook = buildDeltaHook({ gmail: MAILBOX } as unknown as GmailAccessor)
   const baseline = await hook.pull(ROOT, null)
   expect(baseline.changes).toEqual([])
   box.history.set('100', [
@@ -130,7 +129,7 @@ it('follows the label folders', async () => {
   box.labels = box.LABELS
   const work = message('w1', ['Label_1'], '2026-01-08', 'Plan')
   box.messages.set('w1', work)
-  const hook = buildDeltaHook({} as GmailAccessor)
+  const hook = buildDeltaHook({ gmail: MAILBOX } as unknown as GmailAccessor)
   const baseline = await hook.pull(ROOT, null)
   box.history.set(box.now, [[{ messagesAdded: [{ message: { id: 'w1' } }] }], '110'])
   const seen = await hook.pull(ROOT, baseline.checkpoint)

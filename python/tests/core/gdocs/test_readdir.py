@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,8 @@ from mirage.accessor.gdocs import GDocsAccessor
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 
@@ -69,10 +71,8 @@ async def test_readdir_owned(accessor, mounted):
             "owners": [{"me": True}],
         },
     ]
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(files, True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=(files, True)))
     ):
         result = await readdir(
             accessor,
@@ -97,10 +97,8 @@ async def test_readdir_shared(accessor, mounted):
             "owners": [{"me": False}],
         },
     ]
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(files, True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=(files, True)))
     ):
         result = await readdir(
             accessor,
@@ -147,12 +145,12 @@ async def test_readdir_invalid_path_raises(accessor, mounted):
 async def test_readdir_owned_pushes_modified_range(accessor, mounted):
     captured = {}
 
-    async def fake_list(token_manager, mime_type=None, **kwargs):
+    async def fake_list(mime_type=None, **kwargs):
         captured.update(kwargs)
         captured["mime_type"] = mime_type
         return [], True
 
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
+    with serve(drive=StubDrive(list_all_files=fake_list)):
         await readdir(
             accessor,
             PathSpec(
@@ -190,7 +188,6 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, mounted):
     call_count = {"n": 0}
 
     async def fake_list(
-        token_manager,
         mime_type=None,
         modified_after=None,
         modified_before=None,
@@ -201,7 +198,7 @@ async def test_readdir_owned_filtered_does_not_cache(accessor, mounted):
             return files, True
         return full_files, True
 
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
+    with serve(drive=StubDrive(list_all_files=fake_list)):
         await readdir(
             accessor,
             PathSpec(
@@ -247,7 +244,6 @@ async def test_readdir_owned_glob_matches_a_whole_listing(accessor, mounted):
     call_count = {"n": 0}
 
     async def fake_list(
-        token_manager,
         mime_type=None,
         modified_after=None,
         modified_before=None,
@@ -258,7 +254,7 @@ async def test_readdir_owned_glob_matches_a_whole_listing(accessor, mounted):
             return may_only, True
         return full_files, True
 
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
+    with serve(drive=StubDrive(list_all_files=fake_list)):
         await readdir(
             accessor,
             PathSpec(
@@ -289,11 +285,11 @@ async def test_readdir_owned_glob_matches_a_whole_listing(accessor, mounted):
 async def test_readdir_owned_no_pattern_omits_range(accessor, mounted):
     captured = {}
 
-    async def fake_list(token_manager, mime_type=None, **kwargs):
+    async def fake_list(mime_type=None, **kwargs):
         captured.update(kwargs)
         return [], True
 
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
+    with serve(drive=StubDrive(list_all_files=fake_list)):
         await readdir(
             accessor,
             PathSpec(
@@ -312,11 +308,11 @@ async def test_readdir_owned_no_pattern_omits_range(accessor, mounted):
 async def test_readdir_owned_non_date_pattern_omits_range(accessor, mounted):
     captured = {}
 
-    async def fake_list(token_manager, mime_type=None, **kwargs):
+    async def fake_list(mime_type=None, **kwargs):
         captured.update(kwargs)
         return [], True
 
-    with patch("mirage.core.google.readdir.list_all_files", new=fake_list):
+    with serve(drive=StubDrive(list_all_files=fake_list)):
         await readdir(
             accessor,
             PathSpec(
@@ -343,17 +339,10 @@ async def test_readdir_filtered_then_stat_succeeds(accessor, mounted):
             "owners": [{"me": False}],
         }
     ]
+    mock_list = AsyncMock(return_value=(files, True))
+    mock_get = AsyncMock(return_value=files[0])
     with (
-        patch(
-            "mirage.core.google.readdir.list_all_files",
-            new_callable=AsyncMock,
-            return_value=(files, True),
-        ) as mock_list,
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=files[0],
-        ) as mock_get,
+        serve(drive=StubDrive(list_all_files=mock_list, get_file=mock_get)),
     ):
         listed = await readdir(
             accessor,
@@ -406,11 +395,8 @@ async def test_readdir_owned_newest_first_across_cache(accessor, mounted):
             "owners": [{"me": True}],
         },
     ]
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(files, True),
-    ) as mock_list:
+    mock_list = AsyncMock(return_value=(files, True))
+    with serve(drive=StubDrive(list_all_files=mock_list)):
         first = await readdir(
             accessor,
             PathSpec(
@@ -447,10 +433,8 @@ async def test_readdir_entry_size_none_source_size_in_extra(accessor, mounted):
             "owners": [{"me": True}],
         },
     ]
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(files, True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=(files, True)))
     ):
         result = await readdir(
             accessor,
@@ -491,7 +475,7 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
     ]
     complete = {"v": False}
 
-    async def fake_list(token_manager, mime_type=None, **kwargs):
+    async def fake_list(mime_type=None, **kwargs):
         return files, complete["v"]
 
     owned = PathSpec(
@@ -500,7 +484,7 @@ async def test_readdir_incomplete_search_is_not_cached_as_the_directory(
         directory="/gdocs/owned",
     )
     listings = AsyncMock(side_effect=fake_list)
-    with patch("mirage.core.google.readdir.list_all_files", new=listings):
+    with serve(drive=StubDrive(list_all_files=listings)):
         listed = await readdir(accessor, owned, mounted)
         assert len(listed) == 1
         await readdir(accessor, owned, mounted)

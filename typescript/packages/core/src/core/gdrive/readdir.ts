@@ -170,13 +170,19 @@ export async function readdir(
   let complete = true
   if (atRoot && folderId === 'root') {
     // Shared Drive enumeration is best-effort: if the account can't list
-    // them (missing scope, API error), still return My Drive contents.
-    // A folder-scoped mount lists only the folder's children, so shared
-    // drives never surface there.
+    // them (missing scope, API error, network), still return My Drive
+    // contents. A folder-scoped mount lists only the folder's children, so
+    // shared drives never surface there.
     let sharedDrives: { id: string; name: string }[] = []
     try {
       sharedDrives = await drive.listSharedDrives()
-    } catch {
+    } catch (err) {
+      // fetch rejects with a TypeError when the connection fails and a
+      // DOMException when its timeout aborts it
+      const failed =
+        err instanceof GoogleApiError || err instanceof TypeError || err instanceof DOMException
+      if (!failed) throw err
+      console.debug(`Unable to list Google Shared Drives: ${String(err)}`)
       sharedDrives = []
       complete = false
     }

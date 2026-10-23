@@ -16,7 +16,6 @@ import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
 import { eisdir, enoent, fsError } from '../../errors/fs.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { INVALID, type DetectFn } from '../hierarchy/scope.ts'
-import { getFile, patchFile } from './drive.ts'
 import { DATE_LEN, appFilename } from './scope.ts'
 
 /**
@@ -64,8 +63,8 @@ export function makeAppRename(
     }
     if (entry === null) throw enoent(src.virtual)
     const docId = String(entry.extra.doc_id)
-    const tm = accessor.tokenManager
-    const modified = (await getFile(tm, docId)).modifiedTime ?? ''
+    const drive = accessor.drive
+    const modified = (await drive.getFile(docId)).modifiedTime ?? ''
     const cut = dst.virtual.lastIndexOf('/')
     const title = appTitle(dst.virtual.slice(cut + 1), docId, modified, suffix)
     if (
@@ -74,6 +73,6 @@ export function makeAppRename(
     ) {
       throw fsError(dst, 'EPERM')
     }
-    await patchFile(tm, docId, { body: { name: title, modifiedTime: modified } })
+    await drive.patchFile(docId, { body: { name: title, modifiedTime: modified } })
   }
 }

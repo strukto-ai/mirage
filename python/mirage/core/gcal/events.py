@@ -20,7 +20,7 @@ from http import HTTPStatus
 import aiohttp
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import listed, sync_events
+from mirage.core.gcal.client import listed
 from mirage.core.gcal.day import (
     bucket_name,
     bucket_start,
@@ -215,18 +215,18 @@ class GCalDeltaHook:
             changes (list[tuple[FileChangeKind, str]]): Where the changes
                 go.
         """
-        tm = self._accessor.token_manager
+        calendar = self._accessor.calendar
         token, known = last if last is not None else (None, {})
         known = dict(known)
         whole = token is None
         try:
-            events, nxt = await sync_events(tm, cal_id, token, tz)
+            events, nxt = await calendar.sync_events(cal_id, token, tz)
         except aiohttp.ClientResponseError as exc:
             if exc.status != HTTPStatus.GONE:
                 raise
             logger.debug("gcal sync token for %s expired: %s", cal_id, exc)
             whole = True
-            events, nxt = await sync_events(tm, cal_id, None, tz)
+            events, nxt = await calendar.sync_events(cal_id, None, tz)
         seen: set[str] = set()
         for event in events:
             event_id = text_field(event, "id")

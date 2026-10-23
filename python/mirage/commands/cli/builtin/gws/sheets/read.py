@@ -15,7 +15,6 @@
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.core.gsheets.read import read_values
 from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -28,8 +27,7 @@ async def read(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    result = await read_values(
-        accessor.token_manager,
+    result = await accessor.sheets.read_values(
         fl.as_str("spreadsheet") or "",
         fl.as_str("range") or "",
     )

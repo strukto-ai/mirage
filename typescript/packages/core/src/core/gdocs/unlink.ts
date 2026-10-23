@@ -14,13 +14,12 @@
 
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import type { FileStat } from '../../types.ts'
-import { deleteFile } from '../google/drive.ts'
 import { makeUnlink } from '../hierarchy/unlink.ts'
 import { detectScope } from './scope.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 
 async function del(accessor: GDocsAccessor, match: ScopeMatch, _entry: FileStat): Promise<void> {
-  await deleteFile(accessor.tokenManager, match.slots.file_id ?? '')
+  await accessor.drive.deleteFile(match.slots.file_id ?? '')
 }
 
 export const unlink = makeUnlink(detectScope, { deleters: { file: del } })

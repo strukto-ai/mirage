@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +21,8 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.google_api import serve
+from tests.fixtures.gslides_api import StubSlides
 from tests.fixtures.vfs_io import call_over
 
 
@@ -53,15 +55,12 @@ async def test_read_gslide_renders_presentation_json(accessor):
         extra={"file_id": "slide123", "resource_type": "gdrive/gslide"},
     )
     slide_json = json.dumps({"presentationId": "slide123"}).encode()
-    with patch(
-        "mirage.core.gdrive.read.read_presentation",
-        new_callable=AsyncMock,
-        return_value=slide_json,
-    ) as mock:
+    mock = AsyncMock(return_value=slide_json)
+    with serve(slides=StubSlides(read_presentation=mock)):
         result = await read(
             accessor, _scope("/slides/deck.gslide.json"), entry=row
         )
-        mock.assert_called_once_with(accessor.token_manager, "slide123")
+        mock.assert_called_once_with("slide123")
         assert json.loads(result)["presentationId"] == "slide123"
 
 

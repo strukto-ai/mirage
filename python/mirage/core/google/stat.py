@@ -48,7 +48,7 @@ def make_app_stat(
         parent: FileStat | None,
     ) -> FileStat:
         return await resolve_app_entry(
-            accessor.token_manager, match, path, mime, make_filename
+            accessor.drive, match, path, mime, make_filename
         )
 
     return make_stat(detect_scope, overrides={"file": file_stat})

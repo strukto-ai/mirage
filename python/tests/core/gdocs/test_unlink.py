@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,8 @@ from mirage.accessor.gdocs import GDocsAccessor
 from mirage.core.gdocs.unlink import unlink
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 
 
 @pytest.fixture
@@ -29,9 +31,8 @@ def accessor():
 
 @pytest.mark.asyncio
 async def test_unlink_calls_delete_with_doc_id(accessor):
-    with patch(
-        "mirage.core.gdocs.unlink.delete_file", new_callable=AsyncMock
-    ) as mock_delete:
+    mock_delete = AsyncMock()
+    with serve(drive=StubDrive(delete_file=mock_delete)):
         await unlink(
             accessor,
             PathSpec(
@@ -44,7 +45,7 @@ async def test_unlink_calls_delete_with_doc_id(accessor):
             FileStat(name="Foo__doc1.gdoc.json", type=FileType.FILE),
         )
         mock_delete.assert_awaited_once()
-        assert mock_delete.await_args.args[1] == "doc1"
+        assert mock_delete.await_args.args[0] == "doc1"
 
 
 @pytest.mark.asyncio
@@ -63,10 +64,8 @@ async def test_unlink_virtual_dir_raises(accessor):
 @pytest.mark.asyncio
 async def test_unlink_missing_raises(accessor):
     files = []
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(files, True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=(files, True)))
     ):
         with pytest.raises(FileNotFoundError):
             await unlink(

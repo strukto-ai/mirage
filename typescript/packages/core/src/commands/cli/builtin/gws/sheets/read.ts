@@ -14,7 +14,6 @@
 
 import { FlagView } from '../../../../../commands/spec/flag_view.ts'
 import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
-import { readValues } from '../../../../../core/gsheets/read.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
@@ -26,8 +25,7 @@ export async function read(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const result: ByteSource = await readValues(
-    accessor.tokenManager,
+  const result: ByteSource = await accessor.sheets.readValues(
     fl.asStr('spreadsheet') ?? '',
     fl.asStr('range') ?? '',
   )

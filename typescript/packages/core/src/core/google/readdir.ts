@@ -20,7 +20,6 @@ import { stripSlash } from '../../utils/slash.ts'
 import type { DetectFn } from '../hierarchy/scope.ts'
 import { TOP_LEVEL_DIRS } from './constants.ts'
 import { globToModifiedRange } from './date_glob.ts'
-import { listAllFiles } from './drive.ts'
 import { appFile } from './entry.ts'
 
 export type AppReaddir = (
@@ -53,7 +52,7 @@ export function makeAppReaddir(
     }
     if (match.kind !== 'corpus') throw enoent(path.virtual)
 
-    const { files, complete } = await listAllFiles(accessor.tokenManager, {
+    const { files, complete } = await accessor.drive.listAllFiles({
       mimeType: mime,
       modifiedAfter: modifiedRange ? modifiedRange[0] : null,
       modifiedBefore: modifiedRange ? modifiedRange[1] : null,

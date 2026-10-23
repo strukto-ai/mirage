@@ -15,31 +15,12 @@
 import type { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { docsBase, type TokenManager, googleGet } from '../google/client.ts'
 import { resolveAppEntry } from '../google/entry.ts'
 import { MIME } from './constants.ts'
 import { makeFilename } from '../../vfs/gdocs/doc_entry.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
-
-const TABS_CONTENT_PARAM = 'true'
-
-/**
- * Fetch full document JSON, every tab included.
- *
- * `documents.get` fills the singleton fields from the first tab and leaves
- * `tabs` empty unless asked otherwise, so without `includeTabsContent` a
- * multi-tab document renders as tab 1 and the rest are absent rather than
- * truncated. Asking for it moves the content under `tabs[]` and leaves
- * `body` empty, which is the shape the VFS prompt documents.
- */
-export async function readDoc(tm: TokenManager, docId: string): Promise<Uint8Array> {
-  const url = `${docsBase(tm)}/documents/${docId}`
-  const data = await googleGet(tm, url, { includeTabsContent: TABS_CONTENT_PARAM })
-  return compactJsonBytes(data)
-}
 
 async function readFile(
   accessor: GDocsAccessor,
@@ -47,10 +28,9 @@ async function readFile(
   path: PathSpec,
   entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const row =
-    entry ?? (await resolveAppEntry(accessor.tokenManager, match, path, MIME, makeFilename))
+  const row = entry ?? (await resolveAppEntry(accessor.drive, match, path, MIME, makeFilename))
   const timer = startOp()
-  const data = await readDoc(accessor.tokenManager, match.slots.file_id ?? '')
+  const data = await accessor.docs.readDoc(match.slots.file_id ?? '')
   record('read', path.virtual, 'gdocs', data.length, timer, {
     fingerprint: row.fingerprint,
   })

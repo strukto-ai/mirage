@@ -17,7 +17,6 @@ import { eacces, enoent } from '../../errors/fs.ts'
 import type { FileStat } from '../../types.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeUnlink } from '../hierarchy/unlink.ts'
-import { deleteEvent } from './client.ts'
 import { calendarIndex } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
@@ -38,7 +37,7 @@ async function del(accessor: GCalAccessor, match: ScopeMatch, entry: FileStat): 
   if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(match.vfsPath)
   const calId = calendar.id
   if (typeof calId !== 'string') throw enoent(match.vfsPath)
-  await deleteEvent(accessor.tokenManager, calId, String(entry.extra.event_id))
+  await accessor.calendar.deleteEvent(calId, String(entry.extra.event_id))
 }
 
 export const unlink = makeUnlink(detectScope, { deleters: { event: del } })

@@ -15,15 +15,19 @@
 import hashlib
 import itertools
 from collections.abc import Callable
+from http import HTTPStatus
 from typing import Any
 
+import aiohttp
 import pytest
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.api import DriveApi
 from mirage.core.google.drive import FOLDER_MIME, ITEM_FIELDS, MIME_TO_EXT
 from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
+from tests.fixtures.google_api import StubApi, install_api
 
 FILE_MIME = "application/octet-stream"
 
@@ -39,6 +43,36 @@ async def payload(data: bytes | ByteSpool) -> bytes:
     if isinstance(data, ByteSpool):
         return await data.read(0, data.size)
     return data
+
+
+def drive_error(
+    status: int, message: str, resource: str
+) -> aiohttp.ClientResponseError:
+    """The error Drive's client raises for a refused request.
+
+    Args:
+        status (int): the HTTP status Drive answered.
+        message (str): Google's message.
+        resource (str): the path below ``drive/v3`` asked for.
+    """
+    url = URL(f"https://www.googleapis.com/drive/v3/{resource}")
+    return aiohttp.ClientResponseError(
+        aiohttp.RequestInfo(url, "GET", CIMultiDictProxy(CIMultiDict()), url),
+        (),
+        status=status,
+        message=message,
+    )
+
+
+def not_found(file_id: str) -> aiohttp.ClientResponseError:
+    """The error Drive's client raises for an id it holds no file for.
+
+    Args:
+        file_id (str): the Drive file id asked for.
+    """
+    return drive_error(
+        HTTPStatus.NOT_FOUND, f"File not found: {file_id}.", f"files/{file_id}"
+    )
 
 
 class FakeDrive:
@@ -84,6 +118,18 @@ class FakeDrive:
     def folder(self, name: str, parent: str = "root") -> str:
         return self.add(name, parent=parent, mime=FOLDER_MIME)
 
+    def live(self, file_id: str) -> dict:
+        """The item ``file_id`` names, as Drive answers a request for it:
+        a 404 once it is deleted or was never there.
+
+        Args:
+            file_id (str): the Drive file id.
+        """
+        item = self.items.get(file_id)
+        if item is None:
+            raise not_found(file_id)
+        return item
+
     def public(self, item_id: str) -> dict:
         item = self.items[item_id]
         out = {k: v for k, v in item.items() if k != "content"}
@@ -125,14 +171,35 @@ class FakeDrive:
             if set(item["parents"]) & set(folder_ids)
         ]
 
+    async def list_all_files(
+        self,
+        mime_type: str | None = None,
+        modified_after: str | None = None,
+        modified_before: str | None = None,
+    ) -> tuple[list[dict], bool]:
+        return [
+            self.public(item["id"])
+            for item in self.items.values()
+            if (mime_type is None or item["mimeType"] == mime_type)
+            and (
+                modified_after is None
+                or item["modifiedTime"] >= modified_after
+            )
+            and (
+                modified_before is None
+                or item["modifiedTime"] < modified_before
+            )
+        ], not self.incomplete
+
     async def search_files(
-        self, text: str, parent_ids: list[str]
+        self, text: str, parent_ids: list[str], mime_type: str | None = None
     ) -> tuple[list[str], bool]:
         self.searches.append(list(parent_ids))
         ids = [
             item["id"]
             for item in self.items.values()
-            if set(item["parents"]) & set(parent_ids)
+            if (not parent_ids or set(item["parents"]) & set(parent_ids))
+            and (mime_type is None or item["mimeType"] == mime_type)
             and text.lower() in item["content"].decode().lower()
         ]
         return ids, not self.incomplete
@@ -152,10 +219,11 @@ class FakeDrive:
     async def update_file_content(
         self, file_id: str, data: bytes | ByteSpool
     ) -> dict:
-        self.items[file_id]["content"] = await payload(data)
+        self.live(file_id)["content"] = await payload(data)
         return self.public(file_id)
 
     async def delete_file(self, file_id: str) -> None:
+        self.live(file_id)
         stack = [file_id]
         while stack:
             current = stack.pop()
@@ -171,7 +239,7 @@ class FakeDrive:
         add_parents: str | None = None,
         remove_parents: str | None = None,
     ) -> dict:
-        item = self.items[file_id]
+        item = self.live(file_id)
         item["modifiedTime"] = "2026-10-01T00:00:00Z"
         item.update(body)
         if add_parents:
@@ -181,7 +249,7 @@ class FakeDrive:
         return self.public(file_id)
 
     async def copy_file(self, file_id: str, name: str, parent_id: str) -> dict:
-        src = self.items[file_id]
+        src = self.live(file_id)
         return self.public(
             self.add(
                 name,
@@ -194,13 +262,14 @@ class FakeDrive:
     async def download_file(
         self, file_id: str, window: ByteWindow | None = None
     ) -> bytes:
-        data = self.items[file_id]["content"]
+        data = self.live(file_id)["content"]
         if window is None:
             return data
         end = None if window.size is None else window.offset + window.size
         return data[window.offset : end]
 
     async def get_file(self, file_id: str, fields: str = ITEM_FIELDS) -> dict:
+        self.live(file_id)
         return self.public(file_id)
 
     def find(self, name: str) -> dict | None:
@@ -210,36 +279,21 @@ class FakeDrive:
         return None
 
 
-class StubDrive:
+class StubDrive(StubApi):
     """A ``DriveApi`` that answers only the calls a test armed; any other
     call fails the test."""
 
-    def __init__(self, **calls: DriveCall) -> None:
-        """Args:
-        **calls (DriveCall): each armed call, by its ``DriveApi`` name.
-        """
-        self._calls = calls
-
-    def __getattr__(self, name: str) -> DriveCall:
-        if name.startswith("__"):
-            raise AttributeError(name)
-        if name not in self._calls:
-            raise AssertionError(
-                f"the test reached Drive.{name} without arming it"
-            )
-        return self._calls[name]
+    service = "Drive"
 
 
 def install_drive(
     monkeypatch: pytest.MonkeyPatch, drive: DriveApi | StubDrive | FakeDrive
 ) -> None:
-    """Serve ``drive`` from every ``GDriveAccessor`` for the test.
+    """Serve ``drive`` from every Google accessor for the test.
 
     Args:
         monkeypatch (pytest.MonkeyPatch): the test's monkeypatch.
         drive (DriveApi | StubDrive | FakeDrive): what every gdrive core
             op reaches.
     """
-    monkeypatch.setattr(
-        GDriveAccessor, "drive", property(lambda _accessor: drive)
-    )
+    install_api(monkeypatch, drive=drive)

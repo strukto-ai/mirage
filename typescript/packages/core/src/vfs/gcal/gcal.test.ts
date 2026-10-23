@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import { EVENTS, HK, gcalConfig } from '../../../tests/core/gcal/_test_util.ts'
+import { describe, expect, it } from 'vitest'
+import { EVENTS, HK, gcalConfig, installCalendar } from '../../../tests/core/gcal/_test_util.ts'
 import { parseBucket } from '../../core/gcal/day.ts'
 import { compactJsonBytes } from '../../core/render/json.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GCalVFS } from './gcal.ts'
 
-vi.mock(
-  '../../core/gcal/client.ts',
-  async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT,
-)
+installCalendar()
 
 const EVENT = '/cal/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'
 const WHOLE = compactJsonBytes(EVENTS[0] ?? {})

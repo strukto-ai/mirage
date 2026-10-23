@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -28,6 +28,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.gmail_api import StubGmail
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import mounted
 
 
@@ -80,13 +82,15 @@ def test_date_from_internal():
 
 @pytest.mark.asyncio
 async def test_readdir_root(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[
-            {"id": "INBOX", "type": "system"},
-            {"id": "SENT", "type": "system"},
-        ],
+    with serve(
+        gmail=StubGmail(
+            list_labels=AsyncMock(
+                return_value=[
+                    {"id": "INBOX", "type": "system"},
+                    {"id": "SENT", "type": "system"},
+                ]
+            )
+        )
     ):
         result = await readdir(
             accessor,
@@ -99,15 +103,13 @@ async def test_readdir_root(accessor):
 @pytest.mark.asyncio
 async def test_readdir_label(accessor):
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_messages",
-            new_callable=AsyncMock,
-            return_value=[{"id": "x1"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new_callable=AsyncMock,
-            return_value=_msg_stub("x1", "Hi", 1775952000000),
+        serve(
+            gmail=StubGmail(
+                list_messages=AsyncMock(return_value=[{"id": "x1"}]),
+                get_message_raw=AsyncMock(
+                    return_value=_msg_stub("x1", "Hi", 1775952000000)
+                ),
+            )
         ),
     ):
         listed = await gmail_readdir(
@@ -125,10 +127,12 @@ async def test_readdir_label(accessor):
 
 @pytest.mark.asyncio
 async def test_readdir_not_found(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[{"type": "system", "id": "INBOX"}],
+    with serve(
+        gmail=StubGmail(
+            list_labels=AsyncMock(
+                return_value=[{"type": "system", "id": "INBOX"}]
+            )
+        )
     ):
         with pytest.raises(FileNotFoundError):
             await readdir(
@@ -143,10 +147,12 @@ async def test_readdir_not_found(accessor):
 
 @pytest.mark.asyncio
 async def test_readdir_date_dir_uses_after_before_query(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[{"id": "INBOX", "type": "system"}],
+    with serve(
+        gmail=StubGmail(
+            list_labels=AsyncMock(
+                return_value=[{"id": "INBOX", "type": "system"}]
+            )
+        )
     ):
         await readdir(
             accessor,
@@ -159,9 +165,7 @@ async def test_readdir_date_dir_uses_after_before_query(accessor):
 
     captured_calls: list[dict] = []
 
-    async def fake_list_messages(
-        token_manager, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         captured_calls.append(
             {
                 "label_id": label_id,
@@ -171,9 +175,7 @@ async def test_readdir_date_dir_uses_after_before_query(accessor):
         )
         return []
 
-    with patch(
-        "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-    ):
+    with serve(gmail=StubGmail(list_messages=fake_list_messages)):
         result = await readdir(
             accessor,
             PathSpec(
@@ -212,26 +214,21 @@ async def test_readdir_date_dir_returns_msg_files_not_date_strings(accessor):
         "x2": _msg_stub("x2", "Bye 27", 1777291200000 + 3600000),
     }
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raws[mid]
 
-    async def fake_list_messages(
-        _tm, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         return target_msgs
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=fake_list_messages,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         result = await readdir(
@@ -262,29 +259,24 @@ async def test_readdir_date_dir_warm_cache_matches_cold(accessor):
         "x2": _msg_stub("x2", "B", 1777291200000 + 3600000),
     }
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raws[mid]
 
     fetch_count = {"n": 0}
 
-    async def fake_list_messages(
-        _tm, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         fetch_count["n"] += 1
         return target_msgs
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=fake_list_messages,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         cold = await readdir(
@@ -334,26 +326,21 @@ async def test_readdir_date_dir_lists_msg_file_and_attachment_dir(accessor):
         "m1", "Quote", 1777291200000, "att1", "quote.pdf"
     )
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raw
 
-    async def fake_list_messages(
-        _tm, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         return [{"id": "m1"}]
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=fake_list_messages,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         date_listing = await readdir(
@@ -394,26 +381,21 @@ async def test_readdir_date_dir_without_attachments_omits_dir(accessor):
         },
     }
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raw
 
-    async def fake_list_messages(
-        _tm, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         return [{"id": "m1"}]
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=fake_list_messages,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         date_listing = await readdir(
@@ -435,26 +417,21 @@ async def test_readdir_message_entry_rendered_size_estimate_in_extra(accessor):
     raw = _msg_stub("m1", "Sized", 1777291200000)
     raw["sizeEstimate"] = 54321
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raw
 
-    async def fake_list_messages(
-        _tm, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         return [{"id": "m1"}]
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=fake_list_messages,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         await readdir(
@@ -481,15 +458,11 @@ async def test_label_glob_pushes_its_span_into_the_query(accessor):
     # older month can only be answered by querying that month.
     captured: list[str | None] = []
 
-    async def fake_list_messages(
-        token_manager, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         captured.append(query)
         return []
 
-    with patch(
-        "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-    ):
+    with serve(gmail=StubGmail(list_messages=fake_list_messages)):
         result = await gmail_readdir(
             accessor,
             PathSpec(
@@ -513,18 +486,15 @@ async def test_a_globbed_label_listing_is_not_the_label(accessor):
         "payload": {"headers": [{"name": "Subject", "value": "Hi"}]},
     }
 
-    async def fake_list_messages(
-        token_manager, label_id=None, query=None, max_results=50
-    ):
+    async def fake_list_messages(label_id=None, query=None, max_results=50):
         return [{"id": "m1"}] if query else []
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_messages", new=fake_list_messages
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=AsyncMock(return_value=raw),
+        serve(
+            gmail=StubGmail(
+                list_messages=fake_list_messages,
+                get_message_raw=AsyncMock(return_value=raw),
+            )
         ),
     ):
         globbed = await gmail_readdir(
@@ -558,7 +528,7 @@ DAY = FileStat(
 )
 
 
-async def _one_message(_tm, label_id=None, query=None, max_results=50):
+async def _one_message(label_id=None, query=None, max_results=50):
     return [{"id": "x1"}]
 
 
@@ -568,19 +538,18 @@ async def test_a_label_and_its_day_are_windows(accessor):
     # message outside it has not gone anywhere.
     raws = {"x1": _msg_stub("x1", "Hi 27", 1777291200000)}
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raws[mid]
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch("mirage.core.gmail.readdir.list_messages", new=_one_message),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=_one_message,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         listed = [
@@ -607,19 +576,18 @@ async def test_a_day_listed_first_is_a_window(accessor):
     # the seeded path above never reaches.
     raws = {"x1": _msg_stub("x1", "Hi 27", 1777291200000)}
 
-    async def fake_get_message_raw(_tm, mid):
+    async def fake_get_message_raw(mid):
         return raws[mid]
 
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "type": "system"}],
-        ),
-        patch("mirage.core.gmail.readdir.list_messages", new=_one_message),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new=fake_get_message_raw,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"id": "INBOX", "type": "system"}]
+                ),
+                list_messages=_one_message,
+                get_message_raw=fake_get_message_raw,
+            )
         ),
     ):
         path = "/gmail/INBOX/2026-04-27"

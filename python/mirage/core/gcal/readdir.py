@@ -15,7 +15,6 @@
 from datetime import date, datetime, timedelta, timezone
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import list_calendars, list_events
 from mirage.core.gcal.day import (
     SPAN_SEP,
     bucket_name,
@@ -107,8 +106,8 @@ async def calendar_index(
     Returns:
         dict[str, dict]: directory name to entry.
     """
-    rows = await list_calendars(
-        accessor.token_manager, accessor.config.min_access_role
+    rows = await accessor.calendar.list_calendars(
+        accessor.config.min_access_role
     )
     out: dict[str, dict[str, JsonValue]] = {}
     for row in rows:
@@ -363,8 +362,7 @@ async def readdir(
         time_min, time_max, first, last = day_span(
             path.pattern, accessor.today(tz), tz, accessor.time_range, size
         )
-        events = await list_events(
-            accessor.token_manager,
+        events = await accessor.calendar.list_events(
             cal_id,
             time_min,
             time_max,
@@ -402,8 +400,7 @@ async def readdir(
 
     days = scoped_bucket(accessor, match.slots["bucket"], tz, path.virtual)
     time_min, time_max = day_bounds(days[0], tz, len(days))
-    events = await list_events(
-        accessor.token_manager,
+    events = await accessor.calendar.list_events(
         cal_id,
         time_min,
         time_max,

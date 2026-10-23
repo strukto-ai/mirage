@@ -13,11 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.core.gmail.messages import (
-    get_attachment,
-    get_message_raw,
-    message_json_bytes,
-)
+from mirage.core.gmail.messages import message_json_bytes
 from mirage.core.gmail.scope import detect_scope
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
@@ -34,9 +30,7 @@ async def _read_message(
 ) -> bytes:
     if entry is None:
         raise enoent(path.virtual)
-    raw = await get_message_raw(
-        accessor.token_manager, str(entry.extra["message_id"])
-    )
+    raw = await accessor.gmail.get_message_raw(str(entry.extra["message_id"]))
     return message_json_bytes(raw)
 
 
@@ -52,8 +46,7 @@ async def _read_attachment(
     # stays the proof of existence AND the id source.
     if entry is None:
         raise enoent(path.virtual)
-    return await get_attachment(
-        accessor.token_manager,
+    return await accessor.gmail.get_attachment(
         match.slots["message_id"],
         str(entry.extra["attachment_id"]),
     )

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,8 @@ from mirage.accessor.gslides import GSlidesAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
@@ -53,9 +55,7 @@ async def test_readdir_root(accessor):
 @pytest.mark.asyncio
 async def test_a_listed_corpus_is_listed_once(accessor):
     mounted = Mounted(GSlidesVFS, accessor, "/gslides")
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
+    listed = AsyncMock(
         return_value=(
             [
                 {
@@ -67,8 +67,9 @@ async def test_a_listed_corpus_is_listed_once(accessor):
                 }
             ],
             True,
-        ),
-    ) as listed:
+        )
+    )
+    with serve(drive=StubDrive(list_all_files=listed)):
         first = await mounted.readdir(_scope("/gslides/owned"))
         again = await mounted.readdir(_scope("/gslides/owned"))
     assert first == again and len(first) == 1

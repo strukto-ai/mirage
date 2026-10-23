@@ -50,9 +50,7 @@ class Syncs:
         self.answers = answers
         self.asked: list[str | None] = []
 
-    async def __call__(
-        self, token_manager, calendar_id, token, time_zone=None
-    ):
+    async def __call__(self, calendar_id, token, time_zone=None):
         assert calendar_id == PRIMARY["id"]
         self.asked.append(token)
         answer = self.answers[token]
@@ -65,7 +63,7 @@ def _gone() -> aiohttp.ClientResponseError:
     return aiohttp.ClientResponseError(None, (), status=410)  # type: ignore[arg-type]
 
 
-async def test_events_follow_each_event_s_files(monkeypatch):
+async def test_events_follow_each_event_s_files(gcal_api):
     syncs = Syncs(
         {
             None: ([EVENTS[0], EVENTS[1]], "t1"),
@@ -76,7 +74,7 @@ async def test_events_follow_each_event_s_files(monkeypatch):
             "t2": _gone(),
         }
     )
-    monkeypatch.setattr("mirage.core.gcal.events.sync_events", syncs)
+    gcal_api.syncs = syncs
     hook = build_delta_hook(make_accessor())
     root = spec("/primary")
     baseline = await hook.pull(root, None)
@@ -138,11 +136,9 @@ def _primary(**changed: str) -> list[dict]:
     return [{**PRIMARY, **changed}]
 
 
-async def test_events_follow_a_calendar_s_details_and_zone(
-    monkeypatch, gcal_api
-):
+async def test_events_follow_a_calendar_s_details_and_zone(gcal_api):
     syncs = Syncs({None: ([EVENTS[0]], "t1"), "t1": ([], "t2")})
-    monkeypatch.setattr("mirage.core.gcal.events.sync_events", syncs)
+    gcal_api.syncs = syncs
     gcal_api.calendars = _primary()
     hook = build_delta_hook(make_accessor())
     root = spec("/primary")

@@ -17,13 +17,17 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 
+from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail import events
 from mirage.types import FileChangeKind, JsonValue, PathSpec
-from tests.core.gmail.conftest import LABELS, MESSAGES, _message
+from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.gmail_api import LABELS, MESSAGES, _message
+from tests.fixtures.google_api import install_api
 
 pytestmark = pytest.mark.asyncio
 
 ROOT = PathSpec.from_str_path("/gmail", vfs_path="")
+ACCESSOR = GmailAccessor(GmailConfig(access_token="t"), MagicMock())
 TRASHED = {**MESSAGES[0], "labelIds": ["TRASH"]}
 NEW = _message(
     "n3", ["INBOX"], "2026-01-07", "Cy <cy@example.com>", "Hi", "hey"
@@ -50,32 +54,26 @@ class Mailbox:
         self.labels = LABELS
         self.messages = {m["id"]: m for m in (TRASHED, NEW, WORK)}
 
-    async def current_history_id(self, token_manager):
+    async def current_history_id(self):
         return self.now
 
-    async def list_history(self, token_manager, start):
+    async def list_history(self, start):
         answer = self.history[start]
         if isinstance(answer, Exception):
             raise answer
         return answer
 
-    async def list_labels(self, token_manager):
+    async def list_labels(self):
         return self.labels
 
-    async def get_message_raw(self, token_manager, message_id):
+    async def get_message_raw(self, message_id):
         return self.messages[message_id]
 
 
 @pytest.fixture
 def mailbox(monkeypatch):
     box = Mailbox()
-    for name in (
-        "current_history_id",
-        "list_history",
-        "list_labels",
-        "get_message_raw",
-    ):
-        monkeypatch.setattr(events, name, getattr(box, name))
+    install_api(monkeypatch, gmail=box)
     return box
 
 
@@ -84,7 +82,7 @@ def _pairs(delta):
 
 
 async def test_events_follow_each_message_s_labels(mailbox):
-    hook = events.build_delta_hook(MagicMock())
+    hook = events.build_delta_hook(ACCESSOR)
     baseline = await hook.pull(ROOT, None)
     assert baseline.changes == ()
     mailbox.history["100"] = (
@@ -135,7 +133,7 @@ async def test_events_follow_each_message_s_labels(mailbox):
 async def test_events_follow_the_label_folders(mailbox):
     # History records no label created, renamed or deleted: each pull
     # compares the folders, and a message below a renamed one moves with it.
-    hook = events.build_delta_hook(MagicMock())
+    hook = events.build_delta_hook(ACCESSOR)
     baseline = await hook.pull(ROOT, None)
     mailbox.history["100"] = (
         [{"messagesAdded": [{"message": {"id": "w1"}}]}],

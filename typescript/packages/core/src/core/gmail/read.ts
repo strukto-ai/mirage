@@ -17,7 +17,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { getAttachment, getMessageRaw, messageJsonBytes } from './messages.ts'
+import { messageJsonBytes } from './messages.ts'
 import { detectScope } from './scope.ts'
 
 async function readMessage(
@@ -27,7 +27,7 @@ async function readMessage(
   entry: FileStat | null,
 ): Promise<Uint8Array> {
   if (entry === null) throw enoent(path)
-  const raw = await getMessageRaw(accessor.tokenManager, String(entry.extra.message_id))
+  const raw = await accessor.gmail.getMessageRaw(String(entry.extra.message_id))
   return messageJsonBytes(raw)
 }
 
@@ -41,8 +41,7 @@ async function readAttachment(
   // segment; the attachment id only exists in the listing, so the row
   // stays the proof of existence AND the id source.
   if (entry === null) throw enoent(path)
-  return getAttachment(
-    accessor.tokenManager,
+  return accessor.gmail.getAttachment(
     match.slots.message_id ?? '',
     String(entry.extra.attachment_id),
   )

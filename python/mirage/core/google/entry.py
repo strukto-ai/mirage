@@ -17,8 +17,7 @@ from typing import Any
 
 from aiohttp import ClientResponseError
 
-from mirage.core.google.client import TokenManager
-from mirage.core.google.drive import get_file
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, FileStat, FileType, PathSpec
@@ -52,7 +51,7 @@ def app_file(name: str, item: dict[str, Any]) -> FileStat:
 
 
 async def resolve_app_entry(
-    token_manager: TokenManager,
+    drive: DriveApi,
     match: ScopeMatch,
     path: PathSpec,
     mime: str,
@@ -62,14 +61,14 @@ async def resolve_app_entry(
     account-wide search: a path no listing has named is fetched alone.
 
     Args:
-        token_manager (TokenManager): authenticated Drive client.
+        drive (DriveApi): the mount's Drive.
         match (ScopeMatch): decoded corpus and file ID.
         path (PathSpec): requested file.
         mime (str): the app's Drive MIME type.
         filename (Callable): renders the canonical filename.
     """
     try:
-        item = await get_file(token_manager, match.slots["file_id"])
+        item = await drive.get_file(match.slots["file_id"])
     except ClientResponseError as exc:
         if exc.status != 404:
             raise

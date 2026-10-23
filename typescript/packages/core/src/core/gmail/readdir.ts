@@ -19,15 +19,8 @@ import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
 import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
-import { listLabels } from './labels.ts'
 import type { GmailMessageRaw } from './messages.ts'
-import {
-  extractAttachments,
-  extractHeader,
-  getMessageRaw,
-  listMessages,
-  messageJsonBytes,
-} from './messages.ts'
+import { extractAttachments, extractHeader, messageJsonBytes } from './messages.ts'
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { dateDirToGmailQuery, spanToGmailQuery } from './date_query.ts'
@@ -131,7 +124,7 @@ async function groupByDate(
 ): Promise<Map<string, GmailMessageRaw[]>> {
   const groups = new Map<string, GmailMessageRaw[]>()
   for (const m of msgIds) {
-    const raw = await getMessageRaw(accessor.tokenManager, m.id)
+    const raw = await accessor.gmail.getMessageRaw(m.id)
     const dateStr = dateFromInternal(raw.internalDate)
     let bucket = groups.get(dateStr)
     if (bucket === undefined) {
@@ -144,7 +137,7 @@ async function groupByDate(
 }
 
 async function listRoot(accessor: GmailAccessor, _match: ScopeMatch): Promise<Listed | null> {
-  const labels = await listLabels(accessor.tokenManager)
+  const labels = await accessor.gmail.listLabels()
   return labels.map(
     (lb) =>
       new FileStat({
@@ -166,7 +159,7 @@ async function listLabel(
   // way to reach a day older than it.
   const span = globSpan(match.pattern)
   const labelId = String(own.extra.label_id)
-  const msgIds = await listMessages(accessor.tokenManager, {
+  const msgIds = await accessor.gmail.listMessages({
     labelId,
     query: span === null ? null : spanToGmailQuery(span[0], span[1]),
     maxResults: MAX_MESSAGES,
@@ -196,7 +189,7 @@ async function listDay(accessor: GmailAccessor, match: ScopeMatch, own: FileStat
   const day = match.slots.day ?? ''
   const dateQuery = dateDirToGmailQuery(day)
   if (dateQuery === null) return []
-  const msgIds = await listMessages(accessor.tokenManager, {
+  const msgIds = await accessor.gmail.listMessages({
     labelId: String(own.extra.label_id),
     query: dateQuery,
     maxResults: MAX_MESSAGES,
@@ -214,7 +207,7 @@ async function listAttachmentDir(
   _match: ScopeMatch,
   own: FileStat,
 ): Promise<Listed> {
-  const raw = await getMessageRaw(accessor.tokenManager, String(own.extra.message_id))
+  const raw = await accessor.gmail.getMessageRaw(String(own.extra.message_id))
   return attachmentEntries(raw)
 }
 

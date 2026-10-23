@@ -21,12 +21,9 @@ from mirage.core.gmail.date_query import (
     date_dir_to_gmail_query,
     span_to_gmail_query,
 )
-from mirage.core.gmail.labels import list_labels
 from mirage.core.gmail.messages import (
     _extract_attachments,
     _extract_header,
-    get_message_raw,
-    list_messages,
     message_json_bytes,
 )
 from mirage.core.gmail.scope import detect_scope
@@ -150,14 +147,14 @@ async def _group_by_date(
 ) -> dict[str, list[dict[str, Any]]]:
     groups: dict[str, list[dict[str, Any]]] = {}
     for m in msg_ids:
-        raw = await get_message_raw(accessor.token_manager, m["id"])
+        raw = await accessor.gmail.get_message_raw(m["id"])
         date_str = _date_from_internal(raw.get("internalDate", "0"))
         groups.setdefault(date_str, []).append(raw)
     return groups
 
 
 async def _list_root(accessor: GmailAccessor, match: ScopeMatch) -> Listed:
-    labels = await list_labels(accessor.token_manager)
+    labels = await accessor.gmail.list_labels()
     return [
         FileStat(
             name=(
@@ -181,8 +178,7 @@ async def _list_label(
     # which is the only way to reach a day older than it.
     span = glob_span(match.pattern)
     label_id = str(own.extra["label_id"])
-    msg_ids = await list_messages(
-        accessor.token_manager,
+    msg_ids = await accessor.gmail.list_messages(
         label_id=label_id,
         query=span_to_gmail_query(*span) if span else None,
         max_results=MAX_MESSAGES,
@@ -218,8 +214,7 @@ async def _list_day(
     date_query = date_dir_to_gmail_query(match.slots["day"])
     if date_query is None:
         return []
-    msg_ids = await list_messages(
-        accessor.token_manager,
+    msg_ids = await accessor.gmail.list_messages(
         label_id=str(own.extra["label_id"]),
         query=date_query,
         max_results=MAX_MESSAGES,
@@ -234,9 +229,7 @@ async def _list_day(
 async def _list_attachment_dir(
     accessor: GmailAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    raw = await get_message_raw(
-        accessor.token_manager, str(own.extra["message_id"])
-    )
+    raw = await accessor.gmail.get_message_raw(str(own.extra["message_id"]))
     return _attachment_entries(raw.get("payload", {}))
 
 
