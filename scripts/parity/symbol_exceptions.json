@@ -236,6 +236,11 @@
     "scopeOf": "TypeScript's opsRegistry.call takes a PathSpec; Python's dispatcher takes the path itself."
    }
   },
+  "core/disk/constants": {
+   "python_only": {
+    "STREAM_FLUSH_SECONDS": "Python's aiofiles writer buffers, so a streamed write flushes on this interval for a reader to see it; Node's file handle writes reach the file at once."
+   }
+  },
   "core/disk/readdir": {
    "python_only": {
     "_scan": "Python moves the blocking os.scandir to a thread; Node's fs readdir is already async."

@@ -15,3 +15,8 @@
 # A folder changed this recently is not versioned: a timestamp is coarser
 # than the changes it would have to tell apart (git's racy-clean rule).
 RACY_WINDOW_NS = 2_000_000_000
+
+# How often a streamed write's buffer reaches the file, so a reader sees a
+# slow writer's file grow while one reading the file it writes into
+# (`awk 1 f | tee -a f`) reaches its end first, as the kernel's would.
+STREAM_FLUSH_SECONDS = 0.1
