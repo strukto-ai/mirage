@@ -413,6 +413,7 @@ async def handle_command(
                     else None
                 ),
                 command_limits=registry.command_limits,
+                ids=registry.ids,
                 entries=registry.runtime_entries,
                 vfs=files,
                 session=session_view(
@@ -475,6 +476,7 @@ async def handle_command(
                     else None
                 ),
                 command_limits=registry.command_limits,
+                ids=registry.ids,
                 vfs=files,
                 session=session_view(
                     session,

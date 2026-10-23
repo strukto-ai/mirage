@@ -43,4 +43,20 @@ describe('mktemp draws its name from the context id source', () => {
       )
     }
   })
+
+  // Pinned by tests/commands/builtin/generic/test_mktemp.py too: a create that
+  // gives up draws as many names as it probed, so the draw after it is the same
+  // on both hosts.
+  it('draws one name per attempt', async () => {
+    const ids = new SeededIdSource(5)
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      ids,
+    } as Context
+    const result = await mktempGeneric(['x.XXX'], ctx, refuse, refuse, () => Promise.resolve(true))
+    expect(result?.[1].exitCode).toBe(1)
+    expect(ids.randomU32()).toBe(1664735368)
+  })
 })

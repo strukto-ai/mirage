@@ -27,7 +27,6 @@ import {
 } from './client.ts'
 import type { TokenManager } from './client.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
-import { concat } from '../../utils/bytes.ts'
 import { sha256Hex } from '../../utils/hash.ts'
 
 // md5Checksum and headRevisionId are a file's token (driveFingerprint).
@@ -369,7 +368,8 @@ async function multipartRelated(
 ): Promise<{ body: Uint8Array; contentType: string }> {
   const enc = new TextEncoder()
   const meta = JSON.stringify(metadata)
-  const boundary = (await sha256Hex(concat([enc.encode(meta), data]))).slice(0, 32)
+  const parts = (await sha256Hex(enc.encode(meta))) + (await sha256Hex(data))
+  const boundary = (await sha256Hex(enc.encode(parts))).slice(0, 32)
   const head = enc.encode(
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
       `${meta}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`,

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+
 import pytest
 
 from mirage.commands.builtin.generic.shuf import shuf_generic
@@ -80,3 +82,56 @@ async def test_shuf_draws_records_from_the_id_source(options, expected):
     )
     assert io.exit_code == 0
     assert await _text(out) == expected
+
+
+# Past the spool's memory limit, so a shuffle scatters into buckets and
+# a draw with replacement reads records back from disk.
+LARGE = b"".join(b"%07d\n" % n for n in range(300_000))
+
+
+async def _chunks(data: bytes, size: int):
+    for start in range(0, len(data), size):
+        yield data[start : start + size]
+
+
+async def _digest(out) -> str:
+    digest = hashlib.sha256()
+    async for chunk in out:
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options,expected,after",
+    [
+        (
+            {},
+            "8eb383374346a93ffbbdeb29edbebeccd4192ff7d4262267e4498ebf05d1a933",
+            2601269980,
+        ),
+        (
+            {"with_replacement": True, "count": 1000},
+            "fb6124666c6999dbdc514f28a0023b37539fbe8a53a76be4816802053f86427a",
+            2616697384,
+        ),
+    ],
+)
+@pytest.mark.parametrize("chunk", [4096, 65537])
+async def test_shuf_replays_past_the_memory_limit(
+    options, expected, after, chunk
+):
+    # Pinned by shuf.test.ts too, with the draw that follows, so a host
+    # that drew once more or once less than the other shows here.
+    ids = SeededIdSource(5)
+    out, io = await shuf_generic(
+        [],
+        [],
+        read_bytes=_read_operand,
+        stdin=_chunks(LARGE, chunk),
+        ids=ids,
+        **options,
+    )
+    assert io.exit_code == 0
+    assert await _digest(out) == expected
+    assert ids.random_u32() == after

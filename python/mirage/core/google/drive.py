@@ -472,9 +472,8 @@ def _multipart_related(
     metadata: dict[str, Any], data: bytes, mime_type: str
 ) -> tuple[bytes, str]:
     meta = json.dumps(metadata).encode()
-    digest = hashlib.sha256(meta)
-    digest.update(data)
-    boundary = digest.hexdigest()[:32]
+    parts = hashlib.sha256(meta).hexdigest() + hashlib.sha256(data).hexdigest()
+    boundary = hashlib.sha256(parts.encode()).hexdigest()[:32]
     body = (
         (
             f"--{boundary}\r\n"

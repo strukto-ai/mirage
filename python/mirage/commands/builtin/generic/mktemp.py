@@ -188,13 +188,12 @@ async def mktemp(
         else:
             await write_bytes_fn(path, b"")
 
-    name = draw()
     try:
         for _ in range(ATTEMPTS):
+            name = draw()
             path = PathSpec.from_str_path(name, cwd=cwd)
             if exists_fn is None or not await exists_fn(path):
                 break
-            name = draw()
         else:
             raise eexist(path.virtual)
         if not dry_run:

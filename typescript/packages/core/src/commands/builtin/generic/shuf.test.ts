@@ -21,6 +21,7 @@ import type { Context } from '../../config.ts'
 import { UINTMAX } from '../constants.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { SeededIdSource } from '../../../utils/ids.ts'
+import { sha256Hex } from '../../../utils/hash.ts'
 import {
   MAX_OUTPUT_LINES,
   MEMORY_EXHAUSTED,
@@ -602,5 +603,52 @@ describe('shuf draws from the context id source', () => {
     [{ repeat: true, head_count: '4' }, '5\n5\n2\n5\n'],
   ])('replays records with %j', async (flags, expected) => {
     expect(await seededRun(flags, [], '1\n2\n3\n4\n5\n6\n')).toBe(expected)
+  })
+})
+
+// Past the spool's memory limit, so a shuffle scatters into buckets and a draw
+// with replacement reads records back from disk.
+const LARGE = ENC.encode(
+  Array.from({ length: 300_000 }, (_, n) => `${String(n).padStart(7, '0')}\n`).join(''),
+)
+
+async function* chunksOf(data: Uint8Array, size: number): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  for (let start = 0; start < data.length; start += size) yield data.subarray(start, start + size)
+}
+
+// Pinned by tests/commands/builtin/generic/test_shuf.py too, with the draw that
+// follows, so a host that drew once more or once less than the other shows here.
+describe('shuf replays past the memory limit', () => {
+  it.each<[Record<string, FlagValue>, string, number, number]>([
+    [{}, '8eb383374346a93ffbbdeb29edbebeccd4192ff7d4262267e4498ebf05d1a933', 2601269980, 4096],
+    [{}, '8eb383374346a93ffbbdeb29edbebeccd4192ff7d4262267e4498ebf05d1a933', 2601269980, 65537],
+    [
+      { repeat: true, head_count: '1000' },
+      'fb6124666c6999dbdc514f28a0023b37539fbe8a53a76be4816802053f86427a',
+      2616697384,
+      4096,
+    ],
+    [
+      { repeat: true, head_count: '1000' },
+      'fb6124666c6999dbdc514f28a0023b37539fbe8a53a76be4816802053f86427a',
+      2616697384,
+      65537,
+    ],
+  ])('replays %j', async (flags, digest, after, chunk) => {
+    const ids = new SeededIdSource(5)
+    const ctx = {
+      stdin: chunksOf(LARGE, chunk),
+      flags,
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: { kind: 'ram' } as never,
+      ids,
+    } as Context
+    const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
+    if (result === null) throw new Error('shuf declined to handle its own operands')
+    const [out, io] = result
+    expect(io.exitCode).toBe(0)
+    expect(await sha256Hex(out === null ? new Uint8Array() : await materialize(out))).toBe(digest)
+    expect(ids.randomU32()).toBe(after)
   })
 })

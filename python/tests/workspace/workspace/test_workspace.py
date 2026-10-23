@@ -456,12 +456,13 @@ async def _replay(seed: int) -> list[str]:
         await ws.close()
 
 
-def _refuse_system_draws(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(self):
-        raise AssertionError("a seeded workspace drew from the system")
+def _refuse_draw(self):
+    raise AssertionError("a seeded workspace drew from the system")
 
-    monkeypatch.setattr(SystemIdSource, "uuid7", refuse)
-    monkeypatch.setattr(SystemIdSource, "random_u32", refuse)
+
+def _refuse_system_draws(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(SystemIdSource, "uuid7", _refuse_draw)
+    monkeypatch.setattr(SystemIdSource, "random_u32", _refuse_draw)
 
 
 @pytest.mark.asyncio
