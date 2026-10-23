@@ -84,7 +84,7 @@ How the session behaves:
 | --- | --- |
 | `MirageCapability` | Tell a SandboxAgent's model which Mirage mounts it is working in. |
 | `MirageEditor` | An `Editor` that applies patches through the workspace's file operations; pass it to `applyPatchTool({ editor })`. |
-| `mirageTools` | Returns Mirage's tool table as OpenAI Agents function tools: `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`. |
+| `mirageTools` | Returns Mirage's tool table as OpenAI Agents function tools: `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, as far as the session's profile allows them (`MirageToolOperations.names`). |
 | `mirageReadFileTool` | Returns a `read_file` function tool: text comes back as text, images as image input and PDFs as file input the model can see. |
 | `MirageReadFileOutput` | What the `read_file` tool returns: text, an image, or a file such as a PDF, as the model receives it. |
 | `MirageSandboxClient` | The OpenAI Agents SDK sandbox client over an in-process Mirage workspace. |

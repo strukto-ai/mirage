@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +29,7 @@ const DOCS = resolve(ROOT, 'docs', 'typescript')
 const SECRET_NOTE = 'Redacted in snapshots.'
 const MARKER =
   /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+) start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
-const OPENING = /\{\/\* generated: [a-z-]+ [\w/.-]+ start \*\/\}/g
+const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+) (start|end) \*\/\}/g
 const CODE_SPAN = /(`+)(.+?)\1/g
 const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'node', 'server'])
 
@@ -357,6 +358,47 @@ function pages(dir: string): string[] {
     .sort(compareCodePoints)
 }
 
+// Whether every marker opens or closes exactly one region, in order: a
+// start with no end, an end with no start, a repeated end or two starts in
+// a row would each leave rows outside every region, unchecked.
+function markersPaired(text: string): boolean {
+  let current: string | undefined
+  let starts = 0
+  for (const [, kind, key, edge] of text.matchAll(TOKEN)) {
+    const marker = `${kind ?? ''} ${key ?? ''}`
+    if (edge === 'start') {
+      if (current !== undefined) return false
+      current = marker
+      starts++
+    } else if (current !== marker) {
+      return false
+    } else {
+      current = undefined
+    }
+  }
+  return current === undefined && starts === (text.match(MARKER) ?? []).length
+}
+
+function selftest(): void {
+  const start = '{/* generated: exports x start */}'
+  const end = '{/* generated: exports x end */}'
+  const table = '| a |\n| --- |'
+  const good = `${start}\n${table}\n${end}\n`
+  assert.ok(markersPaired(good))
+  assert.ok(markersPaired('no markers\n'))
+  for (const broken of [
+    `${table}\n${end}\n`,
+    `${good}${end}\n`,
+    `${start}\n${table}\n`,
+    `${start}\n${start}\n${table}\n${end}\n`,
+    `${start}\n${table}\n{/* generated: exports y end */}\n`,
+    `${start} ${table} ${end}\n`,
+  ]) {
+    assert.ok(!markersPaired(broken), broken)
+  }
+  console.log('gen-doc-tables selftest: ok')
+}
+
 function regenerate(
   text: string,
   page: string,
@@ -364,8 +406,11 @@ function regenerate(
   seen: Set<string>,
   errors: string[],
 ): string {
-  if ((text.match(OPENING) ?? []).length !== (text.match(MARKER) ?? []).length)
-    errors.push(`${page}: a generated region has no matching end marker`)
+  if (!markersPaired(text)) {
+    errors.push(
+      `${page}: generated markers must pair up, each start followed by its own end on a line of its own`,
+    )
+  }
   return text.replace(MARKER, (whole: string, kind: string, key: string) => {
     const render = kinds.get(kind)?.get(key)
     if (render === undefined) {
@@ -409,6 +454,10 @@ function diff(before: string, after: string, page: string): string {
 }
 
 function main(): void {
+  if (process.argv.includes('--selftest')) {
+    selftest()
+    return
+  }
   const check = process.argv.includes('--check')
   const kinds = renderers()
   const seen = new Set<string>()

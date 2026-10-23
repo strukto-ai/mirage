@@ -50,7 +50,7 @@ console.log(result.text)
 | `MIRAGE_SYSTEM_PROMPT` | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | `buildSystemPrompt` | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
 | `BuildSystemPromptOptions` | Options for `buildSystemPrompt`: a `workspace` (and `sessionId`) whose mounts to describe, or `mountInfo` mapping a prefix to a description when there is no workspace, and `extraInstructions` to append. |
-| `mirageTools` | Returns Mirage's tool table as Mastra tools, `{ shell, read, write, edit, ls, grep, glob }`, each a `createTool()` with the id `mirage-<tool>`; `options` takes `sessionId` and `staleWriteProtection`. |
+| `mirageTools` | Returns Mirage's tool table as Mastra tools, `{ shell, read, write, edit, ls, grep, glob }` as far as the session's profile allows them (`MirageToolOperations.names`), each a `createTool()` with the id `mirage-<tool>`; `options` takes `sessionId` and `staleWriteProtection`. |
 {/* generated: exports mastra end */}
 
 ## Examples

@@ -85,7 +85,7 @@ export const S3ConfigSchema = z.object({
     .number()
     .optional()
     .describe(
-      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts.",
+      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout.",
     ),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),

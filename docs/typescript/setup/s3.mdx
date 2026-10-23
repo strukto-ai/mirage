@@ -54,7 +54,7 @@ Under `write: conditional` a write carries the version of the file mirage read, 
 | `secretAccessKey` | no |  | Secret access key paired with `accessKeyId`. Redacted in snapshots. |
 | `sessionToken` | no |  | Session token for temporary credentials, sent with the access key pair. Redacted in snapshots. |
 | `forcePathStyle` | no |  | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| `timeoutMs` | no |  | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. |
+| `timeoutMs` | no |  | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout. |
 | `presignedUrlProvider` | no |  | Function `(path, operation, options)` that returns a signed URL for one S3 operation (`GET`, `PUT`, `HEAD`, `DELETE`, `LIST` or `COPY`). When set, the mount fetches those URLs instead of signing requests itself, so it needs no credentials. Redacted in snapshots. |
 | `httpAgentProvider` | no |  | Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set. Redacted in snapshots. |
 | `defaultContentType` | no |  | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
@@ -83,7 +83,7 @@ The browser `S3VFS` never sees AWS credentials. You implement one function, `pre
 | `secretAccessKey` | no |  | Secret access key paired with `accessKeyId`. Redacted in snapshots. |
 | `sessionToken` | no |  | Session token for temporary credentials, sent with the access key pair. Redacted in snapshots. |
 | `forcePathStyle` | no |  | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| `timeoutMs` | no |  | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. |
+| `timeoutMs` | no |  | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout. |
 | `presignedUrlProvider` | no |  | Function `(path, operation, options)` that returns a signed URL for one S3 operation (`GET`, `PUT`, `HEAD`, `DELETE`, `LIST` or `COPY`). When set, the mount fetches those URLs instead of signing requests itself, so it needs no credentials. Redacted in snapshots. |
 | `httpAgentProvider` | no |  | Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set. Redacted in snapshots. |
 | `defaultContentType` | no |  | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |

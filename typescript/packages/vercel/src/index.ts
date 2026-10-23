@@ -56,11 +56,11 @@ function answer(result: ToolResult): Answer {
 
 /**
  * Returns Mirage's tool table as AI SDK tools, `{ shell, read, write, edit,
- * ls, grep, glob }`, to spread into `tools`; `options` takes `sessionId`
- * and `staleWriteProtection`.
+ * ls, grep, glob }` as far as the session's profile allows them
+ * (`MirageToolOperations.names`), to spread into `tools`; `options` takes
+ * `sessionId` and `staleWriteProtection`.
  *
- * Each tool has the shared input schema, the session's profile decides
- * which are present (`MirageToolOperations.names`), and each answers
+ * Each tool has the shared input schema and answers
  * `{ text, isError }` as the MCP tool of the same name does. `read` also
  * hands an image or a PDF to the model as a file, which the AI SDK can
  * carry and the text answer cannot.

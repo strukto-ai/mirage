@@ -42,11 +42,11 @@ export type { BuildSystemPromptOptions } from '@struktoai/mirage-core/agents/pro
 
 /**
  * Returns Mirage's tool table as Mastra tools, `{ shell, read, write, edit,
- * ls, grep, glob }`, each a `createTool()` with the id `mirage-<tool>`;
- * `options` takes `sessionId` and `staleWriteProtection`.
+ * ls, grep, glob }` as far as the session's profile allows them
+ * (`MirageToolOperations.names`), each a `createTool()` with the id
+ * `mirage-<tool>`; `options` takes `sessionId` and `staleWriteProtection`.
  *
- * Each tool has the shared input schema, the session's profile decides
- * which are present (`MirageToolOperations.names`), and each answers
+ * Each tool has the shared input schema and answers
  * `{ text, isError }` as the MCP tool of the same name does.
  */
 export function mirageTools(ws: Workspace, options: MirageToolOperationsOptions = {}) {

@@ -39,7 +39,10 @@ MARKER = re.compile(
     r"^\{/\* generated: (?P=kind) (?P=key) end \*/\}$",
     re.M | re.S,
 )
-OPENING = re.compile(r"\{/\* generated: [a-z-]+ [\w/.-]+ start \*/\}")
+TOKEN = re.compile(
+    r"\{/\* generated: (?P<kind>[a-z-]+) (?P<key>[\w/.-]+) "
+    r"(?P<edge>start|end) \*/\}"
+)
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 
 
@@ -337,6 +340,52 @@ def renderers() -> dict[str, dict[str, Callable[[], tuple[str, list[str]]]]]:
     }
 
 
+def markers_paired(text: str) -> bool:
+    """Whether every marker opens or closes exactly one region, in order.
+
+    A start with no end, an end with no start, a repeated end or two
+    starts in a row would each leave rows outside every region, which
+    the check could then never compare.
+
+    Args:
+        text (str): The page as it is on disk.
+    """
+    current: tuple[str, str] | None = None
+    starts = 0
+    for match in TOKEN.finditer(text):
+        marker = (match["kind"], match["key"])
+        if match["edge"] == "start":
+            if current is not None:
+                return False
+            current = marker
+            starts += 1
+        elif current != marker:
+            return False
+        else:
+            current = None
+    return current is None and starts == len(MARKER.findall(text))
+
+
+def selftest() -> None:
+    """Prove the marker check refuses every unpaired shape."""
+    start = "{/* generated: exports x start */}"
+    end = "{/* generated: exports x end */}"
+    table = "| a |\n| --- |"
+    good = f"{start}\n{table}\n{end}\n"
+    assert markers_paired(good)
+    assert markers_paired("no markers\n")
+    for broken in (
+        f"{table}\n{end}\n",
+        f"{good}{end}\n",
+        f"{start}\n{table}\n",
+        f"{start}\n{start}\n{table}\n{end}\n",
+        f"{start}\n{table}\n{{/* generated: exports y end */}}\n",
+        f"{start} {table} {end}\n",
+    ):
+        assert not markers_paired(broken), broken
+    print("gen_doc_tables selftest: ok")
+
+
 def regenerate(
     text: str,
     page: str,
@@ -354,8 +403,11 @@ def regenerate(
         seen (set[tuple[str, str]]): Collects the regions found.
         errors (list[str]): Collects the problems found.
     """
-    if len(OPENING.findall(text)) != len(MARKER.findall(text)):
-        errors.append(f"{page}: a generated region has no matching end marker")
+    if not markers_paired(text):
+        errors.append(
+            f"{page}: generated markers must pair up, each start followed "
+            "by its own end on a line of its own"
+        )
 
     def render(match: re.Match[str]) -> str:
         kind, key = match["kind"], match["key"]
@@ -384,7 +436,13 @@ def main() -> int:
     parser.add_argument(
         "--check", action="store_true", help="Fail on a stale table"
     )
+    parser.add_argument(
+        "--selftest", action="store_true", help="Test the marker check"
+    )
     args = parser.parse_args()
+    if args.selftest:
+        selftest()
+        return 0
     kinds = renderers()
     seen: set[tuple[str, str]] = set()
     errors: list[str] = []
