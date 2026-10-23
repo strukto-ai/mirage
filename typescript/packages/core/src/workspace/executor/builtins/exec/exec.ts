@@ -560,7 +560,8 @@ async function append(dispatch: DispatchFn, target: string, data: ByteSource): P
     await dispatch('append', scope, [data])
   } catch (err) {
     if (err instanceof PipeClosed || isAborting(err)) throw err
-    console.debug(`exec write failed for ${target}: ${String(err)}`)
+    // Host diagnostics stay off stdout, which carries the shell's output.
+    console.error(`exec write failed for ${target}: ${String(err)}`)
   }
 }
 

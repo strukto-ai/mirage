@@ -1040,7 +1040,7 @@ async function statType(dispatch: DispatchFn, scope: PathSpec): Promise<FileType
     ;[stat] = await dispatch('stat', scope)
   } catch (err) {
     if (isAborting(err)) throw err
-    console.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
+    logger.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
     return null
   }
   return stat instanceof FileStat ? stat.type : null
