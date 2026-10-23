@@ -132,6 +132,25 @@ export async function runFaultTests(): Promise<void> {
     assert.deepEqual(await listed('a'), [], 'a reset of the tenant disarms it')
     assert.equal((await cards('a')).status, 200)
 
+    await arm('a', {
+      plans: [
+        { method: 'GET', route: '/boards/:board/cards', status: 500 },
+        { method: 'HEAD', route: '/boards/:board/cards', status: 503, body: null },
+      ],
+    })
+    const head = await fetch(under('a', '/boards/brd_1/cards'), {
+      method: 'HEAD',
+      headers: { 'x-mirage-tenant': 's1' },
+    })
+    assert.equal(head.status, 503, 'a HEAD spends the HEAD plan, not the GET one')
+    assert.equal((await cards('a')).status, 500, 'the GET plan is left for the GET')
+    await listed('a', 's1', 'DELETE')
+    await arm('a', {
+      plans: [{ method: 'GET', route: '/boards/:board/cards', status: 503, body: null }],
+    })
+    assert.equal(await (await cards('a')).text(), 'null', 'an explicit null body is sent as is')
+    await listed('a', 's1', 'DELETE')
+
     const refused = [
       [{ plans: [{ method: 'GET', route: '/boards/:id/cards', status: 500 }] }, 'unknown route'],
       [{ plans: [{ method: 'GET', route: '/boards/:board/cards' }] }, 'no status or delay'],

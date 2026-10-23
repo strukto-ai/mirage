@@ -14,10 +14,13 @@
 
 import asyncio
 import time
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from aioresponses import aioresponses
 from yarl import URL
 
@@ -254,39 +257,39 @@ def test_a_403_waits_only_for_a_rate_limit_reason():
     assert transient(503, "")
 
 
-async def _read(tm: TokenManager) -> object:
+async def _read(tm: TokenManager) -> dict[str, Any]:
     return await google_get(tm, FILES)
 
 
-async def _read_bytes(tm: TokenManager) -> object:
+async def _read_bytes(tm: TokenManager) -> bytes:
     return await google_get_bytes(tm, FILES)
 
 
-async def _read_stream(tm: TokenManager) -> object:
+async def _read_stream(tm: TokenManager) -> bytes:
     return b"".join([chunk async for chunk in google_get_stream(tm, FILES)])
 
 
-async def _create(tm: TokenManager) -> object:
+async def _create(tm: TokenManager) -> dict[str, Any]:
     return await google_post(tm, FILES, {"name": "a"})
 
 
-async def _update(tm: TokenManager) -> object:
+async def _update(tm: TokenManager) -> dict[str, Any]:
     return await google_patch(tm, FILES, {"name": "a"})
 
 
-async def _upload(tm: TokenManager) -> object:
+async def _upload(tm: TokenManager) -> dict[str, Any]:
     return await google_send_bytes(tm, "POST", FILES, b"x", "text/plain")
 
 
-async def _delete(tm: TokenManager) -> object:
-    return await google_delete(tm, FILES)
+async def _delete(tm: TokenManager) -> None:
+    await google_delete(tm, FILES)
 
 
-async def _append(tm: TokenManager) -> object:
+async def _append(tm: TokenManager) -> dict[str, Any]:
     return await append_values(tm, "s1", "A1", "[[1]]")
 
 
-async def _overwrite(tm: TokenManager) -> object:
+async def _overwrite(tm: TokenManager) -> dict[str, Any]:
     return await update_values(tm, "s1", "A1", "[[1]]")
 
 
@@ -447,3 +450,30 @@ async def test_a_resumable_upload_retries_its_start_but_not_a_chunk():
     assert raised.value.status == 503
     assert waits == [1.0]
     await tm.pool.close()
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_write_is_sent_once():
+    received: list[bytes] = []
+
+    async def disconnect(request: web.Request) -> web.Response:
+        received.append(await request.read())
+        assert request.transport is not None
+        request.transport.close()
+        return web.Response(status=204)
+
+    app = web.Application()
+    app.router.add_put("/v4/spreadsheets/s1/values/A1", disconnect)
+    async with TestServer(app) as server:
+        tm = TokenManager(
+            GoogleConfig(
+                client_id="cid",
+                refresh_token="rt",
+                api_base=str(server.make_url("")).rstrip("/"),
+            )
+        )
+        tm.get_token = AsyncMock(return_value="tok")
+        with pytest.raises(aiohttp.ClientConnectionError):
+            await update_values(tm, "s1", "A1", "[[1]]")
+        await tm.pool.close()
+    assert received == [b'{"values": [[1]]}']

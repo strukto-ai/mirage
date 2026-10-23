@@ -50,16 +50,38 @@ export async function* apiStream(
       await wait(Math.min(2 ** attempt, retry.maxBackoff))
       continue
     }
+    let text = ''
+    let chunksOf: AsyncGenerator<Uint8Array, void> | null = null
+    let first: IteratorResult<Uint8Array, void> | null = null
+    // Reading the error body or the first chunk is still opening the
+    // response: nothing has reached the caller, so a drop here retries.
+    try {
+      if (response.status >= 400) text = await response.text()
+      else if (response.body !== null) {
+        chunksOf = bodyChunks(response.body, options.signal)
+        first = await chunksOf.next()
+      }
+    } catch (err) {
+      if (last || retry.retryTransport !== true || options.signal?.aborted === true) throw err
+      await wait(Math.min(2 ** attempt, retry.maxBackoff))
+      continue
+    }
     if (response.status >= 400) {
-      const text = await response.text()
       if (last || !worthRetrying(response.status, text, retry)) {
         throw options.errorOf(response, text)
       }
       await wait(retryDelay(response, text, attempt, retry))
       continue
     }
-    if (response.body === null) return
-    yield* bodyChunks(response.body, options.signal)
+    if (chunksOf === null || first === null || first.done === true) return
+    try {
+      yield first.value
+      yield* chunksOf
+    } finally {
+      // a caller that stops at the first chunk never entered the delegation,
+      // so the body is released here rather than by it
+      await chunksOf.return()
+    }
     return
   }
 }
@@ -304,6 +326,13 @@ export async function apiRequest(
   }
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000))
+  const read = options.read ?? 'json'
+  // Every mode but these reads the body as text. The byte modes, and the
+  // ones that do not consume the body, still have to release it, or
+  // Node/undici holds the connection until GC; python's api_request drains
+  // it the same way when its `async with` response context exits.
+  const asBytes =
+    read === 'none' || read === 'location' || read === 'bytes' || read === 'bytes_response'
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -313,8 +342,15 @@ export async function apiRequest(
       init.signal = AbortSignal.timeout(Math.ceil(options.timeoutSeconds * 1000))
     }
     let response: Response
+    let text = ''
+    let data = new Uint8Array()
+    // The whole round trip, body included, is one attempt: a connection that
+    // drops while the body is read is as retryable as one that never
+    // answered. Nothing past this block touches the network.
     try {
       response = await doFetch(target.toString(), init)
+      if (response.status >= 400 || !asBytes) text = await response.text()
+      else data = new Uint8Array(await response.arrayBuffer())
     } catch (err) {
       // a rejection is connection-level: HTTP errors resolve normally
       if (retry.retryTransport === true && attempt < retry.maxRetries) {
@@ -325,7 +361,6 @@ export async function apiRequest(
       throw err
     }
     if (retry.statuses.has(response.status)) {
-      const text = await response.text()
       if (worthRetrying(response.status, text, retry) && attempt < retry.maxRetries) {
         await wait(retryDelay(response, text, attempt, retry))
         attempt += 1
@@ -335,46 +370,32 @@ export async function apiRequest(
       // through the same hook a plain error status does
       throw options.errorOf(response, text)
     }
-    if (response.status >= 400) throw options.errorOf(response, await response.text())
-    const read = options.read ?? 'json'
-    // The reads that do not consume the body still have to release it, or
-    // Node/undici holds the connection until GC; python's api_request drains
-    // it the same way when its `async with` response context exits.
-    if (read === 'none') {
-      await response.arrayBuffer()
-      return null
-    }
-    if (read === 'location') {
-      const location = response.headers.get('Location')
-      await response.arrayBuffer()
-      return location
-    }
-    if (read === 'bytes') {
-      const data = new Uint8Array(await response.arrayBuffer())
-      return windowOf(data, response.status, options.window)
-    }
+    if (response.status >= 400) throw options.errorOf(response, text)
+    if (read === 'none') return null
+    if (read === 'location') return response.headers.get('Location')
+    if (read === 'bytes') return windowOf(data, response.status, options.window)
     if (read === 'bytes_response') {
-      const headers = loweredHeaders(response.headers)
-      const data = windowOf(
-        new Uint8Array(await response.arrayBuffer()),
-        response.status,
-        options.window,
-      )
-      return { data, status: response.status, headers } satisfies ApiResponse
+      return {
+        data: windowOf(data, response.status, options.window),
+        status: response.status,
+        headers: loweredHeaders(response.headers),
+      } satisfies ApiResponse
     }
-    const text = await response.text()
     if (read === 'text') return text
     if (read === 'response') {
-      const headers = loweredHeaders(response.headers)
-      let data: unknown = null
+      let decoded: unknown = null
       if (text !== '') {
         try {
-          data = JSON.parse(text) as unknown
+          decoded = JSON.parse(text) as unknown
         } catch {
-          data = text
+          decoded = text
         }
       }
-      return { data, status: response.status, headers } satisfies ApiResponse
+      return {
+        data: decoded,
+        status: response.status,
+        headers: loweredHeaders(response.headers),
+      } satisfies ApiResponse
     }
     return text === '' ? null : (JSON.parse(text) as unknown)
   }

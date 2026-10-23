@@ -349,6 +349,39 @@ describe('retry delays', () => {
     }
   })
 
+  it('retries a body that drops mid-read, never a mapped error or a bad parse', async () => {
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
+    const noWait = (): Promise<void> => Promise.resolve()
+    const dropped = (): Response =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(new TypeError('terminated'))
+          },
+        }),
+      )
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(dropped())
+      .mockResolvedValueOnce(jsonResponse({ ok: 6 }))
+    expect(
+      await apiRequest('GET', TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait }),
+    ).toEqual({
+      ok: 6,
+    })
+    expect(fakeFetch).toHaveBeenCalledTimes(2)
+    const bad = vi.fn<typeof fetch>().mockResolvedValue(new Response('{not json'))
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, fetchFn: bad, retry, sleep: noWait }),
+    ).rejects.toThrow(SyntaxError)
+    expect(bad).toHaveBeenCalledOnce()
+    const refused = vi.fn<typeof fetch>().mockResolvedValue(new Response('denied', { status: 404 }))
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, fetchFn: refused, retry, sleep: noWait }),
+    ).rejects.toMatchObject({ status: 404 })
+    expect(refused).toHaveBeenCalledOnce()
+  })
+
   it('an injected sleep takes every wait, in seconds', async () => {
     const waits: number[] = []
     const retry: RetryPolicy = { ...NO_RETRY, statuses: new Set([503]), maxRetries: 2 }
@@ -430,6 +463,41 @@ describe('a repeated header', () => {
 })
 
 describe('apiStream', () => {
+  it('retries a first chunk that drops and releases a body abandoned after it', async () => {
+    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 1, retryTransport: true }
+    const noWait = (): Promise<void> => Promise.resolve()
+    const cancel = vi.fn()
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.error(new TypeError('terminated'))
+            },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array([7]))
+              },
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      )
+    const source = apiStream(TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait })
+    expect((await source.next()).value).toEqual(new Uint8Array([7]))
+    expect(fakeFetch).toHaveBeenCalledTimes(2)
+    await source.return()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
   it('retries opening the response, never a body already yielded', async () => {
     const waits: number[] = []
     const retry: RetryPolicy = {

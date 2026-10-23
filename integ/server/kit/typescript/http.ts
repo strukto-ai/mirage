@@ -323,7 +323,9 @@ async function answer<C extends MinimalClient>(
   // Ahead of the run's queue and of the handler: a faulted request touches
   // no row, so it neither waits behind a write nor holds one up while it
   // hangs, and a write route faulted with a 5xx has provably not applied.
-  const fault = rt.state(run).peek(tenant)?.faults.take(hit.spec.method, hit.spec.path) ?? null
+  // The request's own method, not the route's: a HEAD answered by a GET
+  // route must not spend a plan armed for the GET.
+  const fault = rt.state(run).peek(tenant)?.faults.take(method, hit.spec.path) ?? null
   if (fault !== null) {
     // Unreferenced, so a hang still pending when the server closes does not
     // keep the process alive past its own teardown.

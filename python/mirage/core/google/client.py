@@ -20,7 +20,12 @@ from typing import Any, cast
 
 import aiohttp
 
-from mirage.core.api.client import RetryPolicy, api_request, api_stream
+from mirage.core.api.client import (
+    RetryPolicy,
+    SessionPool,
+    api_request,
+    api_stream,
+)
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import (
@@ -238,6 +243,11 @@ class TokenManager(OAuthTokenManager):
         sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(TOKEN_BUFFER_SECONDS)
+        # aiohttp replays an idempotent request whose connection dropped,
+        # PUT and DELETE included, beneath any policy; READ_RETRY and
+        # WRITE_RETRY decide alone, so an upload chunk or a values update
+        # is never sent twice.
+        self.pool = SessionPool(retry_connection=False)
         self.config = config
         self.sleep = sleep
 

@@ -107,11 +107,15 @@ export class Router<C> {
     this.routes = routes
   }
 
-  // Whether a route is declared under exactly this method and path, which is
-  // how a fault plan names the route it fires on.
+  // Whether a route answers this method at exactly this declared path, which
+  // is how a fault plan names the route it fires on. HEAD rides a GET route,
+  // as it does in `match`.
   declares(method: string, path: string): boolean {
     const want = method.toUpperCase()
-    return this.routes.some((spec) => spec.method === want && spec.path === path)
+    return this.routes.some(
+      (spec) =>
+        spec.path === path && (spec.method === want || (want === 'HEAD' && spec.method === 'GET')),
+    )
   }
 
   match(method: string, pathname: string): Matched<C> | null {

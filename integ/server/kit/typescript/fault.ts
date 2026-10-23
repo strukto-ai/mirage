@@ -79,7 +79,8 @@ export class Faults {
       if (plan.status === undefined) return { reply: null, delayMs: plan.delayMs }
       const reply: Reply = {
         status: plan.status,
-        body: plan.body ?? { error: 'injected_fault', status: plan.status },
+        body:
+          plan.body === undefined ? { error: 'injected_fault', status: plan.status } : plan.body,
       }
       if (plan.headers !== undefined) reply.headers = { ...plan.headers }
       return { reply, delayMs: plan.delayMs }
