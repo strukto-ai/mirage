@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest } from '../api/client.ts'
-import { WRITE_RETRY, sheetsBase, type TokenManager, googleHeaders } from '../google/client.ts'
+import { googleRequest, sheetsBase, type TokenManager } from '../google/client.ts'
 
 class SheetsApiError extends Error {
   readonly status: number
@@ -48,11 +47,8 @@ export async function appendValues(
 ): Promise<unknown> {
   const values = parseValues(valuesJson)
   const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`
-  return apiRequest('POST', url, {
-    headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
+  return googleRequest(tm, 'POST', url, {
     json: { values },
-    retry: WRITE_RETRY,
-    sleep: tm.sleep,
     errorOf: (response, text) => sheetsError('POST', url, response, text),
   })
 }
@@ -65,11 +61,8 @@ export async function updateValues(
 ): Promise<unknown> {
   const values = parseValues(valuesJson)
   const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`
-  return apiRequest('PUT', url, {
-    headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
+  return googleRequest(tm, 'PUT', url, {
     json: { values },
-    retry: WRITE_RETRY,
-    sleep: tm.sleep,
     errorOf: (response, text) => sheetsError('PUT', url, response, text),
   })
 }

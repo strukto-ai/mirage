@@ -387,28 +387,33 @@ describe('retry delays', () => {
     expect(refused).toHaveBeenCalledOnce()
   })
 
-  it('never resends a write whose answered body drops', async () => {
-    const retry: RetryPolicy = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
-    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValueOnce(dropped())
+  it('a dropped body is a transport failure, resent only under retryTransport', async () => {
+    const once = vi.fn<typeof fetch>().mockResolvedValueOnce(dropped())
+    const noTransport: RetryPolicy = { ...NO_RETRY, maxRetries: 2 }
     await expect(
-      apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait, json: {} }),
+      apiRequest('POST', TARGET, {
+        errorOf,
+        fetchFn: once,
+        retry: noTransport,
+        sleep: noWait,
+        json: {},
+      }),
     ).rejects.toThrow('terminated')
-    expect(fakeFetch).toHaveBeenCalledOnce()
-    const repeatable = vi
+    expect(once).toHaveBeenCalledOnce()
+    const resent = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(dropped())
       .mockResolvedValueOnce(jsonResponse({ ok: 7 }))
-    const idempotent: RetryPolicy = { ...retry, idempotent: true }
     expect(
       await apiRequest('POST', TARGET, {
         errorOf,
-        fetchFn: repeatable,
-        retry: idempotent,
+        fetchFn: resent,
+        retry: { ...noTransport, retryTransport: true },
         sleep: noWait,
         json: {},
       }),
     ).toEqual({ ok: 7 })
-    expect(repeatable).toHaveBeenCalledTimes(2)
+    expect(resent).toHaveBeenCalledTimes(2)
   })
 
   it('an injected sleep takes every wait, in seconds', async () => {

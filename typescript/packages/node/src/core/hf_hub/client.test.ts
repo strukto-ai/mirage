@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   HfHubConnectionError,
   HfHubError,
+  WRITE_RETRY,
   apiUrl,
   quotePath,
   errorOf,
@@ -36,6 +37,7 @@ import {
   stallFetch,
 } from './client.ts'
 import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
+import { MAX_RETRIES } from './constants.ts'
 
 /** An anonymous account whose requests give up after `timeoutMs` without progress. */
 function anonymous(timeoutMs = 0): HfAccountAccessor {
@@ -388,6 +390,35 @@ describe('a transport failure', () => {
     expect((err as Error).message).toBe('fetch failed')
     expect((err as Error).cause).toBe(failed)
   })
+
+  it.each([
+    ['hubPost', () => hubPost(anonymous(), 'http://127.0.0.1:1/x', {}), MAX_RETRIES + 1],
+    [
+      'hubPost with WRITE_RETRY',
+      () => hubPost(anonymous(), 'http://127.0.0.1:1/x', {}, undefined, WRITE_RETRY),
+      1,
+    ],
+    [
+      'hubPostNdjson',
+      () => hubPostNdjson(anonymous(), 'http://127.0.0.1:1/x', new Uint8Array()),
+      1,
+    ],
+    ['hubRequest', () => hubRequest(anonymous(), 'DELETE', 'http://127.0.0.1:1/x', null), 1],
+  ] as [string, () => Promise<unknown>, number][])(
+    'is resent for a read, never a write: %s',
+    async (_name, call, sent) => {
+      let calls = 0
+      vi.stubGlobal('fetch', () => {
+        calls += 1
+        return Promise.reject(failed)
+      })
+      vi.useFakeTimers({ toFake: ['setTimeout'] })
+      const settled = call().catch((err: unknown) => err)
+      await vi.runAllTimersAsync()
+      expect(await settled).toBeInstanceOf(HfHubConnectionError)
+      expect(calls).toBe(sent)
+    },
+  )
 
   it('leaves any other rejection as it was', async () => {
     const aborted = new DOMException('no progress', 'TimeoutError')

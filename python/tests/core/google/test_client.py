@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -25,6 +26,7 @@ from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.core.google.client import (
+    READ_RETRY,
     TokenManager,
     calendar_base,
     docs_base,
@@ -40,6 +42,7 @@ from mirage.core.google.client import (
     google_headers,
     google_patch,
     google_post,
+    google_request,
     google_resumable,
     google_send_bytes,
     refresh_access_token,
@@ -477,3 +480,27 @@ async def test_a_dropped_write_is_sent_once():
             await update_values(tm, "s1", "A1", "[[1]]")
         await tm.pool.close()
     assert received == [b'{"values": [[1]]}']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "retry", "sent"),
+    [
+        ("GET", None, 2),
+        ("HEAD", None, 2),
+        ("POST", None, 1),
+        ("PATCH", None, 1),
+        ("POST", READ_RETRY, 2),
+    ],
+)
+async def test_the_request_door_picks_the_policy_by_method(
+    method, retry, sent
+):
+    tm = _signed_in([])
+    with aioresponses() as mock:
+        mock.add(FILES, method, status=503)
+        mock.add(FILES, method, body=b"{}")
+        with contextlib.suppress(aiohttp.ClientResponseError):
+            await google_request(tm, method, FILES, retry=retry)
+        assert len(mock.requests[(method, URL(FILES))]) == sent
+    await tm.pool.close()

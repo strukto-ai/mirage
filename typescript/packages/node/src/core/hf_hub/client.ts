@@ -27,6 +27,11 @@ export const RETRY: RetryPolicy = {
   retryTransport: true,
 }
 
+// A write (a commit, a repository or a tag) retries only the statuses the
+// Hub answers before it acts. A dropped connection may come after the write
+// landed, and a resent commit would land twice.
+export const WRITE_RETRY: RetryPolicy = { ...RETRY, retryTransport: false }
+
 /** A Hub call that answered with a status the caller cannot use. */
 export class HfHubError extends Error {
   /**
@@ -264,11 +269,14 @@ export async function hubGetResponse(
   })) as ApiResponse
 }
 
+/** One JSON POST; `retry` is RETRY for a POST that only reads (paths-info,
+ * preupload) and WRITE_RETRY for one that changes the Hub. */
 export async function hubPost(
   account: HfAccountAccessor,
   url: string,
   body: unknown,
   params?: Record<string, string>,
+  retry: RetryPolicy = RETRY,
 ): Promise<unknown> {
   // fetch labels an untyped string body text/plain, and the Hub answers a
   // paths-info body without a JSON type with 400; python's aiohttp sets it.
@@ -277,7 +285,7 @@ export async function hubPost(
     headers: { ...hubHeaders(account.token), 'Content-Type': 'application/json' },
     params,
     json: body,
-    retry: RETRY,
+    retry,
     fetchFn: stallFetch(account.timeoutMs),
   })
 }
@@ -294,7 +302,7 @@ export async function hubRequest(
     errorOf,
     headers: hubHeaders(account.token),
     params,
-    retry: RETRY,
+    retry: WRITE_RETRY,
     fetchFn: stallFetch(account.timeoutMs),
   }
   if (body !== null && body !== undefined) options.json = body
@@ -313,7 +321,7 @@ export async function hubPostNdjson(
     headers: { ...hubHeaders(account.token), 'Content-Type': 'application/x-ndjson' },
     params,
     body: payload,
-    retry: RETRY,
+    retry: WRITE_RETRY,
     fetchFn: stallFetch(account.timeoutMs),
   })
 }

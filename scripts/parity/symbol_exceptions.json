@@ -51,7 +51,6 @@
   },
   "core/api/client": {
    "python_only": {
-    "_Answered": "tenacity retries by exception type, so a body that dropped after a write was answered is carried past it in its own type; TypeScript's apiRequest loop decides the same case inline.",
     "_TRANSPORT": "The aiohttp exception types a transport failure raises, shared by api_request and api_stream; fetch rejects with one error shape, so TypeScript has no list to name."
    },
    "typescript_only": {

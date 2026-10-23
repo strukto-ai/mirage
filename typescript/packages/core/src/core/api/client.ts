@@ -147,13 +147,6 @@ export interface RetryPolicy {
    * `maxBackoff` still caps the result.
    */
   readonly minDelays?: Readonly<Record<number, number>>
-  /**
-   * Whether the calls this policy carries may be sent again after the server
-   * answered, which is what a transport retry does when a body drops
-   * mid-read. Absent decides by method: GET and HEAD may, anything else may
-   * not, since an answered write may have been applied.
-   */
-  readonly idempotent?: boolean
 }
 
 export const NO_RETRY: RetryPolicy = {
@@ -299,12 +292,6 @@ export function flooredDelay(delay: number, status: number, retry: RetryPolicy):
   return Math.min(Math.max(delay, floor), retry.maxBackoff)
 }
 
-function replayable(method: string, retry: RetryPolicy): boolean {
-  if (retry.idempotent !== undefined) return retry.idempotent
-  const verb = method.toUpperCase()
-  return verb === 'GET' || verb === 'HEAD'
-}
-
 function worthRetrying(status: number, text: string, retry: RetryPolicy): boolean {
   return (
     retry.statuses.has(status) && (retry.retryable === undefined || retry.retryable(status, text))
@@ -346,7 +333,6 @@ export async function apiRequest(
   // it the same way when its `async with` response context exits.
   const asBytes =
     read === 'none' || read === 'location' || read === 'bytes' || read === 'bytes_response'
-  const safe = replayable(method, retry)
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -369,15 +355,15 @@ export async function apiRequest(
     }
     let text = ''
     let data = new Uint8Array()
-    // A body that drops after the response arrived is retried only for a
-    // request the policy says may be repeated: by then a write has been
-    // answered, and may have been applied. Nothing past this block touches
-    // the network.
+    // A body that drops mid-read is a transport failure like one before the
+    // answer: a policy with retryTransport resends on either, so a write that
+    // must never repeat rides a policy without it. Nothing past this block
+    // touches the network.
     try {
       if (response.status >= 400 || !asBytes) text = await response.text()
       else data = new Uint8Array(await response.arrayBuffer())
     } catch (err) {
-      if (safe && retry.retryTransport === true && attempt < retry.maxRetries) {
+      if (retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
         continue

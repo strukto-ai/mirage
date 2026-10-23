@@ -768,16 +768,16 @@ async def _answer_then_cut(request: web.Request) -> web.StreamResponse:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("method", "idempotent", "sent"),
+    ("method", "retry_transport", "sent"),
     [
-        ("GET", None, 3),
-        ("POST", None, 1),
+        ("GET", True, 3),
         ("POST", True, 3),
         ("GET", False, 1),
+        ("POST", False, 1),
     ],
 )
-async def test_a_body_cut_short_is_resent_only_when_replayable(
-    method, idempotent, sent
+async def test_a_body_cut_short_is_a_transport_failure(
+    method, retry_transport, sent
 ):
     app = web.Application()
     app.router.add_route("*", "/answer", _answer_then_cut)
@@ -789,9 +789,7 @@ async def test_a_body_cut_short_is_resent_only_when_replayable(
         return await handler(request)
 
     app.middlewares.append(count)
-    retry = RetryPolicy(
-        max_retries=2, retry_transport=True, idempotent=idempotent
-    )
+    retry = RetryPolicy(max_retries=2, retry_transport=retry_transport)
     async with TestServer(app) as server:
         with pytest.raises(aiohttp.ClientPayloadError):
             await api_request(

@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
-import { HfHubError, hubGet, hubPost, hubRequest, repoUrl, revSegment } from './client.ts'
+import {
+  HfHubError,
+  WRITE_RETRY,
+  hubGet,
+  hubPost,
+  hubRequest,
+  repoUrl,
+  revSegment,
+} from './client.ts'
 import { API_SEGMENTS, DEFAULT_REVISION, HTTP_CONFLICT } from './constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
@@ -77,7 +85,7 @@ export async function createRepo(
   const url = `${rstripSlash(account.endpoint)}/api/repos/create`
   let data: unknown
   try {
-    data = await hubPost(account, url, body)
+    data = await hubPost(account, url, body, undefined, WRITE_RETRY)
   } catch (err) {
     if (options.existOk !== true || !(err instanceof HfHubError) || err.status !== HTTP_CONFLICT) {
       throw err
@@ -102,6 +110,8 @@ export async function createTag(
     account,
     repoApiUrl(account, repoType, repoId, `/tag/${revSegment(revision)}`),
     body,
+    undefined,
+    WRITE_RETRY,
   )
 }
 

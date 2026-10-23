@@ -16,6 +16,7 @@ import { ByteSpool } from '../../io/spool.ts'
 import { googleResumable } from './client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  READ_RETRY,
   TokenManager,
   docsBase,
   calendarBase,
@@ -28,6 +29,7 @@ import {
   googleGetStream,
   googlePatch,
   googlePost,
+  googleRequest,
   googleSendBytes,
   refreshAccessToken,
   sheetsBase,
@@ -387,6 +389,21 @@ describe('google retry policy', () => {
     expect(fake).toHaveBeenCalledTimes(1)
     expect(waits).toEqual([])
   })
+
+  it.each([
+    ['GET', undefined, 2],
+    ['HEAD', undefined, 2],
+    ['POST', undefined, 1],
+    ['PATCH', undefined, 1],
+    ['POST', READ_RETRY, 2],
+  ] as [string, typeof READ_RETRY | undefined, number][])(
+    'the request door picks the policy by method: %s',
+    async (method, retry, sent) => {
+      const fake = serve(reply(503), reply(200, '{}'))
+      await googleRequest(tm, method, FILES, { retry }).catch((err: unknown) => err)
+      expect(fake).toHaveBeenCalledTimes(sent)
+    },
+  )
 
   it('a persistent 5xx surfaces after the budget', async () => {
     const fake = serve(

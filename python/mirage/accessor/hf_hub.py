@@ -54,7 +54,11 @@ class HfAccountAccessor(SessionAccessor):
     """
 
     def __init__(self, config: HfConfig, timeout: float = 30) -> None:
-        super().__init__(timeout=stall_timeout(timeout))
+        # aiohttp's own replay of a dropped PUT or DELETE would run beneath
+        # RETRY and WRITE_RETRY; the policies decide every resend.
+        super().__init__(
+            timeout=stall_timeout(timeout), retry_connection=False
+        )
         self.config = config
 
     @property

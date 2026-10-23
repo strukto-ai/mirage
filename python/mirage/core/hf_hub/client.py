@@ -14,6 +14,7 @@
 
 import logging
 from collections.abc import AsyncIterator, Callable, Mapping
+from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
@@ -47,6 +48,11 @@ RETRY = RetryPolicy(
     delay_source="header",
     retry_transport=True,
 )
+
+# A write (a commit, a repository or a tag) retries only the statuses the
+# Hub answers before it acts. A dropped connection may come after the write
+# landed, and a resent commit would land twice.
+WRITE_RETRY = replace(RETRY, retry_transport=False)
 
 
 class HfHubError(Exception):
@@ -254,8 +260,18 @@ async def hub_post(
     url: str,
     body: JsonValue,
     params: dict[str, Any] | None = None,
+    retry: RetryPolicy = RETRY,
 ) -> JsonValue:
-    """One JSON POST against the Hub API."""
+    """One JSON POST against the Hub API.
+
+    Args:
+        account (HfAccountAccessor): the token and pool the call rides.
+        url (str): the absolute URL.
+        body (JsonValue): the JSON body.
+        params (dict[str, Any] | None): query parameters.
+        retry (RetryPolicy): RETRY for a POST that only reads (paths-info,
+            preupload), WRITE_RETRY for one that changes the Hub.
+    """
     data: JsonValue = await api_request(
         "POST",
         url,
@@ -264,7 +280,7 @@ async def hub_post(
         params=params,
         json_body=body,
         json_body_present=True,
-        retry=RETRY,
+        retry=retry,
         session=account.pool,
     )
     return data
@@ -302,7 +318,7 @@ async def hub_request(
         params=params,
         json_body=body,
         json_body_present=body is not None,
-        retry=RETRY,
+        retry=WRITE_RETRY,
         session=account.pool,
     )
     return data
@@ -336,7 +352,7 @@ async def hub_post_ndjson(
         headers=headers,
         params=params,
         data=payload,
-        retry=RETRY,
+        retry=WRITE_RETRY,
         session=account.pool,
     )
     return data
