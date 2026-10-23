@@ -19,10 +19,15 @@ class LangfuseConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     public_key: str
+    """Langfuse project public key."""
     secret_key: SecretStr
+    """Langfuse project secret key."""
     host: str = "https://cloud.langfuse.com"
+    """Langfuse API host; override for a self-hosted or regional
+    instance."""
     default_trace_limit: int = 100
-    # Opt-in lower bound for trace listings. Unset lists whatever the project
-    # holds, up to default_trace_limit: an implicit rolling window would hide
-    # traces that read() happily serves.
+    """The most traces one trace listing (`traces/` or a session's traces)
+    shows. An older trace is still readable by its id."""
     default_from_timestamp: str | None = None
+    """List only traces from this ISO 8601 timestamp on. Unset lists
+    whatever the project holds, up to `default_trace_limit`."""

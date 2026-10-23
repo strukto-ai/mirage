@@ -22,14 +22,22 @@ import {
 } from '../../vfs/secrets.ts'
 
 export const LinearConfigSchema = z.object({
-  apiKey: secretStr(),
-  workspace: z.string().optional(),
-  teamIds: z.array(z.string()).readonly().optional(),
-  baseUrl: z.string().optional(),
-  // Let grep -w and rg -w read only the issues Linear's search names, and
-  // those whose other fields hold the word (`filesContaining`). Off by
-  // default: Linear indexes a write some time after it lands.
-  contentSearch: z.boolean().optional(),
+  apiKey: secretStr().describe('Linear personal API key.'),
+  workspace: z.string().optional().describe('Accepted for compatibility; not read.'),
+  teamIds: z
+    .array(z.string())
+    .readonly()
+    .optional()
+    .describe('Only these teams are listed or readable. Unset shows every team the key can reach.'),
+  baseUrl: z.string().optional().meta({
+    description: 'Linear GraphQL endpoint; override to point at a fake or proxy.',
+    default: 'https://api.linear.app/graphql',
+  }),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      "Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Search lags writes.",
+    default: false,
+  }),
 })
 
 export type LinearConfig = ConfigOf<typeof LinearConfigSchema>

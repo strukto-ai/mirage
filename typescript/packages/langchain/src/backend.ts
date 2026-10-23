@@ -111,6 +111,10 @@ const ANTHROPIC_BINARY_MIMES = new Set([
   'image/webp',
 ])
 
+/**
+ * Options for `LangchainWorkspace`: `sandboxId` sets the backend's `id`
+ * (default `mirage`), and `sessionId` names the Mirage session it acts as.
+ */
 export interface LangchainWorkspaceOptions {
   sandboxId?: string
   /**
@@ -120,6 +124,10 @@ export interface LangchainWorkspaceOptions {
   sessionId?: string
 }
 
+/**
+ * A `SandboxBackendProtocolV2` implementation for Deep Agents that runs
+ * reads, writes, edits, search and shell commands in a Mirage workspace.
+ */
 export class LangchainWorkspace implements SandboxBackendProtocol {
   readonly id: string
   private readonly ws: Workspace

@@ -40,6 +40,20 @@ config = GoogleDriveConfig(
 )
 ```
 
+{/* generated: config-table gdrive start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
+| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>folder_id</code> | Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table gdrive end */}
+
 ## Filesystem Layout
 
 ```text

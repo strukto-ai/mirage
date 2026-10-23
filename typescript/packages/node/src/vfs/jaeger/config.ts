@@ -20,11 +20,29 @@ import {
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 
 const JaegerConfigSchema = z.object({
-  host: z.string().optional(),
-  defaultTraceLimit: z.number().optional(),
-  defaultFromTimestamp: z.string().optional(),
-  defaultToTimestamp: z.string().optional(),
-  requestTimeout: z.number().optional(),
+  host: z.string().optional().meta({
+    description: 'Jaeger query service URL.',
+    default: 'http://localhost:16686',
+  }),
+  defaultTraceLimit: z.number().optional().meta({
+    description:
+      "The most traces one service's `traces/` listing shows, newest first. An older trace is still readable by its id.",
+    default: 100,
+  }),
+  defaultFromTimestamp: z
+    .string()
+    .optional()
+    .describe(
+      'Lower bound of trace listings, an ISO 8601 timestamp. Unset searches from the beginning.',
+    ),
+  defaultToTimestamp: z
+    .string()
+    .optional()
+    .describe('Upper bound of trace listings, an ISO 8601 timestamp. Unset means now.'),
+  requestTimeout: z.number().optional().meta({
+    description: 'Seconds to wait for one HTTP request to Jaeger.',
+    default: 30,
+  }),
 })
 
 export type JaegerConfig = ConfigOf<typeof JaegerConfigSchema>

@@ -19,4 +19,7 @@ class DiscordConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr
+    """Discord bot token, sent as `Authorization: Bot <token>`."""
     base_url: str | None = None
+    """Discord API root. Unset uses `https://discord.com/api/v10`; set it
+    to point at a fake or proxy."""

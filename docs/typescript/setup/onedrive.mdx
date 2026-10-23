@@ -26,19 +26,22 @@ await ws.shell('ls /onedrive/')
 
 Use `@struktoai/mirage-browser` for the same API in a browser. An access-token callback is recommended so a `401` can refresh the token and retry once.
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `accessToken` | required | Token string or sync/async callback returning a token. Redacted in snapshots. |
-| `driveId` | unset | Explicit Graph drive ID. |
-| `siteId` | unset | Use the default drive for a Graph site. |
-| `groupId` | unset | Use a Teams / Microsoft 365 group's document library. |
-| `userId` | unset | Use another user's drive, by id or UPN (app-only auth). |
-| `graphBaseUrl` | unset | Full service root, for any deployment but the worldwide one. |
-| `keyPrefix` | unset | Mount a folder subtree as the VFS root. |
-| `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Graph search names; see [grep and rg](#grep-and-rg). |
-| `tenantHost` | unset | Tenant metadata retained for Graph-compatible configuration. |
-| `timeout` | `30` | Request and copy-monitor timeout in seconds. |
-| `maxRetries` | `5` | Retries for `429`, `503`, and `504`. |
+{/* generated: config-table onedrive omit=tenantHost start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>accessToken</code><br />required, secret | Microsoft Graph bearer token, or a function (sync or async) that returns one; it is called for each request and again after a `401`. |
+| <code style={{ whiteSpace: 'nowrap' }}>graphBaseUrl</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxRetries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>driveId</code> | Graph drive ID of the drive to mount. Set at most one of `driveId`, `siteId`, `groupId` and `userId`; with none the mount uses the signed-in user's drive. |
+| <code style={{ whiteSpace: 'nowrap' }}>siteId</code> | Graph site ID whose default document library the mount uses. |
+| <code style={{ whiteSpace: 'nowrap' }}>groupId</code> | Microsoft 365 or Teams group ID whose document library the mount uses. |
+| <code style={{ whiteSpace: 'nowrap' }}>userId</code> | User ID or UPN whose drive the mount uses, under app-only auth. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Folder path from the drive root that the mount uses as its root. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Graph search names. Search covers extracted text and lags writes, so it can miss a match. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table onedrive end */}
 
 `driveId`, `siteId`, `groupId` and `userId` are four ways of saying which drive
 the mount is, so set at most one: setting two throws at construction rather

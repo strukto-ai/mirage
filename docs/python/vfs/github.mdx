@@ -23,6 +23,18 @@ vfs = GitHubVFS(
 ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 ```
 
+{/* generated: config-table github start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | GitHub personal access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>owner</code> | Repository owner, a user or an organization. Required unless the `GitHubVFS` constructor is given `owner`. |
+| <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
+| <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
+| <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table github end */}
+
 ## Filesystem Layout
 
 ```text

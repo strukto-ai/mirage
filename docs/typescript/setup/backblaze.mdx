@@ -29,6 +29,26 @@ const res = await ws.shell('ls /bucket/')
 console.log(res.stdoutText)
 ```
 
+### Config
+
+{/* generated: config-table backblaze start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
+| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
+| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
+| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code> | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. |
+| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table backblaze end */}
+
 ## Browser (presigned URLs)
 
 ```bash
@@ -36,6 +56,21 @@ pnpm add @struktoai/mirage-browser
 ```
 
 The browser `BackblazeVFS` is secret-free, your backend signs each operation using your B2 application key and returns a URL. B2 accepts AWS Signature V4, so `@aws-sdk/s3-request-presigner` works, pointed at the B2 endpoint.
+
+### Config
+
+{/* generated: config-table browser/backblaze start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />required, secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation; your server signs it, so the browser holds no keys. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code> | Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/backblaze end */}
 
 ### 1. Server: sign URLs with the B2 endpoint
 

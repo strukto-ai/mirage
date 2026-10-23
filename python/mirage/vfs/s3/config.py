@@ -22,12 +22,27 @@ class S3Config(AWSAuth):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
+    """Name of the bucket to mount."""
     endpoint_url: str | None = None
+    """Endpoint URL of an S3-compatible server. Unset uses
+    `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's
+    endpoint for `region`; an endpoint set only in an AWS profile is not
+    read."""
     path_style: bool = False
+    """Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`)
+    instead of as a subdomain of the endpoint."""
     timeout: int = 30
+    """Seconds to wait to connect, and for each read of a response, before
+    the request fails."""
     proxy: SecretStr | None = None
+    """Proxy URL for every HTTP and HTTPS request to the endpoint."""
     key_prefix: str | None = None
+    """Key prefix inside the bucket that the mount treats as its root; keys
+    outside it are not visible. Leading slashes are dropped and a trailing
+    `/` is added."""
     default_content_type: str | None = None
+    """`Content-Type` stored with every object the mount writes. Unset
+    sends none, so the store applies its own default."""
 
     @field_validator("key_prefix")
     @classmethod

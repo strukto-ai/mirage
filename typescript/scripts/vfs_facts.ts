@@ -111,7 +111,7 @@ function snake(name: string): string {
   return name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
 }
 
-function parse(file: string): ts.SourceFile {
+export function parse(file: string): ts.SourceFile {
   return ts.createSourceFile(file, ts.sys.readFile(file) ?? '', ts.ScriptTarget.ESNext, true)
 }
 
@@ -650,16 +650,38 @@ export interface ConfigFacts {
   validates: boolean
 }
 
+// One schema field as written: the expression that declares it, resolved
+// through a const or a factory parameter, and the scope it is read in.
+export interface FieldShape {
+  required: boolean
+  expr: ts.Expression | undefined
+  source: ts.SourceFile
+  env: Env
+  // The declaration this one replaces through `.extend()` or after a
+  // spread, whose description it keeps when it gives none of its own.
+  overrides?: FieldShape | undefined
+}
+
+export interface ConfigShape {
+  fields: Record<string, FieldShape>
+  rename: Record<string, string>
+  validates: boolean
+}
+
 const CONFIG_PARSER = 'parseConfigWithSchema'
 const NORMALIZER_RE = /^normalize\w*Config$/
 
-interface Bound {
+export interface Bound {
   expr: ts.Expression
   source: ts.SourceFile
 }
-type Env = Map<string, Bound>
+export type Env = Map<string, Bound>
 
-function moduleFile(fromFile: string, specifier: string, packagesRoot: string): string | undefined {
+export function moduleFile(
+  fromFile: string,
+  specifier: string,
+  packagesRoot: string,
+): string | undefined {
   if (specifier.startsWith('.')) {
     const file = resolve(fromFile, '..', specifier)
     return existsSync(file) ? file : undefined
@@ -828,7 +850,7 @@ function shapeOf(
   env: Env,
   packagesRoot: string,
   label: string,
-): Record<string, { required: boolean }> {
+): Record<string, FieldShape> {
   if (ts.isParenthesizedExpression(expr))
     return shapeOf(expr.expression, source, env, packagesRoot, label)
   if (ts.isIdentifier(expr)) {
@@ -860,7 +882,9 @@ function shapeOf(
         if (arg === undefined || !ts.isObjectLiteralExpression(arg)) {
           throw new Error(`${label}: .${method}() without an object literal`)
         }
-        return { ...base, ...shapeOfLiteral(arg, source, env, packagesRoot, label) }
+        const own = shapeOfLiteral(arg, source, env, packagesRoot, label)
+        for (const [key, field] of Object.entries(own)) field.overrides = base[key]
+        return { ...base, ...own }
       }
       // .refine / .superRefine / .strict / .describe / .meta keep the shape.
       return shapeOf(callee.expression, source, env, packagesRoot, label)
@@ -892,8 +916,8 @@ function shapeOfLiteral(
   env: Env,
   packagesRoot: string,
   label: string,
-): Record<string, { required: boolean }> {
-  const out: Record<string, { required: boolean }> = {}
+): Record<string, FieldShape> {
+  const out: Record<string, FieldShape> = {}
   for (const prop of literal.properties) {
     if (ts.isSpreadAssignment(prop)) {
       Object.assign(out, shapeOf(prop.expression, source, env, packagesRoot, label))
@@ -902,15 +926,117 @@ function shapeOfLiteral(
     const key = propertyKey(prop, source)
     if (key === undefined) continue
     if (ts.isPropertyAssignment(prop)) {
-      out[key] = { required: !OPTIONAL_RE.test(prop.initializer.getText(source)) }
+      const field = declaration(prop.initializer, source, env, packagesRoot)
+      out[key] = {
+        required: !OPTIONAL_RE.test(prop.initializer.getText(source)),
+        expr: field?.expr,
+        source: field?.source ?? source,
+        env,
+        overrides: out[key],
+      }
     } else if (ts.isShorthandPropertyAssignment(prop)) {
       const bound = bindingOf(key, source, env, packagesRoot)
+      const field =
+        bound === undefined ? undefined : declaration(bound.expr, bound.source, env, packagesRoot)
       out[key] = {
         required: bound === undefined || !OPTIONAL_RE.test(bound.expr.getText(bound.source)),
+        expr: field?.expr,
+        source: field?.source ?? source,
+        env,
+        overrides: out[key],
       }
     }
   }
   return out
+}
+
+// A field's initializer with any bare identifier followed to the
+// expression it names, so `token: tokenSchema` reads as `tokenSchema`'s
+// declaration.
+function declaration(
+  expr: ts.Expression,
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+  depth = 0,
+): Bound | undefined {
+  if (!ts.isIdentifier(expr) || depth > 6) return { expr, source }
+  const bound = bindingOf(expr.text, source, env, packagesRoot)
+  return bound === undefined
+    ? undefined
+    : declaration(bound.expr, bound.source, env, packagesRoot, depth + 1)
+}
+
+export interface FieldDoc {
+  description: string | undefined
+  default: string | undefined
+  secret: boolean
+}
+
+const SECRET_HELPERS = new Set(['secretStr', 'secretSchema'])
+
+/**
+ * What a schema field says about itself: `.describe()` or a `description`
+ * in `.meta()`, a `.default()` or a `default` in `.meta()` (an annotation
+ * for the field a resolver fills in, as JSON Schema's `default` is), and
+ * whether it carries the secret marker the redactor reads. The chain is
+ * read from the outside in, so the call applied last wins, and a helper
+ * that builds the field is followed to the expression it returns.
+ *
+ * Args:
+ *   field: the field as `configShapes` found it.
+ *   packagesRoot: absolute path to `typescript/packages`.
+ */
+export function fieldDoc(field: FieldShape, packagesRoot: string): FieldDoc {
+  const doc: FieldDoc = { description: undefined, default: undefined, secret: false }
+  let node = field.expr
+  let source = field.source
+  for (let step = 0; node !== undefined && step < 64; step++) {
+    if (ts.isParenthesizedExpression(node)) {
+      node = node.expression
+      continue
+    }
+    if (ts.isIdentifier(node)) {
+      const bound = bindingOf(node.text, source, field.env, packagesRoot)
+      if (bound === undefined) break
+      node = bound.expr
+      source = bound.source
+      continue
+    }
+    if (!ts.isCallExpression(node)) break
+    const callee = node.expression
+    const arg = node.arguments[0]
+    if (ts.isIdentifier(callee)) {
+      if (SECRET_HELPERS.has(callee.text)) doc.secret = true
+      if (callee.text === 'secretSchema' && arg !== undefined) {
+        node = arg
+        continue
+      }
+      const fn = resolveFunction(callee.text, source, packagesRoot)
+      if (fn === undefined) break
+      node = returnExpression(fn.decl)
+      source = fn.source
+      continue
+    }
+    if (!ts.isPropertyAccessExpression(callee)) break
+    const method = callee.name.text
+    if (method === 'describe' && arg !== undefined && ts.isStringLiteralLike(arg))
+      doc.description ??= arg.text
+    if (method === 'default' && arg !== undefined) doc.default ??= arg.getText(source)
+    if (method === 'meta' && arg !== undefined && ts.isObjectLiteralExpression(arg)) {
+      for (const prop of arg.properties) {
+        if (!ts.isPropertyAssignment(prop)) continue
+        const key = propertyKey(prop, source)
+        if (key === 'description' && ts.isStringLiteralLike(prop.initializer))
+          doc.description ??= prop.initializer.text
+        if (key === 'default') doc.default ??= prop.initializer.getText(source)
+      }
+    }
+    node = callee.expression
+  }
+  if (doc.description === undefined && field.overrides !== undefined)
+    doc.description = fieldDoc(field.overrides, packagesRoot).description
+  return doc
 }
 
 function resolveFunction(
@@ -1011,7 +1137,7 @@ function factsOfConfigCall(
   env: Env,
   packagesRoot: string,
   label: string,
-): ConfigFacts {
+): ConfigShape {
   const schema = call.arguments[0]
   if (schema === undefined) throw new Error(`${label}: ${CONFIG_PARSER} without a schema`)
   return {
@@ -1028,7 +1154,7 @@ function factsOfNormalizer(
   packagesRoot: string,
   label: string,
   depth = 0,
-): ConfigFacts {
+): ConfigShape {
   if (depth > 6) throw new Error(`${label}: normalizer resolution did not converge at ${name}`)
   const source = parse(file)
   const reExport = reExportOf(source, name, packagesRoot)
@@ -1126,17 +1252,40 @@ function compareCodePoints(a: string, b: string): number {
   return a.length - i - (b.length - j)
 }
 
-export function configFacts(
+export function configShapes(
   registryFile: string,
   packagesRoot: string,
-): Record<string, ConfigFacts | null> {
-  const out: Record<string, ConfigFacts | null> = {}
+): Record<string, ConfigShape | null> {
+  const out: Record<string, ConfigShape | null> = {}
   const entries = registryNormalizers(registryFile, packagesRoot)
   for (const [vfs, normalizer] of [...entries].sort(([a], [b]) => compareCodePoints(a, b))) {
     out[vfs] =
       normalizer === null
         ? null
         : factsOfNormalizer(normalizer.file, normalizer.name, packagesRoot, `configs[${vfs}]`)
+  }
+  return out
+}
+
+export function configFacts(
+  registryFile: string,
+  packagesRoot: string,
+): Record<string, ConfigFacts | null> {
+  const out: Record<string, ConfigFacts | null> = {}
+  for (const [vfs, shape] of Object.entries(configShapes(registryFile, packagesRoot))) {
+    out[vfs] =
+      shape === null
+        ? null
+        : {
+            fields: Object.fromEntries(
+              Object.entries(shape.fields).map(([key, field]) => [
+                key,
+                { required: field.required },
+              ]),
+            ),
+            rename: shape.rename,
+            validates: shape.validates,
+          }
   }
   return out
 }

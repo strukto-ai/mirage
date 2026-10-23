@@ -16,6 +16,10 @@ import { type Files, readerOf } from '../files.ts'
 import { posixNormpath, resolvePath } from '../../utils/path.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 
+/**
+ * Thrown when a write or edit targets a file that changed after the agent
+ * last read it; `path` names the file.
+ */
 export class StaleMirageFileError extends Error {
   readonly path: string
 

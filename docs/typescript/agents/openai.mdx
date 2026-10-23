@@ -79,17 +79,22 @@ How the session behaves:
 
 ## Exports
 
+{/* generated: exports openai-agents start */}
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | Mirage's seven function tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`), the same table MCP serves; `read` hands images and PDFs over as model input. Works with Chat Completions and Responses. |
-| `mirageReadFileTool(ws)` | Adds a `read_file` function tool. Text becomes `input_text`, images become `input_image`, and PDFs become `input_file`. |
-| `MirageShellExecutor` | `Shell` implementation; pass to `shellTool({ shell })`. |
-| `MirageEditor` | `Editor` implementation; pass to `applyPatchTool({ editor })`. |
-| `MirageSandboxClient` | `SandboxClient` for `SandboxAgent`; pass as `run(agent, input, { sandbox: { client } })`. |
-| `MirageSandboxSession` | Per-conversation session bound to a workspace. |
-| `MirageCapability` | `SandboxAgent` capability that lists the workspace's mounts in the agent's instructions. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
-| `MIRAGE_SYSTEM_PROMPT` | The default system prompt template (used by `buildSystemPrompt`). |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageCapability</code> | Tell a SandboxAgent's model which Mirage mounts it is working in. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageEditor</code> | An `Editor` that applies patches through the workspace's file operations; pass it to `applyPatchTool({ editor })`. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageTools</code> | Returns Mirage's tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`, `glob`) as OpenAI Agents function tools, limited to what the session's profile allows. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageReadFileTool</code> | Returns a `read_file` function tool: text comes back as text, images as image input and PDFs as file input the model can see. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageReadFileOutput</code> | What the `read_file` tool returns: text, an image, or a file such as a PDF, as the model receives it. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageSandboxClient</code> | The OpenAI Agents SDK sandbox client over an in-process Mirage workspace. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageSandboxSession</code> | One SDK sandbox session, backed by its own Mirage shell session. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageSandboxSessionState</code> | The serializable state of a `MirageSandboxSession`: the SDK's sandbox state plus `mirageSessionId`, the Mirage session it runs in. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageShellExecutor</code> | A `Shell` that runs each command in the workspace's shell; pass it to `shellTool({ shell })`. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>BuildSystemPromptOptions</code> | Options for `buildSystemPrompt`: which mounts to describe and what to append. |
+{/* generated: exports openai-agents end */}
 
 Unsupported binary formats return a metadata description instead of being decoded as corrupt text. The tool reads raw workspace bytes, so files mounted from RAM, S3, and other Mirage mounts use the same model-input path.
 

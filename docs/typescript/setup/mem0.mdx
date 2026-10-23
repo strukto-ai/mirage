@@ -25,12 +25,18 @@ await ws.shell('search --top-k 5 "quarterly planning" /memories/')
 
 Exactly one of `userId`, `agentId`, or `runId` is required.
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `apiKey` | required | Mem0 Platform API key. Redacted in snapshots. |
-| `host` | `https://api.mem0.ai` | Mem0 API base URL. |
-| `userId`, `agentId`, `runId` | one required | Scope filter applied to listing and search. |
-| `defaultPageSize` | `100` | Page size while listing memories. |
-| `defaultSearchLimit` | `10` | Default semantic result count. |
+{/* generated: config-table mem0 start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Mem0 Platform API key. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
+| <code style={{ whiteSpace: 'nowrap' }}>userId</code> | Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| <code style={{ whiteSpace: 'nowrap' }}>agentId</code> | Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| <code style={{ whiteSpace: 'nowrap' }}>runId</code> | Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultPageSize</code><br />default `100` | Memories fetched per request while listing the scope. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultSearchLimit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table mem0 end */}
 
 The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.

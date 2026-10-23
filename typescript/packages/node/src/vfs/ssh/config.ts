@@ -21,16 +21,34 @@ import {
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
 const SSHConfigSchema = z.object({
-  host: z.string(),
-  hostname: z.string().optional(),
-  port: z.number().optional(),
-  username: z.string().optional(),
-  password: secretStr().optional(),
-  identityFile: z.string().optional(),
-  passphrase: secretStr().optional(),
-  root: z.string().optional(),
-  timeout: z.number().optional(),
-  knownHosts: z.string().optional(),
+  host: z.string().describe('DNS name or IP address of the remote.'),
+  hostname: z.string().optional().describe('Address to connect to instead of `host`.'),
+  port: z.number().optional().meta({ description: 'SSH port.', default: 22 }),
+  username: z.string().optional().describe('Login user; unset uses the local user name.'),
+  password: secretStr()
+    .optional()
+    .describe('Password for password authentication; prefer `identityFile`.'),
+  identityFile: z
+    .string()
+    .optional()
+    .describe(
+      'Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`).',
+    ),
+  passphrase: secretStr()
+    .optional()
+    .describe('Passphrase of an encrypted private key, from `identityFile` or a default key.'),
+  root: z
+    .string()
+    .optional()
+    .meta({ description: 'Path on the remote that becomes the mount root.', default: '/' }),
+  timeout: z.number().optional().meta({
+    description: 'Seconds to wait for the connection to be ready, authentication included.',
+    default: 30,
+  }),
+  knownHosts: z
+    .string()
+    .optional()
+    .describe('Accepted but not applied: this backend does not verify host keys.'),
 })
 
 export type SSHConfig = ConfigOf<typeof SSHConfigSchema>

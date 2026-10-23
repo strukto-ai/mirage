@@ -49,6 +49,21 @@ const res = await ws.shell('ls /slack/channels/')
 console.log(res.stdoutText)
 ```
 
+### Config
+
+{/* generated: config-table slack start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). |
+| <code style={{ whiteSpace: 'nowrap' }}>searchToken</code><br />secret | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search; search lags new messages. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table slack end */}
+
 ## Browser
 
 ```bash
@@ -56,6 +71,20 @@ pnpm add @struktoai/mirage-browser
 ```
 
 The browser package never sees the bot token. Instead, point it at a relative URL that your backend proxies to `https://slack.com/api/*`, attaching the `Authorization: Bearer …` header server-side.
+
+### Config
+
+{/* generated: config-table browser/slack start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+| <code style={{ whiteSpace: 'nowrap' }}>proxyUrl</code><br />required | URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment. |
+| <code style={{ whiteSpace: 'nowrap' }}>getHeaders</code><br />secret | Function returning extra headers sent with every request to the proxy, such as your own session credential. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search; search lags new messages. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/slack end */}
 
 ### 1. Server: minimal proxy
 

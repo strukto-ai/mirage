@@ -32,16 +32,38 @@ export interface DropboxConfig {
 }
 
 const DropboxConfigSchema = z.object({
-  clientId: z.string(),
-  clientSecret: secretStr().optional(),
-  refreshToken: secretStr(),
-  rootPath: z.string().optional(),
-  contentSearch: z.boolean().optional(),
-  endpoint: z.string().optional(),
+  clientId: z.string().describe('Dropbox app key.'),
+  clientSecret: secretStr()
+    .optional()
+    .describe('Dropbox app secret. Omit it for a PKCE client, as in the browser.'),
+  refreshToken: secretStr().describe(
+    'Long-lived OAuth refresh token; mirage mints short-lived access tokens from it.',
+  ),
+  rootPath: z
+    .string()
+    .optional()
+    .describe(
+      'Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected.',
+    ),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      'Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match.',
+    default: false,
+  }),
+  endpoint: z
+    .string()
+    .optional()
+    .describe(
+      "Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts.",
+    ),
   // Declared so parse keeps it, marked secret so no snapshot carries it.
   refreshFn: secretSchema(
     z.custom<NonNullable<DropboxConfig['refreshFn']>>((value) => typeof value === 'function'),
-  ).optional(),
+  )
+    .optional()
+    .describe(
+      "Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend.",
+    ),
 })
 
 export type DropboxConfigRedacted = RedactedConfig<

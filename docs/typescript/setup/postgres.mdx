@@ -60,13 +60,17 @@ try {
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `dsn` | required | Postgres connection string. The default browser driver requires Neon's HTTP transport. Redacted in snapshots. |
-| `schemas` | none | Optional list to limit which schemas appear in the tree. |
-| `defaultRowLimit` | `1000` | Rows a windowed read returns when it passes an offset but no limit. |
-| `maxReadRows` | `10_000` | Hard ceiling per read. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
-| `maxReadBytes` | `10 MiB` | Hard ceiling per read. |
+{/* generated: config-table postgres start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>dsn</code><br />required, secret | Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string. |
+| <code style={{ whiteSpace: 'nowrap' }}>schemas</code> | Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultRowLimit</code><br />default `1000` | Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxReadRows</code><br />default `10000` | Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxReadBytes</code><br />default `10485760` (10 MiB) | Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`). |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table postgres end */}
 
 ## Mount mode
 

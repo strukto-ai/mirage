@@ -35,6 +35,20 @@ ws = Workspace({"/memory/": vfs}, mode=MountMode.READ)
 The VFS is read-only. A snapshot keeps its config, and a load needs the mount handed back through `mounts=`; it has no drift detection, so restored cache entries are served as saved and other reads reach the live backend. Set exactly one of
 `user_id`, `agent_id`, or `run_id` (see [Setup](/home/setup/mem0)).
 
+{/* generated: config-table mem0 start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Mem0 Platform API key. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://api.mem0.ai'` | Mem0 API base URL. |
+| <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | Mount this user's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>agent_id</code> | Mount this agent's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>run_id</code> | Mount this run's memories. Set exactly one of `user_id`, `agent_id` and `run_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>default_page_size</code><br />default `100` | Memories fetched per request while listing the scope. |
+| <code style={{ whiteSpace: 'nowrap' }}>default_search_limit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table mem0 end */}
+
 ## Filesystem Layout
 
 The tree is flat: the mount root lists one `<memory_id>.json` file per memory in

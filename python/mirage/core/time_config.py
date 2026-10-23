@@ -7,7 +7,12 @@ from mirage.core.time_range import parse_time
 
 class TimeRangeConfig(BaseModel):
     start_time: str | None = None
+    """Start of the mount's time scope, inclusive: an RFC 3339 timestamp
+    with an explicit timezone and at most millisecond precision. Unset
+    leaves the start open."""
     end_time: str | None = None
+    """End of the mount's time scope, exclusive, in the same format as
+    `start_time`, which it must follow. Unset leaves the end open."""
 
     @field_validator("start_time", "end_time")
     @classmethod

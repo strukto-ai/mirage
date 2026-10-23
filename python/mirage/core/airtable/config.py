@@ -16,26 +16,22 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class AirtableConfig(BaseModel):
-    """Credentials and bounds for one Airtable account.
-
-    Args:
-        token (SecretStr): a personal access token (or an OAuth access
-            token), sent as ``Authorization: Bearer``.
-        base_ids (list[str] | None): restrict the mount to these bases;
-            None shows every base the token can reach.
-        base_url (str): the API root, overridden to point at a fake.
-        max_read_records (int): the most records one file may render. A
-            full read of a table or view holding more stops at the cap
-            rather than paging at 5 requests a second for minutes;
-            ``head`` still reads its first lines.
-        requests_per_second (float): pacing per base. Airtable allows 5
-            and answers a burst with a 30-second penalty.
-    """
+    """Credentials and bounds for one Airtable account."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr
+    """Personal access token (or OAuth access token), sent as
+    `Authorization: Bearer`."""
     base_ids: list[str] | None = None
+    """Only these bases are listed or readable. Unset shows every base the
+    token can reach."""
     base_url: str = "https://api.airtable.com/v0"
+    """Airtable API root; override to point at a fake or proxy."""
     max_read_records: int = Field(default=10_000, ge=1)
+    """The most records one file renders. A full read of a larger table or
+    view fails with `File too large` once it passes the cap; `head -n N`
+    still reads its first records."""
     requests_per_second: float = Field(default=5.0, gt=0)
+    """Requests per second per base. Airtable allows 5 and answers a burst
+    with a 30-second penalty."""

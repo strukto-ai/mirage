@@ -32,18 +32,22 @@ const ws = new Workspace({ '/remote': ssh }, { mode: MountMode.READ })
 await ws.shell('ls /remote')
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `host` | required | DNS name or IP address of the remote. |
-| `hostname` | `host` | Connect to this address instead of `host`. |
-| `port` | `22` | |
-| `username` | the local user | |
-| `password` | none | Redacted in snapshots. Prefer `identityFile`. |
-| `identityFile` | none | Path to a private key. `~` is expanded. |
-| `passphrase` | none | Passphrase for `identityFile`. Redacted in snapshots. |
-| `root` | `/` | Path on the remote that becomes the mount root. |
-| `timeout` | `30` | Connect timeout in seconds. |
-| `knownHosts` | none | Accepted but not applied: this backend does not verify host keys. |
+{/* generated: config-table ssh start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | DNS name or IP address of the remote. |
+| <code style={{ whiteSpace: 'nowrap' }}>hostname</code> | Address to connect to instead of `host`. |
+| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `22` | SSH port. |
+| <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name. |
+| <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identityFile`. |
+| <code style={{ whiteSpace: 'nowrap' }}>identityFile</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`). |
+| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted private key, from `identityFile` or a default key. |
+| <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the connection to be ready, authentication included. |
+| <code style={{ whiteSpace: 'nowrap' }}>knownHosts</code> | Accepted but not applied: this backend does not verify host keys. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table ssh end */}
 
 ## Mount mode
 

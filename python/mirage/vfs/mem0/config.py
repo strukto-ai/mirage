@@ -25,12 +25,22 @@ class Mem0Config(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
+    """Mem0 Platform API key."""
     host: str = "https://api.mem0.ai"
+    """Mem0 API base URL."""
     user_id: str | None = None
+    """Mount this user's memories. Set exactly one of `user_id`,
+    `agent_id` and `run_id`."""
     agent_id: str | None = None
+    """Mount this agent's memories. Set exactly one of `user_id`,
+    `agent_id` and `run_id`."""
     run_id: str | None = None
+    """Mount this run's memories. Set exactly one of `user_id`, `agent_id`
+    and `run_id`."""
     default_page_size: PositiveInt = 100
+    """Memories fetched per request while listing the scope."""
     default_search_limit: PositiveInt = 10
+    """How many results `search` returns unless the line sets `top_k`."""
 
     @model_validator(mode="after")
     def _exactly_one_entity(self) -> "Mem0Config":

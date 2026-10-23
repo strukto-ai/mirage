@@ -40,6 +40,22 @@ console.log(res.stdoutText)
 The `DropboxTokenManager` caches the access token in memory and refreshes it ~5 minutes before
 expiry, so cold-start API calls don't pay the refresh round-trip.
 
+### Config
+
+{/* generated: config-table dropbox start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>clientId</code><br />required | Dropbox app key. |
+| <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />required, secret | Dropbox app secret. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
+| <code style={{ whiteSpace: 'nowrap' }}>rootPath</code> | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table dropbox end */}
+
 ## Mount a subfolder
 
 Pass `rootPath` to expose a single Dropbox folder as the mount root instead of the whole

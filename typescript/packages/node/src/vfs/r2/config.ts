@@ -15,11 +15,11 @@
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
-  secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
+import { ALIAS_SHAPE } from '../s3_alias.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface R2Config {
@@ -38,18 +38,21 @@ export interface R2Config {
 }
 
 const R2ConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  accountId: z.string().optional(),
-  endpoint: z.string().optional(),
-  region: z.string().optional(),
-  profile: z.string().optional(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
+  ...ALIAS_SHAPE,
+  region: z.string().optional().meta({
+    description: 'Region requests are signed for; R2 addresses a bucket by account, not by region.',
+    default: 'auto',
+  }),
+  endpoint: z
+    .string()
+    .optional()
+    .describe('Endpoint URL that replaces the one the provider derives.'),
+  accountId: z
+    .string()
+    .optional()
+    .describe(
+      'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required.',
+    ),
 })
 
 // Only the redacted twin derives; the redactor fills in the region and

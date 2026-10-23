@@ -37,10 +37,12 @@ import {
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 
 /**
- * Mirage's tool table as OpenAI Agents function tools: shell, read, write,
- * edit, ls, grep and glob, each with the shared input schema, as far as the session's
- * profile leaves them (`MirageToolOperations.names`), and answering
- * with the text the MCP tool of the same name answers. `read` also hands an
+ * Returns Mirage's tools (`shell`, `read`, `write`, `edit`, `ls`, `grep`,
+ * `glob`) as OpenAI Agents function tools, limited to what the session's
+ * profile allows.
+ *
+ * The set is `MirageToolOperations.names`. Each tool has the shared input
+ * schema and answers with the text the MCP tool of the same name answers. `read` also hands an
  * image or a PDF to the model as input it can see. They work with Chat
  * Completions and Responses; with Responses, `shellTool` over
  * `MirageShellExecutor` and `applyPatchTool` over `MirageEditor` are the hosted

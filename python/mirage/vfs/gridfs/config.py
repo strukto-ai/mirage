@@ -21,10 +21,18 @@ class GridFSConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     uri: SecretStr
+    """MongoDB connection URI."""
     database: str
+    """Database that holds the GridFS bucket."""
     bucket: str = "fs"
+    """GridFS bucket name; its collections are `<bucket>.files` and
+    `<bucket>.chunks`."""
     key_prefix: str | None = None
+    """Filename prefix the mount treats as its root; files outside it are
+    not listed."""
     chunk_size_bytes: int | None = None
+    """Chunk size in bytes for files the mount writes; unset uses the
+    driver's default, 255 KiB."""
 
     @field_validator("key_prefix")
     @classmethod

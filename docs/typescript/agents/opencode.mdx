@@ -86,12 +86,16 @@ Add the dependencies to `.opencode/package.json`:
 
 ## Exports
 
+{/* generated: exports opencode/plugin start */}
 | Symbol | Purpose |
 | --- | --- |
-| `mirageTools(ws, options?)` | Returns OpenCode tool definitions for `read`, `write`, `edit`, `ls`, `bash`, `glob`, and `grep`. |
-| `miragePlugin(ws, options?)` | Returns a native OpenCode plugin backed by `ws`. |
-| `MirageOpenCodeOptions` | Supports `staleWriteProtection` (default `true`) and `sessionId`, the Mirage session every tool acts as, under its profile (default: the workspace's default session). |
-| `StaleMirageFileError` | Indicates that a tracked file changed after it was read. |
+| <code style={{ whiteSpace: 'nowrap' }}>WsResolver</code> | A function that picks the workspace for a tool call from its OpenCode `ToolContext`. |
+| <code style={{ whiteSpace: 'nowrap' }}>WsLike</code> | A workspace, or a `WsResolver` that picks one per tool call. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageOpenCodeOptions</code> | Options for `mirageTools` and `miragePlugin`: `staleWriteProtection` (default `true`) and `sessionId`, the Mirage session every tool acts as. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageTools</code> | Returns OpenCode tool definitions for `read`, `write`, `edit`, `ls`, `bash`, `glob` and `grep`, backed by `ws`. |
+| <code style={{ whiteSpace: 'nowrap' }}>miragePlugin</code> | Returns a native OpenCode plugin whose tools are `mirageTools(ws, options)`. |
+| <code style={{ whiteSpace: 'nowrap' }}>StaleMirageFileError</code> | Thrown when a write or edit targets a file that changed after the agent last read it; `path` names the file. |
+{/* generated: exports opencode/plugin end */}
 
 ### Tool reference
 

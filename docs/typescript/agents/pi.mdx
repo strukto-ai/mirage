@@ -60,12 +60,19 @@ This protection is enabled by default. It observes the content returned by the m
 
 ## Exports
 
-| Symbol                        | Purpose                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------- |
-| `mirageExtension(ws, opts?)`  | Returns a named Pi `InlineExtension` that registers all seven tools against `ws`. |
-| `mirageOperations(ws, opts?)` | Lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle.       |
-| `StaleMirageFileError`        | Error raised when a mutation targets content that changed after an agent read.    |
-| `buildSystemPrompt`           | Generates a system prompt that describes mounted paths to the model.              |
+{/* generated: exports pi start */}
+| Symbol | Purpose |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageExtension</code> | Returns a Pi `InlineExtension` named `mirage` that registers all seven tools against `ws` and appends a mount-aware system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageExtensionOptions</code> | Options for `mirageExtension`: `cwd` (default `/`), `systemPrompt` (a string to append, or `false` for none), plus `staleWriteProtection` and `sessionId` from `MirageOperationsOptions`. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirageOperations</code> | Returns the lower-level `{ read, write, edit, bash, grep, find, ls }` operation bundle backed by `ws`, for wiring Pi tools by hand. |
+| <code style={{ whiteSpace: 'nowrap' }}>StaleMirageFileError</code> | Thrown when a write or edit targets a file that changed after the agent last read it; `path` names the file. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageOperationsBundle</code> | The operations `mirageOperations` returns, one per Pi tool: `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls`. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageOperationsOptions</code> | Options for `mirageOperations`: `staleWriteProtection` (default `true`) and `sessionId`, the Mirage session the operations act as. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>BuildSystemPromptOptions</code> | Options for `buildSystemPrompt`: which mounts to describe and what to append. |
+{/* generated: exports pi end */}
 
 `mirageExtension` accepts:
 

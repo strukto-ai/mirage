@@ -44,13 +44,17 @@ const lf = new LangfuseVFS({
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `publicKey` | required | Langfuse public key. |
-| `secretKey` | required | Langfuse secret key. Redacted in snapshots. |
-| `host` | `https://cloud.langfuse.com` | Override for self-hosted Langfuse. |
-| `defaultTraceLimit` | `100` | Default page size for trace listings. An older trace is still reachable by its id. |
-| `defaultFromTimestamp` | none | List only traces from this ISO 8601 timestamp on. |
+{/* generated: config-table langfuse start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>publicKey</code><br />required | Langfuse project public key. |
+| <code style={{ whiteSpace: 'nowrap' }}>secretKey</code><br />required, secret | Langfuse project secret key. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://cloud.langfuse.com'` | Langfuse API host; override for a self-hosted or regional instance. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultTraceLimit</code><br />default `100` | The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultFromTimestamp</code> | List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `defaultTraceLimit`. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table langfuse end */}
 
 ## Mount mode
 

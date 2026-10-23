@@ -84,14 +84,18 @@ How the session behaves:
 
 ## Exports
 
+{/* generated: exports openai_agents start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MirageShellExecutor` | Drop-in `ShellTool` executor, runs inside `Workspace.shell()`. |
-| `MirageEditor` | Drop-in `ApplyPatchTool` editor, patches go through Mirage FS ops. |
-| `MirageSandboxClient` | Adapter for `agents.sandbox.SandboxAgent`. |
-| `MirageSandboxSession` | Per-conversation session bound to a workspace. |
-| `MirageCapability` | `SandboxAgent` capability that lists the workspace's mounts in the agent's instructions. |
-| `build_system_prompt` | Generates a system prompt that describes mounted paths to the model. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageCapability</code> | Tell a SandboxAgent's model which Mirage mounts it is working in. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageEditor</code> | ApplyPatchEditor backed by a Mirage Workspace. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageRunner</code> | Run OpenAI agents with mirage-resolved multimodal attachments. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageSandboxClient</code> | The OpenAI Agents SDK sandbox client over an in-process Mirage workspace. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageSandboxSession</code> | One SDK sandbox session, backed by its own Mirage shell session. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageShellExecutor</code> | ShellTool executor backed by a Mirage Workspace. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>build_system_prompt</code> | Build a system prompt with optional mount info and extra instructions. |
+{/* generated: exports openai_agents end */}
 
 ## Examples
 

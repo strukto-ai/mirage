@@ -53,22 +53,66 @@ export interface S3HttpAgents {
 export type S3HttpAgentProvider = () => S3HttpAgents
 
 export const S3ConfigSchema = z.object({
-  bucket: z.string(),
-  region: z.string().optional(),
-  endpoint: z.string().optional(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  forcePathStyle: z.boolean().optional(),
-  timeoutMs: z.number().optional(),
+  bucket: z.string().describe('Name of the bucket to mount.'),
+  region: z
+    .string()
+    .optional()
+    .describe(
+      "AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile.",
+    ),
+  endpoint: z
+    .string()
+    .optional()
+    .describe(
+      "Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read.",
+    ),
+  accessKeyId: secretStr()
+    .optional()
+    .describe(
+      'Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.',
+    ),
+  secretAccessKey: secretStr().optional().describe('Secret access key paired with `accessKeyId`.'),
+  sessionToken: secretStr()
+    .optional()
+    .describe('Session token for temporary credentials, sent with the access key pair.'),
+  forcePathStyle: z
+    .boolean()
+    .optional()
+    .describe(
+      'Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.',
+    ),
+  timeoutMs: z
+    .number()
+    .optional()
+    .describe(
+      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout.",
+    ),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
-  ).optional(),
+  )
+    .optional()
+    .describe(
+      'Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials.',
+    ),
   httpAgentProvider: secretSchema(
     z.custom<S3HttpAgentProvider>((value) => typeof value === 'function'),
-  ).optional(),
-  defaultContentType: z.string().optional(),
-  keyPrefix: z.string().optional(),
+  )
+    .optional()
+    .describe(
+      'Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set.',
+    ),
+  defaultContentType: z
+    .string()
+    .optional()
+    .describe(
+      '`Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`.',
+    ),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
+    ),
 })
 
 export interface S3Config {

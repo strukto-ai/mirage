@@ -46,6 +46,22 @@ console.log((await ws.shell('cat /ds/README.md | head -n 20')).stdoutText)
 `HfDatasetsVFS` takes `repoId` in `namespace/dataset-name` form plus an
 optional access token. Public datasets need no token.
 
+### Config
+
+{/* generated: config-table hf_datasets start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>repoId</code><br />required | Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token; unset sends anonymous requests, which reach public repositories only. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code><br />default `30000` | Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Path inside the repository that becomes the mount root; files outside it are not listed. |
+| <code style={{ whiteSpace: 'nowrap' }}>revision</code> | Branch, tag or commit the mount reads; unset reads `main`. |
+| <code style={{ whiteSpace: 'nowrap' }}>expandCommits</code> | Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table hf_datasets end */}
+
 ## Reading, not writing
 
 This mount is read-only, the way a [`github`](/typescript/setup/github) mount is. A Hub write is

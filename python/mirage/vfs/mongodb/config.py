@@ -19,6 +19,15 @@ class MongoDBConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     uri: SecretStr
+    """MongoDB connection URI."""
     databases: list[str] | None = None
+    """Databases to mount; others are hidden. Unset or empty mounts every
+    database except `admin`, `config` and `local`."""
     max_doc_limit: int = 5000
+    """Most documents one `tail -n` read of `documents.jsonl` fetches; a
+    larger count on a collection that holds more is refused
+    (`File too large`)."""
     elide_fields: dict[str, list[str]] = {}
+    """Fields dropped from `documents.jsonl`, keyed by
+    `<database>.<collection>` (a view's name works too); a dotted path such
+    as `nested.path` drops a nested field."""

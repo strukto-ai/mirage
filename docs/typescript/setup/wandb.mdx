@@ -19,6 +19,22 @@ const ws = new Workspace({
 The VFS also ships in `@struktoai/mirage-browser`; its implementation uses
 standard `fetch`. Browser access depends on the service's CORS configuration.
 
+## Config
+
+{/* generated: config-table wandb start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>entities</code><br />required | W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />default `''`, secret | W&B API key, sent as HTTP Basic auth. Empty sends no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
+| <code style={{ whiteSpace: 'nowrap' }}>pageSize</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
+| <code style={{ whiteSpace: 'nowrap' }}>maxPages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table wandb end */}
+
+## Filesystem layout
+
 The mount exposes `/<entity>/<project>/<run-id>/` with `run.json`,
 `config.json`, `summary.json`, `history.jsonl`, and `files/`.
 Configure one or more entities explicitly; project and run listings are fetched

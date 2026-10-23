@@ -43,14 +43,18 @@ memory, refreshing ~5 minutes before expiry.
 
 ### Config Reference
 
-| Field            | Required | Description                                                             |
-| ---------------- | -------- | ----------------------------------------------------------------------- |
-| `client_id`      | Yes      | Dropbox app key                                                         |
-| `client_secret`  | Yes      | Dropbox app secret                                                      |
-| `refresh_token`  | Yes      | Long-lived OAuth2 refresh token                                         |
-| `root_path`      | No       | Mount a sub-folder of the account as the root (default `/`, the account root) |
-| `content_search` | No       | Let `grep`/`rg` narrow recursive scans via `/2/files/search_v2` (default `False`; see below) |
-| `endpoint`       | No       | Base URL overriding the real Dropbox hosts (test fakes)                 |
+{/* generated: config-table dropbox start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>client_id</code><br />required | Dropbox app key. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />required, secret | Dropbox app secret. |
+| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
+| <code style={{ whiteSpace: 'nowrap' }}>root_path</code><br />default `'/'` | Dropbox folder the mount uses as its root, such as `/Projects`; `/` is the account root. `..` segments are rejected. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table dropbox end */}
 
 ## Mount a subfolder
 

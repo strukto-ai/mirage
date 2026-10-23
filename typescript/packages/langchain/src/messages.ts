@@ -27,6 +27,10 @@ function isTextBlock(value: unknown): value is { type: 'text'; text: string } {
   return block.type === 'text' && typeof block.text === 'string'
 }
 
+/**
+ * Returns the non-empty text blocks of an array of LangChain messages, in
+ * order, as `string[]`.
+ */
 export function extractText(messages: readonly MessageLike[]): string[] {
   const texts: string[] = []
   for (const msg of messages) {

@@ -16,6 +16,10 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import type { Shell, ShellAction, ShellResult, ShellOutputResult } from '@openai/agents'
 import { withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
+/**
+ * A `Shell` that runs each command in the workspace's shell; pass it to
+ * `shellTool({ shell })`.
+ */
 export class MirageShellExecutor implements Shell {
   constructor(private readonly ws: Workspace) {}
 

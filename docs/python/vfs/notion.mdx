@@ -21,11 +21,15 @@ vfs = NotionVFS(config=config)
 ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
 ```
 
-| Field      | Required | Default                        | Description             |
-| ---------- | -------- | ------------------------------ | ----------------------- |
-| `api_key`  | yes      |                                | Notion integration token |
-| `base_url` | no       | `https://api.notion.com/v1`    | API base URL            |
-| `api_version` | no    | the client's generation         | Pins the `Notion-Version` header |
+{/* generated: config-table notion start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Notion integration token. |
+| <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_version</code> | `Notion-Version` header sent with every request. Unset sends `2025-09-03`; `ntn --notion-version` overrides it per line. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table notion end */}
 
 ## Filesystem Layout
 

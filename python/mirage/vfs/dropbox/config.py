@@ -19,17 +19,19 @@ class DropboxConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     client_id: str
+    """Dropbox app key."""
     client_secret: SecretStr
+    """Dropbox app secret."""
     refresh_token: SecretStr
+    """Long-lived OAuth refresh token; mirage mints short-lived access
+    tokens from it."""
     root_path: str = "/"
-    # Opt-in for grep/rg to narrow recursive scans via /files/search_v2
-    # instead of downloading every file. Full-text content search is
-    # plan-gated (Dropbox Professional/Essentials/Business and up); on other
-    # plans search_v2 silently matches file names only, which would make a
-    # narrowed scan miss content matches — so this stays off by default.
-    # Search indexing also lags recent writes by a short delay.
+    """Dropbox folder the mount uses as its root, such as `/Projects`; `/`
+    is the account root. `..` segments are rejected."""
     content_search: bool = False
-    # Base URL overriding the real Dropbox hosts (integ fakes): one origin
-    # serving /oauth2/token, the RPC API under /2, and content downloads
-    # under /2. None means the production oauth/api/content hosts.
+    """Let `grep -w` and `rg -w` read only the files Dropbox search names.
+    Needs a plan with full-text search, and search lags writes, so it can
+    miss a match."""
     endpoint: str | None = None
+    """Base URL that replaces Dropbox's OAuth, API and content hosts, such
+    as a test server. Unset uses Dropbox's hosts."""

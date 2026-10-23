@@ -15,12 +15,11 @@ import {
  */
 const SlackConfigSchema = SlackCredentialsSchema.extend({
   ...timeRangeShape,
-  // Let grep -w and rg -w read only the channel days Slack search names
-  // (`filesContaining`). Off by default: Slack indexes a message some time
-  // after it is posted, and searches only message text, file names and
-  // titles and reactions, so a word elsewhere in the JSON (a profile or
-  // block field) is not found.
-  contentSearch: z.boolean().optional(),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      'Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search; search lags new messages.',
+    default: false,
+  }),
 }).refine(orderedTimes, timeRangeOrderError)
 
 export type SlackConfig = ConfigOf<typeof SlackConfigSchema>

@@ -43,6 +43,32 @@ ws = Workspace({"/fashion/": vfs}, mode=MountMode.READ)
 The mapping is config-driven; nothing about the dataset is hardcoded. Point
 `group_by` at different payload fields and the folder tree changes.
 
+{/* generated: config-table qdrant start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>url</code> | Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored. |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'localhost'` | Host name of the Qdrant server when `url` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>port</code><br />default `6333` | Port of the Qdrant server when `url` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>https</code><br />default `False` | Connect to `host` over HTTPS when `url` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />secret | Qdrant API key, required by Qdrant Cloud. |
+| <code style={{ whiteSpace: 'nowrap' }}>collection</code> | Collection the mount root shows; unset lists every collection as a top-level folder. |
+| <code style={{ whiteSpace: 'nowrap' }}>group_by</code><br />default `[]` | Payload fields that become folder levels, one per field in order; dotted paths reach nested keys. Unset puts every point's files directly under the collection. |
+| <code style={{ whiteSpace: 'nowrap' }}>basename_fields</code><br />default `[]` | `group_by` fields whose folder names keep only the last path or URL segment of the value; two values with one basename under the same parent are refused as a collision. |
+| <code style={{ whiteSpace: 'nowrap' }}>id_field</code><br />default `'id'` | Key the point id is written under in a point's `.json`; it replaces a payload field of that name. |
+| <code style={{ whiteSpace: 'nowrap' }}>name_field</code> | Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone. |
+| <code style={{ whiteSpace: 'nowrap' }}>text_field</code> | Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`. |
+| <code style={{ whiteSpace: 'nowrap' }}>blob_field</code> | Payload field of raw or base64 bytes served as `<id>.<blob_ext>` and left out of the `.json`; unset adds no blob file. |
+| <code style={{ whiteSpace: 'nowrap' }}>blob_ext</code><br />default `'bin'` | File extension of the blob file, without the dot. |
+| <code style={{ whiteSpace: 'nowrap' }}>vector_field</code> | Payload field holding a copy of the vector, left out of the `.json`. |
+| <code style={{ whiteSpace: 'nowrap' }}>search_limit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_rows</code><br />default `1000` | Most points one folder listing scrolls; points past it are left out, and a group folder lists only the values those points carry. |
+| <code style={{ whiteSpace: 'nowrap' }}>embedding_model</code><br />default `'sentence-transformers/all-MiniLM-L6-v2'` | Model the server embeds a `search` query with under `cloud_inference`; it must match the model the stored vectors came from. |
+| <code style={{ whiteSpace: 'nowrap' }}>cloud_inference</code><br />default `False` | Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query. |
+| <code style={{ whiteSpace: 'nowrap' }}>embed</code><br />secret | Async function that turns a `search` query into a vector in-process, `(text: str) -> list[float]`. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table qdrant end */}
+
 ### Document and chunk lineage
 
 Config fields use Qdrant's dotted nested-key syntax. For example, a LangChain-style

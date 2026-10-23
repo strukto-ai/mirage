@@ -45,6 +45,25 @@ The S3-compatible endpoint is auto-built from `namespace` + `region`
 unless `endpoint_url` is supplied. Both `READ` and `WRITE` modes are
 supported.
 
+{/* generated: config-table oci start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code><br />required | Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint_url` is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL that replaces the one the provider derives. |
+| <code style={{ whiteSpace: 'nowrap' }}>access_key_id</code><br />secret | Access key ID; set it with `secret_access_key`. Unset uses the AWS credential chain. |
+| <code style={{ whiteSpace: 'nowrap' }}>secret_access_key</code><br />secret | Secret access key paired with `access_key_id`. |
+| <code style={{ whiteSpace: 'nowrap' }}>session_token</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
+| <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `True` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
+| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>namespace</code><br />required | Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint_url` is set. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table oci end */}
+
 ## Filesystem Layout
 
 The OCI VFS maps object keys to virtual paths under the mount

@@ -27,6 +27,11 @@ import {
 import { buildSystemPrompt } from '@struktoai/mirage-core/agents/prompt'
 import { mirageOperations, type MirageOperationsOptions } from './operations.ts'
 
+/**
+ * Options for `mirageExtension`: `cwd` (default `/`), `systemPrompt` (a
+ * string to append, or `false` for none), plus `staleWriteProtection` and
+ * `sessionId` from `MirageOperationsOptions`.
+ */
 export interface MirageExtensionOptions extends MirageOperationsOptions {
   cwd?: string
   systemPrompt?: string | false
@@ -38,6 +43,10 @@ function bashAtCwd(operations: BashOperations, cwd: string): BashOperations {
   }
 }
 
+/**
+ * Returns a Pi `InlineExtension` named `mirage` that registers all seven
+ * tools against `ws` and appends a mount-aware system prompt.
+ */
 export function mirageExtension(ws: Workspace, opts: MirageExtensionOptions = {}): InlineExtension {
   const cwd = opts.cwd ?? '/'
   const ops = mirageOperations(ws, opts)

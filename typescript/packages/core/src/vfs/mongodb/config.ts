@@ -24,10 +24,26 @@ import {
 // `uri` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `MongoDBConfig` declares.
 const MongoDBConfigSchema = z.object({
-  uri: secretStr(),
-  databases: z.array(z.string()).readonly().optional(),
-  maxDocLimit: z.number().optional(),
-  elideFields: z.record(z.string(), z.array(z.string()).readonly()).optional(),
+  uri: secretStr().describe(
+    'MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.',
+  ),
+  databases: z
+    .array(z.string())
+    .readonly()
+    .optional()
+    .describe(
+      'Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`.',
+    ),
+  maxDocLimit: z.number().optional().meta({
+    description:
+      'Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`).',
+    default: 5000,
+  }),
+  elideFields: z.record(z.string(), z.array(z.string()).readonly()).optional().meta({
+    description:
+      "Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field.",
+    default: {},
+  }),
 })
 
 export type MongoDBConfig = ConfigOf<typeof MongoDBConfigSchema>

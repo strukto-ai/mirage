@@ -16,8 +16,11 @@ import { z } from 'zod'
 import { type ConfigOf, secretStr } from '../../vfs/secrets.ts'
 
 export const DiscordConfigSchema = z.object({
-  token: secretStr(),
-  baseUrl: z.string().optional(),
+  token: secretStr().describe('Discord bot token, sent as `Authorization: Bot <token>`.'),
+  baseUrl: z.string().optional().meta({
+    description: 'Discord API root; override to point at a fake or proxy.',
+    default: 'https://discord.com/api/v10',
+  }),
 })
 
 export type DiscordConfig = ConfigOf<typeof DiscordConfigSchema>

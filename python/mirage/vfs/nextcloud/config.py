@@ -19,7 +19,18 @@ class NextcloudConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str
+    """WebDAV URL of the user's files, such as
+    `https://cloud.example.com/remote.php/dav/files/alice/`."""
     username: str | None = None
+    """Basic Auth user name; unset sends requests without credentials."""
     password: SecretStr | None = None
+    """Basic Auth password; use an app password (Settings → Security)
+    rather than the account password."""
     verify_ssl: bool = True
+    """Verify the server's TLS certificate on the WebDAV requests mirage
+    sends itself (copy, checksum, quota, properties, search); reads, writes
+    and listings go through OpenDAL, which always verifies."""
     timeout: int = 30
+    """Seconds one WebDAV request mirage sends itself (copy, checksum,
+    quota, properties, search) may take; reads, writes and listings go
+    through OpenDAL and its own timeouts."""

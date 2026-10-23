@@ -43,6 +43,20 @@ console.log((await ws.shell('stat /hf/data/file.txt')).stdoutText)
 `HfBucketsVFS` takes the bucket in `namespace/bucket-name` form plus an
 optional access token. Both `READ` and `WRITE` modes are supported out of the box.
 
+### Config
+
+{/* generated: config-table hf_buckets start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Bucket id in `namespace/name` form. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />secret | Hugging Face access token. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code><br />default `30000` | Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Path inside the bucket that becomes the mount root; files outside it are not listed. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table hf_buckets end */}
+
 ## Filesystem Layout
 
 Bucket object keys map to virtual paths under the mount prefix: virtual

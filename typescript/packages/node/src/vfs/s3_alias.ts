@@ -54,16 +54,44 @@ export interface S3AliasConfig {
   proxy?: string
 }
 
-const ALIAS_SHAPE = {
-  bucket: z.string(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  profile: z.string().optional(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
+export const ALIAS_SHAPE = {
+  bucket: z.string().describe('Name of the bucket to mount.'),
+  accessKeyId: secretStr()
+    .optional()
+    .describe(
+      'Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain.',
+    ),
+  secretAccessKey: secretStr().optional().describe('Secret access key paired with `accessKeyId`.'),
+  sessionToken: secretStr()
+    .optional()
+    .describe('Session token for temporary credentials, sent with the access key pair.'),
+  profile: z
+    .string()
+    .optional()
+    .describe(
+      'Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.',
+    ),
+  forcePathStyle: z
+    .boolean()
+    .optional()
+    .describe(
+      'Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.',
+    ),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
+    ),
+  timeoutMs: z
+    .number()
+    .optional()
+    .describe(
+      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts.",
+    ),
+  proxy: secretStr()
+    .optional()
+    .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
 }
 
 // What a caller may write, split the way python splits
@@ -72,14 +100,27 @@ const ALIAS_SHAPE = {
 // gateway must name its endpoint and may name a region.
 const REGION_ALIAS_SCHEMA = z.object({
   ...ALIAS_SHAPE,
-  region: z.string(),
-  endpoint: z.string().optional(),
+  region: z
+    .string()
+    .describe(
+      'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
+    ),
+  endpoint: z
+    .string()
+    .optional()
+    .describe('Endpoint URL that replaces the one the provider derives.'),
 })
 
 const FIXED_ALIAS_SCHEMA = z.object({
   ...ALIAS_SHAPE,
-  region: z.string().optional(),
-  endpoint: z.string(),
+  forcePathStyle: z.boolean().optional().meta({ default: true }),
+  region: z.string().optional().meta({
+    description: "Region requests are signed for; the gateway's endpoint does not depend on it.",
+    default: 'us-east-1',
+  }),
+  endpoint: z
+    .string()
+    .describe('URL of the self-hosted S3 gateway, such as `http://localhost:9000`.'),
 })
 
 // The resolved shape, with the region and endpoint each provider's rule

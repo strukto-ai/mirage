@@ -21,10 +21,15 @@ const ws = new Workspace({ '/notion': notion }, { mode: MountMode.READ })
 await ws.shell('ls /notion/pages/')
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `apiKey` | required | Notion internal integration token. Redacted in snapshots. |
-| `baseUrl` | `https://api.notion.com/v1` | Override for testing against a mock server. |
+{/* generated: config-table notion start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Notion integration token. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiVersion</code><br />default `'2025-09-03'` | `Notion-Version` header sent with every request; `ntn --notion-version` overrides it per line. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table notion end */}
 
 ## Browser
 
@@ -43,10 +48,14 @@ const ws = new Workspace({ '/notion': notion }, { mode: MountMode.READ })
 await ws.shell('ls /notion/')
 ```
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `authProvider` | required | `OAuthClientProvider` from `@modelcontextprotocol/client`. Redacted in snapshots. |
-| `serverUrl` | Notion's hosted MCP endpoint | Override if you proxy MCP through your own URL. |
+{/* generated: config-table browser/notion start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>authProvider</code><br />required, secret | `OAuthClientProvider` from `@modelcontextprotocol/client` that authorizes the browser with Notion's MCP server. |
+| <code style={{ whiteSpace: 'nowrap' }}>serverUrl</code><br />default `'https://mcp.notion.com/mcp'` | Notion MCP endpoint; override to route MCP through your own URL. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/notion end */}
 
 ## Mount mode
 

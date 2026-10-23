@@ -46,18 +46,22 @@ drives for you. Both `READ` and `WRITE` modes are supported.
 
 ### Config Reference
 
-| Field          | Required | Description                                                       |
-| -------------- | -------- | ----------------------------------------------------------------- |
-| `access_token` | Yes      | Microsoft Graph OAuth2 bearer token (string or callable provider) |
-| `tenant_host`  | No       | Restrict resolution to a single SharePoint host                   |
-| `site_filter`  | No       | Search term passed to `/sites?search=` to narrow discovery        |
-| `site`         | No       | Scope the mount to one site; use together with `drive`            |
-| `drive`        | No       | Scope the mount to one document library; use together with `site` |
-| `key_prefix`   | No       | Folder path exposed as the mount root in a scoped library         |
-| `content_search` | No     | Let `grep -w` and `rg -w` read only the files Graph search names (default `False`; see [grep and rg](#grep-and-rg)) |
-| `graph_base_url` | No     | Full service root, for any deployment but the worldwide one       |
-| `timeout`      | No       | Request timeout in seconds (default `30`)                          |
-| `max_retries`  | No       | Max retries on `429`/`503`/`504` with backoff (default `5`)       |
+{/* generated: config-table sharepoint start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />required, secret | Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`. |
+| <code style={{ whiteSpace: 'nowrap' }}>tenant_host</code> | SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it. |
+| <code style={{ whiteSpace: 'nowrap' }}>graph_base_url</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_retries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>site_filter</code> | Search term passed to Graph's `/sites?search=` to choose which sites the mount lists. Unset searches `*`. |
+| <code style={{ whiteSpace: 'nowrap' }}>site</code> | Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`. |
+| <code style={{ whiteSpace: 'nowrap' }}>drive</code> | Document library in `site` that the mount uses as its root; takes effect only with `site` set. |
+| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Graph search names. Search covers extracted text and lags writes, so it can miss a match. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table sharepoint end */}
 
 `access_token` accepts either a static string or a `Callable[[], str]` provider.
 With a callable, the VFS refreshes the token on `401`, so long-running

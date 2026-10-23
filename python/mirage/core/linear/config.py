@@ -19,10 +19,14 @@ class LinearConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
+    """Linear personal API key."""
     workspace: str | None = None
+    """Accepted for compatibility; not read."""
     team_ids: list[str] | None = None
+    """Only these teams are listed or readable. Unset shows every team the
+    key can reach."""
     base_url: str = "https://api.linear.app/graphql"
-    # Let grep -w and rg -w read only the issues Linear's search names, and
-    # those whose other fields hold the word (`files_containing`). Off by
-    # default: Linear indexes a write some time after it lands.
+    """Linear GraphQL endpoint; override to point at a fake or proxy."""
     content_search: bool = False
+    """Let `grep -rw` and `rg -w` read only the issues Linear's search names,
+    plus those whose other fields hold the word. Search lags writes."""

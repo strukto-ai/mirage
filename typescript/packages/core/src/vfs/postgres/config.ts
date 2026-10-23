@@ -24,11 +24,34 @@ import {
 // `dsn` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `PostgresConfig` declares.
 const PostgresConfigSchema = z.object({
-  dsn: secretStr(),
-  schemas: z.array(z.string()).readonly().optional(),
-  defaultRowLimit: z.number().optional(),
-  maxReadRows: z.number().optional(),
-  maxReadBytes: z.number().optional(),
+  dsn: secretStr().describe(
+    "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
+  ),
+  schemas: z
+    .array(z.string())
+    .readonly()
+    .optional()
+    .describe(
+      'Schemas to show in the tree; others are hidden. Unset shows every schema except `pg_catalog`, `information_schema` and `pg_*`.',
+    ),
+  defaultRowLimit: z.number().optional().meta({
+    description:
+      'Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches.',
+    default: 1000,
+  }),
+  maxReadRows: z.number().optional().meta({
+    description:
+      'Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it.',
+    default: 10_000,
+  }),
+  maxReadBytes: z
+    .number()
+    .optional()
+    .meta({
+      description:
+        'Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).',
+      default: 10 * 1024 * 1024,
+    }),
 })
 
 export type PostgresConfig = ConfigOf<typeof PostgresConfigSchema>

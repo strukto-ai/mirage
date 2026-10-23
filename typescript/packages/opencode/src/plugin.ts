@@ -23,9 +23,21 @@ import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspa
 
 const z = tool.schema
 
+/**
+ * A function that picks the workspace for a tool call from its OpenCode
+ * `ToolContext`.
+ */
 export type WsResolver = (ctx: ToolContext) => Workspace | Promise<Workspace>
+
+/**
+ * A workspace, or a `WsResolver` that picks one per tool call.
+ */
 export type WsLike = Workspace | WsResolver
 
+/**
+ * Options for `mirageTools` and `miragePlugin`: `staleWriteProtection`
+ * (default `true`) and `sessionId`, the Mirage session every tool acts as.
+ */
 export interface MirageOpenCodeOptions {
   staleWriteProtection?: boolean
   /**
@@ -72,6 +84,10 @@ function trackerFor(
   return tracker
 }
 
+/**
+ * Returns OpenCode tool definitions for `read`, `write`, `edit`, `ls`,
+ * `bash`, `glob` and `grep`, backed by `ws`.
+ */
 export function mirageTools(
   ws: WsLike,
   options: MirageOpenCodeOptions = {},
@@ -244,6 +260,9 @@ export function mirageTools(
   return { read, write, edit, ls, bash, glob, grep }
 }
 
+/**
+ * Returns a native OpenCode plugin whose tools are `mirageTools(ws, options)`.
+ */
 export function miragePlugin(ws: WsLike, options: MirageOpenCodeOptions = {}): Plugin {
   return () => Promise.resolve({ tool: mirageTools(ws, options) })
 }

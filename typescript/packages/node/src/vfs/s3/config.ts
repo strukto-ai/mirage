@@ -29,8 +29,15 @@ export interface S3Config extends S3CoreConfig {
 }
 
 const S3ConfigSchema = S3CoreConfigSchema.extend({
-  profile: z.string().optional(),
-  proxy: secretStr().optional(),
+  profile: z
+    .string()
+    .optional()
+    .describe(
+      'Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given.',
+    ),
+  proxy: secretStr()
+    .optional()
+    .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
 })
 
 export type S3ConfigRedacted = RedactedConfig<

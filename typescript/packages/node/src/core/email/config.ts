@@ -24,28 +24,48 @@ import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secret
 // defaults buildEmailConfig fills in, and secretStr marks the password
 // for snapshot redaction.
 export const EmailConfigSchema = z.object({
-  imapHost: z.string(),
-  imapPort: z.number().default(993),
-  smtpHost: z.string(),
-  smtpPort: z.number().default(587),
-  username: z.string(),
-  password: secretStr(),
-  useSsl: z.boolean().default(true),
-  maxMessages: z.number().default(200),
-  /**
-   * grep and rg ask IMAP SEARCH TEXT which messages may match and read only
-   * those. Off by default: the server searches headers and body, not the
-   * mounted JSON's keys, uids or flags (`recordQueries` refuses words that
-   * can sit there, but a custom keyword cannot be told apart from a word).
-   */
-  contentSearch: z.boolean().default(false),
-  /**
-   * Upstream himalaya's message.send.save-copy, whose default is true
-   * since pimalaya/himalaya#536.
-   */
-  saveCopy: z.boolean().default(true),
-  /** Its folder.alias.sent: null means ask the server for its \Sent mailbox. */
-  sentFolder: z.string().nullable().default(null),
+  imapHost: z.string().describe('IMAP server hostname.'),
+  imapPort: z.number().default(993).describe('IMAP server port.'),
+  smtpHost: z.string().describe('SMTP server hostname `himalaya` sends mail through.'),
+  smtpPort: z
+    .number()
+    .default(587)
+    .describe(
+      'SMTP server port. `465` uses implicit TLS; any other port starts in plaintext and upgrades with STARTTLS when the server offers it.',
+    ),
+  username: z.string().describe('Login for both IMAP and SMTP, usually the email address.'),
+  password: secretStr().describe('Password or app password for `username`.'),
+  useSsl: z
+    .boolean()
+    .default(true)
+    .describe(
+      'Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtpPort` instead.',
+    ),
+  maxMessages: z
+    .number()
+    .default(200)
+    .describe(
+      "How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.",
+    ),
+  contentSearch: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which messages may match and read only those. The server searches headers and body, not the mounted JSON's keys, uids or flags.",
+    ),
+  saveCopy: z
+    .boolean()
+    .default(true)
+    .describe(
+      "After `himalaya` sends a message, append a copy to `sentFolder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox.",
+    ),
+  sentFolder: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      'Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\\Sent` and falls back to `Sent`.',
+    ),
 })
 
 export type EmailConfig = ConfigOf<typeof EmailConfigSchema>

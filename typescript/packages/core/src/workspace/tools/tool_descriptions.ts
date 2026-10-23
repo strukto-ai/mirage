@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `shell`.
+ */
 export const SHELL_DESCRIPTION =
   'Run a shell command line on the Mirage virtual filesystem, in the ' +
   "session's working directory. Supports pipes, redirects, cat, grep, " +
@@ -20,31 +26,67 @@ export const SHELL_DESCRIPTION =
   'call. Files with no registered renderer, such as .parquet or .orc, ' +
   'read back as raw bytes.'
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `read`.
+ */
 export const READ_DESCRIPTION =
   'Read the contents of a file on the Mirage virtual filesystem. ' +
   'Returns line-numbered text. ' +
   "Optionally pass 'offset' (default 0) to start at a given line " +
   "and 'limit' (default 2000) to cap the number of lines returned."
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `write`.
+ */
 export const WRITE_DESCRIPTION =
   'Write a file on the Mirage virtual filesystem, creating missing parent ' +
   'directories. An existing file must be read in full first, and the write fails ' +
   'if it changed since; use edit to change part of a file.'
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `edit`.
+ */
 export const EDIT_DESCRIPTION =
   'Replace a string in an existing file on the Mirage virtual filesystem. ' +
   'Fails if the file changed since it was last read, old_string is not ' +
   'found, or old_string appears more than once. ' +
   'Pass replace_all=true (default false) to replace every occurrence.'
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `ls`.
+ */
 export const LS_DESCRIPTION =
   'List files and directories at the given path on the Mirage virtual filesystem.'
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `grep`.
+ */
 export const GREP_DESCRIPTION =
   'Search files on the Mirage virtual filesystem for a regular ' +
   'expression, recursively under path, as GNU grep -rn does. Prints ' +
   'file:line:text for each match. Finding nothing is not an error.'
 
+/**
+ * The text a Mirage tool gives the model, shared by the MCP server and every
+ * adapter that serves Mirage's tool table.
+ *
+ * This one describes `glob`.
+ */
 export const GLOB_DESCRIPTION =
   'Find files on the Mirage virtual filesystem whose path matches a ' +
   'pattern such as **/*.py, where ** matches any number of directories. ' +

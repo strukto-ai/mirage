@@ -14,6 +14,12 @@
 
 import type { Workspace } from '../workspace/workspace/workspace.ts'
 
+/**
+ * The default system prompt: how the Mirage filesystem differs from a plain one.
+ *
+ * `buildSystemPrompt` starts from it; use it as the agent's instructions
+ * when no mount description is needed.
+ */
 export const MIRAGE_SYSTEM_PROMPT = `Your filesystem is powered by Mirage — a virtual filesystem that mounts cloud storage, local files, and in-memory data as a unified file tree.
 
 Capabilities beyond standard filesystem:
@@ -28,6 +34,13 @@ You can write Python code and execute it. The workspace is pre-configured with y
 Use the shell tool for complex operations. Use read/write/edit for simple file operations.
 `
 
+/**
+ * Options for `buildSystemPrompt`: which mounts to describe and what to append.
+ *
+ * Pass a `workspace` (and `sessionId`) whose mounts to describe, or
+ * `mountInfo` mapping a prefix to a description when there is no workspace,
+ * and `extraInstructions` to append.
+ */
 export interface BuildSystemPromptOptions {
   workspace?: Workspace
   sessionId?: string | undefined
@@ -35,6 +48,10 @@ export interface BuildSystemPromptOptions {
   extraInstructions?: string
 }
 
+/**
+ * Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted
+ * paths and any extra instructions, ready to use as an agent's system prompt.
+ */
 export async function buildSystemPrompt(opts: BuildSystemPromptOptions = {}): Promise<string> {
   const parts: string[] = [MIRAGE_SYSTEM_PROMPT]
   if (opts.workspace !== undefined) {

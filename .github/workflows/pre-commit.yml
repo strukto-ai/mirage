@@ -286,6 +286,17 @@ jobs:
           ./python/.venv/bin/python scripts/gen_cli_docs.py --check
           node --experimental-strip-types typescript/scripts/check-cli-docs.ts
 
+      # The config option, optional peer and adapter export tables are
+      # rendered from the schemas, manifests and entry modules. The hooks
+      # above run only on a diff that touches their files; this run also
+      # catches a table that went stale through a file they do not list.
+      - name: Generated doc tables
+        run: |
+          ./python/.venv/bin/python scripts/gen_doc_tables.py --selftest
+          ./python/.venv/bin/python scripts/gen_doc_tables.py --check
+          node --experimental-strip-types typescript/scripts/gen-doc-tables.ts --selftest
+          node --experimental-strip-types typescript/scripts/gen-doc-tables.ts --check
+
       # The Test (TypeScript) leg table is split across two files -- the
       # `test:leg:*` scripts carry the package selections, the workflow matrix
       # decides which of them run -- so either half can drift into silence: a

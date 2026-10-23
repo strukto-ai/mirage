@@ -12,10 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const GCSConfigSchema = browserAliasSchema({})
+const GCSConfigSchema = browserAliasSchema({
+  region: z.string().optional().meta({
+    description: 'Region the presigned URLs are signed for; GCS accepts `auto`.',
+    default: 'auto',
+  }),
+  endpoint: z.string().optional().meta({
+    description:
+      'Endpoint URL of the GCS XML API. Requests go to the host each presigned URL names; the mount uses it to name its storage location.',
+    default: 'https://storage.googleapis.com',
+  }),
+})
 
 export type GCSConfig = ConfigOf<typeof GCSConfigSchema>
 

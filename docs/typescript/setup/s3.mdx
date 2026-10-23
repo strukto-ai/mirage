@@ -42,6 +42,29 @@ If `~/.aws/credentials` is configured, you can omit `accessKeyId`/`secretAccessK
 
 Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint`. A browser mount signed by presigned URLs cannot carry a condition, so it cannot declare `write: conditional`.
 
+### Config
+
+{/* generated: config-table s3 start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
+| <code style={{ whiteSpace: 'nowrap' }}>accessKeyId</code><br />secret | Access key ID; set it with `secretAccessKey`. Unset uses the AWS SDK credential chain. |
+| <code style={{ whiteSpace: 'nowrap' }}>secretAccessKey</code><br />secret | Secret access key paired with `accessKeyId`. |
+| <code style={{ whiteSpace: 'nowrap' }}>sessionToken</code><br />secret | Session token for temporary credentials, sent with the access key pair. |
+| <code style={{ whiteSpace: 'nowrap' }}>forcePathStyle</code> | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code> | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout. |
+| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>httpAgentProvider</code><br />secret | Function that returns the `httpAgent` and `httpsAgent` for one S3 client, called once per client. The node mount builds it from `proxy` when that is set. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+| <code style={{ whiteSpace: 'nowrap' }}>profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
+| <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table s3 end */}
+
 ## Browser (presigned URLs)
 
 ```bash
@@ -49,6 +72,23 @@ pnpm add @struktoai/mirage-browser
 ```
 
 The browser `S3VFS` never sees AWS credentials. You implement one function, `presignedUrlProvider`, that your frontend calls to get a signed URL for each S3 operation. The actual signing happens on **your server**, using any S3-signing SDK you prefer.
+
+### Config
+
+{/* generated: config-table browser/s3 omit=accessKeyId,secretAccessKey,sessionToken,forcePathStyle,timeoutMs,httpAgentProvider start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
+| <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
+| <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL of an S3-compatible server. Unset, the node mount uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
+| <code style={{ whiteSpace: 'nowrap' }}>presignedUrlProvider</code><br />secret | Function `(path, operation, options)` that returns a signed URL for each S3 operation. When set, the mount fetches those URLs and needs no credentials. |
+| <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default; a write through `presignedUrlProvider` sends `application/octet-stream`. |
+| <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table browser/s3 end */}
+
+The browser `S3VFS` can also sign requests itself, without `presignedUrlProvider`: it then takes the credential fields of the [Node config](#config), which puts the keys in the browser.
 
 ### 1. Server: sign URLs on demand
 

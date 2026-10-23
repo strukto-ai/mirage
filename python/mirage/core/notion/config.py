@@ -19,9 +19,13 @@ class NotionConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
+    """Notion integration token."""
     base_url: str = "https://api.notion.com/v1"
+    """Notion API root; override to point at a fake or proxy."""
     # None means the generation the client is written against. A CLI
     # verb overrides it per line from --notion-version, so the override
     # travels with the config the transport already takes rather than as
     # a second argument every call site would have to thread.
     api_version: str | None = None
+    """`Notion-Version` header sent with every request. Unset sends
+    `2025-09-03`; `ntn --notion-version` overrides it per line."""

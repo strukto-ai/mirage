@@ -16,7 +16,14 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const OCIConfigSchema = browserAliasSchema({ namespace: z.string().optional() })
+const OCIConfigSchema = browserAliasSchema({
+  namespace: z
+    .string()
+    .optional()
+    .describe(
+      'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
+    ),
+})
 
 export type OCIConfig = ConfigOf<typeof OCIConfigSchema>
 

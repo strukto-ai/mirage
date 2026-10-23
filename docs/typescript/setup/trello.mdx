@@ -43,13 +43,18 @@ const trello = new TrelloVFS({
 
 ## Config
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `apiKey` | required | Trello API key. Redacted in snapshots. |
-| `apiToken` | required | Trello API token. Redacted in snapshots. |
-| `workspaceId` | none | Restrict to a single workspace. |
-| `boardIds` | none | Optional allowlist of board IDs. |
-| `baseUrl` | `https://api.trello.com/1` | Override for Enterprise instances. |
+{/* generated: config-table trello start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Trello API key. |
+| <code style={{ whiteSpace: 'nowrap' }}>apiToken</code><br />required, secret | Trello API token. |
+| <code style={{ whiteSpace: 'nowrap' }}>workspaceId</code> | Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member. |
+| <code style={{ whiteSpace: 'nowrap' }}>boardIds</code> | Only these boards are listed or readable. Unset shows every open board of the shown workspaces. |
+| <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.trello.com/1'` | Trello API root; override to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -rw` and `rg -w` read only the cards Trello's search names, plus those whose other fields hold the word. Search lags writes. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table trello end */}
 
 ## Mount mode
 

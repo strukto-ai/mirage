@@ -22,11 +22,11 @@ import {
 } from '../secrets.ts'
 
 const GDriveConfigSchema = GoogleConfigSchema.extend({
-  // Let grep -w and rg -w read only the files Drive full-text search names
-  // (`filesContaining`). Off by default: Drive indexes a write some time
-  // after it lands, and searches the text it extracted rather than the
-  // bytes grep reads.
-  contentSearch: z.boolean().optional(),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      'Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match.',
+    default: false,
+  }),
 })
 
 export type GDriveConfig = ConfigOf<typeof GDriveConfigSchema>

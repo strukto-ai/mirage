@@ -40,16 +40,35 @@ class S3AliasConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
+    """Name of the bucket to mount."""
     region: str
+    """Provider region every request is signed for. Most providers also
+    build their endpoint URL from it unless `endpoint_url` is set."""
     endpoint_url: str | None = None
+    """Endpoint URL that replaces the one the provider derives."""
     access_key_id: SecretStr | None = None
+    """Access key ID; set it with `secret_access_key`. Unset uses the AWS
+    credential chain."""
     secret_access_key: SecretStr | None = None
+    """Secret access key paired with `access_key_id`."""
     session_token: SecretStr | None = None
+    """Session token for temporary credentials, sent with the access key
+    pair."""
     aws_profile: str | None = None
+    """Named profile in the shared AWS config and credentials files that
+    supplies credentials when no access key pair is given."""
     path_style: bool = False
+    """Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`)
+    instead of as a subdomain of the endpoint."""
     key_prefix: str | None = None
+    """Key prefix inside the bucket that the mount treats as its root; keys
+    outside it are not visible. Leading slashes are dropped and a trailing
+    `/` is added."""
     timeout: int = 30
+    """Seconds to wait to connect, and for each read of a response, before
+    the request fails."""
     proxy: SecretStr | None = None
+    """Proxy URL for every HTTP and HTTPS request to the endpoint."""
 
     def resolved_endpoint_url(self) -> str:
         raise NotImplementedError
@@ -93,7 +112,11 @@ class FixedEndpointConfig(S3AliasConfig):
     """
 
     endpoint_url: str
+    """URL of the self-hosted S3 gateway, such as
+    `http://localhost:9000`."""
     region: str = "us-east-1"
+    """Region requests are signed for; the gateway's endpoint does not
+    depend on it."""
     path_style: bool = True
 
     def resolved_endpoint_url(self) -> str:

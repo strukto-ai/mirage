@@ -45,17 +45,22 @@ modes are supported.
 
 ### Config Reference
 
-| Field            | Required | Description                                                            |
-| ---------------- | -------- | ---------------------------------------------------------------------- |
-| `access_token`   | Yes      | Microsoft Graph bearer token or zero-argument provider returning one   |
-| `drive_id`       | No       | Target a specific drive by its Graph drive ID                         |
-| `site_id`        | No       | A SharePoint site's default drive                                      |
-| `group_id`       | No       | A Teams / Microsoft 365 group's document library                       |
-| `user_id`        | No       | Another user's drive, by id or UPN (app-only auth)                     |
-| `graph_base_url` | No       | Full service root, for any deployment but the worldwide one            |
-| `key_prefix`     | No       | Mount a sub-folder of the drive as the root                            |
-| `content_search` | No       | Let `grep -w` and `rg -w` read only the files Graph search names (default `False`; see [grep and rg](#grep-and-rg)) |
-| `timeout`        | No       | Request timeout in seconds (default `30`)                              |
+{/* generated: config-table onedrive omit=tenant_host start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />required, secret | Microsoft Graph bearer token, or a callable that returns one; it is called for each request and again after a `401`. |
+| <code style={{ whiteSpace: 'nowrap' }}>graph_base_url</code> | Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed. |
+| <code style={{ whiteSpace: 'nowrap' }}>max_retries</code><br />default `5` | Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds. |
+| <code style={{ whiteSpace: 'nowrap' }}>drive_id</code> | Graph drive ID of the drive to mount. Set at most one of `drive_id`, `site_id`, `group_id` and `user_id`; with none the mount uses the signed-in user's drive. |
+| <code style={{ whiteSpace: 'nowrap' }}>site_id</code> | Graph site ID whose default document library the mount uses. |
+| <code style={{ whiteSpace: 'nowrap' }}>group_id</code> | Microsoft 365 or Teams group ID whose document library the mount uses. |
+| <code style={{ whiteSpace: 'nowrap' }}>user_id</code> | User ID or UPN whose drive the mount uses, under app-only auth. |
+| <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Folder path from the drive root that the mount uses as its root. |
+| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Graph search names. Search covers extracted text and lags writes, so it can miss a match. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table onedrive end */}
 
 ### Naming the drive
 

@@ -55,9 +55,13 @@ The server serves the session's seven tools, [`session.tools`](/typescript/acces
 
 ## Exports
 
+{/* generated: exports claude-agent-sdk start */}
 | Symbol | Purpose |
 | --- | --- |
-| `MirageServer` | In-process MCP server exposing the Mirage tools; pass to `options.mcpServers`. |
-| `buildOptions` | Returns ready-to-use query `Options` backed by a workspace. |
-| `buildSystemPrompt` | Generates a system prompt that describes mounted paths to the model. |
-| `MIRAGE_SYSTEM_PROMPT` | The default system prompt template. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageServer</code> | An in-process MCP server exposing the Mirage tools; pass it to `options.mcpServers`. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildOptions</code> | Returns ready-to-use query `Options` backed by a workspace: the `MirageServer` tools as the `mirage` MCP server, preapproved, and a system prompt describing the mounts. The SDK's built-in tools stay available under its usual permission rules. |
+| <code style={{ whiteSpace: 'nowrap' }}>BuildOptionsOptions</code> | Options for `buildOptions`: `systemPrompt` replaces the generated prompt, and `sessionId` names the Mirage session the tools act as. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
+| <code style={{ whiteSpace: 'nowrap' }}>EDIT_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>GLOB_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>GREP_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>LS_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>READ_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>SHELL_DESCRIPTION</code><br /><code style={{ whiteSpace: 'nowrap' }}>WRITE_DESCRIPTION</code> | The text a Mirage tool gives the model, shared by the MCP server and every adapter that serves Mirage's tool table. |
+{/* generated: exports claude-agent-sdk end */}

@@ -27,28 +27,99 @@ import {
 export type EmbedFn = (text: string) => Promise<number[]>
 
 const QdrantConfigSchema = z.object({
-  url: z.string().optional(),
-  host: z.string().optional(),
-  port: z.number().optional(),
-  https: z.boolean().optional(),
-  apiKey: secretStr().optional(),
-  collection: z.string().optional(),
-  groupBy: z.array(z.string()).optional(),
-  basenameFields: z.array(z.string()).optional(),
-  idField: z.string().optional(),
-  nameField: z.string().optional(),
-  textField: z.string().optional(),
-  blobField: z.string().optional(),
-  blobExt: z.string().optional(),
-  vectorField: z.string().optional(),
-  searchLimit: z.number().optional(),
-  maxRows: z.number().optional(),
-  embeddingModel: z.string().optional(),
-  cloudInference: z.boolean().optional(),
+  url: z
+    .string()
+    .optional()
+    .describe(
+      'Full URL of the Qdrant server, such as a Qdrant Cloud cluster URL; when set, `host`, `port` and `https` are ignored.',
+    ),
+  host: z.string().optional().meta({
+    description: 'Host name of the Qdrant server when `url` is unset.',
+    default: 'localhost',
+  }),
+  port: z
+    .number()
+    .optional()
+    .meta({ description: 'Port of the Qdrant server when `url` is unset.', default: 6333 }),
+  https: z
+    .boolean()
+    .optional()
+    .meta({ description: 'Connect to `host` over HTTPS when `url` is unset.', default: false }),
+  apiKey: secretStr().optional().describe('Qdrant API key, required by Qdrant Cloud.'),
+  collection: z
+    .string()
+    .optional()
+    .describe(
+      'Collection the mount root shows; unset lists every collection as a top-level folder.',
+    ),
+  groupBy: z.array(z.string()).optional().meta({
+    description:
+      "Payload fields that become folder levels, one per field in order; dotted paths reach nested keys. Unset puts every point's files directly under the collection.",
+    default: [],
+  }),
+  basenameFields: z.array(z.string()).optional().meta({
+    description:
+      '`groupBy` fields whose folder names keep only the last path or URL segment of the value; two values with one basename under the same parent are refused as a collision.',
+    default: [],
+  }),
+  idField: z.string().optional().meta({
+    description:
+      "Key the point id is written under in a point's `.json`; it replaces a payload field of that name.",
+    default: 'id',
+  }),
+  nameField: z
+    .string()
+    .optional()
+    .describe(
+      "Payload field whose value prefixes each point's file stem as `<name>__<id>`; unset names files by point id alone.",
+    ),
+  textField: z
+    .string()
+    .optional()
+    .describe(
+      "Payload field served as the point's `.txt` file and printed by `search`; unset leaves no `.txt`, and `search` returns the `.json`.",
+    ),
+  blobField: z
+    .string()
+    .optional()
+    .describe(
+      'Payload field of raw or base64 bytes served as `<id>.<blobExt>` and left out of the `.json`; unset adds no blob file.',
+    ),
+  blobExt: z
+    .string()
+    .optional()
+    .meta({ description: 'File extension of the blob file, without the dot.', default: 'bin' }),
+  vectorField: z
+    .string()
+    .optional()
+    .describe('Payload field holding a copy of the vector, left out of the `.json`.'),
+  searchLimit: z
+    .number()
+    .optional()
+    .meta({ description: 'Results `search` returns when `--top-k` is not given.', default: 10 }),
+  maxRows: z.number().optional().meta({
+    description:
+      'Most points one folder listing scrolls; points past it are left out, and a group folder lists only the values those points carry.',
+    default: 1000,
+  }),
+  embeddingModel: z.string().optional().meta({
+    description:
+      'Model the server embeds a `search` query with under `cloudInference`; it must match the model the stored vectors came from.',
+    default: 'sentence-transformers/all-MiniLM-L6-v2',
+  }),
+  cloudInference: z.boolean().optional().meta({
+    description:
+      'Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query.',
+    default: false,
+  }),
   // Declared so parse keeps it, and marked secret so no snapshot carries
   // it: a restored mount asks for a fresh VFS rather than searching
   // with a hook it cannot have.
-  embed: secretSchema(z.custom<EmbedFn>((value) => typeof value === 'function')).optional(),
+  embed: secretSchema(z.custom<EmbedFn>((value) => typeof value === 'function'))
+    .optional()
+    .describe(
+      'Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.',
+    ),
 })
 
 export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>

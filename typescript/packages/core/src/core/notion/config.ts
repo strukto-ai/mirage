@@ -22,11 +22,16 @@ import {
 } from '../../vfs/secrets.ts'
 
 export const NotionConfigSchema = z.object({
-  apiKey: secretStr(),
-  baseUrl: z.string().optional(),
-  // Pins the `Notion-Version` header. Absent means the generation the client
-  // is written against; `ntn --notion-version` overrides it per line.
-  apiVersion: z.string().optional(),
+  apiKey: secretStr().describe('Notion integration token.'),
+  baseUrl: z.string().optional().meta({
+    description: 'Notion API root; override to point at a fake or proxy.',
+    default: 'https://api.notion.com/v1',
+  }),
+  apiVersion: z.string().optional().meta({
+    description:
+      '`Notion-Version` header sent with every request; `ntn --notion-version` overrides it per line.',
+    default: '2025-09-03',
+  }),
 })
 
 export type NotionConfig = ConfigOf<typeof NotionConfigSchema>

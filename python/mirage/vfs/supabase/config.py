@@ -19,6 +19,9 @@ class SupabaseConfig(RegionEndpointConfig):
     """Supabase Storage's S3 gateway, addressed by project reference."""
 
     project_ref: str | None = None
+    """Supabase project reference. It builds the endpoint
+    `https://<project_ref>.storage.supabase.co/storage/v1/s3` unless
+    `endpoint_url` is set; one of the two is required."""
     path_style: bool = True
 
     def resolved_endpoint_url(self) -> str:

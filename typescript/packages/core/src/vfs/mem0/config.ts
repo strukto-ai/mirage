@@ -20,13 +20,31 @@ export interface Mem0ConfigResolved {
 }
 
 const Mem0ConfigSchema = z.object({
-  apiKey: secretStr(),
-  host: z.string().optional(),
-  userId: z.string().optional(),
-  agentId: z.string().optional(),
-  runId: z.string().optional(),
-  defaultPageSize: z.number().optional(),
-  defaultSearchLimit: z.number().optional(),
+  apiKey: secretStr().describe('Mem0 Platform API key.'),
+  host: z
+    .string()
+    .optional()
+    .meta({ description: 'Mem0 API base URL.', default: 'https://api.mem0.ai' }),
+  userId: z
+    .string()
+    .optional()
+    .describe("Mount this user's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+  agentId: z
+    .string()
+    .optional()
+    .describe("Mount this agent's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+  runId: z
+    .string()
+    .optional()
+    .describe("Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`."),
+  defaultPageSize: z.number().optional().meta({
+    description: 'Memories fetched per request while listing the scope.',
+    default: 100,
+  }),
+  defaultSearchLimit: z.number().optional().meta({
+    description: 'How many results `search` returns unless the line sets `top_k`.',
+    default: 10,
+  }),
 })
 
 export type Mem0Config = ConfigOf<typeof Mem0ConfigSchema>

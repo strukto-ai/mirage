@@ -110,10 +110,19 @@ class AWSAuth(BaseModel):
     """
 
     region: str | None = None
+    """AWS region requests are signed for and sent to. Unset leaves it to
+    the AWS SDK's environment variables and profile."""
     aws_access_key_id: SecretStr | None = None
+    """Access key ID; set it with `aws_secret_access_key`. Unset uses the AWS
+    credential chain."""
     aws_secret_access_key: SecretStr | None = None
+    """Secret access key paired with `aws_access_key_id`."""
     aws_session_token: SecretStr | None = None
+    """Session token for temporary credentials, sent with the access key
+    pair."""
     aws_profile: str | None = None
+    """Named profile in the shared AWS config and credentials files that
+    supplies credentials when no access key pair is given."""
 
 
 class AWSSMConfig(AWSAuth):

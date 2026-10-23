@@ -8,6 +8,10 @@ import {
 import { z } from 'zod'
 import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
 
+/**
+ * What the `read_file` tool returns: text, an image, or a file such as a
+ * PDF, as the model receives it.
+ */
 export type MirageReadFileOutput = ToolOutputText | ToolOutputImage | ToolOutputFileContent
 
 async function readFileOutput(ws: Workspace, path: string): Promise<MirageReadFileOutput> {
@@ -39,6 +43,10 @@ async function readFileOutput(ws: Workspace, path: string): Promise<MirageReadFi
   }
 }
 
+/**
+ * Returns a `read_file` function tool: text comes back as text, images as
+ * image input and PDFs as file input the model can see.
+ */
 export function mirageReadFileTool(ws: Workspace) {
   return tool({
     name: 'read_file',

@@ -19,14 +19,23 @@ class GitHubConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr
+    """GitHub personal access token."""
     owner: str | None = None
+    """Repository owner, a user or an organization. Required unless the
+    `GitHubVFS` constructor is given `owner`."""
     repo: str | None = None
+    """Repository name. Required unless the `GitHubVFS` constructor is
+    given `repo`."""
     # None means "whatever the repository's default branch is", resolved on
     # the first read through ``ensure_ref``. It is not a synonym for "main":
     # defaulting to that string mounted a nonexistent ref on every repo whose
     # default is `master`, and the tree fetch 404s rather than falling back.
     ref: str | None = None
+    """Branch, tag or commit SHA the mount reads. Unset follows the
+    repository's default branch, resolved on the first read."""
     base_url: str | None = None
+    """GitHub API root. Unset uses `https://api.github.com`; set it for
+    GitHub Enterprise."""
 
 
 class GhConfig(BaseModel):
