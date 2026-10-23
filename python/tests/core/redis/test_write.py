@@ -219,6 +219,11 @@ async def _quiet(chunks: list[bytes], hold: asyncio.Event):
     await hold.wait()
 
 
+async def _chunks_of(*chunks: bytes):
+    for chunk in chunks:
+        yield chunk
+
+
 async def _settle(read, want: bytes) -> bytes | None:
     for _ in range(100):
         got = await read()
@@ -274,11 +279,9 @@ async def test_a_streamed_append_keeps_bytes_of_a_racing_create(
         return False
 
     monkeypatch.setattr(store, "has_file", raced)
-
-    async def mine():
-        yield b"mine\n"
-
-    await write_stream(accessor, _spec("log"), mine(), append=True)
+    await write_stream(
+        accessor, _spec("log"), _chunks_of(b"mine\n"), append=True
+    )
     assert await store.get_file("/log") == b"theirs\nmine\n"
 
 
@@ -323,13 +326,8 @@ async def test_a_streamed_replacement_keeps_its_position(accessor):
 async def test_an_empty_streamed_append_leaves_the_file_alone(accessor):
     await accessor.store.set_file("/f", b"kept")
     await accessor.store.set_modified("/f", "2020-01-01T00:00:00Z")
-
-    async def nothing():
-        return
-        yield b""
-
-    await write_stream(accessor, _spec("f"), nothing(), append=True)
+    await write_stream(accessor, _spec("f"), _chunks_of(), append=True)
     assert await accessor.store.get_file("/f") == b"kept"
     assert await accessor.store.get_modified("/f") == "2020-01-01T00:00:00Z"
-    await write_stream(accessor, _spec("new"), nothing(), append=True)
+    await write_stream(accessor, _spec("new"), _chunks_of(), append=True)
     assert await accessor.store.get_file("/new") == b""

@@ -192,6 +192,16 @@ async def _quiet(chunks: list[bytes], hold: asyncio.Event):
     await hold.wait()
 
 
+async def _chunks_of(*chunks: bytes):
+    for chunk in chunks:
+        yield chunk
+
+
+async def _broken():
+    yield b"kept\n"
+    raise OSError("source gone")
+
+
 # A writer that goes quiet still shows what it wrote within the publish
 # interval, so a reader watches a slow program's log grow.
 @pytest.mark.asyncio
@@ -242,12 +252,8 @@ async def test_an_atomic_streamed_write_lands_at_its_end(store):
 # A stream that fails keeps what it had delivered, as a disk file does.
 @pytest.mark.asyncio
 async def test_a_failed_streamed_write_keeps_what_arrived(store):
-    async def broken():
-        yield b"kept\n"
-        raise OSError("source gone")
-
     with pytest.raises(OSError):
-        await write_stream(store, _spec("f"), broken())
+        await write_stream(store, _spec("f"), _broken())
     assert store.store.files["/f"] == b"kept\n"
 
 
@@ -280,13 +286,8 @@ async def test_a_streamed_replacement_keeps_its_position(store):
 async def test_an_empty_streamed_append_leaves_the_file_alone(store):
     store.store.files["/f"] = b"kept"
     store.store.modified["/f"] = "2020-01-01T00:00:00Z"
-
-    async def nothing():
-        return
-        yield b""
-
-    await write_stream(store, _spec("f"), nothing(), append=True)
+    await write_stream(store, _spec("f"), _chunks_of(), append=True)
     assert store.store.files["/f"] == b"kept"
     assert store.store.modified["/f"] == "2020-01-01T00:00:00Z"
-    await write_stream(store, _spec("new"), nothing(), append=True)
+    await write_stream(store, _spec("new"), _chunks_of(), append=True)
     assert store.store.files["/new"] == b""

@@ -69,13 +69,17 @@ async def test_refuses_unusable_status_before_exec(
     assert calls == [["status", "box", "--format", "json"]]
 
 
+async def _missing_sandbox(
+    executable, hint, args, stdin, output=None, errors=None
+):
+    return b"", b"sandbox not found", 1
+
+
 @pytest.mark.asyncio
 async def test_status_failure_preserves_cli_error(monkeypatch):
-    async def invoke(executable, hint, args, stdin, output=None, errors=None):
-        return b"", b"sandbox not found", 1
-
     monkeypatch.setattr(
-        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+        "mirage.runtime.sandbox.microsandbox.runtime.run_cli",
+        _missing_sandbox,
     )
     with pytest.raises(RuntimeError, match="sandbox not found"):
         await MicrosandboxRuntime(config={"sandbox": "missing"}).connect()

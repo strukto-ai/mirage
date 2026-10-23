@@ -52,6 +52,11 @@ function spec(path: string, prefix = ''): PathSpec {
   return PathSpec.fromStrPath(path, mountKey(path, prefix))
 }
 
+async function* chunksOf(...chunks: string[]): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  for (const chunk of chunks) yield ENC.encode(chunk)
+}
+
 describe.skipIf(skip)('core/redis ops', () => {
   let store: RedisStore
   let acc: RedisAccessor
@@ -110,11 +115,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await store.appendFile(path, ENC.encode('theirs\n'))
       return false
     }
-    async function* mine(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield ENC.encode('mine\n')
-    }
-    await writeStream(acc, spec('/log'), mine(), true)
+    await writeStream(acc, spec('/log'), chunksOf('mine\n'), true)
     expect(DEC.decode((await store.getFile('/log')) ?? new Uint8Array())).toBe('theirs\nmine\n')
   })
 
@@ -145,14 +146,10 @@ describe.skipIf(skip)('core/redis ops', () => {
   it('writeStream leaves a file alone for an empty append', async () => {
     await store.setFile('/f', ENC.encode('kept'))
     await store.setModified('/f', '2020-01-01T00:00:00Z')
-    async function* nothing(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield* []
-    }
-    await writeStream(acc, spec('/f'), nothing(), true)
+    await writeStream(acc, spec('/f'), chunksOf(), true)
     expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('kept')
     expect(await store.getModified('/f')).toBe('2020-01-01T00:00:00Z')
-    await writeStream(acc, spec('/new'), nothing(), true)
+    await writeStream(acc, spec('/new'), chunksOf(), true)
     expect((await store.getFile('/new'))?.byteLength).toBe(0)
   })
 

@@ -199,6 +199,17 @@ async function* quiet(chunks: string[], hold: Promise<void>): AsyncIterable<Uint
   await hold
 }
 
+async function* chunksOf(...chunks: string[]): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  for (const chunk of chunks) yield ENC.encode(chunk)
+}
+
+async function* broken(): AsyncIterable<Uint8Array> {
+  yield ENC.encode('kept\n')
+  await Promise.resolve()
+  throw new Error('source gone')
+}
+
 describe('writeStream', () => {
   // A writer that goes quiet still shows what it wrote within the publish
   // interval, so a reader watches a slow program's log grow.
@@ -275,25 +286,16 @@ describe('writeStream', () => {
     const accessor = mkAccessor()
     accessor.store.files.set('/f', ENC.encode('kept'))
     accessor.store.modified.set('/f', '2020-01-01T00:00:00Z')
-    async function* nothing(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      yield* []
-    }
-    await writeStream(accessor, mkPath('/f'), nothing(), true)
+    await writeStream(accessor, mkPath('/f'), chunksOf(), true)
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept')
     expect(accessor.store.modified.get('/f')).toBe('2020-01-01T00:00:00Z')
-    await writeStream(accessor, mkPath('/new'), nothing(), true)
+    await writeStream(accessor, mkPath('/new'), chunksOf(), true)
     expect(accessor.store.files.get('/new')?.byteLength).toBe(0)
   })
 
   // A stream that fails keeps what it had delivered, as a disk file does.
   it('keeps what arrived before the stream failed', async () => {
     const accessor = mkAccessor()
-    async function* broken(): AsyncIterable<Uint8Array> {
-      yield ENC.encode('kept\n')
-      await Promise.resolve()
-      throw new Error('source gone')
-    }
     await expect(writeStream(accessor, mkPath('/f'), broken())).rejects.toThrow('source gone')
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept\n')
   })
