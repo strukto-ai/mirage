@@ -24,12 +24,7 @@ from mirage.context.session_context import bind_caller, reset_caller
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
-from mirage.runtime.mixin import (
-    E,
-    LineExecutorMixin,
-    ProcessExecutorMixin,
-    StreamingProcessMixin,
-)
+from mirage.runtime.mixin import E, LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import (
     ExecutionKind,
     FilesystemOperation,
@@ -229,14 +224,10 @@ class Runtime(ABC, Generic[E]):
             return await self.run(engine, paths, texts, ctx)
         if kind == "line" and isinstance(self, LineExecutorMixin):
             return await self.run_line(engine, paths, texts, ctx)
-        if kind == "process" and output is not None:
-            if isinstance(self, StreamingProcessMixin):
-                return await self.run_stream(engine, paths, texts, ctx, output)
-        elif kind == "process" and isinstance(self, ProcessExecutorMixin):
-            return await self.run_process(engine, paths, texts, ctx)
-        shown = "stream" if output is not None else kind
+        if kind == "process" and isinstance(self, ProcessExecutorMixin):
+            return await self.run_process(engine, paths, texts, ctx, output)
         raise UnsupportedExecutionError(
-            f"{self.name}: {shown} execution is unsupported"
+            f"{self.name}: {kind} execution is unsupported"
         )
 
     async def run(

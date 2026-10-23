@@ -26,7 +26,7 @@ import { BytePipe } from '../../../io/pipe.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { currentCaller, withCaller } from '../../../context/session_context.ts'
-import { isProcessExecutor, isStreamingProcess } from '../../../runtime/mixin.ts'
+import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/routing/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
@@ -65,7 +65,7 @@ export async function runExternal(
     session.commandLimits,
   )
   const timeout = guard?.timeoutSeconds ?? null
-  if (isStreamingProcess(runtime))
+  if (isProcessExecutor(runtime))
     return streamExternal(runtime, argv, stdin, session, registry, timeout, signal)
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
@@ -74,14 +74,12 @@ export async function runExternal(
     runSignal?.throwIfAborted()
     const ctx: Context = {
       stdin: input,
-      flags: {},
+      flags: { c: command },
       cwd: PathSpec.fromStrPath(session.cwd),
       env: envSnapshot(session),
       ...(runSignal !== undefined ? { signal: runSignal } : {}),
     }
-    return isProcessExecutor(runtime)
-      ? executeProgram(runtime, argv.name, argv.tokens, ctx, { kind: 'process' })
-      : executeProgram(runtime, argv.name, [], { ...ctx, flags: { c: command } }, { kind: 'line' })
+    return executeProgram(runtime, argv.name, [], ctx, { kind: 'line' })
   }
   try {
     const result = await runWithTimeout(execute(), timeout, argv.name)

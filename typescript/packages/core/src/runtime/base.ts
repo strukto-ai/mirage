@@ -19,7 +19,7 @@ import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import { refusedRun, type WorkspaceBinding } from './binding.ts'
 import { UnsupportedExecutionError } from './errors.ts'
-import { isLineExecutor, isProcessExecutor, isStreamingProcess } from './mixin.ts'
+import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
   ExecutionKind,
   FilesystemOperation,
@@ -169,13 +169,9 @@ export abstract class Runtime<E = unknown> {
     if (kind === 'process' && texts.length === 0) throw new Error('process argv must not be empty')
     if (kind === 'code') return this.run(engine, paths, texts, ctx)
     if (kind === 'line' && isLineExecutor(this)) return this.runLine(engine, paths, texts, ctx)
-    if (kind === 'process' && output !== undefined) {
-      if (isStreamingProcess(this)) return this.runStream(engine, paths, texts, ctx, output)
-    } else if (kind === 'process' && isProcessExecutor(this)) {
-      return this.runProcess(engine, paths, texts, ctx)
-    }
-    const shown = output !== undefined ? 'stream' : kind
-    throw new UnsupportedExecutionError(`${this.name}: ${shown} execution is unsupported`)
+    if (kind === 'process' && isProcessExecutor(this))
+      return this.runProcess(engine, paths, texts, ctx, output)
+    throw new UnsupportedExecutionError(`${this.name}: ${kind} execution is unsupported`)
   }
 
   /**

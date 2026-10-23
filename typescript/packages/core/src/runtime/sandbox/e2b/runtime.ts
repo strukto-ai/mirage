@@ -15,6 +15,7 @@
 import { asyncChain } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { RemoteSandbox } from '../base.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerRuntime } from '../../table.ts'
@@ -22,7 +23,7 @@ import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.t
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { wrapLine } from '../constants.ts'
+import { EXEC_ID, wrapLine } from '../constants.ts'
 import { BROKEN_PIPE, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
@@ -143,6 +144,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
   ): Promise<RunResult> {
     signal?.throwIfAborted()
     if (this.sandbox === null) throw new Error('e2b sandbox not connected')
+    const runner = currentCaller().process
     const sdk = await this.ensureSdk()
     signal?.throwIfAborted()
     // Keep the startup result even if aborted in flight, so its process can be killed.
@@ -194,7 +196,9 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         result = error
       } else {
         try {
-          await handle.kill()
+          // A tagged command a kill stopped with a gentler signal is left
+          // to the reap, which sends it that signal first.
+          if (env[EXEC_ID] === undefined || (runner?.signal ?? 9) === 9) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }

@@ -20,11 +20,7 @@ import { delimiter, isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import {
-  PROCESS_EXECUTOR,
-  STREAMING_PROCESS,
-  type StreamingProcess,
-} from '@struktoai/mirage-core/runtime/mixin'
+import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv } from '@struktoai/mirage-core/runtime/python/flags'
@@ -142,10 +138,9 @@ function notRun(message: string, exitCode: number): RunResult {
  * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
-export class LocalRuntime extends PythonRuntime<undefined> implements StreamingProcess<undefined> {
+export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExecutor<undefined> {
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
-  readonly [STREAMING_PROCESS] = true as const
   // Spawns the host interpreter: a real process with the user's own
   // filesystem and network, entry points the workspace gate never sees. This
   // is the base default; declared here so the claim is explicit at the
@@ -188,29 +183,12 @@ export class LocalRuntime extends PythonRuntime<undefined> implements StreamingP
     )
   }
 
-  runProcess(
+  async runProcess(
     _engine: undefined,
     _paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-  ): Promise<RunResult> {
-    return this.executeProcess(texts, ctx)
-  }
-
-  runStream(
-    _engine: undefined,
-    _paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-    output: OutputFn,
-  ): Promise<RunResult> {
-    return this.executeProcess(texts, ctx, output)
-  }
-
-  private async executeProcess(
     argv: string[],
     ctx: Context,
-    output?: OutputFn,
+    output: OutputFn | undefined,
   ): Promise<RunResult> {
     ctx.signal?.throwIfAborted()
     const name = argv[0] ?? ''

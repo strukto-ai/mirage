@@ -289,7 +289,7 @@ async def test_workspace_list_does_not_grant_kill():
     [info] = view.list()
     assert info.pid == child.info.pid and info.command == "secret argument"
     with pytest.raises(PermissionError) as denied:
-        view.terminate(child.info.pid)
+        view.terminate(child.info.pid, 15)
     assert denied.value.errno == errno.EPERM
     supervisor.revoke_session("observer")
     with pytest.raises(PermissionError):
@@ -377,3 +377,32 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     await supervisor.drain()
     assert (await leaf.join()).cancellation_requested
     assert supervisor.live() == ()
+
+
+# A kill reaches the whole group with the signal it named, so a native
+# program a child runner started receives that signal too.
+@pytest.mark.asyncio
+async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
+    supervisor = ProcessSupervisor()
+
+    async def run():
+        await asyncio.Event().wait()
+        return 0
+
+    root = supervisor.start(
+        session_id="a",
+        command="root",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    child = supervisor.start(
+        session_id="a",
+        command="child",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+        parent_pid=root.info.pid,
+    )
+    await asyncio.sleep(0)
+    assert root.terminate(15)
+    assert ((await root.join()).exit_code, child.signal) == (143, 15)
+    assert (await child.join()).exit_code == 143

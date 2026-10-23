@@ -780,9 +780,10 @@ export class Workspace {
               'session changed during hydration; retry spawn after ensureSessionsLoaded',
             )
           admission.checkSpawn()
-          // The handle bound the child's execution id around this run; the
-          // caller captured at spawn holds the spawning one's.
-          const bound = { ...caller, execution: currentCaller().execution }
+          // The handle bound the child's execution id and itself around
+          // this run; the caller captured at spawn holds the spawning one's.
+          const { execution, process: runner } = currentCaller()
+          const bound = { ...caller, execution, process: runner }
           const result = await runWithCaller(bound, async () => {
             const view = sessionView(child, this.policies)
             for (const [name, value] of Object.entries(env ?? {})) {

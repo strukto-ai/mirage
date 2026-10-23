@@ -16,11 +16,12 @@ import asyncio
 import logging
 from typing import Any
 
+from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.cli import STREAM_LIMIT
-from mirage.runtime.sandbox.constants import wrap_line
+from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
@@ -90,7 +91,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._ssh(
-            wrap_line(argv, env, cwd), stdin, output
+            wrap_line(argv, env, cwd), stdin, output, tagged=EXEC_ID in env
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
@@ -99,6 +100,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         command: str,
         stdin: ByteSource | None,
         output: OutputFn | None = None,
+        tagged: bool = False,
     ) -> tuple[bytes, bytes, int]:
         """One exec channel on the connection; the seam tests override.
 
@@ -114,6 +116,8 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             command (str): the dressed command line.
             stdin (ByteSource | None): the input, or None for none.
             output (OutputFn | None): receives stdout as it arrives.
+            tagged (bool): whether the command carries its run's
+                ``EXEC_ID``, so a cancelled run's reap stops it.
         """
         process = await self._conn.create_process(command, encoding=None)
         exited = asyncio.Event()
@@ -156,7 +160,11 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
                 read(), process.stderr.read(), feeding, reap()
             )
         except asyncio.CancelledError:
-            process.kill()
+            # A tagged command a kill stopped with a gentler signal is left
+            # to the reap, which sends it that signal first.
+            runner = current_caller().process
+            if not tagged or runner is None or runner.signal in (None, 9):
+                process.kill()
             raise
         finally:
             if not feeding.done():

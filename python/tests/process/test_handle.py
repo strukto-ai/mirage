@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.context.session_context import current_caller
 from mirage.process.handle import ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.types import PathSpec
@@ -72,3 +73,29 @@ async def test_terminate_asks_once_and_the_runner_exits_137():
     assert handle.terminate() is False
     info = await handle.join()
     assert (info.exit_code, info.cancellation_requested) == (137, True)
+
+
+# A stop stands for the signal a kill named: the runner reads it from the
+# caller it runs as, and its status is 128 plus it, as bash reports a
+# child that signal ended.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal,code", [(15, 143), (2, 130), (1, 129)])
+async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
+    started = asyncio.Event()
+    seen: list[int | None] = []
+
+    async def run() -> int:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            runner = current_caller().process
+            seen.append(runner.signal if runner is not None else None)
+        return 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    await started.wait()
+    assert handle.signal is None
+    assert handle.terminate(signal) is True
+    info = await handle.join()
+    assert (info.exit_code, handle.signal, seen) == (code, signal, [signal])

@@ -23,11 +23,14 @@ import {
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
+  STOP_GRACE_SECONDS,
+  STOP_POLL_SECONDS,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
+import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 
 export interface CliResult {
   stdout: Uint8Array
@@ -67,7 +70,10 @@ async function untilInputCloses<T>(
  * leads a process group of its own, and an aborted call kills the whole
  * group and stops reading the pipes: a grandchild left alive, or one that
  * left the group, holds the output pipes open, so 'close' would wait until
- * it exited on its own, and the call rejects with an AbortError at once. A
+ * it exited on its own, and the call rejects with an AbortError at once.
+ * When a `kill` stopped the runner with a signal other than KILL, the
+ * group gets that signal first (`endTree`), so the program's handlers get
+ * to run. A
  * missing executable rejects with `hint` when one is given, else with
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
@@ -83,14 +89,25 @@ export async function runCli(
 ): Promise<CliResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
+  // Read now: an abort's listener runs as the caller that aborted.
+  const runner = currentCaller().process
   const child = spawn(executable, args, {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.env !== undefined ? { env: options.env } : {}),
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   })
+  // Set by the abort listener, which flow analysis does not follow.
+  let stopping = null as Promise<void> | null
   const abort = (): void => {
-    stopTree(child)
+    const signum = runner?.signal ?? 9
+    if (signum === 9) {
+      stopTree(child)
+      return
+    }
+    stopping = endTree(child, signum).then(() => {
+      stopTree(child)
+    })
   }
   signal?.addEventListener('abort', abort, { once: true })
   children?.add(child)
@@ -133,20 +150,25 @@ export async function runCli(
   })()
   const out: Uint8Array[] = []
   const err: Uint8Array[] = []
+  // Past an abort the output is read and dropped, so a signal handler
+  // that writes is not held on a full pipe.
   const reading = (async () => {
     try {
-      for await (const chunk of child.stdout) {
+      for await (const chunk of child.stdout.iterator({ destroyOnReturn: false })) {
+        if (signal?.aborted === true) continue
         if (options.output === undefined) out.push(chunk as Uint8Array)
-        else await options.output(chunk as Uint8Array)
+        else await abortable(options.output(chunk as Uint8Array), signal)
       }
     } catch (error) {
       if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
       debuglog('mirage')('process output closed: %s', error)
+      child.stdout.resume()
     }
   })()
   const errors = (async () => {
     try {
-      for await (const chunk of child.stderr) err.push(chunk as Uint8Array)
+      for await (const chunk of child.stderr)
+        if (signal?.aborted !== true) err.push(chunk as Uint8Array)
     } catch (error) {
       if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
       debuglog('mirage')('process stderr closed: %s', error)
@@ -159,6 +181,7 @@ export async function runCli(
     if (signal?.aborted === true) throw makeAbortError(signal)
     return { stdout: Buffer.concat(out), stderr: Buffer.concat(err), code }
   } finally {
+    if (stopping !== null) await stopping
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
     child.stdin.destroy()
     await Promise.allSettled([pumps, exited])
@@ -217,22 +240,51 @@ export async function cwdRefusal(name: string, cwd: string): Promise<RunResult |
 }
 
 /**
- * Kill a child and everything it started: its process group. Windows has
- * no process group to kill, so only the child goes there. Mirrors Python's
- * `kill_tree`.
+ * Signal a child and everything it started: its process group. Windows has
+ * no process group to signal, and no signal but a kill, so only the child
+ * goes there, killed. Mirrors Python's `kill_tree`.
+ *
+ * @param signum the signal, KILL (9) by default.
  */
-export function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess, signum = 9): void {
   if (child.pid === undefined || process.platform === 'win32') {
     child.kill('SIGKILL')
     return
   }
   try {
-    process.kill(-child.pid, 'SIGKILL')
-    child.kill('SIGKILL')
+    process.kill(-child.pid, signum)
+    child.kill(signum)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
     debuglog('mirage')('process group %d has already exited', child.pid)
   }
+}
+
+/**
+ * Signal a child's process group and give the group `STOP_GRACE_SECONDS`
+ * to end. The grace is the group's: a descendant still handling the signal
+ * after the child exited keeps it. What is left after it is the caller's to
+ * kill (`stopTree`). Mirrors Python's `end_tree`.
+ *
+ * @param signum the signal.
+ */
+export async function endTree(child: ChildProcess, signum: number): Promise<void> {
+  killTree(child, signum)
+  const deadline = Date.now() + STOP_GRACE_SECONDS * 1000
+  while (Date.now() < deadline) {
+    if (child.pid === undefined || process.platform === 'win32') {
+      if (child.exitCode !== null || child.signalCode !== null) return
+    } else {
+      try {
+        process.kill(-child.pid, 0)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ESRCH') return
+        throw err
+      }
+    }
+    await delay(STOP_POLL_SECONDS * 1000)
+  }
+  debuglog('mirage')('process group %d outlived signal %d', child.pid, signum)
 }
 
 /**

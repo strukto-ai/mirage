@@ -41,7 +41,7 @@ function runProcess(
   stdin: Uint8Array | null = null,
 ) {
   const ctx = { stdin, flags: {}, cwd: PathSpec.fromStrPath(cwd) }
-  return rt.runProcess(undefined, [], [...argv], ctx)
+  return rt.runProcess(undefined, [], [...argv], ctx, undefined)
 }
 
 describe('LocalRuntime', () => {

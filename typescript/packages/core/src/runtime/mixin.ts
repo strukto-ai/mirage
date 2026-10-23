@@ -56,54 +56,38 @@ export function isLineExecutor<T extends RuntimeIdentity>(runtime: T): runtime i
   return (runtime as Partial<LineExecutor>)[LINE_EXECUTOR] === true
 }
 
-/** The nominal argv-executor brand (Python's ProcessExecutorMixin). */
+/**
+ * The nominal argv-executor brand (Python's ProcessExecutorMixin): an
+ * argv run without shell interpretation, its input read as the program
+ * consumes it and its output handed over as it comes.
+ */
 export const PROCESS_EXECUTOR: unique symbol = Symbol.for('mirage.processExecutor')
 
 export interface ProcessExecutor<E = unknown> {
   readonly [PROCESS_EXECUTOR]: true
   /**
-   * Run the program `texts` names without shell interpretation, with
-   * `ctx`'s working directory, environment and stdin.
+   * Run the program `texts` names, with `ctx`'s working directory,
+   * environment and stdin, and resolve with its status once it exits.
    *
    * @param engine the runtime's engine.
    * @param paths unused; argv is words.
    * @param texts the argv, program first.
-   * @param ctx the run's context.
+   * @param ctx the run's context; its stdin is read as the program consumes it.
+   * @param output receives stdout as it arrives, each write awaited, which
+   *   the result then leaves out; undefined, or a transport that cannot
+   *   stream, returns it whole.
    */
-  runProcess(engine: E, paths: PathSpec[], texts: string[], ctx: Context): Promise<RunResult>
+  runProcess(
+    engine: E,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output: OutputFn | undefined,
+  ): Promise<RunResult>
 }
 
 export function isProcessExecutor<T extends RuntimeIdentity>(
   runtime: T,
 ): runtime is T & ProcessExecutor {
   return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
-}
-
-/** An argv executor that consumes input and delivers output incrementally. */
-export const STREAMING_PROCESS: unique symbol = Symbol.for('mirage.streamingProcess')
-
-export interface StreamingProcess<E = unknown> extends ProcessExecutor<E> {
-  readonly [STREAMING_PROCESS]: true
-  /**
-   * Await each output write and return status after the child exits.
-   *
-   * @param engine the runtime's engine.
-   * @param paths unused; argv is words.
-   * @param texts the argv, program first.
-   * @param ctx the run's context; its stdin is read as the child consumes it.
-   * @param output where the child's stdout goes.
-   */
-  runStream(
-    engine: E,
-    paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-    output: OutputFn,
-  ): Promise<RunResult>
-}
-
-export function isStreamingProcess<T extends RuntimeIdentity>(
-  runtime: T,
-): runtime is T & StreamingProcess {
-  return (runtime as Partial<StreamingProcess>)[STREAMING_PROCESS] === true
 }

@@ -17,6 +17,7 @@ import { Readable } from 'node:stream'
 import { once } from 'node:events'
 import { connectOptions } from '../../../utils/ssh.ts'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -24,7 +25,7 @@ import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/ru
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
-import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { CliResult } from '../cli.ts'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { asyncChain } from '@struktoai/mirage-core/io/stream'
@@ -101,7 +102,13 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     output: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.ssh(wrapLine(argv, env, cwd), stdin, output, signal)
+    const result = await this.ssh(
+      wrapLine(argv, env, cwd),
+      stdin,
+      output,
+      signal,
+      env[EXEC_ID] !== undefined,
+    )
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
@@ -115,15 +122,21 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
    * neither waits for the remote side nor leaves the channel open, which
    * sshd counts against its sessions per connection; any other failure
    * closes the channel.
+   *
+   * @param tagged whether the command carries its run's `EXEC_ID`, so a
+   *   cancelled run's reap stops it.
    */
   protected ssh(
     command: string,
     stdin: ByteSource | null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
+    tagged = false,
   ): Promise<CliResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
+    // Read now: an abort's listener runs as the caller that aborted.
+    const runner = currentCaller().process
     return new Promise((resolveFn, rejectFn) => {
       client.exec(command, (err: Error | undefined, stream: ClientChannel) => {
         if (err !== undefined) {
@@ -139,7 +152,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
           rejectFn(error instanceof Error ? error : new Error(String(error)))
         }
         const abort = (): void => {
-          if (!state.done) stream.signal('KILL')
+          // A tagged command a kill stopped with a gentler signal is left
+          // to the reap, which sends it that signal first.
+          if (!state.done && (!tagged || (runner?.signal ?? 9) === 9)) stream.signal('KILL')
           fail(makeAbortError(signal))
         }
         if (signal?.aborted === true) {

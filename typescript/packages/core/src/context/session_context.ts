@@ -21,6 +21,7 @@ import type { JobConsole } from '../shell/console/index.ts'
 import type { ExecutionNode } from '../workspace/types.ts'
 import type { EvaluationContext } from '../workspace/evaluation.ts'
 import type { SessionState } from '../workspace/session/session.ts'
+import type { ProcessHandle } from '../process/handle.ts'
 import { rstripSlash, stripSlash } from '../utils/slash.ts'
 import {
   anchorDepth,
@@ -125,6 +126,9 @@ export interface Caller {
   // The execution (a line, a job, a spawned process) the call runs in,
   // which its records name.
   readonly execution: string | null
+  // The managed runner the call runs in, whose kill signal a native
+  // program it started receives.
+  readonly process: ProcessHandle | null
 }
 
 /**
@@ -168,6 +172,7 @@ const UNBOUND: Caller = {
   started: null,
   enclosing: null,
   execution: null,
+  process: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()
@@ -249,9 +254,17 @@ export function currentExecutionId(): string | null {
   return id
 }
 
-/** Run `run` as part of the execution `executionId`, which its records name. */
-export function runWithExecution<T>(executionId: string, run: () => Promise<T>): Promise<T> {
-  return runWithCaller({ ...currentCaller(), execution: executionId }, run)
+/**
+ * Run `run` as part of the execution `executionId`, which its records name.
+ *
+ * @param process the managed runner it is, when it is one.
+ */
+export function runWithExecution<T>(
+  executionId: string,
+  run: () => Promise<T>,
+  process: ProcessHandle | null = null,
+): Promise<T> {
+  return runWithCaller({ ...currentCaller(), execution: executionId, process }, run)
 }
 
 function runChanged<T>(changes: Partial<Caller>, fn: () => Promise<T>): Promise<T> {

@@ -97,6 +97,13 @@ EXEC_ID = "MIRAGE_EXEC_ID"
 # answering is given up on after it.
 REAP_WAIT_SECONDS = 5.0
 
+# How long a program a ``kill`` signalled may take to exit before it gets
+# KILL, for its handlers to clean up: the stop line's same second.
+STOP_GRACE_SECONDS = 1.0
+
+# How often a stop in its grace checks whether the signalled group ended.
+STOP_POLL_SECONDS = 0.02
+
 # Where the stop line finds grep and sleep: the config's PATH is for the
 # programs it runs and may name none of the system's directories.
 REAP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -135,17 +142,19 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
     return " ".join(parts)
 
 
-def reap_line(exec_id: str) -> str:
+def reap_line(exec_id: str, signum: int = 15) -> str:
     """The shell line that stops every process of the run ``exec_id``.
 
     Each process whose environment holds the run's id, found through
-    ``/proc``, gets TERM, and what still runs a second later gets KILL,
-    so a program that ignores TERM stops too. The line looks grep up on
-    its own PATH (``REAP_PATH``) and exits 127 without it, so it needs
-    only a POSIX shell, grep and ``/proc``.
+    ``/proc``, gets ``signum``, and what still runs a second later gets
+    KILL, so a program that ignores it stops too. The line looks grep up
+    on its own PATH (``REAP_PATH``) and exits 127 without it, so it
+    needs only a POSIX shell, grep and ``/proc``.
 
     Args:
         exec_id (str): the run's id, as ``EXEC_ID`` carries it.
+        signum (int): the first signal, TERM (15) unless a ``kill``
+            named another.
     """
     mark = single_quote(f"{EXEC_ID}={exec_id}")
     return (
@@ -154,7 +163,7 @@ def reap_line(exec_id: str) -> str:
         "left() { l=; for p in /proc/[0-9]*; do "
         'grep -qs "$m" "$p/environ" && l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
-        "left || exit 0; kill -TERM $l 2>/dev/null; "
+        f"left || exit 0; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
     )

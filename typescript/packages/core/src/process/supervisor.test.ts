@@ -270,7 +270,9 @@ it('a workspace list grants no kill', async () => {
     max: null,
   }))
   expect(view.list()).toMatchObject([{ pid: child.info.pid, command: 'secret argument' }])
-  expect(() => view.terminate(child.info.pid)).toThrow(expect.objectContaining({ code: 'EPERM' }))
+  expect(() => view.terminate(child.info.pid, 15)).toThrow(
+    expect.objectContaining({ code: 'EPERM' }),
+  )
   supervisor.revokeSession('observer')
   expect(() => {
     view.checkSpawn()
@@ -336,4 +338,35 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   await supervisor.drain()
   expect((await leaf.join()).cancellationRequested).toBe(true)
   expect(supervisor.live()).toEqual([])
+})
+
+// A kill reaches the whole group with the signal it named, so a native
+// program a child runner started receives that signal too.
+it('a group stopped with a signal passes it to every child', async () => {
+  const supervisor = new ProcessSupervisor()
+  const start = (parentPid: number | null): ProcessHandle => {
+    const abort = new AbortController()
+    return supervisor.start({
+      sessionId: 'a',
+      command: 'runner',
+      cwd: PathSpec.fromStrPath('/'),
+      parentPid,
+      cancel: () => {
+        abort.abort()
+      },
+      run: () =>
+        new Promise((_resolve, reject) => {
+          const stop = (): void => {
+            reject(new DOMException('aborted', 'AbortError'))
+          }
+          if (abort.signal.aborted) stop()
+          else abort.signal.addEventListener('abort', stop)
+        }),
+    })
+  }
+  const root = start(null)
+  const child = start(root.info.pid)
+  expect(root.terminate(15)).toBe(true)
+  expect([(await root.join()).exitCode, child.signal]).toEqual([143, 15])
+  expect((await child.join()).exitCode).toBe(143)
 })

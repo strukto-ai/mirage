@@ -32,6 +32,6 @@ class ProcessView:
     list: Callable[[], tuple[ProcessInfo, ...]]
     check_spawn: Callable[[], None]
     probe: Callable[[int], bool]
-    terminate: Callable[[int], bool]
+    terminate: Callable[[int, int], bool]
     depth: int = 0
     spawn: Callable[[SpawnRequest], ChildProcess] | None = None

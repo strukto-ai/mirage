@@ -27,6 +27,8 @@ import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
 import { Workspace } from '../../../workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
+import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
 
 vi.mock('node:os', async (original) => ({
@@ -237,8 +239,8 @@ class HungRuntime extends SSHRuntime {
     Object.assign(this, { client })
   }
 
-  line(command: string, signal: AbortSignal): Promise<unknown> {
-    return this.ssh(command, null, null, signal)
+  line(command: string, signal: AbortSignal, tagged = false): Promise<unknown> {
+    return this.ssh(command, null, null, signal, tagged)
   }
 }
 
@@ -252,6 +254,31 @@ describe('SSHRuntime cancellation', () => {
     controller.abort()
     await expect(running).rejects.toMatchObject({ name: 'AbortError' })
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([['KILL'], true])
+  })
+
+  // A kill that names a gentler signal leaves a run's tagged command to the
+  // reap, which sends it that signal first; an untagged one (mount setup, a
+  // direct exec) has no reap behind it and is killed.
+  it.each([
+    [true, []],
+    [false, ['KILL']],
+  ])('leaves only a tagged command to the reap on TERM: %s', async (tagged, signals) => {
+    const runtime = new HungRuntime()
+    const controller = new AbortController()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const runner = new ProcessSupervisor(runWithExecution).start({
+      sessionId: 's',
+      command: 'sleep',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        controller.abort()
+      },
+      run: () => runtime.line('sleep 30', controller.signal, tagged).then(() => 0),
+    })
+    await started
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(143)
+    expect([runtime.channel.signals, runtime.channel.closed]).toEqual([signals, true])
   })
 
   it('closes its channel and stops listening when the channel fails', async () => {

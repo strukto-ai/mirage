@@ -17,10 +17,15 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import sdk_install_hint, wrap_line
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    sdk_install_hint,
+    wrap_line,
+)
 from mirage.runtime.sandbox.e2b import sdk
 from mirage.runtime.sandbox.e2b.config import E2BConfig
 from mirage.runtime.sandbox.e2b.constants import BROKEN_PIPE, PTY_MARK, PTY_RAW
@@ -188,8 +193,16 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             await asyncio.gather(feeding, reaping)
             result = reaping.result()
         except BaseException:
+            # A tagged command a kill stopped with a gentler signal is left
+            # to the reap, which sends it that signal first.
+            runner = current_caller().process
             try:
-                await handle.kill()
+                if (
+                    EXEC_ID not in env
+                    or runner is None
+                    or runner.signal in (None, 9)
+                ):
+                    await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             raise

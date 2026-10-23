@@ -1,7 +1,7 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
 import type { PathSpec, ProcessScope } from '../types.ts'
-import { ProcessHandle } from './handle.ts'
-import type { ExecutionBind, ProcessRunner } from './types.ts'
+import { ProcessHandle, type ExecutionBind } from './handle.ts'
+import type { ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
 import { newExecutionId } from '../execution/context.ts'
 import type { IdSource } from '../utils/ids.ts'
@@ -77,8 +77,8 @@ export class ProcessSupervisor {
         failure: null,
       },
       init.run,
-      () => {
-        this.terminateChildren(pid)
+      (signal) => {
+        this.terminateChildren(pid, signal)
         init.cancel()
       },
       (id) => {
@@ -94,11 +94,13 @@ export class ProcessSupervisor {
    * Request cancellation of every live runner whose parent is `pid` or
    * whose execution group `pid` started, so grandchildren are reached
    * after an intermediate runner has exited.
+   *
+   * @param signal what the stop stands for, as the parent's.
    */
-  terminateChildren(pid: number): void {
+  terminateChildren(pid: number, signal = 9): void {
     for (const child of this.live())
       if (child.info.parentPid === pid || (child.info.groupId === pid && child.info.pid !== pid))
-        child.terminate()
+        child.terminate(signal)
   }
 
   view(
@@ -140,7 +142,7 @@ export class ProcessSupervisor {
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       probe: (pid: number) => signalTarget(pid) !== null,
-      terminate: (pid: number) => signalTarget(pid)?.terminate() ?? false,
+      terminate: (pid: number, signal: number) => signalTarget(pid)?.terminate(signal) ?? false,
     })
   }
 

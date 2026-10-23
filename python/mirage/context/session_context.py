@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from mirage.observe.record import OpRecord
     from mirage.policy.decisions import Decisions, HandOff
     from mirage.policy.types import DryRun, EntryGate, VfsExplanation
+    from mirage.process.handle import ProcessHandle
     from mirage.shell.console import JobConsole
     from mirage.shell.types import Redirect
     from mirage.workspace.evaluation import EvaluationContext
@@ -160,6 +161,8 @@ class Caller:
             toward it.
         execution (str | None): the execution (a line, a job, a spawned
             process) the call runs in, which its records name.
+        process (ProcessHandle | None): the managed runner the call runs
+            in, whose kill signal a native program it started receives.
     """
 
     session: SessionState | None = None
@@ -196,6 +199,7 @@ class Caller:
     command_started: int | None = None
     enclosing: JobConsole | None = None
     execution: str | None = None
+    process: ProcessHandle | None = None
 
     @property
     def visibility(self) -> Visibility | None:
@@ -265,7 +269,9 @@ def current_execution_id() -> str | None:
 
 
 async def run_with_execution(
-    execution_id: str, run: Callable[[], Awaitable[T]]
+    execution_id: str,
+    run: Callable[[], Awaitable[T]],
+    process: ProcessHandle | None = None,
 ) -> T:
     """Run ``run`` as part of the execution ``execution_id``.
 
@@ -273,8 +279,10 @@ async def run_with_execution(
         execution_id (str): the execution (a line, a job, a spawned
             process).
         run (Callable[[], Awaitable[T]]): what runs in it.
+        process (ProcessHandle | None): the managed runner it is, when it
+            is one.
     """
-    token = _bind(execution=execution_id)
+    token = _bind(execution=execution_id, process=process)
     try:
         return await run()
     finally:

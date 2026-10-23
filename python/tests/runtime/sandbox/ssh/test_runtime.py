@@ -21,8 +21,10 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
+from mirage.types import PathSpec
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 
@@ -35,7 +37,7 @@ class FakeSSHRuntime(SSHRuntime):
         super().__init__(**options)
         self.calls: list[tuple[str, bytes | None]] = []
 
-    async def _ssh(self, command, stdin, output=None):
+    async def _ssh(self, command, stdin, output=None, tagged=False):
         data = await materialize(stdin) if stdin is not None else None
         self.calls.append((command, data))
         if output is not None:
@@ -252,6 +254,39 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
         with pytest.raises(asyncio.CancelledError):
             await task
     assert process.calls == ["eof", "kill", "close"]
+
+
+# A kill that names a gentler signal leaves a run's tagged command to the
+# reap, which sends it that signal first; an untagged one (mount setup, a
+# direct exec) has no reap behind it and is killed.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tagged,calls",
+    [(True, ["eof", "close"]), (False, ["eof", "kill", "close"])],
+)
+async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
+    tagged, calls
+):
+    process = HungProcess()
+    runtime = SSHRuntime(config={"host": "box"})
+    runtime._conn = HungConn(process)
+
+    async def run() -> int:
+        _, _, code = await runtime._ssh("sleep 30", None, tagged=tagged)
+        return code
+
+    runner = ProcessSupervisor().start(
+        session_id="s",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    while "eof" not in process.calls:
+        await asyncio.sleep(0)
+    assert runner.terminate(15)
+    async with asyncio.timeout(2):
+        await runner.join()
+    assert process.calls == calls
 
 
 class LostProcess(HungProcess):

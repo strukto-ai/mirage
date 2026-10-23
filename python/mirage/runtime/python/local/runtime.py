@@ -23,7 +23,7 @@ from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource
 from mirage.runtime.config import RuntimeConfig, resolve_home
-from mirage.runtime.mixin import StreamingProcessMixin
+from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
@@ -71,7 +71,7 @@ def _not_run(message: str, exit_code: int) -> RunResult:
     )
 
 
-class LocalRuntime(PythonRuntime[None], StreamingProcessMixin[None]):
+class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
     """Run Python code, and any other captured program, on the host.
 
     Each python3 run spawns `<interpreter> -c <code>`. Any other name
@@ -149,23 +149,9 @@ class LocalRuntime(PythonRuntime[None], StreamingProcessMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        output: OutputFn | None,
     ) -> RunResult:
-        return await self._run_process(texts, ctx, None)
-
-    async def run_stream(
-        self,
-        engine: None,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-        output: OutputFn,
-    ) -> RunResult:
-        return await self._run_process(texts, ctx, output)
-
-    async def _run_process(
-        self, argv: list[str], ctx: Context, output: OutputFn | None
-    ) -> RunResult:
-        name = argv[0]
+        name = texts[0]
         cwd = ctx.cwd.virtual
         refusal = cwd_refusal(name, cwd)
         if refusal is not None:
@@ -194,7 +180,7 @@ class LocalRuntime(PythonRuntime[None], StreamingProcessMixin[None]):
         try:
             return await self._spawn(
                 program,
-                argv[1:],
+                texts[1:],
                 ctx.env or {},
                 ctx.stdin,
                 cwd,

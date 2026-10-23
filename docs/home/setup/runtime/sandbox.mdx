@@ -37,9 +37,10 @@ installed in the sandbox image or on the remote machine. For Sandlock, they
 come from this host's interpreter. Mirage forwards the captured program's
 arguments, input, environment and working directory; a working directory
 the sandbox lacks fails the program with exit 126. Each run also gets
-`MIRAGE_EXEC_ID`: when a run is cut short, by a `head` that has read enough
-or by a timeout, Mirage stops every process in the sandbox that carries the
-run's id. Each provider's **Runtime behavior** table describes that boundary.
+`MIRAGE_EXEC_ID`: when a run is cut short, by a `head` that has read enough,
+a timeout or `kill`, Mirage stops every process in the sandbox that carries
+the run's id, with the signal `kill` named or TERM. Each provider's
+**Runtime behavior** table describes that boundary.
 
 File operations reach workspace mounts through the connection configured
 for that provider. They also remain subject to the sandbox or host's own
