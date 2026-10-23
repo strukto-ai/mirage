@@ -103,6 +103,44 @@ describe.skipIf(skip)('core/redis ops', () => {
     )
   })
 
+  // A replacement writes at its own position (SETRANGE): a truncation behind
+  // its back leaves a hole up to where it writes next.
+  it('writeStream keeps a replacement at its own position', async () => {
+    let next = (): void => undefined
+    const second = new Promise<void>((resolve) => (next = resolve))
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('a\n')
+      await second
+      yield ENC.encode('b\n')
+    }
+    const writing = writeStream(acc, spec('/f'), source())
+    for (let i = 0; i < 100; i++) {
+      const seen = await store.getFile('/f')
+      if (seen !== null && DEC.decode(seen) === 'a\n') break
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    await store.setFile('/f', new Uint8Array())
+    next()
+    await writing
+    expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('\0\0b\n')
+  })
+
+  // An append that brings nothing leaves an existing file as it was, its
+  // modification time included (`true >> f`), and creates a missing one.
+  it('writeStream leaves a file alone for an empty append', async () => {
+    await store.setFile('/f', ENC.encode('kept'))
+    await store.setModified('/f', '2020-01-01T00:00:00Z')
+    async function* nothing(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield* []
+    }
+    await writeStream(acc, spec('/f'), nothing(), true)
+    expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('kept')
+    expect(await store.getModified('/f')).toBe('2020-01-01T00:00:00Z')
+    await writeStream(acc, spec('/new'), nothing(), true)
+    expect((await store.getFile('/new'))?.byteLength).toBe(0)
+  })
+
   it('writeStream atomic lands only at its end', async () => {
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))

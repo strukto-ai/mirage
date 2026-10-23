@@ -249,6 +249,43 @@ describe('writeStream', () => {
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('new')
   })
 
+  // A replacement writes at its own position, as an open file's offset keeps
+  // it: a truncation behind its back leaves a hole up to where it writes next.
+  it('keeps a replacement at its own position', async () => {
+    const accessor = mkAccessor()
+    let next = (): void => undefined
+    const second = new Promise<void>((resolve) => (next = resolve))
+    async function* source(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('a\n')
+      await second
+      yield ENC.encode('b\n')
+    }
+    const writing = writeStream(accessor, mkPath('/f'), source())
+    await settle()
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('a\n')
+    accessor.store.files.set('/f', new Uint8Array())
+    next()
+    await writing
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('\0\0b\n')
+  })
+
+  // An append that brings nothing leaves an existing file as it was, its
+  // modification time included (`true >> f`), and creates a missing one.
+  it('leaves a file alone for an empty append', async () => {
+    const accessor = mkAccessor()
+    accessor.store.files.set('/f', ENC.encode('kept'))
+    accessor.store.modified.set('/f', '2020-01-01T00:00:00Z')
+    async function* nothing(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield* []
+    }
+    await writeStream(accessor, mkPath('/f'), nothing(), true)
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept')
+    expect(accessor.store.modified.get('/f')).toBe('2020-01-01T00:00:00Z')
+    await writeStream(accessor, mkPath('/new'), nothing(), true)
+    expect(accessor.store.files.get('/new')?.byteLength).toBe(0)
+  })
+
   // A stream that fails keeps what it had delivered, as a disk file does.
   it('keeps what arrived before the stream failed', async () => {
     const accessor = mkAccessor()

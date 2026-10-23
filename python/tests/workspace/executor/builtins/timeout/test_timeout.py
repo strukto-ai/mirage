@@ -409,3 +409,24 @@ async def test_overrun_keeps_what_the_command_had_printed():
     )
     assert io.exit_code == 124
     assert stdout == b"first\n"
+
+
+# A run that finishes after a deadline whose signal it ignores (CONT)
+# reports what it wrote on stderr once.
+@pytest.mark.asyncio
+async def test_a_run_finishing_past_an_ignored_deadline_reports_stderr_once():
+    async def shell(
+        line: str,
+        session_id: str,
+        stdin: bytes | None = None,
+        sink: JobConsole | None = None,
+    ) -> IOResult:
+        assert sink is not None
+        await sink.emit(Channel.STDERR, b"warn\n")
+        await asyncio.sleep(0.2)
+        return IOResult()
+
+    _, io, _ = await handle_timeout(
+        shell, ["-s", "CONT", "0.05", "sleep", "1"], make_session()
+    )
+    assert (io.exit_code, await materialize(io.stderr)) == (124, b"warn\n")

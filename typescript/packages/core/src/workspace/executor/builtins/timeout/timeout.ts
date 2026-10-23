@@ -434,7 +434,9 @@ async function ended(
       ? source
       : new Uint8Array()
   const tail = encodeText(said.join(''))
-  const stderr = concat([await sink.snapshot(Channel.STDERR), head, tail])
+  // A run that ended on its own holds what it wrote into the console too.
+  const early = finished ? new Uint8Array() : await sink.snapshot(Channel.STDERR)
+  const stderr = concat([early, head, tail])
   const partial = await sink.snapshot(Channel.STDOUT)
   return [
     partial.byteLength > 0 ? partial : null,

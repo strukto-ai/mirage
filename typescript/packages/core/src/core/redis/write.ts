@@ -38,10 +38,12 @@ export async function write(
 }
 
 /**
- * Write bytes as they arrive, each chunk appended where it lands (`APPEND`),
- * so a reader watches the file grow and another appender's bytes stay.
- * `atomic` stages the replacement until it ends. Mirrors Python's
- * `write_stream`.
+ * Write bytes as they arrive, so a reader watches the file grow: a
+ * replacement at its own position (`SETRANGE`), as an open file's offset
+ * keeps it, an append at the file's end (`APPEND`), so another appender's
+ * bytes stay. An append that brings nothing leaves an existing file as it
+ * was (`true >> f`). `atomic` stages the replacement until it ends. Mirrors
+ * Python's `write_stream`.
  */
 export async function writeStream(
   accessor: RedisAccessor,
@@ -63,12 +65,15 @@ export async function writeStream(
     record(op, path.virtual, VFSName.REDIS, whole.byteLength, timer)
     return
   }
-  if (append) await store.appendFile(p, new Uint8Array())
-  else await store.setFile(p, new Uint8Array())
-  await store.setModified(p, nowIso())
+  if (!append || !(await store.hasFile(p))) {
+    await store.setFile(p, new Uint8Array())
+    await store.setModified(p, nowIso())
+  }
   let size = 0
   for await (const chunk of chunks(data)) {
-    await store.appendFile(p, chunk)
+    if (chunk.byteLength === 0) continue
+    if (append) await store.appendFile(p, chunk)
+    else await store.setFileRange(p, size, chunk)
     await store.setModified(p, nowIso())
     size += chunk.byteLength
   }

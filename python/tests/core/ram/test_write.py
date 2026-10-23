@@ -249,3 +249,44 @@ async def test_a_failed_streamed_write_keeps_what_arrived(store):
     with pytest.raises(OSError):
         await write_stream(store, _spec("f"), broken())
     assert store.store.files["/f"] == b"kept\n"
+
+
+# A replacement writes at its own position, as an open file's offset keeps
+# it: a truncation behind its back leaves a hole up to where it writes next.
+@pytest.mark.asyncio
+async def test_a_streamed_replacement_keeps_its_position(store):
+    hold = asyncio.Event()
+    second = asyncio.Event()
+
+    async def source():
+        yield b"a\n"
+        await second.wait()
+        yield b"b\n"
+        await hold.wait()
+
+    writing = asyncio.create_task(write_stream(store, _spec("f"), source()))
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    assert store.store.files["/f"] == b"a\n"
+    store.store.files["/f"] = b""
+    second.set()
+    hold.set()
+    await writing
+    assert store.store.files["/f"] == b"\0\0b\n"
+
+
+# An append that brings nothing leaves an existing file as it was, its
+# modification time included (`true >> f`), and creates a missing one.
+@pytest.mark.asyncio
+async def test_an_empty_streamed_append_leaves_the_file_alone(store):
+    store.store.files["/f"] = b"kept"
+    store.store.modified["/f"] = "2020-01-01T00:00:00Z"
+
+    async def nothing():
+        return
+        yield b""
+
+    await write_stream(store, _spec("f"), nothing(), append=True)
+    assert store.store.files["/f"] == b"kept"
+    assert store.store.modified["/f"] == "2020-01-01T00:00:00Z"
+    await write_stream(store, _spec("new"), nothing(), append=True)
+    assert store.store.files["/new"] == b""

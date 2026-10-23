@@ -17,6 +17,7 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Policy } from '../../../policy/base.ts'
+import type { ExecuteResultContext } from '../../../policy/types.ts'
 import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
 import type { CommandRule } from '../../../policy/types.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
@@ -712,4 +713,49 @@ it('keeps a provider error on its command and continues the line', async () => {
   } finally {
     await ws.close()
   }
+})
+
+class ErringProbe extends ProcessProbe {
+  override async runProcess(
+    _e: unknown,
+    _p: PathSpec[],
+    _argv: string[],
+    _ctx: Context,
+    _out: OutputFn | undefined,
+    errors?: OutputFn,
+  ): Promise<RunResult> {
+    if (errors === undefined) return { stdout: new Uint8Array(), stderr: ENC.encode('whole\n'), exitCode: 0 }
+    await errors(ENC.encode('streamed\n'))
+    return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+  }
+}
+
+// A program's stderr streams into the line as it arrives and still lands in
+// the command's record, which postExecute policies read.
+describe('streamed stderr', () => {
+  it('stays in the command record', async () => {
+    const results: string[] = []
+    const seen: Policy = {
+      postExecute(ctx: ExecuteResultContext) {
+        results.push(JSON.stringify(ctx.results))
+        return null
+      },
+    }
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        shellParser: await getTestParser(),
+        runtimes: [new ErringProbe()],
+        mode: MountMode.EXEC,
+        policies: [seen],
+      },
+    )
+    try {
+      const io = await ws.shell('native-tool')
+      expect(new TextDecoder().decode(await materialize(io.stderr))).toBe('streamed\n')
+      expect(results[0]).toContain('"stderr":"streamed\\n"')
+    } finally {
+      await ws.close()
+    }
+  })
 })

@@ -274,3 +274,41 @@ async def test_an_atomic_streamed_write_lands_at_its_end(accessor):
     hold.set()
     await writing
     assert await accessor.store.get_file("/f") == b"new"
+
+
+# A replacement writes at its own position (SETRANGE): a truncation behind
+# its back leaves a hole up to where it writes next.
+@pytest.mark.asyncio
+async def test_a_streamed_replacement_keeps_its_position(accessor):
+    second = asyncio.Event()
+
+    async def source():
+        yield b"a\n"
+        await second.wait()
+        yield b"b\n"
+
+    writing = asyncio.create_task(write_stream(accessor, _spec("f"), source()))
+    read = lambda: accessor.store.get_file("/f")  # noqa: E731
+    assert await _settle(read, b"a\n") == b"a\n"
+    await accessor.store.set_file("/f", b"")
+    second.set()
+    await writing
+    assert await accessor.store.get_file("/f") == b"\0\0b\n"
+
+
+# An append that brings nothing leaves an existing file as it was, its
+# modification time included (`true >> f`), and creates a missing one.
+@pytest.mark.asyncio
+async def test_an_empty_streamed_append_leaves_the_file_alone(accessor):
+    await accessor.store.set_file("/f", b"kept")
+    await accessor.store.set_modified("/f", "2020-01-01T00:00:00Z")
+
+    async def nothing():
+        return
+        yield b""
+
+    await write_stream(accessor, _spec("f"), nothing(), append=True)
+    assert await accessor.store.get_file("/f") == b"kept"
+    assert await accessor.store.get_modified("/f") == "2020-01-01T00:00:00Z"
+    await write_stream(accessor, _spec("new"), nothing(), append=True)
+    assert await accessor.store.get_file("/new") == b""

@@ -21,6 +21,7 @@ from mirage.core.dev.device import active_pipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.io.cooperative import chunks
+from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -89,31 +90,46 @@ async def write_stream(
         return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
-    if not append and not atomic:
-        store.files[p] = b""
+    if atomic:
+        whole = await materialize(data)
+        store.files[p] = whole
+        store.modified[p] = now_iso()
+        record("write", path_spec.virtual, "ram", len(whole), timer)
+        return
+    if not append or p not in store.files:
+        store.files[p] = b"" if not append else store.files.get(p, b"")
         store.modified[p] = now_iso()
     pending: list[bytes] = []
+    position = 0
     last = time.monotonic()
     later: asyncio.TimerHandle | None = None
 
     def publish() -> None:
-        nonlocal last, later
+        nonlocal position, last, later
         if later is not None:
             later.cancel()
             later = None
-        base = store.files.get(p, b"") if append or not atomic else b""
-        store.files[p] = base + b"".join(pending)
-        store.modified[p] = now_iso()
-        pending.clear()
         last = time.monotonic()
+        if not pending:
+            return
+        data = b"".join(pending)
+        pending.clear()
+        current = store.files.get(p, b"")
+        if append:
+            store.files[p] = current + data
+        else:
+            current = current.ljust(position, b"\0")
+            store.files[p] = (
+                current[:position] + data + current[position + len(data) :]
+            )
+            position += len(data)
+        store.modified[p] = now_iso()
 
     try:
         async with aclosing(chunks(data)) as source:
             async for chunk in source:
                 pending.append(chunk)
                 size += len(chunk)
-                if atomic:
-                    continue
                 wait = STREAM_PUBLISH_SECONDS - (time.monotonic() - last)
                 if wait <= 0:
                     publish()
@@ -122,9 +138,6 @@ async def write_stream(
                         wait, publish
                     )
     finally:
-        if not atomic:
-            publish()
-    if atomic:
         publish()
     record(
         "append" if append else "write", path_spec.virtual, "ram", size, timer

@@ -282,10 +282,16 @@ export class UpstashRedisStore implements RedisStoreLike {
     return replies
   }
 
-  private async raw(command: 'set' | 'append', key: string, data: Uint8Array): Promise<void> {
+  private async raw(
+    command: 'set' | 'append' | 'setrange',
+    key: string,
+    data: Uint8Array,
+    args: readonly string[] = [],
+  ): Promise<void> {
+    const rest = args.map((arg) => `/${encodeURIComponent(arg)}`).join('')
     unwrap(
       await this.request(
-        `/${command}/${encodeURIComponent(key)}`,
+        `/${command}/${encodeURIComponent(key)}${rest}`,
         data as BodyInit,
         'application/octet-stream',
         false,
@@ -377,6 +383,15 @@ export class UpstashRedisStore implements RedisStoreLike {
     }
     for (let offset = 0; offset < data.byteLength; offset += this.maxRequestBytes) {
       await this.raw('append', key, data.subarray(offset, offset + this.maxRequestBytes))
+    }
+  }
+
+  async setFileRange(path: string, offset: number, data: Uint8Array): Promise<void> {
+    const key = this.fk(path)
+    for (let at = 0; at < data.byteLength; at += this.maxRequestBytes) {
+      await this.raw('setrange', key, data.subarray(at, at + this.maxRequestBytes), [
+        String(offset + at),
+      ])
     }
   }
 

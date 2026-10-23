@@ -123,11 +123,12 @@ const STREAM_OUTPUT_BUILTINS = new Set([
  * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
  * PipeRecorder.
  */
-class PipeRecorder extends Recorder {
+export class PipeRecorder extends Recorder {
   // A channel `streamTo` binds goes into its file as it is written; two
   // channels bound to one description share its writer, so they keep their
   // order (`> f 2>&1`).
   readonly writers = new Map<Channel, [FileDescription, ByteWriter]>()
+  private readonly broken = new Set<ByteWriter>()
   file: FileDescription | null = null
   failure: unknown = null
 
@@ -153,7 +154,8 @@ class PipeRecorder extends Recorder {
     return [...seen.values()]
   }
 
-  private failed(file: FileDescription, error: unknown): void {
+  private failed(file: FileDescription, writer: ByteWriter, error: unknown): void {
+    this.broken.add(writer)
     if (this.failure !== null) return
     this.failure = error
     this.file = file
@@ -165,7 +167,7 @@ class PipeRecorder extends Recorder {
         await writer.finish()
       } catch (error) {
         if (error instanceof PipeClosed || isAborting(error)) throw error
-        this.failed(file, error)
+        this.failed(file, writer, error)
       }
     }
   }
@@ -187,13 +189,13 @@ class PipeRecorder extends Recorder {
     const live = this.writers.get(channel)
     if (live !== undefined) {
       const [file, writer] = live
-      if (this.failure === null) {
+      if (!this.broken.has(writer)) {
         try {
           await writer.write(data)
           file.offset += data.length
         } catch (error) {
           if (error instanceof PipeClosed || isAborting(error)) throw error
-          this.failed(file, error)
+          this.failed(file, writer, error)
         }
       }
       return

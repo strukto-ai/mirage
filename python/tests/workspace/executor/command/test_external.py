@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import shlex
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -26,7 +27,7 @@ from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.config import _build_runtime_entries
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.policy import AdmissionRules, CommandRule
+from mirage.policy import AdmissionRules, CommandRule, Policy
 from mirage.policy.builtin.output_cap import DEFAULT_COMMAND_LIMITS
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.runtime.base import Runtime
@@ -768,3 +769,38 @@ async def test_a_provider_error_belongs_to_its_command_and_the_line_continues():
         assert result.exit_code == 0
         assert result.stdout == b"before\nafter\n"
         assert result.stderr == b"failed-tool: provider unavailable\n"
+
+
+class ErringProbe(ProcessProbe):
+    async def run_process(
+        self, engine, paths, texts, ctx, output, errors=None
+    ) -> RunResult:
+        if errors is None:
+            return RunResult(stdout=b"", stderr=b"whole\n", exit_code=0)
+        await errors(b"streamed\n")
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class SeesResults(Policy):
+    def __init__(self) -> None:
+        self.results: list[str] = []
+
+    async def post_execute(self, ctx):
+        self.results.append(json.dumps(ctx.results))
+        return None
+
+
+# A program's stderr streams into the line as it arrives and still lands in
+# the command's record, which post_execute policies read.
+@pytest.mark.asyncio
+async def test_streamed_stderr_stays_in_the_command_record():
+    seen = SeesResults()
+    async with workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[ErringProbe()],
+        policies=[seen],
+    ) as ws:
+        result = await ws.shell("native-tool")
+        assert await result.stderr_str() == "streamed\n"
+    assert '"stderr": "streamed\\n"' in seen.results[0]

@@ -33,7 +33,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { JobRoute, handleRedirect } from './redirect.ts'
+import { JobRoute, PipeRecorder, handleRedirect } from './redirect.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { FileDescription, Recorder } from '../../shell/descriptors.ts'
 
@@ -1316,5 +1316,32 @@ describe('JobRoute.release', () => {
     await route.release()
     await writing
     expect(landed).toEqual(['job\n'])
+  })
+})
+
+// Each live channel fails on its own: a stdout file that refuses its upload
+// leaves the stderr streaming into a healthy file untouched, and the first
+// failure is the one reported.
+describe('a live redirect channel', () => {
+  it('keeps streaming when the other channel fails', async () => {
+    const bad = new FileDescription(PathSpec.fromStrPath('/bad'))
+    const good = new FileDescription(PathSpec.fromStrPath('/good'))
+    const landed = new Map<string, string>()
+    const dispatch = (async (_op: string, scope: PathSpec, args: unknown[]) => {
+      if (scope.virtual === '/bad') throw new Error('upload refused')
+      landed.set(scope.virtual, new TextDecoder().decode(await materialize(args[0] as ByteSource)))
+      return [null, new IOResult()]
+    }) as unknown as DispatchFn
+    const recorder = new PipeRecorder(dispatch, new Map(), new Map(), null, false)
+    recorder.streamTo(bad)
+    recorder.streamTo(good, Channel.STDERR)
+    await recorder.emit(Channel.STDOUT, encode('out\n'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await recorder.emit(Channel.STDOUT, encode('more\n'))
+    await recorder.emit(Channel.STDERR, encode('err\n'))
+    await recorder.finishWriter()
+    expect(Object.fromEntries(landed)).toEqual({ '/good': 'err\n' })
+    expect(recorder.file).toBe(bad)
+    expect(String(recorder.failure)).toContain('upload refused')
   })
 })

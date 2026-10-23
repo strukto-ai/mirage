@@ -16,7 +16,6 @@ import asyncio
 import logging
 import shlex
 from collections.abc import AsyncIterator
-from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
@@ -151,6 +150,16 @@ def _stream_external(
     task: asyncio.Task[None] | None = None
     settled = False
     closing: asyncio.Task[None] | None = None
+    said: list[bytes] = []
+
+    async def errors(chunk: bytes) -> None:
+        # Stdout written before this chunk reaches the sink first, so the
+        # two keep the order the program wrote them in (`> f 2>&1`); the
+        # command's record keeps a copy for the policies that read it.
+        said.append(chunk)
+        assert sink is not None
+        await pipe.drain()
+        await sink.emit(Channel.STDERR, chunk)
 
     async def execute() -> None:
         nonlocal settled
@@ -163,9 +172,7 @@ def _stream_external(
                     Context(cwd=cwd, env=env, stdin=stdin),
                     "process",
                     pipe.write,
-                    partial(sink.emit, Channel.STDERR)
-                    if sink is not None
-                    else None,
+                    errors if sink is not None else None,
                 ),
                 timeout,
                 argv.name,
@@ -173,7 +180,8 @@ def _stream_external(
             if result.stdout:
                 await pipe.write(result.stdout)
             io.exit_code = node.exit_code = result.exit_code
-            io.stderr = node.stderr = result.stderr or b""
+            io.stderr = result.stderr or b""
+            node.stderr = b"".join(said) or io.stderr
             pipe.end()
         except BaseException as exc:
             pipe.end(exc)

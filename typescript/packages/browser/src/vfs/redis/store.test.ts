@@ -494,3 +494,24 @@ describe('UpstashRedisStore from a redis url', () => {
     await expect(store.hasDir('/')).rejects.toThrow(/https:\/\/localhost.*REST listener/)
   })
 })
+
+// A streamed write appends each chunk at the end, or writes a replacement's
+// chunk at its own offset, zero-filling a shorter file; a chunk past the
+// request limit goes in pieces.
+describe('streamed writes', () => {
+  it('appends and writes at an offset in request-sized pieces', async () => {
+    const { store } = make({ maxRequestBytes: 4 })
+    await store.setFile('/f', ENC.encode('ab'))
+    await store.appendFile('/f', ENC.encode('cdefg'))
+    expect(new TextDecoder().decode((await store.getFile('/f')) ?? new Uint8Array())).toBe(
+      'abcdefg',
+    )
+    await store.setFile('/g', new Uint8Array())
+    await store.setFileRange('/g', 2, ENC.encode('xyzwv'))
+    expect(Array.from((await store.getFile('/g')) ?? new Uint8Array())).toEqual([
+      0,
+      0,
+      ...ENC.encode('xyzwv'),
+    ])
+  })
+})

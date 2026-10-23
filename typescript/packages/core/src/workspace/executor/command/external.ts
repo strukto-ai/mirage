@@ -37,6 +37,7 @@ import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { Channel, type JobConsole } from '../../../shell/console/index.ts'
 
 /**
@@ -144,6 +145,15 @@ function streamExternal(
   let task: Promise<void> | undefined
   let settled = false
   let closing: Promise<void> | undefined
+  const said: Uint8Array[] = []
+  // Stdout written before a stderr chunk reaches the sink first, so the two
+  // keep the order the program wrote them in (`> f 2>&1`); the command's
+  // record keeps a copy for the policies that read it.
+  const errors = async (chunk: Uint8Array): Promise<void> => {
+    said.push(chunk)
+    await pipe.drain()
+    await sink?.emit(Channel.STDERR, chunk)
+  }
   const execute = async (): Promise<void> => {
     try {
       const result = await runWithTimeout(
@@ -155,9 +165,7 @@ function streamExternal(
           {
             kind: 'process',
             output: (chunk) => pipe.write(chunk),
-            ...(sink !== undefined
-              ? { errors: (chunk: Uint8Array) => sink.emit(Channel.STDERR, chunk) }
-              : {}),
+            ...(sink !== undefined ? { errors } : {}),
           },
         ),
         timeout,
@@ -165,7 +173,9 @@ function streamExternal(
       )
       if (result.stdout.length) await pipe.write(result.stdout)
       io.exitCode = node.exitCode = result.exitCode
-      io.stderr = node.stderr = result.stderr ?? new Uint8Array()
+      const stderr = result.stderr ?? new Uint8Array()
+      io.stderr = stderr
+      node.stderr = said.length > 0 ? concat(said) : stderr
       pipe.end()
     } catch (error) {
       controller.abort()

@@ -191,6 +191,7 @@ class PipeRecorder(Recorder):
         self.sink = sink
         self.live = live
         self.writers: dict[Channel, tuple[FileDescription, ByteWriter]] = {}
+        self.broken: set[int] = set()
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
 
@@ -225,13 +226,16 @@ class PipeRecorder(Recorder):
             except Exception as exc:
                 if is_aborting(exc):
                     raise
-                self._failed(file, exc)
+                self._failed(file, writer, exc)
 
     async def abort(self) -> None:
         for _, writer in self._distinct():
             await writer.abort()
 
-    def _failed(self, file: FileDescription, exc: Exception) -> None:
+    def _failed(
+        self, file: FileDescription, writer: ByteWriter, exc: Exception
+    ) -> None:
+        self.broken.add(id(writer))
         if self.failure is None:
             self.failure, self.file = exc, file
 
@@ -239,7 +243,7 @@ class PipeRecorder(Recorder):
         live = self.writers.get(channel)
         if live is not None:
             file, writer = live
-            if self.failure is None:
+            if id(writer) not in self.broken:
                 try:
                     await writer.write(data)
                     file.offset += len(data)
@@ -248,7 +252,7 @@ class PipeRecorder(Recorder):
                 except Exception as exc:
                     if is_aborting(exc):
                         raise
-                    self._failed(file, exc)
+                    self._failed(file, writer, exc)
             return
         scope = self.streams.get(channel)
         if scope is None:

@@ -2965,6 +2965,21 @@ describe('handleTimeout', () => {
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
   })
 
+  // A run that finishes after a deadline whose signal it ignores (CONT)
+  // reports what it wrote on stderr once.
+  it('reports stderr once for a run finishing past an ignored deadline', async () => {
+    const late = async (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal; sink?: JobConsole },
+    ): Promise<IOResult> => {
+      await opts.sink?.emit(Channel.STDERR, new TextEncoder().encode('warn\n'))
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      return new IOResult()
+    }
+    const [, io] = await handleTimeout(late, ['-s', 'CONT', '0.05', 'sleep', '1'], session)
+    expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([124, 'warn\n'])
+  })
+
   it('keeps the stderr the command had produced before the deadline', async () => {
     // `tail -F missing` has said it cannot open the file by the time the
     // deadline kills it; that line is the command's output too.

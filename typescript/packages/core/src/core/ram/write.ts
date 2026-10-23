@@ -14,7 +14,7 @@
 
 import { activePipe } from '../dev/device.ts'
 import { chunks } from '../../io/cooperative.ts'
-import type { ByteSource } from '../../io/types.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { STREAM_PUBLISH_SECONDS } from './constants.ts'
 import { record, startOp } from '../../observe/context.ts'
@@ -50,8 +50,10 @@ export async function write(
 /**
  * Write bytes as they arrive, so a reader watches the file grow. What has
  * arrived lands within `STREAM_PUBLISH_SECONDS`, a writer gone quiet
- * included, and at the end, appended to what the file holds then, so
- * another appender's bytes stay.
+ * included, and at the end: a replacement at its own position, as an open
+ * file's offset keeps it, an append at the file's end then, so another
+ * appender's bytes stay. An append that brings nothing leaves an existing
+ * file as it was (`true >> f`).
  * `atomic` stages the replacement until it ends. Mirrors Python's
  * `write_stream`.
  */
@@ -79,34 +81,50 @@ export async function writeStream(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   const { files, modified } = accessor.store
-  if (!append && !atomic) {
-    files.set(p, new Uint8Array())
+  if (atomic) {
+    const whole = await materialize(data)
+    files.set(p, whole)
+    modified.set(p, nowIso())
+    record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
+    return
+  }
+  if (!append || !files.has(p)) {
+    files.set(p, append ? (files.get(p) ?? new Uint8Array()) : new Uint8Array())
     modified.set(p, nowIso())
   }
   let pending: Uint8Array[] = []
+  let position = 0
   let last = performance.now()
   let later: ReturnType<typeof setTimeout> | null = null
   const publish = (): void => {
     if (later !== null) clearTimeout(later)
     later = null
-    const base = append || !atomic ? (files.get(p) ?? new Uint8Array()) : new Uint8Array()
-    files.set(p, concat([base, ...pending]))
-    modified.set(p, nowIso())
-    pending = []
     last = performance.now()
+    if (pending.length === 0) return
+    const data = concat(pending)
+    pending = []
+    const current = files.get(p) ?? new Uint8Array()
+    if (append) {
+      files.set(p, concat([current, data]))
+    } else {
+      const next = new Uint8Array(Math.max(current.byteLength, position + data.byteLength))
+      next.set(current)
+      next.set(data, position)
+      files.set(p, next)
+      position += data.byteLength
+    }
+    modified.set(p, nowIso())
   }
   try {
     for await (const chunk of chunks(data)) {
       pending.push(chunk)
       size += chunk.byteLength
-      if (atomic) continue
       const wait = STREAM_PUBLISH_SECONDS * 1000 - (performance.now() - last)
       if (wait <= 0) publish()
       else later ??= setTimeout(publish, wait)
     }
   } finally {
-    if (!atomic) publish()
+    publish()
   }
-  if (atomic) publish()
   record(op, path.virtual, VFSName.RAM, size, timer)
 }

@@ -477,16 +477,17 @@ async def _ended(
         held (list[IOResult]): the inner result, once it existed.
         said (list[str]): timeout's own -v lines.
         exit_code (int): timeout's exit status.
-        finished (bool): whether the run ended on its own, so its stderr
-            is complete and can be read in full.
+        finished (bool): whether the run ended on its own, so its result
+            holds its whole stderr, what it wrote into the console too.
     """
     stderr = held[0].stderr if held else None
     if finished:
-        stderr = await materialize(stderr)
+        head = await materialize(stderr)
+    else:
+        head = await console.snapshot(Channel.STDERR) + (
+            stderr if isinstance(stderr, bytes) else b""
+        )
     tail = encode_text("".join(said))
-    head = await console.snapshot(Channel.STDERR) + (
-        stderr if isinstance(stderr, bytes) else b""
-    )
     out = await console.snapshot(Channel.STDOUT) or None
     return (
         out,
