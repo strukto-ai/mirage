@@ -207,8 +207,9 @@ export async function expandOperands(
   for (const item of operands) {
     const spec = item instanceof PathSpec ? item : PathSpec.fromStrPath(item)
     if (spec.pattern !== null) {
+      const mount = namespace.mountFor(spec.virtual)
       try {
-        out.push(...(await expandGlob(dispatch, namespace.mountFor(spec.virtual), [spec])))
+        out.push(...(await expandGlob(dispatch, mount, [spec], mount.vfs.fullScanLimit)))
       } catch (err) {
         if (err instanceof GlobLimitError) throw new TooManyMatches(err.message)
         throw err

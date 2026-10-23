@@ -278,38 +278,47 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
 }
 
 /**
- * Reads that stop each walk at its mount's `fullScanLimit`. A read counts
- * against the deepest walked operand above it, so a file operand counts
- * nothing; the one past the limit throws ScanLimitError in its place, and grep
- * or rg stops walking the directory. A file the mount's search rules out is never read, so
- * it costs nothing. Mirrors Python's `capped_reads`.
+ * Reads that stop each walk at its mount's `fullScanLimit`. A file counts
+ * once against the deepest walked operand above it, so a file named as an
+ * operand counts nothing; the one past the limit throws ScanLimitError in its
+ * place, and grep or rg stops walking the directory. The charge is returned
+ * too, for a file whose matching lines the mount's search hands over in place
+ * of a read; a file the search rules out is never read, so it costs nothing.
+ * Mirrors Python's `capped_reads`.
  */
 export function cappedReads(
   stream: Reads,
   operands: readonly PathSpec[],
   mounts: MountView | undefined,
-): Reads {
+): [Reads, (p: PathSpec) => void] {
   const limits = new Map<string, number>()
   for (const d of operands) limits.set(d.virtual, mounts?.fullScanLimit?.(d.virtual) ?? -1)
   const capped = operands
     .filter((d) => (limits.get(d.virtual) ?? -1) >= 0)
     .sort((a, b) => rstripSlash(b.virtual).length - rstripSlash(a.virtual).length)
-  if (capped.length === 0) return stream
+  const named = new Set(operands.map((d) => d.virtual))
   const taken = new Map<string, number>()
+  const charged = new Set<string>()
   const charge = (p: PathSpec): void => {
+    if (named.has(p.virtual) || charged.has(p.virtual)) return
     for (const d of capped) {
       if (!p.virtual.startsWith(`${rstripSlash(d.virtual)}/`)) continue
       const limit = limits.get(d.virtual) ?? -1
       const count = taken.get(d.virtual) ?? 0
       if (count >= limit) throw new ScanLimitError(d, limit)
       taken.set(d.virtual, count + 1)
+      charged.add(p.virtual)
       return
     }
   }
-  return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
-    charge(p)
-    yield* stream(p)
-  }
+  if (capped.length === 0) return [stream, charge]
+  return [
+    async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      charge(p)
+      yield* stream(p)
+    },
+    charge,
+  ]
 }
 
 /**
@@ -346,7 +355,7 @@ export async function searchReads(
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
   const mounts = mountsOf(ctx)
-  const stream = cappedReads(files.readStream, walked ? paths : [], mounts)
+  const [stream, charge] = cappedReads(files.readStream, walked ? paths : [], mounts)
   const narrows = files.answers('files_containing')
   const lines = files.answers('lines_containing') ? files.linesContaining : undefined
   if (!narrows && lines === undefined) return stream
@@ -402,6 +411,7 @@ export async function searchReads(
       (searchable === null || searchable.some((glob) => globPrefixMatch(key, glob)))
     if (ruledOut) return (await files.isWarm(path)) ? null : new Uint8Array(0)
     if (lines === undefined || (await files.isWarm(path))) return null
+    charge(path)
     const ignoreCase = { ignoreCase: asked.ignoreCase }
     const [only] = asked.texts
     if (asked.lineOutput && asked.texts.length === 1 && only !== undefined) {

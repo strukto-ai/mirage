@@ -42,6 +42,7 @@ import { tree as ramTree } from '../../core/ram/readdir.ts'
 
 export interface RAMVFSState {
   type: string
+  config?: { full_scan_limit: number }
   files?: Record<string, Uint8Array>
   dirs?: string[]
   modified?: Record<string, string>
@@ -179,6 +180,7 @@ export class RAMVFS extends BaseVFS {
     for (const [k, v] of this.store.attrs) attrs[k] = { ...v }
     return {
       type: this.name,
+      config: { full_scan_limit: this.fullScanLimit },
       files,
       dirs: [...this.store.dirs],
       modified,

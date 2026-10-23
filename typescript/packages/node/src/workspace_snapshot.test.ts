@@ -258,6 +258,26 @@ describe('snapshot rebuild through the registry', () => {
   })
 })
 
+// Twin of test_a_rebuilt_local_mount_keeps_its_full_scan_limit: a disk
+// mount comes back as RAM holding the limit it was saved with.
+describe('a rebuilt disk mount', () => {
+  it.each([2, -1])('keeps its full scan limit (%d)', async (limit) => {
+    const root = await mkdtemp(join(tmpdir(), 'mirage-limit-'))
+    const ws = new Workspace({ '/d': new DiskVFS({ root, fullScanLimit: limit }) })
+    try {
+      const restored = await Workspace.fromState(await toStateDict(ws))
+      try {
+        expect(restored.mount('/d/').vfs.fullScanLimit).toBe(limit)
+      } finally {
+        await restored.close()
+      }
+    } finally {
+      await ws.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('the write policy in a snapshot', () => {
   const built: Workspace[] = []
   function track(ws: Workspace): Workspace {

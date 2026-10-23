@@ -58,7 +58,7 @@ export interface DiskVFSOptions {
 
 export interface DiskVFSState {
   type: string
-  config?: { root: string; folderVersions: boolean; fullScanLimit: number }
+  config?: { root: string; folderVersions: boolean; full_scan_limit: number }
   /**
    * Each file as bytes, or as a host path read by whoever consumes the
    * state (a snapshot tar, a copy).
@@ -257,7 +257,7 @@ export class DiskVFS extends BaseVFS {
       config: {
         root: this.root,
         folderVersions: this.folderVersions,
-        fullScanLimit: this.fullScanLimit,
+        full_scan_limit: this.fullScanLimit,
       },
       files,
       modes,

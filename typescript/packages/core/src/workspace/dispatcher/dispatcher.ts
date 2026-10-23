@@ -1937,8 +1937,9 @@ export class Dispatcher {
 
   /**
    * How many files the session sees under a scan guard's path, counted off
-   * the mount's `readTree` with every hidden file dropped, so a guard's
-   * refusal never counts what the session cannot see. Without one, or where
+   * the mount's `readTree` with every hidden file dropped, and every file a
+   * nested mount covers, so a guard's refusal never counts what the command
+   * would not read. Without one, or where
    * it cannot read the whole tree, a mount with a `fullScanLimit` is walked
    * listing by listing, hidden entries skipped, until one file past the
    * limit; a folder below the path it cannot open counts nothing, as the
@@ -1947,6 +1948,14 @@ export class Dispatcher {
    */
   private async visibleFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
     const root = call.path.virtual
+    const own = `${rstripSlash(mount.prefix)}/`
+    const covered = this.namespace
+      .mountPrefixes()
+      .map((p) => `${rstripSlash(p)}/`)
+      .filter((p) => p !== own && p.startsWith(own))
+    const counted = (virtual: string): boolean =>
+      pathVisible(call.vis, virtual) &&
+      !covered.some((p) => `${rstripSlash(virtual)}/`.startsWith(p))
     if (vfs.supports('read_tree')) {
       let found: Map<string, FileStat> | null
       try {
@@ -1957,11 +1966,12 @@ export class Dispatcher {
         found = null
       }
       if (found !== null) {
-        const visible = visibleAnswer('read_tree', call.vis, call.path, found) as Map<
-          string,
-          FileStat
-        >
-        return [...visible.values()].filter((st) => st.type === FileType.FILE).length
+        const base = rstripSlash(root)
+        let files = 0
+        for (const [key, st] of found) {
+          if (st.type === FileType.FILE && counted(`${base}/${key}`)) files += 1
+        }
+        return files
       }
     }
     const limit = vfs.fullScanLimit
@@ -1983,7 +1993,7 @@ export class Dispatcher {
       }
       for (const entry of entries) {
         const child = rstripSlash(entry)
-        if (!pathVisible(call.vis, child)) continue
+        if (!counted(child)) continue
         let row: FileStat
         try {
           row = (await mount.call('stat', child)) as FileStat

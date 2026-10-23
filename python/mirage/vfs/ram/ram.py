@@ -153,6 +153,7 @@ class RAMVFS(BaseVFS):
     def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
+            "config": {"full_scan_limit": self.full_scan_limit},
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),

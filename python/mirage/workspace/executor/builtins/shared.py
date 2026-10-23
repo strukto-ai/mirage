@@ -205,10 +205,11 @@ async def expand_operands(
             else PathSpec.from_str_path(str(item))
         )
         if spec.pattern:
+            mount = namespace.mount_for(spec.virtual)
             try:
                 out.extend(
                     await expand_glob(
-                        dispatch, namespace.mount_for(spec.virtual), [spec]
+                        dispatch, mount, [spec], mount.vfs.full_scan_limit
                     )
                 )
             except GlobLimitError as exc:

@@ -312,6 +312,26 @@ describe('Workspace.snapshot / Workspace.load', () => {
   })
 })
 
+// Twin of test_a_rebuilt_local_mount_keeps_its_full_scan_limit.
+describe('a rebuilt RAM mount', () => {
+  it.each([2, -1])('keeps its full scan limit (%d)', async (limit) => {
+    const ws = new Workspace(
+      { '/d': new RAMVFS({ fullScanLimit: limit }) },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const copied = await ws.copy()
+    const restored = await Workspace.fromState(await toStateDict(ws), { shellParser: parser })
+    try {
+      expect([
+        copied.mount('/d/').vfs.fullScanLimit,
+        restored.mount('/d/').vfs.fullScanLimit,
+      ]).toEqual([limit, limit])
+    } finally {
+      await Promise.all([ws.close(), copied.close(), restored.close()])
+    }
+  })
+})
+
 describe('Workspace.copy', () => {
   it('creates an independent workspace with the same content', async () => {
     const ws = buildWorkspace()

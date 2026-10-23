@@ -48,3 +48,28 @@ describe('git grep past the full scan limit', () => {
     }
   })
 })
+
+// Twin of test_a_work_tree_counts_against_the_mount_serving_it.
+describe('git grep over a work tree on another mount', () => {
+  it.each([
+    ['', 'a.txt:one\n128\n', STOPPED],
+    ['--cached ', 'a.txt:one\nc.txt:three\n0\n', ''],
+  ])('git grep %s-e e', async (flag, out, err) => {
+    const ws = new Workspace(
+      { '/meta': new RAMVFS({ fullScanLimit: -1 }), '/data': new RAMVFS({ fullScanLimit: 2 }) },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    ws.registerCli('git', GIT)
+    const git = 'git --git-dir=/meta/.git --work-tree=/data'
+    try {
+      await ws.shell(
+        'git init -q /meta && echo one > /data/a.txt && echo two > /data/b.txt && ' +
+          `echo three > /data/c.txt && ${git} add a.txt b.txt c.txt`,
+      )
+      const result = await ws.shell(`${git} grep ${flag}-e e; echo $?`)
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([out, err])
+    } finally {
+      await ws.close()
+    }
+  })
+})

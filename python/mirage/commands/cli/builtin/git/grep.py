@@ -325,14 +325,9 @@ async def grep(
                         break
         sources.append(("", shown_entries(repo, entries)))
     mounts = mounts_of(ctx)
-    limit = (
-        mounts.full_scan_limit(location.gitdir.virtual)
-        if mounts is not None and mounts.full_scan_limit is not None
-        else -1
-    )
     out: list[bytes] = []
     found = False
-    read = 0
+    read: dict[str, int] = {}
     for revision, entries in sources:
         for path, (mode, oid) in sorted(entries.items()):
             relative = path.decode("utf-8", "surrogateescape")
@@ -342,23 +337,31 @@ async def grep(
                 relative and not pathspec_selects(relative, specs)
             ):
                 continue
-            if 0 <= limit <= read:
-                # Past the mount's full_scan_limit the search stops, and
-                # what it found so far stands, as git keeps what it
-                # printed before a fatal.
-                return b"".join(out), IOResult(
-                    exit_code=FATAL_EXIT,
-                    stderr=encode_text(
-                        f"fatal: stopped after {limit} files "
-                        "(full_scan_limit); narrow the pathspec\n"
-                    ),
-                )
-            read += 1
+            target = location.worktree.join(relative)
+            if mounts is not None and mounts.full_scan_limit is not None:
+                # A blob is read from the repository, a working-tree file
+                # from the mount serving it, and each mount counts its own.
+                source = (
+                    location.gitdir if revision or cached else target
+                ).virtual
+                limit = mounts.full_scan_limit(source)
+                root = mounts.root_of(source)
+                if 0 <= limit <= read.get(root, 0):
+                    # Past the limit the search stops, and what it found
+                    # so far stands, as git keeps what it printed before
+                    # a fatal.
+                    return b"".join(out), IOResult(
+                        exit_code=FATAL_EXIT,
+                        stderr=encode_text(
+                            f"fatal: stopped after {limit} files "
+                            "(full_scan_limit); narrow the pathspec\n"
+                        ),
+                    )
+                read[root] = read.get(root, 0) + 1
             data: bytes | None
             if revision or cached:
                 data = await asyncio.to_thread(blob_data, repo, (mode, oid))
             else:
-                target = location.worktree.join(relative)
                 if await is_link(ctx.vfs, target):
                     continue
                 data = await read_optional(ctx.vfs, target)

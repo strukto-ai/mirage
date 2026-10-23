@@ -1190,6 +1190,36 @@ async def test_a_rebuilt_disk_mount_keeps_its_folder_versions(
         await ws.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["copy", "load"])
+@pytest.mark.parametrize("kind", ["ram", "disk"])
+@pytest.mark.parametrize("limit", [2, -1])
+async def test_a_rebuilt_local_mount_keeps_its_full_scan_limit(
+    tmp_path, route, kind, limit
+):
+    root = tmp_path / "root"
+    root.mkdir()
+    vfs = (
+        RAMVFS(full_scan_limit=limit)
+        if kind == "ram"
+        else DiskVFS(str(root), full_scan_limit=limit)
+    )
+    ws = Workspace({"/d": vfs})
+    try:
+        if route == "copy":
+            rebuilt = await ws.copy()
+        else:
+            snap = tmp_path / "ws.tar"
+            await ws.snapshot(snap)
+            rebuilt = await Workspace.load(snap)
+        try:
+            assert rebuilt.mount("/d").vfs.full_scan_limit == limit
+        finally:
+            await rebuilt.close()
+    finally:
+        await ws.close()
+
+
 class RootOnlyDisk(DiskVFS):
     def __init__(self, root: str) -> None:
         super().__init__(root)

@@ -44,5 +44,8 @@ async def test_resolve_glob_unresolved_no_pattern(accessor, index):
         pattern=None,
     )
     ws = Workspace({"/": vfs_over(PostgresVFS, accessor)})
-    result = await expand_glob(ws.dispatch, ws._registry.mount_for("/"), [p])
+    mount = ws._registry.mount_for("/")
+    result = await expand_glob(
+        ws.dispatch, mount, [p], mount.vfs.full_scan_limit
+    )
     assert result == [p]

@@ -278,13 +278,16 @@ def capped_reads(
 ) -> tuple[
     Callable[[PathSpec], Awaitable[bytes]],
     Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    Callable[[PathSpec], None],
 ]:
     """Reads that stop each walk at its mount's ``full_scan_limit``.
 
-    A read counts against the deepest walked operand above it, so a file
-    operand counts nothing; the one past the limit raises ScanLimitError
-    in its place, and grep or rg stops walking the directory. A file the
-    mount's search rules out is never read, so it costs nothing.
+    A file counts once against the deepest walked operand above it, so a
+    file named as an operand counts nothing; the one past the limit
+    raises ScanLimitError in its place, and grep or rg stops walking the
+    directory. The charge is returned too, for a file whose matching
+    lines the mount's search hands over in place of a read; a file the
+    search rules out is never read, so it costs nothing.
 
     Args:
         read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
@@ -305,25 +308,31 @@ def capped_reads(
         key=lambda d: len(d.virtual.rstrip("/")),
         reverse=True,
     )
-    if not capped:
-        return read_bytes, read_stream
+    named = {d.virtual for d in operands}
     taken: dict[str, int] = {}
+    charged: set[str] = set()
 
     def charge(path: PathSpec) -> None:
+        if path.virtual in named or path.virtual in charged:
+            return
         for d in capped:
             if path.virtual.startswith(d.virtual.rstrip("/") + "/"):
                 count = taken.get(d.virtual, 0)
                 if count >= limits[d.virtual]:
                     raise ScanLimitError(d, limits[d.virtual])
                 taken[d.virtual] = count + 1
+                charged.add(path.virtual)
                 return
+
+    if not capped:
+        return read_bytes, read_stream, charge
 
     async def read(path: PathSpec) -> bytes:
         charge(path)
         return await read_bytes(path)
 
     if read_stream is None:
-        return read, None
+        return read, None, charge
     source = read_stream
 
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
@@ -335,7 +344,7 @@ def capped_reads(
         finally:
             await close_quietly(chunks)
 
-    return read, stream
+    return read, stream, charge
 
 
 async def _unmarked(found: ByteSource) -> ByteSource | None:
@@ -455,7 +464,7 @@ async def search_reads(
         return files.read_bytes, files.read_stream
     walked = name == "rg" or directories_action(fl) == "recurse"
     mounts = mounts_of(ctx)
-    read_bytes, read_stream = capped_reads(
+    read_bytes, read_stream, charge = capped_reads(
         files.read_bytes, files.read_stream, paths if walked else [], mounts
     )
     containing = (
@@ -535,6 +544,7 @@ async def search_reads(
             return None if await files.is_warm(path) else b""
         if lines is None or await files.is_warm(path):
             return None
+        charge(path)
         if terms.line_output and len(terms.texts) == 1:
             found: ByteSource | None = await lines(
                 path, terms.texts[0], ignore_case=terms.ignore_case

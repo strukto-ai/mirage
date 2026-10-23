@@ -2279,8 +2279,9 @@ class Dispatcher:
         """How many files the session sees under a scan guard's path.
 
         Counted off the mount's ``read_tree`` with every hidden file
-        dropped, so a guard's refusal never counts what the session
-        cannot see. Without one, or where it cannot read the whole tree,
+        dropped, and every file a nested mount covers, so a guard's
+        refusal never counts what the command would not read. Without
+        one, or where it cannot read the whole tree,
         a mount with a ``full_scan_limit`` is walked listing by listing,
         hidden entries skipped, until one file past the limit; a folder
         below the path it cannot open counts nothing, as the command
@@ -2291,6 +2292,21 @@ class Dispatcher:
             call (_Call): the guard's call.
         """
         root = call.path.virtual
+        own = mount.prefix.rstrip("/") + "/"
+        covered = tuple(
+            prefix
+            for prefix in (
+                m.prefix.rstrip("/") + "/"
+                for m in self._namespace.registry.mounts()
+            )
+            if prefix != own and prefix.startswith(own)
+        )
+
+        def counted(virtual: str) -> bool:
+            return path_visible(call.vis, virtual) and not (
+                virtual.rstrip("/") + "/"
+            ).startswith(covered)
+
         if mount.vfs.supports("read_tree"):
             try:
                 found = await mount.call("read_tree", root)
@@ -2298,10 +2314,12 @@ class Dispatcher:
                 logger.debug("scan count of %s walks instead: %s", root, exc)
                 found = None
             if found is not None:
-                visible = _visible_answer(
-                    "read_tree", call.vis, call.path, found
+                base = root.rstrip("/")
+                return sum(
+                    st.type is FileType.FILE
+                    for key, st in found.items()
+                    if counted(f"{base}/{key}")
                 )
-                return sum(st.type is FileType.FILE for st in visible.values())
         limit = mount.vfs.full_scan_limit
         if limit < 0:
             return None
@@ -2318,7 +2336,7 @@ class Dispatcher:
                 continue
             for entry in entries:
                 child = entry.rstrip("/")
-                if not path_visible(call.vis, child):
+                if not counted(child):
                     continue
                 try:
                     row = await mount.call("stat", child)

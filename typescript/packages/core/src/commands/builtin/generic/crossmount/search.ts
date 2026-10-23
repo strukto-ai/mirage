@@ -42,7 +42,7 @@ import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
-import { ScanLimitError } from '../../../errors.ts'
+import { ScanBudget } from '../../utils/tree.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { walkErrorLine, type Haystack } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
@@ -152,26 +152,24 @@ export async function runSearch(
     if (planned && walk !== null) {
       const warnings: string[] = []
       const stopped = new Set<string>()
-      const taken = new Map<string, number>()
-      const mounts = mountView(vfs)
+      const mounts = mountView(vfs) ?? null
+      const budgets = new Map(paths.map((p) => [p.virtual, new ScanBudget(p, mounts)]))
+      const reported = new Set<string>()
       const listing = rg.listFiles
-      // The plan hands each file over alone, which no search narrows, so a
-      // walk stops at its operand's mount's fullScanLimit here; a listing
-      // reads none.
+      // The plan hands each file over alone, which no search narrows, so
+      // each file counts here against the mount serving it; a listing reads
+      // none.
       const charged = (h: Haystack): boolean => {
-        if (h.spec !== null || listing || mounts === undefined) return true
+        if (h.spec !== null || listing) return true
         const top = paths.find((p) => h.virtual.startsWith(`${rstripSlash(p.virtual)}/`))
-        if (top === undefined || mounts.fullScanLimit === undefined) return true
-        const limit = mounts.fullScanLimit(top.virtual)
-        const count = taken.get(top.virtual) ?? 0
-        if (limit < 0 || count < limit) {
-          taken.set(top.virtual, count + 1)
-          return true
+        const budget = top === undefined ? undefined : budgets.get(top.virtual)
+        if (top === undefined || budget === undefined || budget.spend(h.virtual)) return true
+        for (const line of budget.stopped) {
+          if (reported.has(line)) continue
+          reported.add(line)
+          warnings.push(`rg: ${line}`)
         }
-        if (!stopped.has(top.virtual)) {
-          stopped.add(top.virtual)
-          warnings.push(`rg: ${new ScanLimitError(top, limit).message}`)
-        }
+        if (!budget.opens(top.virtual)) stopped.add(top.virtual)
         return false
       }
       const links = linkView(vfs)

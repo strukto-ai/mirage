@@ -17,7 +17,9 @@ from pathlib import Path
 import pytest
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import MOUNT, commit_file, run
 
@@ -44,3 +46,32 @@ async def test_a_search_past_the_full_scan_limit_stops_with_a_fatal(
     with Workspace({MOUNT: vfs}) as ws:
         ws.register_cli("git", GIT)
         assert await run(ws, line) == answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag, answer",
+    [
+        ("", ("a.txt:one\n128\n", STOPPED.decode())),
+        ("--cached ", ("a.txt:one\nc.txt:three\n0\n", "")),
+    ],
+)
+async def test_a_work_tree_counts_against_the_mount_serving_it(
+    flag: str, answer: tuple[str, str]
+):
+    with Workspace(
+        {
+            "/meta/": RAMVFS(full_scan_limit=-1),
+            "/data/": RAMVFS(full_scan_limit=2),
+        },
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        git = "git --git-dir=/meta/.git --work-tree=/data"
+        await ws.shell(
+            "git init -q /meta && echo one > /data/a.txt && "
+            "echo two > /data/b.txt && echo three > /data/c.txt && "
+            f"{git} add a.txt b.txt c.txt"
+        )
+        result = await ws.shell(f"{git} grep {flag}-e e; echo $?")
+        assert (await result.stdout_str(), await result.stderr_str()) == answer

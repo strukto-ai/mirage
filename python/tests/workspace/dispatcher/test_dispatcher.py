@@ -2998,6 +2998,23 @@ class ListedRAM(LimitedRAM):
         return await super().readdir(path)
 
 
+class LinedRAM(LimitedRAM):
+    """The limited mount handing each file's matching lines over itself."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[str] = []
+
+    async def lines_containing(self, path, text, *, ignore_case):
+        self.asked.append(path.virtual)
+        data = await self.read(path)
+        return b"".join(
+            line
+            for line in data.splitlines(keepends=True)
+            if text.encode() in line
+        )
+
+
 def _limited(cls: type[LimitedRAM], files: int) -> LimitedRAM:
     vfs = cls()
     vfs._store.dirs.update({"/d", "/d/secret"})
@@ -3099,6 +3116,7 @@ GLOB_REFUSED = (
             f"bash: {GLOB_REFUSED}\n",
         ),
         ("cat /ram/d/a*", "a\na\n", ""),
+        ("echo /ram/d/*/b.txt", "/ram/d/secret/b.txt\n", ""),
     ],
 )
 async def test_a_glob_past_the_full_scan_limit_is_refused(line, out, err):
@@ -3107,6 +3125,60 @@ async def test_a_glob_past_the_full_scan_limit_is_refused(line, out, err):
         assert (await result.stdout_str(), await result.stderr_str()) == (
             out,
             err,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_named_file_counts_nothing_against_a_walk():
+    vfs = LimitedRAM()
+    vfs._store.dirs.add("/d")
+    for i in range(2):
+        vfs._store.files[f"/d/a{i}.txt"] = b"a\n"
+    with Workspace({"/ram/": vfs}) as ws:
+        out = await ws.shell("grep -r a /ram/d /ram/d/a0.txt")
+        assert (
+            await out.stdout_str(),
+            await out.stderr_str(),
+            out.exit_code,
+        ) == ("/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n/ram/d/a0.txt:a\n", "", 0)
+
+
+@pytest.mark.asyncio
+async def test_lines_a_search_hands_over_count_against_the_limit():
+    vfs = LinedRAM()
+    vfs._store.dirs.add("/d")
+    for i in range(4):
+        vfs._store.files[f"/d/f{i}.txt"] = b"hello\nother\n"
+    with Workspace({"/ram/": vfs}) as ws:
+        out = await ws.shell("grep -r hello /ram/d")
+        assert (await out.stdout_str(), out.stderr, out.exit_code) == (
+            "/ram/d/f0.txt:hello\n/ram/d/f1.txt:hello\n",
+            b"grep: /ram/d: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n",
+            2,
+        )
+    assert vfs.asked == ["/ram/d/f0.txt", "/ram/d/f1.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sort", ["path", "modified"])
+async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
+    top = RAMVFS(full_scan_limit=-1)
+    top._store.files["/t.txt"] = b"hello\n"
+    remote = RAMVFS(full_scan_limit=2)
+    for i in range(4):
+        remote._store.files[f"/r{i}.txt"] = b"hello\n"
+    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+        out = await ws.shell(f"rg --sort {sort} -l hello /a")
+        assert (
+            sorted((await out.stdout_str()).splitlines()),
+            out.stderr,
+            out.exit_code,
+        ) == (
+            ["/a/remote/r0.txt", "/a/remote/r1.txt", "/a/t.txt"],
+            b"rg: /a/remote: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n",
+            2,
         )
 
 
@@ -3120,6 +3192,24 @@ async def test_a_copy_past_the_full_scan_limit_is_refused(cls):
             b"tar: more than 2 files in scope (full_scan_limit); "
             b"narrow the path\n",
             1,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_a_copy_counts_no_file_a_nested_mount_covers(cls):
+    vfs = cls()
+    vfs._store.dirs.update({"/d", "/d/sub"})
+    vfs._store.files["/d/x.txt"] = b"x\n"
+    for i in range(3):
+        vfs._store.files[f"/d/sub/c{i}.txt"] = b"c\n"
+    with Workspace(
+        {"/ram/": vfs, "/ram/d/sub/": RAMVFS()}, mode=MountMode.WRITE
+    ) as ws:
+        out = await ws.shell("tar -cf /ram/d.tar /ram/d; tar -tf /ram/d.tar")
+        assert (await out.stdout_str(), out.exit_code) == (
+            "ram/d/\nram/d/sub/\nram/d/x.txt\n",
+            0,
         )
 
 

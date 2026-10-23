@@ -119,11 +119,13 @@ async def _stat_of(dispatch: DispatchFn, path: PathSpec) -> FileStat:
 
 
 async def expand_glob(
-    dispatch: DispatchFn | None, mount: MountEntry, paths: list[PathSpec]
+    dispatch: DispatchFn | None,
+    mount: MountEntry,
+    paths: list[PathSpec],
+    limit: int,
 ) -> list[PathSpec]:
     """Expand pattern specs on one mount, one at a time, through the
-    dispatcher's listing and stat, refused past the mount's
-    ``full_scan_limit``.
+    dispatcher's listing and stat, refused past ``limit`` matches.
 
     A mount that lists nothing, or no dispatcher (a registry no workspace
     wired one into), leaves every word as typed. Each word is keyed below
@@ -133,13 +135,14 @@ async def expand_glob(
         dispatch (DispatchFn | None): the workspace's dispatcher.
         mount (MountEntry): the mount owning the words.
         paths (list[PathSpec]): the words, pattern specs among them.
+        limit (int): the most matches one word may have; -1 for any.
     """
     if dispatch is None or not mount.answers("readdir"):
         return list(paths)
     prefix = mount.prefix.rstrip("/")
     resolve = make_resolve_glob(
         functools.partial(_listing, dispatch),
-        mount.vfs.full_scan_limit,
+        limit,
         functools.partial(_stat_of, dispatch),
     )
     out: list[PathSpec] = []
@@ -329,7 +332,9 @@ async def _level_matches(
         resolved=False,
     )
     try:
-        matches = await expand_glob(registry.dispatch, owner, [spec])
+        # One step of a walk is not the word's expansion, which
+        # resolve_globs limits once the walk is done.
+        matches = await expand_glob(registry.dispatch, owner, [spec], -1)
     except OSError:
         # This parent is not a listable directory; bash skips it during
         # descent. A nested mount root or a link under it is still real.
@@ -704,7 +709,7 @@ async def resolve_globs(
                     # means no match and every spec returned is one.
                     resolved = _merge_namespace(
                         await expand_glob(
-                            registry.dispatch, mount, [item.dir]
+                            registry.dispatch, mount, [item.dir], -1
                         ),
                         _namespace_children(
                             registry, links, directory, pattern
@@ -722,9 +727,10 @@ async def resolve_globs(
                             kept.append(p)
                     resolved = kept
                 if 0 <= mount.vfs.full_scan_limit < len(resolved):
-                    raise GlobLimitError(
-                        typed.raw_path, mount.vfs.full_scan_limit
+                    refused = GlobLimitError(
+                        unmark_globs(typed.raw_path), mount.vfs.full_scan_limit
                     )
+                    raise TooManyMatches(str(refused))
                 if not resolved:
                     # bash's three answers to a zero-match glob: the
                     # literal word (default), nothing at all under
@@ -751,13 +757,6 @@ async def resolve_globs(
                             spelled, raw_path=spelled.raw_path + "/"
                         )
                     result.append(spelled)
-            except GlobLimitError as exc:
-                # A walk lists level by level, so the word typed is the
-                # one named.
-                refused = GlobLimitError(
-                    unmark_globs(typed.raw_path), exc.limit
-                )
-                raise TooManyMatches(str(refused)) from exc
             except (ValueError, AttributeError, TypeError):
                 result.append(typed)
         elif isinstance(item, PathSpec):

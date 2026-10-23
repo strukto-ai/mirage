@@ -71,7 +71,7 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
-from mirage.commands.errors import ScanLimitError
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -238,13 +238,14 @@ async def run_search(
             assert rg is not None and walk is not None
             warnings: list[str] = []
             stopped: set[str] = set()
-            taken: dict[str, int] = {}
+            budgets = {p.virtual: ScanBudget(p, mounts) for p in paths}
+            reported: set[str] = set()
 
             def charged(h: Haystack) -> bool:
                 # The plan hands each file over alone, which no search
-                # narrows, so a walk stops at its operand's mount's
-                # full_scan_limit here; a listing reads none.
-                if h.spec is not None or rg.list_files or mounts is None:
+                # narrows, so each file counts here against the mount
+                # serving it; a listing reads none.
+                if h.spec is not None or rg.list_files:
                     return True
                 root = next(
                     (
@@ -254,16 +255,17 @@ async def run_search(
                     ),
                     None,
                 )
-                if root is None or mounts.full_scan_limit is None:
+                if root is None:
                     return True
-                limit = mounts.full_scan_limit(root.virtual)
-                count = taken.get(root.virtual, 0)
-                if limit < 0 or count < limit:
-                    taken[root.virtual] = count + 1
+                budget = budgets[root.virtual]
+                if budget.spend(h.virtual):
                     return True
-                if root.virtual not in stopped:
+                for line in budget.stopped:
+                    if line not in reported:
+                        reported.add(line)
+                        warnings.append(f"rg: {line}")
+                if not budget.opens(root.virtual):
                     stopped.add(root.virtual)
-                    warnings.append(f"rg: {ScanLimitError(root, limit)}")
                 return False
 
             resolver = (

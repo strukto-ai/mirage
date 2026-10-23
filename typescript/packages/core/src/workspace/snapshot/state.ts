@@ -426,8 +426,15 @@ export function buildMountArgs(
       )
     }
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
+    // A `ram` or `disk` mount restores into RAM holding the limit it was
+    // saved with, as Python's `_construct_vfs` passes it to the class.
+    const saved = (m.vfs_state as VFSStateBase).config as { full_scan_limit?: unknown } | undefined
+    const limit = saved?.full_scan_limit
     mountArgs[m.prefix] = new Mount(
-      placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
+      placed !== null
+        ? placed.vfs
+        : ((override as BaseVFS | undefined) ??
+            new RAMVFS(typeof limit === 'number' ? { fullScanLimit: limit } : {})),
       {
         mode: m.mode as MountMode,
         read,

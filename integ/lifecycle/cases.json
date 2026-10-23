@@ -6786,6 +6786,17 @@
         },
         {
           "op": "exec",
+          "command": "echo /data/d/*/c.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/d/sub/c.txt\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
           "command": "rm -r /data/d; echo rc=$?; ls /data/d",
           "expect": {
             "value": {
