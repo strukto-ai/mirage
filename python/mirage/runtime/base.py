@@ -139,6 +139,7 @@ class Runtime(ABC, Generic[E]):
         *,
         kind: ExecutionKind = "code",
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Run once, as the session the bound workspace captures.
 
@@ -156,6 +157,7 @@ class Runtime(ABC, Generic[E]):
                 process.
             output (OutputFn | None): where a streamed process writes
                 its output; None collects it in the result.
+            errors (OutputFn | None): the same for its stderr.
         """
         release = self.admit()
         try:
@@ -173,7 +175,7 @@ class Runtime(ABC, Generic[E]):
             engine = await self.engine()
             if capture is None:
                 return await self._run(
-                    kind, engine, list(paths), list(texts), ctx, output
+                    kind, engine, list(paths), list(texts), ctx, output, errors
                 )
             run_ctx = replace(
                 ctx,
@@ -192,7 +194,13 @@ class Runtime(ABC, Generic[E]):
             token = bind_caller(capture.caller)
             try:
                 return await self._run(
-                    kind, engine, list(paths), list(texts), run_ctx, output
+                    kind,
+                    engine,
+                    list(paths),
+                    list(texts),
+                    run_ctx,
+                    output,
+                    errors,
                 )
             finally:
                 reset_caller(token)
@@ -207,6 +215,7 @@ class Runtime(ABC, Generic[E]):
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         """Hand the run to the capability its kind asks for.
 
@@ -217,6 +226,7 @@ class Runtime(ABC, Generic[E]):
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
             output (OutputFn | None): a streamed process's output.
+            errors (OutputFn | None): a streamed process's stderr.
         """
         if kind == "process" and not texts:
             raise ValueError("process argv must not be empty")
@@ -225,7 +235,9 @@ class Runtime(ABC, Generic[E]):
         if kind == "line" and isinstance(self, LineExecutorMixin):
             return await self.run_line(engine, paths, texts, ctx)
         if kind == "process" and isinstance(self, ProcessExecutorMixin):
-            return await self.run_process(engine, paths, texts, ctx, output)
+            return await self.run_process(
+                engine, paths, texts, ctx, output, errors
+            )
         raise UnsupportedExecutionError(
             f"{self.name}: {kind} execution is unsupported"
         )

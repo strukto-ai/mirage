@@ -54,6 +54,7 @@ async def run_cli(
     env: dict[str, str] | None = None,
     children: Children | None = None,
     output: Callable[[bytes], Awaitable[None]] | None = None,
+    errors: Callable[[bytes], Awaitable[None]] | None = None,
     direct: bool = False,
 ) -> tuple[bytes, bytes, int]:
     """One process run to its end: its output and its exit status.
@@ -84,6 +85,8 @@ async def run_cli(
             runs, for ``close_children``.
         output (Callable[[bytes], Awaitable[None]] | None): receives
             stdout as it arrives instead of returning it.
+        errors (Callable[[bytes], Awaitable[None]] | None): receives
+            stderr as it arrives instead of returning it.
         direct (bool): the child is the program itself, not a client
             that runs it elsewhere and exits on its own terms (``docker
             exec`` answers a TERM with 0 and leaves the program running).
@@ -133,16 +136,6 @@ async def run_cli(
         finally:
             process.stdin.close()
 
-    async def read_stdout() -> bytes:
-        parts: list[bytes] = []
-        assert process.stdout is not None
-        while chunk := await process.stdout.read(STREAM_LIMIT):
-            if output is None:
-                parts.append(chunk)
-            else:
-                await output(chunk)
-        return b"".join(parts)
-
     feeding = asyncio.create_task(feed())
 
     async def reap() -> None:
@@ -151,20 +144,20 @@ async def run_cli(
             feeding.cancel()
 
     waiting = asyncio.create_task(reap())
-    reading = asyncio.create_task(read_stdout())
-    errors = asyncio.create_task(process.stderr.read())
+    reading = asyncio.create_task(_read_into(process.stdout, output))
+    erring = asyncio.create_task(_read_into(process.stderr, errors))
     try:
         stdout, stderr, _, _ = await asyncio.gather(
-            reading, errors, feeding, waiting
+            reading, erring, feeding, waiting
         )
     except BaseException:
         runner = current_caller().process
         signum = runner.signal if runner is not None else None
         try:
             if signum is not None and signum != 9:
-                for reader in (reading, errors):
+                for reader in (reading, erring):
                     reader.cancel()
-                await asyncio.gather(reading, errors, return_exceptions=True)
+                await asyncio.gather(reading, erring, return_exceptions=True)
                 await end_tree(process, signum)
         finally:
             stop_tree(process, transport)
@@ -180,17 +173,38 @@ async def run_cli(
             runner.program_exited(code)
         raise
     finally:
-        for task in (feeding, reading, errors, waiting):
+        for task in (feeding, reading, erring, waiting):
             if not task.done():
                 task.cancel()
         await asyncio.gather(
-            feeding, reading, errors, waiting, return_exceptions=True
+            feeding, reading, erring, waiting, return_exceptions=True
         )
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
     return stdout, stderr, 128 - code if code < 0 else code
+
+
+async def _read_into(
+    stream: asyncio.StreamReader,
+    sink: Callable[[bytes], Awaitable[None]] | None,
+) -> bytes:
+    """Read a child's output to its end, handing each chunk to ``sink``
+    as it arrives, or keeping it all for the caller without one.
+
+    Args:
+        stream (asyncio.StreamReader): the child's stdout or stderr.
+        sink (Callable[[bytes], Awaitable[None]] | None): where each
+            chunk goes; None returns the whole output.
+    """
+    parts: list[bytes] = []
+    while chunk := await stream.read(STREAM_LIMIT):
+        if sink is None:
+            parts.append(chunk)
+        else:
+            await sink(chunk)
+    return b"".join(parts)
 
 
 async def _spawn(

@@ -12,13 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.write import write
+from mirage.core.redis.append import append_bytes
+from mirage.core.redis.write import write, write_stream
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -205,3 +207,70 @@ async def test_write_bytes_modified_uses_z_suffix(accessor):
     assert modified is not None
     assert modified.endswith("Z")
     assert "+00:00" not in modified
+
+
+def _spec(name: str) -> PathSpec:
+    return PathSpec(vfs_path=name, virtual=f"/{name}", directory=f"/{name}")
+
+
+async def _quiet(chunks: list[bytes], hold: asyncio.Event):
+    for chunk in chunks:
+        yield chunk
+    await hold.wait()
+
+
+async def _settle(read, want: bytes) -> bytes | None:
+    for _ in range(100):
+        got = await read()
+        if got == want:
+            return got
+        await asyncio.sleep(0.01)
+    return await read()
+
+
+# Each chunk is appended where it lands, so a reader watches a slow
+# program's log grow while it runs.
+@pytest.mark.asyncio
+async def test_a_streamed_write_shows_each_chunk_as_it_arrives(accessor):
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(accessor, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
+    )
+    read = lambda: accessor.store.get_file("/log")  # noqa: E731
+    assert await _settle(read, b"a\nb\n") == b"a\nb\n"
+    hold.set()
+    await writing
+    assert await accessor.store.get_file("/log") == b"a\nb\n"
+
+
+# A streamed append lands after what another appender added meanwhile.
+@pytest.mark.asyncio
+async def test_a_streamed_append_keeps_another_appenders_bytes(accessor):
+    await accessor.store.set_file("/log", b"start\n")
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(
+            accessor, _spec("log"), _quiet([b"mine\n"], hold), append=True
+        )
+    )
+    read = lambda: accessor.store.get_file("/log")  # noqa: E731
+    await _settle(read, b"start\nmine\n")
+    await append_bytes(accessor, _spec("log"), b"theirs\n")
+    hold.set()
+    await writing
+    assert await accessor.store.get_file("/log") == b"start\nmine\ntheirs\n"
+
+
+# An atomic write shows nothing until it ends whole.
+@pytest.mark.asyncio
+async def test_an_atomic_streamed_write_lands_at_its_end(accessor):
+    await accessor.store.set_file("/f", b"old")
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(accessor, _spec("f"), _quiet([b"new"], hold), atomic=True)
+    )
+    await asyncio.sleep(0.05)
+    assert await accessor.store.get_file("/f") == b"old"
+    hold.set()
+    await writing
+    assert await accessor.store.get_file("/f") == b"new"

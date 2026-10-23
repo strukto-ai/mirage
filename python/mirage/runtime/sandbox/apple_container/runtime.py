@@ -77,6 +77,7 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         args: list[str],
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """Run one container CLI invocation.
 
@@ -85,7 +86,12 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
             stdin (bytes | None): input delivered to the guest command.
         """
         return await run_cli(
-            "container", APPLE_CONTAINER_CLI_HINT, args, stdin, output=output
+            "container",
+            APPLE_CONTAINER_CLI_HINT,
+            args,
+            stdin,
+            output=output,
+            errors=errors,
         )
 
     async def connect(self) -> None:
@@ -144,12 +150,14 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         target = (await self._target(),)
         stdout, stderr, code = await self._container(
             exec_args(("exec", "-i"), target, env, cwd, argv),
             stdin=stdin,
             output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 

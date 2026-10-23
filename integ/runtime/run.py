@@ -218,6 +218,7 @@ class ProcessBox(Runtime[None], ProcessExecutorMixin[None]):
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         return RunResult(
             stdout=(json.dumps(texts, separators=(",", ":")) + "\n").encode(),

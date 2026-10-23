@@ -438,12 +438,15 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
  * the one a chain hands down is written beside it as
  * `IOResult.refusal` after the last method has spoken. `declared` is
  * the bound the command's own registration declared,
- * when the dispatch site knows it (e.g. a CLI leaf).
+ * when the dispatch site knows it (e.g. a CLI leaf). `native` is set when
+ * a native program a runtime runs produced it, writing as it goes, so a
+ * redirect writes it as it arrives.
  */
 export interface Producer {
   readonly command: string
   readonly prefixes: readonly string[]
   readonly declared: Limit | null
+  readonly native?: boolean
 }
 
 export type RefusalKind = 'deny' | 'pending' | 'failed'

@@ -124,28 +124,54 @@ const STREAM_OUTPUT_BUILTINS = new Set([
  * PipeRecorder.
  */
 class PipeRecorder extends Recorder {
-  writer: ByteWriter | null = null
+  // A channel `streamTo` binds goes into its file as it is written; two
+  // channels bound to one description share its writer, so they keep their
+  // order (`> f 2>&1`).
+  readonly writers = new Map<Channel, [FileDescription, ByteWriter]>()
   file: FileDescription | null = null
   failure: unknown = null
 
-  streamTo(file: FileDescription): void {
+  streamTo(file: FileDescription, channel: Channel = Channel.STDOUT): void {
+    for (const [held, writer] of this.writers.values()) {
+      if (held === file) {
+        this.writers.set(channel, [file, writer])
+        return
+      }
+    }
+    this.writers.set(channel, [
+      file,
+      new ByteWriter(async (source) => {
+        await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
+      }),
+    ])
+  }
+
+  private distinct(): [FileDescription, ByteWriter][] {
+    const seen = new Map<ByteWriter, [FileDescription, ByteWriter]>()
+    for (const [file, writer] of this.writers.values())
+      if (!seen.has(writer)) seen.set(writer, [file, writer])
+    return [...seen.values()]
+  }
+
+  private failed(file: FileDescription, error: unknown): void {
+    if (this.failure !== null) return
+    this.failure = error
     this.file = file
-    this.writer = new ByteWriter(async (source) => {
-      await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
-    })
   }
 
   async finishWriter(): Promise<void> {
-    try {
-      await this.writer?.finish()
-    } catch (error) {
-      if (error instanceof PipeClosed || isAborting(error)) throw error
-      this.failure = error
+    for (const [file, writer] of this.distinct()) {
+      try {
+        await writer.finish()
+      } catch (error) {
+        if (error instanceof PipeClosed || isAborting(error)) throw error
+        this.failed(file, error)
+      }
     }
   }
 
   async abort(): Promise<void> {
-    await this.writer?.abort()
+    for (const [, writer] of this.distinct()) await writer.abort()
   }
 
   constructor(
@@ -158,14 +184,16 @@ class PipeRecorder extends Recorder {
     super()
   }
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    if (channel === Channel.STDOUT && this.writer !== null) {
+    const live = this.writers.get(channel)
+    if (live !== undefined) {
+      const [file, writer] = live
       if (this.failure === null) {
         try {
-          await this.writer.write(data)
-          if (this.file !== null) this.file.offset += data.length
+          await writer.write(data)
+          file.offset += data.length
         } catch (error) {
           if (error instanceof PipeClosed || isAborting(error)) throw error
-          this.failure = error
+          this.failed(file, error)
         }
       }
       return
@@ -320,6 +348,35 @@ type Input = ByteSource | null | typeof UNREADABLE
  * its output, or straight through once it raised. When the program an `exec`
  * ran cannot write its output, that failure's status is the shell's.
  */
+/**
+ * Keep in its files what a cancelled command wrote, as a program a signal
+ * ends leaves its writes in them: the stream going to one is committed,
+ * and the output held for one is written. What was bound for the terminal
+ * goes nowhere, since the command's line or job has ended. Mirrors
+ * Python's `_keep_output`.
+ */
+async function keepOutput(
+  recorder: PipeRecorder,
+  outputs: Map<number, FdDest>,
+  dispatch: DispatchFn,
+  session: SessionState,
+): Promise<void> {
+  await recorder.finishWriter()
+  for (const [key, data] of await recorder.take()) {
+    const dest = key instanceof Inherited ? undefined : outputs.get(key === Channel.STDOUT ? 1 : 2)
+    if (!(dest instanceof FileDescription)) {
+      await discardStreams(data)
+      continue
+    }
+    try {
+      await writeDescription(dispatch, session, dest, data, false, true)
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      console.debug(`kept output not written: ${String(error)}`)
+    }
+  }
+}
+
 export async function handleRedirect(
   executeNode: ExecuteNodeFn,
   dispatch: DispatchFn,
@@ -644,6 +701,7 @@ async function runRedirects(
     }
   }
   let unwound: Unwinding | null = null
+  let cancelled: Error | null = null
   let refused = false
   let io = new IOResult()
   const saved = session.descriptors
@@ -695,7 +753,7 @@ async function runRedirects(
           // > d/f`) would read its own output back.
           if (
             !refused &&
-            STREAM_OUTPUT_BUILTINS.has(name) &&
+            (STREAM_OUTPUT_BUILTINS.has(name) || result[1].producer?.native === true) &&
             recorder.chunks.length === 0 &&
             target instanceof FileDescription &&
             files.includes(target) &&
@@ -707,6 +765,20 @@ async function runRedirects(
             ) === null
           )
             recorder.streamTo(target)
+          const errs = outputs.get(2)
+          // A program's stderr goes into its file as it is written too,
+          // with its stdout when both share one (`> f 2>&1`).
+          if (
+            !refused &&
+            result[1].producer?.native === true &&
+            recorder.chunks.length === 0 &&
+            errs instanceof FileDescription &&
+            files.includes(errs) &&
+            errs.source === null &&
+            !errs.pipe &&
+            (errs !== target || recorder.writers.has(Channel.STDOUT))
+          )
+            recorder.streamTo(errs, Channel.STDERR)
           const [, execIo] = await drained(recorder, ...result)
           io = execIo
           await recorder.finishWriter()
@@ -720,21 +792,24 @@ async function runRedirects(
       }
     }
   } catch (error) {
-    if (!isUnwinding(error)) {
+    if (isAborting(error)) {
+      cancelled = error as Error
+    } else if (!isUnwinding(error)) {
       await recorder.close()
       throw error
-    }
-    unwound = error
-    const output = await takeStdout(error)
-    if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
-    const own =
-      error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id
-    if (!own) {
-      const diagnostic = await takeStderr(error)
-      if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
+    } else {
+      unwound = error
+      const output = await takeStdout(error)
+      if (output.byteLength > 0) await recorder.emit(Channel.STDOUT, output)
+      const own =
+        error instanceof ExitSignal && error.expanding !== null && error.expanding === command?.id
+      if (!own) {
+        const diagnostic = await takeStderr(error)
+        if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
+      }
     }
   } finally {
-    await recorder.abort()
+    if (cancelled === null) await recorder.abort()
     Object.assign(session, held)
     leave()
     session.jobOutput = jobOutput
@@ -745,6 +820,10 @@ async function runRedirects(
       if (original !== undefined) session.descriptors.set(fd, original)
       else session.descriptors.delete(fd)
     }
+  }
+  if (cancelled !== null) {
+    await keepOutput(recorder, outputs, dispatch, session)
+    throw cancelled
   }
   let stdout: ByteSource | null = null
   route.recorder = new Recorder()

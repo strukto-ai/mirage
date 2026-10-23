@@ -150,6 +150,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         name = texts[0]
         cwd = ctx.cwd.virtual
@@ -185,6 +186,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
                 ctx.stdin,
                 cwd,
                 output,
+                errors,
             )
         except OSError as exc:
             reason = fs_strerror(exc) or errno.errorcode.get(
@@ -200,6 +202,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         stdin: ByteSource | None = None,
         cwd: str | None = None,
         output: Callable[[bytes], Awaitable[None]] | None = None,
+        errors: Callable[[bytes], Awaitable[None]] | None = None,
     ) -> RunResult:
         stdout, stderr, code = await run_cli(
             program,
@@ -210,6 +213,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             env={**self.config.env, **env},
             children=self._children,
             output=output,
+            errors=errors,
             direct=True,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)

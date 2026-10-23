@@ -37,7 +37,9 @@ class FakeSSHRuntime(SSHRuntime):
         super().__init__(**options)
         self.calls: list[tuple[str, bytes | None]] = []
 
-    async def _ssh(self, command, stdin, output=None, tagged=False):
+    async def _ssh(
+        self, command, stdin, output=None, errors=None, tagged=False
+    ):
         data = await materialize(stdin) if stdin is not None else None
         self.calls.append((command, data))
         if output is not None:

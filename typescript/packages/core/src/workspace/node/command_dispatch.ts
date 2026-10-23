@@ -939,7 +939,7 @@ async function routeArgv(
   const consumer = lookup(name, session, registry, routing)
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    return runExternal(argv, stdin, session, registry, routing, signal)
+    return runExternal(argv, stdin, session, registry, routing, signal, sink)
   }
 
   // Shell builtins. One lookup: every executor-run builtin word maps to

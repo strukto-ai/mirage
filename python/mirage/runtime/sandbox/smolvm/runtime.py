@@ -56,10 +56,16 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         args: list[str],
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """One smolvm CLI invocation; the seam tests override."""
         return await run_cli(
-            "smolvm", SMOLVM_CLI_HINT, args, stdin, output=output
+            "smolvm",
+            SMOLVM_CLI_HINT,
+            args,
+            stdin,
+            output=output,
+            errors=errors,
         )
 
     async def connect(self) -> None:
@@ -95,11 +101,13 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._smolvm(
             exec_args(self._head(), ("--",), env, cwd, argv),
             stdin=stdin,
             output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 

@@ -56,7 +56,7 @@ class ProcessProbe(Runtime, ProcessExecutorMixin):
         self.requests: list[SimpleNamespace] = []
 
     async def run_process(
-        self, engine, paths, texts, ctx, output
+        self, engine, paths, texts, ctx, output, errors=None
     ) -> RunResult:
         request = await _request(texts, ctx)
         self.requests.append(request)
@@ -71,7 +71,7 @@ class DelayedProcessProbe(ProcessProbe):
     cancelled = False
 
     async def run_process(
-        self, engine, paths, texts, ctx, output
+        self, engine, paths, texts, ctx, output, errors=None
     ) -> RunResult:
         self.requests.append(await _request(texts, ctx))
         try:
@@ -756,7 +756,7 @@ async def test_explicit_process_command_captures_reach_the_runtime(name, args):
 
 class FailingProcess(ProcessProbe):
     async def run_process(
-        self, engine, paths, texts, ctx, output
+        self, engine, paths, texts, ctx, output, errors=None
     ) -> RunResult:
         raise RuntimeError("provider unavailable")
 

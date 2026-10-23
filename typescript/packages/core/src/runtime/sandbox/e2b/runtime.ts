@@ -140,6 +140,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     signal?.throwIfAborted()
@@ -153,6 +154,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
       stdin: stdin !== null,
       timeoutMs: 0,
       ...(output !== null ? { onStdout: (text: string) => output(ENC.encode(text)) } : {}),
+      ...(errors !== null ? { onStderr: (text: string) => errors(ENC.encode(text)) } : {}),
     })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     const state = { exited: false }
@@ -210,7 +212,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     }
     return {
       stdout: output === null ? ENC.encode(result.stdout) : new Uint8Array(),
-      stderr: ENC.encode(result.stderr),
+      stderr: errors === null ? ENC.encode(result.stderr) : new Uint8Array(),
       exitCode: result.exitCode,
     }
   }

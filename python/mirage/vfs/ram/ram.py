@@ -34,6 +34,8 @@ from mirage.core.ram.stream import read_stream as _read_stream
 from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
 from mirage.core.ram.write import write as _write
+from mirage.core.ram.write import write_stream as _write_stream
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_FULL_SCAN_LIMIT
@@ -100,6 +102,14 @@ class RAMVFS(BaseVFS):
 
     async def append(self, path: PathSpec, data: bytes) -> None:
         await _append(self.accessor, path, data)
+
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await _write_stream(self.accessor, path, data, atomic=atomic)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await _write_stream(self.accessor, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         await _pwrite(self.accessor, path, data, offset)

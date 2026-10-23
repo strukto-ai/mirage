@@ -16,6 +16,7 @@ import asyncio
 import logging
 import shlex
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
@@ -34,6 +35,7 @@ from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
 from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
 from mirage.shell.bytes import encode_text
+from mirage.shell.console import Channel, JobConsole
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.command.run import admission_denial
@@ -51,8 +53,16 @@ async def run_external(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[Runtime[Any]],
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute one admitted program; its surrounding shell stays in Mirage."""
+    """Execute one admitted program; its surrounding shell stays in Mirage.
+
+    A program a process runtime streams writes its stderr into ``sink``
+    as it arrives, where the statement it runs in writes (a job's
+    console, a redirect, a compound body), so it lands beside its stdout
+    and stays when the program is stopped; without one it comes back in
+    the result.
+    """
     bindings = routing.bindings
     runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
@@ -82,6 +92,7 @@ async def run_external(
             env,
             registry,
             guard.timeout_seconds if guard is not None else None,
+            sink,
         )
 
     async def execute() -> RunResult:
@@ -123,6 +134,7 @@ def _stream_external(
     env: dict[str, str],
     registry: MountRegistry,
     timeout: float | None,
+    sink: JobConsole | None,
 ) -> tuple[ByteSource, IOResult, ExecutionNode]:
     """Keep a process and its deadline alive until its bounded output is closed."""
     pipe = BytePipe()
@@ -131,6 +143,7 @@ def _stream_external(
         producer=Producer(
             command=argv.name,
             prefixes=tuple(m.prefix for m in registry.mounts()),
+            native=True,
         )
     )
     io.output = state = OutputState()
@@ -150,6 +163,9 @@ def _stream_external(
                     Context(cwd=cwd, env=env, stdin=stdin),
                     "process",
                     pipe.write,
+                    partial(sink.emit, Channel.STDERR)
+                    if sink is not None
+                    else None,
                 ),
                 timeout,
                 argv.name,
@@ -209,6 +225,7 @@ async def _execute_program(
     ctx: Context,
     kind: ExecutionKind,
     output: OutputFn | None = None,
+    errors: OutputFn | None = None,
 ) -> RunResult:
     """Keep an ordinary launch failure within the command that caused it.
 
@@ -219,9 +236,12 @@ async def _execute_program(
         ctx (Context): the run's context.
         kind (ExecutionKind): a process or a line.
         output (OutputFn | None): where a streamed process writes.
+        errors (OutputFn | None): where it writes its stderr.
     """
     try:
-        return await runtime.execute([], texts, ctx, kind=kind, output=output)
+        return await runtime.execute(
+            [], texts, ctx, kind=kind, output=output, errors=errors
+        )
     except (CommandTimeoutError, MirageAbortError):
         raise
     except Exception as exc:

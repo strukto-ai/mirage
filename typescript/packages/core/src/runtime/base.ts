@@ -122,13 +122,13 @@ export abstract class Runtime<E = unknown> {
    * @param opts `kind`: code in the runtime's language (the default), a
    *   whole line (`sh -c` with `ctx.flags.c`), or a process; `output`:
    *   where a streamed process writes its output, absent to collect it in
-   *   the result.
+   *   the result; `errors`: the same for its stderr.
    */
   async execute(
     paths: readonly PathSpec[],
     texts: readonly string[],
     ctx: Context,
-    opts: { kind?: ExecutionKind; output?: OutputFn } = {},
+    opts: { kind?: ExecutionKind; output?: OutputFn; errors?: OutputFn } = {},
   ): Promise<RunResult> {
     const release = this.admit()
     try {
@@ -139,7 +139,7 @@ export abstract class Runtime<E = unknown> {
         return refusedRun(this.name, "runtime cannot enforce this session's file restrictions")
       const engine = await this.engine()
       if (capture === undefined)
-        return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output)
+        return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output, opts.errors)
       const { vfs, session } = capture.ctx
       const processes = ctx.processes ?? capture.ctx.processes
       const runCtx: Context = {
@@ -150,7 +150,7 @@ export abstract class Runtime<E = unknown> {
       if (vfs === undefined) delete runCtx.vfs
       else runCtx.vfs = vfs
       return await runWithCaller(capture.caller, () =>
-        this.runAs(kind, engine, [...paths], [...texts], runCtx, opts.output),
+        this.runAs(kind, engine, [...paths], [...texts], runCtx, opts.output, opts.errors),
       )
     } finally {
       release()
@@ -165,12 +165,13 @@ export abstract class Runtime<E = unknown> {
     texts: string[],
     ctx: Context,
     output: OutputFn | undefined,
+    errors: OutputFn | undefined,
   ): Promise<RunResult> {
     if (kind === 'process' && texts.length === 0) throw new Error('process argv must not be empty')
     if (kind === 'code') return this.run(engine, paths, texts, ctx)
     if (kind === 'line' && isLineExecutor(this)) return this.runLine(engine, paths, texts, ctx)
     if (kind === 'process' && isProcessExecutor(this))
-      return this.runProcess(engine, paths, texts, ctx, output)
+      return this.runProcess(engine, paths, texts, ctx, output, errors)
     throw new UnsupportedExecutionError(`${this.name}: ${kind} execution is unsupported`)
   }
 

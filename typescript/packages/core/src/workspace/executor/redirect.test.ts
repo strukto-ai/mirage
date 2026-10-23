@@ -15,7 +15,7 @@
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SharedInput } from '../../io/async_line_iterator.ts'
-import { DeviceInput, IOResult, materialize } from '../../io/types.ts'
+import { DeviceInput, IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -1182,6 +1182,12 @@ class RejectingVFS extends RAMVFS {
   }
   override pwrite(): Promise<void> {
     return Promise.reject(this.error)
+  }
+  override async writeStream(path: PathSpec, data: ByteSource): Promise<void> {
+    await this.write(path, await materialize(data))
+  }
+  override async appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+    await this.append(path, await materialize(data))
   }
 }
 

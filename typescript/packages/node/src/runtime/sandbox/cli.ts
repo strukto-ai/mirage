@@ -49,6 +49,8 @@ export interface CliOptions {
   // Where the child is kept while it runs, for `closeChildren`.
   children?: Set<ChildProcess>
   output?: (chunk: Uint8Array) => Promise<void>
+  // Receives stderr as it arrives instead of returning it.
+  errors?: (chunk: Uint8Array) => Promise<void>
   // The child is the program itself, not a client that runs it elsewhere
   // and exits on its own terms (`docker exec` answers a TERM with 0 and
   // leaves the program running).
@@ -154,31 +156,9 @@ export async function runCli(
   })()
   const out: Uint8Array[] = []
   const err: Uint8Array[] = []
-  // Past an abort the output is read and dropped, so a signal handler
-  // that writes is not held on a full pipe.
-  const reading = (async () => {
-    try {
-      for await (const chunk of child.stdout.iterator({ destroyOnReturn: false })) {
-        if (signal?.aborted === true) continue
-        if (options.output === undefined) out.push(chunk as Uint8Array)
-        else await abortable(options.output(chunk as Uint8Array), signal)
-      }
-    } catch (error) {
-      if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
-      debuglog('mirage')('process output closed: %s', error)
-      child.stdout.resume()
-    }
-  })()
-  const errors = (async () => {
-    try {
-      for await (const chunk of child.stderr)
-        if (signal?.aborted !== true) err.push(chunk as Uint8Array)
-    } catch (error) {
-      if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
-      debuglog('mirage')('process stderr closed: %s', error)
-    }
-  })()
-  const pumps = Promise.all([reading, errors, feeding])
+  const reading = readInto(child, child.stdout, options.output, out, signal)
+  const erring = readInto(child, child.stderr, options.errors, err, signal)
+  const pumps = Promise.all([reading, erring, feeding])
   try {
     await pumps
     const code = await exited
@@ -198,6 +178,32 @@ export async function runCli(
     else await closeQuietly(stdin)
     signal?.removeEventListener('abort', abort)
     children?.delete(child)
+  }
+}
+
+/**
+ * Read a child's output to its end, handing each chunk to `sink` as it
+ * arrives, or keeping it in `kept` without one. Past an abort the output is
+ * read and dropped, so a signal handler that writes is not held on a full
+ * pipe. Mirrors Python's `_read_into`.
+ */
+async function readInto(
+  child: ChildProcess,
+  stream: Readable,
+  sink: ((chunk: Uint8Array) => Promise<void>) | undefined,
+  kept: Uint8Array[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  try {
+    for await (const chunk of stream.iterator({ destroyOnReturn: false })) {
+      if (signal?.aborted === true) continue
+      if (sink === undefined) kept.push(chunk as Uint8Array)
+      else await abortable(sink(chunk as Uint8Array), signal)
+    }
+  } catch (error) {
+    if (!child.killed && child.signalCode === null && signal?.aborted !== true) throw error
+    debuglog('mirage')('process output closed: %s', error)
+    stream.resume()
   }
 }
 

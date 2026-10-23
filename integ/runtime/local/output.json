@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "local_program_output_reaches_its_file_as_it_runs_and_stays",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "@external"
+            ]
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "perl -e '$|=1; print qq(a\\nb\\nc\\n); sleep 60' > /ram/out & i=0; until [ \"$(wc -l < /ram/out)\" -ge 3 ] || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; [ \"$(wc -l < /ram/out)\" -ge 3 ] && echo live; kill %1; wait %1; echo $?; cat /ram/out",
+          "expect": {
+            "exit": 0,
+            "stdout": "live\n143\na\nb\nc\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "perl -e '$|=1; print STDERR qq(x\\ny\\n); sleep 60' 2> /ram/err & i=0; until [ \"$(wc -l < /ram/err)\" -ge 2 ] || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; [ \"$(wc -l < /ram/err)\" -ge 2 ] && echo live; kill %1; wait %1; cat /ram/err",
+          "expect": {
+            "exit": 0,
+            "stdout": "live\nx\ny\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "perl -e 'select(STDERR); $|=1; select(STDOUT); $|=1; print qq(o\\n); print STDERR qq(e\\n); sleep 60' > /ram/both 2>&1 & i=0; until [ \"$(wc -l < /ram/both)\" -ge 2 ] || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; [ \"$(wc -l < /ram/both)\" -ge 2 ] && echo live; kill %1; wait %1; sort /ram/both",
+          "expect": {
+            "exit": 0,
+            "stdout": "live\ne\no\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "timeout 1 perl -e '$|=1; print qq(a\\nb\\nc\\n); sleep 60' > /ram/cut; echo $?; cat /ram/cut",
+          "expect": {
+            "exit": 0,
+            "stdout": "124\na\nb\nc\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(echo one; sleep 60) > /ram/group & sleep 1; kill %1; wait %1; cat /ram/group",
+          "expect": {
+            "exit": 0,
+            "stdout": "one\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

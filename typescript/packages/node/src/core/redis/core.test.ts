@@ -32,7 +32,7 @@ import { stat } from '@struktoai/mirage-core/core/redis/stat'
 import { readStream } from '@struktoai/mirage-core/core/redis/stream'
 import { truncate } from '@struktoai/mirage-core/core/redis/truncate'
 import { unlink } from '@struktoai/mirage-core/core/redis/unlink'
-import { write } from '@struktoai/mirage-core/core/redis/write'
+import { write, writeStream } from '@struktoai/mirage-core/core/redis/write'
 
 async function listed(accessor: RedisAccessor, path: PathSpec): Promise<string[]> {
   const rows = await readdir(accessor, path)
@@ -74,6 +74,49 @@ describe.skipIf(skip)('core/redis ops', () => {
   it('writeBytes + read round-trip', async () => {
     await write(acc, spec('/hi.txt'), ENC.encode('hello'))
     expect(DEC.decode(await read(acc, spec('/hi.txt')))).toBe('hello')
+  })
+
+  // Each chunk is appended where it lands, so a reader watches a slow
+  // program's log grow; another appender's bytes stay; an atomic write
+  // shows nothing until it ends whole.
+  it('writeStream shows each chunk as it arrives and keeps other appends', async () => {
+    let release = (): void => undefined
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    async function* quiet(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('mine\n')
+      await hold
+    }
+    await write(acc, spec('/log'), ENC.encode('start\n'))
+    const writing = writeStream(acc, spec('/log'), quiet(), true)
+    let seen: Uint8Array | null = null
+    for (let i = 0; i < 100; i++) {
+      seen = await store.getFile('/log')
+      if (seen !== null && DEC.decode(seen) === 'start\nmine\n') break
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(DEC.decode(seen ?? new Uint8Array())).toBe('start\nmine\n')
+    await appendBytes(acc, spec('/log'), ENC.encode('theirs\n'))
+    release()
+    await writing
+    expect(DEC.decode((await store.getFile('/log')) ?? new Uint8Array())).toBe(
+      'start\nmine\ntheirs\n',
+    )
+  })
+
+  it('writeStream atomic lands only at its end', async () => {
+    let release = (): void => undefined
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    async function* quiet(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('new')
+      await hold
+    }
+    await write(acc, spec('/f'), ENC.encode('old'))
+    const writing = writeStream(acc, spec('/f'), quiet(), false, true)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('old')
+    release()
+    await writing
+    expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('new')
   })
 
   it('writeBytes fails when parent is missing', async () => {

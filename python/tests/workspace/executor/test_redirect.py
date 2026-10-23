@@ -22,6 +22,8 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.stream import materialize
+from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import FileStat, PathSpec
@@ -964,6 +966,14 @@ class RejectingVFS(RAMVFS):
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         raise self.error
+
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await self.write(path, await materialize(data))
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await self.append(path, await materialize(data))
 
 
 def _rejecting(vfs: RejectingVFS) -> Workspace:

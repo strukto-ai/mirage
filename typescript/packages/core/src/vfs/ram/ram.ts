@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RAMAccessor } from '../../accessor/ram.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { LOCAL_FULL_SCAN_LIMIT } from '../constants.ts'
@@ -26,7 +27,7 @@ import { read as devAwareRead, readRange as devAwareReadRange } from '../../core
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
 import { readStream as ramStream } from '../../core/ram/stream.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
-import { write as ramWrite } from '../../core/ram/write.ts'
+import { write as ramWrite, writeStream as ramWriteStream } from '../../core/ram/write.ts'
 import { appendBytes as ramAppend } from '../../core/ram/append.ts'
 import { pwrite as ramPwrite } from '../../core/ram/pwrite.ts'
 import { create as ramCreate } from '../../core/ram/create.ts'
@@ -120,6 +121,19 @@ export class RAMVFS extends BaseVFS {
     signal?: AbortSignal,
   ): Promise<void> {
     return ramAppend(this.accessor, path, data, signal)
+  }
+
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    atomic = false,
+  ): Promise<void> {
+    return ramWriteStream(this.accessor, path, data, false, signal, atomic)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    return ramWriteStream(this.accessor, path, data, true, signal)
   }
 
   override pwrite(

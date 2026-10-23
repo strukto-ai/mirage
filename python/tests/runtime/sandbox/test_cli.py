@@ -97,6 +97,20 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
 
 
+# stderr goes to its own callback as it arrives, as stdout goes to output.
+@pytest.mark.asyncio
+async def test_run_cli_streams_stderr_to_its_callback():
+    seen: list[bytes] = []
+
+    async def errors(chunk: bytes) -> None:
+        seen.append(chunk)
+
+    out, err, code = await run_cli(
+        "sh", None, ["-c", "echo o; echo e >&2; exit 3"], None, errors=errors
+    )
+    assert (out, err, b"".join(seen), code) == (b"o\n", b"", b"e\n", 3)
+
+
 @pytest.mark.asyncio
 async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
     held = asyncio.Event()

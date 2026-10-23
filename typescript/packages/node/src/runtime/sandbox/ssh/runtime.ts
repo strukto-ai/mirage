@@ -100,6 +100,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const result = await this.ssh(
@@ -108,6 +109,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       output,
       signal,
       env[EXEC_ID] !== undefined,
+      errors,
     )
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
@@ -125,6 +127,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
    *
    * @param tagged whether the command carries its run's `EXEC_ID`, so a
    *   cancelled run's reap stops it.
+   * @param errors receives stderr as it arrives, as `output` does stdout.
    */
   protected ssh(
     command: string,
@@ -132,6 +135,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     output: OutputFn | null = null,
     signal?: AbortSignal,
     tagged = false,
+    errors: OutputFn | null = null,
   ): Promise<CliResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
@@ -166,6 +170,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         const errs: Buffer[] = []
         let code: number | null = null
         let delivering = Promise.resolve()
+        let erring = Promise.resolve()
         stream.on('data', (chunk: Buffer) => {
           if (output === null) {
             out.push(chunk)
@@ -176,7 +181,16 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
             if (!state.done) stream.resume()
           }, fail)
         })
-        stream.stderr.on('data', (chunk: Buffer) => errs.push(chunk))
+        stream.stderr.on('data', (chunk: Buffer) => {
+          if (errors === null) {
+            errs.push(chunk)
+            return
+          }
+          stream.stderr.pause()
+          erring = errors(chunk).then(() => {
+            if (!state.done) stream.stderr.resume()
+          }, fail)
+        })
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
             c ??
@@ -186,7 +200,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         })
         stream.on('close', () => {
           state.closed = true
-          void delivering.then(() => {
+          void Promise.all([delivering, erring]).then(() => {
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)

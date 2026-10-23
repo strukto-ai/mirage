@@ -998,7 +998,9 @@ async def _route_argv(
     consumer = lookup(name, session, registry, routing)
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
-        return await run_external(argv, stdin, session, registry, routing)
+        return await run_external(
+            argv, stdin, session, registry, routing, sink
+        )
 
     # ── shell builtins ──────────────────────────
     # One lookup: every executor-run builtin word maps to a handler that

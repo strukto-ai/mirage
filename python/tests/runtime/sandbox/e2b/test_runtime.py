@@ -316,7 +316,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
 
     async def run() -> int:
         result = await runtime._exec_argv(
-            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None
+            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None, None
         )
         return result.exit_code
 
@@ -410,7 +410,7 @@ class MountingE2BRuntime(E2BRuntime):
         self.table: dict[str, str] = {}
         self.lines: list[str] = []
 
-    async def _exec_argv(self, argv, stdin, env, cwd, output):
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)

@@ -77,6 +77,7 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
     env: Record<string, string>,
     cwd: string,
     _output: OutputFn | null,
+    _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const data = stdin === null ? null : await materialize(stdin)

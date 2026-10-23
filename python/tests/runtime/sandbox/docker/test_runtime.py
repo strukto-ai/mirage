@@ -31,7 +31,7 @@ class FakeDockerRuntime(DockerRuntime):
         self.running = running
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _docker(self, args, stdin=None, output=None):
+    async def _docker(self, args, stdin=None, output=None, errors=None):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
@@ -137,7 +137,7 @@ class MountingDockerRuntime(FakeDockerRuntime):
         super().__init__(**options)
         self.table: dict[str, str] = {}
 
-    async def _docker(self, args, stdin=None, output=None):
+    async def _docker(self, args, stdin=None, output=None, errors=None):
         if args[-1] == "cat /proc/mounts":
             self.calls.append((list(args), stdin))
             rows = "".join(

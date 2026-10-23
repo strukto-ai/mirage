@@ -21,7 +21,8 @@ import { appendBytes } from './append.ts'
 import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
-import { write } from './write.ts'
+import { write, writeStream } from './write.ts'
+import { STREAM_PUBLISH_SECONDS } from './constants.ts'
 
 const ENC = new TextEncoder()
 
@@ -186,5 +187,77 @@ describe('core/ram mkdir destination parents', () => {
     const acc = mkAccessor()
     await mkdir(acc, mkPath('/d/sub'))
     expect(acc.store.dirs.has('/d/sub')).toBe(true)
+  })
+})
+
+const DEC = new TextDecoder()
+const settle = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, STREAM_PUBLISH_SECONDS * 3000))
+
+async function* quiet(chunks: string[], hold: Promise<void>): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) yield ENC.encode(chunk)
+  await hold
+}
+
+describe('writeStream', () => {
+  // A writer that goes quiet still shows what it wrote within the publish
+  // interval, so a reader watches a slow program's log grow.
+  it("shows a quiet writer's bytes", async () => {
+    const accessor = mkAccessor()
+    let release = (): void => undefined
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const writing = writeStream(accessor, mkPath('/log'), quiet(['a\n', 'b\n'], hold))
+    await settle()
+    expect(DEC.decode(accessor.store.files.get('/log'))).toBe('a\nb\n')
+    release()
+    await writing
+    expect(DEC.decode(accessor.store.files.get('/log'))).toBe('a\nb\n')
+  })
+
+  // A streamed append lands after what another appender added meanwhile.
+  it("keeps another appender's bytes", async () => {
+    const accessor = mkAccessor()
+    accessor.store.files.set('/log', ENC.encode('start\n'))
+    let release = (): void => undefined
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const writing = writeStream(accessor, mkPath('/log'), quiet(['mine\n'], hold), true)
+    await settle()
+    await appendBytes(accessor, mkPath('/log'), ENC.encode('theirs\n'))
+    release()
+    await writing
+    expect(DEC.decode(accessor.store.files.get('/log'))).toBe('start\nmine\ntheirs\n')
+  })
+
+  // An atomic write shows nothing until it ends whole.
+  it('lands an atomic write at its end', async () => {
+    const accessor = mkAccessor()
+    accessor.store.files.set('/f', ENC.encode('old'))
+    let release = (): void => undefined
+    const hold = new Promise<void>((resolve) => (release = resolve))
+    const writing = writeStream(
+      accessor,
+      mkPath('/f'),
+      quiet(['new'], hold),
+      false,
+      undefined,
+      true,
+    )
+    await settle()
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('old')
+    release()
+    await writing
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('new')
+  })
+
+  // A stream that fails keeps what it had delivered, as a disk file does.
+  it('keeps what arrived before the stream failed', async () => {
+    const accessor = mkAccessor()
+    async function* broken(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('kept\n')
+      await Promise.resolve()
+      throw new Error('source gone')
+    }
+    await expect(writeStream(accessor, mkPath('/f'), broken())).rejects.toThrow('source gone')
+    expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept\n')
   })
 })

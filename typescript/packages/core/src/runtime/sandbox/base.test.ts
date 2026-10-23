@@ -220,6 +220,7 @@ describe('RemoteSandbox', () => {
         env: Record<string, string>,
         cwd: string,
         _output?: unknown,
+        _errors?: unknown,
         signal?: AbortSignal,
       ): Promise<RunResult> {
         const result = await super.execArgv(argv, stdin, env, cwd)
@@ -266,6 +267,7 @@ describe('RemoteSandbox', () => {
         env: Record<string, string>,
         cwd: string,
         _output?: unknown,
+        _errors?: unknown,
         signal?: AbortSignal,
       ): Promise<RunResult> {
         const result = await super.execArgv(argv, stdin, env, cwd)
@@ -316,6 +318,7 @@ describe('RemoteSandbox', () => {
         env: Record<string, string>,
         cwd: string,
         _output?: unknown,
+        _errors?: unknown,
         signal?: AbortSignal,
       ): Promise<RunResult> {
         await super.execArgv(argv, stdin, env, cwd)

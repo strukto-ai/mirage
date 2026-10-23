@@ -369,6 +369,17 @@ export class UpstashRedisStore implements RedisStoreLike {
     }
   }
 
+  async appendFile(path: string, data: Uint8Array): Promise<void> {
+    const key = this.fk(path)
+    if (data.byteLength === 0) {
+      await this.command(['APPEND', key, ''])
+      return
+    }
+    for (let offset = 0; offset < data.byteLength; offset += this.maxRequestBytes) {
+      await this.raw('append', key, data.subarray(offset, offset + this.maxRequestBytes))
+    }
+  }
+
   async truncateFile(
     path: string,
     length: number,

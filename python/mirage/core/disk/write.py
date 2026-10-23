@@ -81,7 +81,9 @@ async def write_stream(
                 except FileNotFoundError:
                     pass
                 target = Path(await run_blocking(stage))
-            f = await aiofiles.open(target, "ab" if append else "wb")
+            f = await aiofiles.open(
+                target, "ab" if append else "wb", buffering=0
+            )
         try:
             async with aclosing(chunks(data)) as source:
                 async for chunk in source:

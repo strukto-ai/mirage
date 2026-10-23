@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { record, startOp } from '../../observe/context.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -33,4 +35,42 @@ export async function write(
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', path.virtual, VFSName.REDIS, data.byteLength, timer)
+}
+
+/**
+ * Write bytes as they arrive, each chunk appended where it lands (`APPEND`),
+ * so a reader watches the file grow and another appender's bytes stay.
+ * `atomic` stages the replacement until it ends. Mirrors Python's
+ * `write_stream`.
+ */
+export async function writeStream(
+  accessor: RedisAccessor,
+  path: PathSpec,
+  data: ByteSource,
+  append = false,
+  atomic = false,
+): Promise<void> {
+  const timer = startOp()
+  const p = norm(path.mountPath)
+  const store = accessor.store
+  await checkDestParents(store, path, p)
+  await checkWriteTarget(store, path, p)
+  const op = append ? 'append' : 'write'
+  if (atomic) {
+    const whole = await materialize(data)
+    await store.setFile(p, whole)
+    await store.setModified(p, nowIso())
+    record(op, path.virtual, VFSName.REDIS, whole.byteLength, timer)
+    return
+  }
+  if (append) await store.appendFile(p, new Uint8Array())
+  else await store.setFile(p, new Uint8Array())
+  await store.setModified(p, nowIso())
+  let size = 0
+  for await (const chunk of chunks(data)) {
+    await store.appendFile(p, chunk)
+    await store.setModified(p, nowIso())
+    size += chunk.byteLength
+  }
+  record(op, path.virtual, VFSName.REDIS, size, timer)
 }
