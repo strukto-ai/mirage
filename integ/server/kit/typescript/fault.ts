@@ -138,7 +138,9 @@ function parsePlan(
     times: raw.times === undefined ? 1 : count(raw.times, 'times', 1, Number.MAX_SAFE_INTEGER),
     delayMs: raw.delay_ms === undefined ? 0 : count(raw.delay_ms, 'delay_ms', 0, MAX_DELAY_MS),
   }
-  if (raw.status !== undefined) plan.status = count(raw.status, 'status', 100, 599)
+  // A 1xx is never the final answer, so a plan carrying one would leave the
+  // client waiting on a response that never comes.
+  if (raw.status !== undefined) plan.status = count(raw.status, 'status', 200, 599)
   if (plan.status === undefined && raw.delay_ms === undefined) {
     throw new FaultError('a fault plan needs a status, a delay_ms, or both')
   }

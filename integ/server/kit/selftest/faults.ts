@@ -159,6 +159,7 @@ export async function runFaultTests(): Promise<void> {
         'body',
       ],
       [{ plans: [{ method: 'GET', route: '/boards/:board/cards', status: 700 }] }, 'status'],
+      [{ plans: [{ method: 'GET', route: '/boards/:board/cards', status: 103 }] }, 'interim'],
       [{ plans: [{ method: 'GET', route: '/boards/:board/cards', delay_ms: 2 ** 31 }] }, 'delay'],
       [
         { plans: [{ method: 'GET', route: '/boards/:board/cards', times: 0, status: 500 }] },
