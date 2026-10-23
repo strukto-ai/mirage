@@ -19,7 +19,6 @@ from operator import itemgetter
 from typing import Any
 
 from mirage.context import reset_program_invocation, set_program_invocation
-from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import PipeInput, SharedInput, share
@@ -751,7 +750,11 @@ async def _append(dispatch: DispatchFn, target: str, data: ByteSource) -> None:
     scope = _to_scope(target)
     try:
         await dispatch("append", scope, data=data)
-    except FS_ERRORS as exc:
+    except PipeClosed:
+        raise
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
         logger.debug("exec write failed for %s: %s", target, exc)
 
 

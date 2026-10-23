@@ -30,7 +30,7 @@ import {
 import { Channel } from '../../../../shell/console/index.ts'
 import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
-import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
+import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
@@ -559,7 +559,8 @@ async function append(dispatch: DispatchFn, target: string, data: ByteSource): P
   try {
     await dispatch('append', scope, [data])
   } catch (err) {
-    if (!isFsError(err)) throw err
+    if (err instanceof PipeClosed || isAborting(err)) throw err
+    console.debug(`exec write failed for ${target}: ${String(err)}`)
   }
 }
 

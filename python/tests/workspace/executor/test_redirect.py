@@ -24,7 +24,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.types import CommandTimeoutError
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.redirect import JobRoute
 from mirage.workspace.session.session import SessionState
@@ -924,16 +924,27 @@ class RejectingVFS(RAMVFS):
         error (Exception): what an upload fails with.
         empty_ok (bool): an empty upload (the open) lands.
         reads (bool): reads fail with it too.
+        stats (bool): stats fail with it too.
     """
 
     def __init__(
-        self, error: Exception, empty_ok: bool = False, reads: bool = False
+        self,
+        error: Exception,
+        empty_ok: bool = False,
+        reads: bool = False,
+        stats: bool = False,
     ):
         super().__init__()
         self._store.files["/r.txt"] = b"old\n"
         self.error = error
         self.empty_ok = empty_ok
         self.reads = reads
+        self.stats = stats
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        if self.stats:
+            raise self.error
+        return await super().stat(path)
 
     async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         if self.reads:
@@ -1066,5 +1077,42 @@ async def test_a_timeout_on_upload_still_ends_the_line(line: str):
         io = await ws.shell(line)
         assert io.exit_code == 124
         assert await io.stdout_str() == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_store_refusing_the_noclobber_probe_fails_its_redirect():
+    # bash 5.2: `set -C; echo x > f` refuses an existing f on the
+    # command alone, with status 1, and the list goes on.
+    ws = _rejecting(
+        RejectingVFS(RuntimeError("stat refused: 503"), stats=True)
+    )
+    try:
+        io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
+        assert (await io.stdout_str(), await io.stderr_str()) == (
+            "s=1\n",
+            "/data/r.txt: stat refused: 503\n",
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_exec_whose_diagnostic_cannot_be_written_still_goes_on():
+    # bash 5.2 writes the diagnostic of `exec 2>e 3>bad` into e, then
+    # goes on with the line; a store refusing that write loses only it.
+    ws = Workspace(
+        {
+            "/data": RejectingVFS(
+                RuntimeError("upload refused: 503"), empty_ok=True
+            ),
+            "/bad": RejectingVFS(RuntimeError("upload refused: 503")),
+        },
+        mode=MountMode.WRITE,
+    )
+    try:
+        io = await ws.shell("exec 2>/data/e 3>/bad/r.txt; echo after")
+        assert (io.exit_code, await io.stdout_str()) == (0, "after\n")
     finally:
         await ws.close()

@@ -1342,7 +1342,9 @@ async def _stat_type(dispatch: DispatchFn, scope: PathSpec) -> FileType | None:
     """
     try:
         stat, _ = await dispatch("stat", scope)
-    except FS_ERRORS as exc:
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
         logger.debug(
             "redirect probe found nothing at %s: %s", scope.raw_path, exc
         )
@@ -1426,6 +1428,10 @@ async def _open_refusal(
                     exc,
                 )
                 stat = None
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
+                return _redirect_failure(scope, exc)
             exists = stat is not None and stat.type in (
                 FileType.FILE,
                 FileType.DIRECTORY,

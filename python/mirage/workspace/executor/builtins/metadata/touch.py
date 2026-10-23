@@ -18,7 +18,6 @@ from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
 from mirage.commands.spec.usage import invalid_argument_error, usage_hint
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK
-from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import (
     fs_strerror,
     is_aborting,
@@ -99,11 +98,13 @@ async def handle_touch(
     if isinstance(ref, PathSpec):
         try:
             ref_stat, _ = await dispatch("stat", ref)
-        except FS_ERRORS as exc:
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
             return fail(
                 "touch",
                 f"touch: failed to get attributes of "
-                f"'{ref.raw_path}': {fs_strerror(exc)}\n",
+                f"'{ref.raw_path}': {strerror_of(exc)}\n",
             )
         ref_time = ref_stat.modified
     try:
@@ -157,14 +158,20 @@ async def handle_touch(
         # GNU words that refusal ("setting times of") differently from
         # its create-path one ("cannot touch").
         slashed = target.raw_path.endswith("/")
-        refusal = await dot_refusal(
-            partial(dispatch_stat, dispatch), target, links.follow
-        )
+        refusal: Exception | None
+        try:
+            refusal = await dot_refusal(
+                partial(dispatch_stat, dispatch), target, links.follow
+            )
+        except Exception as exc:
+            if is_aborting(exc):
+                raise
+            refusal = exc
         if refusal is not None:
             action = "setting times of" if slashed else "cannot touch"
             errors.append(
                 f"touch: {action} '{target.raw_path}': "
-                f"{fs_strerror(refusal)}\n"
+                f"{strerror_of(refusal)}\n"
             )
             continue
         resolved = follow_operand(
@@ -179,10 +186,12 @@ async def handle_touch(
         if slashed:
             try:
                 await dispatch("stat", resolved)
-            except FS_ERRORS as exc:
+            except Exception as exc:
+                if is_aborting(exc):
+                    raise
                 errors.append(
                     f"touch: setting times of "
-                    f"'{target.raw_path}': {fs_strerror(exc)}\n"
+                    f"'{target.raw_path}': {strerror_of(exc)}\n"
                 )
                 continue
         try:

@@ -1159,9 +1159,14 @@ class RejectingVFS extends RAMVFS {
     private readonly error: Error,
     private readonly emptyOk = false,
     private readonly reads = false,
+    private readonly stats = false,
   ) {
     super()
     this.store.files.set('/r.txt', encode('old\n'))
+  }
+  override stat(path: PathSpec): Promise<FileStat> {
+    if (this.stats) return Promise.reject(this.error)
+    return super.stat(path)
   }
   override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
     if (this.reads) throw this.error
@@ -1232,6 +1237,36 @@ describe('a redirect the store refuses', () => {
         's=1\n',
         '/data/r.txt: download refused: 503\n',
       ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('fails only its command when the noclobber probe is refused', async () => {
+    // bash 5.2: `set -C; echo x > f` refuses an existing f on the command
+    // alone, with status 1, and the list goes on.
+    const ws = await rejecting(new RejectingVFS(new Error('stat refused: 503'), false, false, true))
+    try {
+      const io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
+      expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', '/data/r.txt: stat refused: 503\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('goes on when exec cannot write its own diagnostic', async () => {
+    // bash 5.2 writes the diagnostic of `exec 2>e 3>bad` into e, then goes
+    // on with the line; a store refusing that write loses only it.
+    const ws = new Workspace(
+      {
+        '/data': new RejectingVFS(new Error('upload refused: 503'), true),
+        '/bad': new RejectingVFS(new Error('upload refused: 503')),
+      },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const io = await ws.shell('exec 2>/data/e 3>/bad/r.txt; echo after')
+      expect([io.exitCode, io.stdoutText]).toEqual([0, 'after\n'])
     } finally {
       await ws.close()
     }

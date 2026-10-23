@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.errors.types import CommandTimeoutError
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -21,9 +21,15 @@ class _RejectingRAMVFS(RAMVFS):
     """RAM VFS whose upload fails with the store's own error, no
     ``OSError``: a Drive 503 or a botocore ``ClientError`` on commit."""
 
-    def __init__(self, error: Exception):
+    def __init__(self, error: Exception, stats: bool = False):
         super().__init__()
         self.error = error
+        self.stats = stats
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        if self.stats:
+            raise self.error
+        return await super().stat(path)
 
     async def write(self, path: PathSpec, data: bytes) -> None:
         raise self.error
@@ -108,3 +114,27 @@ async def test_touch_lets_a_timeout_on_upload_end_the_line():
     ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
     code, out, _ = await _run(ws, "touch /data/new.txt; echo after")
     assert (code, out) == (124, "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "stderr"),
+    [
+        (
+            "touch -r /data/ref.txt /data/new.txt",
+            "touch: failed to get attributes of '/data/ref.txt': "
+            "stat refused: 503\n",
+        ),
+        (
+            "touch /data/d/",
+            "touch: setting times of '/data/d/': stat refused: 503\n",
+        ),
+    ],
+)
+async def test_touch_reports_a_refused_stat_and_the_line_goes_on(
+    line: str, stderr: str
+):
+    vfs = _RejectingRAMVFS(RuntimeError("stat refused: 503"), stats=True)
+    ws = Workspace({"/data/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    code, out, err = await _run(ws, f'{line}; echo "s=$?"')
+    assert (code, out, err) == (0, "s=1\n", stderr)

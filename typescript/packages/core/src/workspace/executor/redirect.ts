@@ -1039,7 +1039,7 @@ async function statType(dispatch: DispatchFn, scope: PathSpec): Promise<FileType
   try {
     ;[stat] = await dispatch('stat', scope)
   } catch (err) {
-    if (!isFsError(err)) throw err
+    if (isAborting(err)) throw err
     console.debug(`redirect probe found nothing at ${scope.rawPath}: ${String(err)}`)
     return null
   }
@@ -1110,7 +1110,8 @@ async function openRefusal(
       try {
         ;[stat] = await dispatch('stat', scope)
       } catch (err) {
-        if (!isFsError(err)) throw err
+        if (isAborting(err)) throw err
+        if (!isFsError(err)) return redirectFailure(scope, err)
         stat = null
       }
       exists =

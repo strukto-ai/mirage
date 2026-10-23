@@ -103,8 +103,15 @@ class StatOnlyRAMVFS extends OverlayRAMVFS {
  * an S3 client's error on commit.
  */
 class RejectingRAMVFS extends OverlayRAMVFS {
-  constructor(private readonly error: Error) {
+  constructor(
+    private readonly error: Error,
+    private readonly stats = false,
+  ) {
     super()
+  }
+  override stat(path: PathSpec): Promise<FileStat> {
+    if (this.stats) return Promise.reject(this.error)
+    return super.stat(path)
   }
   override write(): Promise<void> {
     return Promise.reject(this.error)
@@ -274,6 +281,18 @@ describe('chmod/chown/touch (namespace-routed metadata commands)', () => {
       "touch: cannot touch '/data/new.txt': upload refused: 503\n",
     ])
     expect(await run(ws, 'touch /data/new.txt 2>/dev/null || echo ran')).toEqual([0, 'ran\n', ''])
+    await ws.close()
+  })
+
+  it.each([
+    [
+      'touch -r /data/ref.txt /data/new.txt',
+      "touch: failed to get attributes of '/data/ref.txt': stat refused: 503\n",
+    ],
+    ['touch /data/d/', "touch: setting times of '/data/d/': stat refused: 503\n"],
+  ])('touch reports a refused stat and the line goes on: %s', async (line, stderr) => {
+    const [ws] = await makeOverlayWs({}, new RejectingRAMVFS(new Error('stat refused: 503'), true))
+    expect(await run(ws, `${line}; echo "s=$?"`)).toEqual([0, 's=1\n', stderr])
     await ws.close()
   })
 
