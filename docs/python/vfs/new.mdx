@@ -190,8 +190,9 @@ follow a link, create a name or run one at a time per path off them.
 Three effects are reserved for fixed names: `REMOVE` for `unlink`, `rmdir`
 and `rm_r`, `RENAME` for `rename`, and `COPY` for `copy` and `dir_copy`. The
 dispatcher handles these names specially. It removes a link instead of
-following it, refuses a rename that would bring hidden entries into view, and
-moves the links and cache below a moved, removed or copied directory. A custom
+following it, refuses a rename that would bring hidden entries into view,
+moves the links below a renamed directory and drops those below a removed
+one. A copy leaves the source's links behind. A custom
 function that declares a reserved effect raises `TypeError` when its class is defined.
 To delete, move or copy, define the function with the reserved name.
 

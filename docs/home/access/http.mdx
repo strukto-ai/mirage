@@ -496,7 +496,7 @@ applies. A failure before the first byte answers like a failed VFS call.
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/{name}`
 
 <ParamField body="path" type="string" required>The path the function acts on.</ParamField>
-<ParamField body="kwargs" type="object">The function's keyword arguments. Names that start with `_`, and dispatch arguments such as `session_id`, are refused with `400`.</ParamField>
+<ParamField body="kwargs" type="object">The function's keyword arguments, Python only: a TypeScript custom function takes none, so send `path` alone. Names that start with `_`, and dispatch arguments such as `session_id`, are refused with `400`.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
 Calls a function a mount's VFS declares beyond the built-in calls, such as one

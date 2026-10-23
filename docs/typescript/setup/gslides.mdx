@@ -53,7 +53,7 @@ const slides = new GSlidesVFS({
 | `refreshToken` | unset | User's refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
 | `apiBase` | Google's hosts | One host for every Google API and the OAuth token endpoint, such as a test server. |
-| `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive indexes a write with a delay, so a search can miss a file written moments ago. |
+| `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not its JSON, and indexes a write with a delay, so a file that holds the word can be left out; the [Python docs](/python/vfs/gslides#grep-and-rg) list the cases. |
 
 ## Mount mode
 

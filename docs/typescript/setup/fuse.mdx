@@ -102,7 +102,7 @@ field:
 | `workspace` (default) | Lives only inside mirage's own filesystem, reached through the command surface. Nothing is registered with the kernel. |
 | `fuse` | Also exposed as a real mountpoint via FUSE. |
 | `fskit` | Also exposed as a real mountpoint via FSKit, with no kernel extension. macOS 15.4+ only; see below. |
-| `nfs` | Also exposed as a real mountpoint through the operating system's NFS client: mirage serves NFSv3 on a local port and runs the system `mount`, so no FUSE install is needed. Linux and macOS; Linux needs root to mount. Read-only, and it serves only mounts that set `sizesAlwaysKnown`. |
+| `nfs` | Also exposed as a real mountpoint through the operating system's NFS client: mirage serves NFSv3 on a local port and runs the system `mount`, so no FUSE install is needed. Linux and macOS; Linux needs root to mount. Read-only. A mount that does not set `sizesAlwaysKnown` still mounts, with a warning, but its size-unknown files read as empty; use `fuse` for it. |
 
 A kernel-backed mount shows only that mount's subtree. `mountpoint` pins
 where it lands; omit it for a fresh temp directory:

@@ -75,7 +75,7 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 | `workspace` | Inside Mirage only, through the shell and file APIs. |
 | `fuse` | As a local folder through FUSE. |
 | `fskit` | As a local folder through FSKit, on macOS 15.4 or later. |
-| `nfs` | As a local folder through the operating system's NFS client. Mirage serves NFSv3 on a local port and runs the system `mount`, so nothing extra is installed. Linux and macOS; Linux needs root. Read-only, and it serves only mounts whose VFS always knows file sizes. |
+| `nfs` | As a local folder through the operating system's NFS client. Mirage serves NFSv3 on a local port and runs the system `mount`, so nothing extra is installed. Linux and macOS; Linux needs root. Read-only. A VFS that cannot size a file without reading it still mounts, with a warning, but those files read as empty; use `fuse` for it. |
 
 ## Read and write policies
 
