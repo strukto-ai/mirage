@@ -12,17 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { concatAggregate } from '@struktoai/mirage-core/commands/builtin/aggregators'
 import { CLI as CLIProgram, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { specOf } from '@struktoai/mirage-core/commands/spec/builtins'
-import { IOResult } from '@struktoai/mirage-core/io/types'
+import { type ByteSource, IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import { eacces } from '@struktoai/mirage-core/errors/fs'
+
+const OWN = new AsyncLocalStorage<boolean>()
 
 const GATE = {
   started: 0,
@@ -45,8 +49,10 @@ export class CommandService extends RAMVFS {
   }
 
   override commands(): readonly Command[] {
-    // The service's own handlers read its store as a stream, which the
-    // refusal below leaves alone; every other whole read reaches it.
+    // The service's own handlers read its store, collecting what they
+    // answer while they own it; every other read reaches the refusal below.
+    // One with no search of its own lets any read through. Mirrors Python's
+    // `_OWN`.
     const wrapped = ['grep', 'rev', 'rg']
       .filter((name) => !this.dropped.includes(name))
       .map((name) => generic(name))
@@ -97,7 +103,10 @@ export class CommandService extends RAMVFS {
             }
             return [stream(), new IOResult()]
           }
-          return original.fn(accessor, paths, texts, ctx)
+          return OWN.run(true, async () => {
+            const [out, io] = await original.fn(accessor, paths, texts, ctx)
+            return [out === null ? null : await materialize(out), io] as const
+          })
         },
       })
     })
@@ -142,7 +151,16 @@ export class CommandService extends RAMVFS {
     ]
   }
 
-  override read(path: PathSpec): Promise<Uint8Array> {
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+    signal?: AbortSignal,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (OWN.getStore() === true || this.dropped.length > 0) {
+      return super.read(path, handed, offset, size, signal)
+    }
     return Promise.reject(eacces(path))
   }
 

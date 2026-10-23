@@ -34,6 +34,7 @@ import {
   registerVfs,
   Workspace,
 } from "@struktoai/mirage-node";
+import { type ByteSource, materialize } from "@struktoai/mirage-core/io/types";
 import { mountedPath } from "@struktoai/mirage-core/utils/key_prefix";
 import { rstripSlash } from "@struktoai/mirage-core/utils/slash";
 
@@ -190,7 +191,7 @@ class WikiVFS extends PagesVFS {
     this.wiki = wiki;
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
     const parts = path.vfsPath.split("/").filter((p) => p !== "");
     const name = parts.pop() ?? "";
     let current: Tree = this.wiki.pages;
@@ -199,8 +200,7 @@ class WikiVFS extends PagesVFS {
       if (typeof next === "string") throw enotdir(path);
       current = next;
     }
-    current[name] = DEC.decode(data);
-    return Promise.resolve();
+    current[name] = DEC.decode(await materialize(data));
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {

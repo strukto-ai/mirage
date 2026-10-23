@@ -53,15 +53,16 @@ Subclass `BaseVFS` and define these functions over `PathSpec`:
 
 - `readdir`: return immediate child virtual paths in the format the installed
   example uses. Avoid fetching each child's contents just to list a directory.
-- `read`: return the exact bytes represented by a leaf. It also receives an
+- `read`: return the exact bytes represented by a leaf, or an async iterator
+  of them for a file too large to hold. It also receives an
   `offset` and `size`; leave `reads_ranges` / `readsRanges` false and Mirage
   cuts the window from the whole read.
 - `stat`: classify the entry and return its rendered byte length, or
   `None` / `null` when the length is unknown without reading it.
 
-Those three are the whole minimal VFS. Mirage derives streaming from `read`
-and existence from `stat`, and defaults to a remote resource. A derived stream
-still fetches the entire file; it is not a memory-efficient stream.
+Those three are the whole minimal VFS. Mirage collects a streamed `read` for a
+caller that needs the whole file, derives existence from `stat`, and defaults
+to a remote resource.
 
 Builtin backends define these same functions. Core functions need not inherit
 a class: call them from the methods and wrap client-specific arguments or
@@ -70,7 +71,7 @@ return values at the VFS boundary. The shared types live in `vfs/types`.
 Define more functions independently as the resource needs them. A function
 the VFS does not define answers `Operation not supported`:
 
-- `read_stream` / `readStream`, `exists`, `find`, and `du_size` with
+- `exists`, `find`, and `du_size` with
   `du_entries` / `duSize` with `duEntries` are native fast paths. They
   preserve the baseline read semantics. Set `reads_ranges` / `readsRanges`
   when `read` fetches only the asked window: `offset` plus `size` is an
@@ -89,6 +90,8 @@ the VFS does not define answers `Operation not supported`:
   `beforeFullScan` may raise to refuse a scan no search could narrow.
 - `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r` /
   `rmR`, `rename`, `copy`, `truncate`, and `setattr` are individual mutations.
+  `write` and `append` take bytes or an async iterator of them; `materialize`
+  collects one for a store that takes a single body.
   Defining `write` does not imply deletion, rename, or directory support;
   `append` and `pwrite` are built from `read` and `write` when the VFS does
   not define them. Mount mode still enforces which supported writes may
