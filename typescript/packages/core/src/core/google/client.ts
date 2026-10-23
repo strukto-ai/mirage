@@ -121,6 +121,7 @@ export const READ_RETRY: RetryPolicy = {
   delaySource: 'header',
   retryTransport: true,
   retryable: transient,
+  idempotent: true,
 }
 
 // Every other write retries only a rate-limit refusal. A 5xx or a dropped
@@ -130,6 +131,7 @@ export const WRITE_RETRY: RetryPolicy = {
   ...READ_RETRY,
   statuses: WRITE_RETRY_STATUSES,
   retryTransport: false,
+  idempotent: false,
 }
 
 export class GoogleApiError extends Error {

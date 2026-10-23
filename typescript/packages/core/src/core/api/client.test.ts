@@ -394,6 +394,21 @@ describe('retry delays', () => {
       apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, retry, sleep: noWait, json: {} }),
     ).rejects.toThrow('terminated')
     expect(fakeFetch).toHaveBeenCalledOnce()
+    const repeatable = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(dropped())
+      .mockResolvedValueOnce(jsonResponse({ ok: 7 }))
+    const idempotent: RetryPolicy = { ...retry, idempotent: true }
+    expect(
+      await apiRequest('POST', TARGET, {
+        errorOf,
+        fetchFn: repeatable,
+        retry: idempotent,
+        sleep: noWait,
+        json: {},
+      }),
+    ).toEqual({ ok: 7 })
+    expect(repeatable).toHaveBeenCalledTimes(2)
   })
 
   it('an injected sleep takes every wait, in seconds', async () => {

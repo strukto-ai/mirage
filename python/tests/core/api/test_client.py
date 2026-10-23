@@ -751,3 +751,54 @@ async def test_stream_never_retries_once_a_chunk_reached_the_caller(
     with pytest.raises(aiohttp.ServerDisconnectedError):
         await anext(source)
     assert session.get.call_count == 1
+
+
+async def _no_wait(seconds: float) -> None:
+    return None
+
+
+async def _answer_then_cut(request: web.Request) -> web.StreamResponse:
+    response = web.StreamResponse(headers={"Content-Length": "100"})
+    await response.prepare(request)
+    await response.write(b"{")
+    assert request.transport is not None
+    request.transport.close()
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "idempotent", "sent"),
+    [
+        ("GET", None, 3),
+        ("POST", None, 1),
+        ("POST", True, 3),
+        ("GET", False, 1),
+    ],
+)
+async def test_a_body_cut_short_is_resent_only_when_replayable(
+    method, idempotent, sent
+):
+    app = web.Application()
+    app.router.add_route("*", "/answer", _answer_then_cut)
+    hits: list[str] = []
+
+    @web.middleware
+    async def count(request: web.Request, handler):
+        hits.append(request.method)
+        return await handler(request)
+
+    app.middlewares.append(count)
+    retry = RetryPolicy(
+        max_retries=2, retry_transport=True, idempotent=idempotent
+    )
+    async with TestServer(app) as server:
+        with pytest.raises(aiohttp.ClientPayloadError):
+            await api_request(
+                method,
+                str(server.make_url("/answer")),
+                error_of=_error_of,
+                retry=retry,
+                sleep=_no_wait,
+            )
+    assert len(hits) == sent

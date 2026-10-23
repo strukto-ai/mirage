@@ -302,6 +302,16 @@ const WRITES: [string, Call][] = [
   ['updateValues', (tm) => updateValues(tm, 's1', 'A1', '[[1]]')],
 ]
 
+function dropped(): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError('terminated'))
+      },
+    }),
+  )
+}
+
 function serve(...replies: (Response | Error)[]): ReturnType<typeof vi.fn> {
   const fake = vi.fn()
   for (const r of replies) {
@@ -408,6 +418,28 @@ describe('google retry policy', () => {
       ['t', 60],
     )
     expect(waits).toEqual([3])
+  })
+
+  it('the token exchange and an upload start retry a body that drops', async () => {
+    serve(dropped(), reply(200, '{"access_token":"t","expires_in":60}'))
+    await expect(
+      refreshAccessToken({ clientId: 'c', refreshToken: 'r' }, tm.sleep),
+    ).resolves.toEqual(['t', 60])
+    const spool = new ByteSpool()
+    await spool.append(new TextEncoder().encode('abc'))
+    const fake = serve(
+      dropped(),
+      reply(200, '', { Location: 'https://example.test/upload' }),
+      reply(200, '{"id":"up"}'),
+    )
+    try {
+      await expect(
+        googleResumable(tm, 'POST', 'https://example.test/start', {}, spool, 'text/plain', {}),
+      ).resolves.toEqual({ id: 'up' })
+      expect(fake).toHaveBeenCalledTimes(3)
+    } finally {
+      await spool.close()
+    }
   })
 
   it('a resumable upload retries its start but not a chunk', async () => {

@@ -116,13 +116,17 @@ READ_RETRY = RetryPolicy(
     max_backoff=MAX_BACKOFF,
     retry_transport=True,
     retryable=transient,
+    idempotent=True,
 )
 
 # Every other write retries only a rate-limit refusal. A 5xx or a dropped
 # connection may come after the change landed, and a retried create,
 # append or upload chunk would apply it twice.
 WRITE_RETRY = replace(
-    READ_RETRY, statuses=WRITE_RETRY_STATUSES, retry_transport=False
+    READ_RETRY,
+    statuses=WRITE_RETRY_STATUSES,
+    retry_transport=False,
+    idempotent=False,
 )
 
 

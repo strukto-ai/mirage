@@ -94,6 +94,11 @@ class RetryPolicy:
             Airtable refuses every request for 30 seconds, so a shorter
             backoff only spends the retries inside the window.
             ``max_backoff`` still caps the result.
+        idempotent (bool | None): whether the calls this policy carries
+            may be sent again after the server answered, which is what a
+            transport retry does when a body drops mid-read. None decides
+            by method: GET and HEAD may, anything else may not, since an
+            answered write may have been applied.
     """
 
     statuses: frozenset[int] = frozenset()
@@ -103,6 +108,7 @@ class RetryPolicy:
     retry_transport: bool = False
     retryable: Callable[[int, str], bool] | None = None
     min_delays: Mapping[int, float] = field(default_factory=dict)
+    idempotent: bool | None = None
 
 
 NO_RETRY = RetryPolicy()
@@ -233,7 +239,7 @@ async def api_stream(
                                 yielded = True
                                 yield chunk
                         return
-            except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+            except _TRANSPORT:
                 if yielded or last or not retry.retry_transport:
                     raise
                 delay = min(2.0**attempt, retry.max_backoff)
@@ -283,6 +289,33 @@ class _RetryableStatus(Exception):
         super().__init__(f"retryable HTTP {resp.status}")
         self.resp = resp
         self.text = text
+
+
+# What a dropped connection, a body cut short and a timeout raise.
+_TRANSPORT = (
+    aiohttp.ClientConnectionError,
+    aiohttp.ClientPayloadError,
+    asyncio.TimeoutError,
+)
+
+
+class _Answered(Exception):
+    """A body that dropped after the server answered a request that may
+    not be sent again, carried past tenacity so no retry fires.
+
+    Args:
+        error (Exception): the transport failure, re-raised as it was.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _replayable(method: str, retry: RetryPolicy) -> bool:
+    if retry.idempotent is not None:
+        return retry.idempotent
+    return method.upper() in ("GET", "HEAD")
 
 
 def status_error(resp: aiohttp.ClientResponse, text: str) -> Exception:
@@ -397,16 +430,11 @@ def floored_delay(delay: float, status: int, retry: RetryPolicy) -> float:
 
 def _retry_condition(retry: RetryPolicy) -> Any:
     if retry.retry_transport:
-        # Connection failures and timeouts only (a total timeout raises
-        # asyncio.TimeoutError, not a ClientConnectionError): response-mapped
-        # errors raised by error_of must never come back for another attempt
-        return retry_if_exception_type(
-            (
-                _RetryableStatus,
-                aiohttp.ClientConnectionError,
-                asyncio.TimeoutError,
-            )
-        )
+        # Connection failures, a body cut short and timeouts only (a total
+        # timeout raises asyncio.TimeoutError, not a ClientConnectionError):
+        # response-mapped errors raised by error_of must never come back for
+        # another attempt
+        return retry_if_exception_type((_RetryableStatus, *_TRANSPORT))
     return retry_if_exception_type(_RetryableStatus)
 
 
@@ -461,44 +489,49 @@ async def _attempt(
             data=data,
         )
     async with request as resp:
-        if resp.status in retry.statuses:
+        try:
+            if resp.status in retry.statuses:
+                text = await resp.text()
+                if _worth_retrying(resp.status, text, retry):
+                    raise _RetryableStatus(resp, text)
+                raise error_of(resp, text)
+            if resp.status >= 400:
+                raise error_of(resp, await resp.text())
+            if read == "none":
+                return None
+            if read == "bytes":
+                return window_of(await resp.read(), resp.status, window)
+            if read == "bytes_response":
+                return ApiResponse(
+                    window_of(await resp.read(), resp.status, window),
+                    resp.status,
+                    lowered_headers(resp.headers),
+                )
+            if read == "text":
+                return await resp.text()
+            if read == "location":
+                return resp.headers.get("Location")
             text = await resp.text()
-            if _worth_retrying(resp.status, text, retry):
-                raise _RetryableStatus(resp, text)
-            raise error_of(resp, text)
-        if resp.status >= 400:
-            raise error_of(resp, await resp.text())
-        if read == "none":
-            return None
-        if read == "bytes":
-            return window_of(await resp.read(), resp.status, window)
-        if read == "bytes_response":
-            return ApiResponse(
-                window_of(await resp.read(), resp.status, window),
-                resp.status,
-                lowered_headers(resp.headers),
-            )
-        if read == "text":
-            return await resp.text()
-        if read == "location":
-            return resp.headers.get("Location")
-        text = await resp.text()
-        if not text:
-            # 204 and an empty 2xx have nothing to decode; the caller gets
-            # None rather than a parse error on a call that worked
-            data = None
-        elif read == "response":
-            try:
+            if not text:
+                # 204 and an empty 2xx have nothing to decode; the caller gets
+                # None rather than a parse error on a call that worked
+                data = None
+            elif read == "response":
+                try:
+                    data = json.loads(text)
+                except ValueError:
+                    data = text
+            else:
                 data = json.loads(text)
-            except ValueError:
-                data = text
-        else:
-            data = json.loads(text)
-        if read == "response":
-            return ApiResponse(
-                data, resp.status, lowered_headers(resp.headers)
-            )
-        return data
+            if read == "response":
+                return ApiResponse(
+                    data, resp.status, lowered_headers(resp.headers)
+                )
+            return data
+        except _TRANSPORT as exc:
+            if _replayable(method, retry):
+                raise
+            raise _Answered(exc) from exc
 
 
 async def api_request(
@@ -603,6 +636,8 @@ async def api_request(
             # retries ran dry: the final retryable response maps through
             # the same hook a plain error status does
             raise error_of(exhausted.resp, exhausted.text) from None
+        except _Answered as answered:
+            raise answered.error from None
     finally:
         if own:
             await sess.close()
