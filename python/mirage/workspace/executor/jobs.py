@@ -205,8 +205,11 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
     shell builtin a runtime cannot take (``eval``, ``source``), either of
     which keeps a shell between the job and the program, and which the
     signal ends. ``exec`` and ``command`` run the word after their
-    options in place, so that word is the one judged. A word an
-    expansion spells is not known before it runs, so it is not one.
+    options in place, so that word is the one judged; ``command -v``
+    only looks it up. A word an expansion spells, or one still quoting a
+    character (``e\\val``), is not known before it runs, and words that
+    run commands of their own (``$( )``) run them as the job, so neither
+    is one.
 
     Args:
         left (TSNodeLike): the job's command.
@@ -215,17 +218,20 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
     if not simple_command(left):
         return False
     invocations = command_invocations(left)
-    if not invocations:
+    if len(invocations) != 1:
         return False
     head, args = invocations[0]
     words = [head, *args]
     while words and words[0] in ("exec", "command"):
-        words = words[1:]
+        wrapper, words = words[0], words[1:]
         while words and words[0] is not None and words[0].startswith("-"):
+            if wrapper == "command" and set(words[0]) & {"v", "V"}:
+                return False
             words = words[2:] if words[0] == "-a" else words[1:]
     head = words[0] if words else None
     return (
         head is not None
+        and "\\" not in head
         and (head not in SHELL_NAMES or head in CAPTURABLE_BUILTINS)
         and head not in session.functions
     )

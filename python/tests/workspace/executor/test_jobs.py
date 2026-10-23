@@ -1260,3 +1260,34 @@ async def test_ps_refuses_in_procps_words(args, message):
         1,
         b"error: " + message + b"\n" + _PS_USAGE,
     )
+
+
+# A job is one program only when bash would run it as the program itself:
+# `exec` and `command` run their word in place; a function, `eval`, a
+# lookup, an escaped or expanded name, or a word that runs commands of its
+# own keeps a shell in between.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,simple",
+    [
+        ("prog", True),
+        ("exec prog", True),
+        ("command -p prog", True),
+        ("f() { prog; }; f", False),
+        ("eval prog", False),
+        ("command -v prog", False),
+        ("command e\\val prog", False),
+        ("prog $(echo 5)", False),
+        ("c=prog; $c", False),
+        ("{ prog; }", False),
+    ],
+)
+async def test_a_job_is_one_program_only_when_it_runs_one(line, simple):
+    ws = _workspace()
+    try:
+        await ws.shell(f"{line} &")
+        job = ws.job_table.get(1, ws.default_session_id)
+        assert job is not None
+        assert job.simple is simple
+    finally:
+        await ws.close()

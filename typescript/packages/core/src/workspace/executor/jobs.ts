@@ -180,21 +180,29 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
  * builtin a runtime cannot take (`eval`, `source`), either of which keeps a
  * shell between the job and the program, and which the signal ends. `exec`
  * and `command` run the word after their options in place, so that word is
- * the one judged. A word an expansion spells is not known before it runs,
- * so it is not one. Mirrors Python's `_one_program`.
+ * the one judged; `command -v` only looks it up. A word an expansion
+ * spells, or one still quoting a character (`e\val`), is not known before
+ * it runs, and words that run commands of their own (`$( )`) run them as
+ * the job, so neither is one. Mirrors Python's `_one_program`.
  */
 function oneProgram(left: TSNodeLike, session: SessionState): boolean {
   if (!simpleCommand(left)) return false
-  const first = commandInvocations(left)[0]
-  if (first === undefined) return false
+  const invocations = commandInvocations(left)
+  const first = invocations[0]
+  if (invocations.length !== 1 || first === undefined) return false
   let words = [first[0], ...first[1]]
   while (words[0] === 'exec' || words[0] === 'command') {
+    const wrapper = words[0]
     words = words.slice(1)
-    while (words[0]?.startsWith('-') === true) words = words.slice(words[0] === '-a' ? 2 : 1)
+    while (words[0]?.startsWith('-') === true) {
+      if (wrapper === 'command' && /[vV]/.test(words[0])) return false
+      words = words.slice(words[0] === '-a' ? 2 : 1)
+    }
   }
   const head = words[0] ?? null
   return (
     head !== null &&
+    !head.includes('\\') &&
     (!SHELL_NAMES.has(head) || CAPTURABLE_BUILTINS.has(head)) &&
     !Object.hasOwn(session.functions, head)
   )

@@ -756,3 +756,30 @@ it.each([
     `error: ${message}\n${PS_USAGE}`,
   ])
 })
+
+// A job is one program only when bash would run it as the program itself:
+// `exec` and `command` run their word in place; a function, `eval`, a
+// lookup, an escaped or expanded name, or a word that runs commands of its
+// own keeps a shell in between.
+describe('a job that is one program', () => {
+  it.each([
+    ['prog', true],
+    ['exec prog', true],
+    ['command -p prog', true],
+    ['f() { prog; }; f', false],
+    ['eval prog', false],
+    ['command -v prog', false],
+    ['command e\\val prog', false],
+    ['prog $(echo 5)', false],
+    ['c=prog; $c', false],
+    ['{ prog; }', false],
+  ] as const)('%s is one: %s', async (line, simple) => {
+    const ws = buildWs()
+    try {
+      await ws.shell(`${line} &`)
+      expect(ws.jobTable.get(1, ws.sessionManager.defaultId)?.simple).toBe(simple)
+    } finally {
+      await ws.close()
+    }
+  })
+})
