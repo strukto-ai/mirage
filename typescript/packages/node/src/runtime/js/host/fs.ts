@@ -989,8 +989,9 @@ export function patchNodeFs(ws: Workspace): () => void {
       if (path === null) return original(...args)
       // existsSync answers false where it cannot look, as node's does for
       // any path whose stat fails; the root of a mount the session sees
-      // is the one name it knows is there without asking.
-      if (name === 'exists') return ws.vfs.isMount(path)
+      // is the one name it knows is there without asking, unless a `..`
+      // in the spelling walks through a name it has not checked.
+      if (name === 'exists') return !path.split('/').includes('..') && ws.vfs.isMount(path)
       throw syncRefusal(`${name}Sync`, path)
     })
   }

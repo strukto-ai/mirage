@@ -563,6 +563,8 @@ describe('patchNodeFs — refusals', () => {
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
     expect(fs.existsSync('/data')).toBe(true)
+    expect(fs.existsSync('/data/.')).toBe(true)
+    expect(fs.existsSync('/data/missing/..')).toBe(false)
     expect(fs.existsSync('/vault')).toBe(false)
     await expect(fs.promises.rmdir('/vault')).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(fs.promises.rm('/vault', { recursive: true })).rejects.toMatchObject({
