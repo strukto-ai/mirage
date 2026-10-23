@@ -255,7 +255,7 @@ Runs a shell line as the session. With `stream: false` (the default), it collect
   Run the line on this workspace [runtime](/home/setup/runtime/overview) entry, by name, instead of the one routing picks. Throws for a name the workspace does not have.
 </ResponseField>
 <ResponseField name="sink" type="JobConsole">
-  Write the line's output to this console as each statement finishes. The result then carries the exit code with empty `stdout` and `stderr`. The caller calls `finish()` on the console.
+  Write the line's output to this console as each statement finishes. Cannot be combined with `stream: true`. The result then carries the exit code with empty `stdout` and `stderr`. The caller calls `finish()` on the console.
 </ResponseField>
 
 <Expandable title="ExecuteResult">

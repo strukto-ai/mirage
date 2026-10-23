@@ -105,7 +105,7 @@ exactly one of `cli` or `script`:
 | --- | --- |
 | `cli` | A registered CLI, such as `slack`. |
 | `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. |
-| `runtime` | The runtime entry that runs `script`. Unset picks the first runtime for the script's language. Only valid with `script`. |
+| `runtime` | The runtime entry that runs `script`. Unset runs it on the runtime that would run `python3`, or `node` for JavaScript, on the same line, including a `route_policy` choice. Only valid with `script`. |
 | `config` | Fields the CLI validates at install time. |
 
 ```yaml

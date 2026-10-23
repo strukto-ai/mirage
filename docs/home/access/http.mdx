@@ -487,8 +487,9 @@ refused it. The errno picks the status:
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
 Answers the file's bytes as `application/octet-stream`, read as the response is
-sent, so a large file never sits in the server's memory. A failure before the
-first byte answers like a failed VFS call.
+sent. The server reads the whole file into memory first when the backend has
+no streaming read, when the file is rendered, or when a `post_vfs` policy
+applies. A failure before the first byte answers like a failed VFS call.
 
 ### Call a custom function
 
