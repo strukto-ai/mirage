@@ -16,6 +16,7 @@ import ast
 import functools
 import importlib
 import inspect
+import logging
 import pkgutil
 from pathlib import Path
 from types import ModuleType
@@ -34,6 +35,8 @@ from mirage.core.gdrive.api import DriveClient
 from mirage.core.gmail.api import GmailClient
 from mirage.core.gsheets.api import SheetsClient
 from mirage.core.gslides.api import SlidesClient
+
+logger = logging.getLogger(__name__)
 
 CORE = Path(core_pkg.__file__).parent
 PACKAGES = ("gcal", "gdocs", "gdrive", "gmail", "google", "gsheets", "gslides")
@@ -90,7 +93,8 @@ def _takes_a_token_manager(value: Any) -> bool:
         return False
     try:
         params = inspect.signature(value).parameters.values()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        logger.debug("%r has no signature to read: %s", value, exc)
         return False
     return any("TokenManager" in str(p.annotation) for p in params)
 
