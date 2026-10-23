@@ -29,6 +29,7 @@ import { runAsProgram } from '../../../../context/session_context.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { ensureStream, yieldBytes } from '../../../../io/stream.ts'
+import { Channel, JobConsole } from '../../../../shell/console/index.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable } from '../../../../utils/abort.ts'
 import { execs } from '../../../lookup/lookup.ts'
@@ -185,25 +186,32 @@ export function signalName(number: number): string {
   return `RTMAX-${String(SIGRTMAX - number)}`
 }
 
-// Run the inner line and drain its stdout under the same deadline. A lazy
-// inner pipeline produces bytes only when consumed; draining inside the
-// deadline keeps the whole run under the limit, and draining chunk by
-// chunk into `drained` is what lets a run that overruns keep what it had
-// printed.
+// Run the inner line and drain its output under the same deadline. The line
+// writes into `sink` as it runs, a program as it prints and a list
+// statement by statement, so a run the deadline cuts short keeps what it had
+// printed, as GNU's leaves it on the terminal. A lazy stdout it still
+// returns drains inside the deadline too.
 async function executeDrained(
   executeFn: ExecuteStringFn,
   inner: string,
   sessionId: string,
   stdin: ByteSource | null,
-  drained: Uint8Array[],
+  sink: JobConsole,
   held: IOResult[],
   signal: AbortSignal,
 ): Promise<IOResult> {
-  const io = await executeFn(inner, { sessionId, signal, ...(stdin !== null ? { stdin } : {}) })
+  const io = await executeFn(inner, {
+    sessionId,
+    signal,
+    sink,
+    ...(stdin !== null ? { stdin } : {}),
+  })
   held.push(io)
   if (io.stdout !== null) {
-    for await (const chunk of ensureStream(io.stdout)) drained.push(chunk)
+    for await (const chunk of ensureStream(io.stdout)) await sink.emit(Channel.STDOUT, chunk)
   }
+  const stderr = concat([await sink.snapshot(Channel.STDERR), await io.materializeStderr()])
+  io.stderr = stderr.byteLength > 0 ? stderr : null
   return io
 }
 
@@ -312,9 +320,8 @@ export async function handleTimeout(
     return refuse(encodeText(timeoutMissing(name)), 127)
   }
 
-  const drained: Uint8Array[] = []
-  // The inner result lands here as soon as it exists, so its stderr
-  // survives the deadline the way the drained stdout does.
+  const sink = new JobConsole()
+  // The inner result lands here as soon as it exists.
   const held: IOResult[] = []
   const abort = new AbortController()
   // timeout execs its command, so a builtin that is also a program answers
@@ -325,7 +332,7 @@ export async function handleTimeout(
       shellJoin(command),
       session.sessionId,
       stdin,
-      drained,
+      sink,
       held,
       abort.signal,
     ),
@@ -334,7 +341,7 @@ export async function handleTimeout(
   // becomes an unhandled rejection and can crash the process.
   run.catch(() => undefined)
   try {
-    return await supervise(run, abort, drained, held, seconds, lineSignal, {
+    return await supervise(run, abort, sink, held, seconds, lineSignal, {
       signal,
       killAfter,
       foreground: parse.flags.f === true,
@@ -351,7 +358,7 @@ export async function handleTimeout(
 async function supervise(
   run: Promise<IOResult>,
   abort: AbortController,
-  drained: Uint8Array[],
+  sink: JobConsole,
   held: IOResult[],
   seconds: number,
   lineSignal: AbortSignal | undefined,
@@ -360,7 +367,7 @@ async function supervise(
   const result = seconds > 0 && seconds < Infinity ? await raceDeadline(run, seconds) : await run
   if (result !== TIMED_OUT) {
     return [
-      concat(drained),
+      await sink.snapshot(Channel.STDOUT),
       result,
       new ExecutionNode({ command: 'timeout', exitCode: result.exitCode }),
     ]
@@ -386,22 +393,22 @@ async function supervise(
     await sleep(killAfter)
     abort.abort()
     say(SIGKILL)
-    return ended(drained, held, said, 137)
+    return ended(sink, held, said, 137)
   }
   if (CONTINUE_SIGNALS.has(signal) || STOP_SIGNALS.has(signal)) {
     const late = killAfter > 0 ? await raceDeadline(run, killAfter) : await run
     if (late === TIMED_OUT) {
       abort.abort()
       say(SIGKILL)
-      return ended(drained, held, said, 137)
+      return ended(sink, held, said, 137)
     }
-    return ended(drained, held, said, how.preserve ? late.exitCode : 124, true)
+    return ended(sink, held, said, how.preserve ? late.exitCode : 124, true)
   }
   abort.abort()
   if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
-    return ended(drained, held, said, 128 + signal)
+    return ended(sink, held, said, 128 + signal)
   }
-  return ended(drained, held, said, how.preserve ? 128 + signal : 124)
+  return ended(sink, held, said, how.preserve ? 128 + signal : 124)
 }
 
 /**
@@ -414,7 +421,7 @@ async function supervise(
  * ended on its own has its whole stderr, so that is read in full.
  */
 async function ended(
-  drained: readonly Uint8Array[],
+  sink: JobConsole,
   held: readonly IOResult[],
   said: readonly string[],
   exitCode: number,
@@ -427,8 +434,10 @@ async function ended(
       ? source
       : new Uint8Array()
   const tail = encodeText(said.join(''))
-  const stderr = concat([head, tail])
-  const partial = concat(drained)
+  // A run that ended on its own holds what it wrote into the console too.
+  const early = finished ? new Uint8Array() : await sink.snapshot(Channel.STDERR)
+  const stderr = concat([early, head, tail])
+  const partial = await sink.snapshot(Channel.STDOUT)
   return [
     partial.byteLength > 0 ? partial : null,
     new IOResult({ exitCode, stderr: stderr.byteLength > 0 ? stderr : null }),

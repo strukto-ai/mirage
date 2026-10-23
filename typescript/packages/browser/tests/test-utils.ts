@@ -361,6 +361,17 @@ class FakeRedis {
         this.data.set(key, { kind: 'string', data: next })
         return next.length
       }
+      case 'SETRANGE': {
+        if (rest.length !== 3) throw wrongArity(name)
+        const offset = Number(argText(rest[1] ?? '0'))
+        const value = argBytes(rest[2] ?? '')
+        const data = this.bytesAt(key) ?? new Uint8Array(0)
+        const next = new Uint8Array(Math.max(data.length, offset + value.length))
+        next.set(data)
+        next.set(value, offset)
+        this.data.set(key, { kind: 'string', data: next })
+        return next.length
+      }
       case 'STRLEN':
         if (rest.length !== 1) throw wrongArity(name)
         return (this.bytesAt(key) ?? new Uint8Array(0)).length

@@ -138,16 +138,22 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         async def emit(text: str) -> None:
             assert output is not None
             await output(text.encode())
+
+        async def emit_errors(text: str) -> None:
+            assert errors is not None
+            await errors(text.encode())
 
         handle = await self._sandbox.commands.run(
             wrap_line(argv, env, cwd),
             background=True,
             stdin=stdin is not None,
             on_stdout=emit if output is not None else None,
+            on_stderr=emit_errors if errors is not None else None,
             timeout=0,
         )
         exited = asyncio.Event()
@@ -214,7 +220,7 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             await handle.disconnect()
         return RunResult(
             stdout=str(result.stdout).encode() if output is None else b"",
-            stderr=str(result.stderr).encode(),
+            stderr=str(result.stderr).encode() if errors is None else b"",
             exit_code=int(result.exit_code),
         )
 

@@ -122,7 +122,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     ctx: Context,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.runArgv(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx, null)
+    return this.runArgv(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx, null, null)
   }
 
   runProcess(
@@ -131,8 +131,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     texts: string[],
     ctx: Context,
     output: OutputFn | undefined,
+    errors?: OutputFn,
   ): Promise<RunResult> {
-    return this.runArgv(texts, ctx, output ?? null)
+    return this.runArgv(texts, ctx, output ?? null, errors ?? null)
   }
 
   override async settle(): Promise<void> {
@@ -145,11 +146,13 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.
    * @param output receives stdout as it arrives.
+   * @param errors receives stderr as it arrives.
    */
   private async runArgv(
     argv: readonly string[],
     ctx: Context,
     output: OutputFn | null,
+    errors: OutputFn | null,
   ): Promise<RunResult> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
@@ -166,6 +169,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         { ...this.config.env, ...ctx.env, [EXEC_ID]: execId },
         ctx.cwd.virtual,
         output,
+        errors,
         ctx.signal,
       )
     } catch (error) {
@@ -191,6 +195,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
           null,
           { ...this.config.env },
           '/',
+          null,
           null,
           signal,
         ),
@@ -242,6 +247,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param cwd the working directory, passed through verbatim.
    * @param output receives stdout as it arrives, which the result then
    *   leaves out; null, or a transport that cannot stream, returns it whole.
+   * @param errors the same for stderr.
    * @param signal stops the program.
    */
   protected abstract execArgv(
@@ -250,6 +256,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult>
 
@@ -269,7 +276,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, signal)
+    return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, null, signal)
   }
 
   /** Unmount what the sandbox was served; the sandbox itself is the user's. */

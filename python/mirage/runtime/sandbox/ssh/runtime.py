@@ -89,9 +89,14 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._ssh(
-            wrap_line(argv, env, cwd), stdin, output, tagged=EXEC_ID in env
+            wrap_line(argv, env, cwd),
+            stdin,
+            output,
+            errors,
+            tagged=EXEC_ID in env,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
@@ -100,6 +105,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         command: str,
         stdin: ByteSource | None,
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
         tagged: bool = False,
     ) -> tuple[bytes, bytes, int]:
         """One exec channel on the connection; the seam tests override.
@@ -116,6 +122,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             command (str): the dressed command line.
             stdin (ByteSource | None): the input, or None for none.
             output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
             tagged (bool): whether the command carries its run's
                 ``EXEC_ID``, so a cancelled run's reap stops it.
         """
@@ -146,6 +153,15 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
                     await output(chunk)
             return b"".join(parts)
 
+        async def read_errors() -> bytes:
+            parts: list[bytes] = []
+            while chunk := await process.stderr.read(STREAM_LIMIT):
+                if errors is None:
+                    parts.append(chunk)
+                else:
+                    await errors(chunk)
+            return b"".join(parts)
+
         feeding = asyncio.create_task(feed())
 
         async def reap() -> Any:
@@ -157,7 +173,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
 
         try:
             stdout, stderr, _, result = await asyncio.gather(
-                read(), process.stderr.read(), feeding, reap()
+                read(), read_errors(), feeding, reap()
             )
         except asyncio.CancelledError:
             # A tagged command a kill stopped with a gentler signal is left

@@ -4,6 +4,7 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.io.stream import materialize
+from mirage.shell.console import Channel, JobConsole
 from mirage.workspace.executor.builtins.timeout.timeout import (
     duration_seconds,
     handle_timeout,
@@ -14,17 +15,26 @@ from mirage.workspace.session.session import SessionState
 
 
 class FakeShell:
-    def __init__(self, delay: float = 0.0, exit_code: int = 0):
+    def __init__(
+        self, delay: float = 0.0, exit_code: int = 0, early: bytes = b""
+    ):
         self.lines: list[str] = []
         self.stdins: list[bytes | None] = []
         self.delay = delay
         self.exit_code = exit_code
+        self.early = early
 
     async def __call__(
-        self, line: str, session_id: str, stdin: bytes | None = None
+        self,
+        line: str,
+        session_id: str,
+        stdin: bytes | None = None,
+        sink: JobConsole | None = None,
     ) -> IOResult:
         self.lines.append(line)
         self.stdins.append(stdin)
+        if sink is not None and self.early:
+            await sink.emit(Channel.STDOUT, self.early)
         if self.delay:
             await asyncio.sleep(self.delay)
         return IOResult(stdout=b"done\n", exit_code=self.exit_code)
@@ -172,6 +182,17 @@ async def test_command_finishing_in_time_passes_through():
     assert shell.lines == ["wc -l"]
     assert io.exit_code == 3
     assert stdout == b"done\n"
+
+
+# The line writes as it runs, so an overrun keeps what it had printed, as
+# GNU's leaves it on the terminal.
+@pytest.mark.asyncio
+async def test_overrun_keeps_what_the_line_wrote():
+    shell = FakeShell(delay=1.0, early=b"early\n")
+    stdout, io, _ = await handle_timeout(
+        shell, ["0.05", "sleep", "1"], make_session()
+    )
+    assert (stdout, io.exit_code) == (b"early\n", 124)
 
 
 @pytest.mark.asyncio
@@ -337,7 +358,11 @@ class StreamingShell:
     """A shell whose command prints a line, then never finishes."""
 
     async def __call__(
-        self, line: str, session_id: str, stdin: bytes | None = None
+        self,
+        line: str,
+        session_id: str,
+        stdin: bytes | None = None,
+        sink: JobConsole | None = None,
     ) -> IOResult:
         async def forever():
             yield b"first\n"
@@ -352,7 +377,11 @@ class ComplainingShell:
     finishes, as ``tail -F missing`` does."""
 
     async def __call__(
-        self, line: str, session_id: str, stdin: bytes | None = None
+        self,
+        line: str,
+        session_id: str,
+        stdin: bytes | None = None,
+        sink: JobConsole | None = None,
     ) -> IOResult:
         async def forever():
             await asyncio.sleep(10)
@@ -380,3 +409,27 @@ async def test_overrun_keeps_what_the_command_had_printed():
     )
     assert io.exit_code == 124
     assert stdout == b"first\n"
+
+
+async def _warns_then_finishes(
+    line: str,
+    session_id: str,
+    stdin: bytes | None = None,
+    sink: JobConsole | None = None,
+) -> IOResult:
+    assert sink is not None
+    await sink.emit(Channel.STDERR, b"warn\n")
+    await asyncio.sleep(0.2)
+    return IOResult()
+
+
+# A run that finishes after a deadline whose signal it ignores (CONT)
+# reports what it wrote on stderr once.
+@pytest.mark.asyncio
+async def test_a_run_finishing_past_an_ignored_deadline_reports_stderr_once():
+    _, io, _ = await handle_timeout(
+        _warns_then_finishes,
+        ["-s", "CONT", "0.05", "sleep", "1"],
+        make_session(),
+    )
+    assert (io.exit_code, await materialize(io.stderr)) == (124, b"warn\n")

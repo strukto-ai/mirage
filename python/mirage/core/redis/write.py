@@ -12,8 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from contextlib import aclosing
+
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import check_dest_parents, check_write_target
+from mirage.io.cooperative import chunks
+from mirage.io.stream import materialize
+from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
@@ -34,3 +39,57 @@ async def write(
     await store.set_file(p, data)
     await store.set_modified(p, now_iso())
     record("write", path_spec.virtual, "redis", len(data), timer)
+
+
+async def write_stream(
+    accessor: RedisAccessor,
+    path_spec: PathSpec,
+    data: ByteSource,
+    append: bool = False,
+    atomic: bool = False,
+) -> None:
+    """Write bytes as they arrive, so a reader watches the file grow: a
+    replacement at its own position (``SETRANGE``), as an open file's
+    offset keeps it, an append at the file's end (``APPEND``, which also
+    creates a missing one), so another appender's bytes stay. An append
+    that brings nothing leaves an existing file as it was (``true >> f``).
+    ``atomic`` stages the replacement until it ends.
+
+    Args:
+        accessor (RedisAccessor): the Redis store.
+        path_spec (PathSpec): the destination.
+        data (ByteSource): bytes consumed once.
+        append (bool): append instead of replacing.
+        atomic (bool): stage output until successful EOF.
+    """
+    path = path_spec.mount_path
+    store = accessor.store
+    timer = start_op()
+    p = norm(path)
+    await check_dest_parents(store, path_spec, p)
+    await check_write_target(store, path_spec, p)
+    op = "append" if append else "write"
+    if atomic:
+        whole = await materialize(data)
+        await store.set_file(p, whole)
+        await store.set_modified(p, now_iso())
+        record(op, path_spec.virtual, "redis", len(whole), timer)
+        return
+    if not append:
+        await store.set_file(p, b"")
+        await store.set_modified(p, now_iso())
+    elif not await store.has_file(p):
+        await store.append_file(p, b"")
+        await store.set_modified(p, now_iso())
+    size = 0
+    async with aclosing(chunks(data)) as source:
+        async for chunk in source:
+            if not chunk:
+                continue
+            if append:
+                await store.append_file(p, chunk)
+            else:
+                await store.set_file_range(p, size, chunk)
+            await store.set_modified(p, now_iso())
+            size += len(chunk)
+    record(op, path_spec.virtual, "redis", size, timer)

@@ -45,7 +45,7 @@ class _Sandbox(Runtime, ProcessExecutorMixin):
     captures = ("gcc", EXTERNAL_COMMANDS)
 
     async def run_process(
-        self, engine, paths, texts, ctx, output
+        self, engine, paths, texts, ctx, output, errors=None
     ) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
@@ -57,7 +57,7 @@ class _HostPython(PythonRuntime, ProcessExecutorMixin):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
     async def run_process(
-        self, engine, paths, texts, ctx, output
+        self, engine, paths, texts, ctx, output, errors=None
     ) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 

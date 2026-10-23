@@ -83,7 +83,7 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
     async def connect(self) -> None:
         return None
 
-    async def _exec_argv(self, argv, stdin, env, cwd, output):
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)

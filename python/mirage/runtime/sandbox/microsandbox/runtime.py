@@ -53,10 +53,16 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
         args: list[str],
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """Run one msb CLI invocation."""
         return await run_cli(
-            "msb", MICROSANDBOX_CLI_HINT, args, stdin, output=output
+            "msb",
+            MICROSANDBOX_CLI_HINT,
+            args,
+            stdin,
+            output=output,
+            errors=errors,
         )
 
     async def connect(self) -> None:
@@ -101,6 +107,7 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
@@ -108,6 +115,7 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
             exec_args(self._head(), ("--",), env, cwd, argv),
             stdin=stdin,
             output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 

@@ -37,8 +37,17 @@ import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { Channel, type JobConsole } from '../../../shell/console/index.ts'
 
-/** Execute one admitted program; its surrounding shell stays in Mirage. */
+/**
+ * Execute one admitted program; its surrounding shell stays in Mirage.
+ *
+ * A program a process runtime streams writes its stderr into `sink` as it
+ * arrives, where the statement it runs in writes (a job's console, a
+ * redirect, a compound body), so it lands beside its stdout and stays when
+ * the program is stopped; without one it comes back in the result.
+ */
 export async function runExternal(
   argv: Argv,
   stdin: ByteSource | null,
@@ -46,6 +55,7 @@ export async function runExternal(
   registry: MountRegistry,
   routing: RouteDecision<Runtime>,
   signal?: AbortSignal,
+  sink?: JobConsole,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   const bindings = routing.bindings
   const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
@@ -66,7 +76,7 @@ export async function runExternal(
   )
   const timeout = guard?.timeoutSeconds ?? null
   if (isProcessExecutor(runtime))
-    return streamExternal(runtime, argv, stdin, session, registry, timeout, signal)
+    return streamExternal(runtime, argv, stdin, session, registry, timeout, signal, sink)
   const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
   const runSignal = mergeSignals(signal, deadline?.signal)
   const execute = async () => {
@@ -113,6 +123,7 @@ function streamExternal(
   registry: MountRegistry,
   timeout: number | null,
   signal?: AbortSignal,
+  sink?: JobConsole,
 ): [ByteSource, IOResult, ExecutionNode] {
   const cwd = PathSpec.fromStrPath(session.cwd)
   const env = envSnapshot(session)
@@ -125,6 +136,7 @@ function streamExternal(
       command: argv.name,
       declared: null,
       prefixes: registry.allMounts().map((m) => m.prefix),
+      native: true,
     },
   })
   const state = new OutputState()
@@ -133,6 +145,15 @@ function streamExternal(
   let task: Promise<void> | undefined
   let settled = false
   let closing: Promise<void> | undefined
+  const said: Uint8Array[] = []
+  // Stdout written before a stderr chunk reaches the sink first, so the two
+  // keep the order the program wrote them in (`> f 2>&1`); the command's
+  // record keeps a copy for the policies that read it.
+  const errors = async (chunk: Uint8Array): Promise<void> => {
+    said.push(chunk)
+    await pipe.drain()
+    await sink?.emit(Channel.STDERR, chunk)
+  }
   const execute = async (): Promise<void> => {
     try {
       const result = await runWithTimeout(
@@ -141,14 +162,20 @@ function streamExternal(
           argv.name,
           argv.tokens,
           { stdin, flags: {}, cwd, env, signal: runSignal },
-          { kind: 'process', output: (chunk) => pipe.write(chunk) },
+          {
+            kind: 'process',
+            output: (chunk) => pipe.write(chunk),
+            ...(sink !== undefined ? { errors } : {}),
+          },
         ),
         timeout,
         argv.name,
       )
       if (result.stdout.length) await pipe.write(result.stdout)
       io.exitCode = node.exitCode = result.exitCode
-      io.stderr = node.stderr = result.stderr ?? new Uint8Array()
+      const stderr = result.stderr ?? new Uint8Array()
+      io.stderr = stderr
+      node.stderr = said.length > 0 ? concat(said) : stderr
       pipe.end()
     } catch (error) {
       controller.abort()
@@ -196,14 +223,15 @@ function streamExternal(
  * @param name the program's name, for a launch failure's message.
  * @param texts the argv, or nothing for a line.
  * @param ctx the run's context.
- * @param opts a process or a line, and where a streamed process writes.
+ * @param opts a process or a line, and where a streamed process writes its
+ *   stdout and its stderr.
  */
 async function executeProgram(
   runtime: Runtime,
   name: string,
   texts: readonly string[],
   ctx: Context,
-  opts: { kind: ExecutionKind; output?: OutputFn },
+  opts: { kind: ExecutionKind; output?: OutputFn; errors?: OutputFn },
 ): Promise<RunResult> {
   try {
     return await runtime.execute([], texts, ctx, opts)

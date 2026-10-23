@@ -815,11 +815,14 @@ class Producer:
         declared (Limit | None): the bound the command's own
             registration declared, when the dispatch site knows it
             (e.g. a CLI leaf); None for commands with no declaration.
+        native (bool): a native program a runtime runs produced it,
+            writing as it goes, so a redirect writes it as it arrives.
     """
 
     command: str
     prefixes: tuple[str, ...] = ()
     declared: Limit | None = None
+    native: bool = False
 
 
 RefusalKind = Literal["deny", "pending", "failed"]

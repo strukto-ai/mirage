@@ -99,7 +99,9 @@ async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<P
  * file nor lands on an offset another write has not advanced yet. A writer
  * killed while it waits for its turn writes nothing: a promise cannot be
  * cancelled, so the turn checks the writer's execution frame, as
- * Python's cancelled task leaves the queue.
+ * Python's cancelled task leaves the queue. What a killed command wrote
+ * before it stopped (`kept`) still lands, as Python's task writes on once
+ * it has taken its cancel.
  */
 export async function writeDescription(
   dispatch: DispatchFn,
@@ -107,6 +109,7 @@ export async function writeDescription(
   file: FileDescription,
   data: ByteSource,
   replace = false,
+  kept = false,
 ): Promise<void> {
   if (file.emit !== null) {
     for await (const part of chunks(data)) await file.emit(part)
@@ -118,7 +121,7 @@ export async function writeDescription(
   try {
     await turn
     const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
-    if (hasAborted(writer)) throw makeAbortError(writer)
+    if (!kept && hasAborted(writer)) throw makeAbortError(writer)
     if (file.source === null && (!file.opened || file.append || (replace && file.offset === 0))) {
       file.offset += await createCounted(dispatch, session, file.scope, data, file.append)
       file.opened = true

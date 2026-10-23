@@ -34,6 +34,7 @@ from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
 from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
 from mirage.shell.bytes import encode_text
+from mirage.shell.console import Channel, JobConsole
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.command.run import admission_denial
@@ -51,8 +52,16 @@ async def run_external(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[Runtime[Any]],
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Execute one admitted program; its surrounding shell stays in Mirage."""
+    """Execute one admitted program; its surrounding shell stays in Mirage.
+
+    A program a process runtime streams writes its stderr into ``sink``
+    as it arrives, where the statement it runs in writes (a job's
+    console, a redirect, a compound body), so it lands beside its stdout
+    and stays when the program is stopped; without one it comes back in
+    the result.
+    """
     bindings = routing.bindings
     runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
@@ -82,6 +91,7 @@ async def run_external(
             env,
             registry,
             guard.timeout_seconds if guard is not None else None,
+            sink,
         )
 
     async def execute() -> RunResult:
@@ -123,6 +133,7 @@ def _stream_external(
     env: dict[str, str],
     registry: MountRegistry,
     timeout: float | None,
+    sink: JobConsole | None,
 ) -> tuple[ByteSource, IOResult, ExecutionNode]:
     """Keep a process and its deadline alive until its bounded output is closed."""
     pipe = BytePipe()
@@ -131,6 +142,7 @@ def _stream_external(
         producer=Producer(
             command=argv.name,
             prefixes=tuple(m.prefix for m in registry.mounts()),
+            native=True,
         )
     )
     io.output = state = OutputState()
@@ -138,6 +150,16 @@ def _stream_external(
     task: asyncio.Task[None] | None = None
     settled = False
     closing: asyncio.Task[None] | None = None
+    said: list[bytes] = []
+
+    async def errors(chunk: bytes) -> None:
+        # Stdout written before this chunk reaches the sink first, so the
+        # two keep the order the program wrote them in (`> f 2>&1`); the
+        # command's record keeps a copy for the policies that read it.
+        said.append(chunk)
+        assert sink is not None
+        await pipe.drain()
+        await sink.emit(Channel.STDERR, chunk)
 
     async def execute() -> None:
         nonlocal settled
@@ -150,6 +172,7 @@ def _stream_external(
                     Context(cwd=cwd, env=env, stdin=stdin),
                     "process",
                     pipe.write,
+                    errors if sink is not None else None,
                 ),
                 timeout,
                 argv.name,
@@ -157,7 +180,8 @@ def _stream_external(
             if result.stdout:
                 await pipe.write(result.stdout)
             io.exit_code = node.exit_code = result.exit_code
-            io.stderr = node.stderr = result.stderr or b""
+            io.stderr = result.stderr or b""
+            node.stderr = b"".join(said) or io.stderr
             pipe.end()
         except BaseException as exc:
             pipe.end(exc)
@@ -209,6 +233,7 @@ async def _execute_program(
     ctx: Context,
     kind: ExecutionKind,
     output: OutputFn | None = None,
+    errors: OutputFn | None = None,
 ) -> RunResult:
     """Keep an ordinary launch failure within the command that caused it.
 
@@ -219,9 +244,12 @@ async def _execute_program(
         ctx (Context): the run's context.
         kind (ExecutionKind): a process or a line.
         output (OutputFn | None): where a streamed process writes.
+        errors (OutputFn | None): where it writes its stderr.
     """
     try:
-        return await runtime.execute([], texts, ctx, kind=kind, output=output)
+        return await runtime.execute(
+            [], texts, ctx, kind=kind, output=output, errors=errors
+        )
     except (CommandTimeoutError, MirageAbortError):
         raise
     except Exception as exc:

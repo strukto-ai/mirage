@@ -69,6 +69,8 @@ import {
 } from './builtins/index.ts'
 import { durationSeconds, parseSignal, signalName } from './builtins/timeout/timeout.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
+import { Channel } from '../../shell/console/index.ts'
 
 function wireMount(mount: MountEntry): void {
   for (const cmd of commandsFor(mount.vfs)) {
@@ -2946,6 +2948,36 @@ describe('handleTimeout', () => {
       )
     const [, io] = await handleTimeout(slow, ['0.05', 'sleep', '1'], session)
     expect(io.exitCode).toBe(124)
+  })
+
+  // The line writes as it runs, so an overrun keeps what it had printed, as
+  // GNU's leaves it on the terminal.
+  it('keeps what the line wrote before the deadline', async () => {
+    const early = async (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal; sink?: JobConsole },
+    ): Promise<IOResult> => {
+      await opts.sink?.emit(Channel.STDOUT, new TextEncoder().encode('early\n'))
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      return new IOResult()
+    }
+    const [stdout, io] = await handleTimeout(early, ['0.05', 'sleep', '1'], session)
+    expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
+  })
+
+  // A run that finishes after a deadline whose signal it ignores (CONT)
+  // reports what it wrote on stderr once.
+  it('reports stderr once for a run finishing past an ignored deadline', async () => {
+    const late = async (
+      _cmd: string,
+      opts: { sessionId: string; signal?: AbortSignal; sink?: JobConsole },
+    ): Promise<IOResult> => {
+      await opts.sink?.emit(Channel.STDERR, new TextEncoder().encode('warn\n'))
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      return new IOResult()
+    }
+    const [, io] = await handleTimeout(late, ['-s', 'CONT', '0.05', 'sleep', '1'], session)
+    expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([124, 'warn\n'])
   })
 
   it('keeps the stderr the command had produced before the deadline', async () => {

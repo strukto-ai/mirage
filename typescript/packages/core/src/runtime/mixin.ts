@@ -76,6 +76,7 @@ export interface ProcessExecutor<E = unknown> {
    * @param output receives stdout as it arrives, each write awaited, which
    *   the result then leaves out; undefined, or a transport that cannot
    *   stream, returns it whole.
+   * @param errors the same for stderr.
    */
   runProcess(
     engine: E,
@@ -83,6 +84,7 @@ export interface ProcessExecutor<E = unknown> {
     texts: string[],
     ctx: Context,
     output: OutputFn | undefined,
+    errors?: OutputFn,
   ): Promise<RunResult>
 }
 

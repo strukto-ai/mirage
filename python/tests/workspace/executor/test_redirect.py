@@ -22,11 +22,13 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.types import CommandTimeoutError
+from mirage.io.stream import materialize
+from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import FileStat, PathSpec
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.executor.redirect import JobRoute
+from mirage.workspace.executor.redirect import JobRoute, PipeRecorder
 from mirage.workspace.session.session import SessionState
 
 
@@ -965,6 +967,14 @@ class RejectingVFS(RAMVFS):
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         raise self.error
 
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        await self.write(path, await materialize(data))
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
+        await self.append(path, await materialize(data))
+
 
 def _rejecting(vfs: RejectingVFS) -> Workspace:
     src = RAMVFS()
@@ -1116,3 +1126,30 @@ async def test_exec_whose_diagnostic_cannot_be_written_still_goes_on():
         assert (io.exit_code, await io.stdout_str()) == (0, "after\n")
     finally:
         await ws.close()
+
+
+# Each live channel fails on its own: a stdout file that refuses its upload
+# leaves the stderr streaming into a healthy file untouched, and the first
+# failure is the one reported.
+@pytest.mark.asyncio
+async def test_a_failed_live_file_does_not_silence_the_other_channel():
+    bad = FileDescription(PathSpec.from_str_path("/bad"))
+    good = FileDescription(PathSpec.from_str_path("/good"))
+    landed: dict[str, bytes] = {}
+
+    async def dispatch(op, scope, data=None, **kwargs):
+        if scope.virtual == "/bad":
+            raise RuntimeError("upload refused")
+        landed[scope.virtual] = await materialize(data)
+
+    recorder = PipeRecorder(dispatch, {}, {}, None, False)
+    recorder.stream_to(bad)
+    recorder.stream_to(good, Channel.STDERR)
+    await recorder.emit(Channel.STDOUT, b"out\n")
+    await asyncio.sleep(0)
+    await recorder.emit(Channel.STDOUT, b"more\n")
+    await recorder.emit(Channel.STDERR, b"err\n")
+    await recorder.finish_writer()
+    assert landed == {"/good": b"err\n"}
+    assert recorder.file is bad
+    assert str(recorder.failure) == "upload refused"

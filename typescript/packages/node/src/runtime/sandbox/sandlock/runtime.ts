@@ -73,14 +73,16 @@ export class SandlockRuntime
     texts: string[],
     ctx: Context,
     output: OutputFn | undefined,
+    errors?: OutputFn,
   ): Promise<RunResult> {
-    return this.executeProcess(texts, ctx, output)
+    return this.executeProcess(texts, ctx, output, errors)
   }
 
   private async executeProcess(
     argv: string[],
     ctx: Context,
     output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const refusal = await cwdRefusal(argv[0] ?? '', ctx.cwd.virtual)
     if (refusal !== null) return refusal
@@ -100,6 +102,7 @@ export class SandlockRuntime
         env: { PATH: process.env.PATH ?? '' },
         children: this.children,
         ...(output !== undefined ? { output } : {}),
+        ...(errors !== undefined ? { errors } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
       },
     )

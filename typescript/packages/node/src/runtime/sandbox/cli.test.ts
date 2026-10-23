@@ -255,6 +255,23 @@ describe('runCli', () => {
     expect([DEC.decode(r.stdout), DEC.decode(r.stderr), r.code]).toEqual(['in', 'e\n', 3])
   })
 
+  // stderr goes to its own callback as it arrives, as stdout goes to output.
+  it('streams stderr to its callback', async () => {
+    const seen: Uint8Array[] = []
+    const r = await runCli('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
+      errors: (chunk) => {
+        seen.push(chunk)
+        return Promise.resolve()
+      },
+    })
+    expect([
+      DEC.decode(r.stdout),
+      DEC.decode(r.stderr),
+      DEC.decode(Buffer.concat(seen)),
+      r.code,
+    ]).toEqual(['o\n', '', 'e\n', 3])
+  })
+
   it('keeps input-close listeners bounded while consuming a long byte source', async () => {
     const children = new Set<ChildProcess>()
     let chunks = 0

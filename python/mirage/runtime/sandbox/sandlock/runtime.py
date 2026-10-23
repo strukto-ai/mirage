@@ -84,7 +84,10 @@ class SandlockRuntime(
     ) -> RunResult:
         line = ctx.flags.get("c")
         return await self._run_process(
-            ["/bin/sh", "-c", line if isinstance(line, str) else ""], ctx, None
+            ["/bin/sh", "-c", line if isinstance(line, str) else ""],
+            ctx,
+            None,
+            None,
         )
 
     async def run_process(
@@ -94,11 +97,16 @@ class SandlockRuntime(
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
-        return await self._run_process(texts, ctx, output)
+        return await self._run_process(texts, ctx, output, errors)
 
     async def _run_process(
-        self, argv: list[str], ctx: Context, output: OutputFn | None
+        self,
+        argv: list[str],
+        ctx: Context,
+        output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         refusal = cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
@@ -119,6 +127,7 @@ class SandlockRuntime(
             env={},
             children=self._children,
             output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 

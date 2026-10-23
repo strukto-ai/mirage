@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -22,6 +23,7 @@ import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.concurrency.limiter import run_blocking
+from mirage.core.disk.constants import STREAM_FLUSH_SECONDS
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.io.cooperative import chunks
@@ -82,13 +84,38 @@ async def write_stream(
                     pass
                 target = Path(await run_blocking(stage))
             f = await aiofiles.open(target, "ab" if append else "wb")
+        lock = asyncio.Lock()
+        dirty = False
+
+        async def flush_now_and_then() -> None:
+            nonlocal dirty
+            while True:
+                await asyncio.sleep(STREAM_FLUSH_SECONDS)
+                if not dirty:
+                    continue
+                async with lock:
+                    try:
+                        await f.flush()
+                    except OSError as exc:
+                        logger.debug("streamed write not flushed: %s", exc)
+                        return
+                    dirty = False
+
+        flushing = (
+            None if atomic else asyncio.create_task(flush_now_and_then())
+        )
         try:
             async with aclosing(chunks(data)) as source:
                 async for chunk in source:
-                    with disk_errors(path_spec.virtual):
-                        await f.write(chunk)
+                    async with lock:
+                        with disk_errors(path_spec.virtual):
+                            await f.write(chunk)
+                        dirty = True
                     size += len(chunk)
         finally:
+            if flushing is not None:
+                flushing.cancel()
+                await asyncio.gather(flushing, return_exceptions=True)
             with disk_errors(path_spec.virtual):
                 await f.close()
         if staged:

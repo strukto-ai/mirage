@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.append import append_bytes
-from mirage.core.ram.write import write
+from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
+from mirage.core.ram.write import write, write_stream
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -177,3 +180,114 @@ async def test_write_bytes_sets_modified(store):
         b"data",
     )
     assert store.store.modified["/file.txt"] is not None
+
+
+def _spec(name: str) -> PathSpec:
+    return PathSpec(vfs_path=name, virtual=f"/{name}", directory=f"/{name}")
+
+
+async def _quiet(chunks: list[bytes], hold: asyncio.Event):
+    for chunk in chunks:
+        yield chunk
+    await hold.wait()
+
+
+async def _chunks_of(*chunks: bytes):
+    for chunk in chunks:
+        yield chunk
+
+
+async def _broken():
+    yield b"kept\n"
+    raise OSError("source gone")
+
+
+# A writer that goes quiet still shows what it wrote within the publish
+# interval, so a reader watches a slow program's log grow.
+@pytest.mark.asyncio
+async def test_a_streamed_write_shows_a_quiet_writers_bytes(store):
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(store, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
+    )
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    assert store.store.files["/log"] == b"a\nb\n"
+    hold.set()
+    await writing
+    assert store.store.files["/log"] == b"a\nb\n"
+
+
+# A streamed append lands after what another appender added meanwhile.
+@pytest.mark.asyncio
+async def test_a_streamed_append_keeps_another_appenders_bytes(store):
+    store.store.files["/log"] = b"start\n"
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(
+            store, _spec("log"), _quiet([b"mine\n"], hold), append=True
+        )
+    )
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    await append_bytes(store, _spec("log"), b"theirs\n")
+    hold.set()
+    await writing
+    assert store.store.files["/log"] == b"start\nmine\ntheirs\n"
+
+
+# An atomic write shows nothing until it ends whole.
+@pytest.mark.asyncio
+async def test_an_atomic_streamed_write_lands_at_its_end(store):
+    store.store.files["/f"] = b"old"
+    hold = asyncio.Event()
+    writing = asyncio.create_task(
+        write_stream(store, _spec("f"), _quiet([b"new"], hold), atomic=True)
+    )
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    assert store.store.files["/f"] == b"old"
+    hold.set()
+    await writing
+    assert store.store.files["/f"] == b"new"
+
+
+# A stream that fails keeps what it had delivered, as a disk file does.
+@pytest.mark.asyncio
+async def test_a_failed_streamed_write_keeps_what_arrived(store):
+    with pytest.raises(OSError):
+        await write_stream(store, _spec("f"), _broken())
+    assert store.store.files["/f"] == b"kept\n"
+
+
+# A replacement writes at its own position, as an open file's offset keeps
+# it: a truncation behind its back leaves a hole up to where it writes next.
+@pytest.mark.asyncio
+async def test_a_streamed_replacement_keeps_its_position(store):
+    hold = asyncio.Event()
+    second = asyncio.Event()
+
+    async def source():
+        yield b"a\n"
+        await second.wait()
+        yield b"b\n"
+        await hold.wait()
+
+    writing = asyncio.create_task(write_stream(store, _spec("f"), source()))
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
+    assert store.store.files["/f"] == b"a\n"
+    store.store.files["/f"] = b""
+    second.set()
+    hold.set()
+    await writing
+    assert store.store.files["/f"] == b"\0\0b\n"
+
+
+# An append that brings nothing leaves an existing file as it was, its
+# modification time included (`true >> f`), and creates a missing one.
+@pytest.mark.asyncio
+async def test_an_empty_streamed_append_leaves_the_file_alone(store):
+    store.store.files["/f"] = b"kept"
+    store.store.modified["/f"] = "2020-01-01T00:00:00Z"
+    await write_stream(store, _spec("f"), _chunks_of(), append=True)
+    assert store.store.files["/f"] == b"kept"
+    assert store.store.modified["/f"] == "2020-01-01T00:00:00Z"
+    await write_stream(store, _spec("new"), _chunks_of(), append=True)
+    assert store.store.files["/new"] == b""

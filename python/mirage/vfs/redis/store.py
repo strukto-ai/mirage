@@ -144,6 +144,14 @@ class RedisStore:
     async def set_file(self, path: str, data: bytes) -> None:
         await self._client.set(self._fk(path), data)
 
+    async def append_file(self, path: str, data: bytes) -> None:
+        await self._client.append(self._fk(path), data)
+
+    async def set_file_range(
+        self, path: str, offset: int, data: bytes
+    ) -> None:
+        await self._client.setrange(self._fk(path), offset, data)
+
     async def truncate_file(
         self, path: str, length: int, modified: str, no_create: bool = False
     ) -> bool:

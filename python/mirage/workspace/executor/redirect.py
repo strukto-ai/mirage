@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
@@ -29,7 +30,7 @@ from mirage.context.session_context import (
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
+from mirage.errors.types import CommandTimeoutError, FsCondition
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
@@ -87,6 +88,7 @@ from mirage.workspace.executor.control import (
 from mirage.workspace.executor.create import create_file, write_description
 from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.mount.registry import DEV_PREFIX
+from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.types import ExecutionNode
 
@@ -162,6 +164,9 @@ class PipeRecorder(Recorder):
     While a pipe is in play (``live``), terminal output goes out as it is
     written, through a copied descriptor too, so it keeps the command's
     order. A write into a pipe whose reader has gone raises ``PipeClosed``.
+    A channel ``stream_to`` binds goes into its file as it is written;
+    two channels bound to one description share its writer, so they keep
+    their order (``> f 2>&1``).
 
     Args:
         dispatch (DispatchFn): op dispatcher the pipe writes go through.
@@ -185,50 +190,69 @@ class PipeRecorder(Recorder):
         self.forward = forward
         self.sink = sink
         self.live = live
-        self.writer: ByteWriter | None = None
+        self.writers: dict[Channel, tuple[FileDescription, ByteWriter]] = {}
+        self.broken: set[int] = set()
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
 
-    async def consume(self, source: ByteSource) -> None:
-        assert self.file is not None
+    async def consume(self, file: FileDescription, source: ByteSource) -> None:
         await self.dispatch(
-            "append" if self.file.append else "write",
-            self.file.scope,
+            "append" if file.append else "write",
+            file.scope,
             data=source,
         )
 
-    def stream_to(self, file: FileDescription) -> None:
-        self.file = file
-        self.writer = ByteWriter(self.consume)
+    def stream_to(
+        self, file: FileDescription, channel: Channel = Channel.STDOUT
+    ) -> None:
+        for held, writer in self.writers.values():
+            if held is file:
+                self.writers[channel] = (file, writer)
+                return
+        self.writers[channel] = (file, ByteWriter(partial(self.consume, file)))
+
+    def _distinct(self) -> list[tuple[FileDescription, ByteWriter]]:
+        seen: dict[int, tuple[FileDescription, ByteWriter]] = {}
+        for file, writer in self.writers.values():
+            seen.setdefault(id(writer), (file, writer))
+        return list(seen.values())
 
     async def finish_writer(self) -> None:
-        if self.writer is not None:
+        for file, writer in self._distinct():
             try:
-                await self.writer.finish()
+                await writer.finish()
             except PipeClosed:
                 raise
             except Exception as exc:
                 if is_aborting(exc):
                     raise
-                self.failure = exc
+                self._failed(file, writer, exc)
 
     async def abort(self) -> None:
-        if self.writer is not None:
-            await self.writer.abort()
+        for _, writer in self._distinct():
+            await writer.abort()
+
+    def _failed(
+        self, file: FileDescription, writer: ByteWriter, exc: Exception
+    ) -> None:
+        self.broken.add(id(writer))
+        if self.failure is None:
+            self.failure, self.file = exc, file
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        if channel is Channel.STDOUT and self.writer is not None:
-            if self.failure is None:
+        live = self.writers.get(channel)
+        if live is not None:
+            file, writer = live
+            if id(writer) not in self.broken:
                 try:
-                    await self.writer.write(data)
-                    assert self.file is not None
-                    self.file.offset += len(data)
+                    await writer.write(data)
+                    file.offset += len(data)
                 except PipeClosed:
                     raise
                 except Exception as exc:
                     if is_aborting(exc):
                         raise
-                    self.failure = exc
+                    self._failed(file, writer, exc)
             return
         scope = self.streams.get(channel)
         if scope is None:
@@ -380,6 +404,51 @@ class JobRoute(JobOutput):
             await self.target.emit_to(dest, data)
         elif isinstance(dest, FileDescription):
             await write_description(self.dispatch, self.session, dest, data)
+
+
+async def _keep_output(
+    recorder: PipeRecorder,
+    outputs: dict[int, "_Fd | FileDescription | Inherited"],
+    dispatch: DispatchFn,
+    session: SessionState,
+) -> None:
+    """Keep in its files what a cancelled command wrote, as a program a
+    signal ends leaves its writes in them: the stream going to one is
+    committed, and the output held for one is written. What was bound
+    for the terminal goes nowhere, since the command's line or job has
+    ended. A second cancel waits for this, so the files are whole.
+
+    Args:
+        recorder (PipeRecorder): the command's recorder.
+        outputs (dict[int, _Fd | FileDescription | Inherited]): where
+            the redirect pointed each descriptor.
+        dispatch (DispatchFn): operation dispatcher.
+        session (SessionState): file creation mode.
+    """
+
+    async def keep() -> None:
+        await recorder.finish_writer()
+        for key, data in await recorder.take():
+            dest = (
+                outputs[1 if key == Channel.STDOUT else 2]
+                if isinstance(key, Channel)
+                else None
+            )
+            if not isinstance(dest, FileDescription):
+                await discard_streams(data)
+                continue
+            try:
+                await write_description(dispatch, session, dest, data)
+            except FS_ERRORS as exc:
+                logger.debug("kept output not written: %s", exc)
+
+    kept = asyncio.ensure_future(keep())
+    while not kept.done():
+        try:
+            await asyncio.shield(kept)
+        except asyncio.CancelledError:
+            logger.debug("cancelled again while keeping output")
+    kept.result()
 
 
 def _persistently_closed(context: EvaluationContext) -> set[int]:
@@ -855,6 +924,7 @@ async def _handle_redirect(
     held = {field: getattr(session, field) for field in unbound}
     for field, value in unbound.items():
         setattr(session, field, value)
+    cancelled: asyncio.CancelledError | CommandTimeoutError | None = None
     try:
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
@@ -875,9 +945,13 @@ async def _handle_redirect(
                 target = outputs[1]
                 # A command reading the file it writes (`cat f >> f`, `grep
                 # -r x d > d/f`) would read its own output back.
+                producer = result[1].producer
                 if (
                     not refused
-                    and name in STREAM_OUTPUT_BUILTINS
+                    and (
+                        name in STREAM_OUTPUT_BUILTINS
+                        or (producer is not None and producer.native)
+                    )
                     and not recorder.chunks
                     and isinstance(target, FileDescription)
                     and target in files
@@ -890,6 +964,24 @@ async def _handle_redirect(
                     is None
                 ):
                     recorder.stream_to(target)
+                errs = outputs[2]
+                # A program's stderr goes into its file as it is written
+                # too, with its stdout when both share one (`> f 2>&1`).
+                if (
+                    not refused
+                    and producer is not None
+                    and producer.native
+                    and not recorder.chunks
+                    and isinstance(errs, FileDescription)
+                    and errs in files
+                    and errs.source is None
+                    and not errs.pipe
+                    and (
+                        errs is not target
+                        or Channel.STDOUT in recorder.writers
+                    )
+                ):
+                    recorder.stream_to(errs, Channel.STDERR)
                 _, io, exec_node = await drained(recorder, *result)
                 await recorder.finish_writer()
 
@@ -912,11 +1004,14 @@ async def _handle_redirect(
             diagnostic = await take_stderr(sig)
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
+    except (asyncio.CancelledError, CommandTimeoutError) as exc:
+        cancelled = exc
     except BaseException:
         await recorder.close()
         raise
     finally:
-        await recorder.abort()
+        if cancelled is None:
+            await recorder.abort()
         for field, value in held.items():
             setattr(session, field, value)
         reset_caller(enclosing)
@@ -932,6 +1027,9 @@ async def _handle_redirect(
                 session.descriptors[fd] = saved[fd]
             else:
                 session.descriptors.pop(fd, None)
+    if cancelled is not None:
+        await _keep_output(recorder, outputs, dispatch, session)
+        raise cancelled
     stdout: ByteSource | None = None
     route.recorder = Recorder()
     if recorder.failure is not None and recorder.file is not None:

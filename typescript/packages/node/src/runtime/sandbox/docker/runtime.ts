@@ -48,10 +48,12 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
+    errors: OutputFn | null = null,
   ): Promise<CliResult> {
     return runCli('docker', DOCKER_CLI_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
+      ...(errors !== null ? { errors } : {}),
     })
   }
 
@@ -76,10 +78,11 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
-    const result = await this.docker(args, stdin, output, signal)
+    const result = await this.docker(args, stdin, output, signal, errors)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 

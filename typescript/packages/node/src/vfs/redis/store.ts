@@ -136,6 +136,20 @@ export class RedisStore implements RedisStoreLike {
     await c.set(this.fk(path), Buffer.from(data.buffer, data.byteOffset, data.byteLength))
   }
 
+  async appendFile(path: string, data: Uint8Array): Promise<void> {
+    const c = await this.client()
+    await c.append(this.fk(path), Buffer.from(data.buffer, data.byteOffset, data.byteLength))
+  }
+
+  async setFileRange(path: string, offset: number, data: Uint8Array): Promise<void> {
+    const c = await this.client()
+    await c.setRange(
+      this.fk(path),
+      offset,
+      Buffer.from(data.buffer, data.byteOffset, data.byteLength),
+    )
+  }
+
   async truncateFile(
     path: string,
     length: number,

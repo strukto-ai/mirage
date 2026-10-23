@@ -68,6 +68,7 @@ class ProcessExecutorMixin(ABC, Generic[E]):
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Run the program ``texts`` names, with ``ctx``'s working
         directory, environment and stdin, and return its status once it
@@ -83,4 +84,5 @@ class ProcessExecutorMixin(ABC, Generic[E]):
                 each write awaited, which the result then leaves out;
                 None, or a transport that cannot stream, returns it
                 whole.
+            errors (OutputFn | None): the same for stderr.
         """

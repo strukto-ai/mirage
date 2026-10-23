@@ -56,6 +56,7 @@ class FakeHandle:
         self.received = asyncio.Event()
         self.closed = asyncio.Event()
         self.input_error = None
+        self.on_stderr = None
 
     async def send_stdin(self, data):
         if self.input_error is not None:
@@ -80,6 +81,8 @@ class FakeHandle:
             return FakeResult(self.input.hex(), "", 0)
         if not self.eof:
             await self.closed.wait()
+        if self.on_stderr is not None:
+            await self.on_stderr("warn")
         return FakeResult(self.input.hex(), "warn", 0)
 
     async def kill(self):
@@ -95,11 +98,14 @@ class FakeCommands:
         self.handles = []
         self.input_error = None
 
-    async def run(self, command, *, background, stdin, on_stdout, timeout):
+    async def run(
+        self, command, *, background, stdin, on_stdout, on_stderr, timeout
+    ):
         assert (background, timeout) == (True, 0)
         self.calls.append((command, stdin))
         handle = FakeHandle(shlex.split(command)[-1], stdin)
         handle.input_error = self.input_error
+        handle.on_stderr = on_stderr
         self.handles.append(handle)
         return handle
 
@@ -287,6 +293,23 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
     assert handle.killed and handle.disconnected
 
 
+# A streamed command's stderr goes to its errors callback as it arrives,
+# and the result carries none of it twice.
+@pytest.mark.asyncio
+async def test_streamed_stderr_goes_to_the_errors_callback():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    said: list[bytes] = []
+
+    async def errors(chunk: bytes) -> None:
+        said.append(chunk)
+
+    result = await runtime._exec_argv(
+        ("/bin/sh", "-c", "cat"), b"in", {}, "/workspace", None, errors
+    )
+    assert (said, result.stderr) == ([b"warn"], b"")
+
+
 @pytest.mark.asyncio
 async def test_cancellation_kills_command_and_disconnects():
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
@@ -316,7 +339,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
 
     async def run() -> int:
         result = await runtime._exec_argv(
-            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None
+            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None, None
         )
         return result.exit_code
 
@@ -410,7 +433,7 @@ class MountingE2BRuntime(E2BRuntime):
         self.table: dict[str, str] = {}
         self.lines: list[str] = []
 
-    async def _exec_argv(self, argv, stdin, env, cwd, output):
+    async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)

@@ -37,6 +37,7 @@ from mirage.io import IOResult
 from mirage.io.stream import ensure_stream, materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.join import shell_join
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
@@ -342,7 +343,7 @@ async def _supervise(
     foreground = flags.get("f") is True
     preserve = flags.get("p") is True
     verbose = flags.get("v") is True
-    drained: list[bytes] = []
+    console = JobConsole()
     held: list[IOResult] = []
     # timeout execs its command, so a builtin that is also a program
     # answers as the program. The task copies the context it starts in.
@@ -350,7 +351,7 @@ async def _supervise(
     try:
         task = asyncio.ensure_future(
             _execute_drained(
-                execute_fn, inner, session.session_id, stdin, drained, held
+                execute_fn, inner, session.session_id, stdin, console, held
             )
         )
     finally:
@@ -358,7 +359,7 @@ async def _supervise(
     try:
         return await _deadline(
             task,
-            drained,
+            console,
             held,
             seconds,
             signal,
@@ -375,7 +376,7 @@ async def _supervise(
 
 async def _deadline(
     task: _Run,
-    drained: list[bytes],
+    console: JobConsole,
     held: list[IOResult],
     seconds: float,
     signal: int,
@@ -389,7 +390,7 @@ async def _deadline(
 
     Args:
         task (_Run): the running inner line.
-        drained (list[bytes]): the stdout chunks it printed so far.
+        console (JobConsole): what it printed so far.
         held (list[IOResult]): its result, once it existed.
         seconds (float): the deadline; 0 (or inf) is none.
         signal (int): the signal sent at the deadline.
@@ -431,7 +432,7 @@ async def _deadline(
         if not task.done():
             await _cancel(task)
         say(SIGKILL)
-        return await _ended(drained, held, said, 137)
+        return await _ended(console, held, said, 137)
     if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS:
         done, _ = await asyncio.wait(
             {task}, timeout=kill_after if kill_after else None
@@ -439,15 +440,15 @@ async def _deadline(
         if task not in done:
             await _cancel(task)
             say(SIGKILL)
-            return await _ended(drained, held, said, 137)
+            return await _ended(console, held, said, 137)
         code = task.result()[1].exit_code if preserve else 124
-        return await _ended(drained, held, said, code, finished=True)
+        return await _ended(console, held, said, code, finished=True)
     await _cancel(task)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
-        return await _ended(drained, held, said, 128 + signal)
-    return await _ended(drained, held, said, 128 + signal if preserve else 124)
+        return await _ended(console, held, said, 128 + signal)
+    return await _ended(console, held, said, 128 + signal if preserve else 124)
 
 
 async def _cancel(task: _Run) -> None:
@@ -457,7 +458,7 @@ async def _cancel(task: _Run) -> None:
 
 
 async def _ended(
-    drained: list[bytes],
+    console: JobConsole,
     held: list[IOResult],
     said: list[str],
     exit_code: int,
@@ -472,19 +473,22 @@ async def _ended(
     follow it.
 
     Args:
-        drained (list[bytes]): the stdout chunks the command printed.
+        console (JobConsole): what the command printed.
         held (list[IOResult]): the inner result, once it existed.
         said (list[str]): timeout's own -v lines.
         exit_code (int): timeout's exit status.
-        finished (bool): whether the run ended on its own, so its stderr
-            is complete and can be read in full.
+        finished (bool): whether the run ended on its own, so its result
+            holds its whole stderr, what it wrote into the console too.
     """
     stderr = held[0].stderr if held else None
     if finished:
-        stderr = await materialize(stderr)
+        head = await materialize(stderr)
+    else:
+        head = await console.snapshot(Channel.STDERR) + (
+            stderr if isinstance(stderr, bytes) else b""
+        )
     tail = encode_text("".join(said))
-    head = stderr if isinstance(stderr, bytes) else b""
-    out = b"".join(drained) or None
+    out = await console.snapshot(Channel.STDOUT) or None
     return (
         out,
         IOResult(exit_code=exit_code, stderr=head + tail or None),
@@ -497,33 +501,38 @@ async def _execute_drained(
     inner: str,
     session_id: str,
     stdin: ByteSource | None,
-    drained: list[bytes],
+    console: JobConsole,
     held: list[IOResult],
 ) -> tuple[bytes | None, IOResult]:
-    """Run the inner line and drain its stdout under the same deadline.
+    """Run the inner line and drain its output under the same deadline.
 
-    A lazy inner pipeline produces bytes only when consumed; draining
-    inside the deadline keeps the whole run under the limit, and
-    draining chunk by chunk into ``drained`` is what lets a run that
-    overruns keep what it had printed. The inner result lands in
-    ``held`` as soon as it exists, so its stderr survives the deadline
-    the same way.
+    The line writes into ``console`` as it runs, a program as it prints
+    and a list statement by statement, so a run the deadline cuts short
+    keeps what it had printed, as GNU's leaves it on the terminal. A
+    lazy stdout it still returns drains inside the deadline too. The
+    inner result lands in ``held`` as soon as it exists.
 
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
         inner (str): the joined command line.
         session_id (str): session to run in.
         stdin (ByteSource | None): what the command reads.
-        drained (list[bytes]): where each chunk lands as it arrives.
+        console (JobConsole): where the line writes as it runs.
         held (list[IOResult]): one-slot box the inner result lands in.
     """
     extra = {"stdin": stdin} if stdin is not None else {}
-    io = await execute_fn(inner, session_id=session_id, **extra)
+    io = await execute_fn(inner, session_id=session_id, sink=console, **extra)
     held.append(io)
     if io.stdout is not None:
         async for chunk in ensure_stream(io.stdout):
-            drained.append(chunk)
-    return b"".join(drained) if drained or io.stdout is not None else None, io
+            await console.emit(Channel.STDOUT, chunk)
+    io.stderr = (
+        await console.snapshot(Channel.STDERR)
+        + (await io.materialize_stderr())
+        or None
+    )
+    out = await console.snapshot(Channel.STDOUT)
+    return out if out or io.stdout is not None else None, io
 
 
 async def timeout_builtin(call: BuiltinCall) -> Result:

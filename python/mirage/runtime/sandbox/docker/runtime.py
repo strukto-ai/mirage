@@ -46,10 +46,16 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
         args: list[str],
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
         """One docker CLI invocation; the seam tests override."""
         return await run_cli(
-            "docker", DOCKER_CLI_HINT, args, stdin, output=output
+            "docker",
+            DOCKER_CLI_HINT,
+            args,
+            stdin,
+            output=output,
+            errors=errors,
         )
 
     async def connect(self) -> None:
@@ -77,6 +83,7 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         stdout, stderr, code = await self._docker(
             exec_args(
@@ -84,6 +91,7 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
             ),
             stdin=stdin,
             output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 

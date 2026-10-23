@@ -72,10 +72,12 @@ export class AppleContainerRuntime
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
+    errors: OutputFn | null = null,
   ): Promise<CliResult> {
     return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
+      ...(errors !== null ? { errors } : {}),
     })
   }
 
@@ -138,11 +140,12 @@ export class AppleContainerRuntime
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const target = [await this.target(signal)]
     const args = execArgs(['exec', '-i'], target, env, cwd, argv)
-    const result = await this.container(args, stdin, output, signal)
+    const result = await this.container(args, stdin, output, signal, errors)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 

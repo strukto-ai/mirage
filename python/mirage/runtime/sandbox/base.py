@@ -143,6 +143,7 @@ class RemoteSandbox(
             ("/bin/sh", "-c", line if isinstance(line, str) else ""),
             ctx,
             None,
+            None,
         )
 
     async def run_process(
@@ -152,15 +153,20 @@ class RemoteSandbox(
         texts: list[str],
         ctx: Context,
         output: OutputFn | None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
-        return await self._run_argv(tuple(texts), ctx, output)
+        return await self._run_argv(tuple(texts), ctx, output, errors)
 
     async def settle(self) -> None:
         if self._mounts is not None:
             await self._mounts.sync()
 
     async def _run_argv(
-        self, argv: tuple[str, ...], ctx: Context, output: OutputFn | None
+        self,
+        argv: tuple[str, ...],
+        ctx: Context,
+        output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         """Connect once, bring the served mounts in step, then run.
 
@@ -168,6 +174,7 @@ class RemoteSandbox(
             argv (tuple[str, ...]): the program and its arguments.
             ctx (Context): the run's stdin, environment and cwd.
             output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
         """
         await self._ensure_connected()
         if self._mounts is not None:
@@ -182,6 +189,7 @@ class RemoteSandbox(
                 {**self.config.env, **(ctx.env or {}), EXEC_ID: exec_id},
                 ctx.cwd.virtual,
                 output,
+                errors,
             )
         except asyncio.CancelledError:
             runner = current_caller().process
@@ -205,6 +213,7 @@ class RemoteSandbox(
                     None,
                     dict(self.config.env),
                     "/",
+                    None,
                     None,
                 )
         except Exception:
@@ -240,6 +249,7 @@ class RemoteSandbox(
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         """Execute one argv inside the sandbox: the provider's transport.
 
@@ -271,7 +281,7 @@ class RemoteSandbox(
             cwd (str): the working directory, passed through verbatim.
         """
         return await self._exec_argv(
-            ("/bin/sh", "-c", line), stdin, env, cwd, None
+            ("/bin/sh", "-c", line), stdin, env, cwd, None, None
         )
 
     async def close(self) -> None:

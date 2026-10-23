@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { RedisAccessor } from '../../accessor/redis.ts'
+import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -29,7 +30,7 @@ import { read as redisRead } from '../../core/redis/read.ts'
 import { stat as redisStat } from '../../core/redis/stat.ts'
 import { readStream as redisStream } from '../../core/redis/stream.ts'
 import { exists as redisExists } from '../../core/redis/exists.ts'
-import { write as redisWrite } from '../../core/redis/write.ts'
+import { write as redisWrite, writeStream as redisWriteStream } from '../../core/redis/write.ts'
 import { appendBytes as redisAppend } from '../../core/redis/append.ts'
 import { create as redisCreate } from '../../core/redis/create.ts'
 import { mkdir as redisMkdir } from '../../core/redis/mkdir.ts'
@@ -146,6 +147,19 @@ export class RedisVFS extends BaseVFS {
 
   override append(path: PathSpec, data: Uint8Array): Promise<void> {
     return redisAppend(this.accessor, path, data)
+  }
+
+  override writeStream(
+    path: PathSpec,
+    data: ByteSource,
+    _signal?: AbortSignal,
+    atomic = false,
+  ): Promise<void> {
+    return redisWriteStream(this.accessor, path, data, false, atomic)
+  }
+
+  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+    return redisWriteStream(this.accessor, path, data, true)
   }
 
   override create(path: PathSpec): Promise<void> {

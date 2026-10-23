@@ -189,6 +189,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     argv: string[],
     ctx: Context,
     output: OutputFn | undefined,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     ctx.signal?.throwIfAborted()
     const name = argv[0] ?? ''
@@ -217,6 +218,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       ctx.signal,
       cwd,
       output,
+      errors,
     ).catch((err: unknown) => {
       const { code, syscall } = err as NodeJS.ErrnoException
       if (code === undefined || syscall?.startsWith('spawn') !== true) throw err
@@ -232,6 +234,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     signal?: AbortSignal,
     cwd?: string,
     output?: (chunk: Uint8Array) => Promise<void>,
+    errors?: (chunk: Uint8Array) => Promise<void>,
   ): Promise<RunResult> {
     const missing =
       program === this.python
@@ -243,6 +246,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       children: this.children,
       direct: true,
       ...(output === undefined ? {} : { output }),
+      ...(errors === undefined ? {} : { errors }),
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),
     })

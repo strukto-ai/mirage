@@ -45,6 +45,10 @@ export interface RedisStoreLike {
   /** A byte window, or null when the file is absent; a null `size` reads to the end. */
   getFileRange(path: string, offset: number, size: number | null): Promise<Uint8Array | null>
   setFile(path: string, data: Uint8Array): Promise<void>
+  /** Add bytes to the end of a file, creating it when missing (`APPEND`). */
+  appendFile(path: string, data: Uint8Array): Promise<void>
+  /** Write bytes at an offset, zero-filling a shorter file up to it (`SETRANGE`). */
+  setFileRange(path: string, offset: number, data: Uint8Array): Promise<void>
   truncateFile(path: string, length: number, modified: string, noCreate?: boolean): Promise<boolean>
   delFile(path: string): Promise<void>
   hasFile(path: string): Promise<boolean>

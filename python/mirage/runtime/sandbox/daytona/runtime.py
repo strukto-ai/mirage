@@ -65,6 +65,7 @@ class DaytonaRuntime(RemoteSandbox):
         env: dict[str, str],
         cwd: str,
         output: OutputFn | None,
+        errors: OutputFn | None,
     ) -> RunResult:
         command = wrap_line(argv, env, cwd)
         if stdin is not None:

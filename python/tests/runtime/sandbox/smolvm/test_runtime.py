@@ -40,7 +40,7 @@ class FakeSmolvmRuntime(SmolvmRuntime):
         self.status_stdout = status_stdout
         self.calls: list[tuple[list[str], bytes | None]] = []
 
-    async def _smolvm(self, args, stdin=None, output=None):
+    async def _smolvm(self, args, stdin=None, output=None, errors=None):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[1] == "status":

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { record, startOp } from '../../observe/context.ts'
+import { chunks } from '../../io/cooperative.ts'
+import { materialize, type ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
@@ -33,4 +35,50 @@ export async function write(
   await store.setFile(p, data)
   await store.setModified(p, nowIso())
   record('write', path.virtual, VFSName.REDIS, data.byteLength, timer)
+}
+
+/**
+ * Write bytes as they arrive, so a reader watches the file grow: a
+ * replacement at its own position (`SETRANGE`), as an open file's offset
+ * keeps it, an append at the file's end (`APPEND`, which also creates a
+ * missing one), so another appender's bytes stay. An append that brings
+ * nothing leaves an existing file as it was (`true >> f`). `atomic` stages
+ * the replacement until it ends. Mirrors Python's `write_stream`.
+ */
+export async function writeStream(
+  accessor: RedisAccessor,
+  path: PathSpec,
+  data: ByteSource,
+  append = false,
+  atomic = false,
+): Promise<void> {
+  const timer = startOp()
+  const p = norm(path.mountPath)
+  const store = accessor.store
+  await checkDestParents(store, path, p)
+  await checkWriteTarget(store, path, p)
+  const op = append ? 'append' : 'write'
+  if (atomic) {
+    const whole = await materialize(data)
+    await store.setFile(p, whole)
+    await store.setModified(p, nowIso())
+    record(op, path.virtual, VFSName.REDIS, whole.byteLength, timer)
+    return
+  }
+  if (!append) {
+    await store.setFile(p, new Uint8Array())
+    await store.setModified(p, nowIso())
+  } else if (!(await store.hasFile(p))) {
+    await store.appendFile(p, new Uint8Array())
+    await store.setModified(p, nowIso())
+  }
+  let size = 0
+  for await (const chunk of chunks(data)) {
+    if (chunk.byteLength === 0) continue
+    if (append) await store.appendFile(p, chunk)
+    else await store.setFileRange(p, size, chunk)
+    await store.setModified(p, nowIso())
+    size += chunk.byteLength
+  }
+  record(op, path.virtual, VFSName.REDIS, size, timer)
 }

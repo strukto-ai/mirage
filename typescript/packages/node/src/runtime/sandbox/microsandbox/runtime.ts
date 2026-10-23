@@ -58,10 +58,12 @@ export class MicrosandboxRuntime
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
+    errors: OutputFn | null = null,
   ): Promise<CliResult> {
     return runCli('msb', MICROSANDBOX_CLI_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
+      ...(errors !== null ? { errors } : {}),
     })
   }
 
@@ -111,6 +113,7 @@ export class MicrosandboxRuntime
     env: Record<string, string>,
     cwd: string,
     output: OutputFn | null,
+    errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
     // Released msb can still auto-start a guest stopped after this probe.
@@ -118,7 +121,7 @@ export class MicrosandboxRuntime
     await this.connect(signal)
     signal?.throwIfAborted()
     const args = execArgs(this.head(), ['--'], env, cwd, argv)
-    const result = await this.microsandbox(args, stdin, output, signal)
+    const result = await this.microsandbox(args, stdin, output, signal, errors)
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
