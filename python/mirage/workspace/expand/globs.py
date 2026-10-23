@@ -727,10 +727,16 @@ async def resolve_globs(
                             kept.append(p)
                     resolved = kept
                 # Each match counts against the mount serving it, as a
-                # word can reach into a mount below its own.
+                # word can reach into a mount below its own or follow a
+                # link into another.
                 counts: dict[str, int] = {}
                 for match in resolved:
-                    owner = _mount_of(registry, match.virtual, mount)
+                    served = (
+                        links.follow_parent(match.virtual)
+                        if links is not None
+                        else match.virtual
+                    )
+                    owner = _mount_of(registry, served, mount)
                     counts[owner.prefix] = counts.get(owner.prefix, 0) + 1
                     limit = owner.vfs.full_scan_limit
                     if 0 <= limit < counts[owner.prefix]:

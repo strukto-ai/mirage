@@ -587,10 +587,11 @@ export async function resolveGlobs(
           resolved = kept
         }
         // Each match counts against the mount serving it, as a word can
-        // reach into a mount below its own.
+        // reach into a mount below its own or follow a link into another.
         const counts = new Map<string, number>()
         for (const match of resolved) {
-          const owner = mountOf(registry, match.virtual, mount)
+          const served = links !== null ? links.followParent(match.virtual) : match.virtual
+          const owner = mountOf(registry, served, mount)
           const count = (counts.get(owner.prefix) ?? 0) + 1
           counts.set(owner.prefix, count)
           const limit = owner.vfs.fullScanLimit

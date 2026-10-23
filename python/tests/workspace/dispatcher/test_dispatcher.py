@@ -3206,6 +3206,25 @@ async def test_a_glob_counts_each_match_against_its_own_mount(command):
 
 
 @pytest.mark.asyncio
+async def test_a_glob_through_a_link_counts_against_the_target_mount():
+    top = RAMVFS(full_scan_limit=-1)
+    top._store.dirs.add("/data")
+    for i in range(3):
+        top._store.files[f"/data/t{i}.txt"] = b"t\n"
+    remote = RAMVFS(full_scan_limit=2)
+    with Workspace(
+        {"/a/": top, "/a/remote/": remote}, mode=MountMode.WRITE
+    ) as ws:
+        await ws.shell("ln -s /a/data /a/remote/link")
+        out = await ws.shell("echo /a/*/*/*.txt; echo $?")
+        assert (await out.stdout_str(), await out.stderr_str()) == (
+            "/a/remote/link/t0.txt /a/remote/link/t1.txt"
+            " /a/remote/link/t2.txt\n0\n",
+            "",
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
 async def test_rm_r_leaves_the_files_a_nested_mount_covers(cls):
     vfs = cls()

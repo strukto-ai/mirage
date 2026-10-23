@@ -3556,6 +3556,28 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  it('counts a glob through a link against the target mount', async () => {
+    const top = new RAMVFS({ fullScanLimit: -1 })
+    top.store.dirs.add('/data')
+    for (let i = 0; i < 3; i++) {
+      top.store.files.set(`/data/t${String(i)}.txt`, new TextEncoder().encode('t\n'))
+    }
+    const ws = new Workspace(
+      { '/a': top, '/a/remote': new RAMVFS({ fullScanLimit: 2 }) },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('ln -s /a/data /a/remote/link')
+      const out = await ws.shell('echo /a/*/*/*.txt; echo $?')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+        '/a/remote/link/t0.txt /a/remote/link/t1.txt /a/remote/link/t2.txt\n0\n',
+        '',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_rm_r_leaves_the_files_a_nested_mount_covers.
   it.each([LimitedRAM, ListedRAM])(
     'rm -r leaves the files a nested mount covers (%o)',
