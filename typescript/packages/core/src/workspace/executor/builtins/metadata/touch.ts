@@ -150,7 +150,7 @@ export async function handleTouch(
       )
       continue
     }
-    if (namespace.isMountRoot(target.virtual)) {
+    if (links.isMount(target.virtual)) {
       errors.push(`touch: cannot touch '${target.rawPath}': Is a directory\n`)
       continue
     }

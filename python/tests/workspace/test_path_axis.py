@@ -129,6 +129,37 @@ def test_hide_speaks_before_the_mode():
     assert kept.stdout == b"PRIVATE needle\n"
 
 
+def test_a_hidden_mount_root_answers_as_a_hidden_folder():
+    # A hidden mount root stats ENOENT like any hidden path, the miss
+    # cd takes for a backend that cannot stat its own root; it lands
+    # only on a root the session sees, and touch calls only such a root
+    # a directory, so the root answers what a hidden folder answers.
+    ws = Workspace({"/a/vault": RAMVFS()}, mode=MountMode.WRITE)
+
+    async def seed():
+        io = await ws.shell("mkdir -p /a/sec && echo v > /a/vault/v")
+        assert io.exit_code == 0, io.stderr
+
+    asyncio.run(seed())
+    ws.create_session(
+        "rev", profile={"paths": {"hide": ["/a/vault", "/a/sec"]}}
+    )
+    for line in ("cd /a/vault", "cd -P /a/vault", "cd /a && cd vault"):
+        moved = _run(ws, line)
+        assert moved.exit_code == 1
+        assert (moved.stderr or b"").endswith(
+            b"vault: No such file or directory\n"
+        )
+    assert (_run(ws, "pwd").stdout or b"") == b"/a\n"
+    for name in ("vault", "sec"):
+        touched = _run(ws, f"touch /a/{name}")
+        assert (touched.stderr or b"") == (
+            f"touch: cannot touch '/a/{name}': Permission denied\n".encode()
+        )
+    kept = asyncio.run(ws.shell("cd /a/vault && cat v"))
+    assert kept.stdout == b"v\n"
+
+
 def test_the_dispatcher_runs_as_the_default_session():
     # `ws.vfs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
     # under the default session's profile, the way a bare `execute`

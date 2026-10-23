@@ -224,6 +224,10 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
     physical,
   } = splitModeOptions([...call.argv.operands], CD_OPTIONS, shellPhysical)
   const follow = sessionFollow(namespace, dispatch, session)
+  // A mount root whose stat answers ENOENT is still a place to land, but
+  // only one the session sees: a hidden root answers ENOENT too.
+  const reader = namespace.sessionLinks(session)
+  const isMount = (p: string): boolean => reader.isMount(p)
   if (bad !== null) {
     const err = encodeText(`bash: cd: -${bad}: invalid option\n${CD_USAGE}`)
     return [
@@ -250,16 +254,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
         new ExecutionNode({ command: 'cd', exitCode: 1, stderr: err }),
       ]
     }
-    return handleCd(
-      dispatch,
-      (p) => registry.isMountRoot(p),
-      home,
-      session,
-      false,
-      null,
-      follow,
-      physical,
-    )
+    return handleCd(dispatch, isMount, home, session, false, null, follow, physical)
   }
   const raw = cdOperands[0]
   const rawStr = raw instanceof PathSpec ? raw.virtual : String(raw)
@@ -273,16 +268,7 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
         new ExecutionNode({ command: 'cd -', exitCode: 1, stderr: err }),
       ]
     }
-    return handleCd(
-      dispatch,
-      (p) => registry.isMountRoot(p),
-      old,
-      session,
-      true,
-      null,
-      follow,
-      physical,
-    )
+    return handleCd(dispatch, isMount, old, session, true, null, follow, physical)
   }
   let path: string | PathSpec
   let cdpathTarget: string
@@ -296,14 +282,5 @@ export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
     path = classifyBarePath(rawStr, registry, session.cwd)
     cdpathTarget = rawStr
   }
-  return handleCd(
-    dispatch,
-    (p) => registry.isMountRoot(p),
-    path,
-    session,
-    false,
-    cdpathTarget,
-    follow,
-    physical,
-  )
+  return handleCd(dispatch, isMount, path, session, false, cdpathTarget, follow, physical)
 }

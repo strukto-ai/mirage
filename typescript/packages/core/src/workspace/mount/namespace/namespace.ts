@@ -536,10 +536,6 @@ export class Namespace {
     return this.registry.mountPrefixes()
   }
 
-  isMountRoot(path: string): boolean {
-    return this.registry.isMountRoot(path)
-  }
-
   /**
    * How a session's files read this namespace: the reader for whichever
    * session an op runs as (`NamespaceReader`), over the link table and the

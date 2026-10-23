@@ -176,6 +176,34 @@ describe('the path axis end to end', () => {
     expect(stdoutStr(await ws.shell('cat /repo/secrets/key.pem'))).toBe('PRIVATE needle\n')
   })
 
+  it('a hidden mount root answers as a hidden folder', async () => {
+    // A hidden mount root stats ENOENT like any hidden path, the miss
+    // cd takes for a backend that cannot stat its own root; it lands
+    // only on a root the session sees, and touch calls only such a root
+    // a directory, so the root answers what a hidden folder answers.
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/a/vault': [new RAMVFS(), MountMode.WRITE] as const },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    open.push(ws)
+    expect((await ws.shell('mkdir -p /a/sec && echo v > /a/vault/v')).exitCode).toBe(0)
+    ws.createSession('rev', {
+      profile: parseSessionProfile({ paths: { hide: ['/a/vault', '/a/sec'] } }),
+    })
+    for (const line of ['cd /a/vault', 'cd -P /a/vault', 'cd /a && cd vault']) {
+      const moved = await ws.shell(line, { sessionId: 'rev' })
+      expect(moved.exitCode).toBe(1)
+      expect(stderrStr(moved)).toMatch(/vault: No such file or directory\n$/)
+    }
+    expect(stdoutStr(await ws.shell('pwd', { sessionId: 'rev' }))).toBe('/a\n')
+    for (const name of ['vault', 'sec']) {
+      const touched = await ws.shell(`touch /a/${name}`, { sessionId: 'rev' })
+      expect(stderrStr(touched)).toBe(`touch: cannot touch '/a/${name}': Permission denied\n`)
+    }
+    expect(stdoutStr(await ws.shell('cd /a/vault && cat v'))).toBe('v\n')
+  })
+
   it('the dispatcher runs as the default session', async () => {
     // `ws.vfs`, `ws.dispatch`, `ws.stat` and `ws.readdir` are judged
     // under the default session's profile, the way a bare `shell`

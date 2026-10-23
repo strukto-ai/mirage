@@ -142,7 +142,7 @@ async def handle_touch(
                 f"{fs_strerror(walk_refusal(target))}\n"
             )
             continue
-        if namespace.is_mount_root(target.virtual):
+        if links.is_mount(target.virtual):
             errors.append(
                 f"touch: cannot touch '{target.raw_path}': Is a directory\n"
             )

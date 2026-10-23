@@ -296,6 +296,9 @@ async def cd_builtin(call: BuiltinCall) -> Result:
         list(call.argv.operands), default=shell_physical
     )
     follow = _session_follow(call.namespace, dispatch, session)
+    # A mount root whose stat answers ENOENT is still a place to land,
+    # but only one the session sees: a hidden root answers ENOENT too.
+    is_mount = call.namespace.session_links(session).is_mount
     if bad_opt is not None:
         err = encode_text(f"bash: cd: -{bad_opt}: invalid option\n{CD_USAGE}")
         return (
@@ -321,7 +324,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             )
         return await handle_cd(
             dispatch,
-            registry.is_mount_root,
+            is_mount,
             home,
             session,
             follow=follow,
@@ -340,7 +343,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
             )
         return await handle_cd(
             dispatch,
-            registry.is_mount_root,
+            is_mount,
             old,
             session,
             print_path=True,
@@ -359,7 +362,7 @@ async def cd_builtin(call: BuiltinCall) -> Result:
         cdpath_target = raw_str
     return await handle_cd(
         dispatch,
-        registry.is_mount_root,
+        is_mount,
         path,
         session,
         cdpath_target=cdpath_target,

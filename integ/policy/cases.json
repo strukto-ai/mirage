@@ -132,6 +132,20 @@
    ]
   },
   {
+   "id": "a_hidden_mount_root_is_absent_to_the_shell",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/vault": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/vault"]}}},
+    {"op": "exec", "command": "echo v > /data/vault/v; echo f > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "ls /data", "expect": {"value": {"exit_code": 0, "stdout": "f\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: cd: /data/vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd -P /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: cd: /data/vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data; cd vault; pwd", "expect": {"value": {"exit_code": 0, "stdout": "/data\n", "stderr": "bash: cd: vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "touch /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "touch: cannot touch '/data/vault': Permission denied\n", "refusal": null}}},
+    {"op": "exec", "command": "cd /data/vault; pwd; cat v", "expect": {"value": {"exit_code": 0, "stdout": "/data/vault\nv\n", "stderr": "", "refusal": null}}}
+   ]
+  },
+  {
    "id": "mount_modes_narrow_what_a_session_may_write",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/ro": {"vfs": "ram", "config": {}, "mode": "read"}}},
    "steps": [

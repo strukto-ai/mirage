@@ -552,6 +552,24 @@ describe('patchNodeFs — refusals', () => {
     await expect(patched).rejects.toMatchObject({ code })
     await ws.close()
   })
+
+  it('answers a hidden mount root as absent', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/vault': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    await ws.vfs.write('/vault/v.txt', 'v')
+    await ws.setSessionProfile(ws.defaultSessionId, { paths: { hide: ['/vault'] } })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    expect(fs.existsSync('/data')).toBe(true)
+    expect(fs.existsSync('/vault')).toBe(false)
+    await expect(fs.promises.rmdir('/vault')).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.promises.rm('/vault', { recursive: true })).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await ws.close()
+  })
 })
 
 describe('patchNodeFs — access', () => {
