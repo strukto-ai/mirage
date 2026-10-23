@@ -19,6 +19,33 @@ workspace while seeing different files and using different commands.
 | `paths.show` | Make a specific path visible within a hidden folder. |
 | `mounts` | Restrict a data source to `read`, `write` or `exec` access. |
 | `cwd` and `env` | Set the session's starting directory and environment; `env` takes the same literals and [credential pointers](/home/configuration#environment-and-credential-pointers) as the workspace's. |
+| `vars.hide` | Make matching variable names, or globs over names, read as unset. |
+| `processes` | Set whose processes `ps` lists and `kill` stops, and cap the live processes. |
+| `command_limits` | Override [output and execution limits](/home/core/output-limits) for the session. |
+| `policy` | Run [policy scripts](/home/policy/scripts) at the `pre_` and `post_` methods. |
+
+Each of the last four keys takes this shape:
+
+```yaml
+profiles:
+  worker:
+    vars:
+      hide: [AWS_*, GITHUB_TOKEN]
+    processes:
+      list: workspace
+      kill: session
+      max: 8
+    command_limits:
+      grep: {max_lines: 200}
+    policy:
+      pre_command:
+        - {script: ./guard.py, runtime: monty}
+```
+
+`processes.list` and `processes.kill` take `session`, the default, or
+`workspace`. `kill` cannot reach past `list`, and a bare scope such as
+`processes: workspace` sets both. Starting a process past `max` fails with
+`Resource temporarily unavailable`.
 
 ## Example: a research agent
 
@@ -47,6 +74,25 @@ profile: researcher
 Replace RAM with your [VFS](/home/setup/vfs). `profile: researcher` selects
 the default for new sessions; another session can use a different named
 profile. A profile cannot grant access beyond the workspace's permissions.
+
+The allow list covers shell builtins too. This profile omits `cd` and `echo`,
+so a session under it is refused both with `Permission denied`. The session's
+own shell functions are exempt, because each line in a function body passes
+the same check.
+
+## Use a profile
+
+Name the profile when you create a session:
+
+| | Create a session under `researcher` |
+| --- | --- |
+| Python | `ws.create_session("s1", profile="researcher")` or `await ws.session("s1", profile="researcher")` |
+| TypeScript | `ws.createSession('s1', { profile: 'researcher' })` |
+| [CLI](/home/access/cli#workspaces) | `mirage session create ID -p researcher` |
+
+A session that names no profile gets the one `profile:` selects. Without
+`profile:`, it gets the profile named `default` if the workspace defines one,
+and no restrictions otherwise.
 
 ## Change a profile while it runs
 

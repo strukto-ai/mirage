@@ -37,16 +37,16 @@ constructors default to `read`.
 | --- | --- |
 | `mounts` | Map virtual prefixes to VFS configurations, described below. |
 | `mode` | Default mount access: `read`, `write` or `exec`. |
-| `read`, `write` | Default mount policies. Reads default to `bounded` with a 600-second bound; writes to `unconditional`. |
-| `clis` | Install [virtual CLIs](/home/setup/clis) by command name. |
+| `read`, `write` | Default mount policies, described [below](#read-and-write-policies). Reads default to `bounded` with a 600-second bound; writes to `unconditional`. |
+| `clis` | Install [virtual CLIs](/home/setup/clis) by command name, described [below](#cli-entries). |
 | `runtimes` | Ordered [runtimes](/home/setup/runtime/overview) for programs. |
 | `route_policy` | Choose runtimes with a [routing policy](/home/policy/route-runtime). |
 | `profiles`, `profile` | Define [agent profiles](/home/profiles) and select the default. |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
-| `cache`, `index` | Configure cached file content and directory/stat metadata. |
-| `store`, `console` | Configure workspace state and background-job output storage. |
+| `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-store-and-console). |
+| `store`, `console` | Configure workspace state and background-job output storage, described [below](#cache-index-store-and-console). |
 | `io` | Set byte-queue capacity with `buffer_bytes`. |
 | `default_session_id`, `workspace_id` | Set explicit identifiers instead of generated ones. |
 
@@ -66,7 +66,115 @@ Each mount key is an absolute virtual prefix, such as `/data`.
 | `write` | Override the write policy with one the backend supports. |
 | `command_limits` | Override limits for commands using this mount. |
 | `index` | Replace the workspace's index configuration for this mount. |
-| `backend`, `mountpoint` | Expose a local folder using [FUSE or FSKit](/home/setup/fuse). The default backend is `workspace`. |
+| `backend`, `mountpoint` | Expose a local folder using [FUSE or FSKit](/home/setup/fuse), or `nfs`. The default backend is `workspace`. |
+
+`backend` takes one of these values:
+
+| Value | Exposes the mount |
+| --- | --- |
+| `workspace` | Inside Mirage only, through the shell and file APIs. |
+| `fuse` | As a local folder through FUSE. |
+| `fskit` | As a local folder through FSKit, on macOS 15.4 or later. |
+| `nfs` | As a local folder through the operating system's NFS client. Mirage serves NFSv3 on a local port and runs the system `mount`, so nothing extra is installed. Linux and macOS; Linux needs root. Read-only, and it serves only mounts whose VFS always knows file sizes. |
+
+## Read and write policies
+
+`read` decides when Mirage serves cached file content:
+
+| Value | Behavior |
+| --- | --- |
+| `bounded` | Serve cached content without checking the backend, for up to `ttl` seconds. The default. |
+| `fresh` | Check the backend's content token before serving a cached copy. |
+
+`write` decides whether a write carries the version it was based on:
+
+| Value | Behavior |
+| --- | --- |
+| `unconditional` | Every write lands; the last write wins. The default. |
+| `conditional` | Send the version the mount last saw, such as `If-Match` on the S3 family, so a write based on a stale read is refused. |
+
+`read: pinned` and `write: staged` are reserved names. A mount that declares
+either is refused when it mounts.
+
+## CLI entries
+
+Each `clis` key is the command name the CLI installs under. An entry takes
+exactly one of `cli` or `script`:
+
+| Key | Purpose |
+| --- | --- |
+| `cli` | A registered CLI, such as `slack`. |
+| `script` | A `.py`, `.js` or `.mjs` program file, read when the config loads. |
+| `runtime` | The runtime entry that runs `script`. Unset picks the first runtime for the script's language. Only valid with `script`. |
+| `config` | Fields the CLI validates at install time. |
+
+```yaml
+clis:
+  slack:
+    cli: slack
+    config:
+      token: ${SLACK_TOKEN}
+  pager:
+    script: pager.py
+    runtime: monty
+```
+
+A `script` entry's `config` cannot hold a credential pointer. Read the
+credential from a managed `env` entry instead.
+
+## Cache, index, store and console
+
+Each block takes a `type`, and the other keys depend on it. A `redis` type
+defaults `url` to `redis://localhost:6379/0`.
+
+`cache` holds file content. `type` is `ram` (default) or `redis`.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `limit` | `512MB` | Cache size, in bytes or as a size string. |
+| `max_drain_bytes` | 8 MiB or `limit`, whichever is smaller | Largest file a streamed read copies into the cache. Cannot exceed `limit`. |
+| `url`, `key_prefix` | `mirage:cache:` | Redis only. |
+
+`index` holds directory listings and file metadata. `type` is `ram` (default)
+or `redis`. A mount's own `index` replaces this block.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `ttl` | `600` | Seconds a listing stays cached. |
+| `url`, `key_prefix` | `mirage:index:` | Redis only. |
+
+`store` holds workspace state. `type` is `ram` (default), `disk` or `redis`.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `root` | `~/.mirage/state` | Disk only. The state directory. |
+| `url`, `key_prefix` | `mirage:` | Redis only. |
+| `namespace` | unset | A separate store block for symlinks and file attributes. |
+| `observer` | unset | A separate store block for command history. |
+| `workspace` | unset | A separate store block for sessions and workspace metadata. |
+
+A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
+`workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
+with `key_prefix` defaulting to `mirage/`.
+
+`console` holds background-job output. `type` is `ram` (default) or `redis`.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `url`, `key_prefix` | `mirage:console:` | Redis only. |
+| `ttl_seconds` | `86400` | Redis only. Seconds a job's output is kept after its last write. `null` keeps it until deleted. |
+
+```yaml
+store:
+  type: redis
+  url: redis://localhost:6379/0
+  workspace:
+    type: s3
+    bucket: my-mirage-state
+console:
+  type: redis
+  ttl_seconds: 3600
+```
 
 ## Environment and credential pointers
 
