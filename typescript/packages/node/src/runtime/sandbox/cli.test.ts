@@ -138,6 +138,24 @@ describe('runCli', () => {
     },
   )
 
+  // A kill reaches the program once, as bash's does: a handler that counts
+  // its signals, or one already exiting, must not see a second.
+  it('signals the child once for a kill', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, count] = [join(dir, 'pid'), join(dir, 'count')]
+    const program = [
+      'const fs = require("node:fs")',
+      `process.on("SIGTERM", () => { fs.appendFileSync("${count}", "x\\n"); setTimeout(() => process.exit(0), 200) })`,
+      `fs.writeFileSync("${pidFile}", String(process.pid))`,
+      'setInterval(() => undefined, 1000)',
+    ].join('\n')
+    const runner = shRunner(`exec '${process.execPath}' -e '${program}'`)
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(count, 'utf8')).toBe('x\n')
+  })
+
   // macOS answers EPERM where Linux answers ESRCH for a group whose members
   // have all exited but are not yet reaped; either way the group is gone,
   // and the stop must not fail on it.

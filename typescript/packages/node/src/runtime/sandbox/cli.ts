@@ -253,7 +253,10 @@ export async function cwdRefusal(name: string, cwd: string): Promise<RunResult |
  * no process group to signal, and no signal but a kill, so only the child
  * goes there, killed. A group whose members have all exited but are not
  * yet reaped answers EPERM on macOS where Linux answers ESRCH; either way
- * nothing in it is left to signal. Mirrors Python's `kill_tree`.
+ * nothing in it is left to signal. The group's signal reaches the child
+ * too, so only a KILL also goes through `child.kill`, which marks it
+ * killed: a second gentler signal would reach its handler twice. Mirrors
+ * Python's `kill_tree`.
  *
  * @param signum the signal, KILL (9) by default.
  */
@@ -264,7 +267,7 @@ export function killTree(child: ChildProcess, signum = 9): void {
   }
   try {
     process.kill(-child.pid, signum)
-    child.kill(signum)
+    if (signum === 9) child.kill(signum)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code !== 'ESRCH' && code !== 'EPERM') throw err

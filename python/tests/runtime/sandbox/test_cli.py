@@ -15,6 +15,7 @@
 import asyncio
 import errno
 import os
+import shlex
 import signal
 import sys
 
@@ -242,6 +243,33 @@ async def test_a_direct_child_that_handles_the_signal_leaves_its_status(
     async with asyncio.timeout(5):
         info = await runner.join()
     assert (info.exit_code, runner.program_code) == (128 + signum, code)
+
+
+# A kill reaches the program once, as bash's does: a handler that counts
+# its signals, or one already exiting, must not see a second.
+@pytest.mark.asyncio
+async def test_a_kill_signals_the_child_once(tmp_path):
+    pid_file, count = tmp_path / "pid", tmp_path / "count"
+    program = (
+        "import os, signal, sys, time\n"
+        "def stop(*_):\n"
+        f"    open({str(count)!r}, 'a').write('x\\n')\n"
+        "    time.sleep(0.2)\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n"
+    )
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert count.read_text() == "x\n"
 
 
 # macOS answers EPERM where Linux answers ESRCH for a group whose members
