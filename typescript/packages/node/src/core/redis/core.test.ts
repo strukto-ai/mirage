@@ -103,6 +103,21 @@ describe.skipIf(skip)('core/redis ops', () => {
     )
   })
 
+  // A file another appender creates after the stream found it missing keeps
+  // that appender's bytes: the stream creates it with APPEND, not a SET.
+  it('writeStream keeps the bytes of a racing create', async () => {
+    store.hasFile = async (path: string): Promise<boolean> => {
+      await store.appendFile(path, ENC.encode('theirs\n'))
+      return false
+    }
+    async function* mine(): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('mine\n')
+    }
+    await writeStream(acc, spec('/log'), mine(), true)
+    expect(DEC.decode((await store.getFile('/log')) ?? new Uint8Array())).toBe('theirs\nmine\n')
+  })
+
   // A replacement writes at its own position (SETRANGE): a truncation behind
   // its back leaves a hole up to where it writes next.
   it('writeStream keeps a replacement at its own position', async () => {

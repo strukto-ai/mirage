@@ -50,10 +50,10 @@ async def write_stream(
 ) -> None:
     """Write bytes as they arrive, so a reader watches the file grow: a
     replacement at its own position (``SETRANGE``), as an open file's
-    offset keeps it, an append at the file's end (``APPEND``), so another
-    appender's bytes stay. An append that brings nothing leaves an
-    existing file as it was (``true >> f``). ``atomic`` stages the
-    replacement until it ends.
+    offset keeps it, an append at the file's end (``APPEND``, which also
+    creates a missing one), so another appender's bytes stay. An append
+    that brings nothing leaves an existing file as it was (``true >> f``).
+    ``atomic`` stages the replacement until it ends.
 
     Args:
         accessor (RedisAccessor): the Redis store.
@@ -75,8 +75,11 @@ async def write_stream(
         await store.set_modified(p, now_iso())
         record(op, path_spec.virtual, "redis", len(whole), timer)
         return
-    if not append or not await store.has_file(p):
+    if not append:
         await store.set_file(p, b"")
+        await store.set_modified(p, now_iso())
+    elif not await store.has_file(p):
+        await store.append_file(p, b"")
         await store.set_modified(p, now_iso())
     size = 0
     async with aclosing(chunks(data)) as source:

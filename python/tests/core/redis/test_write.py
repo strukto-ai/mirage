@@ -261,6 +261,27 @@ async def test_a_streamed_append_keeps_another_appenders_bytes(accessor):
     assert await accessor.store.get_file("/log") == b"start\nmine\ntheirs\n"
 
 
+# A file another appender creates after the stream found it missing keeps
+# that appender's bytes: the stream creates it with APPEND, not a SET.
+@pytest.mark.asyncio
+async def test_a_streamed_append_keeps_bytes_of_a_racing_create(
+    accessor, monkeypatch
+):
+    store = accessor.store
+
+    async def raced(path: str) -> bool:
+        await store.append_file(path, b"theirs\n")
+        return False
+
+    monkeypatch.setattr(store, "has_file", raced)
+
+    async def mine():
+        yield b"mine\n"
+
+    await write_stream(accessor, _spec("log"), mine(), append=True)
+    assert await store.get_file("/log") == b"theirs\nmine\n"
+
+
 # An atomic write shows nothing until it ends whole.
 @pytest.mark.asyncio
 async def test_an_atomic_streamed_write_lands_at_its_end(accessor):
