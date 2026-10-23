@@ -178,17 +178,22 @@ must be on the function's own mount (EXDEV otherwise); the backend receives
 it mount-relative.
 
 The effect is one of `READ`, `METADATA`, `WRITE`, `CREATE`, `REMOVE`,
-`RENAME` and `ATTR`; every one but `READ` and `METADATA` is a write. `target=`
+`RENAME`, `COPY` and `ATTR`; every one but `READ` and `METADATA` is a write.
+A `COPY` reads its path and writes only its `dst`. `target=`
 names the kind of entry the path is (`Target.FILE`, `DIR`, `LINK`, or `ANY`
-by default), and `creates=True` marks a `WRITE` that makes a missing file. The
+by default), and `creates=True` marks a `WRITE` that makes a missing file.
+`subtree=True` marks a call that reaches everything below its paths: a write is
+then refused with `EROFS` when anything below is read-only for the session, and
+[policy scripts](/home/policy/scripts) see `subtree` on the call. The
 base functions declare theirs the same way, and the dispatcher reads which ops
 follow a link, create a name or run one at a time per path off them.
-`REMOVE` belongs to `unlink` and `rmdir`, and `RENAME` to `rename`: only for
-those names does the dispatcher remove a link instead of following it, refuse a
-rename that would bring hidden entries into view (hidden-path rules stay where
-they are written), and move the links and cache below a renamed directory. A
-custom function declaring either is refused when its class is defined; a VFS
-that deletes or moves defines those functions.
+Three effects are reserved for fixed names: `REMOVE` for `unlink`, `rmdir`
+and `rm_r`, `RENAME` for `rename`, and `COPY` for `copy` and `dir_copy`. The
+dispatcher handles these names specially. It removes a link instead of
+following it, refuses a rename that would bring hidden entries into view, and
+moves the links and cache below a moved, removed or copied directory. A custom
+function that declares a reserved effect raises `TypeError` when its class is defined.
+To delete, move or copy, define the function with the reserved name.
 
 The driver never sees the mount it runs under. The index store and the `vfs:` reference it was built from live on the mount, built when the driver is placed and shared with any alias of the same instance.
 
