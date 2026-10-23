@@ -51,10 +51,12 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `clientId` | required | Google OAuth client ID. |
-| `clientSecret` | required | Google OAuth client secret. Redacted in snapshots. |
-| `refreshToken` | required | User's refresh token. Redacted in snapshots. |
+| `accessToken` | unset | An access token, or a function that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth. Redacted in snapshots. |
+| `clientId` | unset | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset. |
+| `clientSecret` | unset | Google OAuth client secret. Omit it for a PKCE client. Redacted in snapshots. |
+| `refreshToken` | unset | User's refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
+| `apiBase` | Google's hosts | One host for every Google API and the OAuth token endpoint, such as a test server. |
 | `contentSearch` | `false` | Narrow `grep -r` and `rg` with the listing's message text ([below](#grep-and-rg)). |
 
 ## grep and rg
