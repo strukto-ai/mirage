@@ -1669,11 +1669,21 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
             path (PathSpec): the file, keyed below the mount.
         """
+        return await _collected(await self._answer(index, path), path, True)
+
+    async def _answer(
+        self, index: IndexCacheStore, path: PathSpec
+    ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
+        """What the VFS's read of a whole file returns, called with the
+        stats it declares.
+
+        Args:
+            index (IndexCacheStore): the mount's index.
+            path (PathSpec): the file, keyed below the mount.
+        """
         read = self.vfs.read
         handed = await self._handed(read, path, {}, index)
-        return await _collected(
-            read(path, **_handed_on(read, index, **handed)), path, True
-        )
+        return read(path, **_handed_on(read, index, **handed))
 
     async def _write(
         self, index: IndexCacheStore, path: PathSpec, data: bytes
@@ -2588,9 +2598,7 @@ class MountEntry:
             scope (PathSpec): the file, keyed below the mount.
             index (IndexCacheStore): the mount's index.
         """
-        read = self.vfs.read
-        handed = await self._handed(read, scope, {}, index)
-        source = _as_stream(read(scope, **_handed_on(read, index, **handed)))
+        source = _as_stream(await self._answer(index, scope))
         try:
             async for chunk in source:
                 yield chunk
@@ -2605,7 +2613,9 @@ class MountEntry:
         context (session, recorder), the mount's recording and write
         contexts, its revision pins, the host-I/O bypass, and the read's
         timeout, which bounds each pull rather than the whole stream. The
-        mount is held until the stream ends or is closed.
+        mount is held until the stream ends or is closed. A read that is
+        neither a coroutine nor handed stats is called as the stream opens,
+        so what it binds (a pipe) is bound before the path can be released.
 
         Args:
             path (str): virtual path.
@@ -2618,9 +2628,6 @@ class MountEntry:
             vfs_path=mount_key(path, self.prefix.rstrip("/")),
         )
         read = self.vfs.read
-        # A read that is neither a coroutine nor handed stats runs as the
-        # read opens, so what it binds (a pipe) is bound before the path
-        # can be released.
         source = (
             self._streamed(scope, self.index)
             if _wants(read) or inspect.iscoroutinefunction(read)

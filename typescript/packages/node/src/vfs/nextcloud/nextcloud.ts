@@ -15,7 +15,6 @@ import type {
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
 import { read } from '../../core/nextcloud/read.ts'
 import { stat, tree } from '../../core/nextcloud/stat.ts'
@@ -92,16 +91,6 @@ export class NextcloudVFS extends BaseVFS {
 
   override async write(path: PathSpec, data: ByteSource): Promise<void> {
     return write(this.accessor, path, await materialize(data))
-  }
-
-  override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    return appendByRewrite(
-      (p) => read(this.accessor, p),
-      (p, d) => this.write(p, d),
-      (p) => this.stat(p),
-      path,
-      await materialize(data),
-    )
   }
 
   override create(path: PathSpec): Promise<void> {

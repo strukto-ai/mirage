@@ -1,7 +1,6 @@
 from typing import Any
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.nextcloud.capacity import capacity as _capacity
 from mirage.core.nextcloud.checksum import checksum as _checksum
 from mirage.core.nextcloud.copy import copy as _copy
@@ -74,15 +73,6 @@ class NextcloudVFS(BaseVFS):
 
     async def write(self, path: PathSpec, data: ByteSource) -> None:
         await _write(self.accessor, path, await materialize(data))
-
-    async def append(self, path: PathSpec, data: ByteSource) -> None:
-        await append_by_rewrite(
-            lambda p: _read(self.accessor, p),
-            self.write,
-            self.stat,
-            path,
-            await materialize(data),
-        )
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

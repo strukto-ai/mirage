@@ -1033,12 +1033,21 @@ export class MountEntry {
   }
 
   /** The VFS's read of a whole file, handed what is at its path. */
-  private async readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return collected(
-      this.vfs.read(path, await this.handedFor('read', path, null, index)),
-      path,
-      true,
-    )
+  private readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
+    return collected(this.answer(this.vfs, index, path), path, true)
+  }
+
+  /**
+   * What `vfs`'s read of a whole file answers, called with the stats it
+   * declares. Mirrors Python's `_answer`.
+   */
+  private async answer(
+    vfs: BaseVFS,
+    index: IndexCacheStore,
+    path: PathSpec,
+    signal?: AbortSignal,
+  ): Promise<ByteSource> {
+    return vfs.read(path, await this.handedFor('read', path, null, index), 0, null, signal)
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
@@ -1375,16 +1384,17 @@ export class MountEntry {
     )
   }
 
-  /** The VFS's read of `scope` as a stream, called on the first pull and
-   * handed the stats it declares. Mirrors Python's `_streamed`. */
+  /**
+   * The VFS's read of `scope` as a stream, called on the first pull and
+   * handed the stats it declares. Mirrors Python's `_streamed`.
+   */
   private async *streamed(
     vfs: BaseVFS,
     scope: PathSpec,
     index: IndexCacheStore,
     signal: AbortSignal | undefined,
   ): AsyncIterable<Uint8Array> {
-    const handed = await this.handedFor('read', scope, null, index)
-    yield* asStream(vfs.read(scope, handed, 0, null, signal))
+    yield* asStream(this.answer(vfs, index, scope, signal))
   }
 
   /**
@@ -1498,7 +1508,9 @@ export class MountEntry {
    * recorder, cache scope), the mount's recording context, its write context
    * (a read hands its token on only where a write will send it), its revision
    * pins, and the read's timeout, which bounds each pull rather than the whole
-   * stream. The mount is held until the stream ends or is closed. Mirrors
+   * stream. The mount is held until the stream ends or is closed. A read that
+   * is neither async nor handed stats is called as the stream opens, so what
+   * it binds (a pipe) is bound before the path can be released. Mirrors
    * Python's `read_stream`.
    */
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
@@ -1514,8 +1526,6 @@ export class MountEntry {
       revisions: { map: revisions },
     }
     const signal = callerSignal()
-    // A read that is neither async nor handed stats runs as the read opens,
-    // so what it binds (a pipe) is bound before the path can be released.
     const stream = withPullTimeout(
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)

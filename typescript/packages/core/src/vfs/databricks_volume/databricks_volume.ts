@@ -27,7 +27,6 @@ import { stat as dbxStat } from '../../core/databricks_volume/stat.ts'
 import { readStream as dbxStream } from '../../core/databricks_volume/stream.ts'
 import { unlink as dbxUnlink } from '../../core/databricks_volume/unlink.ts'
 import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
-import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { BaseVFS } from '../base.ts'
@@ -70,16 +69,6 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
 
   override async write(path: PathSpec, data: ByteSource): Promise<void> {
     return dbxWrite(this.accessor, path, await materialize(data))
-  }
-
-  override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    return appendByRewrite(
-      (p) => dbxRead(this.accessor, p),
-      (p, d) => this.write(p, d),
-      (p) => this.stat(p),
-      path,
-      await materialize(data),
-    )
   }
 
   override create(path: PathSpec): Promise<void> {

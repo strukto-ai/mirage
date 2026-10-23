@@ -28,7 +28,6 @@ from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.core.databricks_volume.unlink import unlink as _unlink
 from mirage.core.databricks_volume.write import write as _write
-from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.io.types import ByteSource, materialize
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
@@ -78,15 +77,6 @@ class DatabricksVolumeVFS(BaseVFS):
 
     async def write(self, path: PathSpec, data: ByteSource) -> None:
         await _write(self.accessor, path, await materialize(data))
-
-    async def append(self, path: PathSpec, data: ByteSource) -> None:
-        await append_by_rewrite(
-            lambda p: _read(self.accessor, p),
-            self.write,
-            self.stat,
-            path,
-            await materialize(data),
-        )
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)
