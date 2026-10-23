@@ -177,7 +177,8 @@ describe('JobTable.kill', () => {
 
   // bash's `wait` returns once a killed child has gone, with the status it
   // exited with when it handled the signal; a compound job is a shell the
-  // signal ends.
+  // signal ends. The status is the job's once its runner ends, so a
+  // snapshot taken before any `wait` keeps it too.
   it.each([
     [true, 3],
     [false, 143],
@@ -204,8 +205,9 @@ describe('JobTable.kill', () => {
     await up
     expect(await jt.kill(j.id, '', 15)).toBe(true)
     expect([j.exitCode, stopped]).toEqual([143, []])
-    const waited = await jt.wait(j.id)
-    expect([waited.exitCode, stopped]).toEqual([code, ['handled']])
+    await j.process?.join()
+    expect([j.exitCode, stopped]).toEqual([code, ['handled']])
+    expect((await jt.wait(j.id)).exitCode).toBe(code)
   })
 
   it('wait answers the kill once a runner outlasts the bound', async () => {

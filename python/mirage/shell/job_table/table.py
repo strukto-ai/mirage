@@ -96,7 +96,9 @@ async def _settle(run: JobRunner, job: Job) -> int:
     ``kill``, which settles the job itself so the caller never has to
     wait for a runner that may not notice it was cancelled; a runner
     still unwinding afterwards must not reopen or relabel the job, which
-    is what the status checks below enforce.
+    is what the status checks below enforce. Its status alone is final
+    only once the runner ends: a program that handled the signal leaves
+    its own (``_stopped_status``).
 
     Status is set before the console is finished, so a reader released by
     the ending chunk always sees settled fields.
@@ -109,6 +111,7 @@ async def _settle(run: JobRunner, job: Job) -> int:
         io_result, _ = await run(job)
     except asyncio.CancelledError:
         if job.status != JobStatus.RUNNING:
+            job.exit_code = _stopped_status(job)
             raise
         job.status = JobStatus.KILLED
         job.exit_code = _stopped_status(job)
@@ -495,9 +498,6 @@ class JobTable:
                     await job.process.join()
             except TimeoutError:
                 logger.debug("job %d still stopping after wait", job.id)
-            else:
-                if job.status == JobStatus.KILLED:
-                    job.exit_code = _stopped_status(job)
         return job
 
     async def wait_all(self, session_id: str = "") -> list[Job]:

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -47,6 +48,7 @@ import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionState } from '../session/session.ts'
+import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import { answerClosed, failedRead, statementStdin } from './statement.ts'
@@ -170,6 +172,24 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
   const streams = new Set<Channel | OwnedStream>()
   for (const stream of fds.values()) if (stream !== null) streams.add(stream)
   return streams
+}
+
+/**
+ * Whether a job is one program, as bash runs `cmd &` as the program
+ * itself: a simple command whose word names neither a function nor a shell
+ * builtin a runtime cannot take (`eval`, `source`), either of which keeps a
+ * shell between the job and the program, and which the signal ends. A word
+ * an expansion spells is not known before it runs, so it is not one.
+ * Mirrors Python's `_one_program`.
+ */
+function oneProgram(left: TSNodeLike, session: SessionState): boolean {
+  if (!simpleCommand(left)) return false
+  const head = commandInvocations(left)[0]?.[0] ?? null
+  return (
+    head !== null &&
+    (!SHELL_NAMES.has(head) || CAPTURABLE_BUILTINS.has(head)) &&
+    !Object.hasOwn(session.functions, head)
+  )
 }
 
 export async function handleBackground(
@@ -339,7 +359,7 @@ export async function handleBackground(
       sessionId: session.sessionId,
       parentPid: session.processId,
       limit: session.processes.max,
-      simple: simpleCommand(left),
+      simple: oneProgram(left, session),
     })
   } catch (err) {
     releaseProgram()

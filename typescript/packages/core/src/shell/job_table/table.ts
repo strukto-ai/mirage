@@ -55,7 +55,13 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
   } catch (err) {
     // A job killed while it was still running is already settled; the
     // runner unwinding afterwards must not reopen or relabel it.
-    if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? job.exitCode : 1
+    if (job.status !== JobStatus.RUNNING) {
+      if (!isAbortError(err)) return 1
+      // Final only now the runner has ended: a program that handled the
+      // signal leaves its own status.
+      job.exitCode = stoppedStatus(job)
+      return job.exitCode
+    }
     if (isAbortError(err)) {
       const code = stoppedStatus(job)
       job.status = JobStatus.KILLED
@@ -409,8 +415,7 @@ export class JobTable {
         }, STOP_WAIT_SECONDS * 1000)
       })
       try {
-        const stopped = await Promise.race([job.process.join(), late])
-        if (stopped !== null && job.status === JobStatus.KILLED) job.exitCode = stoppedStatus(job)
+        await Promise.race([job.process.join(), late])
       } finally {
         clearTimeout(timer)
       }

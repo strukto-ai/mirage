@@ -46,6 +46,7 @@ import {
   getCurrentEvaluation,
   runWithEvaluation,
 } from '../../context/session_context.ts'
+import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import { checkSyntax, syntaxErrorResult, type ShellParser } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
@@ -57,6 +58,7 @@ import {
   makeAbortError,
   mergeSignals,
   abortable,
+  ABORT_JOIN_MS,
   joinOrAbort,
 } from '../../utils/abort.ts'
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
@@ -1155,7 +1157,12 @@ async function runParsedLine(
             ? env.router.context(command, context.session, await judged())
             : null,
         ).finally(release)
-        const result = await joinOrAbort(running, killed)
+        // A `kill` names a signal, and what the line started gets the stop
+        // bound to answer it, as Python joins the cancelled line whole.
+        const runner = currentCaller().process
+        const result = await joinOrAbort(running, killed, () =>
+          (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000,
+        )
         if (killed?.aborted === true) throw makeAbortError(killed)
         return result
       } catch (error) {

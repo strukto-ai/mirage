@@ -54,6 +54,22 @@
             "stdout": "143\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; f() { python3 -c \"$P\" \"$1\"; }; f \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\nsaved\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; eval 'python3 -c \"$P\" \"$F\"' & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\nsaved\n",
+            "stderr": ""
+          }
         }
       ]
     }

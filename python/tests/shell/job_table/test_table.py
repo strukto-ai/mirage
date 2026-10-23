@@ -276,7 +276,8 @@ def _submit_handling(
 
 # bash's `wait` returns once a killed child has gone, with the status it
 # exited with when it handled the signal; a compound job is a shell the
-# signal ends.
+# signal ends. The status is the job's once its runner ends, so a
+# snapshot taken before any `wait` keeps it too.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("simple,code", [(True, 3), (False, 143)])
 async def test_wait_joins_a_killed_job_and_takes_its_program_status(
@@ -288,8 +289,10 @@ async def test_wait_joins_a_killed_job_and_takes_its_program_status(
     await started.wait()
     assert await table.kill(job.id, "", 15)
     assert (job.exit_code, stopped) == (143, [])
-    waited = await table.wait(job.id)
-    assert (waited.exit_code, stopped) == (code, ["handled"])
+    assert job.process is not None
+    await job.process.join()
+    assert (job.exit_code, stopped) == (code, ["handled"])
+    assert (await table.wait(job.id)).exit_code == code
 
 
 @pytest.mark.asyncio
