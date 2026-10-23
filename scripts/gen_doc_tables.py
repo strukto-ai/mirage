@@ -225,7 +225,9 @@ def _docstring(module: str, name: str, depth: int = 0) -> str | None:
         raise SystemExit(f"{module}.{name}: re-exports do not converge")
     path = _module_file(module)
     tree = ast.parse(path.read_text())
-    package = module if path.name == "__init__.py" else module.rsplit(".", 1)[0]
+    package = (
+        module if path.name == "__init__.py" else module.rsplit(".", 1)[0]
+    )
     body = tree.body
     for i, node in enumerate(body):
         if (
@@ -331,9 +333,7 @@ def renderers() -> dict[str, dict[str, Callable[[], tuple[str, list[str]]]]]:
             name: partial(config_table, model)
             for name, model in models.items()
         },
-        "exports": {
-            name: partial(exports_table, name) for name in adapters()
-        },
+        "exports": {name: partial(exports_table, name) for name in adapters()},
     }
 
 
