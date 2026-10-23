@@ -15,7 +15,7 @@ import { Workspace } from '@struktoai/mirage-node'
 ```ts
 class Workspace {
   constructor(
-    mounts: Record<string, VFS>,
+    mounts: Record<string, MountSpec>,
     options?: WorkspaceOptions,
   )
 }
@@ -23,8 +23,18 @@ class Workspace {
 
 One virtual terminal over the backends mounted at each prefix.
 
-<ResponseField name="mounts" type="Record<string, VFS>" required>
+<ResponseField name="mounts" type="Record<string, MountSpec>" required>
   The backend at each prefix, such as `{ '/': new RAMVFS(), '/s3': new S3VFS(config) }`.
+  <Expandable title="MountSpec">
+    A `MountSpec` takes one of four forms:
+
+    | Form | Mounts |
+    | --- | --- |
+    | `vfs` | With the workspace's `mode`. |
+    | `[vfs, mode]` | With its own mode. |
+    | `[vfs, mode, limits]` | With its own mode and [command limits](/home/core/output-limits), keyed by command name. |
+    | `new Mount(vfs, options)` | With any of `mode`, `backend`, `mountpoint`, `commandLimits`, `index`, `read` and `write`, as the [mount settings](/home/configuration#mount-settings) describe. |
+  </Expandable>
 </ResponseField>
 <ResponseField name="options.mode" type="MountMode" default="MountMode.READ">
   The mode a mount gets when it sets none: `READ`, `WRITE` or `EXEC`.
@@ -68,10 +78,10 @@ const ws = new Workspace(
 ### ws.session
 
 ```ts
-ws.session(sessionId, { profile?, mounts? }): Promise<Session>
+ws.session(sessionId, { profile?, mounts?, permissions? }): Promise<Session>
 ```
 
-The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile` and `mounts` apply only on create, and throw for an existing session. `ws.createSession` is the same call without the handle.
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and throw for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.createSession` is the same call without the handle.
 
 ```ts
 const session = await ws.session('agent')
@@ -220,7 +230,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 
 ```ts
 session.shell(
-  command, { stdin?, cwd?, env?, signal?, record?, stream? },
+  command, { stdin?, cwd?, env?, signal?, record?, runtime?, sink?, stream? },
 ): Promise<ExecuteResult | ShellExecution>
 ```
 
@@ -240,6 +250,12 @@ Runs a shell line as the session. With `stream: false` (the default), it collect
 </ResponseField>
 <ResponseField name="record" type="boolean" default="true">
   `false` keeps the line out of history.
+</ResponseField>
+<ResponseField name="runtime" type="string">
+  Run the line on this workspace [runtime](/home/setup/runtime/overview) entry, by name, instead of the one routing picks. Throws for a name the workspace does not have.
+</ResponseField>
+<ResponseField name="sink" type="JobConsole">
+  Write the line's output to this console as each statement finishes. The result then carries the exit code with empty `stdout` and `stderr`. The caller calls `finish()` on the console.
 </ResponseField>
 
 <Expandable title="ExecuteResult">
@@ -352,7 +368,7 @@ const current = await session.vfs.stat('/s3/report.csv', undefined, { fresh: tru
 
 <Expandable title="FileStat">
   <ResponseField name="name" type="string" />
-  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK` or `CHAR_DEVICE`.</ResponseField>
+  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK`, `CHAR_DEVICE` under `/dev`, or `FIFO` for a process substitution's `/dev/fd/N`. `BLOCK_DEVICE` and `SOCKET` exist in the enum but are never returned.</ResponseField>
   <ResponseField name="size" type="number | null">The bytes a read answers; `null` when unknown.</ResponseField>
   <ResponseField name="modified" type="string | null">ISO 8601.</ResponseField>
   <ResponseField name="content" type="ContentType | null">A file's content shape, such as `text`.</ResponseField>

@@ -64,11 +64,11 @@ ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
 
 ```python
 await ws.session(
-    session_id, mounts=None, *, profile=None
+    session_id, mounts=None, *, profile=None, permissions=None
 ) -> Session
 ```
 
-The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile` and `mounts` apply only on create, and raise `ValueError` for an existing session. `ws.create_session` is the same call without the handle.
+The [`Session`](#session) every call below runs as. It creates the session when the id is new and adopts it when it exists. `profile`, `mounts` and `permissions` apply only on create, and raise `ValueError` for an existing session. `permissions` adds rules for this session only, on top of its profile: ask and deny rules, hides and weaker mount modes. It cannot add an allow list or a policy. `ws.create_session` is the same call without the handle.
 
 ```python
 session = await ws.session("agent")
@@ -217,7 +217,7 @@ One session's handle, from [`ws.session`](#ws-session). Every call on it answers
 ```python
 await session.shell(
     command, stdin=None, cwd=None, env=None,
-    cancel=None, record=True, stream=False,
+    cancel=None, record=True, runtime=None, stream=False,
 ) -> IOResult | ShellExecution
 ```
 
@@ -237,6 +237,9 @@ Runs a shell line as the session. With `stream=False`, it collects the execution
 </ResponseField>
 <ResponseField name="record" type="bool" default="True">
   `False` keeps the line out of history.
+</ResponseField>
+<ResponseField name="runtime" type="str">
+  Run the line on this workspace [runtime](/home/setup/runtime/overview) entry, by name, instead of the one routing picks.
 </ResponseField>
 
 <Expandable title="IOResult">
@@ -344,7 +347,7 @@ current = await session.vfs.stat("/s3/report.csv", fresh=True)
 
 <Expandable title="FileStat">
   <ResponseField name="name" type="str" />
-  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK` or `CHAR_DEVICE`.</ResponseField>
+  <ResponseField name="type" type="FileType">`FILE`, `DIRECTORY`, `SYMLINK`, `CHAR_DEVICE` under `/dev`, or `FIFO` for a process substitution's `/dev/fd/N`. `BLOCK_DEVICE` and `SOCKET` exist in the enum but are never returned.</ResponseField>
   <ResponseField name="size" type="int | None">The bytes a read answers; `None` when unknown.</ResponseField>
   <ResponseField name="modified" type="str | None">ISO 8601.</ResponseField>
   <ResponseField name="content" type="ContentType | None">A file's content shape, such as `text`.</ResponseField>
