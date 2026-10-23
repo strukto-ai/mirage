@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
 import { render } from '../test-utils.ts'
@@ -163,7 +164,7 @@ class HeldRAM extends RAMVFS {
     offset = 0,
     size: number | null = null,
     signal?: AbortSignal,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     const data = await super.read(path, handed, offset, size, signal)
     if (this.gate !== null) {
       this.reading()
@@ -1335,12 +1336,12 @@ describe('readStream', () => {
     try {
       await ws.vfs.write('/r/a.txt', 'x'.repeat(100))
       const before = ws.records.length
-      const stream = await ws.vfs.readStream('/r/a.txt')
+      const stream = await ws.vfs.read('/r/a.txt', { stream: true })
       expect(ws.records.length).toBe(before)
       let got = ''
       for await (const chunk of stream) got += DEC.decode(chunk)
       expect(got).toBe('x'.repeat(100))
-      await (await ws.vfs.readStream('/r/a.txt'))[Symbol.asyncIterator]().return?.()
+      await (await ws.vfs.read('/r/a.txt', { stream: true }))[Symbol.asyncIterator]().return?.()
       expect(ws.records.slice(before).map((r) => [r.op, r.bytes])).toEqual([
         ['read', 100],
         ['read', 100],

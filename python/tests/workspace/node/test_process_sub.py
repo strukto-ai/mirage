@@ -18,8 +18,12 @@ class BarrierVFS(RAMVFS):
         self.started = asyncio.Event()
         self.closed = asyncio.Event()
 
-    async def read_stream(
-        self, path: PathSpec, index: IndexCacheStore = NULL_INDEX
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        index: IndexCacheStore = NULL_INDEX,
     ) -> AsyncIterator[bytes]:
         try:
             self.started.set()

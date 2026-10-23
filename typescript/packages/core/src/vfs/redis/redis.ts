@@ -124,8 +124,8 @@ export class RedisVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return redisRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return redisStream(this.accessor, path)
     return redisRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -133,32 +133,23 @@ export class RedisVFS extends BaseVFS {
     return redisStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return redisStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return redisExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return redisWrite(this.accessor, path, data)
-  }
-
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return redisAppend(this.accessor, path, data)
-  }
-
-  override writeStream(
+  override write(
     path: PathSpec,
     data: ByteSource,
     _signal?: AbortSignal,
+    _handed?: Handed,
     atomic = false,
   ): Promise<void> {
+    if (data instanceof Uint8Array) return redisWrite(this.accessor, path, data)
     return redisWriteStream(this.accessor, path, data, false, atomic)
   }
 
-  override appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+  override append(path: PathSpec, data: ByteSource): Promise<void> {
+    if (data instanceof Uint8Array) return redisAppend(this.accessor, path, data)
     return redisWriteStream(this.accessor, path, data, true)
   }
 

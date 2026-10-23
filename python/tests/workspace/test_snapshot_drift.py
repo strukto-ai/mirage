@@ -458,7 +458,7 @@ async def test_snapshot_fingerprints_keep_read_mount_ownership(
 async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
     payload = b"old"
 
-    # A read that answers with a stream, recorded only as it is drained.
+    # A read that answers with a stream, recorded only once it is drained.
     class LazyRAMVFS(RAMVFS):
         async def read(
             self,
@@ -468,6 +468,7 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
             size: int | None = None,
         ) -> Any:
             async def lazy() -> AsyncIterator[bytes]:
+                yield payload
                 record(
                     "read",
                     path.virtual,
@@ -476,7 +477,6 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
                     start_op(),
                     fingerprint="old",
                 )
-                yield payload
 
             return lazy()
 
@@ -486,7 +486,7 @@ async def test_snapshot_rejects_fingerprint_from_retired_lazy_op():
     scope = RecordingScope()
     try:
         stream, _ = await ws.dispatch(
-            "read", PathSpec.from_str_path("/data/file")
+            "read", PathSpec.from_str_path("/data/file"), stream=True
         )
         old_id = ws.mount("/data").mount_id
         removing = asyncio.create_task(ws.unmount("/data"))

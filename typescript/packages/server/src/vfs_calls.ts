@@ -83,12 +83,13 @@ export const VFS_CALLS: readonly VfsCall[] = [
   row(
     'read',
     "Read a file's bytes, from an offset.",
-    { path: PATH, offset: INTEGER, size: SIZE },
+    { path: PATH, offset: INTEGER, size: SIZE, raw: FLAG },
     ['path'],
     (t, a) =>
       t.read(str(a, 'path'), {
         offset: (a.offset as number | undefined) ?? 0,
         size: (a.size as number | null | undefined) ?? null,
+        raw: a.raw === true,
       }),
   ),
   row(

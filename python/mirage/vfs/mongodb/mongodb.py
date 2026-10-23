@@ -54,7 +54,9 @@ class MongoDBVFS(BaseVFS):
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path)
         data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
 
@@ -62,9 +64,6 @@ class MongoDBVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await _stat(self.accessor, path, entry)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
 
     async def lines_containing(
         self, path: PathSpec, text: str, *, ignore_case: bool

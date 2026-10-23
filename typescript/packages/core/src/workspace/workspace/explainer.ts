@@ -80,7 +80,7 @@ export class VfsExplainer {
   /** Explain `session.vfs.read`. */
   read(
     path: string,
-    options: { offset?: number; size?: number | null } = {},
+    options: { offset?: number; size?: number | null; raw?: boolean } = {},
   ): Promise<VfsExplanation> {
     return dry('read', [path], this.files, (files) => files.read(path, options))
   }

@@ -17,13 +17,13 @@ from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.read import follow as _follow
-from mirage.core.discord.read import read as _read
 from mirage.core.discord.read import read_many as _read_many
 from mirage.core.discord.read import read_range as _read_range
 from mirage.core.discord.read import read_stream as _read_stream
 from mirage.core.discord.readdir import readdir as _readdir
 from mirage.core.discord.stat import stat as _stat
 from mirage.core.time_range import TimeRange
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.discord.config import DiscordConfig
@@ -65,9 +65,9 @@ class DiscordVFS(BaseVFS):
         size: int | None = None,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path, entry, parent)
+            return _read_stream(self.accessor, path, entry, parent)
         return await _read_range(
             self.accessor, path, offset, size, entry, parent
         )
@@ -83,14 +83,6 @@ class DiscordVFS(BaseVFS):
         return await _read_many(
             self.accessor, paths, limit, entries or unknown, parents or unknown
         )
-
-    def read_stream(
-        self,
-        path: PathSpec,
-        entry: FileStat | None = None,
-        parent: FileStat | None = None,
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry, parent)
 
     async def follow(
         self,

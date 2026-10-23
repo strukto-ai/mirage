@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { ByteSpool } from '@struktoai/mirage-core/io/spool'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
@@ -119,7 +120,7 @@ function ownReads(vfs: BaseVFS): {
   readStream: (p: PathSpec) => AsyncIterable<Uint8Array>
   stat: (p: PathSpec) => Promise<FileStat>
 } {
-  const readBytes = (p: PathSpec): Promise<Uint8Array> => {
+  const answer = (p: PathSpec): Promise<ByteSource> | AsyncIterable<Uint8Array> => {
     const renderer = vfs.supports('read') ? undefined : vfs.renderers[getExtension(p.virtual) ?? '']
     if (renderer === undefined) return vfs.read(p, {})
     const render = (vfs as unknown as Record<string, typeof vfs.read>)[renderer]
@@ -127,14 +128,26 @@ function ownReads(vfs: BaseVFS): {
     return render.call(vfs, p, {})
   }
   return {
-    readBytes,
-    readStream: vfs.supports('readStream')
-      ? (p) => vfs.readStream(p, {})
-      : async function* (p) {
-          yield await readBytes(p)
-        },
+    readBytes: (p) => bytesOf(answer(p)),
+    readStream: (p) => chunksOf(answer(p)),
     stat: (p) => vfs.stat(p, {}),
   }
+}
+
+// What a `read` answered, as bytes: a stream collected.
+async function bytesOf(
+  answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
+): Promise<Uint8Array> {
+  return materialize(await answer)
+}
+
+// What a `read` answered, as a stream: bytes as one chunk.
+async function* chunksOf(
+  answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  const found = await answer
+  if (found instanceof Uint8Array) yield found
+  else yield* found
 }
 
 const H = vi.hoisted(() => ({
@@ -206,9 +219,14 @@ vi.mock('@struktoai/mirage-core/observe/context', async (importOriginal) => {
       options: ContextModule.RecordOptions = {},
     ): OpRecord | null => {
       if (op === 'read') H.slots.push(['stream', path])
-      if (!H.unrecorded) return actual.recordStream(op, path, source, options)
-      const rec = capture(op, path, source, 0, options)
-      H.captured.push(rec)
+      const rec = H.unrecorded
+        ? capture(op, path, source, 0, options)
+        : actual.recordStream(op, path, source, options)
+      if (H.unrecorded && rec !== null) H.captured.push(rec)
+      const forced = H.stampOverride
+      if (op === 'read' && forced !== null && rec !== null) {
+        Object.defineProperty(rec, 'fingerprint', { get: () => forced, set: () => undefined })
+      }
       return rec
     },
   }
@@ -603,7 +621,6 @@ const COMMANDS: Record<Exclude<Row, 'bytes'>, (v: string) => string> = {
   stream: (v) => `cat ${v}`,
   partial: (v) => `cat ${v} | head -c 1`,
 }
-const SLOTS: Record<Row, string> = { bytes: 'bytes', stream: 'stream', partial: 'stream' }
 
 const ALL_SHAPES: Shape[] = ['root', 'nested', 'prefixed']
 const ALL_ROWS: Row[] = ['bytes', 'stream', 'partial']
@@ -646,8 +663,8 @@ interface Fake {
   readBytes: (path: PathSpec) => Promise<Uint8Array>
   readStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   stat: (path: PathSpec) => Promise<FileStat>
-  // The slot a stream read records in: the Google apps' streams are their
-  // whole read handed over, which records through `record`.
+  // The slot a whole read records in: the Google apps answer one with their
+  // rendering, which records through `record`.
   streamSlot: 'stream' | 'bytes'
 }
 
@@ -676,8 +693,8 @@ function watchWalks(vfs: BaseVFS): void {
   })
 }
 
-function slotOf(fake: Fake, row: Row): string {
-  return row === 'bytes' ? SLOTS[row] : fake.streamSlot
+function slotOf(fake: Fake): string {
+  return fake.streamSlot
 }
 
 function chunked(data: Uint8Array): Uint8Array[] {
@@ -806,9 +823,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         dropbox.write(stored, next)
       },
-      readBytes: async (p) => dropboxVfs.read(p, await handed(p)),
+      readBytes: async (p) => bytesOf(dropboxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
-        yield* dropboxVfs.readStream(p, await handed(p))
+        yield* chunksOf(dropboxVfs.read(p, await handed(p)))
       },
       stat: (p) => dropboxVfs.stat(p),
       streamSlot: 'stream',
@@ -843,9 +860,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         box.write(stored, next)
       },
-      readBytes: async (p) => boxVfs.read(p, await handed(p)),
+      readBytes: async (p) => bytesOf(boxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
-        yield* boxVfs.readStream(p, await handed(p))
+        yield* chunksOf(boxVfs.read(p, await handed(p)))
       },
       stat: async (p) => boxVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
@@ -886,9 +903,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         gh.files.set(key, next)
       },
-      readBytes: async (p) => ghVfs.read(p, await handed(p)),
+      readBytes: async (p) => bytesOf(ghVfs.read(p, await handed(p))),
       readStream: async function* (p) {
-        yield* ghVfs.readStream(p, await handed(p))
+        yield* chunksOf(ghVfs.read(p, await handed(p)))
       },
       stat: async (p) => ghVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
@@ -965,9 +982,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         item.content = next
       },
-      readBytes: async (p) => vfs.read(p, await handed(p)),
+      readBytes: async (p) => bytesOf(vfs.read(p, await handed(p))),
       readStream: async function* (p) {
-        yield* vfs.readStream(p, await handed(p))
+        yield* chunksOf(vfs.read(p, await handed(p)))
       },
       stat: async (p) => vfs.stat(p, await handed(p)),
       streamSlot: 'stream',
@@ -1072,9 +1089,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       rewrite: (next) => {
         files.set(stored, next)
       },
-      readBytes: async (p) => hfVfs.read(p, await handed(p)),
+      readBytes: async (p) => bytesOf(hfVfs.read(p, await handed(p))),
       readStream: async function* (p) {
-        yield* hfVfs.readStream(p, await handed(p))
+        yield* chunksOf(hfVfs.read(p, await handed(p)))
       },
       stat: async (p) => hfVfs.stat(p, await handed(p)),
       streamSlot: 'stream',
@@ -1476,7 +1493,7 @@ describe('the read-token contract', () => {
         if (shape === 'listed') await line(ws, 'ls /m')
         expect(await ws.cache.exists(virtual)).toBe(false)
         const first = await readRow(ws, row, virtual)
-        expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
+        expect(readsOnMount()).toEqual([[slotOf(fake), virtual]])
         expect(fake.fetches()).toBe(1)
         expect(first).toEqual(data)
 
@@ -1506,7 +1523,7 @@ describe('the read-token contract', () => {
       const ws = freshWorkspace(fake.vfs)
       try {
         expect(await readRow(ws, row, virtual)).toEqual(BIG.slice(0, 1))
-        expect(readsOnMount()).toEqual([[slotOf(fake, row), virtual]])
+        expect(readsOnMount()).toEqual([[slotOf(fake), virtual]])
         expect(fake.fetches()).toBe(1)
         expect(await ws.cache.get(virtual)).toBeNull()
         expect(await line(ws, `cat ${virtual}`)).toEqual(BIG)

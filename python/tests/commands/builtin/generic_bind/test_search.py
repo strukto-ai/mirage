@@ -74,10 +74,6 @@ class SearchRAM(RAMVFS):
         self.reads.append(path.vfs_path)
         return await super().read(path, offset, size)
 
-    def read_stream(self, path):
-        self.reads.append(path.vfs_path)
-        return super().read_stream(path)
-
     async def files_containing(
         self, path, text, *, whole_word, ignore_case, index=NULL_INDEX
     ):

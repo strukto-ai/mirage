@@ -2354,11 +2354,12 @@ class Dispatcher:
     async def _streams(self, call: _Call, mount: MountEntry) -> bool:
         """Whether a read is answered as it is pulled.
 
-        A whole read of stored bytes streams through the VFS's own
-        ``read_stream``. A window, a rendering, a VFS with no stream and
-        a post_vfs policy that may read the result each get the whole
-        bytes instead, which are a stream of one chunk. A read a running
-        line makes reaches no post_vfs policy, so it streams either way.
+        A whole read of stored bytes streams as the VFS's ``read``
+        answers it, a stream as it is pulled and bytes as one chunk. A
+        window, a rendering, a VFS with no ``read`` of its own and a
+        post_vfs policy that may read the result each get the whole bytes
+        instead, which are a stream of one chunk. A read a running line
+        makes reaches no post_vfs policy, so it streams either way.
 
         Args:
             call (_Call): the admitted read.
@@ -2367,7 +2368,7 @@ class Dispatcher:
         if not (
             call.stream
             and call.window == (0, None)
-            and mount.vfs.supports("read_stream")
+            and mount.vfs.supports("read")
             and not call.renders_read(mount)
         ):
             return False

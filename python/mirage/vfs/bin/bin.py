@@ -20,6 +20,7 @@ from mirage.core.bin.read import read as _read
 from mirage.core.bin.readdir import readdir as _readdir
 from mirage.core.bin.refuse import refuse
 from mirage.core.bin.stat import stat as _stat
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -71,10 +72,10 @@ class BinViewVFS(BaseVFS):
     # as a read-only file system does, rather than as a missing function,
     # which would answer "Operation not supported".
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
         await refuse(self.accessor, path)
 
-    async def append(self, path: PathSpec, data: bytes) -> None:
+    async def append(self, path: PathSpec, data: ByteSource) -> None:
         await refuse(self.accessor, path)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:

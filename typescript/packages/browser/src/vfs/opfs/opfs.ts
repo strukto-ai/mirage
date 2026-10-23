@@ -161,8 +161,8 @@ export class OPFSVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return opfsRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return opfsStream(this.accessor, path)
     return opfsRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -170,28 +170,23 @@ export class OPFSVFS extends BaseVFS {
     return opfsStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return opfsStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return opfsExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return opfsWrite(this.accessor, path, data)
-  }
-
-  override writeStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+  override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    if (data instanceof Uint8Array) return opfsWrite(this.accessor, path, data)
     return opfsWriteStream(this.accessor, path, chunks(data, signal))
   }
 
-  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+  override append(
+    path: PathSpec,
+    data: ByteSource,
+    _handed?: Handed,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (data instanceof Uint8Array) return opfsAppend(this.accessor, path, data)
     return opfsAppendStream(this.accessor, path, chunks(data, signal))
-  }
-
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return opfsAppend(this.accessor, path, data)
   }
 
   override create(path: PathSpec): Promise<void> {

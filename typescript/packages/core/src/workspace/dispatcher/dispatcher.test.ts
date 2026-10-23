@@ -100,7 +100,7 @@ describe('dispatch applies limits on the executing mount', () => {
       expect(DEC.decode(window)).toBe(DEC.decode(data.subarray(100, 300)))
       const tail = await ws.vfs.read('/data/f.txt', { offset: 100 })
       expect(DEC.decode(tail)).toBe(DEC.decode(data.subarray(100)))
-      const streamed = await pullAll(await ws.vfs.readStream('/data/f.txt'))
+      const streamed = await pullAll(await ws.vfs.read('/data/f.txt', { stream: true }))
       expect(streamed.join('')).toBe(DEC.decode(data))
     } finally {
       await ws.close()
@@ -224,8 +224,9 @@ it.each([
   const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
   ws.cache.maxDrainBytes = budget
   const tokens: (string | null)[] = []
-  const original = destination.writeStream.bind(destination)
-  vi.spyOn(destination, 'writeStream').mockImplementation(async (path, data) => {
+  const original = destination.write.bind(destination)
+  vi.spyOn(destination, 'write').mockImplementation(async (path, data) => {
+    if (data instanceof Uint8Array) return original(path, data)
     tokens.push((await ws.cache.fingerprints([path.virtual]))[0] ?? null)
     expect(await ws.cache.exists(path.virtual)).toBe(false)
     await original(path, data)
@@ -334,7 +335,8 @@ class StreamWritingRAM extends RAMVFS {
   readonly chunkSizes: number[] = []
   fail = false
 
-  override async writeStream(path: PathSpec, data: ByteSource): Promise<void> {
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    if (data instanceof Uint8Array) return super.write(path, data)
     this.streamed.push(['write', path.virtual])
     const content: Uint8Array[] = []
     for await (const chunk of data as AsyncIterable<Uint8Array>) {
@@ -354,7 +356,8 @@ class StreamWritingRAM extends RAMVFS {
     await super.write(path, combined)
   }
 
-  override async appendStream(path: PathSpec, data: ByteSource): Promise<void> {
+  override async append(path: PathSpec, data: ByteSource): Promise<void> {
+    if (data instanceof Uint8Array) return super.append(path, data)
     this.streamed.push(['append', path.virtual])
     await super.append(path, await materialize(data))
   }
@@ -1663,8 +1666,9 @@ describe('a cold read keeps its bytes for the next reader', () => {
     async (_name, window, rendered) => {
       // The fill is chosen after the probe, but the op is resolved only once
       // the mount is ready; a renderer landing in between runs, and its
-      // rendering must not become what cat reads. A ranged read on a store
-      // with no native range fills the whole file too.
+      // rendering must not become what cat reads, which is the counted read's
+      // stored bytes. A ranged read on a store with no native range fills the
+      // whole file too.
       const { ws } = counted()
       await ws.vfs.write('/data/f.count', 'STORED')
       await ws.cache.remove('/data/f.count')
@@ -1688,7 +1692,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
       })
       expect(DEC.decode(await ws.vfs.read('/data/f.count', window))).toBe(rendered)
       expect(await ws.cache.exists('/data/f.count')).toBe(false)
-      expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('STORED')
+      expect(DEC.decode((await ws.shell('cat /data/f.count')).stdout)).toBe('BODY')
     },
   )
 
@@ -1927,7 +1931,7 @@ class SplicingRAMVFS extends RAMVFS {
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    const whole = await this.read(path)
+    const whole = await materialize(await this.read(path))
     await new Promise((resolve) => setTimeout(resolve, this.pause))
     await this.write(path, spliceWindow(whole, offset, data))
   }
@@ -2333,20 +2337,18 @@ class Tape extends BaseVFS {
     return Promise.resolve(new FileStat({ name: key, type: FileType.FILE, size: data.byteLength }))
   }
 
-  override read(path: PathSpec): Promise<Uint8Array> {
+  override read(path: PathSpec): Promise<ByteSource> {
     this.reads += 1
     const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
-    return data === undefined ? Promise.reject(enoent(path)) : Promise.resolve(data)
+    if (data === undefined) return Promise.reject(enoent(path))
+    return Promise.resolve(this.chunksOf(data))
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
-    return Promise.resolve()
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), await materialize(data))
   }
 
-  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    const data = this.files.get(path.vfsPath.replace(/^\/+/, ''))
-    if (data === undefined) throw enoent(path)
+  private async *chunksOf(data: Uint8Array): AsyncIterable<Uint8Array> {
     try {
       for (let at = 0; at < data.byteLength; at += 10) {
         await sleep(this.delay)
@@ -2383,7 +2385,7 @@ describe('a streamed read', () => {
       expect(tape.pulled).toBe(1)
       expect(await pullAll(stream)).toEqual(Array<string>(5).fill('0123456789'))
       expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe(WHOLE)
-      expect(tape.reads).toBe(0)
+      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }
@@ -2410,7 +2412,7 @@ describe('a streamed read', () => {
     try {
       const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
       expect(got).toBeInstanceOf(Uint8Array)
-      expect(tape.pulled).toBe(0)
+      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }
@@ -2469,7 +2471,7 @@ describe('a streamed read', () => {
       await stream.return(undefined)
       expect([tape.pulled, tape.closed]).toEqual([1, true])
       await ws.dispatch('read', TAPE)
-      expect(tape.reads).toBe(1)
+      expect(tape.reads).toBe(2)
     } finally {
       await ws.close()
     }
@@ -2483,7 +2485,7 @@ describe('a streamed read', () => {
       await ws.dispatch('write', TAPE, [ENC.encode('new')])
       expect((await pullAll(stream))[0]).toBe('0123456789')
       expect(DEC.decode((await ws.dispatch('read', TAPE)) as Uint8Array)).toBe('new')
-      expect(tape.reads).toBe(0)
+      expect(tape.reads).toBe(1)
     } finally {
       await ws.close()
     }
@@ -2497,7 +2499,7 @@ describe('a streamed read', () => {
       const stream = await ws.dispatch('read', TAPE, [], { stream: true })
       expect((await pullAll(stream)).join('')).toBe(WHOLE)
       await ws.dispatch('read', TAPE)
-      expect(tape.reads).toBe(1)
+      expect(tape.reads).toBe(2)
     } finally {
       await ws.close()
     }
@@ -2506,9 +2508,9 @@ describe('a streamed read', () => {
 
 class LostReply extends Tape {
   // A store whose write lands and whose reply then breaks off.
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    this.files.set(path.vfsPath.replace(/^\/+/, ''), data)
-    return Promise.reject(new Error('reply lost'))
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), await materialize(data))
+    throw new Error('reply lost')
   }
 }
 
@@ -2746,20 +2748,10 @@ class DirVoiceRAM extends RAMVFS {
     offset = 0,
     size: number | null = null,
     signal?: AbortSignal,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     if (this.voiced.has(path.mountPath)) return this.answer(path)
     return super.read(path, handed, offset, size, signal)
   }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    if (this.voiced.has(path.mountPath)) return voicedStream(this, path)
-    return super.readStream(path)
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/require-await
-async function* voicedStream(vfs: DirVoiceRAM, path: PathSpec): AsyncIterable<Uint8Array> {
-  yield vfs.answer(path)
 }
 
 // A store whose backend fails for a path in `voiced`, on a stat as on a read.
@@ -2793,7 +2785,7 @@ function refusalCode(read: Promise<unknown>): Promise<string | null | undefined>
 const WS_READS: [string, (ws: Workspace, path: string) => Promise<string>][] = [
   ['whole', async (ws, path) => DEC.decode(await ws.vfs.read(path))],
   ['ranged', async (ws, path) => DEC.decode(await ws.vfs.read(path, { offset: 0, size: 4 }))],
-  ['streamed', async (ws, path) => drained(await ws.vfs.readStream(path))],
+  ['streamed', async (ws, path) => drained(await ws.vfs.read(path, { stream: true }))],
 ]
 
 describe('a read of a hidden link', () => {
@@ -2813,7 +2805,9 @@ describe('a read of a hidden link', () => {
       ws.createSession('agent', { profile: { paths: { hide: ['/m/alias'] } } })
       const agent = ws.vfs.forSession('agent')
       expect(await refusalCode(agent.read('/m/alias'))).toBe('ENOENT')
-      expect(await refusalCode(agent.readStream('/m/alias').then(drained))).toBe('ENOENT')
+      expect(await refusalCode(agent.read('/m/alias', { stream: true }).then(drained))).toBe(
+        'ENOENT',
+      )
       const io = await ws.shell('cat /m/alias', { sessionId: 'agent' })
       expect(DEC.decode(io.stderr)).toBe('cat: /m/alias: No such file or directory\n')
       expect(await refusalCode(ws.vfs.read('/m/alias'))).toBe('EISDIR')
@@ -3108,7 +3102,7 @@ class LinedRAM extends LimitedRAM {
 
   override async linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {
     this.asked.push(path.virtual)
-    const data = new TextDecoder().decode(await this.read(path))
+    const data = new TextDecoder().decode(await materialize(await this.read(path)))
     const lines = data.split(/(?<=\n)/).filter((line) => line.includes(text))
     return new TextEncoder().encode(lines.join(''))
   }

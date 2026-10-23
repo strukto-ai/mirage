@@ -232,7 +232,7 @@ async def test_an_entry_point_read_stamps_its_ctag(streamed):
         ws = _ws(_vfs(graph))
         try:
             if streamed:
-                stream = await ws.vfs.read_stream("/m/a.txt")
+                stream = await ws.vfs.read("/m/a.txt", stream=True)
                 data = b"".join([chunk async for chunk in stream])
             else:
                 data = await ws.vfs.read("/m/a.txt")

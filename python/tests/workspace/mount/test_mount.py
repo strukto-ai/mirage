@@ -14,17 +14,20 @@
 
 import asyncio
 import errno
+from collections.abc import AsyncIterator
 from types import MappingProxyType
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import read_versioned
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
-from mirage.io.types import IOResult, materialize
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.observe.context import record_stream
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -597,5 +600,40 @@ async def test_a_user_write_drops_only_its_own_mounts_caches(write):
         own = (await ws.shell("cat /one/a.txt")).stdout
         other = (await ws.shell("cat /two/b.txt")).stdout
         assert (own, other) == (b"v2\n" if write else b"v1\n", b"v1\n")
+    finally:
+        await ws.close()
+
+
+async def _versioned(data: bytes, path: PathSpec) -> AsyncIterator[bytes]:
+    rec = record_stream("read", path.virtual, "ram")
+    if rec is not None:
+        rec.fingerprint = "v1"
+    yield data
+
+
+class _VersionedStream(RAMVFS):
+    """Answers a whole read with a stream that records its version."""
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        if offset or size is not None:
+            return await super().read(path, offset, size)
+        return _versioned(await super().read(path), path)
+
+
+# A read-modify-write sends the version of the bytes it read, so a whole
+# read collected from a stream carries the version the stream recorded.
+@pytest.mark.asyncio
+async def test_a_collected_stream_hands_its_version_to_the_bytes():
+    vfs = _VersionedStream()
+    vfs._store.files["/f"] = b"old"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        mount = ws.mount("/m")
+        data, version = await read_versioned(
+            PathSpec.from_str_path("/m/f"), lambda: mount.call("read", "/m/f")
+        )
+        assert (data, version) == (b"old", "v1")
     finally:
         await ws.close()

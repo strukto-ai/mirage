@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import {
   firstLines as notionFirstLines,
@@ -33,7 +34,6 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
   override readonly handed = {
     readdir: ['entry', 'parent'],
     read: ['parent'],
-    readStream: ['parent'],
     firstLines: ['parent'],
     stat: ['entry', 'parent'],
   } as const
@@ -47,13 +47,10 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return notionStream(this.accessor, path, handed?.parent)
     const data = await notionRead(this.accessor, path, null, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return notionStream(this.accessor, path, handed?.parent)
+    return sliceWindow(data, offset, size)
   }
 
   override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {

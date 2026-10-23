@@ -1,4 +1,3 @@
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
@@ -9,6 +8,7 @@ from mirage.core.chroma.search import files_containing as _files_containing
 from mirage.core.chroma.search import search_many
 from mirage.core.chroma.stat import stat as _stat
 from mirage.core.chroma.tree import CHROMA_TREE
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -46,7 +46,9 @@ class ChromaVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
         entry: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, entry)
         data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
@@ -57,11 +59,6 @@ class ChromaVFS(BaseVFS):
         index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat:
         return await _stat(self.accessor, path, entry, index)
-
-    def read_stream(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry)
 
     async def search(
         self, path: PathSpec, query: SearchQuery

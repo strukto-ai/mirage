@@ -424,7 +424,7 @@ when it returns nothing. Bytes are base64 strings, both ways.
 
 | Call | Arguments | Returns |
 | --- | --- | --- |
-| `read` | `path`, `offset?`, `size?` | `string`, the bytes |
+| `read` | `path`, `offset?`, `size?`, `raw?` | `string`, the bytes |
 | `stat` | `path`, `nofollow?` | `FileStat` |
 | `readdir` | `path` | `string[]`, full paths |
 | `list_files` | `path` | `string[]`, file names only |
@@ -480,16 +480,19 @@ refused it. The errno picks the status:
 
 ### Stream a file
 
-<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/read_stream`
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/read`
 
 <ParamField body="path" type="string" required>The file.</ParamField>
+<ParamField body="stream" type="boolean" default="false">Answer the bytes as they are read.</ParamField>
 <ParamField body="raw" type="boolean" default="false">Read the stored bytes instead of a rendered form.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-Answers the file's bytes as `application/octet-stream`, read as the response is
-sent. The server reads the whole file into memory first when the backend has
-no streaming read, when the file is rendered, or when a `post_vfs` policy
-applies. A failure before the first byte answers like a failed VFS call.
+With `stream` true, a read answers the file's bytes as
+`application/octet-stream`, read as the response is sent. Only HTTP streams a
+read. The server reads the whole file into memory first when the backend
+answers bytes, when the file is rendered, when `offset` or `size` asks for a
+window, or when a `post_vfs` policy applies. A failure before the first byte
+answers like a failed VFS call.
 
 ### Call a custom function
 

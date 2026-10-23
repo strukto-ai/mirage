@@ -15,7 +15,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal, overload
 
 from mirage.context import (
     Caller,
@@ -483,6 +483,7 @@ class Files:
             return seen[0]
         return self._session_id if self._session_id is not None else ""
 
+    @overload
     async def read(
         self,
         path: str | PathSpec,
@@ -490,9 +491,40 @@ class Files:
         size: int | None = None,
         raw: bool = False,
         *,
+        stream: Literal[False] = False,
         session_id: str | None = None,
-    ) -> bytes:
-        """Read file content.
+    ) -> bytes: ...
+
+    @overload
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: Literal[True],
+        session_id: str | None = None,
+    ) -> AsyncIterator[bytes]: ...
+
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: bool = False,
+        session_id: str | None = None,
+    ) -> bytes | AsyncIterator[bytes]:
+        """Read file content, whole or as the caller pulls it.
+
+        ``stream`` answers with an async iterator: its first chunk is
+        read before this returns, so a missing file fails here rather
+        than at the first pull, a cold read fills the cache as it is
+        pulled, and the read is recorded once the stream ends. A read the
+        dispatcher answers whole (a window, a warm copy, a rendering, a
+        backend answering bytes) arrives as one chunk.
 
         ``raw`` asks for the stored bytes, skipping a filetype-scoped
         read op the mount registers for this extension and the file
@@ -507,39 +539,18 @@ class Files:
             offset (int): Byte offset for range reads.
             size (int | None): Number of bytes for range reads.
             raw (bool): Read stored bytes rather than a rendered form.
+            stream (bool): Answer with an async iterator of the bytes.
             session_id (str | None): Session to run as outside a line.
 
         Returns:
-            bytes: File content.
+            bytes | AsyncIterator[bytes]: File content, streamed when
+            ``stream`` asks for it.
         """
         kwargs: dict[str, Any] = {"filetype": None} if raw else {}
         if offset or size is not None:
-            return await self._call(
-                "read", path, session_id, offset=offset, size=size, **kwargs
-            )
-        return await self._call("read", path, session_id, **kwargs)
-
-    async def read_stream(
-        self,
-        path: str | PathSpec,
-        raw: bool = False,
-        *,
-        session_id: str | None = None,
-    ) -> AsyncIterator[bytes]:
-        """Read file content as the caller pulls it.
-
-        The first chunk is read before this returns, so a missing file
-        fails here rather than at the first pull. A cold read fills the
-        cache as it is pulled, and the read is recorded once the stream
-        ends. A read the dispatcher answers whole (a warm copy, a rendering, a
-        backend with no stream) arrives as one chunk.
-
-        Args:
-            path (str | PathSpec): Virtual path.
-            raw (bool): Read stored bytes rather than a rendered form.
-            session_id (str | None): Session to run as outside a line.
-        """
-        kwargs: dict[str, Any] = {"filetype": None} if raw else {}
+            kwargs.update(offset=offset, size=size)
+        if not stream:
+            return await self._call("read", path, session_id, **kwargs)
         result = await self._call(
             "read", path, session_id, stream=True, **kwargs
         )

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any, Generic, TypeVar
 
 from mirage.accessor.hf_hub import HfHubAccessor, account_of
@@ -28,6 +27,7 @@ from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
 from mirage.core.hf_hub.stat import stat as _stat
 from mirage.core.hf_hub.stream import read_stream as _read_stream
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, ListingVersion, PathSpec
 from mirage.vfs.base import BaseVFS
 
@@ -85,7 +85,9 @@ class HfHubVFS(BaseVFS, Generic[A]):
         offset: int = 0,
         size: int | None = None,
         entry: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, entry)
         return await _read(self.accessor, path, offset, size, entry)
 
     async def stat(
@@ -95,11 +97,6 @@ class HfHubVFS(BaseVFS, Generic[A]):
         index: IndexCacheStore = NULL_INDEX,
     ) -> FileStat:
         return await _stat(self.accessor, path, entry, index)
-
-    def read_stream(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry)
 
     async def exists(
         self, path: PathSpec, entry: FileStat | None = None

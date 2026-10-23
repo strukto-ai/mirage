@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -136,8 +137,47 @@ def failure(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=status, content=failure_to_dict(exc))
 
 
-def vfs_route(call: VfsCall) -> Callable[..., Awaitable[JSONResponse]]:
-    """The endpoint for one VFS call.
+async def streamed_read(
+    entry: WorkspaceEntry, session: Session, args: dict[str, Any]
+) -> Response:
+    """A read answered as its bytes, pulled as the response is sent.
+
+    Args:
+        entry (WorkspaceEntry): the workspace.
+        session (Session): the session the read acts as.
+        args (dict[str, Any]): the read's checked arguments.
+    """
+    try:
+        source = await entry.runner.call(session.vfs.read(**args, stream=True))
+    except Exception as exc:
+        logger.debug("vfs/read failed", exc_info=True)
+        return failure(exc)
+
+    async def pull() -> bytes:
+        return await anext(source)
+
+    async def output() -> AsyncIterator[bytes]:
+        try:
+            while True:
+                try:
+                    chunk = await entry.runner.call(pull())
+                except StopAsyncIteration:
+                    return
+                yield chunk
+        finally:
+            await entry.runner.call(close_quietly(source))
+
+    return StreamingResponse(
+        output(),
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def vfs_route(call: VfsCall) -> Callable[..., Awaitable[Response]]:
+    """The endpoint for one VFS call. A ``read`` that asks for ``stream``
+    answers its bytes as they are pulled, over HTTP only, where the body
+    can carry them raw.
 
     Args:
         call (VfsCall): the call.
@@ -148,13 +188,21 @@ def vfs_route(call: VfsCall) -> Callable[..., Awaitable[JSONResponse]]:
         request: Request,
         session_id: str | None = None,
         explain: bool = False,
-    ) -> JSONResponse:
+    ) -> Response:
         entry = require_entry(request, workspace_id)
+        params = await json_body(request)
+        stream = params.pop("stream", False) if call.name == "read" else False
+        if not isinstance(stream, bool):
+            raise HTTPException(
+                status_code=400, detail="stream must be a boolean"
+            )
         try:
-            args = checked(call, await json_body(request))
+            args = checked(call, params)
         except CallArgsError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         session = await session_of(entry, session_id)
+        if stream and not explain:
+            return await streamed_read(entry, session, args)
         try:
             result = await entry.runner.call(
                 answered(session, call, args, explain)
@@ -194,50 +242,6 @@ async def glob(
         logger.debug("glob failed", exc_info=True)
         return failure(exc)
     return JSONResponse(content=list(paths))
-
-
-@router.post("/vfs/read_stream")
-async def read_stream(
-    workspace_id: str, request: Request, session_id: str | None = None
-) -> Response:
-    """Pull file bytes with bounded memory, through the authenticated session."""
-    entry = require_entry(request, workspace_id)
-    params = await json_body(request)
-    path, raw = params.get("path"), params.get("raw", False)
-    if (
-        set(params) - {"path", "raw"}
-        or not isinstance(path, str)
-        or not isinstance(raw, bool)
-    ):
-        raise HTTPException(
-            status_code=400, detail="expected path and optional raw boolean"
-        )
-    session = await session_of(entry, session_id)
-    try:
-        source = await entry.runner.call(session.vfs.read_stream(path, raw))
-    except Exception as exc:
-        logger.debug("vfs/read_stream failed", exc_info=True)
-        return failure(exc)
-
-    async def pull() -> bytes:
-        return await anext(source)
-
-    async def output() -> AsyncIterator[bytes]:
-        try:
-            while True:
-                try:
-                    chunk = await entry.runner.call(pull())
-                except StopAsyncIteration:
-                    return
-                yield chunk
-        finally:
-            await entry.runner.call(close_quietly(source))
-
-    return StreamingResponse(
-        output(),
-        media_type="application/octet-stream",
-        headers={"Cache-Control": "no-store"},
-    )
 
 
 @router.post("/vfs/{name}")

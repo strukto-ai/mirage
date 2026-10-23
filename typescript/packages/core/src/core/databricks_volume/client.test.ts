@@ -1,4 +1,5 @@
 import { createServer, type RequestListener } from 'node:http'
+import { materialize } from '../../io/types.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import {
@@ -171,7 +172,9 @@ describe('Files client', () => {
         await expect(result).rejects.toMatchObject({ cause: failure })
         expect(requests).toEqual([])
         expect(contents).toBe('original contents')
-        expect(new TextDecoder().decode(await mount.read(path))).toBe('original contents')
+        expect(new TextDecoder().decode(await materialize(await mount.read(path)))).toBe(
+          'original contents',
+        )
       } finally {
         await server.close()
       }

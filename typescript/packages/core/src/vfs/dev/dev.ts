@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
@@ -94,24 +95,24 @@ export class DevVFS extends RAMVFS {
   }
 
   /**
-   * The stream is finite: a command that consumes a whole input reads the
-   * refusing read, and only the two bounded streaming commands opt into the
-   * endless source (`commands/builtin/dev`).
+   * A whole read of a pipe answers its stream. The stream is finite: a
+   * command that consumes a whole input reads the refusing read, and only
+   * the two bounded streaming commands opt into the endless source
+   * (`commands/builtin/dev`).
    */
-  override readStream(
+  override read(
     path: PathSpec,
-    _handed?: Handed,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
     signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
-    // Bound as the read opens, so a descriptor reads on after the pipe's path
-    // is released.
-    const pipe = activePipe(this.accessor, norm(path.mountPath))
-    if (pipe !== null) return pipe.stream(path, signal)
-    return this.readWhole(path)
-  }
-
-  private async *readWhole(path: PathSpec): AsyncIterable<Uint8Array> {
-    const data = await this.read(path)
-    if (data.byteLength > 0) yield data
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    // Not async, so a pipe is bound as the read opens and a descriptor reads
+    // on after the pipe's path is released.
+    if (offset === 0 && size === null) {
+      const pipe = activePipe(this.accessor, norm(path.mountPath))
+      if (pipe !== null) return pipe.stream(path, signal)
+    }
+    return super.read(path, handed, offset, size, signal)
   }
 }

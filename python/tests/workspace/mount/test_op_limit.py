@@ -46,7 +46,9 @@ async def test_a_mount_read_entry_never_cuts_a_file_call(warm, on_exceed):
         assert await ws.vfs.read("/data/f.txt") == DATA
         assert await ws.vfs.read("/data/f.txt", 100, 200) == DATA[100:300]
         assert await ws.vfs.read("/data/f.txt", 100) == DATA[100:]
-        streamed = [c async for c in await ws.vfs.read_stream("/data/f.txt")]
+        streamed = [
+            c async for c in await ws.vfs.read("/data/f.txt", stream=True)
+        ]
         assert b"".join(streamed) == DATA
     finally:
         await ws.close()

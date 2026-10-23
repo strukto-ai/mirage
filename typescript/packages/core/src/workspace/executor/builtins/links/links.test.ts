@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import type { Policy } from '../../../../policy/base.ts'
 import type { Action, VfsContext } from '../../../../policy/types.ts'
@@ -44,14 +45,9 @@ class SealedReads extends RAMVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (path.virtual.endsWith('.sealed')) return Promise.reject(eacces(path))
     return super.read(path, handed, offset, size)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    if (path.virtual.endsWith('.sealed')) throw eacces(path)
-    return super.readStream(path)
   }
 }
 

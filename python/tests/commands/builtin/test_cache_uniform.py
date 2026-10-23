@@ -78,17 +78,13 @@ async def test_a_warm_read_command_reads_nothing_from_the_backend(line):
         await ws.shell("printf 'alpha\\nbeta\\n' > /c/a.txt")
         await (await ws.shell("cat /c/a.txt")).stdout_str()
         reads: list[str] = []
-        read, read_stream = ram.read, ram.read_stream
+        read = ram.read
 
-        async def counted_read(path, *args, **kwargs):
+        async def counted_read(path, offset=0, size=None):
             reads.append(path.virtual)
-            return await read(path, *args, **kwargs)
+            return await read(path, offset, size)
 
-        def counted_stream(path, *args, **kwargs):
-            reads.append(path.virtual)
-            return read_stream(path, *args, **kwargs)
-
-        ram.read, ram.read_stream = counted_read, counted_stream
+        ram.read = counted_read
         out = await ws.shell(line)
         assert await out.stdout_str()
         assert out.exit_code == 0

@@ -23,7 +23,7 @@ import errno
 import io
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from pathlib import Path
 from typing import Any
@@ -163,8 +163,14 @@ class TrackedStreamVFS(CachedRAMVFS):
         self.closed = 0
         self.on_stall: Callable[[], None] | None = None
 
-    async def read_stream(self, path: PathSpec):
-        data = await super().read(path)
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        if offset or size is not None:
+            return await super().read(path, offset, size)
+        return self._tracked(await super().read(path))
+
+    async def _tracked(self, data: bytes) -> AsyncIterator[bytes]:
         try:
             for offset in range(0, len(data), self.chunk_size):
                 self.pulls += 1
@@ -201,21 +207,13 @@ class RejectedUploadVFS(RAMVFS):
         super().__init__()
         self.message = message
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
         raise RuntimeError(self.message)
 
-    async def append(self, path: PathSpec, data: bytes) -> None:
+    async def append(self, path: PathSpec, data: ByteSource) -> None:
         raise RuntimeError(self.message)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        raise RuntimeError(self.message)
-
-    async def write_stream(
-        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
-    ) -> None:
-        raise RuntimeError(self.message)
-
-    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
         raise RuntimeError(self.message)
 
 

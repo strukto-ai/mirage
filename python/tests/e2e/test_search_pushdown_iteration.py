@@ -33,7 +33,7 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
     )
     reads: list[str] = []
 
-    async def read_stream(accessor, path, index=None):
+    async def streamed(accessor, path, index=None):
         reads.append(path.virtual)
         yield b'{"text":"hello there"}\n'
 
@@ -45,7 +45,7 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
             size=23,
         )
     )
-    override(slack, "read_stream", read_stream)
+    override(slack, "read", streamed)
     override(slack, "stat", stat)
     ws = Workspace({"/slack": (slack, MountMode.READ)}, mode=MountMode.READ)
     expanded = " ".join(

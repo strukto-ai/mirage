@@ -60,7 +60,9 @@ import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import { runWithWriteContext } from '../../cache/context.ts'
+import { publishRead, runWithWriteContext } from '../../cache/context.ts'
+import { latestFingerprint } from '../../cache/file/io.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import { mergeSignals } from '../../utils/abort.ts'
@@ -73,7 +75,14 @@ import {
 } from '../executor/command/handler.ts'
 import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
 import { callerSignal } from '../../context/session_context.ts'
-import { runWithMountContext, runWithRevisions, withMountContext } from '../../observe/context.ts'
+import {
+  activeRecords,
+  commandRecords,
+  runWithMountContext,
+  runWithRecording,
+  runWithRevisions,
+  withMountContext,
+} from '../../observe/context.ts'
 import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { Activity } from '../../utils/activity.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -135,7 +144,7 @@ type ReadFn = (
   handed?: Handed,
   offset?: number,
   size?: number | null,
-) => Promise<Uint8Array>
+) => Promise<ByteSource> | AsyncIterable<Uint8Array>
 
 function cmdKey(name: string, filetype: string | null): CmdKey {
   return `${name}\u0000${filetype ?? ''}`
@@ -228,6 +237,43 @@ function taken(name: string, kwargs: OpKwargs): void {
  * with 416: normalizing here keeps the op's contract one thing whichever
  * path answers it. Mirrors Python's `_read_window`.
  */
+/**
+ * A backend read's answer as a stream: a promise awaited on the first pull,
+ * a stream passed through, bytes as one chunk. Mirrors Python's `_as_stream`.
+ */
+async function* asStream(
+  answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
+): AsyncIterable<Uint8Array> {
+  const found = await answer
+  if (found instanceof Uint8Array) {
+    if (found.byteLength > 0) yield found
+    return
+  }
+  yield* found
+}
+
+/**
+ * A backend read's answer as bytes, a stream collected. A whole read's
+ * stream publishes the version it recorded for the bytes collected from it,
+ * as a whole read answering bytes publishes its own, so a read-modify-write
+ * still sends the version it read. Mirrors Python's `_collected`.
+ */
+async function collected(
+  answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
+  path: PathSpec,
+  whole: boolean,
+): Promise<Uint8Array> {
+  const found = await answer
+  if (found instanceof Uint8Array) return found
+  if (!whole) return materialize(found)
+  const collect = (): Promise<readonly [Uint8Array, OpRecord[]]> =>
+    commandRecords(async (records) => [await materialize(found), records] as const)
+  const [data, records] =
+    activeRecords() === undefined ? (await runWithRecording(collect))[0] : await collect()
+  publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
+  return data
+}
+
 async function readWindow(
   read: ReadFn,
   ranges: boolean,
@@ -241,13 +287,13 @@ async function readWindow(
   const whole = offset === 0 && size === null
   if (ranges && !whole) {
     try {
-      return await read(path, handed, offset, size)
+      return await collected(read(path, handed, offset, size), path, false)
     } catch (err) {
       if (!isUnsatisfiableRange(err)) throw err
       return new Uint8Array(0)
     }
   }
-  const data = await read(path, handed)
+  const data = await collected(read(path, handed), path, true)
   return whole ? data : sliceWindow(data, offset, size)
 }
 
@@ -918,9 +964,9 @@ export class MountEntry {
   }
 
   /**
-   * A write or append of bytes or a stream: a stream goes to the VFS's
-   * `writeStream` / `appendStream` where it has one, and is collected for its
-   * `write` / `append` otherwise, an append by rewrite where it has none.
+   * A write or append of bytes or a stream, handed to the VFS's `write` /
+   * `append` as it came, an append by rewrite where it has none. Every
+   * `write` is told `atomic`; one that collects first already lands whole.
    * Mirrors Python's `MountEntry._write_op` / `_append_op`.
    */
   private async writeSource(
@@ -931,14 +977,11 @@ export class MountEntry {
     kw: OpKwargs,
   ): Promise<unknown> {
     try {
-      if (!(data instanceof Uint8Array) && vfs.supports(append ? 'appendStream' : 'writeStream')) {
-        if (append) return await vfs.appendStream(path, data, callerSignal())
-        return await vfs.writeStream(path, data, callerSignal(), kw.atomic === true, handedOf(kw))
+      if (!append) {
+        return await vfs.write(path, data, callerSignal(), handedOf(kw), kw.atomic === true)
       }
-      const raw = await materialize(data)
-      if (!append) return await vfs.write(path, raw, callerSignal(), handedOf(kw))
-      if (vfs.supports('append')) return await vfs.append(path, raw, handedOf(kw), callerSignal())
-      return await this.appendByRewrite(path, raw, kw.index)
+      if (vfs.supports('append')) return await vfs.append(path, data, handedOf(kw), callerSignal())
+      return await this.appendByRewrite(path, await materialize(data), kw.index)
     } finally {
       await closeQuietly(data)
     }
@@ -991,7 +1034,11 @@ export class MountEntry {
 
   /** The VFS's read of a whole file, handed what is at its path. */
   private async readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return this.vfs.read(path, await this.handedFor('read', path, null, index))
+    return collected(
+      this.vfs.read(path, await this.handedFor('read', path, null, index)),
+      path,
+      true,
+    )
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
@@ -1328,15 +1375,16 @@ export class MountEntry {
     )
   }
 
-  /** A streamed read handed the stats it declares, found on the first pull. */
-  private async *readEntryStream(
+  /** The VFS's read of `scope` as a stream, called on the first pull and
+   * handed the stats it declares. Mirrors Python's `_streamed`. */
+  private async *streamed(
     vfs: BaseVFS,
     scope: PathSpec,
     index: IndexCacheStore,
     signal: AbortSignal | undefined,
   ): AsyncIterable<Uint8Array> {
-    const handed = await this.handedFor('readStream', scope, null, index)
-    yield* vfs.readStream(scope, handed, signal)
+    const handed = await this.handedFor('read', scope, null, index)
+    yield* asStream(vfs.read(scope, handed, 0, null, signal))
   }
 
   /**
@@ -1466,10 +1514,12 @@ export class MountEntry {
       revisions: { map: revisions },
     }
     const signal = callerSignal()
+    // A read that is neither async nor handed stats runs as the read opens,
+    // so what it binds (a pipe) is bound before the path can be released.
     const stream = withPullTimeout(
-      this.wants('readStream').length > 0
-        ? this.readEntryStream(vfs, scope, this.index, signal)
-        : vfs.readStream(scope, {}, signal),
+      this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
+        ? this.streamed(vfs, scope, this.index, signal)
+        : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal))),
       limit?.timeoutSeconds ?? null,
       'read',
     )

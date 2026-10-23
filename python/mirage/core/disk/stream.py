@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-    chunk_size: int = 8192,
+    chunk_size: int = 65536,
 ) -> AsyncIterator[bytes]:
     virtual = path_spec.virtual
     root = accessor.root

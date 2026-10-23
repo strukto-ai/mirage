@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import { BaseVFS } from '../base.ts'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 
@@ -123,7 +124,6 @@ export class GitHubVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
-    readStream: ['entry'],
     stat: ['entry', 'index'],
   } as const
 
@@ -136,13 +136,10 @@ export class GitHubVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return githubStream(this.accessor, path, handed?.entry)
     const data = await githubRead(this.accessor, path, handed?.entry)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return githubStream(this.accessor, path, handed?.entry)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

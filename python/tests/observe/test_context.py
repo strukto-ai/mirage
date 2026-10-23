@@ -360,7 +360,9 @@ async def _dispatch_recording_read(
     ws = Workspace({"/m": RecordingRAMVFS()})
     scope = RecordingScope()
     try:
-        out, _ = await ws.dispatch("read", PathSpec.from_str_path("/m/k.txt"))
+        out, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/m/k.txt"), stream=True
+        )
         async for _chunk in out:
             pass
     finally:

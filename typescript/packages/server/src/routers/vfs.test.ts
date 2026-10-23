@@ -121,18 +121,24 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
     expect(reply.statusCode, reply.body).toBe(400)
     reply = await app.inject({
       method: 'POST',
-      url: base + '/read_stream?session_id=agent',
-      payload: { path: '/data/visible' },
+      url: base + '/read?session_id=agent',
+      payload: { path: '/data/visible', stream: true },
     })
     expect(reply.statusCode).toBe(200)
     expect(reply.headers['content-type']).toBe('application/octet-stream')
     expect(Buffer.compare(reply.rawPayload, data)).toBe(0)
     reply = await app.inject({
       method: 'POST',
-      url: base + '/read_stream?session_id=agent',
-      payload: { path: '/data/secret' },
+      url: base + '/read?session_id=agent',
+      payload: { path: '/data/secret', stream: true },
     })
     expect(reply.statusCode).toBe(404)
+    reply = await app.inject({
+      method: 'POST',
+      url: base + '/read?session_id=agent',
+      payload: { path: '/data/visible', stream: 'yes' },
+    })
+    expect(reply.statusCode).toBe(400)
   } finally {
     await app.close()
   }

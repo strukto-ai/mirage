@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
@@ -21,6 +20,7 @@ from mirage.core.mem0.read import read_stream as _read_stream
 from mirage.core.mem0.readdir import readdir as _readdir
 from mirage.core.mem0.search import search_many
 from mirage.core.mem0.stat import stat as _stat
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -53,7 +53,9 @@ class Mem0VFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
         entry: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, entry)
         data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
 
@@ -61,11 +63,6 @@ class Mem0VFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await _stat(self.accessor, path, entry)
-
-    def read_stream(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry)
 
     async def search(
         self, path: PathSpec, query: SearchQuery

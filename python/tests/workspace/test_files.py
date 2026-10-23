@@ -1165,10 +1165,10 @@ async def test_a_streamed_read_is_recorded_once_it_ends():
     try:
         await ws.vfs.write("/r/a.txt", b"x" * 100)
         before = len(ws.vfs.records)
-        stream = await ws.vfs.read_stream("/r/a.txt")
+        stream = await ws.vfs.read("/r/a.txt", stream=True)
         assert len(ws.vfs.records) == before
         assert b"".join([chunk async for chunk in stream]) == b"x" * 100
-        stream = await ws.vfs.read_stream("/r/a.txt")
+        stream = await ws.vfs.read("/r/a.txt", stream=True)
         await stream.aclose()
         assert [(r.op, r.bytes) for r in ws.vfs.records[before:]] == [
             ("read", 100),
@@ -1184,7 +1184,7 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
     ws = Workspace({"/d/": DiskVFS(root=str(tmp_path))}, mode=MountMode.READ)
     try:
         tracemalloc.start()
-        stream = await ws.vfs.read_stream("/d/big.bin")
+        stream = await ws.vfs.read("/d/big.bin", stream=True)
         total = 0
         async for chunk in stream:
             total += len(chunk)

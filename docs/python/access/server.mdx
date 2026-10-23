@@ -124,6 +124,6 @@ It uses the authenticated request's session and the ordinary dispatcher; callers
 cannot override session or admission fields. Binary values use the server's
 base64 JSON representation.
 
-`POST /v1/workspaces/{id}/vfs/read_stream` takes `{ "path": "/data/item", "raw": false }`
-and streams `application/octet-stream`. It uses the same authentication and file
+`POST /v1/workspaces/{id}/vfs/read` with `{ "path": "/data/item", "stream": true }`
+streams `application/octet-stream`. It uses the same authentication and file
 policy as other VFS routes, with bounded reads and cancellation cleanup.

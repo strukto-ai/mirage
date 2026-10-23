@@ -862,7 +862,9 @@ class FailingVFS(RAMVFS):
         super().__init__()
         self._store.files["/bad"] = b"firstrest"
 
-    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
         yield b"first"
         raise PermissionError(13, "Permission denied", path.virtual)
 
@@ -948,32 +950,27 @@ class RejectingVFS(RAMVFS):
             raise self.error
         return await super().stat(path)
 
-    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
         if self.reads:
             raise self.error
-        async for chunk in super().read_stream(path):
-            yield chunk
+        return await super().read(path, offset, size)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        if self.empty_ok and not data:
-            return await super().write(path, data)
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
+        whole = await materialize(data)
+        if self.empty_ok and not whole:
+            return await super().write(path, whole)
         raise self.error
 
-    async def append(self, path: PathSpec, data: bytes) -> None:
-        if self.empty_ok and not data:
-            return await super().append(path, data)
+    async def append(self, path: PathSpec, data: ByteSource) -> None:
+        whole = await materialize(data)
+        if self.empty_ok and not whole:
+            return await super().append(path, whole)
         raise self.error
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         raise self.error
-
-    async def write_stream(
-        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
-    ) -> None:
-        await self.write(path, await materialize(data))
-
-    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
-        await self.append(path, await materialize(data))
 
 
 def _rejecting(vfs: RejectingVFS) -> Workspace:

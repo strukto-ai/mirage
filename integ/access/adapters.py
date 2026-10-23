@@ -1656,10 +1656,10 @@ class Http:
             )
             reply.raise_for_status()
             return tool_answer(reply.json())
-        if op == "bytes" and step["call"] == "read_stream":
+        if op == "bytes" and step.get("stream") is True:
             async with http.stream(
                 "POST",
-                f"{base}/vfs/read_stream",
+                f"{base}/vfs/read",
                 json=call_params(step),
                 params=params,
             ) as reply:

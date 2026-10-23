@@ -543,3 +543,14 @@ it('serves a custom driver through CLI, namespace and runtime entry points', asy
     await ws.close()
   }
 })
+
+// A method folded into read, write or append would never be called, so a
+// class still defining one is refused as it is built.
+it.each(['readStream', 'writeStream', 'appendStream'])(
+  'refuses a VFS that still defines %s',
+  (name) => {
+    class Old extends BaseVFS {}
+    Object.defineProperty(Old.prototype, name, { value: () => undefined })
+    expect(() => new Old()).toThrow(`Old.${name}: define `)
+  },
+)

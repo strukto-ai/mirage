@@ -28,6 +28,8 @@ from typing import Any, Callable, cast
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import publish_read
+from mirage.cache.file.io import latest_fingerprint
 from mirage.cache.index import NULL_INDEX
 from mirage.cache.index.config import IndexConfig, LookupStatus
 from mirage.cache.index.factory import build_index
@@ -87,7 +89,12 @@ from mirage.core.generic.rewrite import (
 from mirage.errors.fs import ebusy, enotdir, enotsup
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult, materialize
-from mirage.observe.context import with_mount_context
+from mirage.observe.context import (
+    RecordingScope,
+    active_recorder,
+    command_records,
+    with_mount_context,
+)
 from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
@@ -356,8 +363,62 @@ def _named_spec(cmd: Command, cmd_name: str) -> CommandSpec:
     return dataclasses.replace(cmd.spec, name=cmd_name)
 
 
+async def _as_stream(
+    answer: Awaitable[ByteSource] | AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    """A backend read's answer as a stream: a coroutine awaited on the
+    first pull, a stream passed through, bytes as one chunk.
+
+    Args:
+        answer (Awaitable[ByteSource] | AsyncIterator[bytes]): what
+            calling ``read`` returned.
+    """
+    found = await answer if inspect.isawaitable(answer) else answer
+    if isinstance(found, bytes):
+        if found:
+            yield found
+        return
+    try:
+        async for chunk in found:
+            yield chunk
+    finally:
+        await close_quietly(found)
+
+
+async def _collected(
+    answer: Awaitable[ByteSource] | AsyncIterator[bytes],
+    path: PathSpec,
+    whole: bool,
+) -> bytes:
+    """A backend read's answer as bytes, a stream collected.
+
+    A whole read's stream publishes the version it recorded for the bytes
+    collected from it, as a whole read answering bytes publishes its own,
+    so a read-modify-write still sends the version it read.
+
+    Args:
+        answer (Awaitable[ByteSource] | AsyncIterator[bytes]): what
+            calling ``read`` returned.
+        path (PathSpec): the file read.
+        whole (bool): whether the read is of the whole file.
+    """
+    found = await answer if inspect.isawaitable(answer) else answer
+    if isinstance(found, bytes):
+        return found
+    if not whole:
+        return await materialize(found)
+    scope = RecordingScope(active=active_recorder() is None)
+    try:
+        with command_records() as records:
+            data = await materialize(found)
+    finally:
+        scope.close()
+    publish_read(path.virtual, data, latest_fingerprint(records, path.virtual))
+    return data
+
+
 async def _read_window(
-    read: Callable[..., Awaitable[bytes]],
+    read: Callable[..., Awaitable[ByteSource] | AsyncIterator[bytes]],
     ranges: bool,
     path: PathSpec,
     index: IndexCacheStore = NULL_INDEX,
@@ -378,8 +439,8 @@ async def _read_window(
     contract one thing whichever path answers it.
 
     Args:
-        read (Callable[..., Awaitable[bytes]]): the VFS's read, or the
-            renderer for the path's filetype.
+        read (Callable[..., Awaitable[ByteSource] | AsyncIterator[bytes]]):
+            the VFS's read, or the renderer for the path's filetype.
         ranges (bool): whether ``read`` takes a window natively.
         path (PathSpec): the file.
         index (IndexCacheStore): the mount's index.
@@ -396,12 +457,14 @@ async def _read_window(
     handed = _handed_on(read, index, entry=entry, parent=parent)
     if ranges and not whole:
         try:
-            return await read(path, offset=offset, size=size, **handed)
+            return await _collected(
+                read(path, offset=offset, size=size, **handed), path, False
+            )
         except Exception as exc:
             if not is_unsatisfiable_range(exc):
                 raise
             return b""
-    data = await read(path, **handed)
+    data = await _collected(read(path, **handed), path, True)
     if whole:
         return data
     return slice_window(data, offset, size)
@@ -1492,9 +1555,9 @@ class MountEntry:
         entry: FileStat | None = None,
         parent: FileStat | None = None,
     ) -> Any:
-        """A write of bytes or a stream: a stream goes to the VFS's
-        ``write_stream`` where it has one, and is collected for its
-        ``write`` otherwise.
+        """A write of bytes or a stream, handed to the VFS's ``write`` as
+        it came. An atomic write to a ``write`` that takes no ``atomic``
+        is collected first, so it lands whole.
 
         Args:
             path (PathSpec): the file, keyed below the mount.
@@ -1505,24 +1568,18 @@ class MountEntry:
             parent (FileStat | None): its directory, if handed.
         """
         try:
-            if not isinstance(data, bytes) and self.vfs.supports(
-                "write_stream"
-            ):
-                return await self.vfs.write_stream(
-                    path,
-                    data,
-                    **({"atomic": True} if atomic else {}),
-                    **_handed_on(
-                        self.vfs.write_stream,
-                        index,
-                        entry=entry,
-                        parent=parent,
-                    ),
-                )
             write: Callable[..., Awaitable[Any]] = self.vfs.write
+            staged: dict[str, bool] = {}
+            if atomic:
+                names = _parameters(getattr(write, "__func__", write))
+                if names is None or "atomic" in names:
+                    staged["atomic"] = True
+                else:
+                    data = await materialize(data)
             return await write(
                 path,
-                await materialize(data),
+                data,
+                **staged,
                 **_handed_on(write, index, entry=entry, parent=parent),
             )
         finally:
@@ -1536,8 +1593,8 @@ class MountEntry:
         entry: FileStat | None = None,
         parent: FileStat | None = None,
     ) -> Any:
-        """An append of bytes or a stream, as ``_write_op`` writes, by
-        rewrite where the VFS has no append.
+        """An append of bytes or a stream, handed to the VFS's ``append``
+        as it came, or by rewrite where the VFS has no append.
 
         Args:
             path (PathSpec): the file, keyed below the mount.
@@ -1547,10 +1604,6 @@ class MountEntry:
             parent (FileStat | None): its directory, if handed.
         """
         try:
-            if not isinstance(data, bytes) and self.vfs.supports(
-                "append_stream"
-            ):
-                return await self.vfs.append_stream(path, data)
             if not self.vfs.supports("append"):
                 return await self._append_by_rewrite(
                     path, await materialize(data), index
@@ -1558,7 +1611,7 @@ class MountEntry:
             append: Callable[..., Awaitable[Any]] = self.vfs.append
             return await append(
                 path,
-                await materialize(data),
+                data,
                 **_handed_on(append, index, entry=entry, parent=parent),
             )
         finally:
@@ -1616,9 +1669,11 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
             path (PathSpec): the file, keyed below the mount.
         """
-        read: Callable[..., Awaitable[bytes]] = self.vfs.read
+        read = self.vfs.read
         handed = await self._handed(read, path, {}, index)
-        return await read(path, **_handed_on(read, index, **handed))
+        return await _collected(
+            read(path, **_handed_on(read, index, **handed)), path, True
+        )
 
     async def _write(
         self, index: IndexCacheStore, path: PathSpec, data: bytes
@@ -2523,26 +2578,24 @@ class MountEntry:
         key = norm("/" + mount_key(path, self.prefix.rstrip("/")))
         return pipe_below(accessor, key)
 
-    async def _read_entry_stream(
-        self,
-        reader: Callable[..., AsyncIterator[bytes]],
-        scope: PathSpec,
-        index: IndexCacheStore,
+    async def _streamed(
+        self, scope: PathSpec, index: IndexCacheStore
     ) -> AsyncIterator[bytes]:
-        """A streamed read handed the stats it declares, found on the
-        first pull.
+        """The VFS's read of ``scope`` as a stream, called on the first
+        pull and handed the stats it declares.
 
         Args:
-            reader (Callable[..., AsyncIterator[bytes]]): the VFS's
-                streamed read.
             scope (PathSpec): the file, keyed below the mount.
             index (IndexCacheStore): the mount's index.
         """
-        handed = await self._handed(reader, scope, {}, index)
-        async for chunk in reader(
-            scope, **_handed_on(reader, index, **handed)
-        ):
-            yield chunk
+        read = self.vfs.read
+        handed = await self._handed(read, scope, {}, index)
+        source = _as_stream(read(scope, **_handed_on(read, index, **handed)))
+        try:
+            async for chunk in source:
+                yield chunk
+        finally:
+            await close_quietly(source)
 
     def read_stream(self, path: str) -> AsyncIterator[bytes]:
         """The VFS's streamed read of ``path``, framed for later pulls.
@@ -2564,13 +2617,14 @@ class MountEntry:
             directory=path.rsplit("/", 1)[0] or "/",
             vfs_path=mount_key(path, self.prefix.rstrip("/")),
         )
-        reader = self.vfs.read_stream
+        read = self.vfs.read
+        # A read that is neither a coroutine nor handed stats runs as the
+        # read opens, so what it binds (a pipe) is bound before the path
+        # can be released.
         source = (
-            self._read_entry_stream(reader, scope, self.index)
-            if _wants(reader)
-            else reader(
-                scope, **_taken("read_stream", reader, {"index": self.index})
-            )
+            self._streamed(scope, self.index)
+            if _wants(read) or inspect.iscoroutinefunction(read)
+            else _as_stream(read(scope, **_handed_on(read, self.index)))
         )
         limit = self.command_limits.get("read")
         stream = with_pull_timeout(

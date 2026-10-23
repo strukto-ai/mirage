@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import inspect
 from collections.abc import AsyncIterator
 
 from mirage.types import MountMode, PathSpec
@@ -20,21 +21,24 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 
-def _spying_stream(real_stream, pulled: list[str]):
-    def factory(p: PathSpec) -> AsyncIterator[bytes]:
-        return _spy_iter(real_stream(p), p.virtual, pulled)
+def _spying_read(real_read, pulled: list[str]):
+    def factory(
+        p: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        return _spy_iter(real_read(p, offset, size), p.virtual, pulled)
 
     return factory
 
 
 async def _spy_iter(
-    source: AsyncIterator[bytes], name: str, pulled: list[str]
+    answer, name: str, pulled: list[str]
 ) -> AsyncIterator[bytes]:
-    first = True
-    async for chunk in source:
-        if first:
-            pulled.append(name)
-            first = False
+    found = await answer if inspect.isawaitable(answer) else answer
+    pulled.append(name)
+    if isinstance(found, bytes):
+        yield found
+        return
+    async for chunk in found:
         yield chunk
 
 
@@ -51,7 +55,7 @@ def _seeded_ws() -> Workspace:
 
 def _spy_cat_reads(ws, command, pulled):
     vfs = ws.mount("/data/").vfs
-    vfs.read_stream = _spying_stream(vfs.read_stream, pulled)
+    vfs.read = _spying_read(vfs.read, pulled)
     return asyncio.run(_run_and_collect(ws, command))
 
 

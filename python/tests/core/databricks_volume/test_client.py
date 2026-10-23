@@ -27,6 +27,7 @@ from mirage.core.databricks_volume.errors import (
     is_not_found,
 )
 from mirage.core.databricks_volume.read import read
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.databricks_volume import (
@@ -348,7 +349,9 @@ async def test_missing_credential_does_not_hide_or_replace_existing_file(
         assert error.value.__cause__ is failure
         assert http_files.requests == []
         assert contents == b"original contents"
-        assert await mount.read(path) == b"original contents"
+        assert (
+            await materialize(await mount.read(path)) == b"original contents"
+        )
     finally:
         await mount.accessor.close()
 

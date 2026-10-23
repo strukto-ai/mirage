@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import {
   follow as discordFollow,
-  read as discordRead,
   readMany as discordReadMany,
   readRange as discordReadRange,
   readStream as discordReadStream,
@@ -35,7 +35,6 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],
-    readStream: ['entry', 'parent'],
     follow: ['entry', 'parent'],
     readMany: ['entry', 'parent'],
     stat: ['entry', 'parent'],
@@ -50,10 +49,12 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+    signal?: AbortSignal,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     const entry = handed?.entry ?? null
     const parent = handed?.parent ?? null
-    if (offset === 0 && size === null) return discordRead(this.accessor, path, entry, parent)
+    if (offset === 0 && size === null)
+      return discordReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
     return discordReadRange(
       this.accessor,
       path,
@@ -69,14 +70,6 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
     handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
     return discordReadMany(this.accessor, paths, limit, handed)
-  }
-
-  override readStream(
-    path: PathSpec,
-    handed?: Handed,
-    signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
-    return discordReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
   }
 
   override follow(

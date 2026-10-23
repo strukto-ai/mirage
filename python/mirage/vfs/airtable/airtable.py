@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
@@ -69,17 +68,11 @@ class AirtableVFS(BaseVFS):
         size: int | None = None,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, entry, parent)
         data = await _read(self.accessor, path, entry, parent)
         return slice_window(data, offset, size)
-
-    def read_stream(
-        self,
-        path: PathSpec,
-        entry: FileStat | None = None,
-        parent: FileStat | None = None,
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

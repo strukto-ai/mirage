@@ -56,7 +56,7 @@ VFS_CALLS: tuple[VfsCall, ...] = (
     VfsCall(
         "read",
         "Read a file's bytes, from an offset.",
-        {"path": PATH, "offset": INTEGER, "size": SIZE},
+        {"path": PATH, "offset": INTEGER, "size": SIZE, "raw": FLAG},
         ("path",),
     ),
     VfsCall(

@@ -61,7 +61,6 @@ export class AirtableVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],
-    readStream: ['entry', 'parent'],
     stat: ['entry'],
     linesContaining: ['entry'],
     firstLines: ['entry', 'parent'],
@@ -86,13 +85,11 @@ export class AirtableVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null)
+      return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
     const data = await airtableRead(this.accessor, path, handed?.entry, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

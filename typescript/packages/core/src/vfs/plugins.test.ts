@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
 import { commandFiles } from '../commands/builtin/generic_bind/files.ts'
@@ -35,6 +36,7 @@ import { RAMStore } from './ram/store.ts'
 import type { Handed } from './types.ts'
 
 const ENC = new TextEncoder()
+const DEC = new TextDecoder()
 const PATH = new PathSpec({
   virtual: '/nested/data/a.txt',
   directory: '/nested/data',
@@ -47,14 +49,13 @@ class Minimal extends BaseVFS<RAMAccessor> {
     return ramReaddir(this.accessor, path)
   }
 
-  override async read(
+  override read(
     path: PathSpec,
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await ramRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    return ramRead(this.accessor, path).then((data) => sliceWindow(data, offset, size))
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
@@ -68,11 +69,37 @@ class Writable extends Minimal {
   }
 }
 
+async function* halves(): AsyncIterable<Uint8Array> {
+  for (const chunk of [ENC.encode('hel'), ENC.encode('lo\n')]) yield await Promise.resolve(chunk)
+}
+
+/** Reads a window natively and streams a whole read. */
 class Streaming extends Minimal {
   override readonly readsRanges: boolean = true
+  readonly windows: [number, number | null][] = []
 
-  override async *readStream(): AsyncIterable<Uint8Array> {
-    for (const chunk of [ENC.encode('hel'), ENC.encode('lo\n')]) yield await Promise.resolve(chunk)
+  override async read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return halves()
+    this.windows.push([offset, size])
+    return super.read(path, handed, offset, size)
+  }
+}
+
+/** Answers every read by yielding its bytes two at a time. */
+class Yielding extends Minimal {
+  override async *read(
+    path: PathSpec,
+    _handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): AsyncIterable<Uint8Array> {
+    const data = sliceWindow(await ramRead(this.accessor, path), offset, size)
+    for (let at = 0; at < data.byteLength; at += 2) yield data.subarray(at, at + 2)
   }
 }
 
@@ -111,7 +138,8 @@ describe('a plug-in VFS', () => {
         ENC.encode('ell'),
       )
       const chunks: Uint8Array[] = []
-      for await (const chunk of await ws.vfs.readStream(PATH, { raw: true })) chunks.push(chunk)
+      for await (const chunk of await ws.vfs.read(PATH, { raw: true, stream: true }))
+        chunks.push(chunk)
       expect(chunks.filter((c) => c.byteLength > 0)).toEqual([ENC.encode('hello\n')])
       const refused = await ws.shell('rm /nested/data/a.txt')
       expect(refused.exitCode).toBe(1)
@@ -153,22 +181,42 @@ describe('a plug-in VFS', () => {
   it('reads a native window and stream without enabling writes', async () => {
     const accessor = await makeAccessor()
     const vfs = new Streaming({ name: 'custom', accessor })
-    const read = vi.spyOn(vfs, 'read').mockResolvedValue(ENC.encode('ell'))
     const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
     try {
       expect(await ws.dispatch('read', PATH.virtual, [], { offset: 1, size: 3 })).toEqual(
         ENC.encode('ell'),
       )
-      expect(read).toHaveBeenCalledOnce()
-      expect(read.mock.calls[0]?.slice(2, 4)).toEqual([1, 3])
+      expect(vfs.windows).toEqual([[1, 3]])
       const received: Uint8Array[] = []
-      for await (const chunk of await ws.vfs.readStream(PATH, { raw: true })) received.push(chunk)
+      for await (const chunk of await ws.vfs.read(PATH, { raw: true, stream: true }))
+        received.push(chunk)
       expect(received.filter((c) => c.byteLength > 0)).toEqual([
         ENC.encode('hel'),
         ENC.encode('lo\n'),
       ])
-      expect(read).toHaveBeenCalledOnce()
+      expect(vfs.windows).toEqual([[1, 3]])
       expect(vfs.supports('write')).toBe(false)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // A read written as a generator serves a command's stream and a caller
+  // that wants the whole file, which gets the chunks collected.
+  it('serves streams and whole reads from a read that yields', async () => {
+    const accessor = await makeAccessor()
+    const ws = new Workspace(
+      { '/nested/data': new Yielding({ name: 'custom', accessor }) },
+      { mode: MountMode.READ, shellParser: await getTestParser() },
+    )
+    try {
+      expect((await ws.shell('cat /nested/data/a.txt')).stdoutText).toBe('hello\n')
+      expect(DEC.decode(await ws.vfs.read(PATH))).toBe('hello\n')
+      const chunks: string[] = []
+      for await (const chunk of await ws.vfs.read(PATH, { stream: true })) {
+        chunks.push(DEC.decode(chunk))
+      }
+      expect(chunks).toEqual(['he', 'll', 'o\n'])
     } finally {
       await ws.close()
     }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { ListingVersion } from '@struktoai/mirage-core/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 
@@ -68,7 +69,6 @@ export abstract class HfHubVFS extends BaseVFS {
 
   override readonly handed = {
     read: ['entry'],
-    readStream: ['entry'],
     stat: ['entry', 'index'],
     exists: ['entry'],
     checksum: ['entry'],
@@ -83,7 +83,8 @@ export abstract class HfHubVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return hubStream(this.accessor, path, handed?.entry)
     const window =
       offset === 0 && size === null ? {} : size === null ? { offset } : { offset, size }
     return hubRead(this.accessor, path, window, handed?.entry)
@@ -91,10 +92,6 @@ export abstract class HfHubVFS extends BaseVFS {
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return hubStat(this.accessor, path, handed?.entry, handed?.index)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return hubStream(this.accessor, path, handed?.entry)
   }
 
   override exists(path: PathSpec, handed?: Handed): Promise<boolean> {

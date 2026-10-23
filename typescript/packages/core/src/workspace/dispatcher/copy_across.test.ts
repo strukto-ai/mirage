@@ -14,6 +14,7 @@
 
 // Mirrors python/tests/workspace/dispatcher/test_copy_across.py.
 
+import type { ByteSource } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 
 import { exdev } from '../../errors/fs.ts'
@@ -40,14 +41,9 @@ class StoreRAM extends RAMVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     this.reads.push(path.virtual)
     return super.read(path, handed, offset, size)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    this.reads.push(path.virtual)
-    return super.readStream(path)
   }
 
   override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {

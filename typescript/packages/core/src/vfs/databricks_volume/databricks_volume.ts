@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '../../io/types.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { copy as dbxCopy } from '../../core/databricks_volume/copy.ts'
 import { create as dbxCreate } from '../../core/databricks_volume/create.ts'
@@ -54,8 +55,8 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return dbxRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return dbxStream(this.accessor, path)
     return dbxRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -63,25 +64,21 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return dbxStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return dbxStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return dbxExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return dbxWrite(this.accessor, path, data)
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    return dbxWrite(this.accessor, path, await materialize(data))
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+  override async append(path: PathSpec, data: ByteSource): Promise<void> {
     return appendByRewrite(
-      (p) => this.read(p),
+      (p) => dbxRead(this.accessor, p),
       (p, d) => this.write(p, d),
       (p) => this.stat(p),
       path,
-      data,
+      await materialize(data),
     )
   }
 

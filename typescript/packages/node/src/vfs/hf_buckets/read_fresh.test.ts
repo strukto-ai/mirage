@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize } from '@struktoai/mirage-core/io/types'
 import { createHash } from 'node:crypto'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
@@ -327,7 +328,7 @@ describe('hf_buckets past EOF', () => {
         size: 5,
       })) as Uint8Array
       expect(viaOp.byteLength).toBe(0)
-      const direct = await vfs.read(spec, undefined, 99, 5)
+      const direct = await materialize(await vfs.read(spec, undefined, 99, 5))
       expect(direct.byteLength).toBe(0)
     } finally {
       await w.close()

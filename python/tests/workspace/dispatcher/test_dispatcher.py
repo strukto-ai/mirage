@@ -1588,15 +1588,6 @@ class _DirVoiceRAM(RAMVFS):
             return self._answer(path)
         return await super().read(path, offset, size)
 
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        if path.mount_path in self.voiced:
-            return _voiced(self, path)
-        return super().read_stream(path)
-
-
-async def _voiced(vfs: _DirVoiceRAM, path: PathSpec) -> AsyncIterator[bytes]:
-    yield vfs._answer(path)
-
 
 def _host_named(at: str) -> OSError:
     return IsADirectoryError(21, "Is a directory", "/host" + at)
@@ -1614,7 +1605,7 @@ _WS_READS = {
 
 
 async def _drained_stream(ws: Workspace, path: str) -> bytes:
-    return await _drained(await ws.vfs.read_stream(path))
+    return await _drained(await ws.vfs.read(path, stream=True))
 
 
 @pytest.mark.asyncio
@@ -1687,7 +1678,7 @@ async def test_a_hidden_link_to_a_directory_stays_missing():
             await ws.vfs.read("/m/alias", session_id="agent")
         with pytest.raises(FileNotFoundError):
             await _drained(
-                await ws.vfs.read_stream("/m/alias", session_id="agent")
+                await ws.vfs.read("/m/alias", session_id="agent", stream=True)
             )
         io = await ws.shell("cat /m/alias", session_id="agent")
         assert io.stderr == b"cat: /m/alias: No such file or directory\n"
@@ -2072,8 +2063,9 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
 ):
     # The fill is chosen after the probe, but the op is resolved only
     # once the mount is ready; a renderer landing in between runs, and
-    # its rendering must not become what cat reads. A ranged read on a
-    # store with no native range fills the whole file too.
+    # its rendering must not become what cat reads, which is the counted
+    # read's stored bytes. A ranged read on a store with no native range
+    # fills the whole file too.
     ws, _ = _counted_workspace()
     await ws.vfs.write("/data/f.count", b"STORED")
     await ws.cache.remove("/data/f.count")
@@ -2096,7 +2088,7 @@ async def test_a_renderer_registered_after_the_probe_is_not_kept(
     assert await ws.vfs.read("/data/f.count", *window) == rendered
     assert not await ws.cache.exists("/data/f.count")
     out = await ws.shell("cat /data/f.count")
-    assert await out.stdout_str() == "STORED"
+    assert await out.stdout_str() == "BODY"
 
 
 class _RefusingGate:
@@ -2382,20 +2374,19 @@ class Tape(BaseVFS):
         path: PathSpec,
         offset: int = 0,
         size: int | None = None,
-    ) -> bytes:
+    ) -> AsyncIterator[bytes]:
         self.reads += 1
-        return self.files[path.vfs_path.strip("/")]
+        key = path.vfs_path.strip("/")
+        if key not in self.files:
+            raise FileNotFoundError(path.virtual)
+        return self._pulled(self.files[key])
 
     async def write(
         self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
     ) -> None:
         self.files[path.vfs_path.strip("/")] = data
 
-    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        key = path.vfs_path.strip("/")
-        if key not in self.files:
-            raise FileNotFoundError(path.virtual)
-        data = self.files[key]
+    async def _pulled(self, data: bytes) -> AsyncIterator[bytes]:
         try:
             for at in range(0, len(data), 10):
                 await asyncio.sleep(self.delay)
@@ -2426,7 +2417,7 @@ async def test_a_streamed_read_arrives_as_pulled_and_fills_the_cache():
         assert (report.completed, report.bytes) == (True, 50)
         warm, _ = await ws.dispatch("read", TAPE)
         assert warm == b"0123456789" * 5
-        assert tape.reads == 0
+        assert tape.reads == 1
 
 
 @pytest.mark.asyncio
@@ -2470,7 +2461,7 @@ async def test_a_window_or_a_post_vfs_policy_gets_whole_bytes(
     ) as ws:
         got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
         assert isinstance(got, bytes)
-        assert tape.pulled == 0
+        assert tape.reads == 1
 
 
 @pytest.mark.asyncio
@@ -2519,7 +2510,7 @@ async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
         await stream.aclose()
         assert (tape.pulled, tape.closed) == (1, True)
         await ws.dispatch("read", TAPE)
-        assert tape.reads == 1
+        assert tape.reads == 2
 
 
 @pytest.mark.asyncio
@@ -2530,7 +2521,7 @@ async def test_a_write_during_a_stream_keeps_none_of_it():
         await ws.dispatch("write", TAPE, data=b"new")
         assert [chunk async for chunk in stream][0] == b"0123456789"
         got, _ = await ws.dispatch("read", TAPE)
-        assert (got, tape.reads) == (b"new", 0)
+        assert (got, tape.reads) == (b"new", 1)
 
 
 @pytest.mark.asyncio
@@ -2669,7 +2660,7 @@ async def test_a_stream_past_the_drain_budget_keeps_nothing():
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
         assert len(b"".join([chunk async for chunk in stream])) == 50
         await ws.dispatch("read", TAPE)
-        assert tape.reads == 1
+        assert tape.reads == 2
 
 
 @pytest.mark.asyncio
@@ -3348,7 +3339,9 @@ class StreamWritingRAM(RAMVFS):
         self.fail = False
         self.caches_reads = True
 
-    async def write_stream(self, path, data, *, atomic=False):
+    async def write(self, path, data, *, atomic=False):
+        if isinstance(data, bytes):
+            return await super().write(path, data)
         self.streamed.append(("write", path.virtual))
         content = []
         async for chunk in data:
@@ -3359,7 +3352,9 @@ class StreamWritingRAM(RAMVFS):
             content.append(chunk)
         await super().write(path, b"".join(content))
 
-    async def append_stream(self, path, data):
+    async def append(self, path, data):
+        if isinstance(data, bytes):
+            return await super().append(path, data)
         self.streamed.append(("append", path.virtual))
         content = []
         async for chunk in data:
@@ -3439,15 +3434,17 @@ async def test_a_streamed_write_keeps_what_fits_the_drain_budget(
     ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
     ws.cache.max_drain_bytes = budget
     tokens = []
-    original = destination.write_stream
+    original = destination.write
 
     async def write(path, data, *, atomic=False):
+        if isinstance(data, bytes):
+            return await original(path, data)
         tokens.append((await ws.cache.fingerprints([path.virtual]))[0])
         assert not await ws.cache.exists(path.virtual)
         await original(path, data, atomic=atomic)
         record("write", path.virtual, "ram", 3, start_op(), fingerprint="v2")
 
-    monkeypatch.setattr(destination, "write_stream", write)
+    monkeypatch.setattr(destination, "write", write)
     try:
         await ws.vfs.write("/dst/f", b"old")
         await ws.cache.set("/dst/f", b"old", fingerprint="v1")

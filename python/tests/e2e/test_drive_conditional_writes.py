@@ -173,7 +173,7 @@ async def test_a_streamed_ops_read_through_an_outdated_listing_holds_its_bytes(
     ws = workspace()
     await ws.vfs.readdir(drive.root)
     drive.put("f", b"B\n")
-    stream = await ws.vfs.read_stream(f"{drive.root}/f")
+    stream = await ws.vfs.read(f"{drive.root}/f", stream=True)
     assert b"".join([chunk async for chunk in stream]) == b"B\n"
     drive.put("f", b"C\n")
     with pytest.raises(StaleWriteError):

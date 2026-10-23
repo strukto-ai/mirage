@@ -93,8 +93,8 @@ export class GridFSVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return gridfsRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return gridfsStream(this.accessor, path)
     return gridfsRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -102,34 +102,19 @@ export class GridFSVFS extends BaseVFS {
     return gridfsStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return gridfsStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return gridfsExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
-    return gridfsWrite(this.accessor, path, data)
-  }
-
-  override writeStream(
-    path: PathSpec,
-    data: ByteSource,
-    signal?: AbortSignal,
-  ): Promise<FileStat | null> {
+  override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
+    if (data instanceof Uint8Array) return gridfsWrite(this.accessor, path, data)
     return gridfsWriteStream(this.accessor, path, data, signal)
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<FileStat | null | undefined> {
-    return this.appendStream(path, data)
-  }
-
-  override appendStream(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
+  override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => gridfsStream(this.accessor, p, remember),
-      (p, d) => this.writeStream(p, d),
+      (p, d) => this.write(p, d),
       (p) => this.stat(p),
       path,
       data,

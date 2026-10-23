@@ -36,11 +36,6 @@ class StoreRAM(RAMVFS):
         self.reads.append(path.virtual)
         return await super().read(path, offset, size)
 
-    async def read_stream(self, path):
-        self.reads.append(path.virtual)
-        async for chunk in super().read_stream(path):
-            yield chunk
-
     async def copy_from(
         self, source: BaseVFS, src: PathSpec, dst: PathSpec
     ) -> None:

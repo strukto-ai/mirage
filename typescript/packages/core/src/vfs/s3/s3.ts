@@ -20,7 +20,6 @@ import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
 import { mkdir as s3Mkdir } from '../../core/s3/mkdir.ts'
-import { read as s3Read } from '../../core/s3/read.ts'
 import { readdir as s3Readdir } from '../../core/s3/readdir.ts'
 import { rename as s3Rename } from '../../core/s3/rename.ts'
 import { rmR as s3RmR } from '../../core/s3/rm.ts'
@@ -71,8 +70,8 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return s3Read(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return s3Stream(this.accessor, path)
     return s3ReadRange(this.accessor, path, offset, size)
   }
 
@@ -91,34 +90,19 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return s3Checksum(this.accessor, path, algorithm, aws)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return s3Stream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return s3Exists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
-    return s3Write(this.accessor, path, data)
-  }
-
-  override writeStream(
-    path: PathSpec,
-    data: ByteSource,
-    signal?: AbortSignal,
-  ): Promise<FileStat | null> {
+  override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
+    if (data instanceof Uint8Array) return s3Write(this.accessor, path, data)
     return s3WriteStream(this.accessor, path, data, signal)
   }
 
-  override append(path: PathSpec, data: Uint8Array): Promise<FileStat | null | undefined> {
-    return this.appendStream(path, data)
-  }
-
-  override appendStream(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
+  override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {
     return appendByStreamedRewrite(
       (p, remember) => s3Stream(this.accessor, p, remember),
-      (p, d) => this.writeStream(p, d),
+      (p, d) => this.write(p, d),
       (p) => this.stat(p),
       path,
       data,

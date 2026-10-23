@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from bson import ObjectId
 
+import mirage.core.mongodb.read as mongodb_read
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.core.mongodb.read import read
 from mirage.types import PathSpec
@@ -194,15 +195,9 @@ async def test_registered_stream_matches_read_for_metadata(
         "mirage.core.mongodb.read." + builder,
         new=AsyncMock(return_value={"name": "café", "fields": []}),
     ):
-        expected = await vfs_over(MongoDBVFS, accessor).read(_path(path))
-        actual = b"".join(
-            [
-                chunk
-                async for chunk in vfs_over(MongoDBVFS, accessor).read_stream(
-                    _path(path)
-                )
-            ]
-        )
+        expected = await mongodb_read.read(accessor, _path(path))
+        streamed = await vfs_over(MongoDBVFS, accessor).read(_path(path))
+        actual = b"".join([chunk async for chunk in streamed])
     assert actual == expected
     assert b"fields" in actual
 
@@ -218,7 +213,7 @@ async def test_registered_document_stream_is_lazy(accessor):
             yield {"_id": i, "value": "x" * 1024}
 
     with patch("mirage.core.mongodb.stream.iter_documents", new=documents):
-        stream = vfs_over(MongoDBVFS, accessor).read_stream(_path(DOCS_PATH))
+        stream = await vfs_over(MongoDBVFS, accessor).read(_path(DOCS_PATH))
         first = await anext(stream)
         assert consumed == 1
         assert json.loads(first)["_id"] == 0

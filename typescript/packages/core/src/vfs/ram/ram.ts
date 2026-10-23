@@ -25,7 +25,6 @@ import type { Handed } from '../types.ts'
 import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
-import { readStream as ramStream } from '../../core/ram/stream.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
 import { write as ramWrite, writeStream as ramWriteStream } from '../../core/ram/write.ts'
 import { appendBytes as ramAppend } from '../../core/ram/append.ts'
@@ -93,7 +92,7 @@ export class RAMVFS extends BaseVFS {
     offset = 0,
     size: number | null = null,
     signal?: AbortSignal,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return devAwareRead(this.accessor, path, signal)
     return devAwareReadRange(this.accessor, path, offset, size, signal)
   }
@@ -102,37 +101,28 @@ export class RAMVFS extends BaseVFS {
     return devAwareStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return ramStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return ramExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array, signal?: AbortSignal): Promise<void> {
-    return ramWrite(this.accessor, path, data, signal)
+  override write(
+    path: PathSpec,
+    data: ByteSource,
+    signal?: AbortSignal,
+    _handed?: Handed,
+    atomic = false,
+  ): Promise<void> {
+    if (data instanceof Uint8Array) return ramWrite(this.accessor, path, data, signal)
+    return ramWriteStream(this.accessor, path, data, false, signal, atomic)
   }
 
   override append(
     path: PathSpec,
-    data: Uint8Array,
+    data: ByteSource,
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    return ramAppend(this.accessor, path, data, signal)
-  }
-
-  override writeStream(
-    path: PathSpec,
-    data: ByteSource,
-    signal?: AbortSignal,
-    atomic = false,
-  ): Promise<void> {
-    return ramWriteStream(this.accessor, path, data, false, signal, atomic)
-  }
-
-  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    if (data instanceof Uint8Array) return ramAppend(this.accessor, path, data, signal)
     return ramWriteStream(this.accessor, path, data, true, signal)
   }
 

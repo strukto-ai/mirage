@@ -704,18 +704,14 @@ class Stamped extends RAMVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     const timer = startOp()
-    const data = await super.read(path, handed, offset, size)
-    const whole = await super.read(path, handed)
+    const data = await materialize(await super.read(path, handed, offset, size))
+    const whole = await materialize(await super.read(path, handed))
     record('read', path.virtual, 'ram', data.byteLength, timer, {
       fingerprint: String(whole.byteLength),
     })
     return data
-  }
-
-  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    yield await this.read(path)
   }
 }
 

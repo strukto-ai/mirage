@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import { BaseVFS } from '../base.ts'
 import { ChromaAccessor } from '../../accessor/chroma.ts'
 
@@ -57,7 +58,6 @@ export class ChromaVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
-    readStream: ['entry'],
     stat: ['entry', 'index'],
   } as const
 
@@ -92,17 +92,14 @@ export class ChromaVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return readStream(this.accessor, path, handed?.entry)
     const data = await read(this.accessor, path, handed?.entry)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return stat(this.accessor, path, handed?.entry, handed?.index)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path, handed?.entry)
   }
 
   override filesContaining(

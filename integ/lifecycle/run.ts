@@ -66,7 +66,7 @@ import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { command, type Context } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
-import { IOResult } from '@struktoai/mirage-core/io/types'
+import { type ByteSource, IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import { sleep } from '@struktoai/mirage-core/utils/abort'
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
@@ -323,12 +323,21 @@ class TrackedStreamVFS extends CachedRAMVFS {
     super()
   }
 
-  override async *readStream(
+  override async read(
     path: PathSpec,
     handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+    signal?: AbortSignal,
+  ): Promise<ByteSource> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size, signal)
+    return this.tracked(await materialize(await super.read(path, handed)), signal)
+  }
+
+  private async *tracked(
+    data: Uint8Array,
     signal?: AbortSignal,
   ): AsyncIterableIterator<Uint8Array> {
-    const data = await super.read(path, handed)
     try {
       for (let offset = 0; offset < data.byteLength; offset += this.chunkSize) {
         this.pulls++
@@ -365,14 +374,6 @@ class RejectedUploadVFS extends RAMVFS {
   }
 
   override pwrite(): Promise<void> {
-    return Promise.reject(new Error(this.message))
-  }
-
-  override writeStream(): Promise<void> {
-    return Promise.reject(new Error(this.message))
-  }
-
-  override appendStream(): Promise<void> {
     return Promise.reject(new Error(this.message))
   }
 }

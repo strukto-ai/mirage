@@ -50,15 +50,10 @@ describe('a warm read command reads nothing from the backend', () => {
       await ws.shell('cat /c/a.txt')
       const reads: string[] = []
       const read = ram.read.bind(ram)
-      const readStream = ram.readStream.bind(ram)
       Object.assign(ram, {
         read: (path: PathSpec, ...rest: [Handed?, number?, (number | null)?]) => {
           reads.push(path.virtual)
           return read(path, ...rest)
-        },
-        readStream: (path: PathSpec) => {
-          reads.push(path.virtual)
-          return readStream(path)
         },
       })
       const out = await ws.shell(line)

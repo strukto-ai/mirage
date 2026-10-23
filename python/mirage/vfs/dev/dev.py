@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
@@ -22,6 +22,7 @@ from mirage.core.dev.read import read as dev_read
 from mirage.core.dev.stat import key_stat
 from mirage.core.dev.stat import stat as dev_stat
 from mirage.core.ram.readdir import child_keys
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, FileType, PathSpec, VFSName
 from mirage.utils.path import norm
 from mirage.vfs.dev.store import DevStore
@@ -62,10 +63,16 @@ class DevVFS(RAMVFS):
             for key in await child_keys(self.accessor, path)
         ]
 
-    async def read(
+    def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        return await dev_read(self.accessor, path, offset, size)
+    ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
+        # Not a coroutine, so a pipe is bound as the read opens and a
+        # descriptor reads on after the pipe's path is released.
+        if not offset and size is None:
+            pipe = active_pipe(self.accessor, norm(path.mount_path))
+            if pipe is not None:
+                return pipe.stream(path)
+        return dev_read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await dev_stat(self.accessor, path)
@@ -77,19 +84,6 @@ class DevVFS(RAMVFS):
             path (PathSpec): the directory.
         """
         return None
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        # Bound as the read opens, so a descriptor reads on after the
-        # pipe's path is released.
-        pipe = active_pipe(self.accessor, norm(path.mount_path))
-        if pipe is not None:
-            return pipe.stream(path)
-        return self._read_whole(path)
-
-    async def _read_whole(self, path: PathSpec) -> AsyncIterator[bytes]:
-        data = await self.read(path)
-        if data:
-            yield data
 
     def get_state(self) -> dict[str, Any]:
         return {"type": self.name}

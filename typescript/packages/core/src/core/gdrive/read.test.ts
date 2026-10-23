@@ -128,7 +128,9 @@ describe('a cold gdrive read through a mount', () => {
       }
       throw new Error(`unexpected folderId=${opts.folderId}`)
     })
-    drive.downloadFile.mockResolvedValue(new TextEncoder().encode('pdf-bytes'))
+    drive.downloadFileStream.mockImplementation(async function* () {
+      yield await Promise.resolve(new TextEncoder().encode('pdf-bytes'))
+    })
     drive.captureFileMetadata.mockResolvedValue([null, null])
     const ws = await workspace()
     try {
