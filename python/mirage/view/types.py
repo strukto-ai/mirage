@@ -215,18 +215,16 @@ class MountView:
     # The mount serving a path, so a walker can tell "still mine" from
     # "another backend" before it tries to read something it cannot.
     root_of: MountRoot
-    # The du walk budget of the mount serving a path (its VFS's
-    # ``max_du_entries``, None for no cap), so a walk that crosses mounts
-    # charges each entry to its own backend's allowance.
-    max_du_entries: Callable[[str], int | None] | None = None
     # Whether the VFS of the mount serving a path answers a function
     # itself (``read_tree``, ``checksum``, ``read_range``, ...), so a
     # command asks for a one-call answer only where one exists.
     answers: Callable[[str, str], bool] | None = None
-    # The serving mount's cap on one glob's matches; None for no cap.
-    max_glob_matches: Callable[[str], int | None] | None = None
     # The globs its ``files_containing`` covers; None for every file.
     searchable: Callable[[str], tuple[str, ...] | None] | None = None
+    # The most files one command walks under a directory of the mount
+    # serving a path (its VFS's ``full_scan_limit``), -1 for no cap, so a
+    # walk that crosses mounts charges each entry to its own backend.
+    full_scan_limit: Callable[[str], int] | None = None
 
 
 @runtime_checkable

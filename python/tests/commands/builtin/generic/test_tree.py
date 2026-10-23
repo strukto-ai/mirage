@@ -129,6 +129,7 @@ def _mounts_view(roots: list[str]):
         visible_descendants=lambda path: _under(roots, path),
         is_root=lambda path: path.rstrip("/") in roots,
         root_of=lambda path: "/",
+        full_scan_limit=lambda path: -1,
     )
 
 

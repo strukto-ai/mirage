@@ -53,6 +53,7 @@ optional access token. Both `READ` and `WRITE` modes are supported out of the bo
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />default `'https://huggingface.co'` | Hub origin requests go to, for a mirror or a self-hosted Hub. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code><br />default `30000` | Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Path inside the bucket that becomes the mount root; files outside it are not listed. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_buckets end */}
@@ -68,6 +69,15 @@ Directory listings are cached with `indexTtl = 600` (10 minutes) and populate
 file-size/type entries that `stat` reads via a fast path, so a `readdir`
 followed by per-entry `stat` calls (what `ls` and most shell commands trigger)
 costs one HTTP request instead of N. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
+
+## Integration
+
+What Hugging Face buckets answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Hugging Face buckets |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
 ## Shell Commands
 

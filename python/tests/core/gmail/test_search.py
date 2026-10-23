@@ -42,7 +42,7 @@ from tests.fixtures.gmail_api import FakeGmail
 async def test_only_the_messages_whose_text_holds_it_are_read(
     gmail, line, reads
 ):
-    full = await gmail(line, content_search=False)
+    full = await gmail(line, full_scan_limit=-1)
     out, code, read, searches = await gmail(line)
     assert (out, code) == full[:2]
     assert read == reads
@@ -64,12 +64,12 @@ async def test_only_the_messages_whose_text_holds_it_are_read(
     ],
 )
 async def test_a_text_a_label_may_hold_reads_every_message(gmail, line):
-    full = await gmail(line, content_search=False)
+    full = await gmail(line, full_scan_limit=-1)
     assert (await gmail(line))[:3] == full[:3]
 
 
 @pytest.mark.asyncio
 async def test_every_message_is_read_for_a_text_that_is_not_ascii(gmail):
     line = "grep -rl caf\u00e9 /gmail"
-    full = await gmail(line, content_search=False)
+    full = await gmail(line, full_scan_limit=-1)
     assert (await gmail(line, FakeGmail()))[:3] == full[:3]

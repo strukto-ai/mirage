@@ -43,7 +43,7 @@ import { rename as diskRename } from '../../core/disk/rename.ts'
 import { copy as diskCopy } from '../../core/disk/copy.ts'
 import { truncate as diskTruncate } from '../../core/disk/truncate.ts'
 import { setAttrs as diskSetAttrs } from '../../core/disk/set_attrs.ts'
-import { SCOPE_ERROR } from '../../core/disk/constants.ts'
+import { LOCAL_FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 const isMountedOp = (a: DiskAccessor) => a.root !== ''
 
@@ -53,11 +53,12 @@ export interface DiskVFSOptions {
   // local POSIX filesystem; turn them off for an NFS, SMB or FUSE root, whose
   // change times may not move with the folder's entries.
   folderVersions?: boolean
+  fullScanLimit?: number
 }
 
 export interface DiskVFSState {
   type: string
-  config?: { root: string; folderVersions: boolean }
+  config?: { root: string; folderVersions: boolean; full_scan_limit: number }
   /**
    * Each file as bytes, or as a host path read by whoever consumes the
    * state (a snapshot tar, a copy).
@@ -83,7 +84,6 @@ export class DiskVFS extends BaseVFS {
   override readonly cachesReads: boolean = false
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
@@ -93,6 +93,7 @@ export class DiskVFS extends BaseVFS {
   override readonly listingVersion: ListingVersion = ListingVersion.FOLDER
   readonly root: string
   readonly folderVersions: boolean
+  override readonly fullScanLimit: number
   override readonly accessor: DiskAccessor
 
   constructor(options: DiskVFSOptions) {
@@ -101,8 +102,13 @@ export class DiskVFS extends BaseVFS {
     if (typeof folderVersions !== 'boolean') {
       throw new VFSConfigError('disk: folder_versions: must be a boolean')
     }
+    const limit = options.fullScanLimit ?? LOCAL_FULL_SCAN_LIMIT
+    if (!Number.isInteger(limit) || limit < -1) {
+      throw new VFSConfigError('disk: full_scan_limit: must be an integer of -1 or more')
+    }
     super()
     this.folderVersions = folderVersions
+    this.fullScanLimit = limit
     if (!folderVersions) this.listingVersion = ListingVersion.NONE
     this.root = path.resolve(options.root)
     mkdirSync(this.root, { recursive: true })
@@ -134,8 +140,6 @@ export class DiskVFS extends BaseVFS {
   override readonly readsRanges: boolean = true
 
   override readonly local: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readdir(path: PathSpec): Promise<DirListing> {
     return diskReaddir(this.accessor, path)
@@ -250,7 +254,11 @@ export class DiskVFS extends BaseVFS {
     }
     return {
       type: this.name,
-      config: { root: this.root, folderVersions: this.folderVersions },
+      config: {
+        root: this.root,
+        folderVersions: this.folderVersions,
+        full_scan_limit: this.fullScanLimit,
+      },
       files,
       modes,
     }

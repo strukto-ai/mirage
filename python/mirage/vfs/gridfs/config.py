@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from mirage.utils import key_prefix as kp
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class GridFSConfig(BaseModel):
@@ -33,6 +34,10 @@ class GridFSConfig(BaseModel):
     chunk_size_bytes: int | None = None
     """Chunk size in bytes for files the mount writes; unset uses the
     driver's default, 255 KiB."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("key_prefix")
     @classmethod

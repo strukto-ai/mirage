@@ -20,18 +20,18 @@ import type { MountMode, PathSpec } from '../types.ts'
  * name (recorded on each op), its mode as it is now, which sessions are told
  * of it (null for every one), the VFS's du walk budget (null for no cap), the functions the VFS
  * answers itself (the dispatcher's names, `read_range` for a ranged read),
- * how many matches one glob word keeps there, and the globs its search covers
- * (null for every file). Mirrors Python's `MountRow`.
+ * how many matches one glob word keeps there, the globs its search covers
+ * (null for every file) and its VFS's `fullScanLimit` (-1 for no cap).
+ * Mirrors Python's `MountRow`.
  */
 export interface MountRow {
   readonly prefix: string
   readonly kind: string
   readonly mode: MountMode
   readonly visible?: ((sessionId: string | null) => boolean) | null
-  readonly maxDuEntries?: number | null
   readonly calls?: ReadonlySet<string>
-  readonly maxGlobMatches?: number | null
   readonly searchable?: readonly string[] | null
+  readonly fullScanLimit?: number
 }
 
 export interface ExecutionNodeInit {

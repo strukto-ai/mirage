@@ -19,7 +19,6 @@ import { parseSessionProfile } from '../../../policy/profile.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode, type PathSpec } from '../../../types.ts'
-import { eacces } from '../../../errors/fs.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
 import type { ByteSource } from '../../../io/types.ts'
 
@@ -43,7 +42,7 @@ interface Mount {
   lines?: 'bytes' | 'stream' | 'decline' | null
   upper?: boolean
   resource?: boolean
-  refuse?: (message: string) => Error
+  fullScanLimit?: number
 }
 
 // A RAM mount whose search answers by substring, counting reads. Like a real
@@ -51,13 +50,12 @@ interface Mount {
 class SearchRAM extends RAMVFS {
   reads: string[] = []
   asked: [string, boolean][] = []
-  scans: string[] = []
   pulled: string[] = []
   open = 0
   streams: AsyncIterable<Uint8Array>[] = []
 
   constructor(readonly mount: Mount = {}) {
-    super()
+    super({ fullScanLimit: mount.fullScanLimit ?? 10000 })
     if (mount.files === false) Object.assign(this, { filesContaining: undefined })
     if (mount.lines === null) Object.assign(this, { linesContaining: undefined })
     if (mount.resource === true) Object.assign(this, { search: () => Promise.resolve(null) })
@@ -117,14 +115,6 @@ class SearchRAM extends RAMVFS {
     } finally {
       this.open -= 1
     }
-  }
-
-  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
-    this.scans.push(path.virtual)
-    const refuse = this.mount.refuse
-    return refuse === undefined
-      ? Promise.resolve()
-      : Promise.reject(refuse(`${String(files)} files in scope, narrow the path`))
   }
 }
 
@@ -230,7 +220,6 @@ it.each(['bytes', 'stream'] as const)(
     const searched = await run(marked(vfs), 'rg -x ada /m')
     expect(searched).toEqual(await run(marked(new RAMVFS()), 'rg -x ada /m'))
     expect(searched[0]).toBe('/m/top.txt:ada\n')
-    expect(vfs.scans).toEqual(['/m'])
   },
 )
 
@@ -242,46 +231,45 @@ it.each(['bytes', 'stream'] as const)(
     const vfs = new SearchRAM({ files: false, lines })
     const searched = await run(marked(vfs), 'rg -E none ada /m')
     expect(searched).toEqual(await run(marked(new RAMVFS()), 'rg -E none ada /m'))
-    expect([vfs.reads, vfs.scans]).toEqual([[], []])
+    expect(vfs.reads).toEqual([])
   },
 )
 
 const EVERY = 'a.txt b.txt c.txt sub/d.txt z.txt'
 
-// Twin of test_what_a_search_reads_asks_and_scans.
-it.each<[string, string, string | null, string, boolean]>([
-  ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada', false],
-  ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w', false],
-  ['rg -x bob /d', 'files', 'b.txt', 'bob -w', false],
-  ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused', false],
-  ["grep -rP 'conn.*refused' /d", 'files', 'b.txt', 'refused', false],
-  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada', true],
-  ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada', false],
-  ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada', false],
-  ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada', false],
-  ['grep -r ada /d', 'lines', '', '', false],
-  ['grep -rn ada /d', 'lines', 'a.txt sub/d.txt', '', false],
-  ['grep -rn ada /d', 'stream', 'a.txt sub/d.txt', '', false],
-  ['grep -r ada /d', 'decline', EVERY, '', true],
-  ['grep -rn ada /d', 'decline', EVERY, '', true],
-  ['grep -rv ada /d', 'both', null, '', true],
-  ['rg --passthru ada /d', 'both', null, '', true],
-  ["grep -r 'a.b' /d", 'both', null, '', true],
-  ['rg -L ada /d', 'both', null, '', true],
-  ['rg --files-without-match ada /d', 'both', null, '', true],
-  ['rg -c --include-zero ada /d', 'both', null, '', true],
-  ['rg --stats ada /d | grep -v second', 'both', EVERY, '', true],
-  ['rg -z ada /d', 'both', EVERY, '', true],
-  ["rg -U 'ada here\\nnothing' /d", 'both', EVERY, '', true],
-  ['rg -U ada /d', 'lines', 'a.txt sub/d.txt', '', false],
-  ['rg -q --files-without-match ada /d', 'files', null, 'ada', false],
-  ['rg --files /d', 'both', '', '', false],
-])('%s (%s) reads, asks and scans what it should', async (line, mount, reads, asked, scan) => {
+// Twin of test_what_a_search_reads_and_asks.
+it.each<[string, string, string | null, string]>([
+  ['grep -rc ada /d', 'files', 'a.txt sub/d.txt', 'ada'],
+  ['rg -lw ada /d', 'files', 'a.txt sub/d.txt', 'ada -w'],
+  ['rg -x bob /d', 'files', 'b.txt', 'bob -w'],
+  ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused'],
+  ["grep -rP 'conn.*refused' /d", 'files', 'b.txt', 'refused'],
+  ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada'],
+  ['grep -r ada /d /d/c.txt', 'files', 'a.txt c.txt c.txt sub/d.txt', 'ada'],
+  ['grep -r ada /d', 'upper', 'a.txt sub/d.txt', 'ada'],
+  ['grep -r ada /d', 'resource', 'a.txt sub/d.txt', 'ada'],
+  ['grep -r ada /d', 'lines', '', ''],
+  ['grep -rn ada /d', 'lines', 'a.txt sub/d.txt', ''],
+  ['grep -rn ada /d', 'stream', 'a.txt sub/d.txt', ''],
+  ['grep -r ada /d', 'decline', EVERY, ''],
+  ['grep -rn ada /d', 'decline', EVERY, ''],
+  ['grep -rv ada /d', 'both', null, ''],
+  ['rg --passthru ada /d', 'both', null, ''],
+  ["grep -r 'a.b' /d", 'both', null, ''],
+  ['rg -L ada /d', 'both', null, ''],
+  ['rg --files-without-match ada /d', 'both', null, ''],
+  ['rg -c --include-zero ada /d', 'both', null, ''],
+  ['rg --stats ada /d | grep -v second', 'both', EVERY, ''],
+  ['rg -z ada /d', 'both', EVERY, ''],
+  ["rg -U 'ada here\\nnothing' /d", 'both', EVERY, ''],
+  ['rg -U ada /d', 'lines', 'a.txt sub/d.txt', ''],
+  ['rg -q --files-without-match ada /d', 'files', null, 'ada'],
+  ['rg --files /d', 'both', '', ''],
+])('%s (%s) reads and asks what it should', async (line, mount, reads, asked) => {
   const vfs = new SearchRAM(MOUNTS[mount])
   expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
   const [text = '', word] = asked.split(' ')
   expect(vfs.asked).toEqual(text === '' ? [] : [[text, word !== undefined]])
-  expect(vfs.scans).toEqual(scan ? ['/d'] : [])
   if (reads !== null) {
     const keys = reads === '' ? [] : reads.split(' ')
     expect([...vfs.reads].sort()).toEqual(keys.map((key) => `d/${key}`))
@@ -352,13 +340,12 @@ it('keeps the search under a hide and loses its hits', async () => {
   const vfs = new SearchRAM()
   const line = 'grep -r ada /d'
   expect(await run(vfs, line, ['/d/sub'])).toEqual(await run(new RAMVFS(), line, ['/d/sub']))
-  expect([vfs.asked, vfs.scans]).toEqual([[['ada', false]], []])
+  expect(vfs.asked).toEqual([['ada', false]])
   expect(vfs.reads).not.toContain('d/sub/d.txt')
 })
 
-// Twin of test_a_hidden_operand_beside_a_visible_one_keeps_its_match: a mount
-// with no search asks the scan guard for every operand; the hidden one reaches
-// no directory, so the walk reports it as absent.
+// Twin of test_a_hidden_operand_beside_a_visible_one_keeps_its_match: the
+// hidden operand reaches no directory, so the walk reports it as absent.
 it.each(['grep -r ada', 'rg ada'])('%s keeps a match beside a hidden operand', async (line) => {
   const [out, err] = await run(new RAMVFS(), `${line} /d/a.txt /d/b.txt`, ['/d/b.txt'])
   expect(out).toBe('/d/a.txt:ada here\n')
@@ -378,7 +365,7 @@ it.each(['grep -r ada /d', 'grep -rc ada /d', 'grep -rl ada /d', 'rg ada /d'])(
     const [out, err, code] = await run(vfs, line, undefined, {}, deny)
     expect([out, err, code]).toEqual(await run(new RAMVFS(), line, undefined, {}, deny))
     expect([err.includes('/d/c.txt: Permission denied'), code]).toEqual([true, 2])
-    expect([vfs.asked, vfs.scans]).toEqual([[['ada', false]], []])
+    expect(vfs.asked).toEqual([['ada', false]])
     expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'])
   },
 )
@@ -420,28 +407,24 @@ it('closes a streamed answer rg stops inside', async () => {
   expect([vfs.pulled.length, vfs.open]).toEqual([1, 0])
 })
 
-const REFUSED = 'grep: 6 files in scope, narrow the path\n'
-const DENIED = EVERY.split(' ')
-  .map((key) => `grep: /d/${key}: Permission denied\n`)
-  .join('')
-const plainError = (message: string): Error => new Error(message)
-const fsError = (message: string): Error => eacces('/d', message)
-
-// Twin of test_a_mount_may_refuse_a_full_scan.
-it.each<[string, string, (message: string) => Error, [string, number] | null]>([
-  ['grep -rv ada /d', 'both', plainError, [REFUSED, 1]],
-  ['grep -r ada /d', 'decline', plainError, [REFUSED, 1]],
-  ['grep -r ada /d', 'decline', fsError, [DENIED, 2]],
-  ['grep -r ada /d', 'decline-resource', fsError, [DENIED, 2]],
-  ['grep -r ada /d', 'both', plainError, null],
-  ['rg --files /d', 'both', plainError, null],
-])('lets a mount refuse %s (%s)', async (line, mount, refuse, out) => {
-  const vfs = new SearchRAM({ ...MOUNTS[mount], refuse })
-  if (out === null) {
-    expect(await run(vfs, line)).toEqual(await run(new RAMVFS(), line))
-  } else {
-    expect([await run(vfs, line), vfs.reads]).toEqual([['', ...out], []])
-  }
+// Twin of test_only_the_files_a_search_leaves_count_to_the_limit: the search
+// leaves a.txt and sub/d.txt, the only files read, so a limit of two lets the
+// walk finish and one stops it at sub/d.txt.
+it.each<[number, [string, string, number] | null]>([
+  [2, null],
+  [
+    1,
+    [
+      '/d/a.txt:ada here\n',
+      'grep: /d: stopped after 1 files (full_scan_limit); narrow the path\n',
+      2,
+    ],
+  ],
+])('counts only the files a search leaves to a limit of %d', async (limit, out) => {
+  const vfs = new SearchRAM({ lines: null, fullScanLimit: limit })
+  const line = 'grep -r ada /d'
+  expect(await run(vfs, line)).toEqual(out ?? (await run(new RAMVFS(), line)))
+  expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'].slice(0, limit))
 })
 
 it.each<[string, string[]]>([
@@ -449,14 +432,13 @@ it.each<[string, string[]]>([
   ["rg -w 'ada|bob' /d", ['ada', 'bob']],
   ['rg -w xy /d', ['xy']],
   ['rg -x xy /d', ['xy']],
-])('avoids a refused full scan for complete literal words in %s', async (line, terms) => {
-  const vfs = new SearchRAM({ lines: null, refuse: plainError })
+])('asks the search for complete literal words in %s', async (line, terms) => {
+  const vfs = new SearchRAM({ lines: null })
   vfs.store.files.set('/d/short.txt', ENC.encode('xy\n'))
   const plain = new RAMVFS()
   plain.store.files.set('/d/short.txt', ENC.encode('xy\n'))
   expect(await run(vfs, line)).toEqual(await run(plain, line))
   expect(vfs.asked).toEqual(terms.map((term) => [term, true]))
-  expect(vfs.scans).toEqual([])
 })
 
 it.each<[string, string[], string[]]>([
@@ -468,8 +450,8 @@ it.each<[string, string[], string[]]>([
   ['rg -iw -e alpha -e bravo /d', ['alpha', 'bravo'], ['ALPHA', 'Alpha', 'BrAvO']],
   ['rg -iw -e foo -e bar /d', ['foo', 'bar'], ['FOO', 'bar']],
   ["rg -w '(?i:alpha)|bravo' /d", ['alpha', 'bravo'], ['ALPHA', 'Alpha']],
-])('avoids a refused full scan for a caseless literal word in %s', async (line, terms, output) => {
-  const vfs = new SearchRAM({ lines: null, refuse: plainError })
+])('asks the search for a caseless literal word in %s', async (line, terms, output) => {
+  const vfs = new SearchRAM({ lines: null })
   vfs.store.files.set('/d/caseless.txt', ENC.encode('ALPHA\nAlpha\nBrAvO\nFOO\nbar\nalphabet\n'))
   const queries: [string, boolean, boolean][] = []
   const original = vfs.filesContaining.bind(vfs)
@@ -480,7 +462,6 @@ it.each<[string, string[], string[]]>([
   const expected = output.map((text) => `/d/caseless.txt:${text}\n`).join('')
   expect(await run(vfs, line)).toEqual([expected, '', 0])
   expect(queries).toEqual(terms.map((term) => [term, true, true]))
-  expect(vfs.scans).toEqual([])
 })
 
 it('does not request a whole word for a truncated literal prefix', async () => {

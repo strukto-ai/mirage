@@ -22,10 +22,10 @@ import {
 } from '../secrets.ts'
 
 const GmailConfigSchema = GoogleConfigSchema.extend({
-  contentSearch: z.boolean().optional().meta({
+  fullScanLimit: z.number().int().min(-1).optional().meta({
     description:
-      "Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body.",
-    default: false,
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text.',
+    default: 1000,
   }),
 })
 

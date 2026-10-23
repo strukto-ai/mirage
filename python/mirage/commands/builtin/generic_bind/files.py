@@ -57,11 +57,7 @@ from mirage.types import (
     ReadStreamFn,
     StatFn,
 )
-from mirage.utils.glob_walk import (
-    DEFAULT_MAX_GLOB_MATCHES,
-    ResolveGlobFn,
-    make_resolve_glob,
-)
+from mirage.utils.glob_walk import ResolveGlobFn, make_resolve_glob
 from mirage.utils.hidden import move_reveals
 from mirage.utils.path import CycleError
 from mirage.view.types import SessionAccess
@@ -838,10 +834,10 @@ def command_files(
             and mounts.answers(anchor, name)
         )
 
-    cap = (
-        DEFAULT_MAX_GLOB_MATCHES
-        if crossing or mounts is None or mounts.max_glob_matches is None
-        else mounts.max_glob_matches(anchor)
+    limit = (
+        -1
+        if mounts is None or mounts.full_scan_limit is None
+        else mounts.full_scan_limit(anchor)
     )
     return CommandFiles(
         stat=raw_stat,
@@ -873,7 +869,7 @@ def command_files(
         lines_containing=lines_containing,
         resolve_glob=make_resolve_glob(
             raw_readdir,
-            cap,
+            limit,
             raw_stat,
             links.target_stat if links is not None else None,
             access,

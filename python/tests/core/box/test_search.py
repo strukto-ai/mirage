@@ -24,9 +24,7 @@ from mirage.vfs.box.config import BoxConfig
 
 
 def make_accessor(root_folder_id: str | None = None) -> BoxAccessor:
-    config = BoxConfig(
-        access_token="tok", root_folder_id=root_folder_id, content_search=True
-    )
+    config = BoxConfig(access_token="tok", root_folder_id=root_folder_id)
     return BoxAccessor(config, BoxTokenManager(config))
 
 

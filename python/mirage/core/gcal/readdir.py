@@ -413,5 +413,5 @@ async def readdir(
         tz,
         free_busy,
         dated=size > 1,
-        unsearched=accessor.config.content_search,
+        unsearched=accessor.config.full_scan_limit >= 0,
     )

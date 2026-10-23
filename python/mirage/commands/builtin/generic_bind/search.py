@@ -39,27 +39,24 @@ from mirage.commands.builtin.grep_pushdown import (
 from mirage.commands.builtin.rg_stream import open_rg, required_terms
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import (
-    dispatch_of,
     links_of,
     mount_root,
     mounts_of,
 )
-from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
+from mirage.commands.errors import ScanLimitError, UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import revision_for
-from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, PathSpec
 from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import CycleError, glob_prefix_match
-from mirage.view.types import LinkView
+from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +270,83 @@ def candidate_reads(
     return read, stream
 
 
+def capped_reads(
+    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
+    read_stream: Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    operands: list[PathSpec],
+    mounts: MountView | None,
+) -> tuple[
+    Callable[[PathSpec], Awaitable[bytes]],
+    Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    Callable[[PathSpec], None],
+]:
+    """Reads that stop each walk at its mount's ``full_scan_limit``.
+
+    A file counts once against the deepest walked operand above it, so a
+    file named as an operand counts nothing; the one past the limit
+    raises ScanLimitError in its place, and grep or rg stops walking the
+    directory. The charge is returned too, for a file whose matching
+    lines the mount's search hands over in place of a read; a file the
+    search rules out is never read, so it costs nothing.
+
+    Args:
+        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
+            whole-read op.
+        read_stream (Callable[[PathSpec], AsyncIterator[bytes]] | None):
+            the bound stream op, or None when the backend reads whole.
+        operands (list[PathSpec]): the operands walked.
+        mounts (MountView | None): the mount boundaries, which name each
+            operand's limit.
+    """
+    limits = {
+        d.virtual: mounts.full_scan_limit(d.virtual)
+        for d in operands
+        if mounts is not None and mounts.full_scan_limit is not None
+    }
+    capped = sorted(
+        (d for d in operands if limits.get(d.virtual, -1) >= 0),
+        key=lambda d: len(d.virtual.rstrip("/")),
+        reverse=True,
+    )
+    named = {d.virtual for d in operands}
+    taken: dict[str, int] = {}
+    charged: set[str] = set()
+
+    def charge(path: PathSpec) -> None:
+        if path.virtual in named or path.virtual in charged:
+            return
+        for d in capped:
+            if path.virtual.startswith(d.virtual.rstrip("/") + "/"):
+                count = taken.get(d.virtual, 0)
+                if count >= limits[d.virtual]:
+                    raise ScanLimitError(d, limits[d.virtual])
+                taken[d.virtual] = count + 1
+                charged.add(path.virtual)
+                return
+
+    if not capped:
+        return read_bytes, read_stream, charge
+
+    async def read(path: PathSpec) -> bytes:
+        charge(path)
+        return await read_bytes(path)
+
+    if read_stream is None:
+        return read, None, charge
+    source = read_stream
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        charge(path)
+        chunks = source(path)
+        try:
+            async for chunk in chunks:
+                yield chunk
+        finally:
+            await close_quietly(chunks)
+
+    return read, stream, charge
+
+
 async def _unmarked(found: ByteSource) -> ByteSource | None:
     """rg's ``lines_containing`` answer as it stands, or None, so the file
     is read, when it starts with a byte-order mark: rg drops a mark only
@@ -374,8 +448,7 @@ async def search_reads(
     stands in for (the ``is_warm`` call), so a file a path rule refuses
     reports ``Permission denied``, and answers None where a coded pre_vfs
     policy reaches below a directory, so every file is read and judged.
-    When neither can stand in for a walk, the mount's
-    ``before_full_scan`` may refuse it.
+    Each walk stops at its mount's ``full_scan_limit`` (``capped_reads``).
 
     Args:
         files (CommandFiles): the command's files.
@@ -384,32 +457,31 @@ async def search_reads(
         texts (list[str]): pattern arguments.
         ctx (Context): parsed invocation context.
     """
-    read_bytes = files.read_bytes
-    read_stream = files.read_stream
+    fl = FlagView(ctx.flags, spec=SPECS[name])
+    if not paths or (
+        name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
+    ):
+        return files.read_bytes, files.read_stream
+    walked = name == "rg" or directories_action(fl) == "recurse"
+    mounts = mounts_of(ctx)
+    read_bytes, read_stream, charge = capped_reads(
+        files.read_bytes, files.read_stream, paths if walked else [], mounts
+    )
     containing = (
         files.files_containing if files.answers("files_containing") else None
     )
     lines = (
         files.lines_containing if files.answers("lines_containing") else None
     )
-    mounts = mounts_of(ctx)
+    if containing is None and lines is None:
+        return read_bytes, read_stream
     searchable = (
-        mounts.searchable((paths[0] if paths else ctx.cwd).virtual)
+        mounts.searchable(paths[0].virtual)
         if mounts is not None and mounts.searchable is not None
         else None
     )
     links = links_of(ctx)
     home = mount_root(ctx)
-    fl = FlagView(ctx.flags, spec=SPECS[name])
-    if not paths or (
-        name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
-    ):
-        return read_bytes, read_stream
-    walked = name == "rg" or directories_action(fl) == "recurse"
-    if containing is None and lines is None:
-        if walked:
-            await _full_scan(dispatch_of(ctx), paths, name)
-        return read_bytes, read_stream
     try:
         terms = (
             rg_terms(fl, texts)
@@ -421,7 +493,6 @@ async def search_reads(
         return read_bytes, read_stream
     dirs = await _directories(files, paths) if walked else []
     if terms is None:
-        await _full_scan(dispatch_of(ctx), dirs, name)
         return read_bytes, read_stream
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
@@ -446,25 +517,8 @@ async def search_reads(
                 for hit in answer
             }
     if hits is None and lines is None:
-        await _full_scan(dispatch_of(ctx), dirs, name)
         return read_bytes, read_stream
-    if hits is not None and terms.reads_binary:
-        await _full_scan(dispatch_of(ctx), dirs, name)
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
-    scan_asked = False
-    refusal: Exception | None = None
-
-    async def read_unanswered() -> None:
-        nonlocal scan_asked, refusal
-        if refusal is not None:
-            raise refusal
-        if hits is None and not scan_asked:
-            scan_asked = True
-            try:
-                await _full_scan(dispatch_of(ctx), dirs, name)
-            except Exception as exc:
-                refusal = exc
-                raise
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
         # A hit and a searchable glob are keyed below the mount, as its
@@ -490,37 +544,20 @@ async def search_reads(
             return None if await files.is_warm(path) else b""
         if lines is None or await files.is_warm(path):
             return None
+        charge(path)
         if terms.line_output and len(terms.texts) == 1:
             found: ByteSource | None = await lines(
                 path, terms.texts[0], ignore_case=terms.ignore_case
             )
             if found is not None and drops_mark:
                 found = await _unmarked(found)
-            if found is None:
-                await read_unanswered()
             return found
         for text in terms.texts:
             found = await lines(path, text, ignore_case=terms.ignore_case)
             if found is None:
-                await read_unanswered()
                 return None
             if await _holds_line(found):
                 return None
         return b""
 
     return candidate_reads(read_bytes, read_stream, narrowed)
-
-
-async def _full_scan(
-    dispatch: DispatchFn | None, dirs: list[PathSpec], name: str
-) -> None:
-    """Let each walked directory's mount refuse a walk that reads every
-    file; the dispatcher passes over a path that is not a directory.
-
-    Args:
-        dispatch (DispatchFn | None): the command's dispatcher.
-        dirs (list[PathSpec]): the operands about to be walked.
-        name (str): grep or rg.
-    """
-    for scope in dirs:
-        await before_full_scan(dispatch, scope, name)

@@ -977,16 +977,19 @@ def _construct_vfs(mount_state: dict[str, Any]):
     vfs_state = mount_state[MountKey.VFS_STATE]
     ptype = vfs_state.get(VFSStateKey.TYPE, "")
 
-    if ptype == VFSName.RAM:
-        built = cls()
-    elif ptype == VFSName.DISK:
+    if ptype in (VFSName.RAM, VFSName.DISK):
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
-        knobs = {}
-        if "folder_versions" in saved:
-            knobs["folder_versions"] = saved["folder_versions"]
+        knobs = {
+            key: saved[key]
+            for key in ("folder_versions", "full_scan_limit")
+            if key in saved
+        }
         for key in unknown_kwargs(cls, knobs):
             del knobs[key]
-        built = cls(root=tempfile.mkdtemp(prefix="mirage-disk-"), **knobs)
+        if ptype == VFSName.RAM:
+            built = cls(**knobs)
+        else:
+            built = cls(root=tempfile.mkdtemp(prefix="mirage-disk-"), **knobs)
     elif ptype == VFSName.REDIS:
         raise ValueError(
             f"Redis mount at {mount_state[MountKey.PREFIX]} requires "

@@ -302,11 +302,10 @@ export class NamespaceReader implements NamespaceLinks {
       },
       isRoot: (path: string) => !crossing && this.served().some((m) => m.prefix === normDir(path)),
       rootOf: (path: string) => owner(path)?.prefix ?? '/',
-      maxDuEntries: (path: string) => owner(path)?.maxDuEntries ?? null,
       answers: (path: string, name: string) =>
         !crossing && (owner(path)?.calls?.has(name) ?? false),
-      maxGlobMatches: (path: string) => (crossing ? null : (owner(path)?.maxGlobMatches ?? null)),
       searchable: (path: string) => (crossing ? null : (owner(path)?.searchable ?? null)),
+      fullScanLimit: (path: string) => owner(path)?.fullScanLimit ?? -1,
     }
   }
 }

@@ -788,9 +788,6 @@ class GwsService:
                 refresh_token=GWS_TOKEN,
                 api_base=self.url,
                 folder_id=self.folder_ids[mount["path"]],
-                # The fake answers fullText queries, so exercise grep/rg
-                # narrowing in the battery.
-                content_search=True,
             )
         )
 
@@ -800,7 +797,6 @@ class GwsService:
                 client_id="integ",
                 refresh_token=GWS_TOKEN,
                 api_base=self.url,
-                content_search=True,
             )
         )
 
@@ -810,7 +806,6 @@ class GwsService:
                 client_id="integ",
                 refresh_token=GWS_TOKEN,
                 api_base=self.url,
-                content_search=True,
             )
         )
 
@@ -820,7 +815,6 @@ class GwsService:
                 client_id="integ",
                 refresh_token=GWS_TOKEN,
                 api_base=self.url,
-                content_search=True,
             )
         )
 
@@ -843,7 +837,6 @@ class GwsService:
                 client_id="integ",
                 refresh_token=GWS_TOKEN,
                 api_base=self.url,
-                content_search=True,
             )
         )
 
@@ -921,9 +914,6 @@ class EmailService:
                 username=EMAIL_USERNAME,
                 password=self.password,
                 use_ssl=False,
-                # The fake answers IMAP SEARCH TEXT, so exercise grep/rg
-                # narrowing in the battery.
-                content_search=True,
             )
         )
 
@@ -983,9 +973,6 @@ class OneDriveService:
                 access_token=self.token,
                 graph_base_url=self.url,
                 key_prefix=mount.get("prefix"),
-                # The fake answers search(q=), so exercise grep/rg
-                # narrowing in the battery.
-                content_search=True,
             )
         )
 
@@ -1095,7 +1082,6 @@ class DropboxService:
                 client_secret="integ-secret",
                 refresh_token=self.account(mount),
                 endpoint=self.url,
-                content_search=True,
                 root_path=mount.get("root") or "/",
             )
         )
@@ -1364,9 +1350,6 @@ class BoxService:
                 access_token=self.token,
                 endpoint=self.url,
                 root_folder_id=self.folders[mount["path"]],
-                # The fake supports name+content search, so exercise grep/rg
-                # push-down narrowing in the battery.
-                content_search=True,
             )
         )
 
@@ -1422,7 +1405,6 @@ class SlackService:
                 token=bot,
                 search_token=search,
                 base_url=f"{self.url}/api",
-                content_search=True,
                 **mount.get("config", {}),
             )
         )
@@ -1579,9 +1561,6 @@ class TrelloService:
                     "api_key": "integ-key",
                     "api_token": "integ-token",
                     "base_url": self.base,
-                    # The fake answers /search, so exercise grep/rg
-                    # narrowing in the battery.
-                    "content_search": True,
                     **mount.get("config", {}),
                 }
             )
@@ -1682,9 +1661,6 @@ class LinearService:
             LinearConfig(
                 api_key="integ-key",
                 base_url=self.graphql,
-                # The fake answers searchIssues, so exercise grep/rg
-                # narrowing in the battery.
-                content_search=True,
             )
         )
 
@@ -1842,9 +1818,6 @@ class SharePointService:
                 site="Main",
                 drive=mount["drive"],
                 key_prefix=mount.get("prefix"),
-                # The fake answers search(q=), so exercise grep/rg
-                # narrowing in the battery.
-                content_search=True,
             )
         )
 

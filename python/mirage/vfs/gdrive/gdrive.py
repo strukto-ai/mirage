@@ -69,6 +69,7 @@ class GoogleDriveVFS(BaseVFS):
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = GDriveAccessor(self.config, TokenManager(config))
 
     async def readdir(
@@ -215,7 +216,7 @@ class GoogleDriveVFS(BaseVFS):
         ignore_case: bool,
         entry: FileStat | None = None,
     ) -> list[PathSpec] | None:
-        if not whole_word or not self.config.content_search:
+        if not whole_word or self.full_scan_limit < 0:
             return None
         return await _files_containing(self.accessor, text, path, entry)
 

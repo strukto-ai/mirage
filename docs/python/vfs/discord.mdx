@@ -28,6 +28,7 @@ ws = Workspace({"/discord": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Discord bot token, sent as `Authorization: Bot <token>`. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | Discord API root. Unset uses `https://discord.com/api/v10`; set it to point at a fake or proxy. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table discord end */}
@@ -132,6 +133,15 @@ The Discord VFS uses `IndexCacheStore` (same as S3, disk and GitHub).
 Index entries store guild IDs, channel IDs, and `last_message_id` for
 date range computation. File bytes go through the workspace
 file cache.
+
+## Integration
+
+What Discord answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Discord |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `tail -f` | Each new message as it is posted |
 
 ## Example
 

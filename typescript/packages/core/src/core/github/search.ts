@@ -18,7 +18,7 @@ import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
 import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
-import { SCOPE_ERROR, SCOPE_WARN } from './constants.ts'
+import { SCOPE_WARN } from './constants.ts'
 import { countScopeFiles, searchSafe, unsearchableKeys } from './pushdown.ts'
 
 // Use GitHub code search to narrow grep/rg scopes to candidate files.
@@ -90,9 +90,7 @@ function scopeFiles(accessor: GitHubAccessor, under: readonly PathSpec[]): numbe
  * answer that is the whole set (`narrowPaths`, which adds back every file
  * the search never indexes). An empty answer is not trusted either: the
  * index trails a push. A file with a binary extension is left out: the walk
- * reads one only under `-a`, and then whatever the answer says. Each file is
- * one blob request, so an answer of more than `SCOPE_ERROR` files is refused
- * as a scan that large would be.
+ * reads one only under `-a`, and then whatever the answer says.
  */
 export async function filesContaining(
   accessor: GitHubAccessor,
@@ -110,32 +108,7 @@ export async function filesContaining(
   const narrowed = await narrowPaths(accessor, text, under)
   if (narrowed === null) return null
   const texts = narrowed.filter((p) => !BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? ''))
-  if (texts.length > SCOPE_ERROR) {
-    throw new Error(
-      `${String(texts.length)} files in scope and code search could not narrow them; ` +
-        'narrow the path',
-    )
-  }
   return texts.length > 0 ? texts : null
-}
-
-/**
- * Refuse a scan of more than `SCOPE_ERROR` files.
- *
- * Each file is one blob request, so a scope that large is refused rather
- * than read. `files` is the files the session sees under `path`, counted by
- * the dispatcher; null counts the tree.
- */
-export function beforeFullScan(
-  accessor: GitHubAccessor,
-  path: PathSpec,
-  files: number | null,
-): Promise<void> {
-  const count = files ?? scopeFiles(accessor, [path])
-  if (count > SCOPE_ERROR) {
-    return Promise.reject(new Error(`${String(count)} files in scope, narrow the path`))
-  }
-  return Promise.resolve()
 }
 
 /** Fetch a bounded REST search, following the server's pagination. */

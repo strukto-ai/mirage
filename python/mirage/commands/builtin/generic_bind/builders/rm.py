@@ -21,7 +21,11 @@ from mirage.commands.builtin.generic.rm_cmd import (
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
-from mirage.commands.builtin.utils.links import links_of, mounts_of
+from mirage.commands.builtin.utils.links import (
+    dispatch_of,
+    links_of,
+    mounts_of,
+)
 from mirage.commands.builtin.utils.operands import mount_points, operands_io
 from mirage.commands.builtin.utils.output import (
     format_optional_records,
@@ -31,6 +35,7 @@ from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
     rm_link_refusal,
 )
+from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -90,10 +95,18 @@ async def rm(
         try:
             if s.type == FileType.DIRECTORY:
                 if recursive:
+                    # The mount is asked before anything goes, as for
+                    # cp -r: a removal cut short would leave a tree that
+                    # looks untouched.
+                    await before_full_scan(dispatch_of(ctx), p, "rm")
                     # -v names each entry before the tree goes in one
                     # call; a tree it cannot list whole goes entry by
-                    # entry, as does one on a mount without rm_r or one
-                    # the dispatcher declines for the caller's view.
+                    # entry, as does one on a mount without rm_r, one
+                    # the dispatcher declines for the caller's view, and
+                    # one holding a mount, whose covered keys one call
+                    # would take with it.
+                    mounts = mounts_of(ctx)
+                    nested = mount_points(mounts, p.virtual)
                     unlisted: list[str] = []
                     listed = (
                         [
@@ -105,7 +118,12 @@ async def rm(
                         if v
                         else []
                     )
-                    declined = bool(unlisted) or not files.answers("rm_r")
+                    declined = (
+                        bool(unlisted)
+                        or mounts is not None
+                        and bool(mounts.descendants(p.virtual))
+                        or not files.answers("rm_r")
+                    )
                     if not declined:
                         try:
                             await files.rm_r(p)
@@ -119,7 +137,7 @@ async def rm(
                             stat=stat,
                             unlink=files.unlink,
                             rmdir=files.rmdir,
-                            mounts=mounts_of(ctx),
+                            mounts=mounts,
                             force=f,
                         )
                         errors.extend(
@@ -133,10 +151,7 @@ async def rm(
                     errors.extend(
                         f"rm: skipping '{operand_spelling(root, p)}', "
                         "since it's on a different device"
-                        for root in mount_points(
-                            mounts_of(ctx),
-                            p.virtual,
-                        )
+                        for root in nested
                     )
                     if failures:
                         verbose_parts.extend(entry_lines)

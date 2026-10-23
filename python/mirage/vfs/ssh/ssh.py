@@ -20,7 +20,6 @@ from mirage.core.ssh.append import append_bytes as _append
 from mirage.core.ssh.append import append_stream as _append_stream
 from mirage.core.ssh.capacity import capacity as _capacity
 from mirage.core.ssh.checksum import checksum as _checksum
-from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.copy import copy as _copy
 from mirage.core.ssh.copy import dir_copy as _dir_copy
 from mirage.core.ssh.create import create as _create
@@ -57,18 +56,17 @@ class SSHVFS(BaseVFS):
     # SFTP stat/readdir report the remote inode's exact byte size for
     # every file; reads are the same raw bytes.
     sizes_always_known: bool = True
-    max_du_entries: int | None = None
     # A remote filesystem: short-lived index, long enough to spare a
     # re-walk inside one command pipeline. Mirrors the TypeScript VFS.
     index_ttl: float = 60
     prompt: str = PROMPT
 
     reads_ranges: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, config: SSHConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = SSHAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

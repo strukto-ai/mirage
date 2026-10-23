@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -62,7 +61,7 @@ from mirage.commands.builtin.grep_pattern import (
     pattern_arg,
 )
 from mirage.commands.builtin.grep_select import dir_admitted, file_admitted
-from mirage.commands.builtin.rg_scan import walk_error_line
+from mirage.commands.builtin.rg_scan import Haystack, walk_error_line
 from mirage.commands.builtin.rg_search import RgFlags, Totals, split_footer
 from mirage.commands.builtin.rg_stream import format_totals, open_rg
 from mirage.commands.builtin.utils.links import (
@@ -72,11 +71,10 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
@@ -85,8 +83,6 @@ from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.workspace.files import Files
-
-logger = logging.getLogger(__name__)
 
 
 def _admit_grep(flags: GrepFlags, path: PathSpec, info: FileStat) -> bool:
@@ -240,18 +236,38 @@ async def run_search(
     async def scopes() -> AsyncIterator[OwnedScope]:
         if planned:
             assert rg is not None and walk is not None
-            # The plan hands each file over alone, which no search
-            # narrows, so every directory walked is read whole; a listing
-            # reads none.
-            for path in [] if rg.list_files or rg.type_list else paths:
-                try:
-                    info = await stat(path.virtual)
-                except FS_ERRORS as exc:
-                    logger.debug("rg plan %s: %s", path.virtual, exc)
-                    continue
-                if info.type == FileType.DIRECTORY:
-                    await before_full_scan(dispatch, path, name)
             warnings: list[str] = []
+            stopped: set[str] = set()
+            budgets = {p.virtual: ScanBudget(p, mounts) for p in paths}
+            reported: set[str] = set()
+
+            def charged(h: Haystack) -> bool:
+                # The plan hands each file over alone, which no search
+                # narrows, so each file counts here against the mount
+                # serving it; a listing reads none.
+                if h.spec is not None or rg.list_files:
+                    return True
+                root = next(
+                    (
+                        p
+                        for p in paths
+                        if h.virtual.startswith(p.virtual.rstrip("/") + "/")
+                    ),
+                    None,
+                )
+                if root is None:
+                    return True
+                budget = budgets[root.virtual]
+                if budget.spend(h.virtual):
+                    return True
+                for line in budget.stopped:
+                    if line not in reported:
+                        reported.add(line)
+                        warnings.append(f"rg: {line}")
+                if not budget.opens(root.virtual):
+                    stopped.add(root.virtual)
+                return False
+
             resolver = (
                 LinkResolver(links, dispatch, cwd)
                 if links is not None
@@ -267,11 +283,16 @@ async def run_search(
                 warnings,
                 mounts if rg.one_file_system else None,
                 resolver,
+                stopped,
             )
             if rg.sort not in (None, "none") and not (
                 rg.sort == "path" and not rg.sort_reverse
             ):
-                listed = sort_haystacks([h async for h in found], rg)
+                listed = [
+                    h
+                    for h in sort_haystacks([h async for h in found], rg)
+                    if charged(h)
+                ]
                 for message in warnings:
                     yield OwnedScope(paths[0], diagnostic=message + "\n")
                 warnings.clear()
@@ -286,9 +307,12 @@ async def run_search(
                     )
                 return
             async for h in found:
+                admitted = charged(h)
                 for message in warnings:
                     yield OwnedScope(paths[0], diagnostic=message + "\n")
                 warnings.clear()
+                if not admitted:
+                    continue
                 yield OwnedScope(
                     h.spec
                     or replace(

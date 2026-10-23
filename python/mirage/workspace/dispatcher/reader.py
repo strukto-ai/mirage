@@ -364,29 +364,24 @@ class NamespaceReader:
             row = owner(virtual)
             return row.prefix if row is not None else "/"
 
-        def max_du_entries(virtual: str) -> int | None:
-            row = owner(virtual)
-            return row.max_du_entries if row is not None else None
-
         def answers(virtual: str, name: str) -> bool:
             row = None if crossing else owner(virtual)
             return row is not None and name in row.calls
 
-        def max_glob_matches(virtual: str) -> int | None:
-            row = None if crossing else owner(virtual)
-            return row.max_glob_matches if row is not None else None
-
         def searchable(virtual: str) -> tuple[str, ...] | None:
             row = None if crossing else owner(virtual)
             return row.searchable if row is not None else None
+
+        def full_scan_limit(virtual: str) -> int:
+            row = owner(virtual)
+            return row.full_scan_limit if row is not None else -1
 
         return MountView(
             descendants=below,
             visible_descendants=visible_below,
             is_root=is_root,
             root_of=root_of,
-            max_du_entries=max_du_entries,
             answers=answers,
-            max_glob_matches=max_glob_matches,
             searchable=searchable,
+            full_scan_limit=full_scan_limit,
         )

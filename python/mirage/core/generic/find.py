@@ -180,6 +180,7 @@ async def walk_find(
     root: FileStat | None = None,
     loops: list[tuple[str, str]] | None = None,
     enters: Callable[[str], bool] | None = None,
+    listing: Callable[[PathSpec], Awaitable[list[str]]] | None = None,
 ) -> list[str]:
     """Walk readdir/stat under one start point and match every entry.
 
@@ -216,6 +217,8 @@ async def walk_find(
         enters (Callable[[str], bool] | None): ``-xdev``'s test of a
             directory's virtual path: one it fails is an entry still, and
             ``-empty`` still reads it, but the walk does not descend.
+        listing (Callable | None): the walk's own listing of a directory,
+            where the caller bounds it; None lists with ``readdir``.
     """
     stat = partial(followed_stat, stat, follow)
     collected: list[tuple[str, str]] = []
@@ -265,7 +268,7 @@ async def walk_find(
             )
             if key in find_eval.pruned_keys(prune_tree):
                 return []
-        return await readdir(spec)
+        return await (listing or readdir)(spec)
 
     root_stat = (
         root if root is not None else await _stat_entry(stat, root_path)

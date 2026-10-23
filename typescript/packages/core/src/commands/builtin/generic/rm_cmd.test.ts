@@ -85,7 +85,6 @@ function boundaries(mounts: string[]): MountView {
     isRoot: (path) => mounts.includes(path),
     rootOf: () => '/',
     answers: () => false,
-    maxGlobMatches: () => null,
     searchable: () => null,
   }
 }

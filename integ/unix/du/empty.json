@@ -96,13 +96,13 @@
         "redis",
         "opfs"
       ],
-      "command": "du / | grep '/due'",
+      "command": "du / 2>/dev/null | grep '/due'",
       "expect": {
         "exit": 0,
         "stdout": "0\t/data/due/e\n0\t/data/due/g/h\n0\t/data/due/g\n3\t/data/due\n",
         "stderr": ""
       },
-      "note": "A walk from / folds every mount's rows into one tree; an empty directory prints like an empty file there, so the merge asks the dispatcher which each lone 0 row is."
+      "note": "A walk from / folds every mount's rows into one tree; an empty directory prints like an empty file there, so the merge asks the dispatcher which each lone 0 row is. Its stderr is dropped: a remote /data past its full_scan_limit stops the walk with a note there."
     },
     {
       "id": "du_empty_dirs_cleanup",

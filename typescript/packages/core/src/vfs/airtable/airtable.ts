@@ -35,6 +35,7 @@ import { buildDeltaHook } from '../../core/airtable/events.ts'
 import type { DeltaHook } from '../../events/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface AirtableVFSState {
   type: string
@@ -68,9 +69,11 @@ export class AirtableVFS extends BaseVFS {
 
   private readonly config: AirtableConfig
 
+  override readonly fullScanLimit: number
   constructor(config: AirtableConfig, options: { fetchFn?: typeof fetch } = {}) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.accessor = new AirtableAccessor(config, options)
   }
 

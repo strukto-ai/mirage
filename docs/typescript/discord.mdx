@@ -57,6 +57,7 @@ console.log(res.stdoutText)
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://discord.com/api/v10'` | Discord API root; override to point at a fake or proxy. |
 | <code style={{ whiteSpace: 'nowrap' }}>startTime</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
 | <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table discord end */}
@@ -78,6 +79,7 @@ The browser package never sees the bot token. Instead, point it at a relative UR
 | <code style={{ whiteSpace: 'nowrap' }}>endTime</code> | End of the mount's time scope, exclusive, in the same format as `startTime`, which it must follow. Unset leaves the end open. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxyUrl</code><br />required | URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment. |
 | <code style={{ whiteSpace: 'nowrap' }}>getHeaders</code><br />secret | Function returning extra headers sent with every request to the proxy, such as your own session credential. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/discord end */}
@@ -208,6 +210,15 @@ tree stays read-oriented.
     `DiscordVFS` uses an `IndexCacheStore` (default TTL 600s) to deduplicate guild / channel / member listings, but high-volume reads of `.jsonl` files can still hit Discord's per-route rate limits. The HTTP transport retries 429 responses honoring `retry_after` up to 3 times, repeated failures usually mean you should slow down or scope reads to specific channels.
   </Accordion>
 </AccordionGroup>
+
+## Integration
+
+What Discord answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Discord |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `tail -f` | Each new message as it is posted |
 
 ## Examples
 

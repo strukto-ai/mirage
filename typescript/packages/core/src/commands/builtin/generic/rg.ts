@@ -21,7 +21,7 @@ import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
+import { ScanLimitError, UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
@@ -904,6 +904,7 @@ export async function rgGeneric(
     // A mount below the operand shadows whatever the backend holds there; the
     // fan-out that would search the mount itself is off too.
     const boundary = f.oneFileSystem ? (mounts ?? null) : null
+    const stopped = new Set<string>()
     let found = haystacks(
       paths,
       rd,
@@ -914,6 +915,7 @@ export async function rgGeneric(
       warnings,
       boundary,
       linkResolver(ctx),
+      stopped,
     )
     if (f.sort !== null && f.sort !== 'none' && !(f.sort === 'path' && !f.sortReverse)) {
       const listed: Haystack[] = []
@@ -934,6 +936,7 @@ export async function rgGeneric(
             implicit,
             ctx.cwd.virtual,
             io,
+            stopped,
             ctx.signal,
             ctx.shell,
           )
@@ -1155,7 +1158,8 @@ function lead(
 // itself whatever the filters say, and a directory walked. `boundary` is the
 // mounts --one-file-system keeps each walk to its operand's own, null when
 // the walk may enter any directory; `resolver` the namespace's links and the
-// dispatcher past them, which -L walks through.
+// dispatcher past them, which -L walks through; `stopped` the directories a
+// search stopped at their mount's `fullScanLimit`, whose walk ends there.
 export async function* haystacks(
   paths: readonly PathSpec[],
   rd: (path: string) => Promise<string[]>,
@@ -1166,6 +1170,7 @@ export async function* haystacks(
   warnings: string[],
   boundary: MountView | null,
   resolver: LinkResolver | null,
+  stopped: ReadonlySet<string> | null = null,
 ): AsyncGenerator<Haystack> {
   // ripgrep holds one path that is not a directory to one thread, as it
   // does -j1 and a sort; every other line runs its parallel walker.
@@ -1213,7 +1218,7 @@ export async function* haystacks(
       const home = boundary.rootOf(p.virtual)
       crosses = (path) => onOtherMount((q) => boundary.rootOf(q), home, path)
     }
-    yield* walkHaystacks(
+    for await (const found of walkHaystacks(
       rd,
       st,
       p.virtual,
@@ -1226,7 +1231,10 @@ export async function* haystacks(
       resolver,
       f.follow,
       parallel,
-    )
+    )) {
+      yield found
+      if (stopped?.has(p.virtual) === true) break
+    }
   }
 }
 
@@ -1300,6 +1308,9 @@ async function* searchAll(
   cwd: string,
   // Receives the exit status and the warnings, however the output ends.
   io: IOResult,
+  // Collects each directory whose walk a read stopped at its mount's
+  // `fullScanLimit`.
+  stopped: Set<string>,
   signal?: AbortSignal,
   // Runs --pre's command in the session.
   shell?: ShellFn,
@@ -1397,6 +1408,12 @@ async function* searchAll(
           warnings.push(`rg: ${name}: \n${GZIP_RULE}\n${err.render(name).trimStart()}${GZIP_RULE}`)
           damaged = true
           if (f.countOnly || f.countMatches || f.filesWithoutMatch) chunks.length = 0
+        } else if (err instanceof ScanLimitError) {
+          if (!stopped.has(err.directory.virtual)) {
+            stopped.add(err.directory.virtual)
+            warnings.push(`rg: ${err.message}`)
+          }
+          continue
         } else {
           if (!isFsError(err)) throw err
           // ripgrep reports the failed input and keeps searching the rest.

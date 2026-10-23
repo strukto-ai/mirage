@@ -20,7 +20,7 @@ from mirage.commands.builtin.generic.ls import Stat, ls_options
 from mirage.commands.builtin.generic.ls import ls as generic_ls
 from mirage.commands.builtin.generic_bind.files import dispatched_call
 from mirage.commands.builtin.utils.identity import identity_from
-from mirage.commands.builtin.utils.links import link_view
+from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
@@ -92,7 +92,8 @@ async def run_ls(
             and its listing the mounts below, so the relay descends a
             nested mount itself, as nothing runs behind a relay to
             contribute that group the way the fan-out does for a
-            single-mount run.
+            single-mount run; ``-R`` charges each entry to the mount
+            serving it, at that mount's ``full_scan_limit``.
         session_view (SessionView | None): The session view,
             for the profile the group column renders.
     """
@@ -104,6 +105,7 @@ async def run_ls(
         readdir=p(relayed_readdir, dispatch),
         stat=stat_fn,
         links=links,
+        mounts=mount_view(vfs, crossing=True),
         identity=identity_from(session_view),
         **ls_options(flag_kwargs),
     )

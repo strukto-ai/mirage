@@ -35,7 +35,6 @@ const search = vi.mocked(api.searchContent)
 function makeAccessor(rootFolderId?: string): BoxAccessor {
   return new BoxAccessor({
     tokenManager: STUB_TM,
-    contentSearch: true,
     ...(rootFolderId !== undefined ? { rootFolderId } : {}),
   })
 }

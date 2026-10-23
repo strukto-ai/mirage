@@ -18,12 +18,12 @@ from datetime import date
 import pytest
 
 from mirage.context import reset_current_session, set_current_session
+from mirage.errors.types import GlobLimitError
 from mirage.shell.escapes import unescape_unquoted
 from mirage.types import FileStat, FileType, HiddenPaths, PathSpec, Visibility
 from mirage.utils import glob_walk
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import (
-    DEFAULT_MAX_GLOB_MATCHES,
     escape_glob,
     expand_pattern,
     glob_pattern,
@@ -330,12 +330,15 @@ async def test_resolve_glob_with_unmatched_dir_shaped_dropped():
 
 
 @pytest.mark.asyncio
-async def test_resolve_glob_with_cap_truncates_and_warns(caplog):
+async def test_resolve_glob_with_refuses_past_the_limit_and_keeps_up_to_it():
     spec = glob_spec("/notion/pages/*", "/notion")
-    with caplog.at_level("WARNING"):
-        result = await resolve_glob_with(fake_readdir, [spec], 1)
-    assert [p.virtual for p in result] == ["/notion/pages/Demo_page__uuid1"]
-    assert "exceeds limit" in caplog.text
+    with pytest.raises(GlobLimitError) as refused:
+        await resolve_glob_with(fake_readdir, [spec], 1)
+    assert str(refused.value) == (
+        "/notion/pages/*: matches more than 1 files (full_scan_limit); "
+        "narrow the path"
+    )
+    assert len(await resolve_glob_with(fake_readdir, [spec], 2)) == 2
 
 
 @pytest.mark.asyncio
@@ -366,15 +369,12 @@ async def test_make_resolve_glob_passthrough():
 
 
 @pytest.mark.asyncio
-async def test_make_resolve_glob_truncates_at_cap():
-    resolve = make_resolve_glob(fake_readdir, max_glob_matches=1)
+async def test_make_resolve_glob_refuses_past_its_limit():
+    resolve = make_resolve_glob(fake_readdir, 1)
     spec = glob_spec("/notion/pages/*", "/notion")
-    result = await resolve([spec])
-    assert len(result) == 1
-
-
-def test_make_resolve_glob_default_cap():
-    assert DEFAULT_MAX_GLOB_MATCHES == 10000
+    with pytest.raises(GlobLimitError):
+        await resolve([spec])
+    assert len(await make_resolve_glob(fake_readdir)([spec])) == 2
 
 
 @pytest.mark.asyncio

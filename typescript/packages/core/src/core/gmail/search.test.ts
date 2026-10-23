@@ -235,9 +235,9 @@ class CountingGmail extends GmailVFS {
 
 type Ran = [string, number, string[], string[]]
 
-async function onGmail(line: string, fake = new FakeGmail(), contentSearch = true): Promise<Ran> {
+async function onGmail(line: string, fake = new FakeGmail(), fullScanLimit = 1000): Promise<Ran> {
   vi.stubGlobal('fetch', fake.fetch)
-  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, contentSearch })
+  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, fullScanLimit })
   const ws = new Workspace(
     { '/gmail': new Mount(vfs, { mode: MountMode.READ }) },
     { shellParser: await getTestParser() },
@@ -275,7 +275,7 @@ describe('filesContaining', () => {
     ['grep -rlw wombat /gmail', ['j10']],
     ['grep -rlw nothing /gmail', []],
   ])('reads only the messages whose text holds it for %s', async (line, reads) => {
-    const full = await onGmail(line, new FakeGmail(), false)
+    const full = await onGmail(line, new FakeGmail(), -1)
     const [out, code, read, searches] = await onGmail(line)
     expect([out, code]).toEqual(full.slice(0, 2))
     expect(read).toEqual(reads)
@@ -292,13 +292,13 @@ describe('filesContaining', () => {
     'grep -rl abel /gmail',
     `grep -rlF '","' /gmail`,
   ])('reads every message for %s', async (line) => {
-    const full = await onGmail(line, new FakeGmail(), false)
+    const full = await onGmail(line, new FakeGmail(), -1)
     expect((await onGmail(line)).slice(0, 3)).toEqual(full.slice(0, 3))
   })
 
   it('reads every message for a text that is not ASCII', async () => {
     const line = 'grep -rl caf\u00e9 /gmail'
-    const full = await onGmail(line, new FakeGmail(), false)
+    const full = await onGmail(line, new FakeGmail(), -1)
     expect((await onGmail(line)).slice(0, 3)).toEqual(full.slice(0, 3))
   })
 })

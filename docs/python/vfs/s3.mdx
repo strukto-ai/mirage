@@ -58,6 +58,7 @@ optional credentials, endpoint, and connection settings. Both `READ` and
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
 | <code style={{ whiteSpace: 'nowrap' }}>default_content_type</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table s3 end */}
@@ -99,6 +100,16 @@ from S3. This reduces API calls for repeated directory traversals. A configured 
 ## Conditional writes
 
 Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint_url` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint_url`.
+
+## Integration
+
+What S3 answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On S3 |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
 ## Example
 

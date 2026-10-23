@@ -241,24 +241,124 @@ This example extends the same `NotesVFS`:
 nothing. `grep -n mirage /notes/todo.txt` reads the page, since it holds a
 match.
 
-## Turn on a service's search
+## `before_full_scan`
 
-These built-in VFSs keep their service's search off until you set
-`content_search: true`, because the service's index can miss a match: it
-lags recent writes, or searches other text than the file `grep` reads:
+Whether a command may copy, compare or remove every file under a folder.
 
-- Box
-- Dropbox
-- Email (IMAP)
-- Gmail
-- Google Calendar, Docs, Drive, Sheets and Slides
-- Linear
-- OneDrive
-- SharePoint
-- Slack
-- Trello
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def before_full_scan(
+        self, path: PathSpec, *, files: int | None = None
+    ) -> None: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    beforeFullScan(path: PathSpec, files: number | null): Promise<void>
+    ```
+  </Tab>
+</Tabs>
 
-Gmail and Email ask their service for any text; the others only for `-w`.
+| Argument | Meaning |
+| --- | --- |
+| `path` | The folder a command is about to read or remove in full. |
+| `files` | How many files the session sees under `path`; `None` when Mirage could not count them. |
+
+| Return | Mirage then |
+| --- | --- |
+| Nothing | Runs the command. |
+| Raises `ValueError` (TypeScript: rejects) | Refuses the command before it touches anything. It prints `<command>: <message>` and exits 1. |
+
+These commands call `before_full_scan`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
+`mv` to another mount and `diff -r`. The default refuses more than
+`full_scan_limit` files.
+
+## `full_scan_limit`
+
+The most files one command walks under a folder (TypeScript: `fullScanLimit`).
+
+| Command | Past the limit |
+| --- | --- |
+| `grep -r`, `rg` | Stops. It keeps what it printed, prints `grep: <folder>: stopped after <N> files (full_scan_limit); narrow the path` and exits 2. |
+| `git grep` | Stops. It keeps what it printed, prints `fatal: stopped after <N> files (full_scan_limit); narrow the pathspec` and exits 128. |
+| `find`, `ls -R`, `du`, `tree` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
+| A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`, and exits 126. |
+| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_scan`). It prints `tar: more than <N> files in scope (full_scan_limit); narrow the path` and exits 1. |
+
+A search counts only the files it reads, so a file `files_containing` rules out
+costs nothing. A listing counts every entry it lists, folders included. Each
+command exits as it does when some files could not be read, so a script treats
+a walk cut short as one with an error. A glob, a copy and a removal are refused
+instead of cut short, since running on part of what they name would look
+complete later. A glob in a `for` list stops the line with
+`bash: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`.
+
+A walk that crosses into another mount counts that mount's files against its
+own limit, and names that mount's folder where it stops.
+
+| Value | Searches and listings | Globs, copies and removals |
+| --- | --- | --- |
+| `-1` | Walk every file | Never refused |
+| `0` | Read or list nothing under a folder | Always refused |
+| A positive number | Stop after that many files | Refused above that many files |
+
+It is 1000 unless your VFS sets it:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    class SearchableNotesVFS(NotesVFS):
+        full_scan_limit = 500
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    export class SearchableNotesVFS extends NotesVFS {
+      override readonly fullScanLimit: number = 500
+    }
+    ```
+  </Tab>
+</Tabs>
+
+`grep -r mirage /notes` on a folder of 600 pages that `files_containing`
+cannot narrow then prints the matches in the first 500 pages, and:
+
+```text
+grep: /notes: stopped after 500 files (full_scan_limit); narrow the path
+```
+
+## Built-in VFSs
+
+These VFSs answer `grep -r` and `rg` with their service's search. A pattern
+outside **Searches**, or a VFS not listed, reads every file. A search that can
+miss a match leaves out a file that holds the text, so `grep` does not print
+it.
+
+| VFS | Searches | Can miss a match |
+| --- | --- | --- |
+| [Google Drive](/python/vfs/gdrive#integration) | Whole words (`-w`, `-x`) | Docs, Sheets and Slides JSON, office files, PDFs, archives, the end of large files, recent writes |
+| [Google Docs](/python/vfs/gdocs#integration), [Sheets](/python/vfs/gsheets#integration), [Slides](/python/vfs/gslides#integration) | Whole words | Words only in non-text values (fonts, links, formulas) or split by styling |
+| Google Calendar | Whole words | No |
+| [Dropbox](/python/vfs/dropbox#integration) | Whole words | Office files, PDFs, archives, the end of large files, recent writes; file contents below the Professional plan |
+| [Box](/python/vfs/box#integration) | Whole words | Office files, PDFs, archives, the end of large files, recent writes |
+| [OneDrive](/python/vfs/onedrive#integration), [SharePoint](/python/vfs/sharepoint#integration) | Whole words; SharePoint within one document library | Office files, PDFs, archives, the end of large files, recent writes |
+| [Slack](/python/vfs/slack#integration) | Whole words, with a user token | Recent messages, words only in other fields (bot names, link previews) |
+| [Trello](/python/vfs/trello#integration) | Whole words | Recent writes |
+| [Linear](/python/vfs/linear#integration) | Issues: whole words. Other files: any text | Recent issue writes |
+| [Gmail](/python/vfs/gmail#integration) | Any ASCII text | No |
+| [Email (IMAP)](/python/vfs/email#integration) | Any text | On a server that searches words, not substrings |
+| [GitHub](/python/vfs/github#integration) | Whole words, default branch, more than 100 files | Recent pushes |
+| [Chroma](/python/vfs/chroma#integration) | Any text; `-i` reads every page | No |
+| [Qdrant](/python/vfs/qdrant#integration) | Any ASCII text | No |
+| [LanceDB](/python/vfs/lancedb#integration) | Any text; not tables with list, struct or bytes columns | No |
+| [SSH](/python/vfs/ssh#integration) | Any text, on servers that run commands | No |
+| [PostgreSQL](/python/vfs/postgres#integration), [MongoDB](/python/vfs/mongodb#integration), [Airtable](/python/vfs/airtable#integration) | Any text, as lines of one file | No |
+
+Every built-in VFS sets `full_scan_limit` in its config: 1000, or 5000 on
+GitHub, where each file is one request, and 10000 on disk and RAM. On the
+VFSs above from Google Drive to GitHub, `-1` also turns the service's search
+off, so every file is read and no match is missed:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -272,7 +372,7 @@ Gmail and Email ask their service for any text; the others only for `-w`.
         config=SlackConfig(
             token=os.environ["SLACK_BOT_TOKEN"],
             search_token=os.environ["SLACK_USER_TOKEN"],
-            content_search=True,
+            full_scan_limit=5000,
         )
     )
     ws = Workspace({"/slack": slack}, mode=MountMode.READ)
@@ -285,7 +385,7 @@ Gmail and Email ask their service for any text; the others only for `-w`.
     const slack = new SlackVFS({
       token: process.env.SLACK_BOT_TOKEN!,
       searchToken: process.env.SLACK_USER_TOKEN,
-      contentSearch: true,
+      fullScanLimit: 5000,
     })
     const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
     ```
@@ -299,10 +399,11 @@ Gmail and Email ask their service for any text; the others only for `-w`.
         config:
           token: ${SLACK_BOT_TOKEN}
           search_token: ${SLACK_USER_TOKEN}
-          content_search: true
+          full_scan_limit: 5000
     ```
   </Tab>
 </Tabs>
 
 `grep -rw refund /slack/channels/` then asks Slack's search which days mention
-`refund` and reads only those.
+`refund` and reads only those. `grep -r refund /slack/channels/`, which Slack
+cannot narrow, reads the first 5000 days and stops there.

@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
 import { readdir } from '../../core/opfs/readdir.ts'
 import { write } from '../../core/opfs/write.ts'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
@@ -28,7 +27,7 @@ async function listedPaths(accessor: OPFSAccessor, path: PathSpec): Promise<stri
 }
 
 const resolveGlob = (accessor: OPFSAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
-  makeResolveGlob((path) => listedPaths(accessor, path), SCOPE_ERROR)(paths)
+  makeResolveGlob((path) => listedPaths(accessor, path))(paths)
 
 describe('vfs/opfs resolveGlob binding', () => {
   it('expands a glob into matching paths', async () => {

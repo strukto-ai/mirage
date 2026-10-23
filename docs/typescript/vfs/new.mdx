@@ -314,6 +314,8 @@ import { BaseVFS, type PathSpec } from '@struktoai/mirage-node'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 
 class WikiVFS extends BaseVFS {
+  override readonly fullScanLimit: number = 5000
+
   override async filesContaining(
     path: PathSpec,
     text: string,
@@ -322,13 +324,6 @@ class WikiVFS extends BaseVFS {
     if (!opts.wholeWord) return null
     const hits = await this.api.search(text, path.vfsPath)
     return hits.truncated ? null : hits.map((hit) => mountedPath(path, `/${hit.key}`))
-  }
-
-  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
-    if (files !== null && files > 5000) {
-      return Promise.reject(new Error(`${String(files)} files in scope, narrow the path`))
-    }
-    return Promise.resolve()
   }
 }
 ```
@@ -341,12 +336,18 @@ NUL byte: grep and rg call such a file binary from bytes outside its matching
 lines. A file named on the line and a binary-extension file read under `-a`
 are always read.
 
-`beforeFullScan` is called once per directory a command walks, before it reads a
-file there: by `tar -c`, `zip -r`, `cp -r`, `mv` across mounts and `diff -r`
-always, and by grep and rg where no search answered (a flag such as `-v` needs
-every line, the pattern has no plain text, or the search resolved `null`).
-`files` is the number of files the session sees under `path` when your VFS
-answers `readTree`, `null` otherwise.
+`fullScanLimit` is the most files one command walks under a directory, 1000
+unless your VFS sets it, as `WikiVFS` sets it to 5000; `-1` for no limit.
+Searches and listings stop past it, keeping what they printed, and a search
+counts only the files it reads, so a file your search rules out costs nothing.
+A glob matching more is refused.
+
+`beforeFullScan` is called once per directory `tar -c`, `zip -r`, `cp -r`,
+`rm -r`, `mv` across mounts and `diff -r` walk, before they touch a file there. `files` is the
+number of files the session sees under `path`: from your VFS's `readTree`, or by
+listing each directory until one file past `fullScanLimit`; `null` otherwise.
+The default refuses more than `fullScanLimit` files; override `beforeFullScan`
+only for another rule.
 
 Reject from it (or from `filesContaining`) to refuse: the command prints
 `<command>: <message>` and exits 1. From grep or rg, a filesystem error rejected
@@ -452,7 +453,7 @@ A hierarchy backend writes its tree once, as the scope table in `core/<name>/sco
 
 `FileStat.size` must be the rendered content's byte length or `null`, never a storage-side number: a confidently wrong size makes `wc -c` and `ls -l` lie over FUSE, while `null` rides the unknown-size machinery. Put the storage number in `extra` if it is worth reporting. Set `sizesAlwaysKnown` only when every listed size is computed from the same payload a read renders.
 
-Glob resolution is not a per-backend file: the mount derives `glob` from the VFS's `readdir`, capped by its `maxGlobMatches`, and expands patterns through it.
+Glob resolution is not a per-backend file: the mount derives `glob` from the VFS's `readdir`, refused past its `fullScanLimit`, and expands patterns through it.
 
 ## 3. VFS Functions
 

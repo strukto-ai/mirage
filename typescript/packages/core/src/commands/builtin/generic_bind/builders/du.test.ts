@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BUILDER, WalkBudget } from './du.ts'
+import { BUILDER } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
@@ -20,8 +20,7 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
-import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
-import { DEFAULT_MAX_DU_ENTRIES } from '../../../../vfs/constants.ts'
+import type { NamespaceLinks } from '../../../../view/types.ts'
 import { answeringFiles } from '../../../../test-utils.ts'
 
 const DEC = new TextDecoder()
@@ -34,13 +33,15 @@ const TREE: Record<string, { dir: boolean; size?: number; children?: string[] }>
 }
 
 // A mount the dispatcher answers for: its listing, its stat, its subtree
-// read where it has one, and its du walk budget.
+// read where it has one, and its full_scan_limit (-1 for none).
 interface Table {
   readdir: (p: PathSpec) => Promise<string[]>
   stat: (p: PathSpec) => Promise<FileStat>
   readTree?: (p: PathSpec) => Promise<Map<string, FileStat> | null>
-  maxDuEntries?: number | null
+  fullScanLimit?: number
 }
+
+const STOPPED_AT_2 = 'du: /db: stopped after 2 files (full_scan_limit); narrow the path\n'
 
 // A mount with no subtree read, so the builder must walk.
 const OPS: Table = {
@@ -81,8 +82,7 @@ async function du(
         prefix: '/',
         kind: 'fake',
         mode: MountMode.WRITE,
-        maxDuEntries:
-          table.maxDuEntries === undefined ? DEFAULT_MAX_DU_ENTRIES : table.maxDuEntries,
+        fullScanLimit: table.fullScanLimit ?? -1,
         calls: new Set(table.readTree === undefined ? [] : ['read_tree']),
       },
     ],
@@ -100,13 +100,27 @@ async function du(
 }
 
 describe('du walk fallback (no native du op)', () => {
-  it('stops the walk and exits 1 once the entry budget is spent', async () => {
-    const bounded: Table = { ...OPS, maxDuEntries: 1 }
-    const result = await du(bounded, [PathSpec.fromStrPath('/db')])
-    expect(result).not.toBeNull()
-    const [, io] = result as [unknown, { exitCode: number; stderr: Uint8Array | null }]
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr ?? new Uint8Array())).toContain('incomplete')
+  // Mirrors test_a_walk_past_the_limit_reports_partial_output_and_exits_one.
+  it('reports partial output past the limit and exits 1', async () => {
+    const [out, io] = await runScoped({ ...OPS, fullScanLimit: 2 }, [PathSpec.fromStrPath('/db')])
+    expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+      '0\t/db/sub\n3\t/db\n',
+      1,
+      STOPPED_AT_2,
+    ])
+  })
+
+  // Mirrors test_each_operand_walks_under_its_own_limit.
+  it('walks each operand under its own limit', async () => {
+    const [out, io] = await runScoped({ ...OPS, fullScanLimit: 2 }, [
+      PathSpec.fromStrPath('/db'),
+      PathSpec.fromStrPath('/db/sub'),
+    ])
+    expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+      '0\t/db/sub\n3\t/db\n2\t/db/sub\n',
+      1,
+      STOPPED_AT_2,
+    ])
   })
 
   it('a backend failure propagates instead of reading as a missing operand', async () => {
@@ -156,27 +170,35 @@ describe('du walk fallback under a path rule', () => {
     expect(DEC.decode(out)).toBe('2\t/db/sub\n5\t/db\n')
   })
 
-  // The budget bounds a walk that takes a request per directory; a tree
-  // read in one call is summed whole. Mirrors test_a_tree_answer_costs_no_budget.
-  it('charges no budget for a tree answer', async () => {
-    const [out, io] = await runScoped({ ...TREED, maxDuEntries: 1 } as Table, [
+  // A tree read in one call is still a walk of every entry in it. Mirrors
+  // test_a_tree_answer_counts_against_the_limit.
+  it('counts a tree answer against the limit', async () => {
+    const [out, io] = await runScoped({ ...TREED, fullScanLimit: 2 } as Table, [
       PathSpec.fromStrPath('/db'),
     ])
-    expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/db/sub\n5\t/db\n', 0])
+    expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+      '0\t/db/sub\n3\t/db\n',
+      1,
+      STOPPED_AT_2,
+    ])
   })
 
-  // Mirrors test_a_tree_answer_at_a_root_mount_costs_no_budget.
-  it('charges no budget for a tree answer at a root mount', async () => {
+  // Mirrors test_a_walk_of_the_root_names_the_root_where_it_stops.
+  it('names the root where a walk of it stops', async () => {
     const rooted: Table = {
       ...TREED,
-      maxDuEntries: 1,
+      fullScanLimit: 2,
       stat: (p) =>
         p.virtual === '/'
           ? Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))
           : OPS.stat(p),
     } as Table
     const [out, io] = await runScoped(rooted, [PathSpec.fromStrPath('/')])
-    expect([DEC.decode(out), io.exitCode]).toEqual(['2\t/sub\n5\t/\n', 0])
+    expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
+      '0\t/sub\n3\t/\n',
+      1,
+      STOPPED_AT_2.replace('/db:', '/:'),
+    ])
   })
 
   it("does not walk a backend's own refusal", async () => {
@@ -307,39 +329,6 @@ describe('du rows for directories no file points at', () => {
       1,
       notes,
     ])
-  })
-})
-
-describe('WalkBudget', () => {
-  it('stops once spent', () => {
-    const budget = new WalkBudget(2)
-    expect([0, 1, 2].map(() => budget.spend('/d'))).toEqual([true, true, false])
-    expect(budget.hit).toBe(true)
-    const unbounded = new WalkBudget(null)
-    expect(Array.from({ length: 100 }, () => unbounded.spend('/d')).every(Boolean)).toBe(true)
-    expect(unbounded.hit).toBe(false)
-  })
-
-  it('with no cap of its own charges each mount its own', () => {
-    const ownerOf = (p: string): string => (p.startsWith('/a/b') ? '/a/b/' : '/a/')
-    const caps = new Map<string, number | null>([
-      ['/a/', null],
-      ['/a/b/', 1],
-    ])
-    const mounts: MountView = {
-      descendants: () => [],
-      visibleDescendants: () => [],
-      isRoot: (p) => caps.has(p.replace(/\/?$/, '/')),
-      rootOf: ownerOf,
-      answers: () => false,
-      maxGlobMatches: () => null,
-      searchable: () => null,
-      maxDuEntries: (p) => caps.get(ownerOf(p)) ?? null,
-    }
-    const budget = new WalkBudget(null, mounts)
-    expect(Array.from({ length: 100 }, () => budget.spend('/a')).every(Boolean)).toBe(true)
-    expect([0, 1].map(() => budget.spend('/a/b'))).toEqual([true, false])
-    expect(budget.hit).toBe(true)
   })
 })
 

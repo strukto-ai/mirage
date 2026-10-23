@@ -17,7 +17,7 @@ import { specOf } from '../../../spec/builtins.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import { landingRoot, linksOf, mountsOf } from '../../utils/links.ts'
-import { treeWalk } from '../../utils/tree.ts'
+import { ScanBudget, treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { type GenericCommand } from '../adapter.ts'
@@ -55,11 +55,12 @@ export function findWalk(
   // reported by the generic per start point.
   const closed: string[] = []
   const unstatted = new Map<string, unknown>()
+  const stopped: string[] = []
   return findGeneric(
     resolved,
     texts,
     ctx,
-    (root, options) => {
+    async (root, options) => {
       // A walk -maxdepth bounds reads its own levels, not the whole tree.
       const whole = files.answers('read_tree') && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
@@ -68,7 +69,8 @@ export function findWalk(
         files.stat,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null
-      return walkFind(
+      const budget = new ScanBudget(root, mounts ?? null)
+      const keys = await walkFind(
         root,
         {
           unreadable: closed,
@@ -80,9 +82,12 @@ export function findWalk(
           stat,
           follow: follow ? links : null,
           loops,
+          listing: (p) => budget.listing(readdir, p),
         },
         options,
       )
+      stopped.push(...budget.stopped)
+      return keys
     },
     undefined,
     undefined,
@@ -94,5 +99,6 @@ export function findWalk(
     },
     files.stat,
     () => loops.splice(0),
+    () => stopped.splice(0),
   )
 }

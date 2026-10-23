@@ -44,7 +44,7 @@ def _day(event_id: str, summary: str, **fields: str) -> dict:
 
 
 async def _ids(text: str, under: str = "/", **config: str | int) -> list:
-    accessor = make_accessor(content_search=True, **config)
+    accessor = make_accessor(**config)
     out = await files_containing(accessor, text, [spec(under)])
     if out is None:
         return None
@@ -103,7 +103,7 @@ async def test_reads_every_file_when_it_cannot_say(monkeypatch, text, under):
 
 async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
     _api(monkeypatch, EVENTS)
-    accessor = make_accessor()
+    accessor = make_accessor(full_scan_limit=-1)
     out = await files_containing(accessor, "lunch", [spec("/")])
     assert out is None
 
@@ -129,7 +129,7 @@ async def test_a_failed_search_reads_every_file(monkeypatch, error):
 async def test_a_text_changed_since_the_listing_is_found(monkeypatch):
     events = list(EVENTS)
     _api(monkeypatch, events)
-    accessor = make_accessor(content_search=True)
+    accessor = make_accessor()
 
     async def ids(text: str) -> list | None:
         out = await files_containing(accessor, text, [spec("/")])

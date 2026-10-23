@@ -21,6 +21,7 @@ import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface S3VFSState {
   type: string
@@ -42,8 +43,10 @@ export class S3VFS extends S3VFSBase {
   readonly config: S3Config
   override readonly accessor: S3Accessor
 
+  override readonly fullScanLimit: number
   constructor(config: S3Config) {
     super()
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     // Normalized as node's S3VFS does: the keys are `prefix + path`, so a
     // raw `team/x` keyed `team/xa.txt` and a raw `/team/x/` a leading slash.
     const normalized = normalizeKeyPrefix(config.keyPrefix)

@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class EmailConfig(BaseModel):
@@ -38,10 +40,12 @@ class EmailConfig(BaseModel):
     """How many of a folder's newest messages the mount lists and `grep`
     searches, and the window `himalaya envelope list` and `search` page
     through."""
-    content_search: bool = False
-    """Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which
-    messages may match and read only those. The server searches headers
-    and body, not the mounted JSON's keys, uids or flags."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit and reads every message without asking the
+    server (IMAP `SEARCH TEXT`), which searches headers and body, not the
+    mounted JSON."""
     save_copy: bool = True
     """After `himalaya` sends a message, append a copy to `sent_folder`,
     as upstream himalaya's `message.send.save-copy`. Off saves a copy

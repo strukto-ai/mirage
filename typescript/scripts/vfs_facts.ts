@@ -43,8 +43,6 @@ const CAPABILITY_FIELDS = [
   'listingVersion',
   'readsRanges',
   'local',
-  'maxGlobMatches',
-  'maxDuEntries',
 ] as const
 
 // The functions a backend may define, as BaseVFS declares them. Which ones
@@ -97,8 +95,6 @@ export interface Capabilities {
   functions: string[]
   reads_ranges: boolean | string
   local: boolean | string
-  max_glob_matches: number | string | null
-  max_du_entries: number | string | null
 }
 
 interface ClassInfo {
@@ -399,8 +395,6 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
     functions: [...functions].sort(compareCodePoints),
     reads_ranges: booleanCapability(values, 'readsRanges', false, className),
     local: booleanCapability(values, 'local', false, className),
-    max_glob_matches: nullableNumber(values, 'maxGlobMatches', className),
-    max_du_entries: nullableNumber(values, 'maxDuEntries', className),
   }
 }
 
@@ -420,20 +414,6 @@ function numericCapability(
   if (value === undefined) return fallback
   if (typeof value === 'boolean' || value === null) {
     throw new Error(`${className}.${name} is ${String(value)}, expected a number`)
-  }
-  return value
-}
-
-// A cap BaseVFS declares with a default, so every chain reaches a value;
-// null means no cap.
-function nullableNumber(
-  values: Record<string, CapabilityValue>,
-  name: string,
-  className: string,
-): number | string | null {
-  const value = values[name]
-  if (value === undefined || typeof value === 'boolean') {
-    throw new Error(`${className}.${name} is ${String(value)}, expected a number or null`)
   }
   return value
 }
@@ -467,9 +447,8 @@ function stringCapability(
 }
 
 // The value of a named constant a slot was set to, followed one import
-// hop. `maxGlobMatches: SCOPE_ERROR` is the whole reason this exists:
-// reporting the name instead of 5000 would make the two languages differ
-// on a value they agree about.
+// hop: reporting the name instead of its value would make the two languages
+// differ on a value they agree about.
 function resolveIdentifier(source: ts.SourceFile, name: string): CapabilityValue | undefined {
   for (const statement of source.statements) {
     if (ts.isVariableStatement(statement)) {

@@ -9,9 +9,11 @@ import { posixEscape, posixRegex, type PosixRegex } from '../../../../rs/regex.t
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { mountsOf } from '../../../builtin/utils/links.ts'
 import { requireWorkTree } from './discover.ts'
 import {
   AmbiguousArgumentError,
+  FATAL_EXIT,
   GitError,
   InvalidRevisionNameError,
   PatternCompileError,
@@ -235,8 +237,10 @@ export async function grep(
     }
     sources.push(['', shownEntries(repo, entries)])
   }
+  const mounts = mountsOf(ctx)
   const out: Uint8Array[] = []
   let found = false
+  const read = new Map<string, number>()
   for (const [revision, entries] of sources) {
     for (const [path, entry] of [...entries].sort(([a], [b]) =>
       compareCodePoints(byteView(a), byteView(b)),
@@ -248,10 +252,32 @@ export async function grep(
         (path && !pathspecSelects(path, specs))
       )
         continue
+      const target = repo.location.worktree.join(path)
+      if (mounts?.fullScanLimit !== undefined) {
+        // A blob is read from the repository, a working-tree file from the
+        // mount serving it, and each mount counts its own.
+        const source = (revision || cached ? repo.location.gitdir : target).virtual
+        const limit = mounts.fullScanLimit(source)
+        const root = mounts.rootOf(source)
+        const used = read.get(root) ?? 0
+        if (limit >= 0 && used >= limit) {
+          // Past the limit the search stops, and what it found so far
+          // stands, as git keeps what it printed before a fatal.
+          return [
+            concat(out),
+            new IOResult({
+              exitCode: FATAL_EXIT,
+              stderr: encodeText(
+                `fatal: stopped after ${String(limit)} files (full_scan_limit); narrow the pathspec\n`,
+              ),
+            }),
+          ]
+        }
+        read.set(root, used + 1)
+      }
       let data: Uint8Array | null
       if (revision || cached) data = await blobData(repo, entry)
       else {
-        const target = repo.location.worktree.join(path)
         if (await isLink(repo.vfs, target)) continue
         data = await readOptional(repo.vfs, target)
         if (data === null) continue

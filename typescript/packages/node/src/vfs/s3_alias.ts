@@ -52,6 +52,7 @@ export interface S3AliasConfig {
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
+  fullScanLimit?: number
 }
 
 export const ALIAS_SHAPE = {
@@ -92,6 +93,11 @@ export const ALIAS_SHAPE = {
   proxy: secretStr()
     .optional()
     .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+    default: 1000,
+  }),
 }
 
 // What a caller may write, split the way python splits
@@ -150,6 +156,7 @@ const optional = (config: S3AliasConfig): Partial<S3Config> => ({
   ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
   ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
   ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
+  ...(config.fullScanLimit !== undefined ? { fullScanLimit: config.fullScanLimit } : {}),
 })
 
 /**

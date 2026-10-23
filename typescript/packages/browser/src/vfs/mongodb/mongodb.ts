@@ -30,6 +30,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/mongodb/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { HttpMongoDriver } from './http_driver.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface MongoDBVFSOptions {
   config: MongoDBConfig
@@ -53,6 +54,7 @@ export class MongoDBVFS extends MongoDBVFSBase {
   readonly driver: MongoDriver
   override readonly accessor: MongoDBAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: MongoDBVFSOptions | MongoDBConfig) {
     super()
     const { config, prefix, driver, endpoint } =
@@ -60,6 +62,7 @@ export class MongoDBVFS extends MongoDBVFSBase {
         ? options
         : { config: options, prefix: undefined, driver: undefined, endpoint: undefined }
     this.config = resolveMongoDBConfig(config)
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.driver = driver ?? new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri })
     this.accessor = new MongoDBAccessor(this.driver, this.config)
     this.prompt = PROMPT.replace('{prefix}', prefix ?? '')

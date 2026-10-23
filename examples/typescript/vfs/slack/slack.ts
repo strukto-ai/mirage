@@ -242,7 +242,7 @@ async function main(): Promise<void> {
     }
 
     // ── grep and rg at each scope ──────────────────────
-    // With contentSearch: true and a user token (xoxp-) with search:read,
+    // With a user token (xoxp-) with search:read,
     // grep -w and rg -w read only the channel days Slack search names.
     const scopes: { label: string; cmd: string }[] = [
       {

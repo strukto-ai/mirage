@@ -28,7 +28,7 @@ from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.concurrency.limiter import run_blocking
 from mirage.errors.fs import error_path, fs_strerror
 from mirage.errors.render import format_fs_error
-from mirage.errors.types import CommandTimeoutError
+from mirage.errors.types import CommandTimeoutError, GlobLimitError
 from mirage.io.cooperative import chunks
 from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
@@ -82,6 +82,20 @@ def _leaf_message(exc: BaseException) -> str:
     return f"{error_path(exc)}: {strerror}"
 
 
+def argument_list_too_long(command: str, reason: str) -> bytes:
+    """What a command given a glob past its mount's ``full_scan_limit``
+    says: exec(2)'s refusal of an argument list too long, which bash
+    reports with exit 126, then the limit's own line.
+
+    Args:
+        command (str): the command's name.
+        reason (str): the limit's line.
+    """
+    return encode_text(
+        f"{command}: Argument list too long\n{command}: {reason}\n"
+    )
+
+
 def _mount_failure(
     name: str, paths: list[PathSpec], exc: Exception
 ) -> Failure:
@@ -94,6 +108,8 @@ def _mount_failure(
         exc (Exception): the failure.
     """
     logger.debug("%s failed", name, exc_info=exc)
+    if isinstance(exc, GlobLimitError):
+        return None, argument_list_too_long(name, str(exc)), 126
     code = (
         exc.exit_code
         if isinstance(exc, UsageError)

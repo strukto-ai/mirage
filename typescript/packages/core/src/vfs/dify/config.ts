@@ -49,6 +49,11 @@ const DifyConfigSchema = z.object({
     description: 'Longest wait in seconds before a retry, whether from backoff or `Retry-After`.',
     default: 30,
   }),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+    default: 1000,
+  }),
 })
 
 export type DifyConfig = ConfigOf<typeof DifyConfigSchema>

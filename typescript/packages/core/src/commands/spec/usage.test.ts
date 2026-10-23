@@ -70,6 +70,30 @@ describe('unknownOptionError', () => {
     expect(td.decode(msg)).toBe("find: unknown predicate `--bogus'\n")
     expect(code).toBe(1)
   })
+
+  // Twin of test_zgrep_refuses_a_grep_option_it_does_not_support.
+  it.each([
+    ['r', '-r'],
+    ['R', '-R'],
+    ['d', '-d'],
+    ['--recursive', '--recursive'],
+    ['--rec', '--rec'],
+    ['--di', '--di'],
+    ['--directories=recurse', '--directories=recurse'],
+    ['--inc', '--inc'],
+    ['--exc', '--exc'],
+    ['--exclude-dir=x', '--exclude-dir=x'],
+  ])('zgrep refuses %s, a grep option it does not support', (token, shown) => {
+    const [msg, code] = unknownOptionError('zgrep', token)
+    expect([td.decode(msg), code]).toEqual([`zgrep: ${shown}: option not supported\n`, 2])
+  })
+
+  // Twin of test_zgrep_leaves_any_other_option_to_the_usual_refusal.
+  it.each(['--re', '--d', '--in', '--ex', 'Y'])('zgrep leaves %s to the usual refusal', (token) => {
+    const [msg, code] = unknownOptionError('zgrep', token)
+    expect(td.decode(msg)).not.toContain('not supported')
+    expect(code).toBe(2)
+  })
 })
 
 describe('missingValueError', () => {

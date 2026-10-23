@@ -164,6 +164,22 @@ export class DiscardSignal extends ExitSignal {
 }
 
 /**
+ * A glob that matches more paths than its mount's `fullScanLimit`. A command
+ * it is a word of does not run, as exec(2) refuses an argument list too
+ * long; anywhere else (a `for` list, a redirect) the line is discarded like
+ * any expansion error. `reason` is the limit's line. Mirrors Python's
+ * mirage.shell.errors.TooManyMatches.
+ */
+export class TooManyMatches extends DiscardSignal {
+  readonly reason: string
+  constructor(reason: string) {
+    super(encodeText(`bash: ${reason}\n`))
+    this.name = 'TooManyMatches'
+    this.reason = reason
+  }
+}
+
+/**
  * `set -u` reading a name that is not set: `$x`, `${a[i]}`, or a variable
  * an arithmetic expression reads. GNU bash dies on it the way it dies on
  * `${x:?}`: status 127 at top level, 1 from a containing subshell or

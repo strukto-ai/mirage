@@ -19,7 +19,6 @@ import pytest
 
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
-from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.read import read
 from mirage.core.disk.readdir import readdir
 from mirage.io.types import IOResult
@@ -31,7 +30,7 @@ from mirage.workspace import Workspace
 
 
 def resolve_glob(accessor, paths, index=None):
-    return make_resolve_glob(partial(readdir, accessor), SCOPE_ERROR)(paths)
+    return make_resolve_glob(partial(readdir, accessor))(paths)
 
 
 @command("stat", vfs="disk", spec=SPECS["stat"], filetype=".zzz")

@@ -35,8 +35,17 @@ Exactly one of `userId`, `agentId`, or `runId` is required.
 | <code style={{ whiteSpace: 'nowrap' }}>runId</code> | Mount this run's memories. Set exactly one of `userId`, `agentId` and `runId`. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultPageSize</code><br />default `100` | Memories fetched per request while listing the scope. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultSearchLimit</code><br />default `10` | How many results `search` returns unless the line sets `top_k`. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
 
 The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.
+
+## Integration
+
+The most files one command reads on Mem0. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Mem0 |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

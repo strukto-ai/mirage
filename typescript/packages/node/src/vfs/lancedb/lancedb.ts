@@ -28,6 +28,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/lancedb/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { LanceDBStore } from './store.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 const REMOTE_SCHEMES = ['s3://', 'gs://', 'az://', 'hf://', 'db://']
 
@@ -55,10 +56,12 @@ export class LanceDBVFS extends LanceDBVFSBase {
   // Only cards are searched: a blob file is the blob column's bytes.
   override readonly searchable: readonly string[]
 
+  override readonly fullScanLimit: number
   constructor(options: LanceDBVFSOptions | LanceDBConfig) {
     super()
     const config = 'config' in options ? options.config : options
     this.config = resolveLanceDBConfig(config)
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.cachesReads = REMOTE_SCHEMES.some((scheme) => this.config.uri.startsWith(scheme))
     this.store = new LanceDBStore(this.config)
     this.accessor = new LanceDBAccessor(this.store, this.config)

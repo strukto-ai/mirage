@@ -17,7 +17,6 @@ from typing import Any
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.core.generic.rewrite import append_by_streamed_rewrite
-from mirage.core.gridfs.constants import SCOPE_ERROR
 from mirage.core.gridfs.copy import copy as _copy
 from mirage.core.gridfs.create import create as _create
 from mirage.core.gridfs.exists import exists as _exists
@@ -54,11 +53,11 @@ class GridFSVFS(BaseVFS):
     read_revalidatable: bool = True
 
     reads_ranges: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, config: GridFSConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = GridFSAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

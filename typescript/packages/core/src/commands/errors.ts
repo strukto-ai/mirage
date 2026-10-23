@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PathSpec } from '../types.ts'
+
 // Command-line usage error (GNU semantics: stderr message + exit code).
 // The message is the full stderr text (may span lines for the
 // `Try '--help'` hint). Most tools exit 2 for option errors but 1 for
@@ -29,6 +31,21 @@ export class UsageError extends Error {
 // Invalid numeric argument to a find predicate (GNU find: exit 1).
 // Mirrors Python's mirage.commands.errors.FindParseError.
 export class FindParseError extends Error {}
+
+// A walk's read past its mount's `fullScanLimit`: grep and rg keep what they
+// printed, stop walking the directory and exit 2.
+// Mirrors Python's mirage.commands.errors.ScanLimitError.
+export class ScanLimitError extends Error {
+  readonly directory: PathSpec
+  constructor(directory: PathSpec, limit: number) {
+    super(
+      `${directory.rawPath === '' ? '.' : directory.rawPath}: stopped after ${String(limit)} files ` +
+        '(full_scan_limit); narrow the path',
+    )
+    this.name = 'ScanLimitError'
+    this.directory = directory
+  }
+}
 
 // A command's failure after it had already printed output, which a program
 // that writes as it goes leaves on stdout ahead of the diagnostic.

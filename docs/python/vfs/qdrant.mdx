@@ -65,6 +65,7 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 | <code style={{ whiteSpace: 'nowrap' }}>embedding_model</code><br />default `'sentence-transformers/all-MiniLM-L6-v2'` | Model the server embeds a `search` query with under `cloud_inference`; it must match the model the stored vectors came from. |
 | <code style={{ whiteSpace: 'nowrap' }}>cloud_inference</code><br />default `False` | Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query. |
 | <code style={{ whiteSpace: 'nowrap' }}>embed</code><br />secret | Async function that turns a `search` query into a vector in-process, `(text: str) -> list[float]`. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qdrant end */}
@@ -200,12 +201,20 @@ All commands delegate to Mirage's shared implementations.
 | `cat`           | print a point's text/JSON, or dump raw blob/image bytes  |
 | `stat`          | directory vs file, blob size, image mime type            |
 | `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
-| `grep` / `rg`   | lexical search over the text/JSON files ([below](#grep-and-rg)) |
+| `grep` / `rg`   | lexical search over the text/JSON files ([below](#integration)) |
 | `search`        | semantic (vector) search -> ranked content paths + score |
 | `head` / `tail` | first/last lines of a file                               |
 | `wc`            | count lines/bytes of a file                              |
 
-## grep and rg
+## Integration
+
+What Qdrant answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Qdrant |
+| --- | --- |
+| `grep -r`, `rg` | The payload text the listing keeps, for ASCII text |
+| Can miss | No |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 
 A folder listing scrolls every point's payload anyway, so `grep -r` and `rg`
 scroll each folder once more, as a listing does, and read only the `.json` and

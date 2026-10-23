@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pydantic import Field
+
 from mirage.core.google.config import GoogleConfig
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class GoogleDriveConfig(GoogleConfig):
-    content_search: bool = False
-    """Let `grep -w` and `rg -w` read only the files Drive full-text search
-    names. Search covers extracted text and lags writes, so it can miss a
-    match."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit and reads every file without asking Drive
+    full-text search, which lags writes and covers only extracted text."""

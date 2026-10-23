@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { GlobLimitError } from '../../../errors/types.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -144,9 +145,11 @@ describe('commandFiles', () => {
     ])
   })
 
-  it('resolves a glob under its mount cap, across mounts the default, none as stdin', async () => {
+  // Mirrors test_a_glob_past_its_mounts_limit_is_refused_and_none_is_stdin.
+  it('refuses a glob past its mount limit, on a mount or across, none as stdin', async () => {
     const dispatch = keyed({ stored: { '/f0.txt': '', '/f1.txt': '', '/f2.txt': '' } })
-    const row = { prefix: '/', kind: 'ram', mode: MountMode.WRITE, maxGlobMatches: 2 }
+    const row = { prefix: '/', kind: 'ram', mode: MountMode.WRITE, fullScanLimit: 2 }
+    const roomyRow = { ...row, fullScanLimit: 3 }
     const word = new PathSpec({
       virtual: '/*.txt',
       directory: '/',
@@ -155,10 +158,12 @@ describe('commandFiles', () => {
       resolved: false,
     })
     const capped = await guarded(contextFor(dispatch, { row, prefixes: ['/'] }))
+    const roomy = await guarded(contextFor(dispatch, { row: roomyRow, prefixes: ['/'] }))
     const across = commandFiles(contextFor(dispatch, { row, prefixes: ['/'] }))
-    const resolved = await resolveOrEmpty(capped, [word])
-    expect(resolved.map((p) => p.virtual)).toEqual(['/f0.txt', '/f1.txt'])
-    expect(await resolveOrEmpty(across, [word])).toHaveLength(3)
+    for (const files of [capped, across]) {
+      await expect(resolveOrEmpty(files, [word])).rejects.toThrow(new GlobLimitError('/*.txt', 2))
+    }
+    expect(await resolveOrEmpty(roomy, [word])).toHaveLength(3)
     expect(await resolveOrEmpty(capped, [])).toEqual([])
   })
 })

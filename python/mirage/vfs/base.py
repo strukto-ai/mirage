@@ -31,9 +31,8 @@ from mirage.types import (
     PathSpec,
     SearchQuery,
 )
-from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES
 from mirage.vfs.call import vfs_call
-from mirage.vfs.constants import DEFAULT_MAX_DU_ENTRIES
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
@@ -152,12 +151,6 @@ class BaseVFS:
     # mount's config, so an instance sets it; None pins nothing.
     listings_pin: str | None = None
 
-    # How many entries a du walk of this mount visits before it stops and
-    # reports a partial answer, None for no cap: the command table's own
-    # ``max_du_entries``, read here by a walk that crosses mounts through
-    # the dispatcher, which charges each entry to the mount serving it.
-    max_du_entries: int | None = DEFAULT_MAX_DU_ENTRIES
-
     # Whether ``read`` fetches a byte window from the store itself. When
     # False the caller reads the whole file and slices it, so ``read`` is
     # only ever handed a window by a VFS that sets this.
@@ -167,15 +160,18 @@ class BaseVFS:
     # aggregate on the host instead of streaming through mirage.
     local: bool = False
 
-    # How many paths one glob may expand to before it stops; None for no
-    # cap.
-    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES
-
     # The files ``files_containing`` answers for, as mount-relative
     # globs matched segment by segment (a glob naming a directory covers
     # what is below it); None for every file. grep and rg read any other
     # file whatever the answer, as a full scan would.
     searchable: tuple[str, ...] | None = None
+
+    # The most files one command walks under a directory of this mount:
+    # grep -r, rg and git grep stop reading there, find, ls -R, tree and
+    # du stop listing, a glob matching more is refused, and so are tar -c,
+    # zip -r, cp -r, rm -r, mv to another mount and diff -r of a directory
+    # holding more (``before_full_scan``); -1 for no cap.
+    full_scan_limit: int = FULL_SCAN_LIMIT
 
     # Extensions whose ``read`` is a rendering rather than the stored
     # bytes, each to the name of the method that renders it, which takes
@@ -792,21 +788,30 @@ class BaseVFS:
         *,
         files: int | None = None,
     ) -> None:
-        """Called before a command reads every file under ``path``.
+        """Called before a command acts on every file under ``path``.
 
-        Once per directory a command walks, before the first file it
-        reads there: grep -r and rg where no search narrowed the walk,
-        and tar -c, zip -r, cp -r, mv across mounts and diff -r always.
-        Return to let the scan run; raise to refuse it, and the error's
-        message is what the command prints.
+        Once per directory a command copies, compares or removes whole,
+        before the first file it touches there: tar -c, zip -r, cp -r,
+        mv across mounts, diff -r and rm -r. Return to let the scan run;
+        raise to refuse it, and the error's message is what the command
+        prints. The default refuses more than ``full_scan_limit`` files.
+        Searches and listings are never refused: they stop after
+        ``full_scan_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.
             files (int | None): how many files the session sees under
-                ``path``, from the mount's ``read_tree`` with every
-                hidden file dropped; None when ``read_tree`` cannot
-                answer, and the guard counts them itself.
+                ``path``, with every hidden file dropped: the mount's
+                ``read_tree``, or under a ``full_scan_limit`` a walk of
+                its listings that stops one file past it; None when
+                neither counts, and the guard counts them itself.
         """
+        limit = self.full_scan_limit
+        if limit >= 0 and files is not None and files > limit:
+            raise ValueError(
+                f"more than {limit} files in scope (full_scan_limit); "
+                "narrow the path"
+            )
         return None
 
     def is_mounted(self) -> bool:

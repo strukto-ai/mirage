@@ -18,7 +18,8 @@ import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { UsageError } from '../../errors.ts'
+import type { MountView } from '../../../view/types.ts'
+import { ScanLimitError, UsageError } from '../../errors.ts'
 
 // The conditions under which a guard's path reaches no directory to scan.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
@@ -52,6 +53,84 @@ export async function beforeFullScan(
     }
     if (err instanceof UsageError || isFsError(err) || !(err instanceof Error)) throw err
     throw new UsageError(`${command}: ${err.message}`, 1)
+  }
+}
+
+/**
+ * The entries one walk of an operand may still list.
+ *
+ * A walk lists at most `fullScanLimit` entries of each mount it crosses: an
+ * entry is charged to the mount serving the directory that lists it, counted
+ * under the operand, or under the mount's root where that mount starts below
+ * the operand. Once a count runs out the walk lists nothing more there, and
+ * `stopped` holds what the command says about it, one line per folder,
+ * without the command's name, in the order the walk met them. Mirrors
+ * Python's `ScanBudget`.
+ */
+export class ScanBudget {
+  readonly spent = new Map<string, number>()
+  readonly stopped: string[] = []
+
+  constructor(
+    readonly operand: PathSpec,
+    readonly mounts: MountView | null,
+  ) {}
+
+  private limitAt(directory: string): number {
+    return this.mounts?.fullScanLimit?.(directory) ?? -1
+  }
+
+  private folderOf(directory: string): string {
+    const top = this.operand.virtual.replace(/\/+$/, '')
+    const root = (this.mounts?.rootOf(directory) ?? '/').replace(/\/+$/, '')
+    if (root.startsWith(`${top}/`)) return root
+    return top === '' ? '/' : top
+  }
+
+  private stop(folder: string, limit: number): void {
+    const top = this.operand.virtual.replace(/\/+$/, '') || '/'
+    const at = folder === top ? this.operand : PathSpec.fromStrPath(folder)
+    const line = new ScanLimitError(at, limit).message
+    if (!this.stopped.includes(line)) this.stopped.push(line)
+  }
+
+  /**
+   * Charge one entry `directory` lists: true if the walk may keep it, false
+   * once its folder's count is out, which records the stop.
+   */
+  spend(directory: string): boolean {
+    const limit = this.limitAt(directory)
+    if (limit < 0) return true
+    const folder = this.folderOf(directory)
+    const used = this.spent.get(folder) ?? 0
+    if (used < limit) {
+      this.spent.set(folder, used + 1)
+      return true
+    }
+    this.stop(folder, limit)
+    return false
+  }
+
+  /**
+   * Whether the walk may still list `directory`; a folder whose count is out
+   * records the stop and is not listed at all.
+   */
+  opens(directory: string): boolean {
+    const limit = this.limitAt(directory)
+    if (limit < 0) return true
+    const folder = this.folderOf(directory)
+    if ((this.spent.get(folder) ?? 0) < limit) return true
+    this.stop(folder, limit)
+    return false
+  }
+
+  /** `readdir` of `directory`, cut to what the walk may still list. */
+  async listing(
+    readdir: (path: PathSpec) => Promise<string[]>,
+    directory: PathSpec,
+  ): Promise<string[]> {
+    if (!this.opens(directory.virtual)) return []
+    return (await readdir(directory)).filter(() => this.spend(directory.virtual))
   }
 }
 
@@ -99,9 +178,7 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * (ENOTDIR), so a directory a walk reached through one is opened by
  * `readdir`, which follows it as opendir(3) does and meets whatever refuses
  * the directory it leads to. Both take the path first and pass the rest
- * through. `answered` collects each directory listed
- * from an answer, for a walk that charges a budget per request. Mirrors
- * Python's `tree_walk`.
+ * through. Mirrors Python's `tree_walk`.
  */
 /**
  * Whether an earlier answer may stand for `path`. A spelling with dots or a
@@ -116,7 +193,6 @@ export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
   stat: WalkCall<S>,
-  answered?: Set<string>,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
   const roots = new Map<string, [Map<string, FileStat>, Map<string, string[]>]>()
@@ -151,7 +227,6 @@ export function treeWalk<D, S>(
       const [root, rel] = hit
       const listing = roots.get(root)?.[1].get(rel)
       if (listing !== undefined) {
-        answered?.add(virtual)
         const base = root.replace(/\/+$/, '') + '/'
         return listing.map((name) => base + name) as D
       }

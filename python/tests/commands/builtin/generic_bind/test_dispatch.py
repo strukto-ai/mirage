@@ -16,7 +16,6 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope, command_started
-from mirage.commands.builtin.generic.du import TRUNCATED_NOTE
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.config import command
@@ -82,23 +81,15 @@ async def test_relay_sort_caches_inputs_and_replacements(overwrite):
         await ws.close()
 
 
-class _Uncapped(RAMVFS):
-    max_du_entries = None
-
-
-class _Capped(RAMVFS):
-    max_du_entries = 2
-
-
 @command("du", vfs="ram", spec=SPECS["du"])
 async def _unmeasured_du(accessor, paths, texts, opts):
     return b"0\t" + paths[0].raw_path.encode() + b"\n", IOResult()
 
 
 @pytest.mark.asyncio
-async def test_du_walk_charges_each_mount_its_own_cap():
+async def test_du_walk_charges_each_mount_its_own_limit():
     # A du that reports no measurement leaves the line to this walk.
-    outer, inner = _Uncapped(), _Capped()
+    outer, inner = RAMVFS(full_scan_limit=-1), RAMVFS(full_scan_limit=2)
     outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
     inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
     ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
@@ -110,7 +101,10 @@ async def test_du_walk_charges_each_mount_its_own_cap():
             f"1\t/a/f{i}" for i in range(4)
         ]
         assert len([r for r in rows if "/a/b/g" in r]) == 2
-        assert result.stderr == TRUNCATED_NOTE.encode() + b"\n"
+        assert result.stderr == (
+            b"du: /a/b: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n"
+        )
         assert result.exit_code == 1
     finally:
         await ws.close()

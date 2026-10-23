@@ -458,7 +458,7 @@
         "nextcloud",
         "box"
       ],
-      "command": "find /data -newermt 2099-01-01; echo rc=$?",
+      "command": "find /data/guard -newermt 2099-01-01; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n",
@@ -2196,7 +2196,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -type d -exec false {} \\; -o -prune; echo rc=$?; find /data -type d -exec true {} + -o -prune; echo rc=$?",
+      "command": "find /data/guard -type d -exec false {} \\; -o -prune; echo rc=$?; find /data/guard -type d -exec true {} + -o -prune; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=0\n",

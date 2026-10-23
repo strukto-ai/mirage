@@ -39,7 +39,7 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ArithError, DiscardSignal, ExitSignal } from '../../shell/errors.ts'
+import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
@@ -48,6 +48,7 @@ import { expandNode } from '../expand/node.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { runExternal } from '../executor/command/external.ts'
+import { argumentListTooLong } from '../executor/command/handler.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
@@ -384,6 +385,16 @@ export async function executeCommand(
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     return [stdout, io, execNode]
+  } catch (err) {
+    if (!(err instanceof TooManyMatches)) throw err
+    // The command a glob was given to does not run, as exec(2) refuses an
+    // argument list too long; the line goes on.
+    const stderr = argumentListTooLong(name, err.reason)
+    return [
+      null,
+      new IOResult({ exitCode: 126, stderr }),
+      new ExecutionNode({ command: name, exitCode: 126, stderr }),
+    ]
   } finally {
     const frames = session.localFrames
     if (frames[frames.length - 1] === savedEnvOverrides) frames.pop()

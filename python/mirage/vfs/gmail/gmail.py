@@ -49,6 +49,7 @@ class GmailVFS(BaseVFS):
     def __init__(self, config: GmailConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = GmailAccessor(self.config, TokenManager(config))
 
     async def readdir(
@@ -85,7 +86,7 @@ class GmailVFS(BaseVFS):
         whole_word: bool,
         ignore_case: bool,
     ) -> list[PathSpec] | None:
-        if not self.config.content_search:
+        if self.full_scan_limit < 0:
             return None
         return await _files_containing(self.accessor, text, [path])
 

@@ -35,6 +35,7 @@ import { makeFilename } from './doc_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
 import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface GDocsVFSState {
   type: string
@@ -52,9 +53,12 @@ export class GDocsVFS extends BaseVFS {
   readonly config: GDocsConfig
   override readonly accessor: GDocsAccessor
 
+  override readonly fullScanLimit: number
+
   constructor(config: GDocsConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }
@@ -71,7 +75,7 @@ export class GDocsVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return googleFilesContaining(this.accessor, gdocsReaddir, MIME, DOCS_WORDS, text, [path])
   }
 

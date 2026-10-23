@@ -31,6 +31,7 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
 from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -195,11 +196,12 @@ async def test_a_mount_reads_the_stored_bytes_and_a_run_across_renders():
 
 
 @pytest.mark.asyncio
-async def test_a_glob_resolves_under_its_mounts_cap_and_none_reads_as_stdin():
+async def test_a_glob_past_its_mounts_limit_is_refused_and_none_is_stdin():
     backend = Backend(stored={f"/f{i}.txt": b"" for i in range(3)})
-    row = _row("/", max_glob_matches=2)
+    row = _row("/", full_scan_limit=2)
     with _on_mount():
         capped = _files(_ctx(backend, row))
+        roomy = _files(_ctx(backend, _row("/", full_scan_limit=3)))
     across = _files(_ctx(backend, row))
     spec = PathSpec(
         virtual="/*.txt",
@@ -208,9 +210,14 @@ async def test_a_glob_resolves_under_its_mounts_cap_and_none_reads_as_stdin():
         pattern="*.txt",
         resolved=False,
     )
-    resolved = await resolve_or_empty(capped, [spec])
-    assert [p.virtual for p in resolved] == ["/f0.txt", "/f1.txt"]
-    assert len(await resolve_or_empty(across, [spec])) == 3
+    for files in (capped, across):
+        with pytest.raises(GlobLimitError) as refused:
+            await resolve_or_empty(files, [spec])
+        assert str(refused.value) == (
+            "/*.txt: matches more than 2 files (full_scan_limit); "
+            "narrow the path"
+        )
+    assert len(await resolve_or_empty(roomy, [spec])) == 3
     assert await resolve_or_empty(capped, []) == []
 
 

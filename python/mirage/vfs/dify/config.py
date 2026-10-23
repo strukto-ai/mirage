@@ -1,11 +1,14 @@
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     PositiveFloat,
     PositiveInt,
     SecretStr,
     field_validator,
 )
+
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class DifyConfig(BaseModel):
@@ -30,6 +33,10 @@ class DifyConfig(BaseModel):
     retry_max_delay: PositiveFloat = 30.0
     """Longest wait in seconds before a retry, whether from backoff or
     `Retry-After`."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("base_url")
     @classmethod

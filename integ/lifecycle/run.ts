@@ -289,6 +289,25 @@ class ListedRAMVFS extends RAMVFS {
   }
 }
 
+/** A local fixture holding a full scan to `fullScanLimit` files. */
+class LimitedRAMVFS extends RAMVFS {
+  constructor(files: Record<string, string>, fullScanLimit: number) {
+    super({ fullScanLimit })
+    const dirs = new Set(['/'])
+    for (const path of Object.keys(files)) {
+      const parts = path.split('/')
+      for (let depth = 2; depth < parts.length; depth++) dirs.add(parts.slice(0, depth).join('/'))
+    }
+    this.loadState({
+      type: 'ram',
+      files: Object.fromEntries(
+        Object.entries(files).map(([path, data]) => [path, ENC.encode(data)]),
+      ),
+      dirs: [...dirs].sort(),
+    })
+  }
+}
+
 /** A chunked source whose pull and close counts are shared corpus assertions. */
 class TrackedStreamVFS extends CachedRAMVFS {
   pulls = 0
@@ -415,6 +434,14 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
   register('rejected-upload', (config) =>
     Promise.resolve(
       new RejectedUploadVFS((config.message as string | undefined) ?? 'upload refused'),
+    ),
+  )
+  register('limited-ram', (config) =>
+    Promise.resolve(
+      new LimitedRAMVFS(
+        (config.files ?? {}) as Record<string, string>,
+        (config.full_scan_limit as number | undefined) ?? -1,
+      ),
     ),
   )
   register('cached-ram', (config) => {

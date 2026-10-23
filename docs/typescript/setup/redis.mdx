@@ -87,3 +87,12 @@ redis, mounts it through `@struktoai/mirage-browser`, and reads every key back t
 mount to show the two stores agree byte for byte.
 
 For the broader Redis semantics (binary keys, key patterns) see the [Python Redis docs](/python/vfs/redis).
+
+## Integration
+
+What Redis answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Redis |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |

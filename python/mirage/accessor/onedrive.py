@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import aiohttp
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from mirage.accessor.base import SessionAccessor
 from mirage.core.msgraph.config import MsGraphConfig
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 DRIVE_TARGETS = ("drive_id", "site_id", "group_id", "user_id")
 
@@ -36,9 +37,11 @@ class OneDriveConfig(MsGraphConfig):
     """User ID or UPN whose drive the mount uses, under app-only auth."""
     key_prefix: str | None = None
     """Folder path from the drive root that the mount uses as its root."""
-    content_search: bool = False
-    """Let `grep -w` and `rg -w` read only the files Graph search names. Search
-    covers extracted text and lags writes, so it can miss a match."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit and reads every file without asking Graph
+    search, which lags writes and covers only extracted text."""
 
     @model_validator(mode="after")
     def _one_drive_target(self) -> "OneDriveConfig":

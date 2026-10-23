@@ -37,10 +37,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { read as githubRead, readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
-import {
-  beforeFullScan as githubBeforeFullScan,
-  filesContaining as githubFilesContaining,
-} from '../../core/github/search.ts'
+import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 import { SCOPE_ERROR } from '../../core/github/constants.ts'
 
 export interface GitHubVFSState {
@@ -86,9 +83,12 @@ export class GitHubVFS extends BaseVFS {
   readonly config: GitHubConfig
   override readonly accessor: GitHubAccessor
 
+  override readonly fullScanLimit: number
+
   private constructor(config: GitHubConfig, accessor: GitHubAccessor) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? SCOPE_ERROR
     this.accessor = accessor
     this.listingsPin = pinOf(config.ref)
   }
@@ -120,7 +120,6 @@ export class GitHubVFS extends BaseVFS {
     return new GitHubVFS(config, accessor)
   }
 
-  override readonly maxGlobMatches: number = SCOPE_ERROR
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
@@ -159,12 +158,8 @@ export class GitHubVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return githubFilesContaining(this.accessor, text, [path])
-  }
-
-  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
-    return githubBeforeFullScan(this.accessor, path, files)
   }
 
   override getState(): Promise<GitHubVFSState> {

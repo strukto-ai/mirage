@@ -29,6 +29,7 @@ import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
 import { filesContaining } from '../../core/qdrant/search.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface QdrantVFSOptions {
   config: QdrantConfig
@@ -50,9 +51,11 @@ export class QdrantVFS extends BaseVFS {
   readonly config: QdrantConfigResolved
   override readonly accessor: QdrantAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: QdrantVFSOptions | QdrantConfig) {
     super()
     const config = 'config' in options ? options.config : options
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.config = resolveQdrantConfig(config)
     this.accessor = new QdrantAccessor(this.config)
   }

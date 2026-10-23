@@ -20,6 +20,7 @@ from typing import Any, Protocol
 
 from mirage.context import dotglob_active, extglob_active, session_visibility
 from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.types import GlobLimitError
 from mirage.rs.glob import Glob
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.fnmatch import (
@@ -209,8 +210,6 @@ _PATTERN_TABLE = str.maketrans(
         for mark, ch in _GLOB_CHAR_OF.items()
     }
 )
-
-DEFAULT_MAX_GLOB_MATCHES = 10000
 
 
 def has_glob(
@@ -554,7 +553,7 @@ class ResolveGlobFn(Protocol):
 
 def make_resolve_glob(
     readdir: Callable[..., Any],
-    max_glob_matches: int | None = DEFAULT_MAX_GLOB_MATCHES,
+    limit: int = -1,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
@@ -565,8 +564,8 @@ def make_resolve_glob(
 
     Args:
         readdir (Callable): readdir ``readdir(path)``.
-        max_glob_matches (int | None): cap on matches per pattern before
-            truncation.
+        limit (int): the most matches one pattern may have (the mount's
+            ``full_scan_limit``); -1 for no cap.
         stat (Callable | None): stat ``stat(path)``, which is what lets a
             trailing slash keep directories only.
         target_stat (LinkTargetStat | None): the namespace's stat of what
@@ -585,7 +584,7 @@ def make_resolve_glob(
         found = await resolve_glob_with(
             readdir,
             paths,
-            max_glob_matches,
+            limit,
             stat,
             target_stat,
             access,
@@ -662,7 +661,7 @@ async def _is_directory(
 async def resolve_glob_with(
     readdir: Callable[..., Any],
     paths: Sequence[PathSpec],
-    cap: int | None = None,
+    limit: int = -1,
     stat: Callable[..., Any] | None = None,
     target_stat: LinkTargetStat | None = None,
     access: SessionAccess | None = None,
@@ -689,7 +688,9 @@ async def resolve_glob_with(
         readdir (Callable): readdir ``readdir(path)`` returning absolute
             virtual paths.
         paths (Sequence[PathSpec]): specs to resolve.
-        cap (int | None): cap on matches per pattern before truncation.
+        limit (int): the most matches one pattern may have; past it the
+            glob is refused (``GlobLimitError``), not cut short. -1 for no
+            cap.
         stat (Callable | None): stat ``stat(path)``;
             without it a trailing slash cannot drop the files it matched.
         target_stat (LinkTargetStat | None): the namespace's stat of what
@@ -751,14 +752,8 @@ async def resolve_glob_with(
                     )
                 )
                 continue
-            if cap is not None and len(matched) > cap:
-                logger.warning(
-                    "%s: %d matches exceeds limit (%d), truncating",
-                    unmark_globs(p.directory),
-                    len(matched),
-                    cap,
-                )
-                matched = matched[:cap]
+            if 0 <= limit < len(matched):
+                raise GlobLimitError(unmark_globs(p.raw_path), limit)
             if follow is not None and is_word_shaped(p):
                 matched = await _follow_matches(follow, matched)
             result.extend(matched)

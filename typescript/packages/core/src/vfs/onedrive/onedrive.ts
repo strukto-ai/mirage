@@ -30,6 +30,7 @@ import { copy } from '../../core/onedrive/copy.ts'
 import { truncate } from '../../core/onedrive/truncate.ts'
 import { filesContaining } from '../../core/msgraph/search.ts'
 import { driveLoc } from '../../core/onedrive/client.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface OneDriveVFSState {
   type: string
@@ -52,9 +53,12 @@ export class OneDriveVFS extends BaseVFS {
   override readonly accessor: OneDriveAccessor
   private readonly config: OneDriveConfig
 
+  override readonly fullScanLimit: number
+
   constructor(config: OneDriveConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.accessor = new OneDriveAccessor(config)
   }
 
@@ -144,7 +148,7 @@ export class OneDriveVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     const config = this.accessor.config
     const scopes = [path].map((d) => [d, driveLoc(config, d.vfsPath)] as const)
     return filesContaining(config, scopes, text)

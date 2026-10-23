@@ -30,6 +30,7 @@ import { DIFY_TREE } from '../../core/dify/tree.ts'
 import { read, readStream } from '../../core/dify/read.ts'
 import { stat } from '../../core/dify/stat.ts'
 import { searchMany } from '../../core/dify/search.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface DifyVFSOptions {
   config: DifyConfig
@@ -55,9 +56,11 @@ export class DifyVFS extends BaseVFS {
   readonly config: DifyConfigResolved
   override readonly accessor: DifyAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: DifyVFSOptions | DifyConfig) {
     super()
     const config = 'config' in options ? options.config : options
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.config = resolveDifyConfig(config)
     this.accessor = new DifyAccessor(this.config)
   }

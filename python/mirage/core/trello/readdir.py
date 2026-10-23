@@ -272,7 +272,7 @@ async def _list_cards(
         extra: dict[str, Any] = {
             "json_size": len(to_json_bytes(normalize_card(card)))
         }
-        if accessor.config.content_search:
+        if accessor.config.full_scan_limit >= 0:
             extra["unsearched"] = unsearched_text(card)
         rows.append(
             CARD(

@@ -28,6 +28,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/postgres/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { PostgresStore } from './store.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface PostgresVFSOptions {
   config: PostgresConfig
@@ -49,11 +50,13 @@ export class PostgresVFS extends PostgresVFSBase {
   readonly store: PostgresStore
   override readonly accessor: PostgresAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: PostgresVFSOptions | PostgresConfig) {
     super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolvePostgresConfig(config)
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.store = new PostgresStore(this.config)
     this.accessor = new PostgresAccessor(this.store, this.config)
     this.prompt = PROMPT.replace('{prefix}', prefix ?? '')

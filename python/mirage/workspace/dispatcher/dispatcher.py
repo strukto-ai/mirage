@@ -125,6 +125,7 @@ from mirage.utils.path import (
 from mirage.utils.ranges import slice_window
 from mirage.utils.remnants import remove_remnants, visible_below
 from mirage.utils.stat_view import ident
+from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect, Target, VfsCall
@@ -362,6 +363,17 @@ def _visible_answer(
     if name == "files_containing":
         return [hit for hit in result if path_visible(vis, hit.virtual)]
     return [hit for hit in result if path_visible(vis, hit[0])]
+
+
+def _guards_scans(vfs: BaseVFS) -> bool:
+    """Whether a VFS may refuse a command that reads every file under a
+    directory: it defines ``before_full_scan``, or sets a
+    ``full_scan_limit`` the default one holds it to.
+
+    Args:
+        vfs (BaseVFS): the mount's VFS.
+    """
+    return vfs.supports("before_full_scan") or vfs.full_scan_limit >= 0
 
 
 def _answer_paths(result: Any) -> list[str] | None:
@@ -1168,7 +1180,7 @@ class Dispatcher:
         await self._prepare(caller)
         # With no scan guard on any mount, no path reaches one to ask.
         if name == "before_full_scan" and not any(
-            m.vfs.supports(name) for m in self._namespace.registry.mounts()
+            _guards_scans(m.vfs) for m in self._namespace.registry.mounts()
         ):
             return None, IOResult()
         call = await self._walk(
@@ -1220,7 +1232,7 @@ class Dispatcher:
         # A mount with no scan guard has nothing to refuse, so a command
         # asks every mount it walks and only a guard costs a call.
         if name == "before_full_scan" and (
-            mount is None or not mount.vfs.supports(name)
+            mount is None or not _guards_scans(mount.vfs)
         ):
             return None, IOResult()
         # The cache stage answers first where the file cache decides: a
@@ -2167,6 +2179,13 @@ class Dispatcher:
                 mount, call.path
             ):
                 result = None
+            elif call.name == "before_full_scan" and not mount.vfs.supports(
+                call.name
+            ):
+                await mount.vfs.before_full_scan(
+                    call.path, files=await self._visible_files(mount, call)
+                )
+                result = None
             else:
                 if call.name == "before_full_scan":
                     kwargs["files"] = await self._visible_files(mount, call)
@@ -2260,21 +2279,77 @@ class Dispatcher:
         """How many files the session sees under a scan guard's path.
 
         Counted off the mount's ``read_tree`` with every hidden file
-        dropped, so a guard's refusal never counts what the session
-        cannot see; None when the mount cannot answer the subtree in one
-        call.
+        dropped, and every file a nested mount covers, so a guard's
+        refusal never counts what the command would not read. Without
+        one, or where it cannot read the whole tree,
+        a mount with a ``full_scan_limit`` is walked listing by listing,
+        hidden entries skipped, until one file past the limit; a folder
+        below the path it cannot open counts nothing, as the command
+        reports it itself. None otherwise.
 
         Args:
             mount (MountEntry): the mount serving the path.
             call (_Call): the guard's call.
         """
-        if not mount.vfs.supports("read_tree"):
+        root = call.path.virtual
+        own = mount.prefix.rstrip("/") + "/"
+        covered = tuple(
+            prefix
+            for prefix in (
+                m.prefix.rstrip("/") + "/"
+                for m in self._namespace.registry.mounts()
+            )
+            if prefix != own and prefix.startswith(own)
+        )
+
+        def counted(virtual: str) -> bool:
+            return path_visible(call.vis, virtual) and not (
+                virtual.rstrip("/") + "/"
+            ).startswith(covered)
+
+        if mount.vfs.supports("read_tree"):
+            try:
+                found = await mount.call("read_tree", root)
+            except OSError as exc:
+                logger.debug("scan count of %s walks instead: %s", root, exc)
+                found = None
+            if found is not None:
+                base = root.rstrip("/")
+                return sum(
+                    st.type is FileType.FILE
+                    for key, st in found.items()
+                    if counted(f"{base}/{key}")
+                )
+        limit = mount.vfs.full_scan_limit
+        if limit < 0:
             return None
-        found = await mount.call("read_tree", call.path.virtual)
-        if found is None:
-            return None
-        visible = _visible_answer("read_tree", call.vis, call.path, found)
-        return sum(st.type is FileType.FILE for st in visible.values())
+        count = 0
+        pending = [root]
+        while pending and count <= limit:
+            directory = pending.pop()
+            try:
+                entries = await mount.call("readdir", directory)
+            except OSError as exc:
+                if directory == root:
+                    raise
+                logger.debug("scan count skips %s: %s", directory, exc)
+                continue
+            for entry in entries:
+                child = entry.rstrip("/")
+                if not counted(child):
+                    continue
+                try:
+                    row = await mount.call("stat", child)
+                except OSError as exc:
+                    logger.debug("scan count skips %s: %s", child, exc)
+                    continue
+                if row.type is FileType.DIRECTORY:
+                    pending.append(child)
+                elif row.type is FileType.FILE:
+                    count += 1
+                    if count > limit:
+                        break
+        return count
 
     async def _streams(self, call: _Call, mount: MountEntry) -> bool:
         """Whether a read is answered as it is pulled.

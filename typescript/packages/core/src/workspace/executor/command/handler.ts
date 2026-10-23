@@ -19,7 +19,7 @@ import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
-import { CommandTimeoutError } from '../../../errors/types.ts'
+import { CommandTimeoutError, GlobLimitError } from '../../../errors/types.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { OutputStream, closeQuietly } from '../../../io/stream.ts'
@@ -106,10 +106,20 @@ function aborted(err: unknown): boolean {
 }
 
 /**
+ * What a command given a glob past its mount's `fullScanLimit` says: exec(2)'s
+ * refusal of an argument list too long, which bash reports with exit 126, then
+ * the limit's own line. Mirrors Python's `argument_list_too_long`.
+ */
+export function argumentListTooLong(command: string, reason: string): Uint8Array {
+  return encodeText(`${command}: Argument list too long\n${command}: ${reason}\n`)
+}
+
+/**
  * A mount command's failure, worded like GNU (`prog: message`), a file
  * error with the path as typed. Mirrors Python's `_mount_failure`.
  */
 function mountFailure(name: string, paths: readonly PathSpec[], err: unknown): Failure {
+  if (err instanceof GlobLimitError) return [null, argumentListTooLong(name, err.message), 126]
   const code = err instanceof UsageError ? err.exitCode : readFailExitCode(name, err)
   return [null, formatFsError(name, err, paths), code]
 }

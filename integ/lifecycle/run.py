@@ -114,6 +114,32 @@ class ListedRAMVFS(RAMVFS):
 register_vfs("listed-ram", ListedRAMVFS)
 
 
+class LimitedRAMVFS(RAMVFS):
+    """A local fixture holding a full scan to ``full_scan_limit`` files."""
+
+    def __init__(
+        self, files: dict[str, str] | None = None, full_scan_limit: int = -1
+    ) -> None:
+        super().__init__(full_scan_limit=full_scan_limit)
+        files = files or {}
+        self.load_state(
+            {
+                "files": {path: data.encode() for path, data in files.items()},
+                "dirs": sorted(
+                    {"/"}
+                    | {
+                        "/".join(path.split("/")[:depth])
+                        for path in files
+                        for depth in range(2, path.count("/") + 1)
+                    }
+                ),
+            }
+        )
+
+
+register_vfs("limited-ram", LimitedRAMVFS)
+
+
 class TrackedStreamVFS(CachedRAMVFS):
     """A chunked source whose pull and close counts are shared corpus assertions."""
 

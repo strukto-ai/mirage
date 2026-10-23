@@ -43,6 +43,7 @@ console.log(res.stdoutText)
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code> | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'auto'` | Region requests are signed for; R2 addresses a bucket by account, not by region. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. |
 | <code style={{ whiteSpace: 'nowrap' }}>accountId</code> | Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required. |
@@ -69,6 +70,7 @@ The browser `R2VFS` is secret-free, your backend signs each operation using your
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 | <code style={{ whiteSpace: 'nowrap' }}>accountId</code> | Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set. |
 
 Fields marked secret are redacted in snapshots.
@@ -177,3 +179,13 @@ Object-scoped tokens (`Object Read & Write`) cannot edit CORS. If the script ret
 </Warning>
 
 See the [R2 VFS](/python/vfs/r2) docs for the equivalent Python wiring.
+
+## Integration
+
+What R2 answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On R2 |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |

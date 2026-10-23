@@ -17,11 +17,7 @@ from dataclasses import dataclass
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import github_get, github_request_response
-from mirage.core.github.constants import (
-    SCOPE_ERROR,
-    SCOPE_WARN,
-    SEARCH_PAGE_SIZE,
-)
+from mirage.core.github.constants import SCOPE_WARN, SEARCH_PAGE_SIZE
 from mirage.core.github.pushdown import (
     count_scope_files,
     search_safe,
@@ -191,17 +187,12 @@ async def files_containing(
     (``narrow_paths``, which adds back every file the search never
     indexes). An empty answer is not trusted either: the index trails
     a push. A file with a binary extension is left out: the walk reads
-    one only under ``-a``, and then whatever the answer says. Each file
-    is one blob request, so an answer of more than ``SCOPE_ERROR`` files
-    is refused as a scan that large would be.
+    one only under ``-a``, and then whatever the answer says.
 
     Args:
         accessor (GitHubAccessor): backend handle.
         text (str): the whole word grep searches for.
         under (list[PathSpec]): the directories walked.
-
-    Raises:
-        ValueError: the answer names more than ``SCOPE_ERROR`` files.
     """
     if (
         not search_safe(text)
@@ -218,38 +209,7 @@ async def files_containing(
         for p in narrowed
         if get_extension(p.virtual) not in BINARY_EXTENSIONS
     ]
-    if len(texts) > SCOPE_ERROR:
-        raise ValueError(
-            f"{len(texts)} files in scope and code search could not "
-            "narrow them; narrow the path"
-        )
     return texts or None
-
-
-async def before_full_scan(
-    accessor: GitHubAccessor,
-    path: PathSpec,
-    files: int | None,
-) -> None:
-    """Refuse a scan of more than ``SCOPE_ERROR`` files.
-
-    Each file is one blob request, so a scope that large is refused
-    rather than read.
-
-    Args:
-        accessor (GitHubAccessor): backend handle.
-        path (PathSpec): the directory about to be walked.
-        files (int | None): the files the session sees under ``path``,
-            counted by the dispatcher; None counts the tree.
-
-    Raises:
-        ValueError: the scope holds more than ``SCOPE_ERROR`` files.
-    """
-    count = (
-        files if files is not None else await _scope_files(accessor, [path])
-    )
-    if count > SCOPE_ERROR:
-        raise ValueError(f"{count} files in scope, narrow the path")
 
 
 async def search(

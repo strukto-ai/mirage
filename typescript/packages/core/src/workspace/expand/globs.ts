@@ -19,6 +19,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
+import { GlobLimitError } from '../../errors/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
@@ -35,7 +36,7 @@ import {
 import { CycleError, parent } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
+import { DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
 import type { SessionState } from '../session/session.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -88,22 +89,23 @@ async function statOf(dispatch: DispatchFn, path: PathSpec): Promise<FileStat> {
 
 /**
  * Expand pattern specs on one mount, one at a time, through the dispatcher's
- * listing and stat, capped at the mount's match limit. A mount that lists
- * nothing, or no dispatcher (a registry no workspace wired one into), leaves
- * every word as typed. Each word is keyed below the mount before the walk
- * reads it. Mirrors Python's expand_glob.
+ * listing and stat, refused past `limit` matches (-1 for any). A mount that
+ * lists nothing, or no dispatcher (a registry no workspace wired one into),
+ * leaves every word as typed. Each word is keyed below the mount before the
+ * walk reads it. Mirrors Python's expand_glob.
  */
 export async function expandGlob(
   dispatch: DispatchFn | null,
   mount: MountEntry,
   paths: readonly PathSpec[],
+  limit: number,
   access?: SessionAccess,
 ): Promise<PathSpec[]> {
   if (dispatch === null || !mount.answers('readdir')) return [...paths]
   const prefix = rstripSlash(mount.prefix)
   const resolve = makeResolveGlob(
     (p) => listing(dispatch, p),
-    mount.vfs.maxGlobMatches,
+    limit,
     (p) => statOf(dispatch, p),
     undefined,
     access,
@@ -265,7 +267,9 @@ async function levelMatches(
       resolved: false,
     })
     try {
-      const matches = await expandGlob(registry.dispatchFor(access), owner, [spec], access)
+      // One step of a walk is not the word's expansion, which
+      // resolveGlobs limits once the walk is done.
+      const matches = await expandGlob(registry.dispatchFor(access), owner, [spec], -1, access)
       // A descent step yields children, so a match that is the parent
       // itself is not one. A backend asked to list a path that is really
       // a file answers with that file, which walked back out as a
@@ -570,6 +574,7 @@ export async function resolveGlobs(
             registry.dispatchFor(access),
             mount,
             [withPrefix.dir],
+            -1,
             access,
           )
           resolved = mergeNamespace(own, extra, directory, registry, mount)
@@ -580,6 +585,19 @@ export async function resolveGlobs(
             if (await isDirectory(registry, mount, links, p.virtual, access)) kept.push(p)
           }
           resolved = kept
+        }
+        // Each match counts against the mount serving it, as a word can
+        // reach into a mount below its own or follow a link into another.
+        const counts = new Map<string, number>()
+        for (const match of resolved) {
+          const served = links !== null ? links.followParent(match.virtual) : match.virtual
+          const owner = mountOf(registry, served, mount)
+          const count = (counts.get(owner.prefix) ?? 0) + 1
+          counts.set(owner.prefix, count)
+          const limit = owner.vfs.fullScanLimit
+          if (limit >= 0 && count > limit) {
+            throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
+          }
         }
         if (resolved.length === 0) {
           // bash's three answers to a zero-match glob: the literal word
@@ -613,8 +631,9 @@ export async function resolveGlobs(
           }
         }
       } catch (err) {
-        // A failglob refusal is fatal and propagates; an ordinary
-        // resolution failure keeps the literal word.
+        // A failglob refusal is fatal and propagates, as does a glob past
+        // the mount's limit; an ordinary resolution failure keeps the
+        // literal word.
         if (err instanceof ExitSignal) throw err
         result.push(typed)
       }

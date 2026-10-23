@@ -33,7 +33,7 @@ ws = Workspace({"/gslides": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
 | <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Drive full-text search, which searches a file's text, not the JSON the mount renders. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gslides end */}
@@ -187,14 +187,22 @@ Standard commands available on the mounted Google Slides tree:
 | `rm`                                | Delete a presentation (`MountMode.WRITE`)  |
 
 
-## grep and rg
+## Integration
 
-With `content_search=True` (YAML `content_search: true`), `grep -rw` and
+What Google Slides answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Google Slides |
+| --- | --- |
+| `grep -r`, `rg` | Drive full-text search, for whole words |
+| Can miss | Words only in non-text values (fonts, links, layout names, ids) or split by styling |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Drive search |
+
+`grep -rw` and
 `rg -w` read only the presentations Drive full-text search names; every one is
 read when the search fails or finds nothing. A word the rendered JSON may hold
 whatever the text says is never asked: one with a digit, a property name or
 enum value of the Slides API (`pageElements`, `SLIDE`), or a word every
-rendering carries (`https`, `arial`). It is off by default: Drive indexes a
+rendering carries (`https`, `arial`). `full_scan_limit: -1` reads every file instead, since Drive indexes a
 write some time after it lands and searches the file's text, so one whose JSON
 holds the word only in another value (a font, a link or image address, a layout
 name or an id), or only as part of a word styling splits into text runs

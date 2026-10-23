@@ -32,7 +32,6 @@ DuEntries = tuple[list[tuple[str, int]], int]
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
 
-TRUNCATED_NOTE = "du: walk stopped early: the reported sizes are incomplete"
 _DEPTH_HEX = re.compile(r"^[+-]?0[xX][0-9a-fA-F]+$")
 _DEPTH_OCT = re.compile(r"^[+-]?0[0-7]*$")
 _DEPTH_DEC = re.compile(r"^[+-]?[1-9][0-9]*$")
@@ -627,7 +626,7 @@ async def du(
     compute_entries: ComputeEntries,
     flags: DuFlags,
     missing: Sequence[tuple[str, str]] = (),
-    truncated: Callable[[], bool] | None = None,
+    stopped: Callable[[], Sequence[str]] | None = None,
     mounts: MountView | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
@@ -647,8 +646,9 @@ async def du(
         missing (Sequence[tuple[str, str]]): operands that could not be
             read, as
             typed. GNU reports each and exits 1 but still prints the rest.
-        truncated (Callable[[], bool] | None): read after the walks to ask
-            whether any of them hit its entry cap.
+        stopped (Callable[[], Sequence[str]] | None): read after the
+            walks for where one ran past ``full_scan_limit``, each line
+            without the command's name.
         mounts (MountView | None): where the mount boundaries are; leaves
             under a descendant mount's root are shadowed and dropped from
             every row and total (see ``drop_shadowed``).
@@ -717,8 +717,8 @@ async def du(
             + (f": {detail}" if detail is not None else "")
         )
         exit_code = 1
-    if truncated is not None and truncated():
-        notes.append(TRUNCATED_NOTE)
+    for line in stopped() if stopped is not None else ():
+        notes.append(f"du: {line}")
         exit_code = 1
     stderr = ("\n".join(notes) + "\n").encode() if notes else b""
     return DuOutput(format_records(lines), stderr, exit_code, records)
@@ -746,7 +746,7 @@ async def du_generic(
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     compute_size: ComputeSize,
     compute_entries: ComputeEntries,
-    truncated: Callable[[], bool] | None = None,
+    stopped: Callable[[], Sequence[str]] | None = None,
     unreadable: Callable[[], Sequence[str]] | None = None,
     directories: Callable[[], Sequence[str]] | None = None,
     inaccessible: Callable[[], Sequence[tuple[str, str | None]]] | None = None,
@@ -776,7 +776,8 @@ async def du_generic(
             Raises when an operand cannot be read.
         compute_size (ComputeSize): Recursive byte size of one operand.
         compute_entries (ComputeEntries): Per-file breakdown.
-        truncated (Callable[[], bool] | None): Whether the walk was cut.
+        stopped (Callable[[], Sequence[str]] | None): Where a walk ran
+            past ``full_scan_limit``.
         unreadable (Callable[[], Sequence[str]] | None): The directories
             the walk could not open, read after the walks.
         directories (Callable[[], Sequence[str]] | None): Every directory
@@ -804,7 +805,7 @@ async def du_generic(
         compute_entries=compute_entries,
         flags=flags,
         missing=missing,
-        truncated=truncated,
+        stopped=stopped,
         unreadable=unreadable,
         directories=directories,
         mounts=mounts_of(ctx),

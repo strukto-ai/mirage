@@ -20,7 +20,7 @@ import type { FsCondition } from '../../../../errors/types.ts'
 // nor the generic command failure (1) the CLI dispatcher applies to a thrown
 // handler error. Leaves therefore return this code themselves rather than
 // throwing into the dispatcher's catch-all.
-const FATAL_EXIT = 128
+export const FATAL_EXIT = 128
 // git's parse-options refuses a bad option with 129, not the 128 it uses for a
 // fatal. Both appear below, which is git's own split rather than ours:
 // `git log --zzz` is 128 and `git diff --zzz` is 129.

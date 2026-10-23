@@ -269,6 +269,9 @@ export function findGeneric(
   // Under -L, each directory the walk reached again and the one above it
   // that it repeats.
   loops?: () => [string, string][],
+  // Where a walk ran past fullScanLimit, each line without the command's
+  // name.
+  stopped?: () => string[],
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   const nameFlag = parsed.name
@@ -491,6 +494,7 @@ export function findGeneric(
             `is part of the same file system loop as '${respellOne(above, root.virtual, root.rawPath)}'.`,
         )
       }
+      for (const line of stopped?.() ?? []) missing.push(`find: ${line}`)
       const rootKey = rstripSlash(root.virtual) || '/'
       const rootMatches: string[] = []
       for (const key of keys) {

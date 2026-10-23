@@ -41,10 +41,10 @@ import { FlagView, flagOccurrences } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { isFsError } from '../../../../errors/fs.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
-import { beforeFullScan } from '../../utils/tree.ts'
-import { walkErrorLine } from '../../rg_scan.ts'
+import { ScanBudget } from '../../utils/tree.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
+import { walkErrorLine, type Haystack } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
 import { formatTotals, openRg } from '../../rg_stream.ts'
 import { formatRecords } from '../../utils/output.ts'
@@ -150,20 +150,28 @@ export async function runSearch(
   const root = paths[0] ?? PathSpec.fromStrPath(cwd)
   async function* scopes(): AsyncIterable<OwnedScope> {
     if (planned && walk !== null) {
-      // The plan hands each file over alone, which no search narrows, so
-      // every directory walked is read whole; a listing reads none.
-      for (const path of rg.listFiles || rg.typeList ? [] : paths) {
-        let info: FileStat
-        try {
-          info = await stat(path.virtual)
-        } catch (err) {
-          if (!isFsError(err)) throw err
-          console.debug(`rg plan ${path.virtual}: ${String(err)}`)
-          continue
-        }
-        if (info.type === FileType.DIRECTORY) await beforeFullScan(dispatch, path, name)
-      }
       const warnings: string[] = []
+      const stopped = new Set<string>()
+      const mounts = mountView(vfs) ?? null
+      const budgets = new Map(paths.map((p) => [p.virtual, new ScanBudget(p, mounts)]))
+      const reported = new Set<string>()
+      const listing = rg.listFiles
+      // The plan hands each file over alone, which no search narrows, so
+      // each file counts here against the mount serving it; a listing reads
+      // none.
+      const charged = (h: Haystack): boolean => {
+        if (h.spec !== null || listing) return true
+        const top = paths.find((p) => h.virtual.startsWith(`${rstripSlash(p.virtual)}/`))
+        const budget = top === undefined ? undefined : budgets.get(top.virtual)
+        if (top === undefined || budget === undefined || budget.spend(h.virtual)) return true
+        for (const line of budget.stopped) {
+          if (reported.has(line)) continue
+          reported.add(line)
+          warnings.push(`rg: ${line}`)
+        }
+        if (!budget.opens(top.virtual)) stopped.add(top.virtual)
+        return false
+      }
       const links = linkView(vfs)
       const resolver = links === undefined ? null : new LinkResolver(links, dispatch, cwd)
       const found = haystacks(
@@ -174,16 +182,18 @@ export async function runSearch(
         walk,
         rg,
         warnings,
-        rg.oneFileSystem ? (mountView(vfs) ?? null) : null,
+        rg.oneFileSystem ? (mounts ?? null) : null,
         resolver,
+        stopped,
       )
       if (rg.sort !== null && rg.sort !== 'none' && !(rg.sort === 'path' && !rg.sortReverse)) {
         const listed = []
         for await (const h of found) listed.push(h)
+        const kept = sortHaystacks(listed, rg).filter(charged)
         for (const message of warnings)
           yield { path: root, walked: false, diagnostic: message + '\n' }
         warnings.length = 0
-        for (const h of sortHaystacks(listed, rg))
+        for (const h of kept)
           yield {
             path:
               h.spec ??
@@ -199,9 +209,11 @@ export async function runSearch(
         return
       }
       for await (const h of found) {
+        const admitted = charged(h)
         for (const message of warnings)
           yield { path: root, walked: false, diagnostic: message + '\n' }
         warnings.length = 0
+        if (!admitted) continue
         yield {
           path:
             h.spec ??

@@ -3069,10 +3069,60 @@ class SearchedRAM extends RAMVFS {
 class TreeCountingRAM extends RAMVFS {
   trees = 0
 
+  constructor() {
+    super({ fullScanLimit: -1 })
+  }
+
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     this.trees += 1
     return super.readTree(path)
   }
+}
+
+// A RAM mount held to a `fullScanLimit` with no guard of its own. Twin of
+// Python's LimitedRAM.
+class LimitedRAM extends RAMVFS {
+  constructor() {
+    super({ fullScanLimit: 2 })
+  }
+}
+
+// The same mount with no tree read, so a scan is counted by listing each
+// directory. Twin of Python's ListedRAM.
+class ListedRAM extends LimitedRAM {
+  readonly listed: string[] = []
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    this.listed.push(path.virtual)
+    return super.readdir(path)
+  }
+}
+Object.defineProperty(ListedRAM.prototype, 'readTree', {
+  value: (BaseVFS.prototype as unknown as Record<string, unknown>).readTree,
+})
+
+// The limited mount handing each file's matching lines over itself. Twin of
+// Python's LinedRAM.
+class LinedRAM extends LimitedRAM {
+  readonly asked: string[] = []
+
+  override async linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {
+    this.asked.push(path.virtual)
+    const data = new TextDecoder().decode(await this.read(path))
+    const lines = data.split(/(?<=\n)/).filter((line) => line.includes(text))
+    return new TextEncoder().encode(lines.join(''))
+  }
+}
+
+function limited(cls: typeof LimitedRAM, files: number): LimitedRAM {
+  const vfs = new cls()
+  vfs.store.dirs.add('/d')
+  vfs.store.dirs.add('/d/secret')
+  vfs.store.files.set('/d/secret/b.txt', new TextEncoder().encode('b\n'))
+  for (let i = 0; i < files - 1; i++) {
+    vfs.store.files.set(`/d/a${String(i)}.txt`, new TextEncoder().encode('a\n'))
+  }
+  return vfs
 }
 
 function searched(): SearchedRAM {
@@ -3322,6 +3372,322 @@ describe('a hide filters a one-call read', () => {
     try {
       const answer = await ws.dispatch('before_full_scan', '/ram/d')
       expect([answer, vfs.trees]).toEqual([null, 0])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_search_past_the_full_scan_limit_stops_there.
+  it.each([LimitedRAM, ListedRAM])('stops a search past the full scan limit (%o)', async (cls) => {
+    const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
+    try {
+      const out = await ws.shell('grep -r a /ram/d')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        '/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n',
+        'grep: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+        2,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_listing_past_the_full_scan_limit_stops_there.
+  it.each(
+    [LimitedRAM, ListedRAM].flatMap((cls) =>
+      (
+        [
+          ['find /ram/d', '/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n', 1],
+          ['ls -R /ram/d', '/ram/d:\na0.txt\na1.txt\n', 1],
+          ['tree /ram/d', '/ram/d\n|-- a0.txt\n`-- a1.txt\n\n1 directory, 2 files\n', 2],
+          ['du -a /ram/d', '2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n', 1],
+        ] as const
+      ).map(([line, out, code]) => [cls, line, out, code] as const),
+    ),
+  )('stops a listing past the full scan limit (%o, %s)', async (cls, line, out, code) => {
+    const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
+    try {
+      const result = await ws.shell(line)
+      const name = line.split(' ')[0] ?? ''
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
+        [out, `${name}: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n`, code],
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_listing_across_mounts_stops_at_each_mounts_limit.
+  it('stops a listing across mounts at each mount limit', async () => {
+    const ws = new Workspace(
+      { '/a': limited(LimitedRAM, 3), '/b': limited(LimitedRAM, 3) },
+      { shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell('ls -R /a/d /b/d')
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
+        [
+          '/a/d:\na0.txt\na1.txt\n\n/b/d:\na0.txt\na1.txt\n',
+          'ls: /a/d: stopped after 2 files (full_scan_limit); narrow the path\n' +
+            'ls: /b/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+          1,
+        ],
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_glob_past_the_full_scan_limit_is_refused.
+  const refused = '/ram/d/*: matches more than 2 files (full_scan_limit); narrow the path'
+  it.each([
+    ['cat /ram/d/*; echo $?', '126\n', `cat: Argument list too long\ncat: ${refused}\n`],
+    ['echo /ram/d/*; echo $?', '126\n', `echo: Argument list too long\necho: ${refused}\n`],
+    ['for f in /ram/d/*; do echo $f; done; echo after', '', `bash: ${refused}\n`],
+    ['cat /ram/d/a*', 'a\na\n', ''],
+    ['echo /ram/d/*/b.txt', '/ram/d/secret/b.txt\n', ''],
+  ])('refuses a glob past the full scan limit: %s', async (line, out, err) => {
+    const ws = new Workspace(
+      { '/ram': limited(LimitedRAM, 3) },
+      { shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell(line)
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([out, err])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_named_file_counts_nothing_against_a_walk.
+  it('counts a named file nothing against a walk', async () => {
+    const vfs = new LimitedRAM()
+    vfs.store.dirs.add('/d')
+    for (let i = 0; i < 2; i++) {
+      vfs.store.files.set(`/d/a${String(i)}.txt`, new TextEncoder().encode('a\n'))
+    }
+    const ws = new Workspace({ '/ram': vfs }, { shellParser: await getTestParser() })
+    try {
+      const out = await ws.shell('grep -r a /ram/d /ram/d/a0.txt')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        '/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n/ram/d/a0.txt:a\n',
+        '',
+        0,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_lines_a_search_hands_over_count_against_the_limit.
+  it('counts the lines a search hands over against the limit', async () => {
+    const vfs = new LinedRAM()
+    vfs.store.dirs.add('/d')
+    for (let i = 0; i < 4; i++) {
+      vfs.store.files.set(`/d/f${String(i)}.txt`, new TextEncoder().encode('hello\nother\n'))
+    }
+    const ws = new Workspace({ '/ram': vfs }, { shellParser: await getTestParser() })
+    try {
+      const out = await ws.shell('grep -r hello /ram/d')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        '/ram/d/f0.txt:hello\n/ram/d/f1.txt:hello\n',
+        'grep: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+        2,
+      ])
+    } finally {
+      await ws.close()
+    }
+    expect(vfs.asked).toEqual(['/ram/d/f0.txt', '/ram/d/f1.txt'])
+  })
+
+  // Twin of test_a_planned_rg_counts_each_file_against_its_own_mount.
+  it.each(['path', 'modified'])(
+    'counts each file of a planned rg against its own mount (--sort %s)',
+    async (sort) => {
+      const top = new RAMVFS({ fullScanLimit: -1 })
+      top.store.files.set('/t.txt', new TextEncoder().encode('hello\n'))
+      const remote = new RAMVFS({ fullScanLimit: 2 })
+      for (let i = 0; i < 4; i++) {
+        remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('hello\n'))
+      }
+      const ws = new Workspace(
+        { '/a': top, '/a/remote': remote },
+        { shellParser: await getTestParser() },
+      )
+      try {
+        const out = await ws.shell(`rg --sort ${sort} -l hello /a`)
+        expect([
+          out.stdoutText.split('\n').filter(Boolean).sort(),
+          new TextDecoder().decode(out.stderr),
+          out.exitCode,
+        ]).toEqual([
+          ['/a/remote/r0.txt', '/a/remote/r1.txt', '/a/t.txt'],
+          'rg: /a/remote: stopped after 2 files (full_scan_limit); narrow the path\n',
+          2,
+        ])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  // Twin of test_a_glob_counts_each_match_against_its_own_mount.
+  it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
+    const top = new RAMVFS({ fullScanLimit: -1 })
+    top.store.dirs.add('/b')
+    top.store.files.set('/b/t.txt', new TextEncoder().encode('t\n'))
+    const remote = new RAMVFS({ fullScanLimit: 2 })
+    for (let i = 0; i < 3; i++) {
+      remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
+    }
+    const ws = new Workspace(
+      { '/a': top, '/a/remote': remote },
+      { shellParser: await getTestParser() },
+    )
+    const refused = '/a/*/*.txt: matches more than 2 files (full_scan_limit); narrow the path'
+    try {
+      const out = await ws.shell(`${command} /a/*/*.txt; echo $?`)
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+        '126\n',
+        `${command}: Argument list too long\n${command}: ${refused}\n`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('counts a glob through a link against the target mount', async () => {
+    const top = new RAMVFS({ fullScanLimit: -1 })
+    top.store.dirs.add('/data')
+    for (let i = 0; i < 3; i++) {
+      top.store.files.set(`/data/t${String(i)}.txt`, new TextEncoder().encode('t\n'))
+    }
+    const ws = new Workspace(
+      { '/a': top, '/a/remote': new RAMVFS({ fullScanLimit: 2 }) },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.shell('ln -s /a/data /a/remote/link')
+      const out = await ws.shell('echo /a/*/*/*.txt; echo $?')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+        '/a/remote/link/t0.txt /a/remote/link/t1.txt /a/remote/link/t2.txt\n0\n',
+        '',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_rm_r_leaves_the_files_a_nested_mount_covers.
+  it.each([LimitedRAM, ListedRAM])(
+    'rm -r leaves the files a nested mount covers (%o)',
+    async (cls) => {
+      const vfs = new cls()
+      vfs.store.dirs.add('/d')
+      vfs.store.dirs.add('/d/sub')
+      vfs.store.files.set('/d/x.txt', new TextEncoder().encode('x\n'))
+      for (let i = 0; i < 3; i++) {
+        vfs.store.files.set(`/d/sub/c${String(i)}.txt`, new TextEncoder().encode('c\n'))
+      }
+      const ws = new Workspace(
+        { '/ram': vfs, '/ram/d/sub': new RAMVFS() },
+        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      )
+      try {
+        const out = await ws.shell('rm -r /ram/d; echo $?')
+        expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+          '1\n',
+          "rm: skipping '/ram/d/sub', since it's on a different device\n",
+        ])
+      } finally {
+        await ws.close()
+      }
+      expect([...vfs.store.files.keys()].sort()).toEqual([
+        '/d/sub/c0.txt',
+        '/d/sub/c1.txt',
+        '/d/sub/c2.txt',
+      ])
+    },
+  )
+
+  // Twin of test_a_copy_past_the_full_scan_limit_is_refused.
+  it.each([LimitedRAM, ListedRAM])('refuses a copy past the full scan limit (%o)', async (cls) => {
+    const ws = new Workspace(
+      { '/ram': limited(cls, 3) },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const out = await ws.shell('tar -cf /ram/d.tar /ram/d')
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        '',
+        'tar: more than 2 files in scope (full_scan_limit); narrow the path\n',
+        1,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_copy_counts_no_file_a_nested_mount_covers.
+  it.each([LimitedRAM, ListedRAM])('counts no file a nested mount covers (%o)', async (cls) => {
+    const vfs = new cls()
+    vfs.store.dirs.add('/d')
+    vfs.store.dirs.add('/d/sub')
+    vfs.store.files.set('/d/x.txt', new TextEncoder().encode('x\n'))
+    for (let i = 0; i < 3; i++) {
+      vfs.store.files.set(`/d/sub/c${String(i)}.txt`, new TextEncoder().encode('c\n'))
+    }
+    const ws = new Workspace(
+      { '/ram': vfs, '/ram/d/sub': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const out = await ws.shell('tar -cf /ram/d.tar /ram/d; tar -tf /ram/d.tar')
+      expect([out.stdoutText, out.exitCode]).toEqual(['ram/d/\nram/d/sub/\nram/d/x.txt\n', 0])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_scan_within_the_full_scan_limit_runs.
+  it.each([LimitedRAM, ListedRAM])('runs a scan within the full scan limit (%o)', async (cls) => {
+    const ws = new Workspace({ '/ram': limited(cls, 2) }, { shellParser: await getTestParser() })
+    try {
+      const out = await ws.shell('grep -rl a /ram/d')
+      expect([out.stdoutText, out.exitCode]).toEqual(['/ram/d/a0.txt\n', 0])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_hidden_file_does_not_count_to_the_full_scan_limit.
+  it.each([LimitedRAM, ListedRAM])(
+    'does not count a hidden file toward the full scan limit (%o)',
+    async (cls) => {
+      const ws = new Workspace({ '/ram': limited(cls, 3) })
+      try {
+        const answer = await runWithSession(secretHidden(), () =>
+          ws.dispatch('before_full_scan', '/ram/d'),
+        )
+        expect(answer).toBeNull()
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  // Twin of test_a_listed_count_stops_one_file_past_the_limit.
+  it('stops a listed count one file past the limit', async () => {
+    const vfs = new ListedRAM()
+    vfs.store.dirs.add('/d')
+    for (let i = 0; i < 6; i++) {
+      vfs.store.dirs.add(`/d/s${String(i)}`)
+      vfs.store.files.set(`/d/s${String(i)}/f.txt`, new TextEncoder().encode('f\n'))
+    }
+    const ws = new Workspace({ '/ram': vfs })
+    try {
+      await expect(ws.dispatch('before_full_scan', '/ram/d')).rejects.toThrow('more than 2 files')
+      expect(vfs.listed).toHaveLength(4)
     } finally {
       await ws.close()
     }

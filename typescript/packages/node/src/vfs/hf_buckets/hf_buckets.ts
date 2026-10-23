@@ -36,9 +36,9 @@ import { create as hfCreate } from '../../core/hf_buckets/create.ts'
 import { mkdir as hfMkdir } from '../../core/hf_buckets/mkdir.ts'
 import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
-import { SCOPE_ERROR } from '../../core/hf_buckets/constants.ts'
 import { tree as hfTree } from '../../core/hf_buckets/readdir.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfBucketsVFSState {
   type: string
@@ -61,8 +61,10 @@ export class HfBucketsVFS extends BaseVFS {
   readonly config: HfBucketsConfig
   override readonly accessor: HfBucketsAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: HfBucketsConfig) {
     super()
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     assertHfRepoId(config.bucket, 'bucket')
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: HfBucketsConfig = { ...config }
@@ -76,8 +78,6 @@ export class HfBucketsVFS extends BaseVFS {
   }
 
   override readonly readsRanges: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return hfTree(this.accessor, path)

@@ -43,6 +43,11 @@ const JaegerConfigSchema = z.object({
     description: 'Seconds to wait for one HTTP request to Jaeger.',
     default: 30,
   }),
+  fullScanLimit: z.number().int().min(-1).optional().meta({
+    description:
+      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+    default: 1000,
+  }),
 })
 
 export type JaegerConfig = ConfigOf<typeof JaegerConfigSchema>

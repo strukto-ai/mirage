@@ -19,12 +19,14 @@ import { concat } from '../../../utils/bytes.ts'
 import { bomOf } from '../../../utils/encoding.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
 import { CycleError, globPrefixMatch } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import type { LinkView } from '../../../view/types.ts'
+import { ScanLimitError } from '../../errors.ts'
+import type { LinkView, MountView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -35,10 +37,8 @@ import { searchTerms } from '../grep_pushdown.ts'
 import { openRg, requiredTerms } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
-import { beforeFullScan } from '../utils/tree.ts'
-import { linksOf, dispatchOf, mountRoot, mountsOf } from '../utils/links.ts'
+import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
 import type { CommandFiles } from './files.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
 
 type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -277,14 +277,48 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
   }
 }
 
-// Let each walked directory's mount refuse a walk that reads every file; the
-// dispatcher passes over a path that is not a directory.
-async function fullScan(
-  dispatch: DispatchFn | undefined,
-  dirs: PathSpec[],
-  name: string,
-): Promise<void> {
-  for (const scope of dirs) await beforeFullScan(dispatch, scope, name)
+/**
+ * Reads that stop each walk at its mount's `fullScanLimit`. A file counts
+ * once against the deepest walked operand above it, so a file named as an
+ * operand counts nothing; the one past the limit throws ScanLimitError in its
+ * place, and grep or rg stops walking the directory. The charge is returned
+ * too, for a file whose matching lines the mount's search hands over in place
+ * of a read; a file the search rules out is never read, so it costs nothing.
+ * Mirrors Python's `capped_reads`.
+ */
+export function cappedReads(
+  stream: Reads,
+  operands: readonly PathSpec[],
+  mounts: MountView | undefined,
+): [Reads, (p: PathSpec) => void] {
+  const limits = new Map<string, number>()
+  for (const d of operands) limits.set(d.virtual, mounts?.fullScanLimit?.(d.virtual) ?? -1)
+  const capped = operands
+    .filter((d) => (limits.get(d.virtual) ?? -1) >= 0)
+    .sort((a, b) => rstripSlash(b.virtual).length - rstripSlash(a.virtual).length)
+  const named = new Set(operands.map((d) => d.virtual))
+  const taken = new Map<string, number>()
+  const charged = new Set<string>()
+  const charge = (p: PathSpec): void => {
+    if (named.has(p.virtual) || charged.has(p.virtual)) return
+    for (const d of capped) {
+      if (!p.virtual.startsWith(`${rstripSlash(d.virtual)}/`)) continue
+      const limit = limits.get(d.virtual) ?? -1
+      const count = taken.get(d.virtual) ?? 0
+      if (count >= limit) throw new ScanLimitError(d, limit)
+      taken.set(d.virtual, count + 1)
+      charged.add(p.virtual)
+      return
+    }
+  }
+  if (capped.length === 0) return [stream, charge]
+  return [
+    async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      charge(p)
+      yield* stream(p)
+    },
+    charge,
+  ]
 }
 
 /**
@@ -304,8 +338,7 @@ async function fullScan(
  * `isWarm` call), so a file a path rule refuses reports `Permission denied`,
  * and answers null where a coded preVfs policy reaches below a directory, so
  * every file is read and judged.
- * When neither can stand in for a walk, the mount's `beforeFullScan` may
- * refuse it.
+ * Each walk stops at its mount's `fullScanLimit` (`cappedReads`).
  * Mirrors Python's `search_reads`.
  */
 export async function searchReads(
@@ -315,21 +348,20 @@ export async function searchReads(
   texts: string[],
   ctx: Context,
 ): Promise<Reads> {
-  const stream: Reads = files.readStream
-  const narrows = files.answers('files_containing')
-  const searchable = mountsOf(ctx)?.searchable((paths[0] ?? ctx.cwd).virtual) ?? null
-  const lines = files.answers('lines_containing') ? files.linesContaining : undefined
-  const links = linksOf(ctx)
-  const home = mountRoot(ctx)
   const fl = new FlagView(ctx.flags, specOf(name))
-  if (paths.length === 0 || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
-    return stream
+  const [first] = paths
+  if (first === undefined || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
+    return files.readStream
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
-  if (!narrows && lines === undefined) {
-    if (walked) await fullScan(dispatchOf(ctx), paths, name)
-    return stream
-  }
+  const mounts = mountsOf(ctx)
+  const [stream, charge] = cappedReads(files.readStream, walked ? paths : [], mounts)
+  const narrows = files.answers('files_containing')
+  const lines = files.answers('lines_containing') ? files.linesContaining : undefined
+  if (!narrows && lines === undefined) return stream
+  const searchable = mounts?.searchable(first.virtual) ?? null
+  const links = linksOf(ctx)
+  const home = mountRoot(ctx)
   let terms: SearchTerms | null
   try {
     terms =
@@ -342,10 +374,7 @@ export async function searchReads(
     return stream
   }
   const dirs = walked ? await directories(files, paths) : []
-  if (terms === null) {
-    await fullScan(dispatchOf(ctx), dirs, name)
-    return stream
-  }
+  if (terms === null) return stream
   const asked = terms
   const dropsMark = name === 'rg' && encodingFlag(fl) !== 'none'
   let hits: Set<string> | null = null
@@ -364,23 +393,10 @@ export async function searchReads(
       hits = new Set(answers.flatMap((answer) => answer.map((hit) => hit.vfsPath.toLowerCase())))
     }
   }
-  if (hits === null && lines === undefined) {
-    await fullScan(dispatchOf(ctx), dirs, name)
-    return stream
-  }
-  if (hits !== null && asked.readsBinary) {
-    await fullScan(dispatchOf(ctx), dirs, name)
-  }
+  if (hits === null && lines === undefined) return stream
   const dirNames = new Set(dirs.map((p) => p.virtual))
   const named = new Set(paths.map((p) => p.virtual).filter((v) => !dirNames.has(v)))
   const found = hits
-  // Asked once; a refusal then stands for every file no search answered.
-  let scan: Promise<void> | null = null
-  const readUnanswered = (): Promise<void> => {
-    if (found !== null) return Promise.resolve()
-    scan ??= fullScan(dispatchOf(ctx), dirs, name)
-    return scan
-  }
   const narrowed = async (path: PathSpec): Promise<ByteSource | null> => {
     // A hit and a searchable glob are keyed below the mount, as its backend
     // answers them.
@@ -395,20 +411,16 @@ export async function searchReads(
       (searchable === null || searchable.some((glob) => globPrefixMatch(key, glob)))
     if (ruledOut) return (await files.isWarm(path)) ? null : new Uint8Array(0)
     if (lines === undefined || (await files.isWarm(path))) return null
+    charge(path)
     const ignoreCase = { ignoreCase: asked.ignoreCase }
     const [only] = asked.texts
     if (asked.lineOutput && asked.texts.length === 1 && only !== undefined) {
       const found = await lines(path, only, ignoreCase)
-      const answer = found !== null && dropsMark ? await unmarked(found) : found
-      if (answer === null) await readUnanswered()
-      return answer
+      return found !== null && dropsMark ? await unmarked(found) : found
     }
     for (const text of asked.texts) {
       const answer = await lines(path, text, ignoreCase)
-      if (answer === null) {
-        await readUnanswered()
-        return null
-      }
+      if (answer === null) return null
       if (await holdsLine(answer)) return null
     }
     return new Uint8Array(0)

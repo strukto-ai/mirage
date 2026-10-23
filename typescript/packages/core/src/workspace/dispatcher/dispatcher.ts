@@ -217,6 +217,15 @@ function visibleAnswer(
 }
 
 /**
+ * Whether a VFS may refuse a command that reads every file under a
+ * directory: it defines `beforeFullScan`, or sets a `fullScanLimit` the
+ * default one holds it to. Mirrors Python's `_guards_scans`.
+ */
+function guardsScans(vfs: BaseVFS): boolean {
+  return vfs.supports('before_full_scan') || vfs.fullScanLimit >= 0
+}
+
+/**
  * Whether a read-ahead fetches `path`, asked of the mount's index alone: a
  * file its listing sizes within READ_AHEAD_BYTES, and where the store reads a
  * batch, also a file the listing does not size. Mirrors Python's
@@ -827,7 +836,7 @@ export class Dispatcher {
     // With no scan guard on any mount, no path reaches one to ask.
     if (
       name === 'before_full_scan' &&
-      !this.namespace.mountPrefixes().some((p) => this.namespace.mountFor(p).vfs.supports(name))
+      !this.namespace.mountPrefixes().some((p) => guardsScans(this.namespace.mountFor(p).vfs))
     ) {
       return [null, new IOResult()]
     }
@@ -895,7 +904,7 @@ export class Dispatcher {
     const owner = this.namespace.tryMountFor(call.path.virtual)
     // A mount with no scan guard has nothing to refuse, so a command asks
     // every mount it walks and only a guard costs a call.
-    if (name === 'before_full_scan' && !owner?.vfs.supports(name)) {
+    if (name === 'before_full_scan' && (owner === null || !guardsScans(owner.vfs))) {
       return [null, new IOResult()]
     }
     // The cache stage answers first where the file cache decides: a call
@@ -1928,17 +1937,79 @@ export class Dispatcher {
 
   /**
    * How many files the session sees under a scan guard's path, counted off
-   * the mount's `readTree` with every hidden file dropped, so a guard's
-   * refusal never counts what the session cannot see; null when the mount
-   * cannot answer the subtree in one call. Mirrors Python's
+   * the mount's `readTree` with every hidden file dropped, and every file a
+   * nested mount covers, so a guard's refusal never counts what the command
+   * would not read. Without one, or where
+   * it cannot read the whole tree, a mount with a `fullScanLimit` is walked
+   * listing by listing, hidden entries skipped, until one file past the
+   * limit; a folder below the path it cannot open counts nothing, as the
+   * command reports it itself. null otherwise. Mirrors Python's
    * Dispatcher._visible_files.
    */
   private async visibleFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
-    if (!vfs.supports('read_tree')) return null
-    const found = (await mount.call('read_tree', call.path.virtual)) as Map<string, FileStat> | null
-    if (found === null) return null
-    const visible = visibleAnswer('read_tree', call.vis, call.path, found) as Map<string, FileStat>
-    return [...visible.values()].filter((st) => st.type === FileType.FILE).length
+    const root = call.path.virtual
+    const own = `${rstripSlash(mount.prefix)}/`
+    const covered = this.namespace
+      .mountPrefixes()
+      .map((p) => `${rstripSlash(p)}/`)
+      .filter((p) => p !== own && p.startsWith(own))
+    const counted = (virtual: string): boolean =>
+      pathVisible(call.vis, virtual) &&
+      !covered.some((p) => `${rstripSlash(virtual)}/`.startsWith(p))
+    if (vfs.supports('read_tree')) {
+      let found: Map<string, FileStat> | null
+      try {
+        found = (await mount.call('read_tree', root)) as Map<string, FileStat> | null
+      } catch (err) {
+        if (!isFsError(err)) throw err
+        console.debug(`scan count of ${root} walks instead: ${String(err)}`)
+        found = null
+      }
+      if (found !== null) {
+        const base = rstripSlash(root)
+        let files = 0
+        for (const [key, st] of found) {
+          if (st.type === FileType.FILE && counted(`${base}/${key}`)) files += 1
+        }
+        return files
+      }
+    }
+    const limit = vfs.fullScanLimit
+    if (limit < 0) return null
+    let count = 0
+    const pending = [root]
+    for (
+      let directory = pending.pop();
+      directory !== undefined && count <= limit;
+      directory = pending.pop()
+    ) {
+      let entries: string[]
+      try {
+        entries = (await mount.call('readdir', directory)) as string[]
+      } catch (err) {
+        if (directory === root || !isFsError(err)) throw err
+        console.debug(`scan count skips ${directory}: ${String(err)}`)
+        continue
+      }
+      for (const entry of entries) {
+        const child = rstripSlash(entry)
+        if (!counted(child)) continue
+        let row: FileStat
+        try {
+          row = (await mount.call('stat', child)) as FileStat
+        } catch (err) {
+          if (!isFsError(err)) throw err
+          console.debug(`scan count skips ${child}: ${String(err)}`)
+          continue
+        }
+        if (row.type === FileType.DIRECTORY) pending.push(child)
+        else if (row.type === FileType.FILE) {
+          count += 1
+          if (count > limit) break
+        }
+      }
+    }
+    return count
   }
 
   /**
@@ -2030,6 +2101,10 @@ export class Dispatcher {
     if (name === 'before_full_scan') {
       if (!(await isDirectory(mount, p))) return [null, null, []]
       fullKwargs.files = await this.visibleFiles(mount, vfs, call)
+      if (!vfs.supports(name)) {
+        await vfs.beforeFullScan(p, fullKwargs.files as number | null)
+        return [null, null, []]
+      }
     }
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null

@@ -28,7 +28,7 @@ ws = Workspace({"/linear": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>workspace</code> | Accepted for compatibility; not read. |
 | <code style={{ whiteSpace: 'nowrap' }}>team_ids</code> | Only these teams are listed or readable. Unset shows every team the key can reach. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.linear.app/graphql'` | Linear GraphQL endpoint; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>content_search</code><br />default `False` | Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Search lags writes. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Linear's search, which lags writes. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table linear end */}
@@ -155,9 +155,17 @@ Each team has a `documents/` folder with one JSON file per Linear document:
 Document JSON includes the title, markdown content, the linked project, and
 the creator.
 
-## grep and rg
+## Integration
 
-With `content_search=True` (YAML `content_search: true`), `grep -rw` and
+What Linear answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Linear |
+| --- | --- |
+| `grep -r`, `rg` | Issues: Linear search, for whole words. Other files: the text the listing keeps |
+| Can miss | Recent issue writes |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Linear search |
+
+`grep -rw` and
 `rg -w` ask Linear's issue search for each word and read only the issues that
 hold every word, where the search names it or the listing keeps it. The listing
 keeps the issue's other fields (team, project, cycle, state, people, labels,
@@ -166,12 +174,11 @@ one inside a link.
 
 Every issue is read when the word is a key of the issue JSON (`title`,
 `priority`) or a JSON literal, has a digit or only the letters a to f, which an
-id can hold, and when a search fails, returns 250 issues or finds nothing. It
-is off by default: Linear indexes a write some time after it lands.
+id can hold, and when a search fails, returns 250 issues or finds nothing. `full_scan_limit: -1` reads every file instead, since Linear indexes a write some time after it lands.
 
 Members, projects, cycles and documents are listed with their whole JSON, so
 `grep -r` and `rg` list them once more and read only the files whose text holds
-the pattern's text in any case, with or without `content_search`. The issues
+the pattern's text in any case, whatever `full_scan_limit` is. The issues
 are listed once more too, so a change since the last listing is still found.
 A file over 8 KiB, and every file for a text that is not ASCII, is read as
 usual. Comments are always read: they are fetched per issue, and Linear's

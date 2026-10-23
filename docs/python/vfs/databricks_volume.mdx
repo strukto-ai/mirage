@@ -42,6 +42,7 @@ ws = Workspace({"/dbx": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}
@@ -192,6 +193,14 @@ Keep Mirage in-process and supply the workspace host and token explicitly.
 Your application's OAuth or SDK integration can supply a token callback. This
 does not require FUSE. The agent accesses the mounted workspace through Mirage's
 backend adapters or `Workspace.shell(...)`.
+
+## Integration
+
+The most files one command reads on Databricks volumes. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Databricks volumes |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 
 ## Example
 

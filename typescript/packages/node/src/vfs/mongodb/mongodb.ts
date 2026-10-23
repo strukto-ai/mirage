@@ -28,6 +28,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/mongodb/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { MongoDBStore } from './store.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface MongoDBVFSOptions {
   config: MongoDBConfig
@@ -49,11 +50,13 @@ export class MongoDBVFS extends MongoDBVFSBase {
   readonly store: MongoDBStore
   override readonly accessor: MongoDBAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: MongoDBVFSOptions | MongoDBConfig) {
     super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolveMongoDBConfig(config)
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.store = new MongoDBStore(this.config.uri)
     this.accessor = new MongoDBAccessor(this.store, this.config)
     this.prompt = PROMPT.replace('{prefix}', prefix ?? '')

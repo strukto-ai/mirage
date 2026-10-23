@@ -28,6 +28,8 @@ from mirage.commands.spec.constants import (
     RG_FLAG_NAMES,
     USAGE_EXIT,
     USAGE_HINT_PREFIX,
+    ZGREP_UNSUPPORTED_LONG,
+    ZGREP_UNSUPPORTED_SHORT,
 )
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.word_choice import WordChoices, WordRefusalKind
@@ -212,6 +214,10 @@ def unknown_option_error(
         return encode_text(line), usage_exit_code(cmd_name)
     if builtin and cmd_name == "rg":
         return rg_unknown_flag(token)
+    if builtin and cmd_name == "zgrep" and zgrep_unsupported(token):
+        dashed = token if token.startswith("-") else f"-{token}"
+        line = f"zgrep: {dashed}: option not supported\n"
+        return encode_text(line), usage_exit_code(cmd_name)
     if builtin and cmd_name in PYTHON_NAMES:
         # CPython names the whole typed token, long or short (pinned on
         # 3.14.7; 3.12 still spelled a long one `unknown option`).
@@ -223,6 +229,21 @@ def unknown_option_error(
         line = f"{cmd_name}: invalid option -- '{token}'\n"
     hint = usage_hint(cmd_name, builtin) + "\n"
     return encode_text(line + hint), usage_exit_code(cmd_name, builtin)
+
+
+def zgrep_unsupported(token: str) -> bool:
+    """Whether zgrep refuses a grep option itself (gzip 1.13).
+
+    Args:
+        token (str): the offending token ('--rec') or cluster char ('r').
+    """
+    if not token.startswith("--"):
+        return token in ZGREP_UNSUPPORTED_SHORT
+    name = token[2:].split("=", 1)[0]
+    return any(
+        len(name) >= shortest and full.startswith(name)
+        for full, shortest in ZGREP_UNSUPPORTED_LONG.items()
+    )
 
 
 # ripgrep's `find_similar_names` threshold: the share of 3-grams a flag

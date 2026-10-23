@@ -49,7 +49,7 @@ expiry, so cold-start API calls don't pay the refresh round-trip.
 | <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />required, secret | Dropbox app secret. |
 | <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />required, secret | Long-lived OAuth refresh token; mirage mints short-lived access tokens from it. |
 | <code style={{ whiteSpace: 'nowrap' }}>rootPath</code> | Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Dropbox search names. Needs a plan with full-text search, and search lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Dropbox search, which needs a plan with full-text search and lags writes. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Dropbox's OAuth, API and content hosts, such as a test server. Unset uses Dropbox's hosts. |
 | <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend. |
 
@@ -78,38 +78,18 @@ await ws.shell('ls /dropbox/') // lists the contents of /Team/data
 `..` segments are rejected. Config dictionaries (e.g. via the VFS registry) may spell it
 `root_path`. Omitting it (or passing `/`) mounts the account root as before.
 
-## Search push-down
+## Integration
 
-By default a recursive `grep`/`rg` walks the tree and downloads every file. With
-`contentSearch: true` (config dictionaries may spell it `content_search`), both commands
-first ask [`/2/files/search_v2`](https://www.dropbox.com/developers/documentation/http/documentation#files-search)
-which files contain the pattern's literal, then download and scan only those candidates.
-The local scan decides every match in the files it reads, but Dropbox searches the text it
-extracted rather than the bytes `grep` reads, so an office file, PDF or archive whose raw
-bytes hold the word, the end of a large file, or a word Dropbox splits differently
-(`foo.bar`) can be left out.
-Regex patterns narrow on an extracted required literal; flags whose output must see every
-file in scope (`grep -v`, `grep -c`, `rg -v`, `rg --type/--glob`) always take the full
-walk, as do file operands and multi-pattern (`-e`/`-f`) runs. An empty or failed search
-also falls back to the full walk.
+What Dropbox answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
 
-```ts
-const dropbox = new DropboxVFS({
-  clientId: process.env.DROPBOX_APP_KEY!,
-  clientSecret: process.env.DROPBOX_APP_SECRET!,
-  refreshToken: process.env.DROPBOX_REFRESH_TOKEN!,
-  contentSearch: true,
-})
-```
+| Command | On Dropbox |
+| --- | --- |
+| `grep -r`, `rg` | Dropbox search, for whole words |
+| Can miss | Office files, PDFs, archives, the end of large files, words Dropbox splits differently (`foo.bar`), recent writes; file contents on plans below Professional |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Dropbox search |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
-The knob is off by default for two reasons: full-text content search is plan-gated
-(Dropbox Professional/Essentials/Business and up — on other plans `search_v2` silently
-matches file names only, so a narrowed scan would miss content matches), and Dropbox's
-search index lags recent writes by a short delay, so a push-down may miss files written
-moments earlier. Only enable it when the account's plan includes full-text search and
-slightly stale results are acceptable. See
-[Dropbox (Python) — Search push-down](/python/vfs/dropbox#search-push-down) for the
-mirrored Python knob.
+The [Python Dropbox docs](/python/vfs/dropbox#integration) list when each search answers and what it can miss.
 
 ## Names missing from a listing
 

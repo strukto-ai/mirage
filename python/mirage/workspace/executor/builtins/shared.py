@@ -16,10 +16,12 @@ from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.errors import TooManyMatches
 from mirage.types import PathSpec, word_text
 from mirage.utils.path import resolve_path
 from mirage.view.types import SessionView
@@ -203,11 +205,15 @@ async def expand_operands(
             else PathSpec.from_str_path(str(item))
         )
         if spec.pattern:
-            out.extend(
-                await expand_glob(
-                    dispatch, namespace.mount_for(spec.virtual), [spec]
+            mount = namespace.mount_for(spec.virtual)
+            try:
+                out.extend(
+                    await expand_glob(
+                        dispatch, mount, [spec], mount.vfs.full_scan_limit
+                    )
                 )
-            )
+            except GlobLimitError as exc:
+                raise TooManyMatches(str(exc)) from exc
             continue
         out.append(spec)
     return out

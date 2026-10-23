@@ -64,9 +64,7 @@ async def _ask(
     reply: "JsonValue | Exception" = None,
     listed: list[dict] = CARDS,
 ):
-    accessor = TrelloAccessor(
-        TrelloConfig(api_key="k", api_token="t", content_search=True)
-    )
+    accessor = TrelloAccessor(TrelloConfig(api_key="k", api_token="t"))
 
     def cards(*args, params, **kwargs):
         ids = (

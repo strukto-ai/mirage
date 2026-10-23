@@ -21,7 +21,6 @@ from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.append import append_bytes as _append
-from mirage.core.disk.constants import SCOPE_ERROR
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
 from mirage.core.disk.exists import exists as _exists
@@ -56,6 +55,7 @@ from mirage.types import (
     VFSName,
 )
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.constants import LOCAL_FULL_SCAN_LIMIT
 from mirage.vfs.disk.prompt import PROMPT
 from mirage.vfs.errors import VFSConfigError
 
@@ -64,7 +64,6 @@ class DiskVFS(BaseVFS):
     name: str = VFSName.DISK
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
-    max_du_entries: int | None = None
     accessor: DiskAccessor
     index_ttl: float = 60
     prompt: str = PROMPT
@@ -77,20 +76,37 @@ class DiskVFS(BaseVFS):
 
     reads_ranges: bool = True
     local: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
-    def __init__(self, root: str, folder_versions: bool = True) -> None:
+    def __init__(
+        self,
+        root: str,
+        folder_versions: bool = True,
+        full_scan_limit: int = LOCAL_FULL_SCAN_LIMIT,
+    ) -> None:
         """Args:
         root (str): the host directory the mount mirrors.
         folder_versions (bool): store each listing at its folder's
             version. Folder versions assume a local POSIX filesystem;
             turn them off for an NFS, SMB or FUSE root, whose change
             times may not move with the folder's entries.
+        full_scan_limit (int): the most files one command walks under a
+            directory: searches and listings stop there, and a glob
+            matching more, tar -c, cp -r, rm -r and the like are
+            refused; -1 for no cap.
         """
         if not isinstance(folder_versions, bool):
             raise VFSConfigError("disk: folder_versions: must be a boolean")
+        if (
+            isinstance(full_scan_limit, bool)
+            or not isinstance(full_scan_limit, int)
+            or full_scan_limit < -1
+        ):
+            raise VFSConfigError(
+                "disk: full_scan_limit: must be an integer of -1 or more"
+            )
         super().__init__()
         self.folder_versions = folder_versions
+        self.full_scan_limit = full_scan_limit
         if not folder_versions:
             self.listing_version = ListingVersion.NONE
         self.root = Path(root).resolve()
@@ -230,6 +246,7 @@ class DiskVFS(BaseVFS):
             "config": {
                 "root": str(self.root),
                 "folder_versions": self.folder_versions,
+                "full_scan_limit": self.full_scan_limit,
             },
             "files": files,
             "modes": modes,

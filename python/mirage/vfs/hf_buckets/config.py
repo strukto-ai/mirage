@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from mirage.utils import key_prefix as kp
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class HfBucketsConfig(BaseModel):
@@ -33,6 +34,10 @@ class HfBucketsConfig(BaseModel):
     key_prefix: str | None = None
     """Path inside the bucket that becomes the mount root; files outside it
     are not listed."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("bucket")
     @classmethod
@@ -82,6 +87,10 @@ class HfRepoConfig(BaseModel):
     """Fetch each file's last commit so listings carry modification times, at
     50 entries per request instead of 1000. Unset does so only when the
     whole repository fits in one page."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("repo_id")
     @classmethod

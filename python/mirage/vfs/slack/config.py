@@ -1,10 +1,16 @@
+from pydantic import Field
+
 from mirage.core.slack.config import SlackConfig as SlackCredentials
 from mirage.core.time_config import TimeRangeConfig
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class SlackConfig(SlackCredentials, TimeRangeConfig):
     """A Slack mount: the CLI's credentials plus the mount's time scope."""
 
-    content_search: bool = False
-    """Let `grep -rw` and `rg -w` read only the channel and DM days Slack
-    search names. Needs a token that can search; search lags new messages."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit and reads every file without asking Slack
+    search, which lags posts and covers only message text, file names, titles
+    and reactions."""

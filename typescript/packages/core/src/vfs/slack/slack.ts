@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
-import { DU_MAX_ENTRIES } from '../../core/slack/constants.ts'
 import {
   follow as slackFollow,
   read as slackRead,
@@ -33,7 +32,6 @@ import type { Handed } from '../types.ts'
  * packages build over their own transport.
  */
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
-  override readonly maxDuEntries: number | null = DU_MAX_ENTRIES
   override readonly readsRanges: boolean = true
   override readonly handed = {
     readdir: ['entry'],
@@ -108,7 +106,7 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   ): Promise<PathSpec[] | null> {
     if (
       !opts.wholeWord ||
-      !this.accessor.contentSearch ||
+      this.fullScanLimit < 0 ||
       !(this.accessor.transport.searchAvailable?.() ?? true)
     )
       return Promise.resolve(null)

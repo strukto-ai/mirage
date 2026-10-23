@@ -2078,17 +2078,14 @@
           "path": "/cal",
           "vfs": "gcal",
           "backend": "gcal",
-          "config": {
-            "content_search": true
-          }
+          "config": {}
         },
         {
           "path": "/week",
           "vfs": "gcal",
           "backend": "gcal",
           "config": {
-            "bucket_days": 7,
-            "content_search": true
+            "bucket_days": 7
           }
         },
         {
@@ -2096,8 +2093,7 @@
           "vfs": "gcal",
           "backend": "gcal",
           "config": {
-            "bucket_days": 30,
-            "content_search": true
+            "bucket_days": 30
           }
         },
         {

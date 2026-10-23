@@ -46,6 +46,7 @@ ws = Workspace({"/m": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Path inside the repository that becomes the mount root; files outside it are not listed. |
 | <code style={{ whiteSpace: 'nowrap' }}>revision</code> | Branch, tag or commit the mount reads; unset reads `main`. |
 | <code style={{ whiteSpace: 'nowrap' }}>expand_commits</code> | Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table hf_models end */}
@@ -85,6 +86,15 @@ For example, `sapientinc/HRM-Text-1B` mounted at `/m/` exposes:
   tokenizer_config.json
   model.safetensors        ← never downloaded unless you cat it
 ```
+
+## Integration
+
+What Hugging Face models answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Hugging Face models |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `sha256sum` | The LFS sha256 the Hub keeps; other files are read |
 
 ## Example
 

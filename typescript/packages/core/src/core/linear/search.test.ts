@@ -100,12 +100,7 @@ async function ask(
   askLinear = true,
 ): Promise<[PathSpec[] | null, string[]]> {
   const transport = new FakeTransport(named, reply)
-  const out = await filesContaining(
-    new LinearAccessor(transport, { contentSearch: true }),
-    text,
-    [under],
-    askLinear,
-  )
+  const out = await filesContaining(new LinearAccessor(transport), text, [under], askLinear)
   return [out, transport.searched]
 }
 
@@ -162,7 +157,7 @@ describe('linear filesContaining', () => {
   // gone since is not read.
   it('finds a text changed since the listing', async () => {
     const transport = new FakeTransport({ numbat: ['I1'] })
-    const accessor = new LinearAccessor(transport, { contentSearch: true })
+    const accessor = new LinearAccessor(transport)
     const search = () => filesContaining(accessor, 'numbat', [scope()], true)
     await search()
     const changed = issue('I2', 'Write release notes', 'Blocked', 'See numbat.io')

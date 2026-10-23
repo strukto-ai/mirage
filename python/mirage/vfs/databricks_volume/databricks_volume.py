@@ -54,6 +54,7 @@ class DatabricksVolumeVFS(BaseVFS):
     ) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = DatabricksVolumeAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
