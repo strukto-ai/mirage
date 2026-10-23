@@ -178,13 +178,21 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
  * Whether a job is one program, as bash runs `cmd &` as the program
  * itself: a simple command whose word names neither a function nor a shell
  * builtin a runtime cannot take (`eval`, `source`), either of which keeps a
- * shell between the job and the program, and which the signal ends. A word
- * an expansion spells is not known before it runs, so it is not one.
- * Mirrors Python's `_one_program`.
+ * shell between the job and the program, and which the signal ends. `exec`
+ * and `command` run the word after their options in place, so that word is
+ * the one judged. A word an expansion spells is not known before it runs,
+ * so it is not one. Mirrors Python's `_one_program`.
  */
 function oneProgram(left: TSNodeLike, session: SessionState): boolean {
   if (!simpleCommand(left)) return false
-  const head = commandInvocations(left)[0]?.[0] ?? null
+  const first = commandInvocations(left)[0]
+  if (first === undefined) return false
+  let words = [first[0], ...first[1]]
+  while (words[0] === 'exec' || words[0] === 'command') {
+    words = words.slice(1)
+    while (words[0]?.startsWith('-') === true) words = words.slice(words[0] === '-a' ? 2 : 1)
+  }
+  const head = words[0] ?? null
   return (
     head !== null &&
     (!SHELL_NAMES.has(head) || CAPTURABLE_BUILTINS.has(head)) &&
