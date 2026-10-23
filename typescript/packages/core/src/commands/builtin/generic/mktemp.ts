@@ -23,17 +23,18 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { eexist, fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
+import { type IdSource, SystemIdSource, randomBelow } from '../../../utils/ids.ts'
 
 const ENC = new TextEncoder()
 const DEFAULT_TEMPLATE = 'tmp.XXXXXXXXXX'
 // How many names a create draws before it gives up with EEXIST.
 const ATTEMPTS = 100
 
-function randomSuffix(length: number): string {
+function randomSuffix(ids: IdSource, length: number): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let out = ''
   for (let i = 0; i < length; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)] ?? ''
+    out += chars[randomBelow(ids, chars.length)] ?? ''
   }
   return out
 }
@@ -163,8 +164,9 @@ export async function mktempGeneric(
   )
   const fallback = (texts.length === 0 || useDestDir || t) && destDir === '' && envTmpdir === ''
   const end = template.length - suffixLen
+  const ids = ctx.ids ?? new SystemIdSource()
   const draw = (): string =>
-    template.slice(0, end - xCount) + randomSuffix(xCount) + template.slice(end)
+    template.slice(0, end - xCount) + randomSuffix(ids, xCount) + template.slice(end)
   const create = (path: PathSpec): Promise<void> =>
     directory ? mkdir(path) : write(path, new Uint8Array(0))
   let name = draw()

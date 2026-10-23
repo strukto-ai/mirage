@@ -108,7 +108,7 @@ from mirage.types import (
 )
 from mirage.utils.activity import Activity
 from mirage.utils.filetype import get_extension
-from mirage.utils.ids import uuid7
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import norm
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
@@ -430,6 +430,7 @@ class MountEntry:
         vfs_ref: str | None = None,
         index_config: IndexConfig | None = None,
         write: WritePolicy | str | None = None,
+        ids: IdSource | None = None,
     ) -> None:
         if not prefix.startswith("/"):
             raise ValueError(f"prefix must start with /: {prefix!r}")
@@ -444,7 +445,7 @@ class MountEntry:
                     f"{renderer!r}, which is not a method"
                 )
         self.visible: Callable[[str | None], bool] | None = None
-        self.mount_id = uuid7()
+        self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
         self.prefix = prefix
         self.vfs = vfs
         # The functions the VFS answers itself, read once when it is

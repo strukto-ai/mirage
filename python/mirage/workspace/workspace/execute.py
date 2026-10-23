@@ -27,6 +27,7 @@ from mirage.context import (
     set_current_evaluation,
 )
 from mirage.errors.types import CommandTimeoutError
+from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
@@ -517,7 +518,9 @@ async def execute_line(
         # reached the terminal while it ran, a job's output from before
         # it first.
         tty = session.tty
-    execution_scope = execution_scope or ExecutionScope()
+    execution_scope = execution_scope or ExecutionScope(
+        execution_id=new_execution_id(ws.registry.ids)
+    )
     await execution_scope.start()
     # Whole-invocation policies must approve the result before bytes escape.
     if await ws.registry.policies.wants_for("post_execute", session_id):

@@ -76,6 +76,7 @@ function ownPart(
         [],
         follow,
         registry.diff,
+        registry.ids,
       )
     }
     return runSingle(cmdName, paths, texts, bag, opts ?? {})
@@ -172,6 +173,7 @@ export async function fanOutTraversal(
         undefined,
         follow,
         registry.diff,
+        registry.ids,
         signal,
       )
     }

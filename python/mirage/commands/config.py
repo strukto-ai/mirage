@@ -31,6 +31,7 @@ from mirage.process.view import ProcessView
 from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import CommandRuntime, ShellFn
 from mirage.types import Limit, PathSpec
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 
@@ -69,6 +70,9 @@ class Context:
         shell (ShellFn | None): Run a nested line in the calling
             session, as ``sh -c`` would (awk's pipes and ``system()``).
         diff (DiffComputer | None): The workspace's shared diff computation service.
+        ids (IdSource): Where the command draws generated names and
+            random values (``mktemp``, ``shuf``): the workspace's
+            source, so a seeded workspace replays them.
         runtime (CommandRuntime | None): Where an interpreter command
             runs its code, and what policy lets that code start and load.
     """
@@ -85,6 +89,7 @@ class Context:
     shell: ShellFn | None = None
     runtime: CommandRuntime | None = None
     diff: DiffComputer | None = None
+    ids: IdSource = field(default_factory=SystemIdSource)
 
 
 CommandFnResult = CommandOutput | None

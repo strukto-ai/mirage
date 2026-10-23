@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, expectTypeOf, it } from 'vitest'
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { runWithSession } from '../../context/session_context.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMSessionStore } from '../session/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
+import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
@@ -269,5 +270,82 @@ describe('session tools', () => {
     const refused = await ws.tools.call('write', { path: '/a.txt', content: 'two\n' })
     expect(refused.isError).toBe(true)
     expect(refused.content[0]?.text).toContain('read all of it')
+  })
+})
+
+// Pinned by tests/workspace/workspace/test_workspace.py too: the workspace id,
+// the default session id, then each mount, on both hosts.
+const SEED_5_IDS = [
+  '00000000-0000-709b-a78b-37e02557f3ef',
+  '00000000-0000-709c-a45f-a2ddcbf27499',
+  '00000000-0000-709d-8a25-2d58fd25f996',
+  '00000000-0000-709e-b168-26af1c8ce177',
+]
+
+async function replay(seed: number): Promise<string[]> {
+  const ws = new Workspace(
+    {
+      '/data': [new RAMVFS(), MountMode.WRITE] as const,
+      '/more': [new RAMVFS(), MountMode.WRITE] as const,
+    },
+    { mode: MountMode.WRITE, shellParser: await getTestParser(), ids: new SeededIdSource(seed) },
+  )
+  open.push(ws)
+  await ws.shell('seq 1 20 > /data/n.txt && seq 30 40 > /more/m.txt')
+  const seen = [ws.workspaceId, ws.defaultSessionId, ws.mount('/data').mountId]
+  for (const line of [
+    'mktemp -u /data/t.XXXXXX',
+    'shuf -n 3 /data/n.txt',
+    'shuf -i 1-9',
+    'cat /data/n.txt | shuf -n 2',
+    'shuf -n 4 /data/n.txt /more/m.txt',
+  ]) {
+    const result = await ws.shell(line)
+    expect(result.exitCode, line).toBe(0)
+    seen.push(stdoutStr(result))
+  }
+  for (const event of await ws.observer.events()) seen.push(String(event.execution_id))
+  const copy = await ws.copy()
+  open.push(copy)
+  seen.push(copy.mount('/data').mountId)
+  return seen
+}
+
+describe('the workspace id source', () => {
+  it('replays every id and draw of a run', async () => {
+    const refuse = (): never => {
+      throw new Error('a seeded workspace drew from the system')
+    }
+    const uuid = vi.spyOn(SystemIdSource.prototype, 'uuid7').mockImplementation(refuse)
+    const word = vi.spyOn(SystemIdSource.prototype, 'randomU32').mockImplementation(refuse)
+    try {
+      const first = await replay(5)
+      expect(await replay(5)).toEqual(first)
+      expect(await replay(6)).not.toEqual(first)
+    } finally {
+      uuid.mockRestore()
+      word.mockRestore()
+    }
+  })
+
+  it('mints its ids in a fixed order', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { ids: new SeededIdSource(5) })
+    open.push(ws)
+    expect([
+      ws.workspaceId,
+      ws.defaultSessionId,
+      ws.mount('/dev').mountId,
+      ws.mount('/data').mountId,
+    ]).toEqual(SEED_5_IDS)
+  })
+
+  it('lets a given id outrank the source', () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { workspaceId: 'ws-given', sessionId: 'sess-given', ids: new SeededIdSource(5) },
+    )
+    open.push(ws)
+    expect(ws.workspaceId).toBe('ws-given')
+    expect(ws.defaultSessionId).toBe('sess-given')
   })
 })

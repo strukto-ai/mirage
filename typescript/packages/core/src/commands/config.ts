@@ -1,4 +1,5 @@
 import type { DiffComputer } from '../rs/diff_types.ts'
+import type { IdSource } from '../utils/ids.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +43,12 @@ import type { Files } from '../workspace/files.ts'
  */
 export interface Context {
   diff?: DiffComputer
+  /**
+   * Where the command draws generated names and random values (`mktemp`,
+   * `shuf`): the workspace's source, so a seeded workspace replays them.
+   * Omitted means the system source.
+   */
+  ids?: IdSource
   /** Piped standard input, if any. */
   stdin: ByteSource | null
   /** The parsed flags. Read them through a spec-bound `FlagView`. */

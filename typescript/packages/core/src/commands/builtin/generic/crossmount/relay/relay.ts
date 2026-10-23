@@ -1,4 +1,5 @@
 import type { DiffComputer } from '../../../../../rs/diff_types.ts'
+import type { IdSource } from '../../../../../utils/ids.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,6 +66,7 @@ export async function runRelay(
   argv: readonly string[] = [],
   checkUnlink?: (path: PathSpec) => void,
   diff?: DiffComputer,
+  ids?: IdSource,
   signal?: AbortSignal,
 ): Promise<CrossResult> {
   if (!RELAY_COMMANDS.has(cmdName))
@@ -103,6 +105,7 @@ export async function runRelay(
       argv,
       undefined,
       diff,
+      ids,
     )
   }
   throw new Error(`No cross-mount composition for ${cmdName}`)

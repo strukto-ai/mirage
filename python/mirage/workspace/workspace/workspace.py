@@ -62,6 +62,7 @@ from mirage.context import (
 )
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
+from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
@@ -131,7 +132,7 @@ from mirage.types import (
 from mirage.utils.abort import MirageAbortError, run_cancellable
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.hidden import path_visible
-from mirage.utils.ids import new_session_id, new_workspace_id
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.history import HISTORY_PREFIX, HistoryViewVFS
@@ -268,10 +269,25 @@ class Workspace:
         secrets: Mapping[str, SecretSource | Mapping[str, Any]] | None = None,
         io: IOConfig | Mapping[str, Any] | None = None,
         clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> None:
         self._clock: Clock = clock if clock is not None else SystemClock()
+        self._ids: IdSource = ids if ids is not None else SystemIdSource()
+        # Minted before any mount, so a seeded source hands out the same
+        # draws in the same order on both hosts.
+        self._workspace_id = (
+            workspace_id if workspace_id is not None else self._ids.uuid7()
+        )
+        # A minted default session id is provisional: attaching to a
+        # workspace whose discovery record already names one adopts the
+        # stored pointer instead (see WorkspaceMeta).
+        session_id_explicit = session_id is not None
+        if session_id is None:
+            session_id = self._ids.uuid7()
         self._registry = MountRegistry(
-            IOConfig.model_validate({} if io is None else io), self._clock
+            IOConfig.model_validate({} if io is None else io),
+            self._clock,
+            self._ids,
         )
         self._diff_pool = DiffPool()
         self._registry.diff = self._diff_pool
@@ -281,16 +297,7 @@ class Workspace:
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
-        self._workspace_id = (
-            workspace_id if workspace_id is not None else new_workspace_id()
-        )
         self._registry.workspace_id = self._workspace_id
-        # A minted default session id is provisional: attaching to a
-        # workspace whose discovery record already names one adopts the
-        # stored pointer instead (see WorkspaceMeta).
-        session_id_explicit = session_id is not None
-        if session_id is None:
-            session_id = new_session_id()
         stores = resolve_control_stores(
             self._workspace_id,
             store,
@@ -316,7 +323,7 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.processes = ProcessSupervisor()
+        self.processes = ProcessSupervisor(self._ids)
         self.job_table = JobTable(console_factory, self.processes)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: set[ShellExecution] = set()
@@ -1712,6 +1719,7 @@ class Workspace:
         profile: str | None = None,
         s3: S3Config | None = None,
         clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace from a tar.
 
@@ -1772,6 +1780,9 @@ class Workspace:
                 entry ages on it from the ``cached_at`` the snapshot
                 recorded in the writer's wall seconds, so restoring onto
                 a clock with another epoch shifts its expiry.
+            ids (IdSource | None): where the restored workspace draws
+                its generated ids and random values; None means the
+                system source.
         """
         # Disk mount files are staged on disk, not held in memory, until
         # the restored mounts have copied them in.
@@ -1790,6 +1801,7 @@ class Workspace:
                 profiles=profiles,
                 profile=profile,
                 clock=clock,
+                ids=ids,
             )
         finally:
             await run_blocking(shutil.rmtree, staging, ignore_errors=True)
@@ -1809,6 +1821,7 @@ class Workspace:
         | None = None,
         profile: str | None = None,
         clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> "Workspace":
         """Reconstruct a Workspace directly from a state dict (no tar).
 
@@ -1852,6 +1865,9 @@ class Workspace:
                 entry ages on it from the ``cached_at`` the snapshot
                 recorded in the writer's wall seconds, so restoring onto
                 a clock with another epoch shifts its expiry.
+            ids (IdSource | None): where the restored workspace draws
+                its generated ids and random values; None means the
+                system source.
         """
         ws = await cls._from_state(
             state,
@@ -1863,6 +1879,7 @@ class Workspace:
             profiles=profiles,
             profile=profile,
             clock=clock,
+            ids=ids,
         )
         await install_fingerprints(
             ws._registry,
@@ -1914,6 +1931,7 @@ class Workspace:
             secrets=self._declared_sources,
             shared=frozenset(mounts),
             clock=self._clock,
+            ids=self._ids,
         )
 
     @classmethod
@@ -1931,6 +1949,7 @@ class Workspace:
         profile: str | None = None,
         shared: frozenset[str] = frozenset(),
         clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> "Workspace":
         args = build_mount_args(state, mounts, clis)
         # A caller's own profile table or default is a document the
@@ -1954,6 +1973,7 @@ class Workspace:
             runtimes=runtimes,
             policies=policies,
             clock=clock,
+            ids=ids,
         )
         if mounts:
             ws._shared_mounts = {
@@ -2820,7 +2840,8 @@ class Workspace:
 
         execution = ShellExecution(
             run,
-            execution_scope or ExecutionScope(),
+            execution_scope
+            or ExecutionScope(execution_id=new_execution_id(self._ids)),
             cancel,
             buffer_bytes=self.io.buffer_bytes,
         )

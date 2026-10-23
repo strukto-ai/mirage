@@ -31,32 +31,30 @@ import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { OutputStream, closeQuietly, rechunk } from '../../../io/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { mountRoot } from '../utils/links.ts'
+import {
+  type IdSource,
+  SystemIdSource,
+  randomBelow,
+  randomBelowBig,
+  shuffle,
+} from '../../../utils/ids.ts'
 
 const ENC = new TextEncoder()
 
-function shuffleInPlace(arr: string[]): void {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const tmp = arr[i] ?? ''
-    arr[i] = arr[j] ?? ''
-    arr[j] = tmp
-  }
-}
-
-function choicesWithReplacement(items: readonly string[], k: number): string[] {
+function choicesWithReplacement(ids: IdSource, items: readonly string[], k: number): string[] {
   if (items.length === 0) return []
   const out: string[] = []
   for (let i = 0; i < k; i++) {
-    out.push(items[Math.floor(Math.random() * items.length)] ?? '')
+    out.push(items[randomBelow(ids, items.length)] ?? '')
   }
   return out
 }
 
 // `_sample` in shuf.py is the twin: `emitCount` first, so an output too large
 // to render is refused before any of it is built.
-function processItems(items: string[], repeat: boolean, need: number): string[] {
-  if (repeat) return choicesWithReplacement(items, need)
-  shuffleInPlace(items)
+function processItems(ids: IdSource, items: string[], repeat: boolean, need: number): string[] {
+  if (repeat) return choicesWithReplacement(ids, items, need)
+  shuffle(ids, items)
   return items.slice(0, need)
 }
 
@@ -207,27 +205,6 @@ export function emitCount(
   return count < available ? count : available
 }
 
-// A uniform bigint in [0, limit), built from 32-bit `Math.random` chunks and
-// rejected down to the exact limit. `Math.random` cannot serve a range wider
-// than 2**53 on its own, and `-i`'s span reaches 2**64 - 1, so the range path
-// cannot borrow the float32 draw `shuffleInPlace` uses for arrays. The
-// rejection loop discards at most half the draws, since `bits` is the limit's
-// own bit length. `random.randint` is the python twin and needs no help: its
-// integers are arbitrary precision already.
-function randomBelow(limit: bigint): bigint {
-  const bits = limit.toString(2).length
-  const chunks = Math.ceil(bits / 32)
-  const shift = BigInt(chunks * 32 - bits)
-  for (;;) {
-    let drawn = 0n
-    for (let i = 0; i < chunks; i++) {
-      drawn = (drawn << 32n) | BigInt(Math.floor(Math.random() * 4294967296))
-    }
-    const value = drawn >> shift
-    if (value < limit) return value
-  }
-}
-
 // Emit `need` values from the inclusive range, never enumerating it.
 //
 // GNU is lazy exactly here: with a `-n` below the element count it never builds
@@ -242,11 +219,17 @@ function randomBelow(limit: bigint): bigint {
 // the whole population and taking a prefix.
 //
 // `_range_lines` in shuf.py is the twin.
-function rangeLines(low: bigint, high: bigint, need: number, repeat: boolean): string[] {
+function rangeLines(
+  ids: IdSource,
+  low: bigint,
+  high: bigint,
+  need: number,
+  repeat: boolean,
+): string[] {
   const size = high - low + 1n
   if (repeat) {
     const out: string[] = []
-    for (let i = 0; i < need; i++) out.push(String(low + randomBelow(size)))
+    for (let i = 0; i < need; i++) out.push(String(low + randomBelowBig(ids, size)))
     return out
   }
   if (size <= MAX_OUTPUT_LINES) {
@@ -254,13 +237,13 @@ function rangeLines(low: bigint, high: bigint, need: number, repeat: boolean): s
     // A bigint increment is exact, which is the whole point: read as float64 a
     // bound at 2**53 increments to itself and this loop never ends (SH2).
     for (let value = low; value <= high; value++) items.push(String(value))
-    shuffleInPlace(items)
+    shuffle(ids, items)
     return items.slice(0, need)
   }
   const drawn = new Set<bigint>()
   const out: string[] = []
   while (out.length < need) {
-    const value = low + randomBelow(size)
+    const value = low + randomBelowBig(ids, size)
     if (drawn.has(value)) continue
     drawn.add(value)
     out.push(String(value))
@@ -384,6 +367,7 @@ async function countRecords(data: ByteSpool, terminator: number): Promise<number
  * and never reads at random. Mirrors Python's _shuffled.
  */
 async function* shuffled(
+  ids: IdSource,
   data: ByteSpool,
   terminator: number,
   depth = 0,
@@ -391,19 +375,12 @@ async function* shuffled(
   const end = Uint8Array.of(terminator)
   if (data.size <= MEMORY_LIMIT || depth === SCATTER_DEPTH) {
     const records = splitRecords(await data.read(0, data.size), terminator)
-    for (let i = records.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      const picked = records[j]
-      const current = records[i]
-      if (picked === undefined || current === undefined) continue
-      records[i] = picked
-      records[j] = current
-    }
+    shuffle(ids, records)
     for (const record of records) yield concat([record, end])
     return
   }
   const buckets = Array.from({ length: SCATTER_FAN_OUT }, () => new ByteSpool(0))
-  const pick = (): number => Math.floor(Math.random() * buckets.length)
+  const pick = (): number => randomBelow(ids, buckets.length)
   try {
     let rest: Uint8Array = new Uint8Array()
     for await (const chunk of data.stream()) {
@@ -422,7 +399,7 @@ async function* shuffled(
     }
     if (rest.length > 0) await buckets[pick()]?.append(concat([rest, end]))
     for (const bucket of buckets) {
-      yield* shuffled(bucket, terminator, depth + 1)
+      yield* shuffled(ids, bucket, terminator, depth + 1)
       await bucket.close()
     }
   } finally {
@@ -432,6 +409,7 @@ async function* shuffled(
 
 /** Records of `data` drawn at random with replacement, terminated. Mirrors Python's _drawn. */
 async function* drawn(
+  ids: IdSource,
   data: ByteSpool,
   terminator: number,
   available: number,
@@ -439,12 +417,12 @@ async function* drawn(
   const end = Uint8Array.of(terminator)
   if (data.size <= MEMORY_LIMIT) {
     const held = splitRecords(await data.read(0, data.size), terminator)
-    for (;;) yield concat([held[Math.floor(Math.random() * available)] ?? end.subarray(1), end])
+    for (;;) yield concat([held[randomBelow(ids, available)] ?? end.subarray(1), end])
   }
   const records = await delimited([data.stream()], terminator)
   try {
     for (;;) {
-      const record = await records.read(Math.floor(Math.random() * available))
+      const record = await records.read(randomBelow(ids, available))
       yield concat([record.at(-1) === terminator ? record.subarray(0, -1) : record, end])
     }
   } finally {
@@ -453,6 +431,7 @@ async function* drawn(
 }
 
 async function sampleRecords(
+  ids: IdSource,
   sources: ByteSource[],
   sep: string,
   count: bigint | null,
@@ -476,7 +455,7 @@ async function sampleRecords(
     await data.close()
     throw error
   }
-  const picks = repeat ? drawn(data, terminator, available) : shuffled(data, terminator)
+  const picks = repeat ? drawn(ids, data, terminator, available) : shuffled(ids, data, terminator)
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
       for (let i = 0; i < need; i++) {
@@ -500,6 +479,7 @@ export async function shufGeneric(
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
   const parsed = parseFlags(ctx.flags)
+  const ids = ctx.ids ?? new SystemIdSource()
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
@@ -553,7 +533,7 @@ export async function shufGeneric(
     if (need > MAX_OUTPUT_LINES) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
     }
-    out = rangeLines(low, high, Number(need), repeat)
+    out = rangeLines(ids, low, high, Number(need), repeat)
   } else if (echoMode) {
     // An operand -e echoes is named below the mount the command runs on.
     const root = mountRoot(ctx)
@@ -561,6 +541,7 @@ export async function shufGeneric(
   } else {
     try {
       result = await sampleRecords(
+        ids,
         paths.length > 0 ? paths.map((p) => stream(p)) : [ctx.stdin ?? new Uint8Array()],
         sep,
         nFlag,
@@ -576,7 +557,7 @@ export async function shufGeneric(
     if (need > MAX_OUTPUT_LINES) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
     }
-    out = processItems(items, repeat, Number(need))
+    out = processItems(ids, items, repeat, Number(need))
   }
   // `shuf -n 0` is valid and prints zero bytes, so the separator
   // terminates each line rather than being appended to the join.

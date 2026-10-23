@@ -36,6 +36,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileType, PathSpec
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.view.types import FollowOperands
 from mirage.workspace.files import Files
 
@@ -89,6 +90,7 @@ async def run_dispatch(
     argv: tuple[str, ...] = (),
     follow: FollowOperands | None = None,
     diff: DiffComputer | None = None,
+    ids: IdSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run the same builder once across every operand's owning mount.
 
@@ -116,6 +118,9 @@ async def run_dispatch(
         argv (tuple[str, ...]): Original argument spellings for diagnostics.
         follow (FollowOperands | None): the line's operand resolution,
             which its globs' matches take too.
+        diff (DiffComputer | None): the workspace's diff service.
+        ids (IdSource | None): where the command draws random values;
+            None means the system source.
     """
     ctx = Context(
         flags=virtual_flags(flag_kwargs),
@@ -124,6 +129,7 @@ async def run_dispatch(
         vfs=vfs or Files(dispatch, follow=follow, ledger=False),
         argv=argv,
         diff=diff,
+        ids=ids if ids is not None else SystemIdSource(),
     )
     # No mount is bound to the run, a line that spans mounts walking
     # through the dispatcher, even inside a command a mount runs (a
