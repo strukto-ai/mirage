@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from mirage.core.ssh.stream import follow
+from mirage.core.ssh.stream import follow, read_stream
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
-from tests.fixtures.ssh_run import StreamAccessor
+from tests.fixtures.ssh_run import RunAccessor, StreamAccessor
 
 
 def _file(vfs_path: str) -> PathSpec:
@@ -24,6 +27,26 @@ def _file(vfs_path: str) -> PathSpec:
     return PathSpec(
         virtual=virtual, directory="/s", vfs_path=vfs_path, raw_path=virtual
     )
+
+
+class _Remote:
+    """An open remote file whose reads answer ``reads`` in turn.
+
+    Args:
+        reads (list[bytes]): what each read answers.
+    """
+
+    def __init__(self, reads: list[bytes]) -> None:
+        self.reads = reads
+
+    async def __aenter__(self) -> "_Remote":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        return None
+
+    async def read(self, size: int) -> bytes:
+        return self.reads.pop(0)
 
 
 COMMAND = (
@@ -90,3 +113,19 @@ async def test_anything_but_the_shells_empty_line_leaves_the_poll(chunks):
     assert await follow(accessor, _file("a"), 1, 1.0) is None
     if not isinstance(chunks, Exception):
         assert accessor.closed == 1
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_records_the_read_and_its_bytes():
+    sftp = MagicMock()
+    sftp.open = MagicMock(return_value=_Remote([b"hello ", b"stream", b""]))
+    accessor = RunAccessor("/", (0, b"", b""), sftp=sftp)
+    scope = RecordingScope()
+    try:
+        chunks = [c async for c in read_stream(accessor, _file("x"))]
+    finally:
+        scope.close()
+    assert b"".join(chunks) == b"hello stream"
+    assert [(r.op, r.path, r.bytes) for r in scope.records] == [
+        ("read", "/s/x", 12)
+    ]

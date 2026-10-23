@@ -28,6 +28,16 @@ async def read_stream(
     path_spec: PathSpec,
     chunk_size: int = 65536,
 ) -> AsyncIterator[bytes]:
+    """A file's bytes as they are read. A short read is the file's end,
+    as the kernel answers it, so a reader of a file its own pipeline
+    appends to (``awk 1 f | tee -a f``) stops where the file ended when
+    it read.
+
+    Args:
+        accessor (DiskAccessor): the disk the mount serves.
+        path_spec (PathSpec): the file.
+        chunk_size (int): the most bytes one read asks for.
+    """
     virtual = path_spec.virtual
     root = accessor.root
     rec = record_stream("read", virtual, "disk")
@@ -36,8 +46,9 @@ async def read_stream(
         async with aiofiles.open(p, "rb") as f:
             while True:
                 chunk = await f.read(chunk_size)
-                if not chunk:
+                if chunk:
+                    if rec is not None:
+                        rec.bytes += len(chunk)
+                    yield chunk
+                if len(chunk) < chunk_size:
                     break
-                if rec is not None:
-                    rec.bytes += len(chunk)
-                yield chunk

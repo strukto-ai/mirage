@@ -21,6 +21,14 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
+/**
+ * A file's bytes as they are read, through `node:fs/promises`, never the
+ * CommonJS fs a JS runtime's patch may route back into the workspace this
+ * mount serves. A short read of a regular file is its end, as the kernel
+ * answers it, so a reader of a file its own pipeline appends to
+ * (`awk 1 f | tee -a f`) stops where the file ended when it read. Mirrors
+ * Python's `read_stream`.
+ */
 export async function* readStream(
   accessor: DiskAccessor,
   path: PathSpec,
@@ -29,21 +37,23 @@ export async function* readStream(
   const rec = recordStream('read', path.virtual, VFSName.DISK)
   const failed = (err: unknown): unknown =>
     (err as NodeJS.ErrnoException).code === 'ENOENT' ? enoent(path) : diskError(err, path)
-  // node:fs/promises, never the CommonJS fs a JS runtime's patch may route
-  // back into the workspace this mount serves.
   const handle = await open(full, 'r').catch((err: unknown) => {
     throw failed(err)
   })
   try {
+    const regular = (await handle.stat()).isFile()
+    const size = 65536
     for (;;) {
       const { bytesRead, buffer } = await handle
-        .read(new Uint8Array(65536), 0, 65536, null)
+        .read(new Uint8Array(size), 0, size, null)
         .catch((err: unknown) => {
           throw failed(err)
         })
-      if (bytesRead === 0) return
-      if (rec !== null) rec.bytes += bytesRead
-      yield buffer.subarray(0, bytesRead)
+      if (bytesRead > 0) {
+        if (rec !== null) rec.bytes += bytesRead
+        yield buffer.subarray(0, bytesRead)
+      }
+      if (bytesRead === 0 || (regular && bytesRead < size)) return
     }
   } finally {
     await handle.close()
