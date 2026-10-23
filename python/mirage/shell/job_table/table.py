@@ -35,7 +35,7 @@ from mirage.types import PathSpec
 logger = logging.getLogger(__name__)
 
 
-def cancel_job(job: Job) -> None:
+def cancel_job(job: Job, signal: int = 9) -> None:
     """Ask a job to stop, from any thread, without waiting for it.
 
     Routed through the task's own loop because the caller is often
@@ -45,10 +45,12 @@ def cancel_job(job: Job) -> None:
 
     Args:
         job (Job): the job to cancel.
+        signal (int): what the stop stands for, KILL (9) unless a
+            ``kill`` named another.
     """
     try:
         if job.process is not None:
-            job.process.terminate()
+            job.process.terminate(signal)
         elif job.task is not None:
             job.task.get_loop().call_soon_threadsafe(job.task.cancel)
     except RuntimeError as exc:
@@ -89,7 +91,8 @@ async def _settle(run: JobRunner, job: Job) -> int:
         if job.status != JobStatus.RUNNING:
             raise
         job.status = JobStatus.KILLED
-        job.exit_code = KILLED_EXIT_CODE
+        signal = job.process.signal if job.process is not None else None
+        job.exit_code = KILLED_EXIT_CODE if signal is None else 128 + signal
         # This task is already unwinding from a cancel, and a store that
         # suspends (Redis) would take a second cancellation mid-write
         # and lose the marker readers are parked on. The shielded task
@@ -324,7 +327,9 @@ class JobTable:
     def all_running_jobs(self) -> list[Job]:
         return [j for j in self.all_jobs() if j.status == JobStatus.RUNNING]
 
-    async def kill(self, job_id: int, session_id: str = "") -> bool:
+    async def kill(
+        self, job_id: int, session_id: str = "", signal: int = 9
+    ) -> bool:
         """Stop a job and record it as killed.
 
         The cancel is routed through the task's own loop, never awaited
@@ -348,15 +353,17 @@ class JobTable:
         Args:
             job_id (int): the job to stop.
             session_id (str): the session whose list names it.
+            signal (int): the signal the job is stopped with; its status
+                is 128 plus it, KILL's 137 by default.
         """
         job = self.get(job_id, session_id)
         if job is None or job.status != JobStatus.RUNNING:
             return False
         if job.task is None:
             return False
-        cancel_job(job)
+        cancel_job(job, signal)
         job.status = JobStatus.KILLED
-        job.exit_code = KILLED_EXIT_CODE
+        job.exit_code = 128 + signal
         await job.console.emit(Channel.STDERR, b"Killed")
         await job.console.finish(KILLED_OUTCOME)
         return True

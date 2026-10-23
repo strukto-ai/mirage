@@ -26,6 +26,8 @@ import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
+import { ProcessSupervisor } from '../../process/supervisor.ts'
+import { runWithExecution } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -253,6 +255,57 @@ describe('RemoteSandbox', () => {
     expect(execId).not.toBe('')
     expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId)])
     expect(box.execs[1]?.[2]).not.toHaveProperty(EXEC_ID)
+  })
+
+  // A run a `kill` stopped is stopped in the box with the signal it named.
+  it('stops a killed run in the box with its signal', async () => {
+    class StuckBox extends RecordingSandbox {
+      protected override async execArgv(
+        argv: readonly string[],
+        stdin: ByteSource | null,
+        env: Record<string, string>,
+        cwd: string,
+        _output?: unknown,
+        signal?: AbortSignal,
+      ): Promise<RunResult> {
+        const result = await super.execArgv(argv, stdin, env, cwd)
+        if (lineOf(argv) !== 'yes') return result
+        return new Promise<RunResult>((_, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              reject(new DOMException('execute aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      }
+    }
+    const box = new StuckBox({ captures: ['yes'] })
+    const abort = new AbortController()
+    const ctx = {
+      stdin: null,
+      flags: { c: 'yes' },
+      env: {},
+      cwd: PathSpec.fromStrPath('/'),
+      signal: abort.signal,
+    }
+    const runner = new ProcessSupervisor(runWithExecution).start({
+      sessionId: 's',
+      command: 'yes',
+      cwd: ctx.cwd,
+      cancel: () => {
+        abort.abort()
+      },
+      run: async () => (await box.runLine(undefined, [], [], ctx)).exitCode,
+    })
+    await vi.waitFor(() => {
+      expect(box.execs).toHaveLength(1)
+    })
+    expect(runner.terminate(2)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(130)
+    const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
+    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId, 2)])
   })
 
   it('holds a cancel only so long when the box stops answering', async () => {

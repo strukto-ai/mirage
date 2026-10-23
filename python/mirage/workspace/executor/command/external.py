@@ -16,7 +16,6 @@ import asyncio
 import logging
 import shlex
 from collections.abc import AsyncIterator
-from dataclasses import replace
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
@@ -31,7 +30,7 @@ from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import ProcessExecutorMixin, StreamingProcessMixin
+from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.routing.types import RouteDecision
 from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
 from mirage.shell.bytes import encode_text
@@ -74,7 +73,7 @@ async def run_external(
         profile_limits=session.command_limits,
     )
 
-    if isinstance(runtime, StreamingProcessMixin):
+    if isinstance(runtime, ProcessExecutorMixin):
         return _stream_external(
             runtime,
             argv,
@@ -87,14 +86,8 @@ async def run_external(
 
     async def execute() -> RunResult:
         data = await materialize(stdin) if stdin is not None else None
-        ctx = Context(cwd=cwd, env=env, stdin=data)
-        if isinstance(runtime, ProcessExecutorMixin):
-            return await _execute_program(
-                runtime, argv.name, list(argv.tokens), ctx, "process"
-            )
-        return await _execute_program(
-            runtime, argv.name, [], replace(ctx, flags={"c": command}), "line"
-        )
+        ctx = Context(cwd=cwd, env=env, stdin=data, flags={"c": command})
+        return await _execute_program(runtime, argv.name, [], ctx, "line")
 
     try:
         result = await run_with_timeout(

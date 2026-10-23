@@ -250,4 +250,5 @@ the host interpreter's Python version.
 
 ## Notes
 
-- A timeout kills the subprocess.
+- A timeout kills the subprocess. `kill` sends it the signal it names, then
+  `KILL` a second later if it is still running.

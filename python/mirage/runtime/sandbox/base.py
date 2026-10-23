@@ -19,10 +19,11 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
+from mirage.context.session_context import current_caller
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 class RemoteSandbox(
-    Runtime[None], LineExecutorMixin[None], StreamingProcessMixin[None]
+    Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
     """A runtime that executes programs in a sandbox the user runs.
 
@@ -150,16 +151,7 @@ class RemoteSandbox(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-    ) -> RunResult:
-        return await self._run_argv(tuple(texts), ctx, None)
-
-    async def run_stream(
-        self,
-        engine: None,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-        output: OutputFn,
+        output: OutputFn | None,
     ) -> RunResult:
         return await self._run_argv(tuple(texts), ctx, output)
 
@@ -192,21 +184,24 @@ class RemoteSandbox(
                 output,
             )
         except asyncio.CancelledError:
-            await asyncio.shield(self._reap(exec_id))
+            runner = current_caller().process
+            signum = runner.signal if runner is not None else None
+            await asyncio.shield(self._reap(exec_id, signum or 15))
             raise
 
-    async def _reap(self, exec_id: str) -> None:
+    async def _reap(self, exec_id: str, signum: int) -> None:
         """Stop what a cancelled run left in the box (``EXEC_ID``), for
         at most ``REAP_WAIT_SECONDS``: a box that stopped answering would
         otherwise hold the cancel.
 
         Args:
             exec_id (str): the run's id.
+            signum (int): the signal the run is stopped with first.
         """
         try:
             async with asyncio.timeout(REAP_WAIT_SECONDS):
                 done = await self._exec_argv(
-                    ("/bin/sh", "-c", reap_line(exec_id)),
+                    ("/bin/sh", "-c", reap_line(exec_id, signum)),
                     None,
                     dict(self.config.env),
                     "/",

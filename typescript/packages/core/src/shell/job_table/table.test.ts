@@ -159,6 +159,19 @@ describe('JobTable.get / list / running', () => {
 })
 
 describe('JobTable.kill', () => {
+  // kill %N with a signal records bash's status for it: 128 plus the signal.
+  it.each([
+    [9, 137],
+    [15, 143],
+    [2, 130],
+  ])('a job killed with signal %i exits %i', async (signal, code) => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const j = jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
+    expect(await jt.kill(j.id, '', signal)).toBe(true)
+    expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
+  })
+
   it('aborts, marks killed, and keeps output produced before the kill', async () => {
     const jt = new JobTable()
     const abort = new AbortController()

@@ -23,7 +23,9 @@ import {
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
+  STOP_GRACE_SECONDS,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -67,7 +69,10 @@ async function untilInputCloses<T>(
  * leads a process group of its own, and an aborted call kills the whole
  * group and stops reading the pipes: a grandchild left alive, or one that
  * left the group, holds the output pipes open, so 'close' would wait until
- * it exited on its own, and the call rejects with an AbortError at once. A
+ * it exited on its own, and the call rejects with an AbortError at once.
+ * When a `kill` stopped the runner with a signal other than KILL, the
+ * group gets that signal first and KILL only after `STOP_GRACE_SECONDS`,
+ * so the program's handlers get to run. A
  * missing executable rejects with `hint` when one is given, else with
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
@@ -83,14 +88,26 @@ export async function runCli(
 ): Promise<CliResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
+  // Read now: an abort's listener runs as the caller that aborted.
+  const runner = currentCaller().process
   const child = spawn(executable, args, {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.env !== undefined ? { env: options.env } : {}),
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   })
+  // Set by the abort listener, which flow analysis does not follow.
+  let grace = null as ReturnType<typeof setTimeout> | null
   const abort = (): void => {
-    stopTree(child)
+    const signum = runner?.signal ?? 9
+    if (signum === 9) {
+      stopTree(child)
+      return
+    }
+    killTree(child, signum)
+    grace = setTimeout(() => {
+      stopTree(child)
+    }, STOP_GRACE_SECONDS * 1000)
   }
   signal?.addEventListener('abort', abort, { once: true })
   children?.add(child)
@@ -159,6 +176,7 @@ export async function runCli(
     if (signal?.aborted === true) throw makeAbortError(signal)
     return { stdout: Buffer.concat(out), stderr: Buffer.concat(err), code }
   } finally {
+    if (grace !== null) clearTimeout(grace)
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
     child.stdin.destroy()
     await Promise.allSettled([pumps, exited])
@@ -217,18 +235,20 @@ export async function cwdRefusal(name: string, cwd: string): Promise<RunResult |
 }
 
 /**
- * Kill a child and everything it started: its process group. Windows has
- * no process group to kill, so only the child goes there. Mirrors Python's
- * `kill_tree`.
+ * Signal a child and everything it started: its process group. Windows has
+ * no process group to signal, and no signal but a kill, so only the child
+ * goes there, killed. Mirrors Python's `kill_tree`.
+ *
+ * @param signum the signal, KILL (9) by default.
  */
-export function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess, signum = 9): void {
   if (child.pid === undefined || process.platform === 'win32') {
     child.kill('SIGKILL')
     return
   }
   try {
-    process.kill(-child.pid, 'SIGKILL')
-    child.kill('SIGKILL')
+    process.kill(-child.pid, signum)
+    child.kill(signum)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err
     debuglog('mirage')('process group %d has already exited', child.pid)

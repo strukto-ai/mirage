@@ -39,7 +39,7 @@ async def _run(runtime: LocalRuntime, program: Program, **fields) -> RunResult:
 
 def _process(runtime: LocalRuntime, argv, cwd, stdin: bytes | None = None):
     ctx = Context(cwd=PathSpec.from_str_path(str(cwd)), env={}, stdin=stdin)
-    return runtime.run_process(None, [], list(argv), ctx)
+    return runtime.run_process(None, [], list(argv), ctx, None)
 
 
 @pytest.mark.asyncio

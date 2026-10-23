@@ -21,9 +21,8 @@ import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  STREAMING_PROCESS,
   type LineExecutor,
-  type StreamingProcess,
+  type ProcessExecutor,
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -35,12 +34,11 @@ import { closeChildren, cwdRefusal, runCli } from '../cli.ts'
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
   extends Runtime<undefined>
-  implements LineExecutor<undefined>, StreamingProcess<undefined>
+  implements LineExecutor<undefined>, ProcessExecutor<undefined>
 {
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
-  readonly [STREAMING_PROCESS] = true as const
   declare config: SandlockConfig
   private readonly children = new Set<ChildProcess>()
 
@@ -74,16 +72,7 @@ export class SandlockRuntime
     _paths: PathSpec[],
     texts: string[],
     ctx: Context,
-  ): Promise<RunResult> {
-    return this.executeProcess(texts, ctx)
-  }
-
-  runStream(
-    _engine: undefined,
-    _paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-    output: OutputFn,
+    output: OutputFn | undefined,
   ): Promise<RunResult> {
     return this.executeProcess(texts, ctx, output)
   }

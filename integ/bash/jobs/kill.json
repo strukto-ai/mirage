@@ -241,6 +241,41 @@
       "note": "bash matches a sigspec case-insensitively, SIG prefix or not; KILL's waited status is 137 in bash and in mirage's cancellation alike."
     },
     {
+      "id": "job_kill_waits_128_plus_the_signal",
+      "seq": 502419,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 5 & p=$!; kill \"$p\"; wait \"$p\"; echo term=$?; sleep 5 & kill -s HUP %1; wait %1; echo hup=$?) 2>/dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "term=143\nhup=129\n",
+        "stderr": ""
+      },
+      "note": "bash reports a child a signal ended as 128 plus it, and a managed runner's cancellation carries the signal kill named; INT and QUIT are left out, since a non-interactive bash's asynchronous commands may ignore them."
+    },
+    {
       "id": "job_kill_succeeds_when_any_operand_was_signalled",
       "seq": 502414,
       "targets": [

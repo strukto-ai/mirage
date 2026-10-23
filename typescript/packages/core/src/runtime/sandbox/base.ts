@@ -20,13 +20,13 @@ import { Runtime } from '../base.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  STREAMING_PROCESS,
   type LineExecutor,
-  type StreamingProcess,
+  type ProcessExecutor,
 } from '../mixin.ts'
 import type { MountType, OutputFn, RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
 import { abortable } from '../../utils/abort.ts'
+import { currentCaller } from '../../context/session_context.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
   BASE_CONFIG_KEYS,
@@ -61,7 +61,7 @@ import { SandboxMounts } from './mounts.ts'
  */
 export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime<undefined>
-  implements LineExecutor<undefined>, StreamingProcess<undefined>
+  implements LineExecutor<undefined>, ProcessExecutor<undefined>
 {
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees
@@ -69,7 +69,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   override readonly reach = 'remote'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
-  readonly [STREAMING_PROCESS] = true as const
   declare config: NormalizedSandboxConfig<C>
   // Connect-once latch: the first captured line connects; later lines
   // just execute. Single-flight so concurrent first lines share one
@@ -131,18 +130,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     _paths: PathSpec[],
     texts: string[],
     ctx: Context,
+    output: OutputFn | undefined,
   ): Promise<RunResult> {
-    return this.runArgv(texts, ctx, null)
-  }
-
-  runStream(
-    _engine: undefined,
-    _paths: PathSpec[],
-    texts: string[],
-    ctx: Context,
-    output: OutputFn,
-  ): Promise<RunResult> {
-    return this.runArgv(texts, ctx, output)
+    return this.runArgv(texts, ctx, output ?? null)
   }
 
   override async settle(): Promise<void> {
@@ -168,6 +158,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
     const execId = crypto.randomUUID().replaceAll('-', '')
+    const runner = currentCaller().process
     try {
       return await this.execArgv(
         argv,
@@ -178,7 +169,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         ctx.signal,
       )
     } catch (error) {
-      if (ctx.signal?.aborted === true) await this.reap(execId)
+      if (ctx.signal?.aborted === true) await this.reap(execId, runner?.signal ?? 15)
       throw error
     }
   }
@@ -187,13 +178,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * Stop what a cancelled run left in the box (`EXEC_ID`), for at most
    * `REAP_WAIT_SECONDS`: a box that stopped answering would otherwise hold
    * the cancel.
+   *
+   * @param execId the run's id.
+   * @param signum the signal the run is stopped with first.
    */
-  private async reap(execId: string): Promise<void> {
+  private async reap(execId: string, signum: number): Promise<void> {
     const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
     try {
       const done = await abortable(
         this.execArgv(
-          ['/bin/sh', '-c', reapLine(execId)],
+          ['/bin/sh', '-c', reapLine(execId, signum)],
           null,
           { ...this.config.env },
           '/',

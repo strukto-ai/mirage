@@ -27,8 +27,6 @@ import { PythonRuntime } from '../../../runtime/python/base.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  STREAMING_PROCESS,
-  type StreamingProcess,
   type LineExecutor,
   type ProcessExecutor,
 } from '../../../runtime/mixin.ts'
@@ -38,7 +36,7 @@ import { Limit, MountMode, type PathSpec } from '../../../types.ts'
 import * as globs from '../../expand/globs.ts'
 import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
 import { SessionState } from '../../session/session.ts'
-import { sleep } from '../../../utils/abort.ts'
+import { abortable, sleep } from '../../../utils/abort.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
@@ -55,20 +53,33 @@ class ProcessProbe extends Runtime implements ProcessExecutor {
   constructor(options: RuntimeOptions = {}) {
     super(options, [EXTERNAL_COMMANDS])
   }
-  async runProcess(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context): Promise<RunResult> {
-    this.requests.push({ ...ctx, argv })
-    const stdin = ctx.stdin === null ? null : await materialize(ctx.stdin)
+  async runProcess(
+    _e: unknown,
+    _p: PathSpec[],
+    argv: string[],
+    ctx: Context,
+    _out: OutputFn | undefined,
+  ): Promise<RunResult> {
+    const stdin = ctx.stdin === null ? null : await abortable(materialize(ctx.stdin), ctx.signal)
+    this.requests.push({ ...ctx, stdin, argv })
     return { stdout: stdin ?? ENC.encode('GPU ready\nother\n'), stderr: null, exitCode: 0 }
   }
 }
 
-class StreamingProbe extends ProcessProbe implements StreamingProcess {
-  readonly [STREAMING_PROCESS] = true as const
+class StreamingProbe extends ProcessProbe {
   streams: Request[] = []
 
-  async runStream(_e: unknown, _p: PathSpec[], argv: string[], ctx: Context, out: OutputFn) {
+  override async runProcess(
+    _e: unknown,
+    _p: PathSpec[],
+    argv: string[],
+    ctx: Context,
+    out: OutputFn | undefined,
+  ) {
     this.streams.push({ ...ctx, argv })
-    await out(ENC.encode(ctx.env?.TOKEN ?? 'unset'))
+    const said = ENC.encode(ctx.env?.TOKEN ?? 'unset')
+    if (out === undefined) return { stdout: said, stderr: null, exitCode: 0 }
+    await out(said)
     return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
   }
 }

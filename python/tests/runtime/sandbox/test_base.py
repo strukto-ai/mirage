@@ -22,6 +22,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
@@ -217,6 +218,35 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     exec_id = box.exec_envs[0][EXEC_ID]
     assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id)]
     assert EXEC_ID not in box.exec_envs[1]
+
+
+# A run a ``kill`` stopped is stopped in the box with the signal it named.
+@pytest.mark.asyncio
+async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
+    class StuckBox(RecordingSandbox):
+        async def exec_line(
+            self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+        ) -> RunResult:
+            result = await super().exec_line(line, stdin, env, cwd)
+            if line == "yes":
+                await asyncio.Event().wait()
+            return result
+
+    box = StuckBox(captures=("yes",))
+    ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
+
+    async def run() -> int:
+        return (await box.run_line(None, [], [], ctx)).exit_code
+
+    runner = ProcessSupervisor().start(
+        session_id="s", command="yes", cwd=ctx.cwd, run=run
+    )
+    while not box.execs:
+        await asyncio.sleep(0)
+    assert runner.terminate(2)
+    assert (await runner.join()).exit_code == 130
+    exec_id = box.exec_envs[0][EXEC_ID]
+    assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id, 2)]
 
 
 @pytest.mark.asyncio

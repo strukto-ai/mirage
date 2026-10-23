@@ -56,42 +56,31 @@ class LineExecutorMixin(ABC, Generic[E]):
 
 
 class ProcessExecutorMixin(ABC, Generic[E]):
-    """Execute an argv request without shell interpretation."""
+    """Execute an argv request without shell interpretation, its input
+    read as the program consumes it and its output handed over as it
+    comes."""
 
     @abstractmethod
     async def run_process(
-        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
-    ) -> RunResult:
-        """Run the program ``texts`` names, with ``ctx``'s working
-        directory, environment and stdin.
-
-        Args:
-            engine (E): the runtime's engine.
-            paths (list[PathSpec]): unused; argv is words.
-            texts (list[str]): the argv, program first.
-            ctx (Context): the run's context.
-        """
-
-
-class StreamingProcessMixin(ProcessExecutorMixin[E]):
-    """An argv executor that consumes input and delivers output incrementally."""
-
-    @abstractmethod
-    async def run_stream(
         self,
         engine: E,
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn,
+        output: OutputFn | None,
     ) -> RunResult:
-        """Await each output write and return status after the child exits.
+        """Run the program ``texts`` names, with ``ctx``'s working
+        directory, environment and stdin, and return its status once it
+        exits.
 
         Args:
             engine (E): the runtime's engine.
             paths (list[PathSpec]): unused; argv is words.
             texts (list[str]): the argv, program first.
             ctx (Context): the run's context; its stdin is read as the
-                child consumes it.
-            output (OutputFn): where the child's stdout goes.
+                program consumes it.
+            output (OutputFn | None): receives stdout as it arrives,
+                each write awaited, which the result then leaves out;
+                None, or a transport that cannot stream, returns it
+                whole.
         """

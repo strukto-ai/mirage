@@ -87,4 +87,40 @@ describe('ProcessHandle', () => {
     const done = await handle.join()
     expect([done.exitCode, done.cancellationRequested]).toEqual([137, true])
   })
+
+  // A stop stands for the signal a kill named: the binder hands the runner
+  // its handle, and its status is 128 plus the signal, as bash reports a
+  // child that signal ended.
+  it.each([
+    [15, 143],
+    [2, 130],
+    [1, 129],
+  ])('a runner stopped with signal %i exits %i', async (signal, code) => {
+    const abort = new AbortController()
+    const run = (): Promise<number> =>
+      new Promise((_resolve, reject) => {
+        const stop = (): void => {
+          reject(new DOMException('aborted', 'AbortError'))
+        }
+        if (abort.signal.aborted) stop()
+        else abort.signal.addEventListener('abort', stop)
+      })
+    const bound: ProcessHandle[] = []
+    const handle = new ProcessHandle(
+      info(),
+      run,
+      () => {
+        abort.abort()
+      },
+      ignore,
+      (_id, run, process) => {
+        bound.push(process)
+        return run()
+      },
+    )
+    expect(handle.signal).toBeNull()
+    expect(handle.terminate(signal)).toBe(true)
+    const done = await handle.join()
+    expect([done.exitCode, handle.signal, bound]).toEqual([code, signal, [handle]])
+  })
 })

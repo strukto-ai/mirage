@@ -19,6 +19,7 @@ import sys
 
 import pytest
 
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.cli import (
     Children,
     close_children,
@@ -26,6 +27,7 @@ from mirage.runtime.sandbox.cli import (
     run_cli,
 )
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
+from mirage.types import PathSpec
 
 # A child that starts a sleep in a session of its own, so killing the
 # child's group leaves it running with the output pipes it inherited.
@@ -156,6 +158,74 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
         with pytest.raises(asyncio.CancelledError):
             await task
     assert await _ended(int(pid_file.read_text()))
+
+
+def _start_runner(supervisor: ProcessSupervisor, script: str):
+    async def run() -> int:
+        _, _, code = await run_cli("sh", None, ["-c", script], None)
+        return code
+
+    return supervisor.start(
+        session_id="s",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+
+
+# A kill that names TERM reaches the program as TERM, so its handler
+# runs, and the runner's status is bash's 143 for a child TERM ended.
+@pytest.mark.asyncio
+async def test_a_runner_killed_with_term_lets_the_child_handle_it(tmp_path):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
+        "while :; do sleep 0.05; done",
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert said.read_text() == "bye\n"
+    assert info.exit_code == 143
+
+
+@pytest.mark.asyncio
+async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
+    tmp_path,
+):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
+        "while :; do sleep 0.05; done",
+    )
+    child = await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGKILL)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert not said.exists()
+    assert info.exit_code == 137
+    assert await _ended(child)
+
+
+# A program that ignores the signal still ends: KILL follows the grace.
+@pytest.mark.asyncio
+async def test_a_child_that_ignores_the_signal_is_killed_after_the_grace(
+    tmp_path,
+):
+    pid_file = tmp_path / "pid"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
+    )
+    child = await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert info.exit_code == 143
+    assert await _ended(child)
 
 
 @pytest.mark.asyncio

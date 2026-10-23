@@ -843,16 +843,6 @@
     "servingMount": "Reads the mount a command's files were said to run in (Files.servedBy) before the async context, which the browser's fallback storage does not isolate between tasks; Python's task context always isolates, so crosses_mounts and mount_root read it directly."
    }
   },
-  "runtime/mixin": {
-   "python_only": {
-    "StreamingProcessMixin": "Python detects the streaming capability by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
-   },
-   "typescript_only": {
-    "STREAMING_PROCESS": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin.",
-    "StreamingProcess": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin.",
-    "isStreamingProcess": "Nominal TypeScript streaming capability corresponds to the Python StreamingProcessMixin."
-   }
-  },
   "runtime/types": {
    "python_only": {
     "ByteReader": "Python stream readers and asyncssh implement readexactly; TypeScript transports expose Web ReadableStreams."
@@ -944,7 +934,7 @@
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
    }
   },
-  "process/types": {
+  "process/handle": {
    "typescript_only": {
     "ExecutionBind": "TypeScript's process layer sits below the session the caller carries, so importing the caller's runWithExecution would close a type cycle; the workspace hands the supervisor the binder. Python's process handle imports run_with_execution directly."
    }

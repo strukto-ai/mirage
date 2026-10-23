@@ -15,17 +15,18 @@
 import asyncio
 import logging
 import os
-import signal
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextvars import Context
 
+from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain, close_quietly
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
+    STOP_GRACE_SECONDS,
 )
 from mirage.runtime.types import RunResult, SandboxPipe
 
@@ -59,7 +60,10 @@ async def run_cli(
     kills the whole group and closes our ends of the pipes before it
     re-raises: a grandchild left alive, or one that left the group,
     holds the output pipes open, so the wait would last until it exited
-    on its own. A line abandoned to a timeout returns at once.
+    on its own. A line abandoned to a timeout returns at once. When a
+    ``kill`` stopped the runner with a signal other than KILL, the group
+    gets that signal first and KILL only after ``STOP_GRACE_SECONDS``, so
+    the program's handlers get to run.
 
     Args:
         executable (str): the program (``docker``, ``sandlock``, a host
@@ -148,8 +152,18 @@ async def run_cli(
             reading, errors, feeding, waiting
         )
     except BaseException:
-        stop_tree(process, transport)
-        await process.wait()
+        runner = current_caller().process
+        signum = runner.signal if runner is not None else None
+        try:
+            if signum is not None and signum != 9:
+                kill_tree(process, signum)
+                async with asyncio.timeout(STOP_GRACE_SECONDS):
+                    await process.wait()
+        except TimeoutError:
+            logger.debug("process %d outlived signal %d", process.pid, signum)
+        finally:
+            stop_tree(process, transport)
+            await process.wait()
         raise
     finally:
         for task in (feeding, reading, errors, waiting):
@@ -263,20 +277,22 @@ def cwd_refusal(name: str, cwd: str) -> RunResult | None:
     )
 
 
-def kill_tree(process: asyncio.subprocess.Process) -> None:
-    """Kill a child and everything it started: its process group.
+def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
+    """Signal a child and everything it started: its process group.
 
-    Windows has no process group to kill, so only the child goes there.
+    Windows has no process group to signal, and no signal but a kill, so
+    only the child goes there, killed.
 
     Args:
         process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        signum (int): the signal, KILL (9) by default.
     """
     if sys.platform == "win32":
         if process.returncode is None:
             process.kill()
         return
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process.pid, signum)
     except ProcessLookupError:
         logger.debug("process group %d has already exited", process.pid)
 

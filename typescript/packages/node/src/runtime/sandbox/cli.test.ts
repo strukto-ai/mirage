@@ -19,6 +19,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { closeChildren, openCliPipe, runCli } from './cli.ts'
+import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
+import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
+import { PathSpec } from '@struktoai/mirage-core/types'
 import { PIPE_DIAGNOSTIC_BYTES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { ProcessInput } from '@struktoai/mirage-core/process/stdio'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
@@ -54,7 +58,62 @@ async function escapedPid(pidFile: string): Promise<number> {
   return Number(readFileSync(pidFile, 'utf8'))
 }
 
+// A runner whose run is \`sh -c script\`, stopped through its abort.
+function shRunner(script: string): ProcessHandle {
+  const abort = new AbortController()
+  return new ProcessSupervisor(runWithExecution).start({
+    sessionId: 's',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      abort.abort()
+    },
+    run: async () =>
+      (await runCli('sh', null, ['-c', script], null, { signal: abort.signal })).code,
+  })
+}
+
 describe('runCli', () => {
+  // A kill that names TERM reaches the program as TERM, so its handler
+  // runs, and the runner's status is bash's 143 for a child TERM ended.
+  it('lets the child handle the TERM a kill sent its runner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+    )
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(143)
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  it('gives the child no handler when a kill sent its runner KILL', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+    )
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(9)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(137)
+    expect(existsSync(said)).toBe(false)
+    expect(await ended(child)).toBe(true)
+  })
+
+  // A program that ignores the signal still ends: KILL follows the grace.
+  it('kills a child that ignores the signal once the grace has passed', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const pidFile = join(dir, 'pid')
+    const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(143)
+    expect(await ended(child)).toBe(true)
+  })
+
   it('returns both streams and the status', async () => {
     const r = await runCli(
       'sh',

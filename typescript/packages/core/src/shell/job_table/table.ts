@@ -45,8 +45,9 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     // runner unwinding afterwards must not reopen or relabel it.
     if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? KILLED_EXIT_CODE : 1
     if (isAbortError(err)) {
+      const signal = job.process?.signal ?? null
       job.status = JobStatus.KILLED
-      job.exitCode = KILLED_EXIT_CODE
+      job.exitCode = signal === null ? KILLED_EXIT_CODE : 128 + signal
       await job.console.emit(Channel.STDERR, encodeText('Killed'))
       await job.console.finish(KILLED_OUTCOME)
       return KILLED_EXIT_CODE
@@ -271,14 +272,17 @@ export class JobTable {
    * ending chunk are dropped, so a runner still unwinding cannot append
    * past its own death, and `settle` returns early once the job is no
    * longer RUNNING so it cannot relabel it.
+   *
+   * @param signal the signal the job is stopped with; its status is 128
+   *   plus it, KILL's 137 by default.
    */
-  async kill(jobId: number, sessionId = ''): Promise<boolean> {
+  async kill(jobId: number, sessionId = '', signal = 9): Promise<boolean> {
     const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
-    if (job.process !== null) job.process.terminate()
+    if (job.process !== null) job.process.terminate(signal)
     else job.abort?.abort()
     job.status = JobStatus.KILLED
-    job.exitCode = KILLED_EXIT_CODE
+    job.exitCode = 128 + signal
     await job.console.emit(Channel.STDERR, encodeText('Killed'))
     await job.console.finish(KILLED_OUTCOME)
     return true

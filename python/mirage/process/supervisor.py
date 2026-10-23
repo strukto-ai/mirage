@@ -95,12 +95,12 @@ class ProcessSupervisor:
                 ),
                 run,
                 self._retire,
-                lambda: self.terminate_children(pid),
+                lambda signal: self.terminate_children(pid, signal),
             )
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             return handle
 
-    def terminate_children(self, pid: int) -> None:
+    def terminate_children(self, pid: int, signal: int = 9) -> None:
         """Request cancellation of every live runner under ``pid``.
 
         A runner is under ``pid`` when ``pid`` is its parent or started
@@ -109,12 +109,13 @@ class ProcessSupervisor:
 
         Args:
             pid (int): the parent or group leader.
+            signal (int): what the stop stands for, as the parent's.
         """
         for child in self.live():
             if child.info.parent_pid == pid or (
                 child.info.group_id == pid and child.info.pid != pid
             ):
-                child.terminate()
+                child.terminate(signal)
 
     def _retire(self, pid: int) -> None:
         with self._lock:
@@ -170,10 +171,10 @@ class ProcessSupervisor:
             with self._lock:
                 return signal_target(pid) is not None
 
-        def terminate(pid: int) -> bool:
+        def terminate(pid: int, signal: int) -> bool:
             with self._lock:
                 handle = signal_target(pid)
-                return handle is not None and handle.terminate()
+                return handle is not None and handle.terminate(signal)
 
         return ProcessView(
             list=list_visible,

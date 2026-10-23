@@ -907,10 +907,14 @@ _KILL_USAGE = (
 )
 
 # The signals a managed runner answers besides the probe (0). Each one ends
-# the runner through its cancellation channel, so the waited status is the
-# managed cancellation's (137) whichever was sent. Stop, continue and the
-# user signals have no managed meaning and are refused as bash refuses a
-# name it does not know.
+# the runner through its cancellation channel, carrying the signal: a
+# native program the runner started receives it, KILL a second later if
+# it is still running, and the waited status is 128 plus it, as bash
+# reports a child the signal ended. A non-interactive bash's asynchronous
+# commands may ignore INT and QUIT, job control being off; a managed
+# runner ends on them as on any other. Stop, continue and the user signals
+# have no managed meaning and are refused as bash refuses a name it does
+# not know.
 _KILL_SIGNALS = {"HUP": 1, "INT": 2, "QUIT": 3, "KILL": 9, "TERM": 15}
 
 # The largest PID operand kill and ps read as a number: the bound both hosts
@@ -966,7 +970,7 @@ async def handle_kill(
     """Signal managed runners with bash's kill surface.
 
     The signal comes from ``-s``/``-n``, or from the first ``-sigspec``;
-    ``0`` probes and every other signal cancels the runner. Every
+    ``0`` probes and every other signal cancels the runner with it. Every
     operand is tried and each failure is named in bash's words; the
     status is 0 when any operand was signalled, as bash's is. A job
     spec is ``%N``; a negative number is a process group, which no
@@ -1028,10 +1032,10 @@ async def handle_kill(
             if signal == 0:
                 found = processes.probe(pid)
             else:
-                found = processes.terminate(pid)
+                found = processes.terminate(pid, signal)
                 job = next((j for j in jobs if j.pid == pid), None)
                 if found and job is not None:
-                    await job_table.kill(job.id, sid)
+                    await job_table.kill(job.id, sid, signal)
         except PermissionError:
             errors.append(f"{voice}kill: ({pid}) - Operation not permitted")
             continue

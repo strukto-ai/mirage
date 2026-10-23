@@ -242,6 +242,17 @@ async def test_kill_all_reaches_every_session():
     assert table.all_running_jobs() == []
 
 
+# kill %N with a signal records bash's status for it: 128 plus the signal.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal,code", [(9, 137), (15, 143), (2, 130)])
+async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
+    table = JobTable()
+    job = _submit(table, "a")
+    assert await table.kill(job.id, "a", signal)
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, code)
+    await table.kill_all()
+
+
 @pytest.mark.asyncio
 async def test_numbering_resets_per_session_when_its_list_empties():
     table = JobTable()

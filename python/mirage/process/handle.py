@@ -14,9 +14,12 @@ logger = logging.getLogger(__name__)
 class ProcessHandle:
     """Host-side lifecycle of one asynchronous runner.
 
-    Termination requests cancellation once. Joining waits for the runner,
-    including its finally blocks; it does not assert that a provider has
-    stopped native descendants. A cancelled waiter never cancels the runner.
+    Termination requests cancellation once, standing for a signal: a
+    native program the runner started receives it, and a cancelled
+    runner's status is 128 plus it, as a shell reports a child the
+    signal ended. Joining waits for the runner, including its finally
+    blocks; it does not assert that a provider has stopped native
+    descendants. A cancelled waiter never cancels the runner.
     """
 
     def __init__(
@@ -24,15 +27,16 @@ class ProcessHandle:
         info: ProcessInfo,
         run: ProcessRunner,
         finished: Callable[[int], None],
-        cancel_children: Callable[[], None] = lambda: None,
+        cancel_children: Callable[[int], None] = lambda signal: None,
     ) -> None:
         self._info = info
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
+        self._signal: int | None = None
         self._completion: Future[ProcessInfo] = Future()
         self.task = asyncio.create_task(
-            run_with_execution(info.execution_id, run)
+            run_with_execution(info.execution_id, run, self)
         )
         self.task.add_done_callback(self._settle)
 
@@ -41,21 +45,33 @@ class ProcessHandle:
         with self._lock:
             return self._info
 
-    def terminate(self) -> bool:
-        """Request cancellation without waiting for the runner to exit."""
+    @property
+    def signal(self) -> int | None:
+        """The signal the runner was stopped with, None while it runs."""
+        with self._lock:
+            return self._signal
+
+    def terminate(self, signal: int = 9) -> bool:
+        """Request cancellation without waiting for the runner to exit.
+
+        Args:
+            signal (int): what the stop stands for, KILL (9) unless a
+                ``kill`` named another.
+        """
         with self._lock:
             if (
                 self._info.state == ProcessState.EXITED
                 or self._info.cancellation_requested
             ):
                 return False
+            self._signal = signal
             self.task.get_loop().call_soon_threadsafe(self.task.cancel)
             self._info = replace(
                 self._info,
                 state=ProcessState.STOPPING,
                 cancellation_requested=True,
             )
-        self._cancel_children()
+        self._cancel_children(signal)
         return True
 
     def _settle(self, task: asyncio.Task[int]) -> None:
@@ -63,7 +79,10 @@ class ProcessHandle:
         error = None if cancelled else task.exception()
         if error is not None:
             logger.debug("process %d failed: %s", self._info.pid, error)
-        code = 137 if cancelled else 1 if error is not None else task.result()
+        if cancelled:
+            code = 128 + (self._signal or 9)
+        else:
+            code = 1 if error is not None else task.result()
         with self._lock:
             self._info = replace(
                 self._info,

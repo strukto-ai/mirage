@@ -23,7 +23,7 @@ export interface ProcessView {
   readonly list: () => readonly ProcessInfo[]
   readonly checkSpawn: () => void
   readonly probe: (pid: number) => boolean
-  readonly terminate: (pid: number) => boolean
+  readonly terminate: (pid: number, signal: number) => boolean
   readonly depth?: number
   readonly spawn?: (request: SpawnRequest) => ChildProcess
 }

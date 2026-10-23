@@ -20,13 +20,6 @@ export interface ProcessInfo {
 
 export type ProcessRunner = () => Promise<number>
 
-/**
- * Runs a runner as part of its execution, so what it records names it. The
- * workspace hands over the caller's binder: the process layer sits below
- * the session the caller carries, so it cannot import it.
- */
-export type ExecutionBind = <T>(executionId: string, run: () => Promise<T>) => Promise<T>
-
 export interface SpawnRequest {
   readonly argv: readonly string[]
   readonly cwd?: PathSpec

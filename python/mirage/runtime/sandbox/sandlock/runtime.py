@@ -20,7 +20,7 @@ from typing import Any
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import LineExecutorMixin, StreamingProcessMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.cli import (
     Children,
     close_children,
@@ -37,7 +37,7 @@ from mirage.types import PathSpec
 
 
 class SandlockRuntime(
-    Runtime[None], LineExecutorMixin[None], StreamingProcessMixin[None]
+    Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
     """Run native commands through the Linux Sandlock CLI.
 
@@ -93,16 +93,7 @@ class SandlockRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-    ) -> RunResult:
-        return await self._run_process(texts, ctx, None)
-
-    async def run_stream(
-        self,
-        engine: None,
-        paths: list[PathSpec],
-        texts: list[str],
-        ctx: Context,
-        output: OutputFn,
+        output: OutputFn | None,
     ) -> RunResult:
         return await self._run_process(texts, ctx, output)
 
