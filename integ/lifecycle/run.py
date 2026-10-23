@@ -36,7 +36,7 @@ from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
 from mirage.io.cooperative import chunks
-from mirage.io.types import IOResult
+from mirage.io.types import ByteSource, IOResult
 from mirage.policy import Policy, PolicyDenied
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -208,6 +208,14 @@ class RejectedUploadVFS(RAMVFS):
         raise RuntimeError(self.message)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
+        raise RuntimeError(self.message)
+
+    async def write_stream(
+        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
+    ) -> None:
+        raise RuntimeError(self.message)
+
+    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
         raise RuntimeError(self.message)
 
 

@@ -367,6 +367,14 @@ class RejectedUploadVFS extends RAMVFS {
   override pwrite(): Promise<void> {
     return Promise.reject(new Error(this.message))
   }
+
+  override writeStream(): Promise<void> {
+    return Promise.reject(new Error(this.message))
+  }
+
+  override appendStream(): Promise<void> {
+    return Promise.reject(new Error(this.message))
+  }
 }
 
 /** A registered CLI exercising stdin, deferred status, and producer closure. */
