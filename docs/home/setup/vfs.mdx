@@ -32,7 +32,6 @@ token for search:
         config=SlackConfig(
             token=os.environ["SLACK_BOT_TOKEN"],
             search_token=os.environ["SLACK_USER_TOKEN"],
-            content_search=True,
         )
     )
     ws = Workspace({"/slack": slack}, mode=MountMode.READ)
@@ -45,7 +44,6 @@ token for search:
     const slack = new SlackVFS({
       token: process.env.SLACK_BOT_TOKEN!,
       searchToken: process.env.SLACK_USER_TOKEN,
-      contentSearch: true,
     })
     const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
     ```
@@ -59,7 +57,6 @@ token for search:
         config:
           token: ${SLACK_BOT_TOKEN}
           search_token: ${SLACK_USER_TOKEN}
-          content_search: true
     ```
   </Tab>
 </Tabs>
@@ -100,7 +97,7 @@ The `head` prints:
 
 The `grep` uses Slack's own search: it asks Slack which days mention `refund`
 and reads only those, not every day of every channel. That takes the
-`search_token` (a user token with `search:read`), `content_search` and `-w`,
+`search_token` (a user token with `search:read`) and `-w`,
 since Slack matches whole words. Without them, or when Slack's search cannot
 answer, `grep` reads the files. Slack searches message text, file names and
 reactions, and finds a new message only once it has indexed it. Attachments

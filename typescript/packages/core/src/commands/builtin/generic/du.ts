@@ -97,8 +97,6 @@ export interface DuOutput {
   records: PathRecord[] | null
 }
 
-const TRUNCATED_NOTE = 'du: walk stopped early: the reported sizes are incomplete'
-
 function line(size: number, human: boolean, label: string): string {
   return `${scaledSize(size, null, human)}\t${label}`
 }
@@ -539,8 +537,9 @@ async function duOne(
  *
  * `computeEntries` reports mount-relative (path, size) pairs plus the total.
  * `missing` names the operands that could not be read: GNU reports each and
- * exits 1 but still prints the rest. `truncated` is read after the walks to
- * ask whether any of them hit its entry cap. `mounts` marks the descendant
+ * exits 1 but still prints the rest. `stopped` is read after the walks for
+ * where one ran past `fullScanLimit`, each line without the command's name.
+ * `mounts` marks the descendant
  * boundaries: leaves under one are shadowed and dropped from every row and
  * total (see `dropShadowed`). `unreadable` is read after the walks for the
  * directories a walk could not open (a rule refused them below the operand):
@@ -558,7 +557,7 @@ export async function du(
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
   missing: [string, string][] = [],
-  truncated?: () => boolean,
+  stopped?: () => readonly string[],
   mounts: MountView | null = null,
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
@@ -608,8 +607,8 @@ export async function du(
     notes.push(`du: cannot access '${shown}'` + (detail === null ? '' : `: ${detail}`))
     exitCode = 1
   }
-  if (truncated?.() === true) {
-    notes.push(TRUNCATED_NOTE)
+  for (const line of stopped?.() ?? []) {
+    notes.push(`du: ${line}`)
     exitCode = 1
   }
   const stderr =
@@ -638,7 +637,7 @@ export async function duGeneric(
   stat: (p: PathSpec) => Promise<unknown>,
   computeSize: ComputeSize,
   computeEntries: ComputeEntries,
-  truncated?: () => boolean,
+  stopped?: () => readonly string[],
   unreadable?: () => readonly string[],
   directories?: () => readonly string[],
   inaccessible?: () => readonly (readonly [string, string | null])[],
@@ -659,7 +658,7 @@ export async function duGeneric(
     computeSize,
     computeEntries,
     missing,
-    truncated,
+    stopped,
     mountsOf(ctx) ?? null,
     unreadable,
     directories,

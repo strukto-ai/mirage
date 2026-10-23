@@ -30,10 +30,10 @@ config = DropboxConfig(
     # Mount a subfolder instead of the account root by setting
     # DROPBOX_ROOT_PATH, e.g. "/Team/data".
     root_path=os.environ.get("DROPBOX_ROOT_PATH") or "/",
-    # Set DROPBOX_CONTENT_SEARCH=1 to let grep/rg narrow recursive scans
-    # via /2/files/search_v2 instead of downloading every file. Needs a
-    # plan with full-text search (Professional/Essentials/Business+).
-    content_search=os.environ.get("DROPBOX_CONTENT_SEARCH") == "1",
+    # grep -rw and rg -w narrow recursive scans via /2/files/search_v2.
+    # On a plan without full-text search (below Professional), set
+    # DROPBOX_FULL_SCAN_LIMIT=-1 to read every file instead.
+    full_scan_limit=int(os.environ.get("DROPBOX_FULL_SCAN_LIMIT", "1000")),
 )
 backend = DropboxVFS(config)
 ws = Workspace({"/dropbox": backend}, mode=MountMode.WRITE)
@@ -70,10 +70,10 @@ async def main() -> None:
         await show(f"mv {scratch}/notes.txt {scratch}/renamed.txt")
         await show(f"cat {scratch}/renamed.txt")
 
-        # ── recursive search; with content_search=True the candidates
-        # come from /2/files/search_v2 and only matches are downloaded ──
-        await show(f"grep -rn beta {scratch}")
-        await show(f"rg -l gamma {scratch}")
+        # ── recursive whole-word search; the candidates come from
+        # /2/files/search_v2 and only matches are downloaded ──
+        await show(f"grep -rnw beta {scratch}")
+        await show(f"rg -lw gamma {scratch}")
     finally:
         await show(f"rm -r {scratch}")
         await show("rm -d /dropbox/_mirage_example")

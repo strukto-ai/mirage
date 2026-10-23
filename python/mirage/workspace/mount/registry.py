@@ -771,9 +771,8 @@ class MountRegistry:
                 sizes_always_known=m.vfs.sizes_always_known,
                 anchor=m is self._anchor,
                 visible=m.visible,
-                max_du_entries=m.vfs.max_du_entries,
-                max_glob_matches=m.vfs.max_glob_matches,
                 searchable=m.vfs.searchable,
+                full_scan_limit=m.vfs.full_scan_limit,
                 calls=m.calls,
             )
             for m in self._mounts

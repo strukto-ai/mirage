@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SCOPE_ERROR = 50000
-
 # A folder changed this recently is not versioned: a timestamp is coarser
 # than the changes it would have to tell apart (git's racy-clean rule).
 RACY_WINDOW_NS = 2_000_000_000

@@ -20,6 +20,7 @@ import pytest
 
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
+from mirage.errors.types import GlobLimitError
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
@@ -222,7 +223,7 @@ async def _ram_listed(accessor, path: PathSpec) -> list[str]:
     return [f"{base}/{row.name}" for row in rows]
 
 
-def test_scope_error_truncates_instead_of_crash():
+def test_a_glob_past_the_limit_is_refused_not_cut_short():
     vfs = RAMVFS()
     for i in range(20):
         vfs._store.files[f"/f{i:02d}.txt"] = b""
@@ -239,8 +240,8 @@ def test_scope_error_truncates_instead_of_crash():
     async def _run():
         return await ram_resolve_glob([glob_ps])
 
-    result = asyncio.run(_run())
-    assert len(result) == 5
+    with pytest.raises(GlobLimitError):
+        asyncio.run(_run())
 
 
 def test_relative_glob_matches_spelled_as_typed():

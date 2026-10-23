@@ -15,6 +15,8 @@
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import { LOCAL_FULL_SCAN_LIMIT } from '../constants.ts'
+import { VFSConfigError } from '../errors.ts'
 import { PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
@@ -36,7 +38,6 @@ import { rename as ramRename } from '../../core/ram/rename.ts'
 import { copy as ramCopy } from '../../core/ram/copy.ts'
 import { truncate as ramTruncate } from '../../core/ram/truncate.ts'
 import { setAttrs as ramSetAttrs } from '../../core/ram/set_attrs.ts'
-import { SCOPE_ERROR } from '../../core/ram/constants.ts'
 import { tree as ramTree } from '../../core/ram/readdir.ts'
 
 export interface RAMVFSState {
@@ -60,7 +61,21 @@ export class RAMVFS extends BaseVFS {
 
   override readonly local: boolean = true
 
-  override readonly maxGlobMatches: number = SCOPE_ERROR
+  override readonly fullScanLimit: number
+
+  /**
+   * @param options.fullScanLimit the most files one command walks under a directory: searches and
+   *   listings stop there, and a glob matching more, tar -c, cp -r, rm -r and the like are refused;
+   *   -1 for no cap.
+   */
+  constructor(options: { fullScanLimit?: number } = {}) {
+    super()
+    const limit = options.fullScanLimit ?? LOCAL_FULL_SCAN_LIMIT
+    if (!Number.isInteger(limit) || limit < -1) {
+      throw new VFSConfigError('ram: full_scan_limit: must be an integer of -1 or more')
+    }
+    this.fullScanLimit = limit
+  }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return ramTree(this.accessor, path)

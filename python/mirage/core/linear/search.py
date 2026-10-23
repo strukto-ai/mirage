@@ -161,7 +161,7 @@ async def files_containing(
         text (str): plain text every match holds.
         under (list[PathSpec]): the directories walked.
         ask_linear (bool): whether Linear's issue search may be asked,
-            for a whole word with ``content_search``.
+            for a whole word under a ``full_scan_limit``.
     """
     if not text.isascii():
         return None

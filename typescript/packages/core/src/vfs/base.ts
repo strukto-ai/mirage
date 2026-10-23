@@ -26,10 +26,9 @@ import type {
   SetAttrFields,
 } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
-import { DEFAULT_MAX_GLOB_MATCHES } from '../utils/glob_walk.ts'
 import type { DeltaHook } from '../events/base.ts'
 import { methodName, vfsCall } from './call.ts'
-import { DEFAULT_MAX_DU_ENTRIES } from './constants.ts'
+import { FULL_SCAN_LIMIT } from './constants.ts'
 import { Effect, type Handed, Target } from './types.ts'
 
 /**
@@ -241,15 +240,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly listingsPin: string | null = null
   /**
-   * How many entries a du walk of this mount visits before it stops and
-   * reports a partial answer, null for no cap: the command table's own
-   * `maxDuEntries`, read by a walk that crosses mounts through the
-   * dispatcher, which charges each entry to the mount serving it.
-   *
-   * Mirrors Python's `BaseVFS.max_du_entries`.
-   */
-  readonly maxDuEntries: number | null = DEFAULT_MAX_DU_ENTRIES
-  /**
    * Whether `read` fetches a byte window from the store itself. When false
    * the caller reads the whole file and slices it, so `read` is only ever
    * handed a window by a VFS that sets this.
@@ -260,8 +250,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * aggregate on the host instead of streaming through mirage.
    */
   readonly local: boolean = false
-  /** How many paths one glob may expand to before it stops. */
-  readonly maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES
   /**
    * The files `filesContaining` answers for, as mount-relative globs matched
    * segment by segment (a glob naming a directory covers what is below it);
@@ -269,6 +257,14 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * answer, as a full scan would.
    */
   readonly searchable: readonly string[] | null = null
+  /**
+   * The most files one command walks under a directory of this mount: grep
+   * -r, rg and git grep stop reading there, find, ls -R, tree and du stop
+   * listing, a glob matching more is refused, and so are tar -c, zip -r, cp
+   * -r, rm -r, mv to another mount and diff -r of a directory holding more
+   * (`beforeFullScan`); -1 for no cap.
+   */
+  readonly fullScanLimit: number = FULL_SCAN_LIMIT
   /**
    * Extensions whose `read` is a rendering rather than the stored bytes,
    * each to the name of the method that renders it, which takes `read`'s
@@ -730,20 +726,29 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Called before a command reads every file under `path`, once per directory
-   * a command walks, before the first file it reads there: grep -r and rg
-   * where no search narrowed the walk, and tar -c, zip -r, cp -r, mv across
-   * mounts and diff -r always. Resolve to let the scan run; reject to refuse
-   * it, and the error's message is what the command prints.
+   * Called before a command acts on every file under `path`, once per
+   * directory a command copies, compares or removes whole, before the first
+   * file it touches there: tar -c, zip -r, cp -r, mv across mounts, diff -r
+   * and rm -r. Resolve to let the scan run; reject to refuse it, and the
+   * error's message is what the command prints. The default refuses more
+   * than `fullScanLimit` files. Searches and listings are never refused: they
+   * stop after `fullScanLimit` files.
    *
    * @param path the directory about to be walked.
-   * @param files how many files the session sees under `path`, from the
-   *   mount's `readTree` with every hidden file dropped; null when `readTree`
-   *   cannot answer, and the guard counts them itself.
+   * @param files how many files the session sees under `path`, with every
+   *   hidden file dropped: the mount's `readTree`, or under a
+   *   `fullScanLimit` a walk of its listings that stops one file past it;
+   *   null when neither counts, and the guard counts them itself.
    * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullScan(_path: PathSpec, _files: number | null, _handed?: Handed): Promise<void> {
+  beforeFullScan(_path: PathSpec, files: number | null, _handed?: Handed): Promise<void> {
+    const limit = this.fullScanLimit
+    if (limit >= 0 && files !== null && files > limit) {
+      return Promise.reject(
+        new Error(`more than ${String(limit)} files in scope (full_scan_limit); narrow the path`),
+      )
+    }
     return Promise.resolve()
   }
 

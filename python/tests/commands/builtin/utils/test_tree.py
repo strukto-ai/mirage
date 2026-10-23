@@ -17,10 +17,11 @@ from dataclasses import replace
 import pytest
 
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.utils.tree import tree_walk
+from mirage.commands.builtin.utils.tree import ScanBudget, tree_walk
 from mirage.errors.fs import enotdir, enotsup, walk_declined
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
+from mirage.view.types import MountView
 from mirage.workspace import Workspace
 
 FILE = FileType.FILE
@@ -57,15 +58,14 @@ class _Mount:
         return FileStat(name=path.virtual, type=FILE)
 
 
-def _walk(mount: _Mount, answered=None):
-    return tree_walk(mount.read_tree, mount.readdir, mount.stat, answered)
+def _walk(mount: _Mount):
+    return tree_walk(mount.read_tree, mount.readdir, mount.stat)
 
 
 @pytest.mark.asyncio
 async def test_one_answer_lists_and_stats_the_whole_walk():
     mount = _Mount(_found())
-    answered: set[str] = set()
-    readdir, stat = _walk(mount, answered=answered)
+    readdir, stat = _walk(mount)
     root = PathSpec.from_str_path("/m")
     assert await readdir(root) == ["/m/a", "/m/b.txt", "/m/e"]
     assert await readdir(PathSpec.from_str_path("/m/a")) == ["/m/a/c.txt"]
@@ -75,7 +75,6 @@ async def test_one_answer_lists_and_stats_the_whole_walk():
     assert (await stat(PathSpec.from_str_path("/m/a/c.txt"))).size == 3
     assert mount.asked == ["/m"]
     assert mount.calls == []
-    assert answered == {"/m", "/m/a", "/m/e"}
 
 
 @pytest.mark.asyncio
@@ -191,9 +190,6 @@ async def _guarded(line: str) -> tuple[GuardedRAM, bytes, bytes, int]:
 @pytest.mark.parametrize(
     "line",
     [
-        "grep -r ada /g/d",
-        "rg ada /g/d",
-        "rg --sort modified ada /g/d /out",
         "tar -cf /out/a.tar /g/d",
         "tar -cf - /g/d",
         "zip -qr /out/a.zip /g/d",
@@ -201,6 +197,7 @@ async def _guarded(line: str) -> tuple[GuardedRAM, bytes, bytes, int]:
         "cp -r /g/d /g/c",
         "mv /g/d /out/m",
         "diff -r /g/d /g/e",
+        "rm -r /g/d",
     ],
 )
 async def test_a_command_reading_a_whole_directory_asks_first(line):
@@ -220,6 +217,7 @@ async def test_a_command_reading_a_whole_directory_asks_first(line):
             "xt\n",
         ),
         ("mkdir /out/t; mv -T /g/d /out/t; ls -d /out/t", "/out/t\n"),
+        ("rm -rf /g/d; ls /g/d", "a.txt\nsub\n"),
     ],
 )
 async def test_a_refused_tree_copy_leaves_the_destination_alone(line, out):
@@ -245,3 +243,78 @@ async def test_a_refused_tree_copy_leaves_the_destination_alone(line, out):
 async def test_a_command_reading_named_files_asks_nothing(line):
     vfs, _, stderr, code = await _guarded(line)
     assert (vfs.scans, stderr, code) == ([], b"", 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    ["grep -r ada /g/d", "rg ada /g/d", "rg --sort modified ada /g/d /out"],
+)
+async def test_a_search_stops_at_the_limit_rather_than_asking(line):
+    vfs, stdout, stderr, code = await _guarded(line)
+    assert (vfs.scans, stdout, stderr, code) == (
+        [],
+        b"/g/d/a.txt:ada\n",
+        b"",
+        0,
+    )
+
+
+def _limits(limits: dict[str, int]) -> MountView:
+    def root_of(path: str) -> str:
+        return max(
+            (r for r in limits if (path.rstrip("/") + "/").startswith(r)),
+            key=len,
+        )
+
+    return MountView(
+        descendants=lambda path: [],
+        visible_descendants=lambda path: [],
+        is_root=lambda path: False,
+        root_of=root_of,
+        full_scan_limit=lambda path: limits[root_of(path)],
+    )
+
+
+STOP = "stopped after {} files (full_scan_limit); narrow the path"
+
+
+def test_a_scan_budget_stops_once_spent_and_opens_nothing_more():
+    budget = ScanBudget(PathSpec.from_str_path("/m/d"), _limits({"/m/": 2}))
+    assert [budget.spend("/m/d") for _ in range(3)] == [True, True, False]
+    assert not budget.opens("/m/d/sub")
+    assert budget.stopped == [f"/m/d: {STOP.format(2)}"]
+
+
+def test_a_scan_budget_charges_each_mount_under_its_own_root():
+    budget = ScanBudget(
+        PathSpec.from_str_path("/"), _limits({"/": -1, "/m/": 2, "/n/": 3})
+    )
+    assert all(budget.spend("/") for _ in range(50))
+    assert [budget.spend("/m/d") for _ in range(3)] == [True, True, False]
+    assert all(budget.spend("/n") for _ in range(3))
+    assert budget.stopped == [f"/m: {STOP.format(2)}"]
+
+
+@pytest.mark.parametrize("raw, shown", [("d", "d"), ("", ".")])
+def test_a_scan_budget_names_the_operand_as_typed(raw, shown):
+    operand = replace(PathSpec.from_str_path("/m/d"), raw_path=raw)
+    budget = ScanBudget(operand, _limits({"/m/": 0}))
+    assert not budget.spend("/m/d")
+    assert budget.stopped == [f"{shown}: {STOP.format(0)}"]
+
+
+@pytest.mark.asyncio
+async def test_a_scan_budget_listing_cuts_one_and_skips_the_next():
+    asked: list[str] = []
+
+    async def readdir(path: PathSpec) -> list[str]:
+        asked.append(path.virtual)
+        return [f"{path.virtual}/{i}" for i in range(3)]
+
+    budget = ScanBudget(PathSpec.from_str_path("/m"), _limits({"/m/": 2}))
+    listed = await budget.listing(readdir, PathSpec.from_str_path("/m"))
+    assert listed == ["/m/0", "/m/1"]
+    assert await budget.listing(readdir, PathSpec.from_str_path("/m/0")) == []
+    assert asked == ["/m"]
+    assert budget.stopped == [f"/m: {STOP.format(2)}"]

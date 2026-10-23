@@ -44,8 +44,8 @@ class SearchRAM(RAMVFS):
     Like a real index it never covers a binary-extension file. ``lines``
     answers as "bytes", "stream" or "decline" (None for every file), or
     is None for no line search; ``upper`` spells hits in another case,
-    ``resource`` adds the ``search`` command's search, which grep and rg
-    never ask, and ``refuse`` is what ``before_full_scan`` raises.
+    and ``resource`` adds the ``search`` command's search, which grep and
+    rg never ask.
     """
 
     def __init__(
@@ -54,13 +54,12 @@ class SearchRAM(RAMVFS):
         lines: str | None = "bytes",
         upper: bool = False,
         resource: bool = False,
-        refuse: type[Exception] | None = None,
+        full_scan_limit: int = 10000,
     ) -> None:
-        super().__init__()
-        self.lines, self.upper, self.refuse = lines, upper, refuse
+        super().__init__(full_scan_limit=full_scan_limit)
+        self.lines, self.upper = lines, upper
         self.reads: list[str] = []
         self.asked: list[tuple[str, bool]] = []
-        self.scans: list[str] = []
         self.pulled: list[bytes] = []
         self.open = 0
         self.streams: list[AsyncIterator[bytes]] = []
@@ -113,11 +112,6 @@ class SearchRAM(RAMVFS):
                 yield line
         finally:
             self.open -= 1
-
-    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
-        self.scans.append(path.virtual)
-        if self.refuse is not None:
-            raise self.refuse(f"{files} files in scope, narrow the path")
 
 
 def _holds(data: bytes, text: str, ignore_case: bool) -> bool:
@@ -230,7 +224,6 @@ def test_rg_reads_a_file_whose_line_answer_starts_with_a_mark(lines):
     searched = _run(_marked(vfs), line)
     assert searched == _run(_marked(RAMVFS()), line)
     assert searched[0] == b"/m/top.txt:ada\n"
-    assert vfs.scans == ["/m"]
 
 
 # Under -E none rg keeps the mark, so the answer stands and nothing is read.
@@ -240,85 +233,78 @@ def test_rg_keeps_a_marked_line_answer_under_no_encoding(lines):
     vfs = SearchRAM(files=False, lines=lines)
     searched = _run(_marked(vfs), line)
     assert searched == _run(_marked(RAMVFS()), line)
-    assert (vfs.reads, vfs.scans) == ([], [])
+    assert vfs.reads == []
 
 
 EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
 
 
 @pytest.mark.parametrize(
-    "line, mount, reads, asked, scan",
+    "line, mount, reads, asked",
     [
         # Only the files holding the text are read; -c and -L still print
         # the rest from the walk. A regex asks the text every match holds.
-        ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada", None),
-        ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w", None),
-        ("rg -x bob /d", "files", "b.txt", "bob -w", None),
-        ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused", None),
-        ("grep -rP 'conn.*refused' /d", "files", "b.txt", "refused", None),
-        # -a reads the binary-extension file no search vouches for, asking
-        # the mount first, and a named file is read whatever the search said
-        # (twice, as GNU does).
+        ("grep -rc ada /d", "files", "a.txt sub/d.txt", "ada"),
+        ("rg -lw ada /d", "files", "a.txt sub/d.txt", "ada -w"),
+        ("rg -x bob /d", "files", "b.txt", "bob -w"),
+        ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused"),
+        ("grep -rP 'conn.*refused' /d", "files", "b.txt", "refused"),
+        # -a reads the binary-extension file no search vouches for, and a
+        # named file is read whatever the search said (twice, as GNU does).
         (
             "grep -ra ada /d",
             "files",
             "a.txt sub/d.txt w.bin",
             "ada",
-            True,
         ),
         (
             "grep -r ada /d /d/c.txt",
             "files",
             "a.txt c.txt c.txt sub/d.txt",
             "ada",
-            None,
         ),
-        ("grep -r ada /d", "upper", "a.txt sub/d.txt", "ada", None),
-        ("grep -r ada /d", "resource", "a.txt sub/d.txt", "ada", None),
+        ("grep -r ada /d", "upper", "a.txt sub/d.txt", "ada"),
+        ("grep -r ada /d", "resource", "a.txt sub/d.txt", "ada"),
         # Lines stand in for a file; -n reads a file holding one.
-        ("grep -r ada /d", "lines", "", "", None),
-        ("grep -rn ada /d", "lines", "a.txt sub/d.txt", "", None),
-        ("grep -rn ada /d", "stream", "a.txt sub/d.txt", "", None),
-        ("grep -r ada /d", "decline", EVERY, "", True),
-        ("grep -rn ada /d", "decline", EVERY, "", True),
-        ("grep -rv ada /d", "both", None, "", True),
-        ("rg --passthru ada /d", "both", None, "", True),
-        ("grep -r 'a.b' /d", "both", None, "", True),
-        ("rg -L ada /d", "both", None, "", True),
+        ("grep -r ada /d", "lines", "", ""),
+        ("grep -rn ada /d", "lines", "a.txt sub/d.txt", ""),
+        ("grep -rn ada /d", "stream", "a.txt sub/d.txt", ""),
+        ("grep -r ada /d", "decline", EVERY, ""),
+        ("grep -rn ada /d", "decline", EVERY, ""),
+        ("grep -rv ada /d", "both", None, ""),
+        ("rg --passthru ada /d", "both", None, ""),
+        ("grep -r 'a.b' /d", "both", None, ""),
+        ("rg -L ada /d", "both", None, ""),
         (
             "rg --files-without-match ada /d",
             "both",
             None,
             "",
-            True,
         ),
         (
             "rg -c --include-zero ada /d",
             "both",
             None,
             "",
-            True,
         ),
-        ("rg -q --files-without-match ada /d", "files", None, "ada", None),
-        ("rg --stats ada /d | grep -v second", "both", EVERY, "", True),
-        ("rg -z ada /d", "both", EVERY, "", True),
+        ("rg -q --files-without-match ada /d", "files", None, "ada"),
+        ("rg --stats ada /d | grep -v second", "both", EVERY, ""),
+        ("rg -z ada /d", "both", EVERY, ""),
         (
             "rg -U 'ada here\\nnothing' /d",
             "both",
             EVERY,
             "",
-            True,
         ),
-        ("rg -U ada /d", "lines", "a.txt sub/d.txt", "", None),
-        ("rg --files /d", "both", "", "", None),
+        ("rg -U ada /d", "lines", "a.txt sub/d.txt", ""),
+        ("rg --files /d", "both", "", ""),
     ],
 )
-def test_what_a_search_reads_asks_and_scans(line, mount, reads, asked, scan):
+def test_what_a_search_reads_and_asks(line, mount, reads, asked):
     vfs = SearchRAM(**MOUNTS[mount])
     assert _run(vfs, line) == _run(RAMVFS(), line)
     text, _, word = asked.partition(" ")
     assert vfs.asked == ([(text, bool(word))] if text else [])
-    assert vfs.scans == (["/d"] if scan else [])
     if reads is not None:
         assert sorted(vfs.reads) == [f"d/{key}" for key in reads.split()]
 
@@ -383,14 +369,14 @@ def test_a_hidden_path_keeps_the_search_and_loses_its_hits():
     vfs, hide = SearchRAM(), ("/d/sub",)
     line = "grep -r ada /d"
     assert _run(vfs, line, hide) == _run(RAMVFS(), line, hide)
-    assert (vfs.asked, vfs.scans) == ([("ada", False)], [])
+    assert vfs.asked == [("ada", False)]
     assert "d/sub/d.txt" not in vfs.reads
 
 
 @pytest.mark.parametrize("line", ["grep -r ada", "rg ada"])
 def test_a_hidden_operand_beside_a_visible_one_keeps_its_match(line):
-    # A mount with no search asks the scan guard for every operand; the
-    # hidden one reaches no directory, so the walk reports it as absent.
+    # The hidden operand reaches no directory, so the walk reports it as
+    # absent.
     out, err, _ = _run(RAMVFS(), f"{line} /d/a.txt /d/b.txt", ("/d/b.txt",))
     assert out == b"/d/a.txt:ada here\n"
     assert b"/d/b.txt" in err
@@ -409,7 +395,7 @@ def test_a_deny_rule_on_a_file_keeps_the_search_on(line):
     out, err, code = _run(vfs, line, deny=deny)
     assert (out, err, code) == _run(RAMVFS(), line, deny=deny)
     assert (b"/d/c.txt: Permission denied" in err, code) == (True, 2)
-    assert (vfs.asked, vfs.scans) == ([("ada", False)], [])
+    assert vfs.asked == [("ada", False)]
     assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"]
 
 
@@ -473,44 +459,28 @@ def test_rg_closes_a_streamed_answer_it_stops_inside():
     assert asyncio.run(run()) == (1, 0)
 
 
-REFUSED = b"grep: 6 files in scope, narrow the path\n"
-
-
-DENIED = b"".join(
-    b"grep: /d/%s: Permission denied\n" % key.encode() for key in EVERY.split()
-)
-
-
 @pytest.mark.parametrize(
-    "line, mount, refuse, out",
+    "limit, out",
     [
+        # The search leaves a.txt and sub/d.txt, the only files read, so a
+        # limit of two lets the walk finish and one stops it at sub/d.txt.
+        (2, None),
         (
-            "grep -rv ada /d",
-            "both",
-            ValueError,
-            (REFUSED, 1),
+            1,
+            (
+                b"/d/a.txt:ada here\n",
+                b"grep: /d: stopped after 1 files (full_scan_limit); "
+                b"narrow the path\n",
+                2,
+            ),
         ),
-        (
-            "grep -r ada /d",
-            "decline",
-            ValueError,
-            (REFUSED, 1),
-        ),
-        # An OSError is a per-file read error to grep, which goes on to the
-        # next file; that file is refused too, not read.
-        ("grep -r ada /d", "decline", PermissionError, (DENIED, 2)),
-        ("grep -r ada /d", "decline-resource", PermissionError, (DENIED, 2)),
-        # A narrowed line, and one that reads no content, run.
-        ("grep -r ada /d", "both", ValueError, None),
-        ("rg --files /d", "both", ValueError, None),
     ],
 )
-def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
-    vfs = SearchRAM(**MOUNTS[mount], refuse=refuse)
-    if out is None:
-        assert _run(vfs, line) == _run(RAMVFS(), line)
-    else:
-        assert (_run(vfs, line), vfs.reads) == ((b"", *out), [])
+def test_only_the_files_a_search_leaves_count_to_the_limit(limit, out):
+    vfs = SearchRAM(lines=None, full_scan_limit=limit)
+    line = "grep -r ada /d"
+    assert _run(vfs, line) == (_run(RAMVFS(), line) if out is None else out)
+    assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"][:limit]
 
 
 @pytest.mark.parametrize(
@@ -522,14 +492,13 @@ def test_a_mount_may_refuse_a_full_scan(line, mount, refuse, out):
         ("rg -x xy /d", ["xy"]),
     ],
 )
-def test_rg_complete_literal_words_avoid_a_refused_full_scan(line, terms):
-    vfs = SearchRAM(lines=None, refuse=RuntimeError)
+def test_rg_complete_literal_words_ask_the_search(line, terms):
+    vfs = SearchRAM(lines=None)
     vfs._store.files["/d/short.txt"] = b"xy\n"
     plain = RAMVFS()
     plain._store.files["/d/short.txt"] = b"xy\n"
     assert _run(vfs, line) == _run(plain, line)
     assert vfs.asked == [(term, True) for term in terms]
-    assert vfs.scans == []
 
 
 @pytest.mark.parametrize(
@@ -557,10 +526,8 @@ def test_rg_complete_literal_words_avoid_a_refused_full_scan(line, terms):
         ),
     ],
 )
-def test_rg_caseless_literal_words_avoid_a_refused_full_scan(
-    line, terms, output
-):
-    vfs = SearchRAM(lines=None, refuse=RuntimeError)
+def test_rg_caseless_literal_words_ask_the_search(line, terms, output):
+    vfs = SearchRAM(lines=None)
     vfs._store.files["/d/caseless.txt"] = (
         b"ALPHA\nAlpha\nBrAvO\nFOO\nbar\nalphabet\n"
     )
@@ -583,7 +550,6 @@ def test_rg_caseless_literal_words_avoid_a_refused_full_scan(
     expected = "".join(f"/d/caseless.txt:{text}\n" for text in output).encode()
     assert _run(vfs, line) == (expected, b"", 0)
     assert queries == [(term, True, True) for term in terms]
-    assert vfs.scans == []
 
 
 def test_rg_truncated_literal_prefix_never_requests_a_whole_word():

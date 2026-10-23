@@ -103,6 +103,35 @@ def test_unknown_short_option_reports_char():
     assert code == 2
 
 
+@pytest.mark.parametrize(
+    "token, shown",
+    [
+        ("r", "-r"),
+        ("R", "-R"),
+        ("d", "-d"),
+        ("--recursive", "--recursive"),
+        ("--rec", "--rec"),
+        ("--di", "--di"),
+        ("--directories=recurse", "--directories=recurse"),
+        ("--inc", "--inc"),
+        ("--exc", "--exc"),
+        ("--exclude-dir=x", "--exclude-dir=x"),
+    ],
+)
+def test_zgrep_refuses_a_grep_option_it_does_not_support(token, shown):
+    assert unknown_option_error("zgrep", token) == (
+        f"zgrep: {shown}: option not supported\n".encode(),
+        2,
+    )
+
+
+@pytest.mark.parametrize("token", ["--re", "--d", "--in", "--ex", "Y"])
+def test_zgrep_leaves_any_other_option_to_the_usual_refusal(token):
+    msg, code = unknown_option_error("zgrep", token)
+    assert b"not supported" not in msg
+    assert code == 2
+
+
 def test_find_uses_predicate_wording():
     msg, code = unknown_option_error("find", "--bogus")
     assert msg == b"find: unknown predicate `--bogus'\n"

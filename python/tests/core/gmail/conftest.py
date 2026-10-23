@@ -57,7 +57,7 @@ def gmail(monkeypatch):
     async def run(line: str, fake: FakeGmail | None = None, **config: Any):
         fake = fake or FakeGmail()
         install_api(monkeypatch, gmail=fake)
-        settings = {"access_token": "t", "content_search": True} | config
+        settings = {"access_token": "t"} | config
         vfs = CountingGmail(GmailConfig(**settings))
         ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
         try:

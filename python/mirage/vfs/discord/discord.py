@@ -46,6 +46,7 @@ class DiscordVFS(BaseVFS):
     def __init__(self, config: DiscordConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = DiscordAccessor(
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),

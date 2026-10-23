@@ -29,6 +29,8 @@ import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
 import type { Result } from './types.ts'
 import { scopePath } from './scope.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { TooManyMatches } from '../../../shell/errors.ts'
+import { GlobLimitError } from '../../../errors/types.ts'
 
 interface ResultInit {
   out?: Uint8Array | null
@@ -205,7 +207,12 @@ export async function expandOperands(
   for (const item of operands) {
     const spec = item instanceof PathSpec ? item : PathSpec.fromStrPath(item)
     if (spec.pattern !== null) {
-      out.push(...(await expandGlob(dispatch, namespace.mountFor(spec.virtual), [spec])))
+      try {
+        out.push(...(await expandGlob(dispatch, namespace.mountFor(spec.virtual), [spec])))
+      } catch (err) {
+        if (err instanceof GlobLimitError) throw new TooManyMatches(err.message)
+        throw err
+      }
       continue
     }
     out.push(spec)

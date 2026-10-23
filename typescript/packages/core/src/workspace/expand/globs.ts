@@ -19,6 +19,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
+import { GlobLimitError } from '../../errors/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import {
@@ -35,7 +36,7 @@ import {
 import { CycleError, parent } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
+import { DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
 import type { SessionState } from '../session/session.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -103,7 +104,7 @@ export async function expandGlob(
   const prefix = rstripSlash(mount.prefix)
   const resolve = makeResolveGlob(
     (p) => listing(dispatch, p),
-    mount.vfs.maxGlobMatches,
+    mount.vfs.fullScanLimit,
     (p) => statOf(dispatch, p),
     undefined,
     access,
@@ -581,6 +582,10 @@ export async function resolveGlobs(
           }
           resolved = kept
         }
+        const limit = mount.vfs.fullScanLimit
+        if (limit >= 0 && resolved.length > limit) {
+          throw new GlobLimitError(typed.rawPath, limit)
+        }
         if (resolved.length === 0) {
           // bash's three answers to a zero-match glob: the literal word
           // (default), nothing at all under nullglob, and a fatal
@@ -613,9 +618,15 @@ export async function resolveGlobs(
           }
         }
       } catch (err) {
-        // A failglob refusal is fatal and propagates; an ordinary
-        // resolution failure keeps the literal word.
+        // A failglob refusal is fatal and propagates, as does a glob past
+        // the mount's limit, named as typed since a walk lists level by
+        // level; an ordinary resolution failure keeps the literal word.
         if (err instanceof ExitSignal) throw err
+        if (err instanceof GlobLimitError) {
+          throw new TooManyMatches(
+            new GlobLimitError(unmarkGlobs(typed.rawPath), err.limit).message,
+          )
+        }
         result.push(typed)
       }
     } else {

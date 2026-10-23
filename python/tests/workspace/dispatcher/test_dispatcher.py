@@ -2959,7 +2959,7 @@ class TreeCountingRAM(RAMVFS):
     """A RAM mount with no scan guard that counts its tree reads."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(full_scan_limit=-1)
         self.trees = 0
 
     async def read_tree(self, path):
@@ -2974,6 +2974,185 @@ async def test_a_mount_with_no_scan_guard_is_not_counted():
     with Workspace({"/ram/": vfs}) as ws:
         answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
     assert (answer, vfs.trees) == (None, 0)
+
+
+class LimitedRAM(RAMVFS):
+    """A RAM mount held to a ``full_scan_limit`` with no guard of its own."""
+
+    def __init__(self) -> None:
+        super().__init__(full_scan_limit=2)
+
+
+class ListedRAM(LimitedRAM):
+    """The same mount with no tree read, so a scan is counted by listing
+    each directory."""
+
+    read_tree = BaseVFS.read_tree
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.listed: list[str] = []
+
+    async def readdir(self, path):
+        self.listed.append(path.virtual)
+        return await super().readdir(path)
+
+
+def _limited(cls: type[LimitedRAM], files: int) -> LimitedRAM:
+    vfs = cls()
+    vfs._store.dirs.update({"/d", "/d/secret"})
+    vfs._store.files["/d/secret/b.txt"] = b"b\n"
+    for i in range(files - 1):
+        vfs._store.files[f"/d/a{i}.txt"] = b"a\n"
+    return vfs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_a_search_past_the_full_scan_limit_stops_there(cls):
+    with Workspace({"/ram/": _limited(cls, 3)}) as ws:
+        out = await ws.shell("grep -r a /ram/d")
+        assert (await out.stdout_str(), out.stderr, out.exit_code) == (
+            "/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n",
+            b"grep: /ram/d: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n",
+            2,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+@pytest.mark.parametrize(
+    "line, out, code",
+    [
+        ("find /ram/d", "/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n", 1),
+        ("ls -R /ram/d", "/ram/d:\na0.txt\na1.txt\n", 1),
+        (
+            "tree /ram/d",
+            "/ram/d\n|-- a0.txt\n`-- a1.txt\n\n1 directory, 2 files\n",
+            2,
+        ),
+        ("du -a /ram/d", "2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n", 1),
+    ],
+)
+async def test_a_listing_past_the_full_scan_limit_stops_there(
+    cls, line, out, code
+):
+    with Workspace({"/ram/": _limited(cls, 3)}) as ws:
+        result = await ws.shell(line)
+        name = line.split()[0]
+        assert (
+            await result.stdout_str(),
+            result.stderr,
+            result.exit_code,
+        ) == (
+            out,
+            f"{name}: /ram/d: stopped after 2 files (full_scan_limit); "
+            "narrow the path\n".encode(),
+            code,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_listing_across_mounts_stops_at_each_mounts_limit():
+    with Workspace(
+        {"/a/": _limited(LimitedRAM, 3), "/b/": _limited(LimitedRAM, 3)}
+    ) as ws:
+        result = await ws.shell("ls -R /a/d /b/d")
+        assert (
+            await result.stdout_str(),
+            result.stderr,
+            result.exit_code,
+        ) == (
+            "/a/d:\na0.txt\na1.txt\n\n/b/d:\na0.txt\na1.txt\n",
+            b"ls: /a/d: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n"
+            b"ls: /b/d: stopped after 2 files (full_scan_limit); "
+            b"narrow the path\n",
+            1,
+        )
+
+
+GLOB_REFUSED = (
+    "/ram/d/*: matches more than 2 files (full_scan_limit); narrow the path"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, out, err",
+    [
+        (
+            "cat /ram/d/*; echo $?",
+            "126\n",
+            f"cat: Argument list too long\ncat: {GLOB_REFUSED}\n",
+        ),
+        (
+            "echo /ram/d/*; echo $?",
+            "126\n",
+            f"echo: Argument list too long\necho: {GLOB_REFUSED}\n",
+        ),
+        (
+            "for f in /ram/d/*; do echo $f; done; echo after",
+            "",
+            f"bash: {GLOB_REFUSED}\n",
+        ),
+        ("cat /ram/d/a*", "a\na\n", ""),
+    ],
+)
+async def test_a_glob_past_the_full_scan_limit_is_refused(line, out, err):
+    with Workspace({"/ram/": _limited(LimitedRAM, 3)}) as ws:
+        result = await ws.shell(line)
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            out,
+            err,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_a_copy_past_the_full_scan_limit_is_refused(cls):
+    with Workspace({"/ram/": _limited(cls, 3)}, mode=MountMode.WRITE) as ws:
+        out = await ws.shell("tar -cf /ram/d.tar /ram/d")
+        assert (await out.stdout_str(), out.stderr, out.exit_code) == (
+            "",
+            b"tar: more than 2 files in scope (full_scan_limit); "
+            b"narrow the path\n",
+            1,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_a_scan_within_the_full_scan_limit_runs(cls):
+    with Workspace({"/ram/": _limited(cls, 2)}) as ws:
+        out = await ws.shell("grep -rl a /ram/d")
+        assert await out.stdout_str() == "/ram/d/a0.txt\n"
+        assert out.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_a_hidden_file_does_not_count_to_the_full_scan_limit(
+    cls, secret_hidden
+):
+    vfs = _limited(cls, 3)
+    with Workspace({"/ram/": vfs}) as ws:
+        answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
+    assert answer is None
+
+
+@pytest.mark.asyncio
+async def test_a_listed_count_stops_one_file_past_the_limit():
+    vfs = ListedRAM()
+    for i in range(6):
+        vfs._store.dirs.add(f"/d/s{i}")
+        vfs._store.files[f"/d/s{i}/f.txt"] = b"f\n"
+    vfs._store.dirs.add("/d")
+    with Workspace({"/ram/": vfs}) as ws:
+        with pytest.raises(ValueError, match="more than 2 files"):
+            await ws.dispatch("before_full_scan", _path("/ram/d"))
+    assert len(vfs.listed) == 4
 
 
 @pytest.mark.asyncio

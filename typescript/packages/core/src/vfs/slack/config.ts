@@ -15,11 +15,16 @@ import {
  */
 const SlackConfigSchema = SlackCredentialsSchema.extend({
   ...timeRangeShape,
-  contentSearch: z.boolean().optional().meta({
-    description:
-      'Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search; search lags new messages.',
-    default: false,
-  }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Slack search, which lags posts and covers only message text, file names, titles and reactions.',
+      default: 1000,
+    }),
 }).refine(orderedTimes, timeRangeOrderError)
 
 export type SlackConfig = ConfigOf<typeof SlackConfigSchema>

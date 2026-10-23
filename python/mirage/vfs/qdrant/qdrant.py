@@ -36,6 +36,7 @@ class QdrantVFS(BaseVFS):
     def __init__(self, config: QdrantConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = QdrantAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:

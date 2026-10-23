@@ -29,9 +29,7 @@ async def test_slack_grep_glob_expanded_to_60_paths_reads_those_60_days():
     # A search never rules out a file named on the line, so the 60 days
     # the glob expanded to are each read and Slack is never searched.
     slack = SlackVFS(
-        config=SlackConfig(
-            token="xoxb-test", search_token="xoxp-test", content_search=True
-        )
+        config=SlackConfig(token="xoxb-test", search_token="xoxp-test")
     )
     reads: list[str] = []
 

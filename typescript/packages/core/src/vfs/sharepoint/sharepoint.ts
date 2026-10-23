@@ -28,6 +28,7 @@ import { rename } from '../../core/sharepoint/rename.ts'
 import { copy } from '../../core/sharepoint/copy.ts'
 import { truncate } from '../../core/sharepoint/truncate.ts'
 import { filesContaining } from '../../core/sharepoint/search.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface SharePointVFSState {
   type: string
@@ -50,9 +51,12 @@ export class SharePointVFS extends BaseVFS {
   override readonly accessor: SharePointAccessor
   private readonly config: SharePointConfig
 
+  override readonly fullScanLimit: number
+
   constructor(config: SharePointConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.accessor = new SharePointAccessor(config)
   }
 
@@ -142,7 +146,7 @@ export class SharePointVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return filesContaining(this.accessor, text, [path])
   }
 

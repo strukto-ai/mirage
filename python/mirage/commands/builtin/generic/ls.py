@@ -22,6 +22,7 @@ from mirage.commands.builtin.utils.output import (
     format_records,
 )
 from mirage.commands.builtin.utils.paths import vfs_stat_path
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -1070,6 +1071,7 @@ async def probe_operand(
     escape: bool = False,
     chain: tuple[str, ...] = (),
     spell: Callable[[str], str] | None = None,
+    budget: ScanBudget | None = None,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -1109,6 +1111,9 @@ async def probe_operand(
             above this one, each as the path it resolves to.
         spell (Callable[[str], str] | None): a path below the operand as
             the operand spelled it; None at the operand itself.
+        budget (ScanBudget | None): under ``-R``, the entries the walk
+            may still list; a directory past it is listed in its parent
+            but not opened.
     """
     if spell is None:
         spell = functools.partial(
@@ -1200,6 +1205,8 @@ async def probe_operand(
         if row is not None:
             return Operand(path, row, []), warnings
 
+    if budget is not None:
+        names = [name for name in names if budget.spend(path.virtual)]
     entries, entry_ws = await _stat_entries(
         path,
         names,
@@ -1234,6 +1241,8 @@ async def probe_operand(
                 # A nested mount's root. Its row belongs here, but its
                 # listing is another backend's, which this walk cannot
                 # read: the cross-mount fan-out renders that group.
+                continue
+            if budget is not None and not budget.opens(child_path.virtual):
                 continue
             below = chain
             if real is not None:
@@ -1270,6 +1279,7 @@ async def probe_operand(
                 escape=escape,
                 chain=below,
                 spell=spell,
+                budget=budget,
             )
             groups.extend(child.groups)
             warnings.extend(child_ws)
@@ -1571,6 +1581,7 @@ async def ls(
     )
     operands: list[Operand] = []
     for p in paths:
+        budget = ScanBudget(p, mounts) if recursive else None
         operand, p_ws = await probe_operand(
             p,
             readdir=readdir,
@@ -1589,8 +1600,13 @@ async def ls(
             group_dirs_first=group_dirs_first,
             stat_needed=needed,
             escape=escape,
+            budget=budget,
         )
         warnings.extend(p_ws)
+        if budget is not None:
+            warnings.extend(
+                LsWarning(f"ls: {line}", False) for line in budget.stopped
+            )
         operands.append(operand)
     if len(operands) > 1:
         operands = await _sort_operands(

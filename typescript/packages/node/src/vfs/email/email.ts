@@ -58,9 +58,12 @@ export class EmailVFS extends BaseVFS {
   readonly config: EmailConfig
   override readonly accessor: EmailAccessor
 
+  override readonly fullScanLimit: number
+
   constructor(config: EmailConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit
     this.accessor = new EmailAccessor(config)
   }
 
@@ -100,7 +103,7 @@ export class EmailVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!this.config.contentSearch) return Promise.resolve(null)
+    if (this.fullScanLimit < 0) return Promise.resolve(null)
     return emailFilesContaining(this.accessor, text, [path], opts.wholeWord)
   }
 

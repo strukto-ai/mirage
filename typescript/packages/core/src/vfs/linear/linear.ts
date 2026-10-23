@@ -28,6 +28,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
 import { read as linearRead } from '../../core/linear/read.ts'
 import { stat as linearStat } from '../../core/linear/stat.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface LinearVFSState {
   type: string
@@ -61,14 +62,17 @@ export class LinearVFS extends BaseVFS {
     'teams/*/documents/*',
   ]
 
+  override readonly fullScanLimit: number
+
   constructor(config: LinearConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const transportOpts: { apiKey: string; baseUrl?: string } = { apiKey: config.apiKey }
     if (config.baseUrl !== undefined) transportOpts.baseUrl = config.baseUrl
-    const accessorOpts: { teamIds?: readonly string[]; contentSearch?: boolean } = {}
+    const accessorOpts: { teamIds?: readonly string[]; fullScanLimit?: number } = {}
     if (config.teamIds !== undefined) accessorOpts.teamIds = config.teamIds
-    if (config.contentSearch !== undefined) accessorOpts.contentSearch = config.contentSearch
+    accessorOpts.fullScanLimit = this.fullScanLimit
     this.accessor = new LinearAccessor(new HttpLinearTransport(transportOpts), accessorOpts)
   }
 
@@ -81,7 +85,7 @@ export class LinearVFS extends BaseVFS {
       this.accessor,
       text,
       [path],
-      opts.wholeWord && this.config.contentSearch === true,
+      opts.wholeWord && this.fullScanLimit >= 0,
     )
   }
 

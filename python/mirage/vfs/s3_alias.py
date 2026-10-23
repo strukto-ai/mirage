@@ -14,8 +14,9 @@
 
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 from mirage.vfs.s3 import S3VFS, S3Config
 
 
@@ -69,6 +70,10 @@ class S3AliasConfig(BaseModel):
     the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     def resolved_endpoint_url(self) -> str:
         raise NotImplementedError
@@ -86,6 +91,7 @@ class S3AliasConfig(BaseModel):
             key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
+            full_scan_limit=self.full_scan_limit,
         )
 
 

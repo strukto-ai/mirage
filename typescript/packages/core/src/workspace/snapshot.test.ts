@@ -665,8 +665,8 @@ describe('cli registry snapshot', () => {
     // refuses a subclass field the caller set.
     const ws = buildWorkspace()
     const config: GDocsConfig = { clientId: 'id', clientSecret: 'sec', refreshToken: 'tok' }
-    expect(() => ws.registerCli('gws', GWS, { ...config, contentSearch: true })).toThrow(
-      "CLI 'gws': unknown config keys: contentSearch",
+    expect(() => ws.registerCli('gws', GWS, { ...config, fullScanLimit: 1000 })).toThrow(
+      "CLI 'gws': unknown config keys: fullScanLimit",
     )
     ws.registerCli('gws', GWS, { ...config })
     const clone = await ws.copy()

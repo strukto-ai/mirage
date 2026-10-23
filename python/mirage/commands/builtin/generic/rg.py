@@ -77,7 +77,7 @@ from mirage.commands.builtin.utils.wrap import (
     to_pathspec,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
+from mirage.commands.errors import ScanLimitError, UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -1227,8 +1227,18 @@ async def rg_generic(
     # A mount below the operand shadows whatever the backend holds there;
     # the fan-out that would search the mount itself is off too.
     boundary = mounts if f.one_file_system else None
+    stopped: set[str] = set()
     found = haystacks(
-        paths, rd, st, cwd, walk, f, warnings, boundary, link_resolver(ctx)
+        paths,
+        rd,
+        st,
+        cwd,
+        walk,
+        f,
+        warnings,
+        boundary,
+        link_resolver(ctx),
+        stopped,
     )
     if f.sort not in (None, "none") and not (
         f.sort == "path" and not f.sort_reverse
@@ -1249,6 +1259,7 @@ async def rg_generic(
             implicit,
             cwd,
             io,
+            stopped,
             ctx.shell,
         )
     )
@@ -1525,6 +1536,7 @@ async def haystacks(
     warnings: list[str],
     boundary: MountView | None,
     resolver: LinkResolver | None,
+    stopped: set[str] | None = None,
 ) -> AsyncIterator[Haystack]:
     """Every input the line searches, in order: a stdin operand, a named
     file as itself whatever the filters say, and a directory walked.
@@ -1542,6 +1554,8 @@ async def haystacks(
             any directory.
         resolver (LinkResolver | None): the namespace's links and the
             dispatcher past them, which -L walks through.
+        stopped (set[str] | None): the directories a search stopped at
+            their mount's ``full_scan_limit``, whose walk ends there.
     """
     # ripgrep holds one path that is not a directory to one thread, as it
     # does -j1 and a sort; every other line runs its parallel walker.
@@ -1582,7 +1596,7 @@ async def haystacks(
                 on_other_mount, boundary.root_of, boundary.root_of(p.virtual)
             )
         )
-        async for found in walk_haystacks(
+        walked = walk_haystacks(
             rd,
             st,
             p.virtual,
@@ -1595,8 +1609,14 @@ async def haystacks(
             resolver,
             f.follow,
             parallel,
-        ):
-            yield found
+        )
+        try:
+            async for found in walked:
+                yield found
+                if stopped and p.virtual in stopped:
+                    break
+        finally:
+            await close_quietly(walked)
 
 
 async def _list_files(
@@ -1670,6 +1690,7 @@ async def _search_all(
     implicit: bool,
     cwd: str,
     io: IOResult,
+    stopped: set[str],
     shell: ShellFn | None = None,
 ) -> AsyncIterator[bytes]:
     """Search every haystack in order and put the output together.
@@ -1693,6 +1714,8 @@ async def _search_all(
             globs are rooted at.
         io (IOResult): receives the exit status and the warnings, however
             the output ends.
+        stopped (set[str]): collects each directory whose walk a read
+            stopped at its mount's ``full_scan_limit``.
         shell (ShellFn | None): runs --pre's command in the session.
     """
     multi = len(paths) > 1
@@ -1779,6 +1802,11 @@ async def _search_all(
                     await close_quietly(matches)
                 if faults:
                     raise faults[0]
+            except ScanLimitError as exc:
+                if exc.directory.virtual not in stopped:
+                    stopped.add(exc.directory.virtual)
+                    warnings.append(f"rg: {exc}")
+                continue
             except FS_ERRORS as exc:
                 # ripgrep reports the failed input and keeps searching the
                 # rest.

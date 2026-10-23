@@ -18,6 +18,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from mirage.vfs.constants import FULL_SCAN_LIMIT
+
 TokenProvider = Callable[[], str | SecretStr | Awaitable[str | SecretStr]]
 
 
@@ -49,6 +51,10 @@ class DatabricksVolumeConfig(BaseModel):
     asynchronous, that returns one for each request."""
     timeout: int = Field(default=30, gt=0)
     """Seconds one request may take before it fails."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod

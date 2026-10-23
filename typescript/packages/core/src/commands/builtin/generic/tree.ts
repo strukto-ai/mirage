@@ -27,6 +27,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { cInt, strtoul } from '../utils/strtol.ts'
+import { ScanBudget } from '../utils/tree.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 
@@ -87,6 +88,9 @@ interface TreeOpts {
   crossStat: ((p: PathSpec) => Promise<FileStat>) | null
   // What a drawn link leads to, from the namespace's symlink facts.
   targetStat: ((path: string) => Promise<FileStat | null>) | null
+  // The entries this operand's walk may still list; a directory past it is
+  // drawn but not opened.
+  budget?: ScanBudget
 }
 
 // The mount roots mounted directly on this directory. A mount point need
@@ -151,6 +155,8 @@ async function walkTree(
   }
   if (nested.length > 0) entries = [...new Set([...entries, ...nested])]
   entries.sort(compareCodePoints)
+  const budget = treeOpts.budget
+  if (budget !== undefined) entries = entries.filter(() => budget.spend(path.virtual))
   const filtered: {
     spec: PathSpec
     name: string
@@ -224,6 +230,7 @@ async function walkTree(
       dirs += 1
       if (entry.link !== null) continue
       if (treeOpts.maxDepth !== null && depth + 1 >= treeOpts.maxDepth) continue
+      if (budget !== undefined && !budget.opens(entry.spec.virtual)) continue
       const nextPrefix = prefix + (last ? INDENT : VERTICAL)
       // Past a mount root the subtree belongs to another VFS, so the
       // rest of this branch reads through the dispatcher. Deeper mounts
@@ -328,6 +335,7 @@ export async function treeGeneric(
   let totalDirs = 0
   let totalFiles = 0
   let anyError = false
+  const stopped: string[] = []
   for (const p of targets) {
     const label = p.rawPath !== '' ? p.rawPath : p.virtual
     const before = lines.length
@@ -356,7 +364,9 @@ export async function treeGeneric(
         continue
       }
     }
-    const counts = await walkTree(readdir, stat, p, '', lines, treeOpts, 0)
+    const budget = new ScanBudget(p, treeOpts.mounts)
+    const counts = await walkTree(readdir, stat, p, '', lines, { ...treeOpts, budget }, 0)
+    for (const line of budget.stopped) stopped.push(`tree: ${line}`)
     if (counts.failed && lines.length === before + 1) {
       // The root could not be opened (GNU marks it inline and exits 2).
       lines[before] = `${label}${UNOPENABLE_MARK}`
@@ -372,5 +382,13 @@ export async function treeGeneric(
   }
   lines.push('', summary(totalDirs, totalFiles, treeOpts.dirsOnly))
   const out: ByteSource = formatRecords(lines)
-  return [out, new IOResult({ exitCode: anyError ? 2 : 0 })]
+  // A walk past fullScanLimit draws what it listed and says where it
+  // stopped, exiting 2 as for a directory it could not open.
+  return [
+    out,
+    new IOResult({
+      exitCode: anyError || stopped.length > 0 ? 2 : 0,
+      stderr: stopped.length > 0 ? formatRecords(stopped) : null,
+    }),
+  ]
 }

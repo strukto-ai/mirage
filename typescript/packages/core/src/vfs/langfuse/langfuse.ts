@@ -27,6 +27,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface LangfuseVFSState {
   type: string
@@ -44,9 +45,11 @@ export class LangfuseVFS extends BaseVFS {
   readonly config: LangfuseConfig
   override readonly accessor: LangfuseAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: LangfuseConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const transportOpts: { publicKey: string; secretKey: string; host?: string } = {
       publicKey: config.publicKey,
       secretKey: config.secretKey,

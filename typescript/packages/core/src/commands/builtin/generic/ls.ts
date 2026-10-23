@@ -65,6 +65,7 @@ import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
+import { ScanBudget } from '../utils/tree.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { streamConfig } from './sort.ts'
@@ -122,6 +123,9 @@ interface WalkOpts {
   // Whether the listing prints anything an entry's stat supplies, so an
   // entry whose stat failed is reported. See `statNeeded`.
   statNeeded: boolean
+  // Under -R, the entries the walk of this operand may still list; a
+  // directory past it is listed in its parent but not opened.
+  budget?: ScanBudget
 }
 
 // One ls operand once its kind is known. `row` is set when the operand is not
@@ -542,6 +546,8 @@ async function listDir(
   let structureOnly = false
   try {
     entries = await readdir(dir)
+    const budget = ctx.budget
+    if (budget !== undefined) entries = entries.filter(() => budget.spend(dir.virtual))
   } catch (err) {
     // A directory whose own `.` and `..` did not resolve is not one the
     // namespace can owe children to, and one the session may not open is
@@ -737,6 +743,7 @@ async function probeOperand(
         // cross-mount fan-out renders that group.
         continue
       }
+      if (ctx.budget !== undefined && !ctx.budget.opens(childPath)) continue
       let below = open
       if (real !== null) {
         // Under -L a directory is the one it resolves to, and one open
@@ -1270,7 +1277,12 @@ export async function lsGeneric(
   }
   const probed: Operand[] = []
   for (const p of targets) {
-    probed.push(await probeOperand(readdir, stat, p, walkOpts, warnings, true))
+    const budget = recursive ? new ScanBudget(p, walkOpts.mounts) : undefined
+    const opts = budget === undefined ? walkOpts : { ...walkOpts, budget }
+    probed.push(await probeOperand(readdir, stat, p, opts, warnings, true))
+    for (const line of budget?.stopped ?? []) {
+      warnings.push({ message: `ls: ${line}`, serious: false })
+    }
   }
   const operands =
     probed.length > 1

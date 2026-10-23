@@ -29,6 +29,7 @@ standard `fetch`. Browser access depends on the service's CORS configuration.
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
 | <code style={{ whiteSpace: 'nowrap' }}>pageSize</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxPages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table wandb end */}
@@ -149,3 +150,11 @@ Exhausting a page budget raises an error instead of returning a complete-looking
 partial result. Recursive `du` is capped at 1000 entries; glob expansion uses
 Mirage's standard traversal limit. API keys use host configuration and are
 redacted from VFS state. No write operations or W&B CLI are registered.
+
+## Integration
+
+The most files one command reads on Weights & Biases. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Weights & Biases |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

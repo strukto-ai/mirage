@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as Constants from '../../core/github/constants.ts'
 
-const scope = vi.hoisted(() => ({ warn: 1, error: 5000 }))
+const scope = vi.hoisted(() => ({ warn: 1 }))
 
 vi.mock('../../core/github/constants.ts', async () => {
   const actual = await vi.importActual<typeof Constants>('../../core/github/constants.ts')
@@ -23,9 +23,6 @@ vi.mock('../../core/github/constants.ts', async () => {
     ...actual,
     get SCOPE_WARN(): number {
       return scope.warn
-    },
-    get SCOPE_ERROR(): number {
-      return scope.error
     },
   }
 })
@@ -40,6 +37,9 @@ import { RAMVFS } from '../ram/ram.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
+const REFUSED_AT_4 = 'more than 4 files in scope (full_scan_limit); narrow the path\n'
+
+const STOPPED_AT_4 = 'stopped after 4 files (full_scan_limit); narrow the path\n'
 const TREE: GitHubTreeItem[] = [
   { path: 'top.txt', type: 'blob', sha: 'a', size: 2 },
   { path: 'empty', type: 'tree', sha: 'b' },
@@ -161,8 +161,8 @@ async function run(vfs: GitHubVFS | RAMVFS, line: string): Promise<Ran> {
   }
 }
 
-function ram(): RAMVFS {
-  const vfs = new RAMVFS()
+function ram(limit = 10000): RAMVFS {
+  const vfs = new RAMVFS({ fullScanLimit: limit })
   const enc = new TextEncoder()
   for (const [key, data] of Object.entries(REPO)) {
     const parts = key.split('/')
@@ -178,6 +178,7 @@ async function onGithub(
   line: string,
   hub = new FakeGitHub(REPO),
   pinned = false,
+  fullScanLimit = 5000,
 ): Promise<[Ran, FakeGitHub]> {
   vi.stubGlobal('fetch', hub.fetch)
   const ref = pinned ? { ref: await hub.head() } : {}
@@ -186,6 +187,7 @@ async function onGithub(
     owner: 'o',
     repo: 'r',
     baseUrl: hub.url,
+    fullScanLimit,
     ...ref,
   })
   hub.log.length = 0
@@ -204,7 +206,6 @@ async function read(hub: FakeGitHub): Promise<string[]> {
 describe('grep and rg over code search', () => {
   beforeEach(() => {
     scope.warn = 1
-    scope.error = 5000
   })
 
   afterEach(() => {
@@ -262,10 +263,13 @@ describe('grep and rg over code search', () => {
     expect(await read(hub)).toEqual(Object.keys(REPO).sort())
   })
 
-  it('refuses off the default branch without the -w hint', async () => {
-    scope.error = 4
-    const [got] = await onGithub('grep -rw import /gh', new FakeGitHub(REPO), true)
-    expect(got).toEqual(['', 'grep: 5 files in scope, narrow the path\n', 1])
+  // Twin of test_a_ref_off_the_default_branch_stops_at_the_cap.
+  it('stops at the cap off the default branch', async () => {
+    const line = 'grep -rw import /gh'
+    const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true, 4)
+    expect(got).toEqual(await run(ram(4), line))
+    expect(got.slice(1)).toEqual([`grep: /gh: ${STOPPED_AT_4}`, 2])
+    expect(await read(hub)).toHaveLength(4)
   })
 
   it('does not search a scope cheaper to read', async () => {
@@ -276,25 +280,33 @@ describe('grep and rg over code search', () => {
     expect(hub.count('search')).toBe(0)
   })
 
+  // Twin of test_a_search_past_the_scope_cap_stops_there.
   it.each([
-    ['grep -r import /gh', 'grep: 5 files in scope, narrow the path\n'],
-    ['grep -rwv import /gh', 'grep: 5 files in scope, narrow the path\n'],
-    ['grep -rwa import /gh', 'grep: 5 files in scope, narrow the path\n'],
-    ['rg -w --binary import /gh', 'rg: 5 files in scope, narrow the path\n'],
-    ['diff -r /gh /gh', 'diff: 5 files in scope, narrow the path\n'],
-    ["rg 'imp.rt' /gh", 'rg: 5 files in scope, narrow the path\n'],
-  ])('refuses %s past the scope cap', async (line, stderr) => {
-    scope.error = 4
-    const [got, hub] = await onGithub(line)
-    expect(got).toEqual(['', stderr, 1])
+    ['grep -r import /gh', 'grep'],
+    ['grep -rwv import /gh', 'grep'],
+    ["rg 'imp.rt' /gh", 'rg'],
+  ])('stops %s past the scope cap', async (line, name) => {
+    const [got, hub] = await onGithub(line, new FakeGitHub(REPO), false, 4)
+    expect(got).toEqual(await run(ram(4), line))
+    expect(got.slice(1)).toEqual([`${name}: /gh: ${STOPPED_AT_4}`, 2])
+    expect(hub.count('blob')).toBe(4)
+  })
+
+  // Twin of test_a_tree_diff_past_the_scope_cap_is_refused.
+  it('refuses a tree diff past the scope cap', async () => {
+    const [got, hub] = await onGithub('diff -r /gh /gh', new FakeGitHub(REPO), false, 4)
+    expect(got).toEqual(['', `diff: ${REFUSED_AT_4}`, 1])
     expect(hub.count('blob')).toBe(0)
   })
 
   // Twin of test_an_archive_past_the_scope_cap_is_refused.
   it('refuses an archive past the scope cap', async () => {
-    scope.error = 1
-    const [got, hub] = await onGithub('tar -cf - /gh/src')
-    expect(got).toEqual(['', 'tar: 2 files in scope, narrow the path\n', 1])
+    const [got, hub] = await onGithub('tar -cf - /gh/src', new FakeGitHub(REPO), false, 1)
+    expect(got).toEqual([
+      '',
+      'tar: more than 1 files in scope (full_scan_limit); narrow the path\n',
+      1,
+    ])
     expect(hub.count('blob')).toBe(0)
   })
 
@@ -304,10 +316,17 @@ describe('grep and rg over code search', () => {
     ['/gh', '/docs', 3],
     ['/r/gh', '', 5],
   ])('counts the refetched tree after an expiry at %s%s', async (prefix, sub, count) => {
-    scope.error = 0
+    // One under the refetched count: a count off the expired tree is smaller,
+    // and would let the scan run.
     const hub = new FakeGitHub({ 'docs/a.txt': 'a', 'docs/b.txt': 'b', 'top.txt': 't' })
     vi.stubGlobal('fetch', hub.fetch)
-    const vfs = await GitHubVFS.create({ token: 't', owner: 'o', repo: 'r', baseUrl: hub.url })
+    const vfs = await GitHubVFS.create({
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      baseUrl: hub.url,
+      fullScanLimit: count - 1,
+    })
     const ws = new Workspace(
       { [prefix]: new Mount(vfs, { mode: MountMode.READ }) },
       { shellParser: await getTestParser() },
@@ -318,9 +337,10 @@ describe('grep and rg over code search', () => {
       hub.set('new/d.txt', 'd')
       await ws.registry.mountFor(prefix).index.invalidate()
       hub.log.length = 0
-      const result = await ws.shell(`grep -rv x ${prefix}${sub}`)
+      const target = `${prefix}${sub}`
+      const result = await ws.shell(`diff -r ${target} ${target}`)
       expect(DEC.decode(result.stderr)).toBe(
-        `grep: ${String(count)} files in scope, narrow the path\n`,
+        `diff: more than ${String(count - 1)} files in scope (full_scan_limit); narrow the path\n`,
       )
       expect(hub.counts()).toEqual([0, 1, 0])
     } finally {
@@ -328,32 +348,35 @@ describe('grep and rg over code search', () => {
     }
   })
 
-  it('does not refuse a narrowed scan', async () => {
-    scope.error = 4
-    const line = 'grep -rw import /gh'
-    const [got] = await onGithub(line)
-    expect(got).toEqual(await run(ram(), line))
-  })
+  // Twin of test_a_narrowed_search_under_the_scope_cap_runs: code search
+  // names three files, so a cap of four reads them all.
+  it.each(['grep -rw import /gh', 'grep -rwa import /gh', 'rg -w --binary import /gh'])(
+    'runs %s, narrowed under the scope cap',
+    async (line) => {
+      const [got, hub] = await onGithub(line, new FakeGitHub(REPO), false, 4)
+      expect(got).toEqual(await run(ram(), line))
+      expect(await read(hub)).toEqual(['big.txt', 'docs/c.md', 'src/a.py'])
+    },
+  )
 
   // Code search never indexes a big file, so the answer names it; the walk
   // skips a binary extension without -a, so it is not a read to cap.
   it('does not count a binary the walk skips toward the cap', async () => {
-    scope.error = 3
     const weights = { 'w0.bin': REPO['big.txt'] ?? '', 'w1.bin': REPO['big.txt'] ?? '' }
     const line = 'grep -rw import /gh'
-    const [got, hub] = await onGithub(line, new FakeGitHub({ ...REPO, ...weights }))
+    const [got, hub] = await onGithub(line, new FakeGitHub({ ...REPO, ...weights }), false, 3)
     expect(got).toEqual(await run(ram(), line))
     expect(hub.count('search')).toBe(1)
   })
 
-  it('refuses a narrowed scan past the scope cap', async () => {
-    scope.error = 2
-    const [got, hub] = await onGithub('grep -rw import /gh')
+  // Twin of test_a_narrowed_search_past_the_scope_cap_stops_there.
+  it('stops a narrowed search past the scope cap', async () => {
+    const [got, hub] = await onGithub('grep -rw import /gh', new FakeGitHub(REPO), false, 2)
     expect(got).toEqual([
-      '',
-      'grep: 3 files in scope and code search could not narrow them; narrow the path\n',
-      1,
+      '/gh/big.txt:import\n',
+      'grep: /gh: stopped after 2 files (full_scan_limit); narrow the path\n',
+      2,
     ])
-    expect(hub.count('blob')).toBe(0)
+    expect(await read(hub)).toEqual(['big.txt', 'docs/c.md'])
   })
 })

@@ -17,7 +17,6 @@ from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.client import slack_search_available
-from mirage.core.slack.constants import DU_MAX_ENTRIES
 from mirage.core.slack.read import follow as _follow
 from mirage.core.slack.read import read as _read
 from mirage.core.slack.read import read_many as _read_many
@@ -42,7 +41,6 @@ class SlackVFS(BaseVFS):
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
     sizes_always_known: bool = True
-    max_du_entries: int | None = DU_MAX_ENTRIES
     prompt: str = PROMPT
     write_prompt: str = WRITE_PROMPT
 
@@ -54,6 +52,7 @@ class SlackVFS(BaseVFS):
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = SlackAccessor(
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),
@@ -129,7 +128,7 @@ class SlackVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if (
             not whole_word
-            or not self.config.content_search
+            or self.full_scan_limit < 0
             or not slack_search_available(self.config)
         ):
             return None

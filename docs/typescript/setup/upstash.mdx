@@ -67,3 +67,11 @@ through its [`RedisVFS`](/python/vfs/redis).
 ## Mount mode
 
 `read`, `write`, `exec`.
+
+## Integration
+
+The most files one command reads on Upstash Redis. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Upstash Redis |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

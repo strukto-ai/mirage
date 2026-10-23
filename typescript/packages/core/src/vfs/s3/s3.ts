@@ -15,7 +15,7 @@
 import type { S3Accessor } from '../../accessor/s3.ts'
 import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
-import { MD5_ETAG_STORES, SCOPE_ERROR } from '../../core/s3/constants.ts'
+import { MD5_ETAG_STORES } from '../../core/s3/constants.ts'
 import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
@@ -43,7 +43,6 @@ import { tree as s3Tree } from '../../core/s3/readdir.ts'
  */
 export class S3VFSBase extends BaseVFS<S3Accessor> {
   override readonly readsRanges: boolean = true
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   /**
    * The endpoint this mount's writes go to, for its write-condition row: the

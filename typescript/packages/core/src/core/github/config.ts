@@ -30,6 +30,16 @@ const GitHubConfigSchema = z.object({
     description: 'GitHub API root; set it for GitHub Enterprise.',
     default: 'https://api.github.com',
   }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search.',
+      default: 5000,
+    }),
 })
 
 export type GitHubConfig = ConfigOf<typeof GitHubConfigSchema>

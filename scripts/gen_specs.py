@@ -387,8 +387,6 @@ def _capabilities() -> dict[str, dict[str, Any]]:
             ],
             "reads_ranges": cls.reads_ranges,
             "local": cls.local,
-            "max_glob_matches": cls.max_glob_matches,
-            "max_du_entries": cls.max_du_entries,
         }
     return out
 

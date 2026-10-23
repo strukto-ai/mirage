@@ -68,6 +68,7 @@ The development proxy does not yet support document streaming or schema reads.
 | <code style={{ whiteSpace: 'nowrap' }}>databases</code> | Databases to mount; others are hidden. Unset or empty mounts every database except `admin`, `config` and `local`. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxDocLimit</code><br />default `5000` | Most documents one `tail -n` read of `documents.jsonl` fetches; a larger count on a collection that holds more is refused (`File too large`). |
 | <code style={{ whiteSpace: 'nowrap' }}>elideFields</code><br />default `{}` | Fields dropped from `documents.jsonl`, keyed by `<database>.<collection>` (a view's name works too); a dotted path such as `nested.path` drops a nested field. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mongodb end */}
@@ -77,3 +78,17 @@ Fields marked secret are redacted in snapshots.
 `read`.
 
 For the database/collection/document layout see the [Python MongoDB docs](/python/vfs/mongodb).
+
+## Integration
+
+What MongoDB answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On MongoDB |
+| --- | --- |
+| `grep`, `rg` on one file | A filter on the server sends only the documents that may match |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `tail -n N` | The last N documents by `_id` |
+| `wc -l` | `countDocuments()` on the server |
+| `tail -f` | A change stream yields each new insert |
+
+The [Python MongoDB docs](/python/vfs/mongodb#integration) list when each search answers and what it can miss.

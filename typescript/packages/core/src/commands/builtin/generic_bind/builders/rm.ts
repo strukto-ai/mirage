@@ -35,7 +35,8 @@ import type { WalkDeclinedError } from '../../../../errors/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles } from '../files.ts'
-import { linksOf, mountsOf } from '../../utils/links.ts'
+import { dispatchOf, linksOf, mountsOf } from '../../utils/links.ts'
+import { beforeFullScan } from '../../utils/tree.ts'
 
 const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
@@ -76,6 +77,9 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
         // rmR/rmdir are resolved lazily so object stores without a real
         // directory-remove op still unlink plain files (mirrors Python).
         if (recursive) {
+          // The mount is asked before anything goes, as for cp -r: a removal
+          // cut short would leave a tree that looks untouched.
+          await beforeFullScan(dispatchOf(ctx), p, 'rm')
           const listing = (dir: PathSpec): Promise<string[]> => files.readdir(dir)
           const probe = (spec: PathSpec): Promise<FileStat> => files.stat(spec)
           // -v names each entry before the tree goes in one call; a tree it

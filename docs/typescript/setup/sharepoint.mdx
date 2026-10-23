@@ -42,13 +42,20 @@ new SharePointVFS({
 | <code style={{ whiteSpace: 'nowrap' }}>site</code> | Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`. |
 | <code style={{ whiteSpace: 'nowrap' }}>drive</code> | Document library in `site` that the mount uses as its root; takes effect only with `site` set. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Graph search names. Search covers extracted text and lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Graph search, which lags writes and covers only extracted text. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table sharepoint end */}
 
-## grep and rg
+## Integration
 
-With `contentSearch: true`, `grep -rw` and `rg -w` read only the files Microsoft Graph search names, instead of every file under the directory. A directory above one document library is always read in full. It is off by default: Graph searches the text it extracted rather than the bytes `grep` reads, and indexes a write some time after it lands, so a file that holds the word can be left out. The [Python SharePoint docs](/python/vfs/sharepoint#grep-and-rg) list the cases.
+What SharePoint answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
 
-Node and browser expose the same API. Filesystem behavior and snapshot version pinning mirror the [Python SharePoint VFS](/python/vfs/sharepoint).
+| Command | On SharePoint |
+| --- | --- |
+| `grep -r`, `rg` | Microsoft Graph search within one document library, for whole words |
+| Can miss | Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`), recent writes |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Graph search |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
+
+The [Python SharePoint docs](/python/vfs/sharepoint#integration) list when each search answers and what it can miss.

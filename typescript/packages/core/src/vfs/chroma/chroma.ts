@@ -31,6 +31,7 @@ import { CHROMA_TREE } from '../../core/chroma/tree.ts'
 import { read, readStream } from '../../core/chroma/read.ts'
 import { stat } from '../../core/chroma/stat.ts'
 import { filesContaining, searchMany } from '../../core/chroma/search.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface ChromaVFSOptions {
   config: ChromaConfig
@@ -60,9 +61,11 @@ export class ChromaVFS extends BaseVFS {
     stat: ['entry', 'index'],
   } as const
 
+  override readonly fullScanLimit: number
   constructor(options: ChromaVFSOptions | ChromaConfig) {
     super()
     const config = 'config' in options ? options.config : options
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.config = resolveChromaConfig(config)
     this.accessor = new ChromaAccessor(this.config)
   }

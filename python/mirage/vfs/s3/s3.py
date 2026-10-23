@@ -19,7 +19,7 @@ from typing import Any
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
-from mirage.core.s3.constants import MD5_ETAG_STORES, SCOPE_ERROR
+from mirage.core.s3.constants import MD5_ETAG_STORES
 from mirage.core.s3.copy import copy as _copy
 from mirage.core.s3.copy import copy_from as _copy_from
 from mirage.core.s3.create import create as _create
@@ -78,11 +78,11 @@ class S3VFS(BaseVFS):
     read_revalidatable: bool = True
 
     reads_ranges: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, config: S3Config) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self._endpoint = _declared_endpoint(config)
         pinned = (
             config.model_copy(update={"endpoint_url": self._endpoint})

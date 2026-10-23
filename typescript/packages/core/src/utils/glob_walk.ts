@@ -18,6 +18,7 @@ import { pathVisible } from './hidden.ts'
 import type { FollowOperands, SessionAccess } from '../view/types.ts'
 import { type FileStat, FileType, PathSpec, type ReaddirFn, type StatFn } from '../types.ts'
 import { isFsError } from '../errors/fs.ts'
+import { GlobLimitError } from '../errors/types.ts'
 import { EXTGLOB_RE, fnmatch, patternParts, QUOTED_CHARS } from './fnmatch.ts'
 import { Glob } from '../rs/glob.ts'
 import { rekey } from './key_prefix.ts'
@@ -194,8 +195,6 @@ const GLOB_CHAR_OF: Readonly<Record<string, string>> = Object.fromEntries(
 const GLOB_CHAR_RE = /[*?[@+!()|]/g
 const GLOB_MARK_RE = /[\uFDD0-\uFDD8]/g
 
-export const DEFAULT_MAX_GLOB_MATCHES = 10000
-
 export function hasGlob(segment: string, access?: SessionAccess): boolean {
   return (
     GLOB_CHARS.some((ch) => segment.includes(ch)) ||
@@ -349,7 +348,8 @@ function isUnlistableDir(err: unknown): boolean {
 // Shared resolve_glob loop: resolved specs pass through, pattern specs
 // expand segment-by-segment (mid-path aware, spelled as typed), an
 // unmatched glob word stays the literal (bash nullglob off: the command
-// then errors on it like GNU), and matches cap at `cap` when given.
+// then errors on it like GNU), and a pattern matching more than `limit`
+// paths is refused (`GlobLimitError`), not cut short; -1 for no limit.
 // Per-backend glob modules bind their own readdir.
 //
 // The spec shape is how a caller chooses between the two answers, and the
@@ -396,7 +396,7 @@ export async function resolveGlobWith<A, I>(
   accessor: A,
   paths: readonly PathSpec[],
   index: I | undefined,
-  cap?: number,
+  limit = -1,
   stat?: (accessor: A, path: PathSpec, index?: I) => Promise<FileStat>,
   targetStat?: TargetStat,
   access?: SessionAccess,
@@ -474,12 +474,16 @@ export async function resolveGlobWith<A, I>(
         )
         continue
       }
-      const capped = cap !== undefined && matched.length > cap ? matched.slice(0, cap) : matched
+      if (limit >= 0 && matched.length > limit) {
+        throw new GlobLimitError(unmarkGlobs(p.rawPath), limit)
+      }
       // A typed word's matches are the words bash would have put on the
       // line, so a link one names resolves as the name typed would; an
       // internal expansion's matches are left as listed.
       result.push(
-        ...(follow !== undefined && isWordShaped(p) ? await followMatches(follow, capped) : capped),
+        ...(follow !== undefined && isWordShaped(p)
+          ? await followMatches(follow, matched)
+          : matched),
       )
     } else {
       result.push(p)
@@ -607,7 +611,7 @@ export async function expandPattern<A, I>(
  */
 export function makeResolveGlob(
   readdir: ReaddirFn,
-  maxGlobMatches: number = DEFAULT_MAX_GLOB_MATCHES,
+  limit = -1,
   stat?: StatFn,
   targetStat?: TargetStat,
   access?: SessionAccess,
@@ -620,7 +624,7 @@ export function makeResolveGlob(
       null,
       paths,
       undefined,
-      maxGlobMatches,
+      limit,
       stat === undefined ? undefined : (_accessor: null, path: PathSpec) => stat(path),
       targetStat,
       access,

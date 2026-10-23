@@ -32,6 +32,16 @@ const NextcloudConfigSchema = z.object({
       'Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search) may take; reads, writes and listings go through OpenDAL and its own timeouts.',
     default: 30,
   }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+      default: 1000,
+    }),
 })
 
 export type NextcloudConfig = ConfigOf<typeof NextcloudConfigSchema>

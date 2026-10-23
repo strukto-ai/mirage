@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.types import PathSpec
+
 
 class UsageError(ValueError):
     """Command-line usage error (GNU semantics: stderr message + exit code).
@@ -46,3 +48,20 @@ class PartialOutputError(Exception):
     def __init__(self, message: str, stdout: bytes) -> None:
         super().__init__(message)
         self.stdout = stdout
+
+
+class ScanLimitError(Exception):
+    """A walk's read past its mount's ``full_scan_limit``: grep and rg
+    keep what they printed, stop walking the directory and exit 2.
+
+    Args:
+        directory (PathSpec): the walked operand.
+        limit (int): how many files it read.
+    """
+
+    def __init__(self, directory: PathSpec, limit: int) -> None:
+        super().__init__(
+            f"{directory.raw_path or '.'}: stopped after {limit} files "
+            "(full_scan_limit); narrow the path"
+        )
+        self.directory = directory

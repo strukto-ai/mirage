@@ -45,6 +45,15 @@ The RAM VFS uses `IndexCacheStore` with `index_ttl = 0`, so its
 listings are not cached: the data is in memory, and every listing reads
 it. A workspace or mount `index:` block still applies its `ttl` to this mount.
 
+## Integration
+
+What RAM answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On RAM |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 10000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
+
 ## Example
 
 ```python

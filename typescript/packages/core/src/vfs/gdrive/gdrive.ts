@@ -43,6 +43,7 @@ import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
 import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
 import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface GDriveVFSState {
   type: string
@@ -80,9 +81,12 @@ export class GoogleDriveVFS extends BaseVFS {
   readonly config: GDriveConfig
   override readonly accessor: GDriveAccessor
 
+  override readonly fullScanLimit: number
+
   constructor(config: GDriveConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }
@@ -201,7 +205,7 @@ export class GoogleDriveVFS extends BaseVFS {
     opts: { wholeWord: boolean; ignoreCase: boolean },
     handed?: Handed,
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return gdriveFilesContaining(this.accessor, text, path, handed?.entry)
   }
 

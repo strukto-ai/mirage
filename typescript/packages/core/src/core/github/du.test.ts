@@ -62,7 +62,6 @@ async function runDu(
         prefix: '/',
         kind: 'github',
         mode: MountMode.WRITE,
-        maxDuEntries: null,
         calls: new Set(['read_tree']),
       },
     ],

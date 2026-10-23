@@ -161,8 +161,32 @@ async def test_depth_limit_does_not_open_children(unreadable_tree):
 @pytest.mark.parametrize(
     "unreadable_tree", [("disk", 10001), ("ssh", 10001)], indirect=True
 )
-async def test_du_accounts_for_more_than_the_default_budget(unreadable_tree):
+async def test_du_stops_at_the_mounts_full_scan_limit(unreadable_tree):
     vfs, _ = unreadable_tree
+    limit = vfs.full_scan_limit
+    ws = Workspace({"/d": vfs})
+    try:
+        summary = await ws.shell("du -s /d/large")
+        assert summary.exit_code == 1
+        assert (
+            summary.stderr
+            == (
+                f"du: /d/large: stopped after {limit} files (full_scan_limit); "
+                "narrow the path\n"
+            ).encode()
+        )
+        assert summary.stdout == f"{limit}\t/d/large\n".encode()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unreadable_tree", [("disk", 10001), ("ssh", 10001)], indirect=True
+)
+async def test_du_lifted_accounts_for_every_entry(unreadable_tree):
+    vfs, _ = unreadable_tree
+    vfs.full_scan_limit = -1
     ws = Workspace({"/d": vfs})
     try:
         summary = await ws.shell("du -s /d/large")

@@ -23,8 +23,6 @@ API_BASE = "https://huggingface.co"
 # resolves without a round trip.
 DEFAULT_REVISION = "main"
 
-SCOPE_ERROR = 5000
-
 # The tree endpoint's page size, and the reason there are two of them.
 # A bare listing serves up to 1000 rows a page. Asking for `expand=true`
 # -- the only way to learn the commit that last touched each path, which

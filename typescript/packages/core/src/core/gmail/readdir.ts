@@ -24,6 +24,7 @@ import { extractAttachments, extractHeader, messageJsonBytes } from './messages.
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { dateDirToGmailQuery, spanToGmailQuery } from './date_query.ts'
+import { FULL_SCAN_LIMIT } from '../../vfs/constants.ts'
 
 const TITLE_MAX = 80
 export const MSG_SUFFIX = '.gmail.json'
@@ -68,7 +69,7 @@ function attachmentEntries(raw: GmailMessageRaw): FileStat[] {
 /**
  * One date directory's children, plus its attachment-dir seeds. With
  * `keepText` each message's row keeps its rendered text, lowercased, for
- * grep (`contentSearch`).
+ * grep (a `fullScanLimit` of 0 or more).
  */
 function dateChildren(
   raws: readonly GmailMessageRaw[],
@@ -174,7 +175,7 @@ async function listLabel(
     )
     const { children, seeds: attSeeds } = dateChildren(
       groups.get(dateStr) ?? [],
-      accessor.config.contentSearch === true,
+      (accessor.config.fullScanLimit ?? FULL_SCAN_LIMIT) >= 0,
     )
     seeds.set(dateStr, children)
     for (const [attDir, attEntries] of attSeeds) seeds.set(`${dateStr}/${attDir}`, attEntries)
@@ -197,7 +198,7 @@ async function listDay(accessor: GmailAccessor, match: ScopeMatch, own: FileStat
   const groups = await groupByDate(accessor, msgIds)
   const { children, seeds } = dateChildren(
     groups.get(day) ?? [],
-    accessor.config.contentSearch === true,
+    (accessor.config.fullScanLimit ?? FULL_SCAN_LIMIT) >= 0,
   )
   return new DirListing({ entries: children, seeds, window: true })
 }

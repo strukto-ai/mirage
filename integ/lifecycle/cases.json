@@ -6639,6 +6639,163 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_walk_past_the_mount_limit_stops_and_a_copy_glob_or_removal_is_refused",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "limited-ram",
+            "config": {
+              "full_scan_limit": 2,
+              "files": {
+                "/d/a.txt": "alpha\n",
+                "/d/b.txt": "beta\n",
+                "/d/sub/c.txt": "gamma\n"
+              }
+            }
+          },
+          "/out": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "grep -r a /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 2,
+              "stdout": "/data/d/a.txt:alpha\n/data/d/b.txt:beta\n",
+              "stderr": "grep: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rg a /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 2,
+              "stdout": "/data/d/a.txt:alpha\n/data/d/b.txt:beta\n",
+              "stderr": "rg: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "tar -cf /out/d.tar /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "tar: more than 2 files in scope (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "grep -rl a /data/d/sub",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/d/sub/c.txt\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "grep a /data/d/a.txt /data/d/b.txt /data/d/sub/c.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/d/a.txt:alpha\n/data/d/b.txt:beta\n/data/d/sub/c.txt:gamma\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "find /data/d -type f | sort",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "/data/d/a.txt\n/data/d/b.txt\n",
+              "stderr": "find: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "find /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "/data/d\n/data/d/a.txt\n/data/d/b.txt\n",
+              "stderr": "find: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "ls -R /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "/data/d:\na.txt\nb.txt\n",
+              "stderr": "ls: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "du -a /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "6\t/data/d/a.txt\n5\t/data/d/b.txt\n11\t/data/d\n",
+              "stderr": "du: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "tree /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 2,
+              "stdout": "/data/d\n|-- a.txt\n`-- b.txt\n\n1 directory, 2 files\n",
+              "stderr": "tree: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/d/*; echo rc=$?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "rc=126\n",
+              "stderr": "cat: Argument list too long\ncat: /data/d/*: matches more than 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rm -r /data/d; echo rc=$?; ls /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "rc=1\na.txt\nb.txt\nsub\n",
+              "stderr": "rm: more than 2 files in scope (full_scan_limit); narrow the path\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

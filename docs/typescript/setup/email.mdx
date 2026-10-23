@@ -43,27 +43,24 @@ await ws.shell('ls /mail/INBOX/')
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />required, secret | Password or app password for `username`. |
 | <code style={{ whiteSpace: 'nowrap' }}>useSsl</code><br />default `true` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtpPort` instead. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxMessages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which messages may match and read only those. The server searches headers and body, not the mounted JSON's keys, uids or flags. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON. |
 | <code style={{ whiteSpace: 'nowrap' }}>saveCopy</code><br />default `true` | After `himalaya` sends a message, append a copy to `sentFolder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
 | <code style={{ whiteSpace: 'nowrap' }}>sentFolder</code><br />default `null` | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table email end */}
 
-## grep and rg
+## Integration
 
-With `contentSearch: true` (YAML `content_search: true`), `grep -r` and `rg` read only the
-messages IMAP `SEARCH TEXT` names in each folder or day they walk (from the
-mount root, in every folder), and print what reading every message would. IMAP matches the headers and body in any
-case; each hit's file is named from a header-only fetch. Attachments are always
-read.
+What Email answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
 
-Every message is read when the text is a key of the message JSON or a flag
-name, holds anything but ASCII letters and spaces, matches more than
-`maxMessages` messages in a folder, or the search fails. It is
-off by default: a server that answers `SEARCH` from a full-text index (Dovecot
-with an FTS plugin, for one) matches words rather than substrings, so a
-narrowed scan could miss a message there.
+| Command | On Email |
+| --- | --- |
+| `grep -r`, `rg` | IMAP `SEARCH TEXT`, for any text |
+| Can miss | On a server that searches words rather than substrings (Dovecot with full-text search) |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without IMAP search |
+
+The [Python Email docs](/python/vfs/email#integration) list when each search answers and what it can miss.
 
 ## Mount mode
 

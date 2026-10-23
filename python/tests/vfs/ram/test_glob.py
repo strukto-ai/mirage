@@ -18,7 +18,6 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.core.ram.constants import SCOPE_ERROR
 from mirage.core.ram.readdir import readdir
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import make_resolve_glob
@@ -32,7 +31,7 @@ async def _listed(accessor, path, index=None):
 
 
 def resolve_glob(accessor, paths, index=None):
-    return make_resolve_glob(partial(_listed, accessor), SCOPE_ERROR)(paths)
+    return make_resolve_glob(partial(_listed, accessor))(paths)
 
 
 @pytest.fixture

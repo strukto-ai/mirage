@@ -981,9 +981,11 @@ def _construct_vfs(mount_state: dict[str, Any]):
         built = cls()
     elif ptype == VFSName.DISK:
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
-        knobs = {}
-        if "folder_versions" in saved:
-            knobs["folder_versions"] = saved["folder_versions"]
+        knobs = {
+            key: saved[key]
+            for key in ("folder_versions", "full_scan_limit")
+            if key in saved
+        }
         for key in unknown_kwargs(cls, knobs):
             del knobs[key]
         built = cls(root=tempfile.mkdtemp(prefix="mirage-disk-"), **knobs)

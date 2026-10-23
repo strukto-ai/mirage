@@ -236,7 +236,7 @@ def slack(monkeypatch):
             return await history(accessor, channel_id, day, *args, **kwargs)
 
         monkeypatch.setattr(read_mod, "get_history_jsonl", counted)
-        settings = {"token": "xoxp-test", "content_search": True} | config
+        settings = {"token": "xoxp-test"} | config
         ws = Workspace(
             {"/slack": SlackVFS(SlackConfig(**settings))}, mode=MountMode.READ
         )

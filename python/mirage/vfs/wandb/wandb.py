@@ -17,11 +17,11 @@ class WandbVFS(BaseVFS):
     accessor: WandbAccessor
     name: str = VFSName.WANDB
     prompt: str = PROMPT
-    max_du_entries: int | None = 1000
 
     def __init__(self, config: WandbConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = WandbAccessor(config)
 
     async def readdir(

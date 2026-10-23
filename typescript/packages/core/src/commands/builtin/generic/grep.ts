@@ -46,7 +46,7 @@ import { OutputStream } from '../../../io/stream.ts'
 import type { OpenStream } from '../../../rs/stream.ts'
 import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { UsageError } from '../../errors.ts'
+import { ScanLimitError, UsageError } from '../../errors.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
 import { wordRefusalLine, validWordsBlock, usageHint } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
@@ -503,7 +503,12 @@ export async function grepGeneric(
   async function* run(): AsyncIterable<Uint8Array> {
     try {
       for (const path of paths) {
-        yield* scan(path)
+        try {
+          yield* scan(path)
+        } catch (err) {
+          if (!(err instanceof ScanLimitError)) throw err
+          warn(`grep: ${err.message}`)
+        }
         if (f.quiet && matched) break
       }
     } finally {

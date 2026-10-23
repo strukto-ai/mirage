@@ -45,8 +45,8 @@ import { copy as sshCopy, dirCopy as sshDirCopy } from '../../core/ssh/copy.ts'
 import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
-import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   sshMkdir(accessor, path, parents === true)
@@ -62,15 +62,16 @@ export class SSHVFS extends BaseVFS {
   // SFTP stat/readdir report the remote inode's exact byte size for every
   // file; reads are the same raw bytes.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly maxDuEntries: number | null = null
   override readonly indexTtl: number = 60
   override readonly prompt = PROMPT
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: SSHConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.accessor = new SSHAccessor(config)
   }
 
@@ -90,8 +91,6 @@ export class SSHVFS extends BaseVFS {
   }
 
   override readonly readsRanges: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return sshReaddir(this.accessor, path)

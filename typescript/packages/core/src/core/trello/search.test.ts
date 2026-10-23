@@ -81,9 +81,7 @@ async function ask(
   reply?: Record<string, unknown> | Error,
 ): Promise<[PathSpec[] | null, string[]]> {
   const transport = new FakeTransport(named, reply)
-  const out = await filesContaining(new TrelloAccessor(transport, { contentSearch: true }), text, [
-    under,
-  ])
+  const out = await filesContaining(new TrelloAccessor(transport), text, [under])
   return [out, transport.searched]
 }
 
@@ -121,7 +119,7 @@ describe('trello filesContaining', () => {
   // since is not read.
   it('finds a text changed since the listing', async () => {
     const transport = new FakeTransport({ numbat: ['c1'] })
-    const accessor = new TrelloAccessor(transport, { contentSearch: true })
+    const accessor = new TrelloAccessor(transport)
     const search = () => filesContaining(accessor, 'numbat', [scope()])
     await search()
     transport.listed = CARDS.map((card) =>

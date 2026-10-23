@@ -47,7 +47,7 @@ function config(overrides: Partial<EmailConfig> = {}): EmailConfig {
     password: 'p',
     useSsl: false,
     maxMessages: 200,
-    contentSearch: false,
+    fullScanLimit: -1,
     saveCopy: true,
     sentFolder: null,
     ...overrides,

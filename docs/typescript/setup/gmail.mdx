@@ -58,23 +58,22 @@ For OAuth in a browser, prefer PKCE so secrets stay off the page; the [Google se
 | <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />secret | User's OAuth refresh token. Required with `clientId` when `accessToken` is unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>refreshFn</code><br />secret | Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiBase</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gmail end */}
 
-## grep and rg
+## Integration
 
-With `contentSearch: true` (YAML `content_search: true`), the listing keeps
-each message's text, and `grep -r` and `rg` read only the messages whose text
-holds the pattern's text in any case, printing what reading every message
-would. Listing a label already fetches its messages in full, so this asks Gmail
-nothing more and saves the second fetch of each message it rules out. Gmail's
-own search is not used: it reads the HTML part of a message and can miss a word
-of the plain-text body a `.gmail.json` holds, such as one inside a link.
-Attachments are always read, and so is every message for a text that is not
-ASCII. It is off by default because the listing then holds every listed
-message's body.
+What Gmail answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Gmail |
+| --- | --- |
+| `grep -r`, `rg` | The message text the listing keeps, for ASCII text |
+| Can miss | No |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file, and the listing keeps no message text |
+
+The [Python Gmail docs](/python/vfs/gmail#integration) list when each search answers and what it can miss.
 
 ## Mount mode
 

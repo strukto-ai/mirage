@@ -43,13 +43,11 @@ class MountRow:
             session a call through a facade of the given session id runs
             as (None: the default facade) is told of the mount at all,
             None for always (a session's own documents mount answers it).
-        max_du_entries (int | None): the mount VFS's ``du`` walk budget,
-            None for no cap.
-        max_glob_matches (int | None): the mount VFS's cap on one glob's
-            matches, None for no cap.
         searchable (tuple[str, ...] | None): the mount VFS's
             ``searchable`` globs, the files its ``files_containing``
             answers for; None for every file.
+        full_scan_limit (int): the mount VFS's ``full_scan_limit``, -1
+            for no cap.
         calls (frozenset[str]): the functions the mount's VFS answers
             itself: each dispatcher call it defines, and ``read_range``
             when its reads fetch only the range asked for.
@@ -61,9 +59,8 @@ class MountRow:
     sizes_always_known: bool = False
     anchor: bool = False
     visible: Callable[[str | None], bool] | None = None
-    max_du_entries: int | None = None
-    max_glob_matches: int | None = None
     searchable: tuple[str, ...] | None = None
+    full_scan_limit: int = -1
     calls: frozenset[str] = frozenset()
 
 

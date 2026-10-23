@@ -9,9 +9,11 @@ from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.types import RegexSyntax
+from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.cli.builtin.git.constants import EXECUTABLE, REGULAR
 from mirage.commands.cli.builtin.git.discover import require_work_tree
 from mirage.commands.cli.builtin.git.errors import (
+    FATAL_EXIT,
     AmbiguousArgumentError,
     GitError,
     InvalidRevisionNameError,
@@ -322,8 +324,15 @@ async def grep(
                         entries[path] = (entry.mode, entry.sha)
                         break
         sources.append(("", shown_entries(repo, entries)))
+    mounts = mounts_of(ctx)
+    limit = (
+        mounts.full_scan_limit(location.gitdir.virtual)
+        if mounts is not None and mounts.full_scan_limit is not None
+        else -1
+    )
     out: list[bytes] = []
     found = False
+    read = 0
     for revision, entries in sources:
         for path, (mode, oid) in sorted(entries.items()):
             relative = path.decode("utf-8", "surrogateescape")
@@ -333,6 +342,18 @@ async def grep(
                 relative and not pathspec_selects(relative, specs)
             ):
                 continue
+            if 0 <= limit <= read:
+                # Past the mount's full_scan_limit the search stops, and
+                # what it found so far stands, as git keeps what it
+                # printed before a fatal.
+                return b"".join(out), IOResult(
+                    exit_code=FATAL_EXIT,
+                    stderr=encode_text(
+                        f"fatal: stopped after {limit} files "
+                        "(full_scan_limit); narrow the pathspec\n"
+                    ),
+                )
+            read += 1
             data: bytes | None
             if revision or cached:
                 data = await asyncio.to_thread(blob_data, repo, (mode, oid))

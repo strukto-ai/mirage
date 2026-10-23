@@ -114,11 +114,16 @@ export const GoogleConfigSchema = z
 export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
 
 export const GoogleAppConfigSchema = GoogleConfigSchema.extend({
-  contentSearch: z.boolean().optional().meta({
-    description:
-      'Let `grep -w` and `rg -w` read only the files Drive full-text search names. Search covers extracted text and lags writes, so it can miss a match.',
-    default: false,
-  }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Drive full-text search, which searches a file's text, not the JSON the mount renders.",
+      default: 1000,
+    }),
 })
 
 export type GoogleAppConfig = ConfigOf<typeof GoogleAppConfigSchema>

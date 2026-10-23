@@ -19,6 +19,7 @@ from mirage.commands.builtin.utils.paths import (
     stat_or_enoent,
     vfs_stat_path,
 )
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -534,6 +535,7 @@ async def find_walk_generic(
                         or landing_root(mounts, links, virtual) == home
                     )
 
+                budget = ScanBudget(search, mounts)
                 walked = await walk_find(
                     search,
                     readdir=readdir,
@@ -545,6 +547,7 @@ async def find_walk_generic(
                     root=start.stat,
                     loops=loops,
                     enters=stays if home is not None else None,
+                    listing=partial(budget.listing, readdir),
                 )
                 rows = respell_raw(walked, search.virtual, search.raw_path)
                 # GNU names a directory it may not open in the walk's own
@@ -566,6 +569,7 @@ async def find_walk_generic(
                         " is part of the same file system loop as "
                         f"'{respell_one(above, search.virtual, search.raw_path)}'."
                     )
+                missing.extend(f"find: {line}" for line in budget.stopped)
             for row in rows:
                 if row not in first:
                     yield (row + "\n").encode()

@@ -81,6 +81,9 @@ export interface WalkFindDeps {
   // -xdev's test of a directory's virtual path: one it fails is an entry
   // still, and -empty still reads it, but the walk does not descend.
   enters?: (virtual: string) => boolean
+  // The walk's own listing of a directory, where the caller bounds it;
+  // absent lists with `readdir`, which -empty still reads.
+  listing?: (spec: PathSpec) => Promise<string[]>
 }
 
 interface WalkEntry {
@@ -245,7 +248,7 @@ export async function walkFind(
       )
       if (prunedKeys(pruneTree).includes(key)) return []
     }
-    return deps.readdir(spec)
+    return (deps.listing ?? deps.readdir)(spec)
   }
   let rootStat: FileStat | null = null
   try {

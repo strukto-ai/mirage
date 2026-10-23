@@ -19,7 +19,8 @@ import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { treeWalk } from './tree.ts'
+import type { MountView } from '../../../view/types.ts'
+import { ScanBudget, treeWalk } from './tree.ts'
 
 const FILE = FileType.FILE
 const DIR = FileType.DIRECTORY
@@ -53,8 +54,8 @@ class Mount {
     this.calls.push(`stat ${path.virtual}`)
     return Promise.resolve(new FileStat({ name: path.virtual, type: FILE }))
   }
-  walk(answered?: Set<string>) {
-    return treeWalk<string[], FileStat>(this.readTree, this.readdir, this.stat, answered)
+  walk() {
+    return treeWalk<string[], FileStat>(this.readTree, this.readdir, this.stat)
   }
 }
 
@@ -63,8 +64,7 @@ const at = (p: string): PathSpec => PathSpec.fromStrPath(p)
 describe('treeWalk', () => {
   it('lists and stats the whole walk from one answer', async () => {
     const mount = new Mount(found())
-    const answered = new Set<string>()
-    const [readdir, stat] = mount.walk(answered)
+    const [readdir, stat] = mount.walk()
     expect(await readdir(at('/m'))).toEqual(['/m/a', '/m/b.txt', '/m/e'])
     expect(await readdir(at('/m/a'))).toEqual(['/m/a/c.txt'])
     expect(await readdir(at('/m/e'))).toEqual([])
@@ -73,7 +73,6 @@ describe('treeWalk', () => {
     expect((await stat(at('/m/a/c.txt'))).size).toBe(3)
     expect(mount.asked).toEqual(['/m'])
     expect(mount.calls).toEqual([])
-    expect([...answered].sort()).toEqual(['/m', '/m/a', '/m/e'])
   })
 
   // Mirrors test_a_dotted_or_refused_operand_is_never_answered_from_an_earlier_answer.
@@ -188,9 +187,6 @@ async function guarded(line: string): Promise<[GuardedRAM, string, string, numbe
 describe('a whole-directory read asks the mount first', () => {
   // Twin of test_a_command_reading_a_whole_directory_asks_first.
   it.each([
-    'grep -r ada /g/d',
-    'rg ada /g/d',
-    'rg --sort modified ada /g/d /out',
     'tar -cf /out/a.tar /g/d',
     'tar -cf - /g/d',
     'zip -qr /out/a.zip /g/d',
@@ -198,6 +194,7 @@ describe('a whole-directory read asks the mount first', () => {
     'cp -r /g/d /g/c',
     'mv /g/d /out/m',
     'diff -r /g/d /g/e',
+    'rm -r /g/d',
   ])('%s is refused before it reads', async (line) => {
     const [vfs, , stderr, code] = await guarded(line)
     expect(vfs.scans.length).toBeGreaterThan(0)
@@ -210,6 +207,7 @@ describe('a whole-directory read asks the mount first', () => {
   it.each([
     ['printf x > /out/t; cp -rb -T /g/d /out/t; cat /out/t; ls /out', 'xt\n'],
     ['mkdir /out/t; mv -T /g/d /out/t; ls -d /out/t', '/out/t\n'],
+    ['rm -rf /g/d; ls /g/d', 'a.txt\nsub\n'],
   ])('%s leaves the destination alone', async (line, out) => {
     const [, stdout, stderr] = await guarded(line)
     expect(stdout).toBe(out)
@@ -229,5 +227,80 @@ describe('a whole-directory read asks the mount first', () => {
   ])('%s asks nothing', async (line) => {
     const [vfs, , stderr, code] = await guarded(line)
     expect([vfs.scans, stderr, code]).toEqual([[], '', 0])
+  })
+
+  // Twin of test_a_search_stops_at_the_limit_rather_than_asking.
+  it.each(['grep -r ada /g/d', 'rg ada /g/d', 'rg --sort modified ada /g/d /out'])(
+    '%s walks without asking',
+    async (line) => {
+      const [vfs, stdout, stderr, code] = await guarded(line)
+      expect([vfs.scans, stdout, stderr, code]).toEqual([[], '/g/d/a.txt:ada\n', '', 0])
+    },
+  )
+})
+
+// The mounts a scan budget charges, each root to its full_scan_limit.
+function limits(table: Record<string, number>): MountView {
+  const rootOf = (path: string): string =>
+    Object.keys(table)
+      .filter((root) => `${path.replace(/\/+$/, '')}/`.startsWith(root))
+      .reduce((a, b) => (b.length > a.length ? b : a), '')
+  return {
+    descendants: () => [],
+    visibleDescendants: () => [],
+    isRoot: () => false,
+    rootOf,
+    answers: () => false,
+    searchable: () => null,
+    fullScanLimit: (path) => table[rootOf(path)] ?? -1,
+  }
+}
+
+const stop = (n: number): string =>
+  `stopped after ${String(n)} files (full_scan_limit); narrow the path`
+
+// Twins of the scan budget tests in test_tree.py.
+describe('ScanBudget', () => {
+  it('stops once spent and opens nothing more', () => {
+    const budget = new ScanBudget(at('/m/d'), limits({ '/m/': 2 }))
+    expect([0, 1, 2].map(() => budget.spend('/m/d'))).toEqual([true, true, false])
+    expect(budget.opens('/m/d/sub')).toBe(false)
+    expect(budget.stopped).toEqual([`/m/d: ${stop(2)}`])
+  })
+
+  it('charges each mount under its own root', () => {
+    const budget = new ScanBudget(at('/'), limits({ '/': -1, '/m/': 2, '/n/': 3 }))
+    expect(Array.from({ length: 50 }, () => budget.spend('/')).every(Boolean)).toBe(true)
+    expect([0, 1, 2].map(() => budget.spend('/m/d'))).toEqual([true, true, false])
+    expect([0, 1, 2].map(() => budget.spend('/n')).every(Boolean)).toBe(true)
+    expect(budget.stopped).toEqual([`/m: ${stop(2)}`])
+  })
+
+  it.each([
+    ['d', 'd'],
+    ['', '.'],
+  ])('names the operand as typed (%j)', (raw, shown) => {
+    const operand = new PathSpec({
+      virtual: '/m/d',
+      directory: '/m/d',
+      vfsPath: 'm/d',
+      rawPath: raw,
+    })
+    const budget = new ScanBudget(operand, limits({ '/m/': 0 }))
+    expect(budget.spend('/m/d')).toBe(false)
+    expect(budget.stopped).toEqual([`${shown}: ${stop(0)}`])
+  })
+
+  it('cuts one listing and skips the next', async () => {
+    const asked: string[] = []
+    const readdir = (path: PathSpec): Promise<string[]> => {
+      asked.push(path.virtual)
+      return Promise.resolve([0, 1, 2].map((i) => `${path.virtual}/${String(i)}`))
+    }
+    const budget = new ScanBudget(at('/m'), limits({ '/m/': 2 }))
+    expect(await budget.listing(readdir, at('/m'))).toEqual(['/m/0', '/m/1'])
+    expect(await budget.listing(readdir, at('/m/0'))).toEqual([])
+    expect(asked).toEqual(['/m'])
+    expect(budget.stopped).toEqual([`/m: ${stop(2)}`])
   })
 })

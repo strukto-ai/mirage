@@ -99,10 +99,7 @@ if TYPE_CHECKING:
         VFSName,
         WritePolicy,
     )
-    from mirage.utils.glob_walk import (
-        DEFAULT_MAX_GLOB_MATCHES,
-        make_resolve_glob,
-    )
+    from mirage.utils.glob_walk import make_resolve_glob
     from mirage.utils.ids import new_session_id, new_workspace_id, uuid7
     from mirage.vfs.base import BaseVFS
     from mirage.vfs.call import vfs_call
@@ -229,10 +226,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "FilesystemOperation",
     ),
     "mirage.secrets.registry": ("known_sources", "register_secrets"),
-    "mirage.utils.glob_walk": (
-        "DEFAULT_MAX_GLOB_MATCHES",
-        "make_resolve_glob",
-    ),
+    "mirage.utils.glob_walk": ("make_resolve_glob",),
 }
 _MODULE_OF = {
     name: module for module, names in _EXPORTS.items() for name in names
@@ -276,7 +270,6 @@ __all__ = [
     "CommandSpec",
     "Context",
     "ContentType",
-    "DEFAULT_MAX_GLOB_MATCHES",
     "Decision",
     "Decisions",
     "DriftPolicy",

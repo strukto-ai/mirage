@@ -22,12 +22,11 @@ from mirage.commands.builtin.generic_bind.files import (
     command_files,
 )
 from mirage.commands.builtin.utils.links import (
-    crosses_mounts,
     links_of,
     mount_view,
     mounts_of,
 )
-from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
+from mirage.commands.builtin.utils.tree import ScanBudget, WalkCall, tree_walk
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -42,14 +41,15 @@ from mirage.view.types import LinkView, MountView
 
 @dataclass(slots=True)
 class WalkBudget:
-    """Entry allowance shared by every operand of one ``du`` invocation.
+    """What the walks of one ``du`` invocation met.
 
-    A walk the mount's ``read_tree`` does not answer takes one
-    ``readdir`` per directory, which on an API-backed tree is one request
-    per directory. Slack, for
-    instance, exposes a directory per channel per day, so an unbounded
-    walk of a real workspace is tens of thousands of requests. The budget
-    stops the walk and records that the answer is partial.
+    Each operand's walk lists at most ``full_scan_limit`` entries of each
+    mount it crosses (``ScanBudget``): a walk the mount's ``read_tree``
+    does not answer takes one ``readdir`` per directory, which on an
+    API-backed tree is one request per directory. Slack, for instance,
+    exposes a directory per channel per day, so an unbounded walk of a
+    real workspace is tens of thousands of requests. Where a walk ran out
+    is kept, so the answer says it is partial.
 
     It also collects the directories the walk could not open (a rule
     refused them below the operand), which the generic reports after
@@ -57,65 +57,26 @@ class WalkBudget:
     directory it met, which is how one no file points at (an empty one,
     or a refused one) still gets GNU's row.
 
-    A walk with no cap of its own (the dispatcher's, which spans mounts)
-    defers to the mounts it crosses: each entry is charged to the mount
-    serving it, at that mount's own cap, so a disk tree below a capped
-    root is not cut short and a service below an uncapped one is not
-    walked without its bound.
-
     Args:
-        remaining (int | None): entries still allowed, or None for no cap.
-        hit (bool): whether the cap was reached.
+        mounts (MountView | None): the mount table the limits come from.
+        scan (ScanBudget | None): the current operand's allowance.
+        stopped (list[str]): where a walk ran out, in the order met.
         unreadable (list[str]): virtual paths of the directories the
             walk could not open, in the order it met them.
         directories (list[str]): virtual paths of every directory the
             last walk met, the operand's own included: each walk starts it
             afresh, so an operand's rows are its own walk's.
-        mounts (MountView | None): the mount table, for a walk with no
-            cap of its own.
-        spent (dict[str, int]): entries charged so far per mount root.
         inaccessible (list[tuple[str, str | None]]): under ``-L``, each
             link that leads nowhere, with the strerror GNU adds for a
             chain that loops.
     """
 
-    remaining: int | None
-    hit: bool = False
+    mounts: MountView | None = None
+    scan: ScanBudget | None = None
+    stopped: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
     directories: list[str] = field(default_factory=list)
-    mounts: MountView | None = None
-    spent: dict[str, int] = field(default_factory=dict)
     inaccessible: list[tuple[str, str | None]] = field(default_factory=list)
-
-    def spend(self, path: str) -> bool:
-        """Charge one entry to the budget.
-
-        Args:
-            path (str): virtual path of the directory whose listing names
-                the entry, so a mount root is charged to its parent, as
-                the parent's own walk would count it.
-
-        Returns:
-            bool: True if the walk may continue, False once exhausted.
-        """
-        if self.remaining is not None:
-            if self.remaining <= 0:
-                self.hit = True
-                return False
-            self.remaining -= 1
-            return True
-        if self.mounts is None or self.mounts.max_du_entries is None:
-            return True
-        cap = self.mounts.max_du_entries(path)
-        if cap is None:
-            return True
-        owner = self.mounts.root_of(path)
-        used = self.spent.get(owner, 0)
-        if used >= cap:
-            self.hit = True
-            return False
-        self.spent[owner] = used + 1
-        return True
 
 
 def _account_for_walk_error(
@@ -248,18 +209,15 @@ async def _counted(
 @dataclass(frozen=True)
 class Walk:
     """The walk's readdir and stat, answered from the mount's
-    ``read_tree`` where it can, and the directories listed that way,
-    which cost no request and so no budget.
+    ``read_tree`` where it can.
 
     Args:
         readdir (WalkCall): the walk's listing.
         stat (WalkCall): the walk's stat.
-        answered (set[str]): the directories ``read_tree`` listed.
     """
 
     readdir: WalkCall
     stat: WalkCall
-    answered: set[str]
 
 
 async def _du_walk(
@@ -285,15 +243,17 @@ async def _du_walk(
             entries.append(("/" + path.virtual.strip("/"), size))
         return size
     budget.directories.append(path.virtual)
+    scan = budget.scan
+    if scan is not None and not scan.opens(path.virtual):
+        return 0
     try:
         children = await walk.readdir(path)
     except Exception as exc:
         _account_for_walk_error(exc, path, budget)
         return 0
     total = 0
-    free = (path.virtual.rstrip("/") or "/") in walk.answered
     for child in children:
-        if not free and not budget.spend(path.virtual):
+        if scan is not None and not scan.spend(path.virtual):
             break
         child_spec = PathSpec(
             virtual=child,
@@ -307,20 +267,18 @@ async def _du_walk(
 
 def _tree_of(files: CommandFiles, listing: ReaddirFn) -> Walk:
     """The walk's readdir and stat, answered from the mount's
-    ``read_tree`` where it can, and the directories listed that way.
+    ``read_tree`` where it can.
 
     Args:
         files (CommandFiles): the command's files.
         listing (ReaddirFn): the walk's own listing.
     """
-    answered: set[str] = set()
     readdir, stat = tree_walk(
         files.read_tree if files.answers("read_tree") else None,
         listing,
         files.stat,
-        answered=answered,
     )
-    return Walk(readdir=readdir, stat=stat, answered=answered)
+    return Walk(readdir=readdir, stat=stat)
 
 
 async def _walk_operand(
@@ -342,6 +300,7 @@ async def _walk_operand(
             size under its name; None for a total alone.
     """
     budget.directories.clear()
+    budget.scan = ScanBudget(path, budget.mounts)
     state = follow.operand(path) if follow is not None else None
     total = await _du_walk(walk, path, budget, entries, state)
     if state is not None:
@@ -354,6 +313,9 @@ async def _walk_operand(
                     entries,
                     replace(state, tree=link.virtual),
                 )
+    budget.stopped.extend(
+        line for line in budget.scan.stopped if line not in budget.stopped
+    )
     return total
 
 
@@ -386,19 +348,8 @@ async def du(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["du"])
-    crossing = crosses_mounts(ctx)
     mounts = mounts_of(ctx)
-    # A walk across mounts has no cap of its own: each entry is charged to
-    # the mount serving it, at that mount's cap (see WalkBudget).
-    anchor = (paths[0] if paths else ctx.cwd).virtual
-    budget = WalkBudget(
-        mounts.max_du_entries(anchor)
-        if not crossing
-        and mounts is not None
-        and mounts.max_du_entries is not None
-        else None,
-        mounts=mounts,
-    )
+    budget = WalkBudget(mounts=mounts)
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
     bound = mount_view(ctx.vfs) if fl.as_bool("one_file_system") else None
@@ -433,7 +384,7 @@ async def du(
         files.stat,
         compute_size,
         compute_entries,
-        truncated=lambda: budget.hit,
+        stopped=lambda: budget.stopped,
         unreadable=lambda: budget.unreadable,
         directories=lambda: budget.directories,
         inaccessible=lambda: budget.inaccessible,

@@ -57,6 +57,7 @@ await ws.shell('search "red running shoes" /fashion') // ranked paths + score + 
 | <code style={{ whiteSpace: 'nowrap' }}>vectorColumn</code> | Embedding column left out of cards and listings. |
 | <code style={{ whiteSpace: 'nowrap' }}>searchLimit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxRows</code><br />default `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table lancedb end */}
@@ -94,6 +95,18 @@ const fashion = new LanceDBVFS({
   },
 })
 ```
+
+## Integration
+
+What LanceDB answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On LanceDB |
+| --- | --- |
+| `grep -r`, `rg` | The string columns of each row, for any text; a table with list, struct or bytes columns reads every card |
+| Can miss | No |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+
+The [Python LanceDB docs](/python/vfs/lancedb#integration) list when each search answers and what it can miss.
 
 ## Supported commands
 

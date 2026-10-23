@@ -211,6 +211,23 @@ class UnboundVariable(ExitSignal):
         )
 
 
+class TooManyMatches(DiscardSignal):
+    """A glob that matches more paths than its mount's ``full_scan_limit``.
+
+    A command it is a word of does not run, as exec(2) refuses an
+    argument list too long; anywhere else (a ``for`` list, a redirect)
+    the line is discarded like any expansion error.
+
+    Args:
+        reason (str): the limit's line, ``WORD: matches more than N files
+            (full_scan_limit); narrow the path``.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(encode_text(f"bash: {reason}\n"))
+        self.reason = reason
+
+
 class BadSubstitution(DiscardSignal):
     """A ``${...}`` bash cannot read, found as its word expands.
 

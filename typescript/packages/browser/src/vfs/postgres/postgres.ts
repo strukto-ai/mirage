@@ -30,6 +30,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/postgres/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { NeonPgDriver } from './neon_driver.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface PostgresVFSOptions {
   config: PostgresConfig
@@ -52,11 +53,13 @@ export class PostgresVFS extends PostgresVFSBase {
   readonly driver: PgDriver
   override readonly accessor: PostgresAccessor
 
+  override readonly fullScanLimit: number
   constructor(options: PostgresVFSOptions | PostgresConfig) {
     super()
     const { config, prefix, driver } =
       'config' in options ? options : { config: options, prefix: undefined, driver: undefined }
     this.config = resolvePostgresConfig(config)
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.driver = driver ?? new NeonPgDriver(this.config.dsn)
     this.accessor = new PostgresAccessor(this.driver, this.config)
     this.prompt = PROMPT.replace('{prefix}', prefix ?? '')

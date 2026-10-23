@@ -55,6 +55,7 @@ and HMAC credentials. Both `READ` and `WRITE` modes are supported.
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gcs end */}
@@ -92,6 +93,16 @@ The GCS VFS uses `IndexCacheStore` with `index_ttl = 600`
 (10 minutes), same as S3. Directory listings are cached for up to 600
 seconds before being refreshed from GCS. This reduces API calls for
 repeated directory traversals. A configured `index:` replaces this lifetime with its own `ttl`, and the mount's `ttl:` caps it.
+
+## Integration
+
+What GCS answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On GCS |
+| --- | --- |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `md5sum` | The object's ETag, when it is the MD5: a single-part upload, unencrypted or under SSE-S3 |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
 ## Example
 

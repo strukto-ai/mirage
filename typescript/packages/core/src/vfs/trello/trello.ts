@@ -32,6 +32,7 @@ import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
 import { stat as trelloStat } from '../../core/trello/stat.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 
 export interface TrelloVFSState {
   type: string
@@ -57,9 +58,12 @@ export class TrelloVFS extends BaseVFS {
     'workspaces/*/boards/*/lists/*/cards/*/card.json',
   ]
 
+  override readonly fullScanLimit: number
+
   constructor(config: TrelloConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const transportOpts: { apiKey: string; apiToken: string; baseUrl?: string } = {
       apiKey: config.apiKey,
       apiToken: config.apiToken,
@@ -68,11 +72,11 @@ export class TrelloVFS extends BaseVFS {
     const accessorOpts: {
       workspaceId?: string
       boardIds?: readonly string[]
-      contentSearch?: boolean
+      fullScanLimit?: number
     } = {}
     if (config.workspaceId !== undefined) accessorOpts.workspaceId = config.workspaceId
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
-    if (config.contentSearch !== undefined) accessorOpts.contentSearch = config.contentSearch
+    accessorOpts.fullScanLimit = this.fullScanLimit
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
 
@@ -81,7 +85,7 @@ export class TrelloVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.config.contentSearch !== true) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return trelloFilesContaining(this.accessor, text, [path])
   }
 

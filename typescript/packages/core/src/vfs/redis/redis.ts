@@ -17,6 +17,8 @@ import { VFSName } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { VFSConfigError } from '../errors.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
@@ -38,7 +40,6 @@ import { rename as redisRename } from '../../core/redis/rename.ts'
 import { copy as redisCopy } from '../../core/redis/copy.ts'
 import { truncate as redisTruncate } from '../../core/redis/truncate.ts'
 import { setAttrs as redisSetAttrs } from '../../core/redis/set_attrs.ts'
-import { SCOPE_ERROR } from '../../core/redis/constants.ts'
 import { tree as redisTree } from '../../core/redis/readdir.ts'
 import { capacity as redisCapacity } from '../../core/redis/capacity.ts'
 
@@ -72,8 +73,14 @@ export class RedisVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
-  constructor(store: RedisStoreLike) {
+  override readonly fullScanLimit: number
+
+  constructor(store: RedisStoreLike, fullScanLimit: number = FULL_SCAN_LIMIT) {
+    if (!Number.isInteger(fullScanLimit) || fullScanLimit < -1) {
+      throw new VFSConfigError('redis: full_scan_limit: must be an integer of -1 or more')
+    }
     super()
+    this.fullScanLimit = fullScanLimit
     this.store = store
     this.accessor = new RedisAccessor(store)
   }
@@ -102,8 +109,6 @@ export class RedisVFS extends BaseVFS {
   override readonly readsRanges: boolean = true
 
   override readonly local: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return redisTree(this.accessor, path)

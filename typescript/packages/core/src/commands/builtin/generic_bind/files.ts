@@ -21,11 +21,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { FileStat, FileType, type SetAttrFields } from '../../../types.ts'
 import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
-import {
-  DEFAULT_MAX_GLOB_MATCHES,
-  makeResolveGlob,
-  type ResolveGlobFn,
-} from '../../../utils/glob_walk.ts'
+import { makeResolveGlob, type ResolveGlobFn } from '../../../utils/glob_walk.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { CycleError } from '../../../utils/path.ts'
 import type { SessionAccess } from '../../../view/types.ts'
@@ -609,7 +605,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       })) as ByteSource | null,
     resolveGlob: makeResolveGlob(
       readdir,
-      mounts?.maxGlobMatches(anchor) ?? DEFAULT_MAX_GLOB_MATCHES,
+      mounts?.fullScanLimit?.(anchor) ?? -1,
       stat,
       links === undefined ? undefined : (virtual: string) => links.targetStat(virtual),
       access,

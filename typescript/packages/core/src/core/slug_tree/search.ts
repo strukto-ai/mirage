@@ -15,7 +15,7 @@
 import { callerSignal } from '../../context/session_context.ts'
 import { enoent } from '../../errors/fs.ts'
 import { FileType, type FileStat, type PathSpec } from '../../types.ts'
-import { DEFAULT_MAX_GLOB_MATCHES, resolveGlobWith } from '../../utils/glob_walk.ts'
+import { resolveGlobWith } from '../../utils/glob_walk.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { listingAt, treeKey, type SlugTree } from './tree.ts'
@@ -84,7 +84,7 @@ export async function searchScope<A>(
       accessor,
       paths,
       undefined,
-      DEFAULT_MAX_GLOB_MATCHES,
+      -1,
       undefined,
       undefined,
       undefined,

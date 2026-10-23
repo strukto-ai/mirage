@@ -18,7 +18,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { SCOPE_ERROR } from '../../core/disk/constants.ts'
 import { readdir } from '../../core/disk/readdir.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 
@@ -29,7 +28,7 @@ async function listed(accessor: DiskAccessor, path: PathSpec): Promise<string[]>
 }
 
 const resolveGlob = (accessor: DiskAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
-  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
+  makeResolveGlob((path) => listed(accessor, path))(paths)
 
 let root: string
 let accessor: DiskAccessor

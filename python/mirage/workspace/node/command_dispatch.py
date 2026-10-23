@@ -58,7 +58,12 @@ from mirage.policy import (
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.errors import ArithError, DiscardSignal, ExitSignal
+from mirage.shell.errors import (
+    ArithError,
+    DiscardSignal,
+    ExitSignal,
+    TooManyMatches,
+)
 from mirage.shell.helpers import (
     get_command_name,
     get_parts,
@@ -108,6 +113,7 @@ from mirage.workspace.executor.command.command import (
     made_by_command,
 )
 from mirage.workspace.executor.command.external import run_external
+from mirage.workspace.executor.command.handler import argument_list_too_long
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
@@ -430,6 +436,15 @@ async def execute_command(
         if refused:
             io.stderr = refused + (await materialize(io.stderr) or b"")
         return stdout, io, exec_node
+    except TooManyMatches as exc:
+        # The command a glob was given to does not run, as exec(2)
+        # refuses an argument list too long; the line goes on.
+        err = argument_list_too_long(name, exc.reason)
+        return (
+            None,
+            IOResult(exit_code=126, stderr=err),
+            ExecutionNode(command=name, exit_code=126, stderr=err),
+        )
     finally:
         frames = session._local_frames
         if frames and frames[-1] is saved_env_overrides:

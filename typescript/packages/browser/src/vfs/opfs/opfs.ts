@@ -41,10 +41,12 @@ import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
 import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
-import { SCOPE_ERROR } from '../../core/opfs/constants.ts'
+import { LOCAL_FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 
 export interface OPFSVFSOptions {
   root?: string
+  fullScanLimit?: number
 }
 
 export interface OPFSVFSState {
@@ -108,8 +110,15 @@ export class OPFSVFS extends BaseVFS {
   private rootHandle: FileSystemDirectoryHandle | null = null
   private openPromise: Promise<FileSystemDirectoryHandle> | null = null
 
+  override readonly fullScanLimit: number
+
   constructor(options: OPFSVFSOptions = {}) {
+    const limit = options.fullScanLimit ?? LOCAL_FULL_SCAN_LIMIT
+    if (!Number.isInteger(limit) || limit < -1) {
+      throw new VFSConfigError('opfs: full_scan_limit: must be an integer of -1 or more')
+    }
     super()
+    this.fullScanLimit = limit
     this.rootName = options.root ?? ''
     this.accessor = new OPFSAccessor(this)
   }
@@ -142,8 +151,6 @@ export class OPFSVFS extends BaseVFS {
   override readonly readsRanges: boolean = true
 
   override readonly local: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readdir(path: PathSpec): Promise<FileStat[]> {
     return opfsReaddir(this.accessor, path)

@@ -33,11 +33,16 @@ export const LinearConfigSchema = z.object({
     description: 'Linear GraphQL endpoint; override to point at a fake or proxy.',
     default: 'https://api.linear.app/graphql',
   }),
-  contentSearch: z.boolean().optional().meta({
-    description:
-      "Let `grep -rw` and `rg -w` read only the issues Linear's search names, plus those whose other fields hold the word. Search lags writes.",
-    default: false,
-  }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Linear's search, which lags writes.",
+      default: 1000,
+    }),
 })
 
 export type LinearConfig = ConfigOf<typeof LinearConfigSchema>

@@ -23,6 +23,7 @@ import {
   redactHfDatasetsConfig,
 } from './config.ts'
 import { PROMPT } from './prompt.ts'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfDatasetsVFSState {
   type: string
@@ -35,8 +36,10 @@ export class HfDatasetsVFS extends HfHubVFS {
   readonly config: HfDatasetsConfig
   readonly accessor: HfDatasetsAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: HfDatasetsConfig) {
     super()
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     assertHfRepoRef(config.repoId, 'repo_id')
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: HfDatasetsConfig = { ...config }

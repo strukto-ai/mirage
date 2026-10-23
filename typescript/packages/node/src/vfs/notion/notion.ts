@@ -21,6 +21,7 @@ import type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/
 
 import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/notion/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface NotionVFSState {
   type: string
@@ -35,9 +36,11 @@ export class NotionVFS extends NotionVFSBase {
   readonly config: NotionConfig
   override readonly accessor: NotionAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: NotionConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     const transportOpts: { apiKey: string; baseUrl?: string; apiVersion?: string } = {
       apiKey: config.apiKey,
     }

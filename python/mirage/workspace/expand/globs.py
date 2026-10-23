@@ -18,10 +18,11 @@ import posixpath
 
 from mirage.context import session_visibility
 from mirage.errors.constants import WALK_ERRORS
+from mirage.errors.types import GlobLimitError
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
-from mirage.shell.errors import DiscardSignal
+from mirage.shell.errors import DiscardSignal, TooManyMatches
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.glob_walk import (
     glob_name_matches,
@@ -121,7 +122,8 @@ async def expand_glob(
     dispatch: DispatchFn | None, mount: MountEntry, paths: list[PathSpec]
 ) -> list[PathSpec]:
     """Expand pattern specs on one mount, one at a time, through the
-    dispatcher's listing and stat, capped at the mount's match limit.
+    dispatcher's listing and stat, refused past the mount's
+    ``full_scan_limit``.
 
     A mount that lists nothing, or no dispatcher (a registry no workspace
     wired one into), leaves every word as typed. Each word is keyed below
@@ -137,7 +139,7 @@ async def expand_glob(
     prefix = mount.prefix.rstrip("/")
     resolve = make_resolve_glob(
         functools.partial(_listing, dispatch),
-        mount.vfs.max_glob_matches,
+        mount.vfs.full_scan_limit,
         functools.partial(_stat_of, dispatch),
     )
     out: list[PathSpec] = []
@@ -719,6 +721,10 @@ async def resolve_globs(
                         ):
                             kept.append(p)
                     resolved = kept
+                if 0 <= mount.vfs.full_scan_limit < len(resolved):
+                    raise GlobLimitError(
+                        typed.raw_path, mount.vfs.full_scan_limit
+                    )
                 if not resolved:
                     # bash's three answers to a zero-match glob: the
                     # literal word (default), nothing at all under
@@ -745,6 +751,13 @@ async def resolve_globs(
                             spelled, raw_path=spelled.raw_path + "/"
                         )
                     result.append(spelled)
+            except GlobLimitError as exc:
+                # A walk lists level by level, so the word typed is the
+                # one named.
+                refused = GlobLimitError(
+                    unmark_globs(typed.raw_path), exc.limit
+                )
+                raise TooManyMatches(str(refused)) from exc
             except (ValueError, AttributeError, TypeError):
                 result.append(typed)
         elif isinstance(item, PathSpec):

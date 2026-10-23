@@ -38,7 +38,7 @@ Use `@struktoai/mirage-browser` for the same API in a browser. An access-token c
 | <code style={{ whiteSpace: 'nowrap' }}>groupId</code> | Microsoft 365 or Teams group ID whose document library the mount uses. |
 | <code style={{ whiteSpace: 'nowrap' }}>userId</code> | User ID or UPN whose drive the mount uses, under app-only auth. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Folder path from the drive root that the mount uses as its root. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Graph search names. Search covers extracted text and lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Graph search, which lags writes and covers only extracted text. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table onedrive end */}
@@ -57,8 +57,15 @@ wrong root fails outright. mirage ships no table of their hostnames, having no
 way to verify one; take the root from Microsoft's national cloud
 documentation for your tenant.
 
-## grep and rg
+## Integration
 
-With `contentSearch: true`, `grep -rw` and `rg -w` read only the files Microsoft Graph search names, instead of every file under the directory. It is off by default: Graph searches the text it extracted rather than the bytes `grep` reads, and indexes a write some time after it lands, so a file that holds the word can be left out. The [Python OneDrive docs](/python/vfs/onedrive#grep-and-rg) list the cases.
+What OneDrive answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
 
-Reads, writes, resumable uploads, recursive copy, move, delete, directory creation, and version-pinned snapshot reads mirror the [Python OneDrive VFS](/python/vfs/onedrive).
+| Command | On OneDrive |
+| --- | --- |
+| `grep -r`, `rg` | Microsoft Graph search, for whole words |
+| Can miss | Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`), recent writes |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Graph search |
+| `find`, `du`, `ls -R`, `tree` | One recursive listing |
+
+The [Python OneDrive docs](/python/vfs/onedrive#integration) list when each search answers and what it can miss.

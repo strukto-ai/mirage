@@ -15,7 +15,7 @@
 import { fsStrerror, isEacces, isEnotdir, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { underPath } from '../../../../utils/key_prefix.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { treeWalk, type WalkCall } from '../../utils/tree.ts'
+import { ScanBudget, treeWalk, type WalkCall } from '../../utils/tree.ts'
 import {
   type ComputeEntries,
   type ComputeSize,
@@ -30,27 +30,23 @@ import { type CommandFiles, commandFiles } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { crossesMounts, linksOf, mountView, mountsOf } from '../../utils/links.ts'
+import { linksOf, mountView, mountsOf } from '../../utils/links.ts'
 
 /**
- * Entry allowance shared by every operand of one `du` invocation.
+ * What the walks of one `du` invocation met.
  *
- * A walk the mount's `readTree` does not answer takes one `readdir` per
- * directory, which on an API-backed tree is one request per directory. Slack, for instance, exposes a
- * directory per channel per day, so an unbounded walk of a real workspace is
- * tens of thousands of requests. The budget stops the walk and records that the
- * answer is partial.
+ * Each operand's walk lists at most `fullScanLimit` entries of each mount it
+ * crosses (`ScanBudget`): a walk the mount's `readTree` does not answer takes
+ * one `readdir` per directory, which on an API-backed tree is one request per
+ * directory. Slack, for instance, exposes a directory per channel per day, so
+ * an unbounded walk of a real workspace is tens of thousands of requests.
+ * Where a walk ran out is kept, so the answer says it is partial.
  */
 export class WalkBudget {
-  private remaining: number | null
-  // A walk with no cap of its own (the dispatcher's, which spans mounts)
-  // defers to the mounts it crosses: each entry is charged to the mount
-  // serving it, at that mount's own cap, so a disk tree below a capped root
-  // is not cut short and a service below an uncapped one is not walked
-  // without its bound.
-  private readonly mounts: MountView | undefined
-  private readonly spent = new Map<string, number>()
-  hit = false
+  // The current operand's allowance.
+  scan: ScanBudget | null = null
+  // Where a walk ran out, in the order met.
+  readonly stopped: string[] = []
   // Paths the walk was refused (a rule denied them below the operand), in
   // the order it met them; the generic reports them after the walks the
   // way GNU names an unreadable directory.
@@ -64,34 +60,8 @@ export class WalkBudget {
   // a chain that loops.
   readonly inaccessible: [string, string | null][] = []
 
-  constructor(remaining: number | null, mounts?: MountView) {
-    this.remaining = remaining
-    this.mounts = mounts
-  }
-
-  /** Charge one entry named by the listing of directory `path` (so a mount
-   * root is charged to its parent, as the parent's own walk would count it);
-   * false once the cap is exhausted. */
-  spend(path: string): boolean {
-    if (this.remaining !== null) {
-      if (this.remaining <= 0) {
-        this.hit = true
-        return false
-      }
-      this.remaining -= 1
-      return true
-    }
-    const cap = this.mounts?.maxDuEntries?.(path) ?? null
-    if (this.mounts === undefined || cap === null) return true
-    const owner = this.mounts.rootOf(path)
-    const used = this.spent.get(owner) ?? 0
-    if (used >= cap) {
-      this.hit = true
-      return false
-    }
-    this.spent.set(owner, used + 1)
-    return true
-  }
+  // The mount table the limits come from.
+  constructor(readonly mounts: MountView | null = null) {}
 }
 
 /**
@@ -127,23 +97,19 @@ function accountForWalkError(err: unknown, path: PathSpec, budget: WalkBudget): 
 }
 
 // The walk's readdir and stat, answered from the mount's `readTree` where it
-// can, and the directories listed that way, which cost no request and so no
-// budget. Mirrors Python's `_walk`.
+// can. Mirrors Python's `Walk`.
 interface Walk {
   readdir: WalkCall<string[]>
   stat: WalkCall<FileStat>
-  answered: Set<string>
 }
 
 function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string[]>): Walk {
-  const answered = new Set<string>()
   const [readdir, stat] = treeWalk<string[], FileStat>(
     files.answers('read_tree') ? files.readTree : undefined,
     listing,
     files.stat,
-    answered,
   )
-  return { readdir, stat, answered }
+  return { readdir, stat }
 }
 
 /**
@@ -260,6 +226,8 @@ async function duWalk(
     return size
   }
   budget.directories.push(path.virtual)
+  const scan = budget.scan
+  if (scan !== null && !scan.opens(path.virtual)) return 0
   let children: string[]
   try {
     children = await walk.readdir(path)
@@ -268,9 +236,8 @@ async function duWalk(
     return 0
   }
   let total = 0
-  const free = walk.answered.has(path.virtual.replace(/\/+$/, '') || '/')
   for (const child of children) {
-    if (!free && !budget.spend(path.virtual)) break
+    if (scan !== null && !scan.spend(path.virtual)) break
     total += await duWalk(walk, PathSpec.fromStrPath(child), budget, entries, follow)
   }
   return total
@@ -290,6 +257,8 @@ async function walkOperand(
   entries: [string, number][] | null,
 ): Promise<number> {
   budget.directories.length = 0
+  const scan = new ScanBudget(path, budget.mounts)
+  budget.scan = scan
   const state = follow === null ? null : follow.operand(path)
   let total = await duWalk(walk, path, budget, entries, state)
   if (state !== null) {
@@ -298,6 +267,9 @@ async function walkOperand(
         total += await duWalk(walk, link, budget, entries, state.under(link))
       }
     }
+  }
+  for (const line of scan.stopped) {
+    if (!budget.stopped.includes(line)) budget.stopped.push(line)
   }
   return total
 }
@@ -326,13 +298,7 @@ export async function walkEntries(
 const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const flags = new FlagView(ctx.flags, specOf('du'))
-  const crossing = crossesMounts(ctx)
-  // A walk across mounts has no cap of its own: each entry is charged to the
-  // mount serving it, at that mount's cap (see WalkBudget).
-  const budget = new WalkBudget(
-    crossing ? null : (mountsOf(ctx)?.maxDuEntries?.((paths[0] ?? ctx.cwd).virtual) ?? null),
-    mountsOf(ctx),
-  )
+  const budget = new WalkBudget(mountsOf(ctx) ?? null)
   // Kept on one filesystem, a listing leaves out the roots of the mounts
   // below it, which the walk must neither list nor stat.
   const bound = flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
@@ -359,7 +325,7 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     files.stat,
     computeSize,
     computeEntries,
-    () => budget.hit,
+    () => budget.stopped,
     () => budget.unreadable,
     () => budget.directories,
     () => budget.inaccessible,

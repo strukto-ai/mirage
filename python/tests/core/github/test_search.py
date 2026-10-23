@@ -446,6 +446,12 @@ async def test_rest_search_paginates_and_clips_the_final_page(monkeypatch):
     assert requests[0]["order"] == "asc"
 
 
+REFUSED_AT_4 = (
+    b"more than 4 files in scope (full_scan_limit); narrow the path\n"
+)
+
+STOPPED_AT_4 = b"stopped after 4 files (full_scan_limit); narrow the path\n"
+
 REPO = {
     "src/a.py": b"import os\nx = 1\n",
     "src/b.py": b"y = 2\n",
@@ -465,8 +471,8 @@ async def _run(vfs, line: str) -> tuple[bytes, bytes, int]:
         await ws.close()
 
 
-def _ram() -> RAMVFS:
-    vfs = RAMVFS()
+def _ram(limit: int = 10000) -> RAMVFS:
+    vfs = RAMVFS(full_scan_limit=limit)
     for key, data in REPO.items():
         parts = key.split("/")
         for depth in range(1, len(parts)):
@@ -476,11 +482,21 @@ def _ram() -> RAMVFS:
 
 
 async def _on_github(
-    line: str, monkeypatch, pinned: bool = False, **hub_args
+    line: str,
+    monkeypatch,
+    pinned: bool = False,
+    limit: int = 5000,
+    **hub_args,
 ) -> tuple[tuple[bytes, bytes, int], FakeGitHub]:
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
     with serve(FakeGitHub(files=dict(REPO), **hub_args)) as hub:
-        config = {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url}
+        config = {
+            "token": "t",
+            "owner": "o",
+            "repo": "r",
+            "base_url": hub.url,
+            "full_scan_limit": limit,
+        }
         if pinned:
             config["ref"] = hub.head()
         vfs = build_vfs("github", config)
@@ -565,12 +581,12 @@ async def test_a_ref_off_the_default_branch_reads_every_file(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_ref_off_the_default_branch_is_refused_without_the_w_hint(
-    monkeypatch,
-):
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
-    got, _ = await _on_github("grep -rw import /gh", monkeypatch, pinned=True)
-    assert got == (b"", b"grep: 5 files in scope, narrow the path\n", 1)
+async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
+    line = "grep -rw import /gh"
+    got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
+    assert got == await _run(_ram(4), line)
+    assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
+    assert len(_read(hub)) == 4
 
 
 @pytest.mark.asyncio
@@ -587,59 +603,72 @@ async def test_a_scope_cheaper_to_read_is_not_searched():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, stderr",
+    "line, name",
     [
-        ("grep -r import /gh", "grep: 5 files in scope, narrow the path\n"),
-        ("grep -rwv import /gh", "grep: 5 files in scope, narrow the path\n"),
-        ("grep -rwa import /gh", "grep: 5 files in scope, narrow the path\n"),
-        (
-            "rg -w --binary import /gh",
-            "rg: 5 files in scope, narrow the path\n",
-        ),
-        ("rg 'imp.rt' /gh", "rg: 5 files in scope, narrow the path\n"),
-        ("diff -r /gh /gh", "diff: 5 files in scope, narrow the path\n"),
+        ("grep -r import /gh", "grep"),
+        ("grep -rwv import /gh", "grep"),
+        ("rg 'imp.rt' /gh", "rg"),
     ],
 )
-async def test_a_scan_past_the_scope_cap_is_refused(line, stderr, monkeypatch):
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
-    (out, err, code), hub = await _on_github(line, monkeypatch)
-    assert (out, err.decode(), code) == (b"", stderr, 1)
+async def test_a_search_past_the_scope_cap_stops_there(
+    line, name, monkeypatch
+):
+    got, hub = await _on_github(line, monkeypatch, limit=4)
+    assert got == await _run(_ram(4), line)
+    assert got[1:] == (f"{name}: /gh: ".encode() + STOPPED_AT_4, 2)
+    assert hub.count("blob") == 4
+
+
+@pytest.mark.asyncio
+async def test_a_tree_diff_past_the_scope_cap_is_refused(monkeypatch):
+    (out, err, code), hub = await _on_github(
+        "diff -r /gh /gh", monkeypatch, limit=4
+    )
+    assert (out, err, code) == (b"", b"diff: " + REFUSED_AT_4, 1)
     assert hub.count("blob") == 0
 
 
 @pytest.mark.asyncio
 async def test_an_archive_past_the_scope_cap_is_refused(monkeypatch):
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 1)
-    (out, err, code), hub = await _on_github("tar -cf - /gh/src", monkeypatch)
+    (out, err, code), hub = await _on_github(
+        "tar -cf - /gh/src", monkeypatch, limit=1
+    )
     assert (out, err, code) == (
         b"",
-        b"tar: 2 files in scope, narrow the path\n",
+        b"tar: more than 1 files in scope (full_scan_limit); narrow the path\n",
         1,
     )
     assert hub.count("blob") == 0
 
 
 @pytest.mark.asyncio
-async def test_a_narrowed_scan_is_not_refused(monkeypatch):
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 4)
-    line = "grep -rw import /gh"
-    got, _ = await _on_github(line, monkeypatch)
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -rw import /gh",
+        "grep -rwa import /gh",
+        "rg -w --binary import /gh",
+    ],
+)
+async def test_a_narrowed_search_under_the_scope_cap_runs(line, monkeypatch):
+    # Code search names three files, so a cap of four reads them all.
+    got, hub = await _on_github(line, monkeypatch, limit=4)
     assert got == await _run(_ram(), line)
+    assert _read(hub) == ["big.txt", "docs/c.md", "src/a.py"]
 
 
 @pytest.mark.asyncio
-async def test_a_narrowed_scan_past_the_scope_cap_is_refused(monkeypatch):
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 2)
+async def test_a_narrowed_search_past_the_scope_cap_stops_there(monkeypatch):
     (out, err, code), hub = await _on_github(
-        "grep -rw import /gh", monkeypatch
+        "grep -rw import /gh", monkeypatch, limit=2
     )
-    assert (out, err.decode(), code) == (
-        b"",
-        "grep: 3 files in scope and code search could not narrow them; "
-        "narrow the path\n",
-        1,
+    assert (out, err, code) == (
+        b"/gh/big.txt:import\n",
+        b"grep: /gh: stopped after 2 files (full_scan_limit); "
+        b"narrow the path\n",
+        2,
     )
-    assert hub.count("blob") == 0
+    assert _read(hub) == ["big.txt", "docs/c.md"]
 
 
 @pytest.mark.asyncio
@@ -647,13 +676,18 @@ async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
     # Code search never indexes a big file, so the answer names it; the walk
     # skips a binary extension without -a, so it is not a read to cap.
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 3)
     weights = {f"w{i}.bin": REPO["big.txt"] for i in range(2)}
     line = "grep -rw import /gh"
     with serve(FakeGitHub(files=dict(REPO) | weights)) as hub:
         vfs = build_vfs(
             "github",
-            {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url},
+            {
+                "token": "t",
+                "owner": "o",
+                "repo": "r",
+                "base_url": hub.url,
+                "full_scan_limit": 3,
+            },
         )
         assert await _run(vfs, line) == await _run(_ram(), line)
         assert hub.count("search") == 1
@@ -691,8 +725,9 @@ async def test_files_containing_judges_the_tree_it_loads(
 async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
     prefix, scope, count, monkeypatch
 ):
+    # One under the refetched count: a count off the expired tree is
+    # smaller, and would let the scan run.
     files = {"docs/a.txt": b"a", "docs/b.txt": b"b", "top.txt": b"t"}
-    monkeypatch.setattr("mirage.core.github.search.SCOPE_ERROR", 0)
     with serve(FakeGitHub(files=files)) as hub:
         vfs = build_vfs(
             "github",
@@ -702,6 +737,7 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
                 "repo": "r",
                 "ref": "main",
                 "base_url": hub.url,
+                "full_scan_limit": count - 1,
             },
         )
         ws = Workspace(
@@ -717,9 +753,14 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
             hub.files["new/d.txt"] = b"d"
             await ws._registry.mount_for(prefix).index.invalidate()
             hub.log.clear()
-            result = await ws.shell(f"grep -rv x {prefix}{scope}")
-            assert result.stderr == (
-                f"grep: {count} files in scope, narrow the path\n".encode()
+            target = f"{prefix}{scope}"
+            result = await ws.shell(f"diff -r {target} {target}")
+            assert (
+                result.stderr
+                == (
+                    f"diff: more than {count - 1} files in scope "
+                    "(full_scan_limit); narrow the path\n"
+                ).encode()
             )
             assert hub.counts() == (0, 1, 0)
         finally:

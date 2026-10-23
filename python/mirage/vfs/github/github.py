@@ -18,11 +18,10 @@ from typing import Any
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.core.github.constants import COMMIT_SHA, SCOPE_ERROR
+from mirage.core.github.constants import COMMIT_SHA
 from mirage.core.github.read import read as _read
 from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
-from mirage.core.github.search import before_full_scan as _before_full_scan
 from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
 from mirage.core.github.stat import tree as _tree
@@ -79,8 +78,6 @@ class GitHubVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     prompt: str = PROMPT
-
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(
         self,
@@ -141,6 +138,7 @@ class GitHubVFS(BaseVFS):
                 "constructor kwargs or in GitHubConfig"
             )
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = GitHubAccessor(
             GitHubAccount(
                 GhConfig(token=config.token, base_url=config.base_url)
@@ -194,14 +192,9 @@ class GitHubVFS(BaseVFS):
         whole_word: bool,
         ignore_case: bool,
     ) -> list[PathSpec] | None:
-        if not whole_word:
+        if not whole_word or self.full_scan_limit < 0:
             return None
         return await _files_containing(self.accessor, text, [path])
-
-    async def before_full_scan(
-        self, path: PathSpec, *, files: int | None = None
-    ) -> None:
-        await _before_full_scan(self.accessor, path, files)
 
     @property
     def is_default_branch(self) -> bool | None:

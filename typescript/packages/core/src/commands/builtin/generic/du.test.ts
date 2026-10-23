@@ -89,14 +89,18 @@ describe('du', () => {
   })
 
   it.each([
-    [true, 1],
-    [false, 0],
-  ])('warns and exits 1 only when the walk was cut (%s)', async (cut, code) => {
+    [
+      ['/dir: stopped after 1 files (full_scan_limit); narrow the path'],
+      1,
+      'du: /dir: stopped after 1 files (full_scan_limit); narrow the path\n',
+    ],
+    [[], 0, ''],
+  ])('says where a walk was cut short and exits 1 (%j)', async (stopped, code, err) => {
     const [size, entries] = backend({ '/dir/a.txt': 2 })
-    const out = await du([spec('/dir', 'dir')], flags(), size, entries, [], () => cut)
+    const out = await du([spec('/dir', 'dir')], flags(), size, entries, [], () => stopped)
     expect(DEC.decode(out.stdout)).toBe('2\t/dir\n')
     expect(out.exitCode).toBe(code)
-    expect(DEC.decode(out.stderr).includes('incomplete')).toBe(cut)
+    expect(DEC.decode(out.stderr)).toBe(err)
   })
 
   it('reports what it measured unless it only summed', async () => {
@@ -132,7 +136,6 @@ function mountsView(descendants: string[]): MountView {
     isRoot: () => false,
     rootOf: () => '/',
     answers: () => false,
-    maxGlobMatches: () => null,
     searchable: () => null,
   }
 }

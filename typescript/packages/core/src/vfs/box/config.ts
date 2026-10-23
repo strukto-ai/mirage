@@ -29,10 +29,7 @@ export interface BoxConfig {
   // the Box web URL (box.com/folder/<id>), so a subfolder mount survives
   // reorganization that a path prefix would not.
   rootFolderId?: string
-  // Opt in to grep/rg content-search push-down: route recursive literal
-  // scans through Box search to narrow the file set before scanning locally.
-  // Off by default because Box's search index lags recent writes.
-  contentSearch?: boolean
+  fullScanLimit?: number
   clientId?: string
   clientSecret?: string
   refreshToken?: string
@@ -62,11 +59,16 @@ const BoxConfigSchema = z.object({
       "Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root.",
     default: '0',
   }),
-  contentSearch: z.boolean().optional().meta({
-    description:
-      'Let `grep -w` and `rg -w` read only the files Box search names. Search covers extracted text and lags writes, so it can miss a match.',
-    default: false,
-  }),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Box search, which lags writes.',
+      default: 1000,
+    }),
   clientId: z
     .string()
     .optional()

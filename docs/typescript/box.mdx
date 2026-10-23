@@ -98,7 +98,7 @@ is in-memory only and a process restart needs a fresh refresh token.
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Base URL that replaces Box's API, upload and OAuth token hosts, such as a test server. Unset uses Box's hosts. |
 | <code style={{ whiteSpace: 'nowrap' }}>rootFolderId</code><br />default `'0'` | Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root. |
-| <code style={{ whiteSpace: 'nowrap' }}>contentSearch</code><br />default `false` | Let `grep -w` and `rg -w` read only the files Box search names. Search covers extracted text and lags writes, so it can miss a match. |
+| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Box search, which lags writes. |
 | <code style={{ whiteSpace: 'nowrap' }}>clientId</code> | Box app client ID. Required with `refreshToken` (OAuth) or with `clientSecret` and `enterpriseId` (client credentials). |
 | <code style={{ whiteSpace: 'nowrap' }}>clientSecret</code><br />secret | Box app client secret. Required for client credentials; the OAuth refresh sends it when set, so a PKCE client can omit it. |
 | <code style={{ whiteSpace: 'nowrap' }}>refreshToken</code><br />secret | OAuth refresh token; needs `clientId`. Box rotates it on every refresh, so persist the new one with `onRefreshTokenRotated`. |
@@ -257,6 +257,19 @@ them, it hands back exactly what Box stores:
 For a rich, editable view of Google-format documents, mount them through
 [Google Drive](/home/setup/google) with Google credentials instead, the `gws docs ...`
 commands operate on Google file IDs and do not apply to Box.
+
+## Integration
+
+What Box answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On Box |
+| --- | --- |
+| `grep -r`, `rg` | Box search, for whole words |
+| Can miss | Office files, PDFs, archives, the end of large files, words Box splits differently (`foo.bar`), recent writes |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Box search |
+| `sha1sum` | The SHA-1 Box keeps, asked live |
+
+The [Python Box docs](/python/vfs/box#integration) list when each search answers and what it can miss.
 
 ## Available commands
 

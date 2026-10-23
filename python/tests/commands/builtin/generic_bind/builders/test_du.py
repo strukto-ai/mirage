@@ -18,7 +18,6 @@ from typing import Any
 import pytest
 
 from mirage.commands.builtin.generic_bind import generic
-from mirage.commands.builtin.generic_bind.builders.du import WalkBudget
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.fs import enotsup, walk_declined
@@ -26,7 +25,6 @@ from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.types import FileStat, FileType, MountMode, PathSpec
-from mirage.view.types import MountView
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.readers import readers
@@ -36,6 +34,9 @@ TREE = {
     "/db/sub": ["/db/sub/b.txt"],
 }
 SIZES = {"/db/a.txt": 3, "/db/sub/b.txt": 2}
+STOPPED_AT_2 = (
+    "du: /db: stopped after 2 files (full_scan_limit); narrow the path\n"
+)
 
 
 async def _readdir(path: PathSpec) -> list[str]:
@@ -59,7 +60,7 @@ class _Mount:
         readdir (Any): ``readdir(path)``.
         stat (Any): ``stat(path)``, a link's own row.
         read_tree (Any): ``read_tree(path)``, or None for none.
-        max_du_entries (int | None): the mount's walk budget.
+        full_scan_limit (int): the mount's limit, -1 for none.
         followed (Any): ``stat(path)`` with links followed, for the
             namespace's own probes.
     """
@@ -69,7 +70,7 @@ class _Mount:
         readdir: Any = _readdir,
         stat: Any = _stat,
         read_tree: Any = None,
-        max_du_entries: int | None = None,
+        full_scan_limit: int = -1,
         followed: Any = None,
     ) -> None:
         self.readdir = readdir
@@ -80,7 +81,7 @@ class _Mount:
             prefix="/",
             resource_type="ram",
             mode=MountMode.WRITE,
-            max_du_entries=max_du_entries,
+            full_scan_limit=full_scan_limit,
             calls=frozenset({"read_tree"} if read_tree is not None else ()),
         )
 
@@ -126,32 +127,6 @@ async def _du(
     )
 
 
-def test_walk_budget_stops_once_spent():
-    budget = WalkBudget(2)
-    assert [budget.spend("/d") for _ in range(3)] == [True, True, False]
-    assert budget.hit is True
-    unbounded = WalkBudget(None)
-    assert all(unbounded.spend("/d") for _ in range(100))
-    assert unbounded.hit is False
-
-
-def test_walk_budget_with_no_cap_charges_each_mount_its_own():
-    caps = {"/a/": None, "/a/b/": 1}
-    mounts = MountView(
-        descendants=lambda p: [],
-        visible_descendants=lambda p: [],
-        is_root=lambda p: p.rstrip("/") + "/" in caps,
-        root_of=lambda p: "/a/b/" if p.startswith("/a/b") else "/a/",
-        max_du_entries=lambda p: caps[
-            "/a/b/" if p.startswith("/a/b") else "/a/"
-        ],
-    )
-    budget = WalkBudget(None, mounts=mounts)
-    assert all(budget.spend("/a") for _ in range(100))
-    assert [budget.spend("/a/b") for _ in range(2)] == [True, False]
-    assert budget.hit is True
-
-
 def _tree(refusal: Any = None) -> Any:
     async def read_tree(path: PathSpec) -> dict[str, FileStat]:
         if refusal is not None:
@@ -178,12 +153,11 @@ async def test_a_backends_own_refusal_is_not_walked():
 
 
 @pytest.mark.asyncio
-async def test_a_tree_answer_costs_no_budget():
-    """The budget bounds a walk that takes a request per directory; a
-    tree read in one call is summed whole."""
-    mount = _Mount(read_tree=_tree(), max_du_entries=1)
-    out, code, _ = await _du(mount, ["/db"])
-    assert (out, code) == ("2\t/db/sub\n5\t/db\n", 0)
+async def test_a_tree_answer_counts_against_the_limit():
+    """A tree read in one call is still a walk of every entry in it."""
+    mount = _Mount(read_tree=_tree(), full_scan_limit=2)
+    out, code, err = await _du(mount, ["/db"])
+    assert (out, code, err) == ("0\t/db/sub\n3\t/db\n", 1, STOPPED_AT_2)
 
 
 async def _root_stat(path: PathSpec) -> FileStat:
@@ -193,26 +167,28 @@ async def _root_stat(path: PathSpec) -> FileStat:
 
 
 @pytest.mark.asyncio
-async def test_a_tree_answer_at_a_root_mount_costs_no_budget():
-    mount = _Mount(stat=_root_stat, read_tree=_tree(), max_du_entries=1)
-    out, code, _ = await _du(mount, ["/"])
-    assert (out, code) == ("2\t/sub\n5\t/\n", 0)
+async def test_a_walk_of_the_root_names_the_root_where_it_stops():
+    mount = _Mount(stat=_root_stat, read_tree=_tree(), full_scan_limit=2)
+    out, code, err = await _du(mount, ["/"])
+    assert (out, code) == ("0\t/sub\n3\t/\n", 1)
+    assert err == STOPPED_AT_2.replace("/db:", "/:")
 
 
 @pytest.mark.asyncio
-async def test_exhausted_budget_reports_partial_output_and_exits_one():
-    """A tree bigger than the cap must not report a wrong size silently."""
-    out, code, err = await _du(_Mount(max_du_entries=1), ["/db"])
-    assert code == 1
-    assert "incomplete" in err
-    assert out.endswith("\t/db\n")
+async def test_a_walk_past_the_limit_reports_partial_output_and_exits_one():
+    """A tree bigger than the limit must not report a wrong size silently."""
+    out, code, err = await _du(_Mount(full_scan_limit=2), ["/db"])
+    assert (out, code, err) == ("0\t/db/sub\n3\t/db\n", 1, STOPPED_AT_2)
 
 
 @pytest.mark.asyncio
-async def test_budget_is_shared_across_operands():
-    out, code, _ = await _du(_Mount(max_du_entries=1), ["/db", "/db/sub"])
-    assert code == 1
-    assert len(out.splitlines()) == 2
+async def test_each_operand_walks_under_its_own_limit():
+    out, code, err = await _du(_Mount(full_scan_limit=2), ["/db", "/db/sub"])
+    assert (out, code, err) == (
+        "0\t/db/sub\n3\t/db\n2\t/db/sub\n",
+        1,
+        STOPPED_AT_2,
+    )
 
 
 _SEALED_TREE = {

@@ -144,6 +144,20 @@ export interface WalkDeclinedError extends MissingOpError {
   declined: true
 }
 
+// A glob that matches more paths than its mount's fullScanLimit. The line is
+// refused rather than run on part of what it names, as exec(2) refuses an
+// argument list too long. Mirrors Python's GlobLimitError.
+export class GlobLimitError extends Error {
+  readonly word: string
+  readonly limit: number
+  constructor(word: string, limit: number) {
+    super(`${word}: matches more than ${String(limit)} files (full_scan_limit); narrow the path`)
+    this.name = 'GlobLimitError'
+    this.word = word
+    this.limit = limit
+  }
+}
+
 // A command or op overran its timeout budget (exit 124).
 // Mirrors Python's mirage.errors.types.CommandTimeoutError.
 export class CommandTimeoutError extends Error {

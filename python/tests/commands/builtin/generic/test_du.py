@@ -88,21 +88,32 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
     assert io.exit_code == 1
 
 
-@pytest.mark.parametrize("cut,code", [(True, 1), (False, 0)])
+@pytest.mark.parametrize(
+    "stopped,code,err",
+    [
+        (
+            ["/dir: stopped after 1 files (full_scan_limit); narrow the path"],
+            1,
+            b"du: /dir: stopped after 1 files (full_scan_limit); "
+            b"narrow the path\n",
+        ),
+        ([], 0, b""),
+    ],
+)
 @pytest.mark.asyncio
-async def test_a_truncated_walk_warns_and_exits_one(cut, code):
-    """GNU du prints what it accounted for, warns, and exits 1."""
+async def test_a_walk_cut_short_says_where_and_exits_one(stopped, code, err):
+    """du prints what it accounted for, says where it stopped, exits 1."""
     compute_size, compute_entries = _make_backend({"/dir/a.txt": 2})
     out = await du(
         [_spec("/dir", "dir")],
         compute_size=compute_size,
         compute_entries=compute_entries,
         flags=DuFlags(),
-        truncated=lambda: cut,
+        stopped=lambda: stopped,
     )
     assert out.stdout == b"2\t/dir\n"
     assert out.exit_code == code
-    assert (b"incomplete" in out.stderr) is cut
+    assert out.stderr == err
 
 
 @pytest.mark.asyncio

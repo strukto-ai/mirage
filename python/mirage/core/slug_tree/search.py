@@ -16,7 +16,7 @@ from mirage.core.slug_tree.tree import SlugTree, listing_at, tree_key
 from mirage.core.slug_tree.types import A
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.glob_walk import DEFAULT_MAX_GLOB_MATCHES, resolve_glob_with
+from mirage.utils.glob_walk import resolve_glob_with
 from mirage.utils.key_prefix import mount_prefix_of
 
 
@@ -96,6 +96,4 @@ async def search_scope(
         base = path.virtual.rstrip("/")
         return [f"{base}/{row.name}" for row in listing_at(rows, path).entries]
 
-    return await resolve_glob_with(
-        listed, paths, DEFAULT_MAX_GLOB_MATCHES
-    ), prefix
+    return await resolve_glob_with(listed, paths), prefix

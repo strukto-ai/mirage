@@ -19,7 +19,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { RedisStore } from '../../vfs/redis/store.ts'
 import { appendBytes } from '@struktoai/mirage-core/core/redis/append'
-import { SCOPE_ERROR } from '@struktoai/mirage-core/core/redis/constants'
 import { copy } from '@struktoai/mirage-core/core/redis/copy'
 import { create } from '@struktoai/mirage-core/core/redis/create'
 import { exists } from '@struktoai/mirage-core/core/redis/exists'
@@ -42,7 +41,7 @@ async function listed(accessor: RedisAccessor, path: PathSpec): Promise<string[]
 }
 
 const resolveGlob = (accessor: RedisAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
-  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
+  makeResolveGlob((path) => listed(accessor, path))(paths)
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined

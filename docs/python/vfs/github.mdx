@@ -31,6 +31,7 @@ ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `5000` | Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table github end */}
@@ -143,8 +144,8 @@ Tips for efficient access on large repositories:
 # Find files by name
 find /github/ -name "*.py"
 
-# Search with rg (uses GitHub code search API when applicable)
-rg "TODO" /github/
+# Search whole words with rg (uses GitHub code search on large repos)
+rg -w "TODO" /github/
 
 # Read only the first lines of a file
 head -n 20 /github/src/main.py
@@ -165,7 +166,7 @@ Standard commands available on the mounted GitHub tree:
 | `ls`            | List files and directories                 |
 | `cat`           | Read file contents                         |
 | `head` / `tail` | First/last N lines                         |
-| `grep` / `rg`   | Pattern search; rg uses code search API    |
+| `grep` / `rg`   | Pattern search; see [grep and rg](#integration) |
 | `jq`            | Query JSON files                           |
 | `wc`            | Line/word/byte counts                      |
 | `stat`          | File metadata including git SHA            |
@@ -187,9 +188,33 @@ Standard commands available on the mounted GitHub tree:
 | `dirname`       | Strip filename from path                   |
 | `realpath`      | Resolve path                               |
 
-## Search Optimization
+## Integration
 
-`rg` uses the GitHub code search API when the search scope exceeds
-100 files and the mounted ref is the repository's default branch.
-This avoids downloading file contents and returns results significantly
-faster for large repositories.
+What GitHub answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On GitHub |
+| --- | --- |
+| `grep -r`, `rg` | GitHub code search, for whole words, on the default branch, under a path with more than 100 files |
+| Can miss | Recent pushes |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 5000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without code search |
+| `find`, `du`, `ls -R`, `tree` | One recursive tree listing |
+
+`grep -rw` and `rg -w` read only the files GitHub code search names when:
+
+- the scope holds more than 100 files; a smaller one is read directly,
+- the mounted ref is the default branch, the only one code search indexes,
+- the repository tree was listed in full,
+- and the search returns every hit, 100 at most.
+
+Every file is read otherwise. Files code search never indexes are always read.
+
+Each file is one request, so `grep -r`, `git grep`, `find` and the other walks
+stop after `full_scan_limit` files (default 5000) and keep what they printed,
+and a glob matching more, `tar -c`, `zip -r`, `cp -r`, `rm -r`, `mv` to another
+mount and `diff -r` are refused above it:
+
+```bash
+$ grep -r TODO /github/
+/github/src/main.py:# TODO: retry
+grep: /github/: stopped after 5000 files (full_scan_limit); narrow the path
+```

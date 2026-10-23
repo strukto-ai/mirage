@@ -14,13 +14,15 @@
 
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.commands.errors import UsageError
+from mirage.commands.errors import ScanLimitError, UsageError
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition, WalkDeclinedError
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,112 @@ async def before_full_scan(
         logger.debug("scan guard at %s: %s", path.virtual, exc)
 
 
+@dataclass(slots=True)
+class ScanBudget:
+    """The entries one walk of an operand may still list.
+
+    A walk lists at most ``full_scan_limit`` entries of each mount it
+    crosses: an entry is charged to the mount serving the directory that
+    lists it, counted under the operand, or under the mount's root where
+    that mount starts below the operand. Once a count runs out the walk
+    lists nothing more there, and ``stopped`` holds what the command
+    says about it, one line per folder.
+
+    Args:
+        operand (PathSpec): the walked operand.
+        mounts (MountView | None): the mount table; None counts nothing.
+        spent (dict[str, int]): entries charged per counted folder.
+        stopped (list[str]): the stop lines, without the command's name,
+            in the order the walk met them.
+    """
+
+    operand: PathSpec
+    mounts: MountView | None
+    spent: dict[str, int] = field(default_factory=dict)
+    stopped: list[str] = field(default_factory=list)
+
+    def _limit(self, directory: str) -> int:
+        if self.mounts is None or self.mounts.full_scan_limit is None:
+            return -1
+        return self.mounts.full_scan_limit(directory)
+
+    def _folder(self, directory: str) -> str:
+        assert self.mounts is not None
+        top = self.operand.virtual.rstrip("/")
+        root = self.mounts.root_of(directory).rstrip("/")
+        return root if root.startswith(top + "/") else top or "/"
+
+    def _stop(self, folder: str, limit: int) -> None:
+        top = self.operand.virtual.rstrip("/") or "/"
+        line = str(
+            ScanLimitError(
+                self.operand
+                if folder == top
+                else PathSpec.from_str_path(folder),
+                limit,
+            )
+        )
+        if line not in self.stopped:
+            self.stopped.append(line)
+
+    def spend(self, directory: str) -> bool:
+        """Charge one entry ``directory`` lists.
+
+        Args:
+            directory (str): virtual path of the listed directory.
+
+        Returns:
+            bool: True if the walk may keep the entry, False once its
+            folder's count is out, which records the stop.
+        """
+        limit = self._limit(directory)
+        if limit < 0:
+            return True
+        folder = self._folder(directory)
+        used = self.spent.get(folder, 0)
+        if used < limit:
+            self.spent[folder] = used + 1
+            return True
+        self._stop(folder, limit)
+        return False
+
+    def opens(self, directory: str) -> bool:
+        """Whether the walk may still list ``directory``; a folder whose
+        count is out records the stop and is not listed at all.
+
+        Args:
+            directory (str): virtual path of the directory.
+        """
+        limit = self._limit(directory)
+        if limit < 0:
+            return True
+        folder = self._folder(directory)
+        if self.spent.get(folder, 0) < limit:
+            return True
+        self._stop(folder, limit)
+        return False
+
+    async def listing(
+        self,
+        readdir: Callable[[PathSpec], Awaitable[list[str]]],
+        directory: PathSpec,
+    ) -> list[str]:
+        """``readdir`` of ``directory``, cut to what the walk may still
+        list.
+
+        Args:
+            readdir (Callable): the walk's readdir.
+            directory (PathSpec): the directory to list.
+        """
+        if not self.opens(directory.virtual):
+            return []
+        return [
+            name
+            for name in await readdir(directory)
+            if self.spend(directory.virtual)
+        ]
+
+
 def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:
     """Each directory's children in name order, keyed by its path below
     the walk's root (``""`` for the root itself).
@@ -105,7 +213,6 @@ def tree_walk(
     read_tree: ReadTree | None,
     readdir: WalkCall,
     stat: WalkCall,
-    answered: set[str] | None = None,
 ) -> tuple[WalkCall, WalkCall]:
     """A walk's ``readdir`` and ``stat``, answered from the mount's
     ``read_tree``.
@@ -128,8 +235,6 @@ def tree_walk(
             its accessor and index, called as ``read_tree(path)``.
         readdir (WalkCall): the walk's own readdir.
         stat (WalkCall): the walk's own stat.
-        answered (set[str] | None): collects each directory listed from
-            an answer, for a walk that charges a budget per request.
     """
     if read_tree is None:
         return readdir, stat
@@ -162,8 +267,6 @@ def tree_walk(
             root, rel = hit
             listing = roots[root][1].get(rel)
             if listing is not None:
-                if answered is not None:
-                    answered.add(virtual)
                 base = root.rstrip("/") + "/"
                 return [base + name for name in listing]
         return await readdir(path, *args, **kwargs)

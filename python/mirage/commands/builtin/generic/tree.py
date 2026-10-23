@@ -8,6 +8,7 @@ from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
 from mirage.commands.builtin.utils.strtol import c_int, strtoul
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -128,6 +129,7 @@ async def _walk_tree(
     cross_readdir: Readdir | None = None,
     cross_stat: Stat | None = None,
     target_stat: LinkTargetStat | None = None,
+    budget: ScanBudget | None = None,
 ) -> tuple[list[str], int, int, int]:
     """One directory's lines, its counts, and how many directories in
     its subtree (itself included) could not be opened.
@@ -141,7 +143,8 @@ async def _walk_tree(
     operand) contributes no lines and counts itself, so the caller
     marks its own line the way GNU does and the run exits 2; the
     refusal itself is kept in ``warnings`` for the root case, which has
-    no line to mark.
+    no line to mark. A directory past ``budget`` is drawn but not
+    opened.
     """
     lines: list[str] = []
     dirs = 0
@@ -166,6 +169,8 @@ async def _walk_tree(
         entries = []
     if child_mounts:
         entries = sorted(set(entries) | set(child_mounts))
+    if budget is not None:
+        entries = [e for e in entries if budget.spend(path.virtual)]
 
     filtered: list[tuple[PathSpec, FileStat, bool, bool]] = []
     for entry in entries:
@@ -229,6 +234,8 @@ async def _walk_tree(
             continue
         if max_depth is not None and depth + 1 >= max_depth:
             continue
+        if budget is not None and not budget.opens(entry_spec.virtual):
+            continue
         extension = _INDENT if is_last else _VERTICAL
         # Past a mount root the subtree belongs to another VFS, so
         # the rest of this branch reads through the dispatcher. Deeper
@@ -252,6 +259,7 @@ async def _walk_tree(
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
             target_stat=target_stat,
+            budget=budget,
         )
         if sub_unopened and not sub:
             # The child itself could not be opened (one that opened but
@@ -329,6 +337,7 @@ async def tree(
         partial(_cross_stat, stat_path) if stat_path is not None else None
     )
     body: list[str] = []
+    stopped: list[str] = []
     total_dirs = 0
     total_files = 0
     failed = False
@@ -357,6 +366,7 @@ async def tree(
                 total_files += 1
                 continue
         warnings: list[str] = []
+        budget = ScanBudget(path, mounts)
         lines, dirs, files, unopened = await _walk_tree(
             path,
             readdir,
@@ -373,7 +383,9 @@ async def tree(
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
             target_stat=links.target_stat if links is not None else None,
+            budget=budget,
         )
+        stopped.extend(f"tree: {line}" for line in budget.stopped)
         # `warnings` only decides the marker; emitting it would diverge.
         # With stat_path wired the two clear cases are already answered
         # above, so this covers a directory that exists but could not be
@@ -395,7 +407,12 @@ async def tree(
     # A blank line and the one summary close the run (the file count is
     # omitted under -d).
     body += ["", _summary(total_dirs, total_files, dirs_only)]
-    return format_records(body), IOResult(exit_code=2 if failed else 0)
+    # A walk past full_scan_limit draws what it listed and says where it
+    # stopped, exiting 2 as for a directory it could not open.
+    return format_records(body), IOResult(
+        exit_code=2 if failed or stopped else 0,
+        stderr=format_records(stopped) if stopped else None,
+    )
 
 
 __all__ = ["tree"]

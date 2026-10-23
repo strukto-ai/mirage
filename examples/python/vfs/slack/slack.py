@@ -241,7 +241,7 @@ async def main():
             print(f"  {line[:150]}")
 
     # ── grep and rg at each scope ──
-    # With content_search=True and a user token (xoxp-) with search:read,
+    # With a user token (xoxp-) with search:read,
     # grep -w and rg -w read only the channel days Slack search names.
     for label, cmd in [
         (

@@ -70,9 +70,12 @@ export class GCalVFS extends BaseVFS {
   readonly config: GCalConfig
   override readonly accessor: GCalAccessor
 
+  override readonly fullScanLimit: number
+
   constructor(config: GCalConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit
     const tm = new TokenManager(config)
     this.accessor = new GCalAccessor({ tokenManager: tm, config })
     this.prompt = treePrompt(config.bucketDays) + this.accessor.timeRange.prompt()
@@ -105,7 +108,7 @@ export class GCalVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || !this.config.contentSearch) return Promise.resolve(null)
+    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
     return gcalFilesContaining(this.accessor, text, [path])
   }
 

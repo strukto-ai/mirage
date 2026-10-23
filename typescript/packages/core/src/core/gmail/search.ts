@@ -72,7 +72,7 @@ function inLabels(needle: string, labels: ReadonlySet<string>): boolean {
  * Gmail's search reads a message's HTML part and can miss a word of the
  * text/plain body a .gmail.json renders, such as one inside a link or one only
  * that part holds, so it is not asked. The listing fetches every message in
- * full anyway and, with `contentSearch`, keeps each one's rendered text,
+ * full anyway and, under a `fullScanLimit`, keeps each one's rendered text,
  * lowercased, without its labels; the files are picked from that. null for a
  * text that is not ASCII, whose case a lowercased copy may not keep, a text
  * that may lie in a labels field (`inLabels`), which changes after the

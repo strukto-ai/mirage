@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class NextcloudConfig(BaseModel):
@@ -34,3 +36,7 @@ class NextcloudConfig(BaseModel):
     """Seconds one WebDAV request mirage sends itself (copy, checksum,
     quota, properties, search) may take; reads, writes and listings go
     through OpenDAL and its own timeouts."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""

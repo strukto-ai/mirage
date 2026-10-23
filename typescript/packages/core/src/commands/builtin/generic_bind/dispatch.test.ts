@@ -87,19 +87,11 @@ it.each([false, true])(
   },
 )
 
-class Uncapped extends RAMVFS {
-  override readonly maxDuEntries = null
-}
-
-class Capped extends RAMVFS {
-  override readonly maxDuEntries = 2
-}
-
-it('charges each mount its own cap in a du walk', async () => {
+it('charges each mount its own limit in a du walk', async () => {
   // A du that reports no measurement leaves the line to this walk.
   const enc = new TextEncoder()
-  const outer = new Uncapped()
-  const inner = new Capped()
+  const outer = new RAMVFS({ fullScanLimit: -1 })
+  const inner = new RAMVFS({ fullScanLimit: 2 })
   for (let i = 0; i < 4; i++) outer.store.files.set(`/f${String(i)}`, enc.encode('x'))
   for (let i = 0; i < 3; i++) inner.store.files.set(`/g${String(i)}`, enc.encode('y'))
   const ws = new Workspace(
@@ -123,7 +115,7 @@ it('charges each mount its own cap in a du walk', async () => {
     )
     expect(rows.filter((r) => r.includes('/a/b/g'))).toHaveLength(2)
     expect(new TextDecoder().decode(result.stderr)).toBe(
-      'du: walk stopped early: the reported sizes are incomplete\n',
+      'du: /a/b: stopped after 2 files (full_scan_limit); narrow the path\n',
     )
     expect(result.exitCode).toBe(1)
   } finally {

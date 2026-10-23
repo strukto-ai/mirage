@@ -26,7 +26,6 @@ import { read as hubRead } from '../../core/hf_hub/read.ts'
 import { stat as hubStat } from '../../core/hf_hub/stat.ts'
 import { readStream as hubStream } from '../../core/hf_hub/stream.ts'
 import { exists as hubExists } from '../../core/hf_hub/exists.ts'
-import { SCOPE_ERROR } from '../../core/hf_hub/constants.ts'
 import { checksum as hubChecksum } from '../../core/hf_hub/checksum.ts'
 
 /**
@@ -66,8 +65,6 @@ export abstract class HfHubVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
 
   override readonly readsRanges: boolean = true
-
-  override readonly maxGlobMatches: number = SCOPE_ERROR
 
   override readonly handed = {
     read: ['entry'],

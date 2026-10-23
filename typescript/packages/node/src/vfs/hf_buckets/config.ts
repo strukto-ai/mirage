@@ -61,6 +61,7 @@ export interface HfBucketsConfig {
   endpoint?: string
   timeoutMs?: number
   keyPrefix?: string
+  fullScanLimit?: number
 }
 
 // Python states the timeout in seconds; the redactor fills `endpoint`
@@ -89,6 +90,16 @@ const HfBucketsConfigSchema = z.object({
     .describe(
       'Path inside the bucket that becomes the mount root; files outside it are not listed.',
     ),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+      default: 1000,
+    }),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with
@@ -127,6 +138,7 @@ export interface HfRepoConfig {
   // dataset pays one wasted page rather than a twentyfold walk. true and
   // false force it either way.
   expandCommits?: boolean
+  fullScanLimit?: number
 }
 
 const HfRepoConfigSchema = z.object({
@@ -165,6 +177,16 @@ const HfRepoConfigSchema = z.object({
     .describe(
       "Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page.",
     ),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+      default: 1000,
+    }),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with

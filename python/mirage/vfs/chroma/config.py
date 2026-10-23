@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class ChromaConfig(BaseModel):
@@ -18,6 +20,10 @@ class ChromaConfig(BaseModel):
     chunk_index_field: str = "chunk_index"
     """Chunk metadata key whose integer orders a file's chunks; a chunk
     without one sorts as `0`."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit."""
 
     @field_validator("collection_name", "slug_field", "chunk_index_field")
     @classmethod

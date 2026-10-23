@@ -325,18 +325,20 @@ class FakeSlack implements SlackTransport {
 class SearchSlackVFS extends SlackVFSBase {
   override readonly name = 'slack'
   override readonly accessor: SlackAccessor
-  constructor(transport: SlackTransport, contentSearch: boolean) {
+  override readonly fullScanLimit: number
+  constructor(transport: SlackTransport, fullScanLimit: number) {
     super()
-    this.accessor = new SlackAccessor(transport, { contentSearch })
+    this.accessor = new SlackAccessor(transport)
+    this.fullScanLimit = fullScanLimit
   }
 }
 
 type Ran = [string, number, string[], string[]]
 
-async function onSlack(line: string, fake = new FakeSlack(), contentSearch = true): Promise<Ran> {
+async function onSlack(line: string, fake = new FakeSlack(), fullScanLimit = 1000): Promise<Ran> {
   vi.mocked(getHistoryJsonl).mockClear()
   const ws = new Workspace(
-    { '/slack': new Mount(new SearchSlackVFS(fake, contentSearch), { mode: MountMode.READ }) },
+    { '/slack': new Mount(new SearchSlackVFS(fake, fullScanLimit), { mode: MountMode.READ }) },
     { shellParser: await getTestParser() },
   )
   try {
@@ -365,7 +367,7 @@ describe('filesContaining', () => {
     ['rg -lw deploy /slack/dms/ana__D1', ['D1/2025-11-03']],
   ])('reads only the days search names for %s', async (line, reads) => {
     // A file hit names every day a message shares it, not its upload.
-    const full = await onSlack(line, new FakeSlack(), false)
+    const full = await onSlack(line, new FakeSlack(), -1)
     const [out, code, read] = await onSlack(line)
     expect([out, code]).toEqual(full.slice(0, 2))
     expect(read).toEqual(reads)
@@ -373,7 +375,7 @@ describe('filesContaining', () => {
 
   it('reads a day rather than searching it', async () => {
     const line = 'grep -rlw deploy /slack/channels/general__C1/2025-11-06'
-    const full = await onSlack(line, new FakeSlack(), false)
+    const full = await onSlack(line, new FakeSlack(), -1)
     const fake = new FakeSlack()
     const [out, code, read, searches] = await onSlack(line, fake)
     expect([out, code, read]).toEqual(full.slice(0, 3))
@@ -414,7 +416,7 @@ describe('filesContaining', () => {
       () => new FakeSlack(1, new DOMException('timed out', 'TimeoutError')),
     ],
   ])('reads every day when search cannot answer %s', async (line, fake) => {
-    const full = await onSlack(line, new FakeSlack(), false)
+    const full = await onSlack(line, new FakeSlack(), -1)
     const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
       expect((await onSlack(line, fake())).slice(0, 3)).toEqual(full.slice(0, 3))
@@ -429,7 +431,7 @@ describe('filesContaining', () => {
   it.each(['grep -rlw deploy /slack/channels', 'rg -lw deploy /slack/channels/random__C2'])(
     'reads a channel the search user is not in: %s',
     async (line) => {
-      const full = await onSlack(line, new FakeSlack(), false)
+      const full = await onSlack(line, new FakeSlack(), -1)
       const hidden = new FakeSlack(1, null, true, new Set(['C2']))
       expect((await onSlack(line, hidden)).slice(0, 3)).toEqual(full.slice(0, 3))
     },
@@ -441,7 +443,7 @@ describe('filesContaining', () => {
   it.each(['grep -rlw deploy /slack', 'grep -rlw deploy /slack/dms'])(
     'reads a DM the search user is not in: %s',
     async (line) => {
-      const full = await onSlack(line, new FakeSlack(), false)
+      const full = await onSlack(line, new FakeSlack(), -1)
       const hidden = new FakeSlack(1, null, true, new Set(['D1']))
       expect((await onSlack(line, hidden)).slice(0, 3)).toEqual(full.slice(0, 3))
     },

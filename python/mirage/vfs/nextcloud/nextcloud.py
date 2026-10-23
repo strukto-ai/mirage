@@ -5,7 +5,6 @@ from mirage.accessor.nextcloud import NextcloudAccessor
 from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.nextcloud.capacity import capacity as _capacity
 from mirage.core.nextcloud.checksum import checksum as _checksum
-from mirage.core.nextcloud.constants import SCOPE_ERROR
 from mirage.core.nextcloud.copy import copy as _copy
 from mirage.core.nextcloud.copy import dir_copy as _dir_copy
 from mirage.core.nextcloud.create import create as _create
@@ -40,11 +39,11 @@ class NextcloudVFS(BaseVFS):
     supports_snapshot: bool = True
 
     reads_ranges: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, config: NextcloudConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = NextcloudAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

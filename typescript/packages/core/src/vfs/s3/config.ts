@@ -113,6 +113,16 @@ export const S3ConfigSchema = z.object({
     .describe(
       'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
     ),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .optional()
+    .meta({
+      description:
+        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
+      default: 1000,
+    }),
 })
 
 export interface S3Config {
@@ -129,6 +139,7 @@ export interface S3Config {
   httpAgentProvider?: S3HttpAgentProvider
   defaultContentType?: string
   keyPrefix?: string
+  fullScanLimit?: number
 }
 
 export function normalizeKeyPrefix(v: string | undefined): string | undefined {

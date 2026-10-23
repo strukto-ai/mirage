@@ -44,7 +44,7 @@ async function ids(
   under = '/',
   config: Record<string, unknown> = {},
 ): Promise<string[] | null> {
-  const accessor = makeAccessor({ contentSearch: true, ...config })
+  const accessor = makeAccessor(config)
   const out = await filesContaining(accessor, text, [spec(under)])
   if (out === null) return null
   return out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '').sort()
@@ -90,7 +90,7 @@ it.each([
 })
 
 it('reads every file when the listing kept no text', async () => {
-  const out = await filesContaining(makeAccessor(), 'lunch', [spec('/')])
+  const out = await filesContaining(makeAccessor({ fullScanLimit: -1 }), 'lunch', [spec('/')])
   expect(out).toBeNull()
 })
 
@@ -115,7 +115,7 @@ it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
 // A read fetches the event as it is now, and so does the search: each bucket
 // is listed again rather than served from the walk's listing.
 it('finds a text changed since the listing', async () => {
-  const accessor = makeAccessor({ contentSearch: true })
+  const accessor = makeAccessor()
   const search = async (text: string) => {
     const out = await filesContaining(accessor, text, [spec('/')])
     return out === null

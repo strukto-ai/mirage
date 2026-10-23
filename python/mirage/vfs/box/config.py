@@ -14,7 +14,9 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 
 
 class BoxConfig(BaseModel):
@@ -45,9 +47,11 @@ class BoxConfig(BaseModel):
     """Box folder ID the mount uses as its root, from the folder's web URL
     (`box.com/folder/<id>`); unlike a path it survives renames and moves.
     Unset mounts the account root, folder `0`."""
-    content_search: bool = False
-    """Let `grep -w` and `rg -w` read only the files Box search names. Search
-    covers extracted text and lags writes, so it can miss a match."""
+    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    """Most files one command walks under a folder: `grep -r`, `find` and other
+    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
+    refused. `-1` lifts the limit and reads every file without asking Box
+    search, which lags writes."""
     refresh_fn: Callable[[str], Awaitable[tuple[str, str, int]]] | None = None
     """Async callable that takes the current refresh token and returns
     `(access_token, refresh_token, expires_in)`, called instead of Box's

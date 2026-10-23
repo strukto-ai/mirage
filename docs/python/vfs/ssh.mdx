@@ -41,6 +41,7 @@ ws = Workspace({"/remote": vfs}, mode=MountMode.WRITE)
 | <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the TCP connection, and again for authentication. |
 | <code style={{ whiteSpace: 'nowrap' }}>known_hosts</code> | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |
+| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ssh end */}
@@ -122,6 +123,25 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+## Integration
+
+What SSH answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+
+| Command | On SSH |
+| --- | --- |
+| `grep -r`, `rg` | `grep` on the server, for any text |
+| Can miss | No |
+| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `wc -l` | `wc -l` on the server |
+| `tail -f` | `tail -f` on the server |
+| `md5sum`, `sha256sum` and the other hash commands | The matching sum tool on the server |
+| `find`, `du`, `ls -R`, `tree` | One `find` on the server |
+
+`grep -r` and `rg` run `grep` on the server to find which files hold the text,
+then read only those. The answer is exact. Every file is read when the server
+runs no commands (an SFTP-only account), its `grep` refuses an option
+(busybox), or it cannot read a file.
 
 ## Shell Commands
 

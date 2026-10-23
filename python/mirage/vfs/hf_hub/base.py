@@ -23,7 +23,6 @@ from mirage.cache.index import NULL_INDEX, IndexCacheStore
 # allows; python attributes are invariant, so the same narrowing has to be a
 # type parameter or mypy reads every subclass as an illegal override.
 from mirage.core.hf_hub.checksum import checksum as _checksum
-from mirage.core.hf_hub.constants import SCOPE_ERROR
 from mirage.core.hf_hub.exists import exists as _exists
 from mirage.core.hf_hub.read import read as _read
 from mirage.core.hf_hub.readdir import readdir as _readdir
@@ -70,11 +69,11 @@ class HfHubVFS(BaseVFS, Generic[A]):
     listing_version: ListingVersion = ListingVersion.MOUNT
 
     reads_ranges: bool = True
-    max_glob_matches: int | None = SCOPE_ERROR
 
     def __init__(self, config: Any) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = self.ACCESSOR(account_of(config), config)
 
     async def readdir(self, path: PathSpec) -> DirListing:

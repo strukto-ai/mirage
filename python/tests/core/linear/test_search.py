@@ -67,7 +67,7 @@ async def _ask(
     issues: list[dict] = ISSUES,
     documents: list[dict] = DOCUMENTS,
 ):
-    accessor = LinearAccessor(LinearConfig(api_key="k", content_search=True))
+    accessor = LinearAccessor(LinearConfig(api_key="k"))
 
     def nodes(handle, query, variables):
         ids = (

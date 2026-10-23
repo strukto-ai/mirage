@@ -38,6 +38,7 @@ class JaegerVFS(BaseVFS):
     def __init__(self, config: JaegerConfig) -> None:
         super().__init__()
         self.config = config
+        self.full_scan_limit = config.full_scan_limit
         self.accessor = JaegerAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:

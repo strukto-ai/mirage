@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import { timeRangeShape, orderedTimes, timeRangeOrderError } from '../../core/time_config.ts'
 import { GoogleConfigSchema } from '../../core/google/config.ts'
+import { FULL_SCAN_LIMIT } from '../constants.ts'
 import {
   type ConfigOf,
   parseConfigWithSchema,
@@ -58,12 +59,16 @@ export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
     .describe(
       "Day (`YYYY-MM-DD`) the default listing's 90-day future horizon is measured from, for tests and snapshots. Unset uses the current date in the mount's time zone.",
     ),
-  contentSearch: z
-    .boolean()
-    .default(false)
-    .describe(
-      "Let `grep -w` and `rg -w` read only the events Calendar search names. The listing then keeps each event's fields that search does not cover and checks them itself.",
-    ),
+  fullScanLimit: z
+    .number()
+    .int()
+    .min(-1)
+    .default(FULL_SCAN_LIMIT)
+    .meta({
+      description:
+        "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every event without asking Calendar's search; the listing then keeps no event text.",
+      default: 1000,
+    }),
 }).refine(orderedTimes, timeRangeOrderError)
 
 export type GCalConfig = ConfigOf<typeof GCalConfigSchema>

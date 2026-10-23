@@ -11,10 +11,14 @@ import { Workspace } from '../workspace.ts'
 
 const DEC = new TextDecoder()
 
-async function setup(kind: string, count = 0) {
+async function setup(kind: string, count = 0, fullScanLimit?: number) {
   const root = await mkdtemp(join(tmpdir(), 'mirage-walk-'))
   const opened: string[] = []
-  const vfs = kind === 'disk' ? new DiskVFS({ root }) : new SSHVFS({ host: 'fake', root: '/srv' })
+  const limit = fullScanLimit === undefined ? {} : { fullScanLimit }
+  const vfs =
+    kind === 'disk'
+      ? new DiskVFS({ root, ...limit })
+      : new SSHVFS({ host: 'fake', root: '/srv', ...limit })
   if (kind === 'disk') {
     for (const name of ['a', 'b', 'c']) {
       await mkdir(join(root, name))
@@ -59,7 +63,7 @@ async function setup(kind: string, count = 0) {
     vi.restoreAllMocks()
     await rm(root, { recursive: true, force: true })
   }
-  return { ws, opened, close }
+  return { ws, vfs, opened, close }
 }
 
 describe.each(['disk', 'ssh'])('partial traversal on %s', (kind) => {
@@ -120,10 +124,31 @@ describe.each(['disk', 'ssh'])('partial traversal on %s', (kind) => {
   })
 })
 
+// Twin of test_du_stops_at_the_mounts_full_scan_limit.
 it.each(['disk', 'ssh'])(
-  'du on %s exceeds the default walker budget',
+  'du on %s stops at the mount full scan limit',
   async (kind) => {
-    const { ws, close } = await setup(kind, 10001)
+    const { ws, vfs, close } = await setup(kind, 10001)
+    const limit = String(vfs.fullScanLimit)
+    try {
+      const summary = await ws.shell('du -s /d/large')
+      expect([summary.exitCode, DEC.decode(summary.stderr), DEC.decode(summary.stdout)]).toEqual([
+        1,
+        `du: /d/large: stopped after ${limit} files (full_scan_limit); narrow the path\n`,
+        `${limit}\t/d/large\n`,
+      ])
+    } finally {
+      await close()
+    }
+  },
+  60000,
+)
+
+// Twin of test_du_lifted_accounts_for_every_entry.
+it.each(['disk', 'ssh'])(
+  'du on %s lifted accounts for every entry',
+  async (kind) => {
+    const { ws, close } = await setup(kind, 10001, -1)
     try {
       const summary = await ws.shell('du -s /d/large')
       expect([summary.exitCode, DEC.decode(summary.stderr)]).toEqual([0, ''])

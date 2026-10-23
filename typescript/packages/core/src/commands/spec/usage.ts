@@ -30,6 +30,8 @@ import {
   RG_FLAG_NAMES,
   USAGE_EXIT,
   USAGE_HINT_PREFIX,
+  ZGREP_UNSUPPORTED_LONG,
+  ZGREP_UNSUPPORTED_SHORT,
 } from './constants.ts'
 import { CommandName } from './types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
@@ -180,6 +182,10 @@ export function unknownOptionError(
     return [encodeText(`find: unknown predicate \`${dashed}'\n`), usageExitCode(cmdName)]
   }
   if (builtin && cmdName === 'rg') return rgUnknownFlag(token)
+  if (builtin && cmdName === 'zgrep' && zgrepUnsupported(token)) {
+    const dashed = token.startsWith('-') ? token : `-${token}`
+    return [encodeText(`zgrep: ${dashed}: option not supported\n`), usageExitCode(cmdName)]
+  }
   if (builtin && PYTHON_NAMES.has(cmdName)) {
     // CPython names the whole typed token, long or short (pinned on 3.14.7;
     // 3.12 still spelled a long one `unknown option`).
@@ -191,6 +197,16 @@ export function unknownOptionError(
     : `${cmdName}: invalid option -- '${token}'\n`
   const hint = usageHint(cmdName, builtin) + '\n'
   return [encodeText(line + hint), usageExitCode(cmdName, builtin)]
+}
+
+/** Whether zgrep refuses a grep option itself (gzip 1.13). */
+export function zgrepUnsupported(token: string): boolean {
+  if (!token.startsWith('--')) return ZGREP_UNSUPPORTED_SHORT.has(token)
+  const name = token.slice(2).split('=', 1)[0] ?? ''
+  for (const [full, shortest] of ZGREP_UNSUPPORTED_LONG) {
+    if (name.length >= shortest && full.startsWith(name)) return true
+  }
+  return false
 }
 
 // ripgrep's `find_similar_names` threshold: the share of 3-grams a flag name

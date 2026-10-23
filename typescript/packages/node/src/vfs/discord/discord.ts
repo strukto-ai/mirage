@@ -24,6 +24,7 @@ import type {
 
 import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/discord/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface DiscordVFSState {
   type: string
@@ -42,9 +43,11 @@ export class DiscordVFS extends DiscordVFSBase {
   readonly config: DiscordConfig
   override readonly accessor: DiscordAccessor
 
+  override readonly fullScanLimit: number
   constructor(config: DiscordConfig) {
     super()
     this.config = config
+    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
     this.accessor = new DiscordAccessor(
       new NodeDiscordTransport(config.token, config.baseUrl),
       config,
