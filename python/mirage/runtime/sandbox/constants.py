@@ -101,6 +101,9 @@ REAP_WAIT_SECONDS = 5.0
 # KILL, for its handlers to clean up: the stop line's same second.
 STOP_GRACE_SECONDS = 1.0
 
+# How often a stop in its grace checks whether the signalled group ended.
+STOP_POLL_SECONDS = 0.02
+
 # Where the stop line finds grep and sleep: the config's PATH is for the
 # programs it runs and may name none of the system's directories.
 REAP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

@@ -58,8 +58,8 @@ async function escapedPid(pidFile: string): Promise<number> {
   return Number(readFileSync(pidFile, 'utf8'))
 }
 
-// A runner whose run is \`sh -c script\`, stopped through its abort.
-function shRunner(script: string): ProcessHandle {
+// A runner whose run is `sh -c script`, stopped through its abort.
+function shRunner(script: string, output?: (chunk: Uint8Array) => Promise<void>): ProcessHandle {
   const abort = new AbortController()
   return new ProcessSupervisor(runWithExecution).start({
     sessionId: 's',
@@ -69,7 +69,12 @@ function shRunner(script: string): ProcessHandle {
       abort.abort()
     },
     run: async () =>
-      (await runCli('sh', null, ['-c', script], null, { signal: abort.signal })).code,
+      (
+        await runCli('sh', null, ['-c', script], null, {
+          signal: abort.signal,
+          ...(output === undefined ? {} : { output }),
+        })
+      ).code,
   })
 }
 
@@ -101,6 +106,56 @@ describe('runCli', () => {
     expect((await runner.join()).exitCode).toBe(137)
     expect(existsSync(said)).toBe(false)
     expect(await ended(child)).toBe(true)
+  })
+
+  // The grace is the group's: a descendant still handling the signal after
+  // the program it ran under has exited keeps its second.
+  it('lets a descendant keep the grace after its parent exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `sh -c 'trap "sleep 0.3; echo bye > ${said}; exit 0" TERM; ` +
+        `while :; do sleep 0.05; done' >/dev/null 2>&1 & echo $$ > ${pidFile}; wait`,
+    )
+    await escapedPid(pidFile)
+    await delay(200)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  // What ignores the signal, a descendant too, ends with KILL after the
+  // grace, though the program it ran under exited at once.
+  it('kills a descendant that ignores the signal after its parent exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, kidFile] = [join(dir, 'pid'), join(dir, 'kid')]
+    const runner = shRunner(
+      `sh -c "trap '' TERM; while :; do sleep 0.05; done" >/dev/null 2>&1 & ` +
+        `echo $! > ${kidFile}; echo $$ > ${pidFile}; wait`,
+    )
+    await escapedPid(pidFile)
+    const kid = await escapedPid(kidFile)
+    await delay(200)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(await ended(kid)).toBe(true)
+  })
+
+  // A handler that writes more than a pipe holds is not blocked on it, even
+  // with a consumer that no longer reads: the output is dropped.
+  it('lets a handler writing its output finish in the grace', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const runner = shRunner(
+      `trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; ` +
+        `echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
+        'while :; do sleep 0.05; done',
+      () => new Promise<void>(() => undefined),
+    )
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('bye\n')
   })
 
   // A program that ignores the signal still ends: KILL follows the grace.

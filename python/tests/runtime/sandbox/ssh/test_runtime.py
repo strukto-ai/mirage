@@ -21,8 +21,10 @@ import pytest
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
+from mirage.types import PathSpec
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
 
@@ -252,6 +254,32 @@ async def test_a_cancelled_line_does_not_wait_for_the_remote_command():
         with pytest.raises(asyncio.CancelledError):
             await task
     assert process.calls == ["eof", "kill", "close"]
+
+
+# A kill that names a gentler signal leaves the command to the reap,
+# which sends it that signal first.
+@pytest.mark.asyncio
+async def test_a_term_kill_leaves_the_remote_command_to_the_reap():
+    process = HungProcess()
+    runtime = SSHRuntime(config={"host": "box"})
+    runtime._conn = HungConn(process)
+
+    async def run() -> int:
+        _, _, code = await runtime._ssh("sleep 30", None)
+        return code
+
+    runner = ProcessSupervisor().start(
+        session_id="s",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    while "eof" not in process.calls:
+        await asyncio.sleep(0)
+    assert runner.terminate(15)
+    async with asyncio.timeout(2):
+        await runner.join()
+    assert process.calls == ["eof", "close"]
 
 
 class LostProcess(HungProcess):

@@ -27,6 +27,8 @@ import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
 import { Workspace } from '../../../workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SSHRuntime } from './runtime.ts'
+import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { Ssh2Sdk } from './sdk.ts'
 
 vi.mock('node:os', async (original) => ({
@@ -252,6 +254,27 @@ describe('SSHRuntime cancellation', () => {
     controller.abort()
     await expect(running).rejects.toMatchObject({ name: 'AbortError' })
     expect([runtime.channel.signals, runtime.channel.closed]).toEqual([['KILL'], true])
+  })
+
+  // A kill that names a gentler signal leaves the command to the reap,
+  // which sends it that signal first.
+  it('leaves the command to the reap when a kill names TERM', async () => {
+    const runtime = new HungRuntime()
+    const controller = new AbortController()
+    const started = new Promise((resolve) => runtime.channel.once('eof', resolve))
+    const runner = new ProcessSupervisor(runWithExecution).start({
+      sessionId: 's',
+      command: 'sleep',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        controller.abort()
+      },
+      run: () => runtime.line('sleep 30', controller.signal).then(() => 0),
+    })
+    await started
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(143)
+    expect([runtime.channel.signals, runtime.channel.closed]).toEqual([[], true])
   })
 
   it('closes its channel and stops listening when the channel fails', async () => {

@@ -210,6 +210,62 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
     assert await _ended(child)
 
 
+# The grace is the group's: a descendant still handling the signal after
+# the program it ran under has exited keeps its second.
+@pytest.mark.asyncio
+async def test_a_descendant_keeps_the_grace_after_its_parent_exits(tmp_path):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f'sh -c \'trap "sleep 0.3; echo bye > {said}; exit 0" TERM; '
+        f"while :; do sleep 0.05; done' >/dev/null 2>&1 & "
+        f"echo $$ > {pid_file}; wait",
+    )
+    await _wait_for_pid(pid_file)
+    await asyncio.sleep(0.2)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert said.read_text() == "bye\n"
+
+
+# What ignores the signal, a descendant too, ends with KILL after the
+# grace, though the program it ran under exited at once.
+@pytest.mark.asyncio
+async def test_a_descendant_that_ignores_the_signal_is_killed(tmp_path):
+    pid_file, kid_file = tmp_path / "pid", tmp_path / "kid"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        "sh -c \"trap '' TERM; while :; do sleep 0.05; done\" "
+        f">/dev/null 2>&1 & echo $! > {kid_file}; echo $$ > {pid_file}; wait",
+    )
+    await _wait_for_pid(pid_file)
+    kid = await _wait_for_pid(kid_file)
+    await asyncio.sleep(0.2)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert await _ended(kid)
+
+
+# A handler that writes more than a pipe holds is not blocked on it: the
+# output is read and dropped through the grace.
+@pytest.mark.asyncio
+async def test_a_handler_writing_its_output_finishes_in_the_grace(tmp_path):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; "
+        f"echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
+        "while :; do sleep 0.05; done",
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert said.read_text() == "bye\n"
+
+
 # A program that ignores the signal still ends: KILL follows the grace.
 @pytest.mark.asyncio
 async def test_a_child_that_ignores_the_signal_is_killed_after_the_grace(

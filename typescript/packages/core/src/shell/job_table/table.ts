@@ -43,14 +43,15 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
   } catch (err) {
     // A job killed while it was still running is already settled; the
     // runner unwinding afterwards must not reopen or relabel it.
-    if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? KILLED_EXIT_CODE : 1
+    if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? job.exitCode : 1
     if (isAbortError(err)) {
       const signal = job.process?.signal ?? null
+      const code = signal === null ? KILLED_EXIT_CODE : 128 + signal
       job.status = JobStatus.KILLED
-      job.exitCode = signal === null ? KILLED_EXIT_CODE : 128 + signal
+      job.exitCode = code
       await job.console.emit(Channel.STDERR, encodeText('Killed'))
       await job.console.finish(KILLED_OUTCOME)
-      return KILLED_EXIT_CODE
+      return code
     }
     // Recorded as the job's output and exit status rather than
     // rethrown: nobody awaits this task, so rethrowing would only

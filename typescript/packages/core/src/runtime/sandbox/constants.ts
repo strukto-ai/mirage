@@ -83,6 +83,9 @@ export const REAP_WAIT_SECONDS = 5
 // KILL, for its handlers to clean up: the stop line's same second.
 export const STOP_GRACE_SECONDS = 1
 
+// How often a stop in its grace checks whether the signalled group ended.
+export const STOP_POLL_SECONDS = 0.02
+
 // Where the stop line finds grep and sleep: the config's PATH is for the
 // programs it runs and may name none of the system's directories.
 export const REAP_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'

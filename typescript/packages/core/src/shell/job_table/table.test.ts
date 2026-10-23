@@ -167,9 +167,11 @@ describe('JobTable.kill', () => {
   ])('a job killed with signal %i exits %i', async (signal, code) => {
     const jt = new JobTable()
     const abort = new AbortController()
-    const j = jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
+    const j = jt.submit({ command: 'sleep', run: pending(abort, 'up'), abort, cwd: '/' })
+    while (dec(await j.console.snapshot(Channel.STDOUT)) === '') await Promise.resolve()
     expect(await jt.kill(j.id, '', signal)).toBe(true)
     expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
+    expect((await j.process?.join())?.exitCode).toBe(code)
   })
 
   it('aborts, marks killed, and keeps output produced before the kill', async () => {

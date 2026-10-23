@@ -24,6 +24,7 @@ from e2b import CommandExitException, NotFoundException, SandboxException
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
@@ -300,6 +301,31 @@ async def test_cancellation_kills_command_and_disconnects():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handle.killed and handle.disconnected
+
+
+# A kill that names a gentler signal leaves the command to the reap,
+# which sends it that signal first.
+@pytest.mark.asyncio
+async def test_a_term_kill_leaves_the_command_to_the_reap():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+
+    async def run() -> int:
+        result = await runtime.exec_line("sleep", None, {}, "/workspace")
+        return result.exit_code
+
+    runner = ProcessSupervisor().start(
+        session_id="s",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+    )
+    await asyncio.sleep(0)
+    handle = FakeSandbox.last.commands.handles[0]
+    await handle.waiting.wait()
+    assert runner.terminate(15)
+    await runner.join()
+    assert not handle.killed and handle.disconnected
 
 
 @pytest.mark.asyncio

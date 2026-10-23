@@ -16,6 +16,7 @@ import asyncio
 import logging
 from typing import Any
 
+from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -156,7 +157,11 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
                 read(), process.stderr.read(), feeding, reap()
             )
         except asyncio.CancelledError:
-            process.kill()
+            # A kill that named a gentler signal leaves the command to the
+            # reap, which sends it that signal first.
+            runner = current_caller().process
+            if runner is None or runner.signal in (None, 9):
+                process.kill()
             raise
         finally:
             if not feeding.done():

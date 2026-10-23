@@ -17,6 +17,7 @@ import { Readable } from 'node:stream'
 import { once } from 'node:events'
 import { connectOptions } from '../../../utils/ssh.ts'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
+import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -124,6 +125,8 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
   ): Promise<CliResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
+    // Read now: an abort's listener runs as the caller that aborted.
+    const runner = currentCaller().process
     return new Promise((resolveFn, rejectFn) => {
       client.exec(command, (err: Error | undefined, stream: ClientChannel) => {
         if (err !== undefined) {
@@ -139,7 +142,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
           rejectFn(error instanceof Error ? error : new Error(String(error)))
         }
         const abort = (): void => {
-          if (!state.done) stream.signal('KILL')
+          // A kill that named a gentler signal leaves the command to the
+          // reap, which sends it that signal first.
+          if (!state.done && (runner?.signal ?? 9) === 9) stream.signal('KILL')
           fail(makeAbortError(signal))
         }
         if (signal?.aborted === true) {

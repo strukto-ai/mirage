@@ -57,7 +57,11 @@ from mirage.policy.types import (  # noqa: E402
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
 from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
-from mirage.runtime.types import RunResult, ScriptSource  # noqa: E402
+from mirage.runtime.types import (  # noqa: E402
+    OutputFn,
+    RunResult,
+    ScriptSource,
+)
 from mirage.types import FileStat, Limit, PathSpec  # noqa: E402
 from mirage.vfs.base import BaseVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
@@ -213,6 +217,7 @@ class ProcessBox(Runtime[None], ProcessExecutorMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        output: OutputFn | None,
     ) -> RunResult:
         return RunResult(
             stdout=(json.dumps(texts, separators=(",", ":")) + "\n").encode(),

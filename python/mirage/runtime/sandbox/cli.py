@@ -27,6 +27,7 @@ from mirage.runtime.sandbox.constants import (
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
+    STOP_POLL_SECONDS,
 )
 from mirage.runtime.types import RunResult, SandboxPipe
 
@@ -62,8 +63,8 @@ async def run_cli(
     holds the output pipes open, so the wait would last until it exited
     on its own. A line abandoned to a timeout returns at once. When a
     ``kill`` stopped the runner with a signal other than KILL, the group
-    gets that signal first and KILL only after ``STOP_GRACE_SECONDS``, so
-    the program's handlers get to run.
+    gets that signal first (``end_tree``), so the program's handlers get
+    to run.
 
     Args:
         executable (str): the program (``docker``, ``sandlock``, a host
@@ -156,11 +157,10 @@ async def run_cli(
         signum = runner.signal if runner is not None else None
         try:
             if signum is not None and signum != 9:
-                kill_tree(process, signum)
-                async with asyncio.timeout(STOP_GRACE_SECONDS):
-                    await process.wait()
-        except TimeoutError:
-            logger.debug("process %d outlived signal %d", process.pid, signum)
+                for reader in (reading, errors):
+                    reader.cancel()
+                await asyncio.gather(reading, errors, return_exceptions=True)
+                await end_tree(process, signum)
         finally:
             stop_tree(process, transport)
             await process.wait()
@@ -295,6 +295,57 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
         os.killpg(process.pid, signum)
     except ProcessLookupError:
         logger.debug("process group %d has already exited", process.pid)
+
+
+async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
+    """Signal a child's process group and give the group
+    ``STOP_GRACE_SECONDS`` to end, reading and dropping the child's
+    output meanwhile, so a handler that writes is not held on a full
+    pipe. The grace is the group's: a descendant still handling the
+    signal after the child exited keeps it. What is left after it is the
+    caller's to kill (``stop_tree``). Mirrors TypeScript's ``endTree``.
+
+    Args:
+        process (asyncio.subprocess.Process): a child ``run_cli`` started,
+            with nothing else reading its output.
+        signum (int): the signal.
+    """
+    kill_tree(process, signum)
+    drops = [
+        asyncio.create_task(_drop(stream))
+        for stream in (process.stdout, process.stderr)
+        if stream is not None
+    ]
+    try:
+        async with asyncio.timeout(STOP_GRACE_SECONDS):
+            while True:
+                if sys.platform == "win32":
+                    if process.returncode is not None:
+                        return
+                else:
+                    try:
+                        os.killpg(process.pid, 0)
+                    except ProcessLookupError:
+                        return
+                await asyncio.sleep(STOP_POLL_SECONDS)
+    except TimeoutError:
+        logger.debug(
+            "process group %d outlived signal %d", process.pid, signum
+        )
+    finally:
+        for drop in drops:
+            drop.cancel()
+        await asyncio.gather(*drops, return_exceptions=True)
+
+
+async def _drop(stream: asyncio.StreamReader) -> None:
+    """Read a stream to its end, keeping nothing.
+
+    Args:
+        stream (asyncio.StreamReader): a child's output.
+    """
+    while await stream.read(STREAM_LIMIT):
+        pass
 
 
 def stop_tree(

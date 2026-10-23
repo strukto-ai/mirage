@@ -17,6 +17,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -188,8 +189,12 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             await asyncio.gather(feeding, reaping)
             result = reaping.result()
         except BaseException:
+            # A kill that named a gentler signal leaves the command to the
+            # reap, which sends it that signal first.
+            runner = current_caller().process
             try:
-                await handle.kill()
+                if runner is None or runner.signal in (None, 9):
+                    await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             raise

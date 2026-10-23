@@ -248,9 +248,11 @@ async def test_kill_all_reaches_every_session():
 async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     table = JobTable()
     job = _submit(table, "a")
+    await asyncio.sleep(0)
     assert await table.kill(job.id, "a", signal)
     assert (job.status, job.exit_code) == (JobStatus.KILLED, code)
-    await table.kill_all()
+    assert job.process is not None
+    assert (await job.process.join()).exit_code == code
 
 
 @pytest.mark.asyncio

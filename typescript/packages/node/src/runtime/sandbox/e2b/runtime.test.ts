@@ -18,6 +18,8 @@ import { Workspace } from '../../../workspace.ts'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
+import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
 import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
@@ -399,6 +401,32 @@ describe('E2B cancellation and validation', () => {
     expect(DEC.decode((await other).stdout)).toBe('07')
     expect(connect).toHaveBeenCalledTimes(1)
     expect(sandbox.commands.calls).toHaveLength(1)
+  })
+
+  // A kill that names a gentler signal leaves the command to the reap,
+  // which sends it that signal first.
+  it('leaves the command to the reap when a kill names TERM', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const abort = new AbortController()
+    const runner = new ProcessSupervisor(runWithExecution).start({
+      sessionId: 's',
+      command: 'sleep',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        abort.abort()
+      },
+      run: async () => (await runtime.execLine('sleep', null, {}, '/', abort.signal)).exitCode,
+    })
+    await vi.waitFor(() => {
+      expect(FakeSandbox.last.commands.handles).toHaveLength(1)
+    })
+    expect(runner.terminate(15)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(143)
+    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
+      killed: false,
+      disconnected: true,
+    })
   })
 
   it('kills a handle that arrives after startup was aborted', async () => {
