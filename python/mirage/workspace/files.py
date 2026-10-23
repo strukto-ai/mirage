@@ -507,6 +507,18 @@ class Files:
         session_id: str | None = None,
     ) -> AsyncIterator[bytes]: ...
 
+    @overload
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: bool,
+        session_id: str | None = None,
+    ) -> bytes | AsyncIterator[bytes]: ...
+
     async def read(
         self,
         path: str | PathSpec,

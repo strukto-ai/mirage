@@ -498,6 +498,11 @@ export class Files {
   ): Promise<AsyncIterable<Uint8Array>>
   async read(
     path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream: boolean },
+    sessionId?: string,
+  ): Promise<Uint8Array | AsyncIterable<Uint8Array>>
+  async read(
+    path: string | PathSpec,
     options: { raw?: boolean; offset?: number; size?: number | null; stream?: boolean } = {},
     sessionId?: string,
   ): Promise<Uint8Array | AsyncIterable<Uint8Array>> {

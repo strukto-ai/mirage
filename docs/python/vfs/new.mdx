@@ -630,7 +630,7 @@ places:
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `read_bytes` and `read_range` | one `read(path, *, offset=0, size=None)`; set `reads_ranges = True` when it fetches only the window |
 | `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
-| `read_stream`, `write_stream`, `append_stream` | `read` answering a stream, and `write` and `append` taking one; a class still defining one is refused |
+| `read_stream`, `write_stream`, `append_stream` | `read` answering a stream, and `write` and `append` taking one; a VFS still defining one is refused when mounted |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `workspace/mount/backends.py`; `commands()` returns only the commands the VFS was handed |
 | `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |

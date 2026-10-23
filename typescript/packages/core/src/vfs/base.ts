@@ -28,7 +28,7 @@ import type {
 import { CapacityState, ListingVersion } from '../types.ts'
 import type { DeltaHook } from '../events/base.ts'
 import { methodName, vfsCall } from './call.ts'
-import { FOLDED_METHODS, FULL_SCAN_LIMIT } from './constants.ts'
+import { FULL_SCAN_LIMIT } from './constants.ts'
 import { Effect, type Handed, Target } from './types.ts'
 
 /**
@@ -286,13 +286,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * `super()` bare.
    */
   constructor(options: VFSOptions<A> = {}) {
-    for (const [name, into] of Object.entries(FOLDED_METHODS)) {
-      if (typeof (this as unknown as Record<string, unknown>)[name] === 'function') {
-        throw new TypeError(
-          `${this.constructor.name}.${name}: define ${into} instead, which answers or takes bytes or a stream`,
-        )
-      }
-    }
     if (options.name !== undefined) {
       if (options.name === '') throw new Error('a VFS needs a non-empty name')
       this.name = options.name

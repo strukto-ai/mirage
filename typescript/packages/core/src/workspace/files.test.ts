@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '../io/types.ts'
+import { materialize, type ByteSource } from '../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
 import { render } from '../test-utils.ts'
@@ -1330,6 +1330,21 @@ describe('Files per-call sessionId', () => {
 })
 
 describe('readStream', () => {
+  // Mirrors Python's test_a_stream_flag_held_in_a_bool_picks_the_answer.
+  it('takes a stream flag held in a boolean', async () => {
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/r/a.txt', 'hi')
+      for (const stream of [false, true]) {
+        const got = await ws.vfs.read('/r/a.txt', { stream })
+        expect(got instanceof Uint8Array).toBe(!stream)
+        expect(DEC.decode(got instanceof Uint8Array ? got : await materialize(got))).toBe('hi')
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Mirrors Python's test_a_streamed_read_is_recorded_once_it_ends.
   it('records the read once the stream ends', async () => {
     const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })

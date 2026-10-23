@@ -487,13 +487,3 @@ async def test_custom_driver_serves_cli_namespace_and_runtime():
         assert not row.is_dir
     finally:
         await ws.close()
-
-
-# A method folded into read, write or append would never be called, so a
-# class still defining one is refused as it is defined.
-@pytest.mark.parametrize(
-    "name", ["read_stream", "write_stream", "append_stream"]
-)
-def test_a_folded_method_is_refused_when_its_class_is_defined(name):
-    with pytest.raises(TypeError, match=f"Old.{name}: define "):
-        type("Old", (BaseVFS,), {name: lambda self, path: None})

@@ -49,7 +49,7 @@ import {
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
 import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
-import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { FOLDED_METHODS, WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
@@ -256,7 +256,9 @@ async function* asStream(
  * A backend read's answer as bytes, a stream collected. A whole read's
  * stream publishes the version it recorded for the bytes collected from it,
  * as a whole read answering bytes publishes its own, so a read-modify-write
- * still sends the version it read. Mirrors Python's `_collected`.
+ * still sends the version it read. Its record stays in the records of the
+ * block around it, so the write a rewrite makes still sees the read that
+ * proves the copy it extends. Mirrors Python's `_collected`.
  */
 async function collected(
   answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
@@ -266,8 +268,15 @@ async function collected(
   const found = await answer
   if (found instanceof Uint8Array) return found
   if (!whole) return materialize(found)
-  const collect = (): Promise<readonly [Uint8Array, OpRecord[]]> =>
-    commandRecords(async (records) => [await materialize(found), records] as const)
+  const collect = async (): Promise<readonly [Uint8Array, OpRecord[]]> => {
+    const held = currentCaller().commandSink
+    if (held === null) {
+      return commandRecords(async (records) => [await materialize(found), records] as const)
+    }
+    const start = held[1].length
+    const data = await materialize(found)
+    return [data, held[1].slice(start)] as const
+  }
   const [data, records] =
     activeRecords() === undefined ? (await runWithRecording(collect))[0] : await collect()
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
@@ -440,6 +449,13 @@ export class MountEntry {
       if (typeof (init.vfs as unknown as Record<string, unknown>)[renderer] !== 'function') {
         throw new TypeError(
           `${init.vfs.constructor.name}.renderers maps '${filetype}' to '${renderer}', which is not a method`,
+        )
+      }
+    }
+    for (const [name, into] of Object.entries(FOLDED_METHODS)) {
+      if (name in init.vfs) {
+        throw new TypeError(
+          `${init.vfs.constructor.name}.${name}: define ${into} instead, which answers or takes bytes or a stream`,
         )
       }
     }

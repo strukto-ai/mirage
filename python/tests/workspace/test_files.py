@@ -27,6 +27,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.policy import (
     Action,
     Deny,
@@ -1157,6 +1158,19 @@ class TestPerCallSession:
             assert run(ws.vfs.exists("/data/secret.txt")) is True
         finally:
             run(ws.close())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_a_stream_flag_held_in_a_bool_picks_the_answer(stream: bool):
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/r/a.txt", b"hi")
+        got = await ws.vfs.read("/r/a.txt", stream=stream)
+        assert isinstance(got, bytes) is not stream
+        assert await materialize(got) == b"hi"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

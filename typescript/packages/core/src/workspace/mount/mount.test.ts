@@ -19,7 +19,12 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { recordStream, revisionFor } from '../../observe/context.ts'
+import {
+  commandRecords,
+  recordStream,
+  revisionFor,
+  runWithRecording,
+} from '../../observe/context.ts'
 import { readVersioned } from '../../cache/context.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
@@ -73,6 +78,29 @@ describe('Mount constructor validation', () => {
     }
     expect(() => new MountEntry({ prefix: '/ram/', vfs: new MisnamedRenderer() })).toThrow(
       "'renderDoc', which is not a method",
+    )
+  })
+
+  // A method folded into read, write or append would never be called, so a
+  // VFS that still has one, on its prototype or as a field, is refused as it
+  // is mounted.
+  it.each(['readStream', 'writeStream', 'appendStream'])(
+    'rejects a VFS that defines %s',
+    (name) => {
+      class Old extends StubVFS {}
+      Object.defineProperty(Old.prototype, name, { value: () => undefined })
+      expect(() => new MountEntry({ prefix: '/ram/', vfs: new Old() })).toThrow(
+        `Old.${name}: define `,
+      )
+    },
+  )
+
+  it('rejects a VFS that sets a folded method as a field', () => {
+    class Fielded extends StubVFS {
+      writeStream = (): Promise<void> => Promise.resolve()
+    }
+    expect(() => new MountEntry({ prefix: '/ram/', vfs: new Fielded() })).toThrow(
+      'Fielded.writeStream: define write',
     )
   })
 })
@@ -903,6 +931,25 @@ it('a collected stream hands its version to the bytes', async () => {
       mount.call('read', '/m/f'),
     )
     expect([new TextDecoder().decode(data as Uint8Array), version]).toEqual(['old', 'v1'])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A rewrite's write proves the copy it extends by the read before it, so a
+// read collected from a stream leaves its record in the block around it.
+it('a collected read stays in the records around it', async () => {
+  const vfs = new VersionedStream()
+  vfs.store.files.set('/f', new TextEncoder().encode('old'))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    const [mine] = await runWithRecording(() =>
+      commandRecords(async (records) => {
+        await ws.mount('/m').call('read', '/m/f')
+        return records
+      }),
+    )
+    expect(mine.map((r) => [r.op, r.fingerprint])).toContainEqual(['read', 'v1'])
   } finally {
     await ws.close()
   }

@@ -27,7 +27,11 @@ from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.observe.context import record_stream
+from mirage.observe.context import (
+    RecordingScope,
+    command_records,
+    record_stream,
+)
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -76,6 +80,31 @@ class MisnamedRenderer(RAMVFS):
 def test_mount_rejects_a_renderer_that_names_no_method():
     with pytest.raises(TypeError, match="'render_doc', which is not a method"):
         MountEntry("/data/", MisnamedRenderer())
+
+
+class _Stale:
+    async def write_stream(self, path, data):
+        return None
+
+
+class _Mixed(_Stale, RAMVFS):
+    pass
+
+
+# A method folded into read, write or append would never be called, so a
+# VFS that still has one, its own or a mixin's, is refused as it is mounted.
+@pytest.mark.parametrize(
+    "name", ["read_stream", "write_stream", "append_stream"]
+)
+def test_mount_rejects_a_folded_method(name):
+    old = type("Old", (RAMVFS,), {name: lambda self, path: None})
+    with pytest.raises(TypeError, match=f"Old.{name}: define "):
+        MountEntry("/data/", old())
+
+
+def test_mount_rejects_a_folded_method_from_a_mixin():
+    with pytest.raises(TypeError, match="_Mixed.write_stream: define write"):
+        MountEntry("/data/", _Mixed())
 
 
 # ── read-only enforcement ──────────────────────
@@ -636,4 +665,21 @@ async def test_a_collected_stream_hands_its_version_to_the_bytes():
         )
         assert (data, version) == (b"old", "v1")
     finally:
+        await ws.close()
+
+
+# A rewrite's write proves the copy it extends by the read before it, so a
+# read collected from a stream leaves its record in the block around it.
+@pytest.mark.asyncio
+async def test_a_collected_read_stays_in_the_records_around_it():
+    vfs = _VersionedStream()
+    vfs._store.files["/f"] = b"old"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    scope = RecordingScope()
+    try:
+        with command_records() as mine:
+            await ws.mount("/m").call("read", "/m/f")
+        assert ("read", "v1") in [(r.op, r.fingerprint) for r in mine]
+    finally:
+        scope.close()
         await ws.close()

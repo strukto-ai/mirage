@@ -121,7 +121,7 @@ from mirage.utils.path import norm
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared, declared_calls
-from mirage.vfs.constants import WRITE_EFFECTS
+from mirage.vfs.constants import FOLDED_METHODS, WRITE_EFFECTS
 from mirage.vfs.types import Effect
 from mirage.view.types import StatPath
 from mirage.workspace.dispatcher.constants import CALLS
@@ -394,7 +394,9 @@ async def _collected(
 
     A whole read's stream publishes the version it recorded for the bytes
     collected from it, as a whole read answering bytes publishes its own,
-    so a read-modify-write still sends the version it read.
+    so a read-modify-write still sends the version it read. Its record
+    stays in the records of the block around it, so the write a rewrite
+    makes still sees the read that proves the copy it extends.
 
     Args:
         answer (Awaitable[ByteSource] | AsyncIterator[bytes]): what
@@ -409,8 +411,14 @@ async def _collected(
         return await materialize(found)
     scope = RecordingScope(active=active_recorder() is None)
     try:
-        with command_records() as records:
+        held = current_caller().command_sink
+        if held is None:
+            with command_records() as records:
+                data = await materialize(found)
+        else:
+            start = len(held[1])
             data = await materialize(found)
+            records = held[1][start:]
     finally:
         scope.close()
     publish_read(path.virtual, data, latest_fingerprint(records, path.virtual))
@@ -506,6 +514,12 @@ class MountEntry:
                 raise TypeError(
                     f"{type(vfs).__name__}.renderers maps {filetype!r} to "
                     f"{renderer!r}, which is not a method"
+                )
+        for name, into in FOLDED_METHODS.items():
+            if hasattr(vfs, name):
+                raise TypeError(
+                    f"{type(vfs).__name__}.{name}: define {into} instead, "
+                    "which answers or takes bytes or a stream"
                 )
         self.visible: Callable[[str | None], bool] | None = None
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()

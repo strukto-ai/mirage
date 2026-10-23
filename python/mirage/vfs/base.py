@@ -32,7 +32,7 @@ from mirage.types import (
     SearchQuery,
 )
 from mirage.vfs.call import vfs_call
-from mirage.vfs.constants import FOLDED_METHODS, FULL_SCAN_LIMIT
+from mirage.vfs.constants import FULL_SCAN_LIMIT
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
@@ -181,21 +181,6 @@ class BaseVFS:
     renderers: Mapping[str, str] = MappingProxyType({})
 
     _closed: bool = False
-
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Refuse a method folded into ``read``, ``write`` or ``append``,
-        which nothing would call.
-
-        Args:
-            **kwargs (Any): the class keywords, passed on.
-        """
-        super().__init_subclass__(**kwargs)
-        for name, into in FOLDED_METHODS.items():
-            if name in vars(cls):
-                raise TypeError(
-                    f"{cls.__name__}.{name}: define {into} instead, which "
-                    "answers or takes bytes or a stream"
-                )
 
     def __init__(
         self,
