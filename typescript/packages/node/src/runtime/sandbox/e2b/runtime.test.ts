@@ -403,9 +403,13 @@ describe('E2B cancellation and validation', () => {
     expect(sandbox.commands.calls).toHaveLength(1)
   })
 
-  // A kill that names a gentler signal leaves the command to the reap,
-  // which sends it that signal first.
-  it('leaves the command to the reap when a kill names TERM', async () => {
+  // A kill that names a gentler signal leaves a run's tagged command to the
+  // reap, which sends it that signal first; an untagged one (mount setup, a
+  // direct exec) has no reap behind it and is killed.
+  it.each([
+    [{ [EXEC_ID]: 'run' }, false],
+    [{}, true],
+  ])('leaves only a tagged command to the reap on TERM: %j', async (env, killed) => {
     const runtime = makeRuntime()
     await runtime.connect()
     const abort = new AbortController()
@@ -416,17 +420,14 @@ describe('E2B cancellation and validation', () => {
       cancel: () => {
         abort.abort()
       },
-      run: async () => (await runtime.execLine('sleep', null, {}, '/', abort.signal)).exitCode,
+      run: async () => (await runtime.execLine('sleep', null, env, '/', abort.signal)).exitCode,
     })
     await vi.waitFor(() => {
       expect(FakeSandbox.last.commands.handles).toHaveLength(1)
     })
     expect(runner.terminate(15)).toBe(true)
     expect((await runner.join()).exitCode).toBe(143)
-    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({
-      killed: false,
-      disconnected: true,
-    })
+    expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed, disconnected: true })
   })
 
   it('kills a handle that arrives after startup was aborted', async () => {

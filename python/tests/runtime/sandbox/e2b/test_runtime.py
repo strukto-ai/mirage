@@ -303,15 +303,21 @@ async def test_cancellation_kills_command_and_disconnects():
     assert handle.killed and handle.disconnected
 
 
-# A kill that names a gentler signal leaves the command to the reap,
-# which sends it that signal first.
+# A kill that names a gentler signal leaves a run's tagged command to the
+# reap, which sends it that signal first; an untagged one (mount setup, a
+# direct exec) has no reap behind it and is killed.
 @pytest.mark.asyncio
-async def test_a_term_kill_leaves_the_command_to_the_reap():
+@pytest.mark.parametrize("env,killed", [({EXEC_ID: "run"}, False), ({}, True)])
+async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
+    env, killed
+):
     runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
     await runtime.connect()
 
     async def run() -> int:
-        result = await runtime.exec_line("sleep", None, {}, "/workspace")
+        result = await runtime._exec_argv(
+            ("/bin/sh", "-c", "sleep"), None, env, "/workspace", None
+        )
         return result.exit_code
 
     runner = ProcessSupervisor().start(
@@ -325,7 +331,7 @@ async def test_a_term_kill_leaves_the_command_to_the_reap():
     await handle.waiting.wait()
     assert runner.terminate(15)
     await runner.join()
-    assert not handle.killed and handle.disconnected
+    assert (handle.killed, handle.disconnected) == (killed, True)
 
 
 @pytest.mark.asyncio

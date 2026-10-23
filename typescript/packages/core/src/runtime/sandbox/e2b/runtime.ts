@@ -23,7 +23,7 @@ import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.t
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { wrapLine } from '../constants.ts'
+import { EXEC_ID, wrapLine } from '../constants.ts'
 import { BROKEN_PIPE, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
@@ -196,9 +196,9 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         result = error
       } else {
         try {
-          // A kill that named a gentler signal leaves the command to the
-          // reap, which sends it that signal first.
-          if ((runner?.signal ?? 9) === 9) await handle.kill()
+          // A tagged command a kill stopped with a gentler signal is left
+          // to the reap, which sends it that signal first.
+          if (env[EXEC_ID] === undefined || (runner?.signal ?? 9) === 9) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
