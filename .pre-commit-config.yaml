@@ -170,3 +170,15 @@ repos:
         language: system
         files: ^(python/mirage/vfs/.*/prompt\.py|typescript/packages/[^/]+/src/vfs/.*/prompt\.ts|scripts/check_prompt_parity\.py|scripts/parity/prompt_exceptions\.json)$
         pass_filenames: false
+      - id: doc-tables-python
+        name: Generated doc tables (python)
+        entry: python/.venv/bin/python scripts/gen_doc_tables.py --check
+        language: system
+        files: ^(docs/python/.*\.mdx|python/mirage/(accessor|agents|core|secrets|vfs)/.*\.py|scripts/gen_doc_tables\.py)$
+        pass_filenames: false
+      - id: doc-tables-typescript
+        name: Generated doc tables (typescript)
+        entry: node --experimental-strip-types typescript/scripts/gen-doc-tables.ts --check
+        language: system
+        files: ^(docs/typescript/.*\.mdx|typescript/packages/[^/]+/(package\.json|src/.*\.ts)|typescript/scripts/(gen-doc-tables|vfs_facts)\.ts)$
+        pass_filenames: false

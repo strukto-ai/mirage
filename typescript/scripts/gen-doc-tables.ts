@@ -1,0 +1,447 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import ts from 'typescript'
+
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+
+import { type ConfigShape, configShapes, fieldDoc, moduleFile, parse } from './vfs_facts.ts'
+
+const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
+const PACKAGES = resolve(ROOT, 'typescript', 'packages')
+const DOCS = resolve(ROOT, 'docs', 'typescript')
+const SECRET_NOTE = 'Redacted in snapshots.'
+const MARKER =
+  /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+) start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
+const OPENING = /\{\/\* generated: [a-z-]+ [\w/.-]+ start \*\/\}/g
+const CODE_SPAN = /(`+)(.+?)\1/g
+const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'node', 'server'])
+
+// Which feature needs each optional peer. Every optional peer of core and
+// node must appear exactly once; the generator refuses a peer missing here
+// or a package listed here that is no longer an optional peer.
+const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; needs: string }[] = [
+  {
+    feature: 'FUSE',
+    packages: ['@zkochan/fuse-native'],
+    needs:
+      'Mounting a workspace as an OS filesystem; see the [FUSE setup](/typescript/setup/fuse).',
+  },
+  {
+    feature: 'Redis',
+    packages: ['redis'],
+    needs:
+      '`RedisVFS`, the Redis file and index cache stores, and the Redis session and history stores.',
+  },
+  { feature: 'Postgres', packages: ['pg'], needs: '`PostgresVFS`.' },
+  { feature: 'MongoDB', packages: ['mongodb'], needs: '`MongoDBVFS` and `GridFSVFS`.' },
+  { feature: 'LanceDB', packages: ['@lancedb/lancedb'], needs: '`LanceDBVFS`.' },
+  { feature: 'Qdrant', packages: ['@qdrant/js-client-rest'], needs: '`QdrantVFS`.' },
+  { feature: 'Chroma', packages: ['chromadb'], needs: '`ChromaVFS`.' },
+  {
+    feature: 'SSH',
+    packages: ['ssh2'],
+    needs: '`SSHVFS`, the SSH sandbox runtime and the SFTP mount.',
+  },
+  {
+    feature: 'Email',
+    packages: ['imapflow', 'mailparser', 'nodemailer'],
+    needs: '`EmailVFS` (IMAP read, MIME parsing) and sending mail with `himalaya` (SMTP).',
+  },
+  { feature: 'OpenDAL', packages: ['opendal'], needs: '`HfBucketsVFS` and `NextcloudVFS`.' },
+  {
+    feature: 'Python runtimes',
+    packages: ['pyodide', '@pydantic/monty'],
+    needs: 'The Pyodide and Monty runtimes behind `python3`.',
+  },
+  {
+    feature: 'JavaScript runtime',
+    packages: ['quickjs-emscripten'],
+    needs: 'The QuickJS runtime behind `js` and `node`.',
+  },
+  {
+    feature: 'Sandboxes',
+    packages: ['e2b', '@daytonaio/sdk'],
+    needs: 'The E2B and Daytona sandbox runtimes.',
+  },
+  { feature: '1Password', packages: ['@1password/sdk'], needs: 'The `1password` secret source.' },
+]
+
+type Rendered = [body: string, bare: string[]]
+type Renderers = Map<string, Map<string, () => Rendered>>
+
+function escapeProse(text: string): string {
+  return text
+    .replaceAll('|', '\\|')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('{', '&#123;')
+    .replaceAll('}', '&#125;')
+}
+
+// Prose for one Markdown table cell in MDX. Code spans keep their text,
+// since MDX shows an entity inside one literally.
+function cell(text: string): string {
+  const flat = text.split(/\s+/).filter(Boolean).join(' ')
+  let out = ''
+  let last = 0
+  for (const match of flat.matchAll(CODE_SPAN)) {
+    out += escapeProse(flat.slice(last, match.index)) + match[0].replaceAll('|', '\\|')
+    last = match.index + match[0].length
+  }
+  return out + escapeProse(flat.slice(last))
+}
+
+function configTable(shape: ConfigShape): Rendered {
+  const rows = ['| Field | Required | Default | Description |', '| --- | --- | --- | --- |']
+  const bare: string[] = []
+  for (const [name, field] of Object.entries(shape.fields)) {
+    const doc = fieldDoc(field, PACKAGES)
+    const description = doc.description?.trim() ?? ''
+    if (description === '') bare.push(name)
+    const text = doc.secret ? `${description} ${SECRET_NOTE}`.trim() : description
+    const fallback = doc.default === undefined ? '' : `\`${doc.default.replaceAll('|', '\\|')}\``
+    rows.push(`| \`${name}\` | ${field.required ? 'yes' : 'no'} | ${fallback} | ${cell(text)} |`)
+  }
+  return [rows.join('\n'), bare]
+}
+
+function sameFields(a: ConfigShape | null | undefined, b: ConfigShape | null): boolean {
+  if (a === undefined || a === null || b === null) return a === b
+  return Object.keys(a.fields).join(',') === Object.keys(b.fields).join(',')
+}
+
+// Node's schemas under their registry names. A browser schema whose field
+// set differs from node's (the presigned S3 aliases, the proxied Slack,
+// Discord and Notion) gets a key of its own, `browser/<name>`.
+function configRenderers(): Map<string, () => Rendered> {
+  const node = configShapes(resolve(PACKAGES, 'node', 'src', 'vfs', 'registry.ts'), PACKAGES)
+  const browser = configShapes(resolve(PACKAGES, 'browser', 'src', 'vfs', 'registry.ts'), PACKAGES)
+  const out = new Map<string, () => Rendered>()
+  for (const [name, shape] of Object.entries(node)) {
+    if (shape !== null) out.set(name, () => configTable(shape))
+  }
+  for (const [name, shape] of Object.entries(browser)) {
+    if (shape !== null && !sameFields(node[name], shape))
+      out.set(`browser/${name}`, () => configTable(shape))
+  }
+  return out
+}
+
+interface Manifest {
+  peerDependencies?: Record<string, string>
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>
+  exports?: Record<string, string | { import?: string }>
+}
+
+function manifest(pkg: string): Manifest {
+  return JSON.parse(readFileSync(resolve(PACKAGES, pkg, 'package.json'), 'utf8')) as Manifest
+}
+
+function peersTable(): Rendered {
+  const ranges = new Map<string, Set<string>>()
+  for (const pkg of ['core', 'node']) {
+    const meta = manifest(pkg)
+    for (const [name, flags] of Object.entries(meta.peerDependenciesMeta ?? {})) {
+      if (flags.optional !== true) continue
+      const range = meta.peerDependencies?.[name]
+      if (range === undefined) throw new Error(`${pkg}: optional peer ${name} declares no range`)
+      ranges.set(name, (ranges.get(name) ?? new Set()).add(range))
+    }
+  }
+  const mapped = PEER_FEATURES.flatMap((f) => f.packages)
+  const unmapped = [...ranges.keys()].filter((name) => !mapped.includes(name))
+  const unknown = mapped.filter((name) => !ranges.has(name))
+  if (unmapped.length > 0 || unknown.length > 0 || new Set(mapped).size !== mapped.length) {
+    throw new Error(
+      `PEER_FEATURES disagrees with peerDependenciesMeta: unmapped ${unmapped.join(', ') || '-'}; ` +
+        `not an optional peer ${unknown.join(', ') || '-'}`,
+    )
+  }
+  const rows = ['| Feature | Packages | Needed for |', '| --- | --- | --- |']
+  for (const { feature, packages, needs } of PEER_FEATURES) {
+    const listed = packages
+      .map((name) => `\`${name}@${[...(ranges.get(name) ?? [])].join(' + ')}\``)
+      .join(', ')
+    rows.push(`| ${feature} | ${listed.replaceAll('|', '\\|')} | ${needs} |`)
+  }
+  return [rows.join('\n'), []]
+}
+
+// The first paragraph of the `/** */` block right above a declaration.
+function jsdocSummary(node: ts.Node, source: ts.SourceFile): string {
+  const ranges = ts.getLeadingCommentRanges(source.text, node.getFullStart()) ?? []
+  const last = ranges.at(-1)
+  if (last === undefined) return ''
+  const raw = source.text.slice(last.pos, last.end)
+  if (!raw.startsWith('/**')) return ''
+  const lines = raw
+    .slice(3, -2)
+    .split('\n')
+    .map((line) => line.replace(/^\s*\* ?/, '').trimEnd())
+  const paragraph: string[] = []
+  for (const line of lines) {
+    if (line.startsWith('@')) break
+    if (line.trim() === '') {
+      if (paragraph.length > 0) break
+      continue
+    }
+    paragraph.push(line.trim())
+  }
+  return paragraph.join(' ')
+}
+
+function declaredName(statement: ts.Statement): string[] {
+  if (ts.isVariableStatement(statement)) {
+    return statement.declarationList.declarations
+      .map((d) => d.name)
+      .filter(ts.isIdentifier)
+      .map((n) => n.text)
+  }
+  if (
+    (ts.isFunctionDeclaration(statement) ||
+      ts.isClassDeclaration(statement) ||
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isEnumDeclaration(statement)) &&
+    statement.name !== undefined
+  ) {
+    return [statement.name.text]
+  }
+  return []
+}
+
+function isExported(statement: ts.Statement): boolean {
+  return (
+    ts.canHaveModifiers(statement) &&
+    (ts.getModifiers(statement) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+  )
+}
+
+// The names an import or a re-export binds, each with the module it names.
+function bindings(statement: ts.Statement): [string, ts.ImportSpecifier | ts.ExportSpecifier][] {
+  if (ts.isImportDeclaration(statement)) {
+    const named = statement.importClause?.namedBindings
+    if (named === undefined || !ts.isNamedImports(named)) return []
+    const specifier = (statement.moduleSpecifier as ts.StringLiteral).text
+    return named.elements.map((el) => [specifier, el])
+  }
+  if (
+    ts.isExportDeclaration(statement) &&
+    statement.moduleSpecifier !== undefined &&
+    ts.isStringLiteral(statement.moduleSpecifier) &&
+    statement.exportClause !== undefined &&
+    ts.isNamedExports(statement.exportClause)
+  ) {
+    const specifier = statement.moduleSpecifier.text
+    return statement.exportClause.elements.map((el) => [specifier, el])
+  }
+  return []
+}
+
+// The summary of the declaration `name` resolves to from `file`, through
+// re-exports and imports, without loading the module.
+function summaryOf(file: string, name: string, depth = 0): string {
+  if (depth > 8) throw new Error(`${file}: ${name} does not resolve`)
+  const source = parse(file)
+  for (const statement of source.statements) {
+    if (declaredName(statement).includes(name)) return jsdocSummary(statement, source)
+  }
+  for (const statement of source.statements) {
+    for (const [specifier, el] of bindings(statement)) {
+      if (el.name.text !== name) continue
+      const target = moduleFile(file, specifier, PACKAGES)
+      if (target === undefined) throw new Error(`${file}: ${specifier} does not resolve`)
+      return summaryOf(target, (el.propertyName ?? el.name).text, depth + 1)
+    }
+  }
+  throw new Error(`${file}: no declaration of ${name}`)
+}
+
+// Each module entry point of an adapter package, keyed `<pkg>` for its
+// `.` export and `<pkg>/<subpath>` for the others, mapped to its source.
+function entriesOf(pkg: string): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const [subpath, entry] of Object.entries(manifest(pkg).exports ?? {})) {
+    const target = typeof entry === 'string' ? entry : entry.import
+    if (target === undefined || !target.endsWith('.js')) continue
+    const file = resolve(
+      PACKAGES,
+      pkg,
+      target.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '.ts'),
+    )
+    if (!existsSync(file)) throw new Error(`${pkg}: ${target} has no source at ${file}`)
+    out.set(subpath === '.' ? pkg : `${pkg}/${subpath.replace(/^\.\//, '')}`, file)
+  }
+  return out
+}
+
+function exportsOf(file: string): [string, string][] {
+  const source = parse(file)
+  const out: [string, string][] = []
+  for (const statement of source.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause
+      if (clause === undefined || !ts.isNamedExports(clause))
+        throw new Error(`${file}: \`export *\` hides the public names`)
+      for (const el of clause.elements) {
+        const target =
+          statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
+            ? moduleFile(file, statement.moduleSpecifier.text, PACKAGES)
+            : file
+        if (target === undefined) throw new Error(`${file}: an export does not resolve`)
+        out.push([el.name.text, summaryOf(target, (el.propertyName ?? el.name).text)])
+      }
+    } else if (isExported(statement)) {
+      for (const name of declaredName(statement)) out.push([name, jsdocSummary(statement, source)])
+    }
+  }
+  return out
+}
+
+function exportsTable(file: string): Rendered {
+  const rows = ['| Symbol | Purpose |', '| --- | --- |']
+  const bare: string[] = []
+  for (const [name, text] of exportsOf(file)) {
+    if (text === '') bare.push(name)
+    rows.push(`| \`${name}\` | ${cell(text)} |`)
+  }
+  return [rows.join('\n'), bare]
+}
+
+function renderers(): Renderers {
+  const adapters = readdirSync(PACKAGES, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && !NOT_ADAPTERS.has(d.name))
+    .filter((d) => existsSync(resolve(PACKAGES, d.name, 'package.json')))
+    .map((d) => d.name)
+    .sort(compareCodePoints)
+  return new Map([
+    ['config-table', configRenderers()],
+    ['peers', new Map([['optional', peersTable]])],
+    [
+      'exports',
+      new Map(
+        adapters.flatMap((pkg) =>
+          [...entriesOf(pkg)].map(([key, file]): [string, () => Rendered] => [
+            key,
+            () => exportsTable(file),
+          ]),
+        ),
+      ),
+    ],
+  ])
+}
+
+function pages(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true })
+    .flatMap((d) => {
+      const path = resolve(dir, d.name)
+      if (d.isDirectory()) return pages(path)
+      return d.name.endsWith('.mdx') ? [path] : []
+    })
+    .sort(compareCodePoints)
+}
+
+function regenerate(
+  text: string,
+  page: string,
+  kinds: Renderers,
+  seen: Set<string>,
+  errors: string[],
+): string {
+  if ((text.match(OPENING) ?? []).length !== (text.match(MARKER) ?? []).length)
+    errors.push(`${page}: a generated region has no matching end marker`)
+  return text.replace(MARKER, (whole: string, kind: string, key: string) => {
+    const render = kinds.get(kind)?.get(key)
+    if (render === undefined) {
+      errors.push(`${page}: nothing generates \`${kind} ${key}\``)
+      return whole
+    }
+    seen.add(`${kind} ${key}`)
+    const [body, bare] = render()
+    if (bare.length > 0) {
+      errors.push(
+        `${page}: \`${kind} ${key}\` renders without a description for ${bare.join(', ')}; ` +
+          'describe them in the code',
+      )
+    }
+    const lines = whole.split('\n')
+    return `${lines[0] ?? ''}\n${body}\n${lines.at(-1) ?? ''}`
+  })
+}
+
+// A unified-style listing of the lines that differ, enough to see which
+// rows a stale page would gain or lose.
+function diff(before: string, after: string, page: string): string {
+  const a = before.split('\n')
+  const b = after.split('\n')
+  let head = 0
+  while (head < a.length && head < b.length && a[head] === b[head]) head++
+  let tail = 0
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  )
+    tail++
+  return [
+    `--- ${page}`,
+    `+++ ${page} (generated)`,
+    `@@ line ${String(head + 1)} @@`,
+    ...a.slice(head, a.length - tail).map((line) => `-${line}`),
+    ...b.slice(head, b.length - tail).map((line) => `+${line}`),
+  ].join('\n')
+}
+
+function main(): void {
+  const check = process.argv.includes('--check')
+  const kinds = renderers()
+  const seen = new Set<string>()
+  const errors: string[] = []
+  const stale: string[] = []
+  for (const path of pages(DOCS)) {
+    const page = relative(ROOT, path)
+    const text = readFileSync(path, 'utf8')
+    if (!text.includes('{/* generated:')) continue
+    const updated = regenerate(text, page, kinds, seen, errors)
+    if (updated === text) continue
+    stale.push(page)
+    if (check) console.log(diff(text, updated, page))
+    else writeFileSync(path, updated)
+  }
+  for (const [kind, keys] of kinds) {
+    for (const key of [...keys.keys()].sort(compareCodePoints)) {
+      if (!seen.has(`${kind} ${key}`))
+        console.log(`note: no page in docs/typescript carries \`${kind} ${key}\``)
+    }
+  }
+  if (errors.length > 0) {
+    console.error(errors.join('\n'))
+    process.exit(1)
+  }
+  if (check && stale.length > 0) {
+    console.error(
+      'Stale doc tables; run node --experimental-strip-types typescript/scripts/gen-doc-tables.ts:\n' +
+        stale.join('\n'),
+    )
+    process.exit(1)
+  }
+  console.log(`doc tables ${check ? 'checked' : 'generated'}: ${String(seen.size)} regions`)
+}
+
+main()
