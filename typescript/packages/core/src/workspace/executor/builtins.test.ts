@@ -69,7 +69,7 @@ import {
 } from './builtins/index.ts'
 import { durationSeconds, parseSignal, signalName } from './builtins/timeout/timeout.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import type { JobConsole } from '../../shell/console/index.ts';
+import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel } from '../../shell/console/index.ts'
 
 function wireMount(mount: MountEntry): void {
