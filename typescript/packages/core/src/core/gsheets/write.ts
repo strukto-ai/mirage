@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { apiRequest } from '../api/client.ts'
-import { sheetsBase, type TokenManager, googleHeaders } from '../google/client.ts'
+import { WRITE_RETRY, sheetsBase, type TokenManager, googleHeaders } from '../google/client.ts'
 
 class SheetsApiError extends Error {
   readonly status: number
@@ -51,6 +51,8 @@ export async function appendValues(
   return apiRequest('POST', url, {
     headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
     json: { values },
+    retry: WRITE_RETRY,
+    sleep: tm.sleep,
     errorOf: (response, text) => sheetsError('POST', url, response, text),
   })
 }
@@ -66,6 +68,8 @@ export async function updateValues(
   return apiRequest('PUT', url, {
     headers: { ...(await googleHeaders(tm)), 'Content-Type': 'application/json' },
     json: { values },
+    retry: WRITE_RETRY,
+    sleep: tm.sleep,
     errorOf: (response, text) => sheetsError('PUT', url, response, text),
   })
 }

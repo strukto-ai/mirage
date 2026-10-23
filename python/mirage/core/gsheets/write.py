@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.core.api.client import api_request, status_error
 from mirage.core.google.client import (
+    WRITE_RETRY,
     TokenManager,
     google_headers,
     sheets_base,
@@ -52,7 +53,9 @@ async def append_values(
         error_of=status_error,
         headers=await google_headers(token_manager),
         json_body={"values": values},
+        retry=WRITE_RETRY,
         session=token_manager.pool,
+        sleep=token_manager.sleep,
     )
     return data
 
@@ -86,6 +89,8 @@ async def update_values(
         error_of=status_error,
         headers=await google_headers(token_manager),
         json_body={"values": values},
+        retry=WRITE_RETRY,
         session=token_manager.pool,
+        sleep=token_manager.sleep,
     )
     return data

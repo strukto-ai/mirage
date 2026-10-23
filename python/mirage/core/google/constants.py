@@ -25,6 +25,18 @@ FORMS_API_BASE = "https://forms.googleapis.com/v1"
 DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3"
 TOKEN_BUFFER_SECONDS = 300
 
+# The statuses Google's API guides ask a client to back off on: 429, the
+# transient 5xx, and a 403 whose error reason says the caller is being
+# throttled. A 403 for any other reason (a permission, a daily quota that
+# will not refill in seconds) is final; the reasons are kept to the two
+# per-user and per-project throttles every API shares. A write retries only
+# the throttles, which Google answers before it applies anything.
+RETRY_STATUSES = frozenset({403, 429, 500, 502, 503, 504})
+WRITE_RETRY_STATUSES = frozenset({403, 429})
+RATE_LIMIT_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded"})
+MAX_RETRIES = 3
+MAX_BACKOFF = 32.0
+
 # The Drive-item backends (gdocs, gsheets, gslides) present the same
 # synthetic owned/shared tree; the per-backend scope tables differ only
 # in the leaf suffix.

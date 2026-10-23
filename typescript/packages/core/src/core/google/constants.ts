@@ -25,6 +25,21 @@ export const FORMS_API_BASE = 'https://forms.googleapis.com/v1'
 export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 export const TOKEN_BUFFER_SECONDS = 300
 
+// The statuses Google's API guides ask a client to back off on: 429, the
+// transient 5xx, and a 403 whose error reason says the caller is being
+// throttled. A 403 for any other reason (a permission, a daily quota that
+// will not refill in seconds) is final; the reasons are kept to the two
+// per-user and per-project throttles every API shares. A write retries only
+// the throttles, which Google answers before it applies anything.
+export const RETRY_STATUSES: ReadonlySet<number> = new Set([403, 429, 500, 502, 503, 504])
+export const WRITE_RETRY_STATUSES: ReadonlySet<number> = new Set([403, 429])
+export const RATE_LIMIT_REASONS: ReadonlySet<string> = new Set([
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+])
+export const MAX_RETRIES = 3
+export const MAX_BACKOFF = 32
+
 // The Drive-item backends (gdocs, gsheets, gslides) present the same
 // synthetic owned/shared tree; the per-backend route tables differ only in
 // the leaf suffix.

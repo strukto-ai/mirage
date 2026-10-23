@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
 from aioresponses import aioresponses
 from yarl import URL
@@ -27,13 +29,21 @@ from mirage.core.google.client import (
     drive_upload_base,
     forms_base,
     gmail_base,
+    google_delete,
     google_error_message,
+    google_get,
+    google_get_bytes,
     google_get_stream,
     google_headers,
+    google_patch,
+    google_post,
     google_resumable,
+    google_send_bytes,
+    refresh_access_token,
     sheets_base,
     slides_base,
     token_url,
+    transient,
 )
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.constants import (
@@ -43,10 +53,12 @@ from mirage.core.google.constants import (
     DRIVE_UPLOAD_BASE,
     FORMS_API_BASE,
     GMAIL_API_BASE,
+    MAX_RETRIES,
     SHEETS_API_BASE,
     SLIDES_API_BASE,
     TOKEN_URL,
 )
+from mirage.core.gsheets.write import append_values, update_values
 from mirage.io.spool import ByteSpool
 
 API_ERROR = (
@@ -57,6 +69,25 @@ TOKEN_ERROR = (
     '{"error": "invalid_grant", "error_description": '
     '"Token has been expired or revoked."}'
 )
+FILES = "https://drive.test/drive/v3/files"
+
+
+def _reason(code: int, reason: str) -> str:
+    return (
+        f'{{"error": {{"code": {code}, "message": "{reason}", '
+        f'"errors": [{{"domain": "usageLimits", "reason": "{reason}"}}]}}}}'
+    )
+
+
+def _signed_in(waits: list[float]) -> TokenManager:
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    tm = TokenManager(
+        GoogleConfig(client_id="cid", refresh_token="rt"), sleep=_record
+    )
+    tm.get_token = AsyncMock(return_value="tok")
+    return tm
 
 
 def _manager(api_base: str | None = None) -> TokenManager:
@@ -131,7 +162,7 @@ async def test_token_manager_refreshes_once_then_caches():
     with _refresh_returning("cached-token") as refresh:
         assert await mgr.get_token() == "cached-token"
         assert await mgr.get_token() == "cached-token"
-    refresh.assert_called_once_with(mgr.config)
+    refresh.assert_called_once_with(mgr.config, mgr.sleep)
 
 
 @pytest.mark.asyncio
@@ -208,4 +239,211 @@ async def test_resumable_upload_honors_acknowledged_ranges(advance):
                     await google_resumable(
                         tm, "POST", url, {}, spool, "text/plain", {}
                     )
+    await tm.pool.close()
+
+
+def test_a_403_waits_only_for_a_rate_limit_reason():
+    assert transient(403, _reason(403, "userRateLimitExceeded"))
+    assert transient(403, _reason(403, "rateLimitExceeded"))
+    assert not transient(403, _reason(403, "insufficientFilePermissions"))
+    assert not transient(403, _reason(403, "dailyLimitExceeded"))
+    assert not transient(403, "Forbidden")
+    assert not transient(403, '{"error": "denied"}')
+    assert not transient(403, '{"error": {"errors": [{"reason": ["x"]}]}}')
+    assert transient(429, "")
+    assert transient(503, "")
+
+
+async def _read(tm: TokenManager) -> object:
+    return await google_get(tm, FILES)
+
+
+async def _read_bytes(tm: TokenManager) -> object:
+    return await google_get_bytes(tm, FILES)
+
+
+async def _read_stream(tm: TokenManager) -> object:
+    return b"".join([chunk async for chunk in google_get_stream(tm, FILES)])
+
+
+async def _create(tm: TokenManager) -> object:
+    return await google_post(tm, FILES, {"name": "a"})
+
+
+async def _update(tm: TokenManager) -> object:
+    return await google_patch(tm, FILES, {"name": "a"})
+
+
+async def _upload(tm: TokenManager) -> object:
+    return await google_send_bytes(tm, "POST", FILES, b"x", "text/plain")
+
+
+async def _delete(tm: TokenManager) -> object:
+    return await google_delete(tm, FILES)
+
+
+async def _append(tm: TokenManager) -> object:
+    return await append_values(tm, "s1", "A1", "[[1]]")
+
+
+async def _overwrite(tm: TokenManager) -> object:
+    return await update_values(tm, "s1", "A1", "[[1]]")
+
+
+SHEET = "https://sheets.googleapis.com/v4/spreadsheets/s1/values/A1"
+READS = [
+    ("GET", FILES, _read),
+    ("GET", FILES, _read_bytes),
+    ("GET", FILES, _read_stream),
+]
+WRITES = [
+    ("POST", FILES, _create),
+    ("PATCH", FILES, _update),
+    ("POST", FILES, _upload),
+    ("DELETE", FILES, _delete),
+    ("POST", SHEET + ":append?valueInputOption=USER_ENTERED", _append),
+    ("PUT", SHEET + "?valueInputOption=USER_ENTERED", _overwrite),
+]
+
+
+def _answer(mock: aioresponses, method: str, url: str, **kwargs) -> None:
+    mock.add(url, method, **kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("method", "url", "call"), READS)
+async def test_a_read_retries_a_5xx_and_a_dropped_connection(
+    method, url, call
+):
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    with aioresponses() as mock:
+        _answer(mock, method, url, status=503, headers={"Retry-After": "2"})
+        _answer(mock, method, url, exception=aiohttp.ServerDisconnectedError())
+        _answer(mock, method, url, body=b"{}")
+        await call(tm)
+        assert len(mock.requests[(method, URL(url))]) == 3
+    assert waits == [2.0, 2.0]
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("method", "url", "call"), WRITES)
+async def test_a_write_retries_a_throttle_but_never_a_5xx(method, url, call):
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    with aioresponses() as mock:
+        _answer(mock, method, url, status=429, headers={"Retry-After": "0"})
+        _answer(
+            mock,
+            method,
+            url,
+            status=403,
+            body=_reason(403, "userRateLimitExceeded"),
+            headers={"Retry-After": "0"},
+        )
+        _answer(mock, method, url, status=503)
+        with pytest.raises(aiohttp.ClientResponseError) as raised:
+            await call(tm)
+        assert len(mock.requests[(method, URL(url))]) == 3
+    assert raised.value.status == 503
+    assert waits == [0.0, 0.0]
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("method", "url", "call"), WRITES)
+async def test_a_write_never_retries_a_dropped_connection(method, url, call):
+    tm = _signed_in([])
+    with aioresponses() as mock:
+        _answer(mock, method, url, exception=aiohttp.ServerDisconnectedError())
+        with pytest.raises(aiohttp.ServerDisconnectedError):
+            await call(tm)
+        assert len(mock.requests[(method, URL(url))]) == 1
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("method", "url", "call"), READS + WRITES)
+async def test_a_permission_403_is_final(method, url, call):
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    with aioresponses() as mock:
+        _answer(
+            mock,
+            method,
+            url,
+            status=403,
+            body=_reason(403, "insufficientFilePermissions"),
+        )
+        with pytest.raises(aiohttp.ClientResponseError) as raised:
+            await call(tm)
+    assert raised.value.status == 403
+    assert waits == []
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+async def test_a_persistent_5xx_surfaces_after_the_budget():
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    with aioresponses() as mock:
+        for _ in range(MAX_RETRIES + 1):
+            mock.get(FILES, status=500, body='{"error": {"message": "boom"}}')
+        with pytest.raises(aiohttp.ClientResponseError) as raised:
+            await google_get(tm, FILES)
+        assert len(mock.requests[("GET", URL(FILES))]) == MAX_RETRIES + 1
+    assert raised.value.status == 500
+    assert raised.value.message == "boom"
+    assert waits == [1.0, 2.0, 4.0]
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+async def test_a_read_timeout_is_retried():
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    with aioresponses() as mock:
+        mock.get(FILES, exception=asyncio.TimeoutError())
+        mock.get(FILES, payload={"files": []})
+        assert await google_get(tm, FILES) == {"files": []}
+    assert waits == [1.0]
+    await tm.pool.close()
+
+
+@pytest.mark.asyncio
+async def test_the_token_exchange_retries_a_5xx():
+    waits: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        waits.append(seconds)
+
+    config = GoogleConfig(client_id="cid", refresh_token="rt")
+    with aioresponses() as mock:
+        mock.post(TOKEN_URL, status=503, headers={"Retry-After": "3"})
+        mock.post(TOKEN_URL, payload={"access_token": "t", "expires_in": 60})
+        assert await refresh_access_token(config, _record) == ("t", 60)
+    assert waits == [3.0]
+
+
+@pytest.mark.asyncio
+async def test_a_resumable_upload_retries_its_start_but_not_a_chunk():
+    waits: list[float] = []
+    tm = _signed_in(waits)
+    url, upload = "https://example.test/start", "https://example.test/upload"
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abc")
+        with aioresponses() as mock:
+            start = url + "?uploadType=resumable"
+            mock.post(start, status=503, headers={"Retry-After": "1"})
+            mock.post(start, headers={"Location": upload})
+            mock.put(upload, status=503)
+            with pytest.raises(aiohttp.ClientResponseError) as raised:
+                await google_resumable(
+                    tm, "POST", url, {}, spool, "text/plain", {}
+                )
+            assert len(mock.requests[("POST", URL(start))]) == 2
+            assert len(mock.requests[("PUT", URL(upload))]) == 1
+    assert raised.value.status == 503
+    assert waits == [1.0]
     await tm.pool.close()
