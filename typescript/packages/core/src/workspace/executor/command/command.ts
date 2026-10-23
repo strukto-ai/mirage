@@ -348,6 +348,7 @@ export async function handleCommand(
           ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, cliSignal) } : {}),
           ...(cliSignal !== undefined ? { signal: cliSignal } : {}),
           commandLimits: registry.commandLimits,
+          ids: registry.ids,
           entries: registry.runtimeEntries,
           vfs: commandFiles(null),
           session: sessionView(session, registry.policies, context.frame.diagnostics),
@@ -421,6 +422,7 @@ export async function handleCommand(
         ...(executeFn !== undefined ? { shell: nestedShell(executeFn, session, treeSignal) } : {}),
         ...(treeSignal !== undefined ? { signal: treeSignal } : {}),
         commandLimits: registry.commandLimits,
+        ids: registry.ids,
         vfs: files,
         session: sessionView(session, registry.policies, context.frame.diagnostics),
         ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
@@ -711,6 +713,7 @@ export async function handleCommand(
       makeCheckUnlink(registry, sessionAccess(session)),
       follow,
       registry.diff,
+      registry.ids,
       mergeSignals(signal, context.frame.abortSignal),
     )
     const csExec = new ExecutionNode({

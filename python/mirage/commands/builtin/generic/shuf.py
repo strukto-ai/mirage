@@ -1,4 +1,3 @@
-import random
 import re
 from collections.abc import (
     AsyncGenerator,
@@ -26,6 +25,7 @@ from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.utils.ids import IdSource, SystemIdSource, random_below, shuffle
 from mirage.utils.key_prefix import mount_key
 
 # A `-o` reached a backend wired without a write op, which is a wiring
@@ -377,18 +377,23 @@ def _need(available: int, count: int | None, with_replacement: bool) -> int:
 
 
 def _sample(
-    items: list[str], count: int | None, with_replacement: bool
+    ids: IdSource,
+    items: list[str],
+    count: int | None,
+    with_replacement: bool,
 ) -> list[str]:
     need = _need(len(items), count, with_replacement)
     if with_replacement:
-        return random.choices(items, k=need) if items else []
+        if not items:
+            return []
+        return [items[random_below(ids, len(items))] for _ in range(need)]
     out = list(items)
-    random.shuffle(out)
+    shuffle(ids, out)
     return out[:need]
 
 
 def _range_lines(
-    low: int, high: int, need: int, with_replacement: bool
+    ids: IdSource, low: int, high: int, need: int, with_replacement: bool
 ) -> list[str]:
     """Emit `need` values from the inclusive range, never enumerating it.
 
@@ -406,6 +411,7 @@ def _range_lines(
     population and taking a prefix.
 
     Args:
+        ids (IdSource): the source the values are drawn from.
         low (int): the inclusive low bound, possibly past 2**53.
         high (int): the inclusive high bound.
         need (int): how many lines to emit, already capped.
@@ -415,16 +421,17 @@ def _range_lines(
     Returns:
         list[str]: the values as decimal strings, in output order.
     """
+    size = high - low + 1
     if with_replacement:
-        return [str(random.randint(low, high)) for _ in range(need)]
-    if high - low + 1 <= MAX_OUTPUT_LINES:
+        return [str(low + random_below(ids, size)) for _ in range(need)]
+    if size <= MAX_OUTPUT_LINES:
         items = [str(value) for value in range(low, high + 1)]
-        random.shuffle(items)
+        shuffle(ids, items)
         return items[:need]
     drawn: set[int] = set()
     out: list[str] = []
     while len(out) < need:
-        value = random.randint(low, high)
+        value = low + random_below(ids, size)
         if value in drawn:
             continue
         drawn.add(value)
@@ -442,7 +449,7 @@ async def _count_records(data: ByteSpool, terminator: bytes) -> int:
 
 
 async def _shuffled(
-    data: ByteSpool, terminator: bytes, depth: int = 0
+    ids: IdSource, data: ByteSpool, terminator: bytes, depth: int = 0
 ) -> AsyncGenerator[bytes, None]:
     """Every record of ``data`` once, terminated, in uniformly random order.
 
@@ -451,6 +458,7 @@ async def _shuffled(
     a uniform permutation and never reads at random.
 
     Args:
+        ids (IdSource): the source the order is drawn from.
         data (ByteSpool): the records.
         terminator (bytes): what ends each one.
         depth (int): how many scatters deep this bucket is.
@@ -459,7 +467,7 @@ async def _shuffled(
         records = (await data.read(0, data.size)).split(terminator)
         if records[-1] == b"":
             records.pop()
-        random.shuffle(records)
+        shuffle(ids, records)
         for record in records:
             yield record + terminator
         return
@@ -470,17 +478,17 @@ async def _shuffled(
             records = (rest + chunk).split(terminator)
             rest = records.pop()
             parts = [bytearray() for _ in buckets]
-            for record, chosen in zip(
-                records, random.choices(range(len(buckets)), k=len(records))
-            ):
-                parts[chosen] += record + terminator
+            for record in records:
+                parts[random_below(ids, len(buckets))] += record + terminator
             for bucket, part in zip(buckets, parts):
                 if part:
                     await bucket.append(bytes(part))
         if rest:
-            await random.choice(buckets).append(rest + terminator)
+            await buckets[random_below(ids, len(buckets))].append(
+                rest + terminator
+            )
         for bucket in buckets:
-            async for record in _shuffled(bucket, terminator, depth + 1):
+            async for record in _shuffled(ids, bucket, terminator, depth + 1):
                 yield record
             await bucket.close()
     finally:
@@ -489,11 +497,12 @@ async def _shuffled(
 
 
 async def _drawn(
-    data: ByteSpool, terminator: bytes, available: int
+    ids: IdSource, data: ByteSpool, terminator: bytes, available: int
 ) -> AsyncGenerator[bytes, None]:
     """Records of ``data`` drawn at random with replacement, terminated.
 
     Args:
+        ids (IdSource): the source the picks are drawn from.
         data (ByteSpool): the records.
         terminator (bytes): what ends each one.
         available (int): how many records it holds.
@@ -501,14 +510,15 @@ async def _drawn(
     if data.size <= MEMORY_LIMIT:
         held = (await data.read(0, data.size)).split(terminator)
         while True:
-            yield held[random.randrange(available)] + terminator
+            yield held[random_below(ids, available)] + terminator
     async with await delimited([data.stream()], terminator) as records:
         while True:
-            record = await records.read(random.randrange(available))
+            record = await records.read(random_below(ids, available))
             yield record.removesuffix(terminator) + terminator
 
 
 async def _sample_records(
+    ids: IdSource,
     paths: list[PathSpec],
     read: PolymorphicReadFn,
     stdin: ByteSource | None,
@@ -532,9 +542,9 @@ async def _sample_records(
         await data.close()
         raise
     picks = (
-        _drawn(data, terminator, available)
+        _drawn(ids, data, terminator, available)
         if repeat
-        else _shuffled(data, terminator)
+        else _shuffled(ids, data, terminator)
     )
 
     async def output() -> AsyncIterator[bytes]:
@@ -560,7 +570,9 @@ async def shuf_generic(
     write_bytes: Callable[[PathSpec, ByteSource], Awaitable[None]]
     | None = None,
     root: str = "",
+    ids: IdSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    ids = ids if ids is not None else SystemIdSource()
     sep = "\x00" if zero_terminated else "\n"
     rendered: ByteSource
 
@@ -576,7 +588,7 @@ async def shuf_generic(
             raise ValueError(range_error(input_range, bounds))
         low, high = bounds
         need = _need(high - low + 1, count, with_replacement)
-        result = _range_lines(low, high, need, with_replacement)
+        result = _range_lines(ids, low, high, need, with_replacement)
         rendered = _render(result, sep)
     elif echo:
         # An operand -e echoes is named below the mount the command runs
@@ -586,11 +598,11 @@ async def shuf_generic(
             if paths
             else list(texts)
         )
-        result = _sample(items, count, with_replacement)
+        result = _sample(ids, items, count, with_replacement)
         rendered = _render(result, sep)
     else:
         rendered = await _sample_records(
-            paths, read_bytes, stdin, sep, count, with_replacement
+            ids, paths, read_bytes, stdin, sep, count, with_replacement
         )
     if output is not None:
         if write_bytes is None:

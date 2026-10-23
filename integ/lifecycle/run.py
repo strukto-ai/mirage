@@ -167,6 +167,27 @@ class TrackedStreamVFS(CachedRAMVFS):
 register_vfs("tracked-stream", TrackedStreamVFS)
 
 
+class RejectedUploadVFS(RAMVFS):
+    """A store whose uploads fail with its own error, no OSError, as a
+    Drive 503 or an S3 client's error on commit does."""
+
+    def __init__(self, message: str = "upload refused") -> None:
+        super().__init__()
+        self.message = message
+
+    async def write(self, path: PathSpec, data: bytes) -> None:
+        raise RuntimeError(self.message)
+
+    async def append(self, path: PathSpec, data: bytes) -> None:
+        raise RuntimeError(self.message)
+
+    async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
+        raise RuntimeError(self.message)
+
+
+register_vfs("rejected-upload", RejectedUploadVFS)
+
+
 class TrackedStreamCLI:
     """A registered CLI exercising stdin, deferred status, and producer closure."""
 

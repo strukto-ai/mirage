@@ -54,6 +54,7 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { normDir, ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type Clock, SystemClock } from '../../utils/clock.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 
 // What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -309,6 +310,7 @@ export class MountRegistry {
     placements: RegistryPlacements = {},
     readonly io: IOConfig = new IOConfig(),
     private readonly clock: Clock = new SystemClock(),
+    readonly ids: IdSource = new SystemIdSource(),
   ) {
     this.indexConfig = placements.index
     this.workspaceId = placements.workspaceId
@@ -336,6 +338,7 @@ export class MountRegistry {
           read: DEFAULT_READ_SPEC,
           write: WritePolicy.UNCONDITIONAL,
           index: new DevIndex(),
+          ids: this.ids,
         },
         list,
       ),
@@ -363,6 +366,7 @@ export class MountRegistry {
             index,
             vfsRef,
             indexConfig: placements.indexes?.[rawPrefix] ?? this.indexConfig,
+            ids: this.ids,
           },
           list,
         ),
@@ -468,6 +472,7 @@ export class MountRegistry {
         index,
         vfsRef,
         indexConfig: placement.index ?? this.indexConfig,
+        ids: this.ids,
       },
       this.mountList,
     )

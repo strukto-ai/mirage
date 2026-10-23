@@ -48,6 +48,7 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.clock import Clock, SystemClock
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.path import norm_dir, owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
@@ -104,13 +105,20 @@ class MountRegistry:
             defaults.
         clock (Clock | None): the clock every index store this registry
             builds reads time through; None means the system clock.
+        ids (IdSource | None): where the mounts this registry places
+            and the commands it runs draw generated ids and random
+            values; None means the system source.
     """
 
     def __init__(
-        self, io: IOConfig | None = None, clock: Clock | None = None
+        self,
+        io: IOConfig | None = None,
+        clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> None:
         self.io = io if io is not None else IOConfig()
         self.clock: Clock = clock if clock is not None else SystemClock()
+        self.ids: IdSource = ids if ids is not None else SystemIdSource()
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None
@@ -425,6 +433,7 @@ class MountRegistry:
             vfs_ref,
             index,
             write if write is not None else self._default_write,
+            self.ids,
         )
         if alias is not None:
             m.activity = alias.activity

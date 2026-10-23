@@ -30,6 +30,7 @@ import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ConsoleFactory, JobTable } from '../../shell/job_table/index.ts'
 import type { ShellParser } from '../../shell/parse/index.ts'
 import type { Clock } from '../../utils/clock.ts'
+import type { IdSource } from '../../utils/ids.ts'
 import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { RouteDecision, RoutePolicy } from '../../runtime/routing/index.ts'
@@ -98,6 +99,13 @@ export interface WorkspaceOptions {
    * time from; omitted means the real one. A copy keeps its origin's.
    */
   clock?: Clock
+  /**
+   * Where the workspace draws its generated ids (its own and its default
+   * session's when not given, each mount's) and the random values commands
+   * use (`mktemp`, `shuf`); omitted means the system source. A seeded source
+   * replays them. A copy keeps its origin's.
+   */
+  ids?: IdSource
   /**
    * Builds each background job's console from its job id, so job
    * output can live somewhere a reader in another process reaches

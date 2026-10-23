@@ -21,10 +21,11 @@ import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { PathSpec } from '../../../../types.ts'
 import {
   fsStrerror,
+  isAborting,
   isEnoent,
   isEnotdir,
-  isFsError,
   isMissingOp,
+  strerrorOf,
   walkRefusal,
 } from '../../../../errors/fs.ts'
 import { CycleError } from '../../../../utils/path.ts'
@@ -100,10 +101,10 @@ export async function handleTouch(
       const [refStat] = await dispatch('stat', ref)
       refTime = (refStat as FileStat).modified
     } catch (err) {
-      if (!isFsError(err)) throw err
+      if (isAborting(err)) throw err
       return fail(
         'touch',
-        `touch: failed to get attributes of '${ref.rawPath}': ${String(fsStrerror(err))}\n`,
+        `touch: failed to get attributes of '${ref.rawPath}': ${strerrorOf(err)}\n`,
       )
     }
   }
@@ -150,7 +151,7 @@ export async function handleTouch(
       )
       continue
     }
-    if (namespace.isMountRoot(target.virtual)) {
+    if (links.isMount(target.virtual)) {
       errors.push(`touch: cannot touch '${target.rawPath}': Is a directory\n`)
       continue
     }
@@ -159,10 +160,16 @@ export async function handleTouch(
     // words that refusal ("setting times of") differently from its
     // create-path one ("cannot touch").
     const slashed = target.rawPath.endsWith('/')
-    const unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => links.follow(v))
+    let unwalked: unknown
+    try {
+      unwalked = await dotRefusal(dispatchStat(dispatch), target, (v) => links.follow(v))
+    } catch (err) {
+      if (isAborting(err)) throw err
+      unwalked = err
+    }
     if (unwalked !== null) {
       const action = slashed ? 'setting times of' : 'cannot touch'
-      errors.push(`touch: ${action} '${target.rawPath}': ${String(fsStrerror(unwalked))}\n`)
+      errors.push(`touch: ${action} '${target.rawPath}': ${strerrorOf(unwalked)}\n`)
       continue
     }
     let virtual: string
@@ -181,8 +188,8 @@ export async function handleTouch(
       try {
         await dispatch('stat', resolved)
       } catch (err) {
-        if (!isFsError(err)) throw err
-        errors.push(`touch: setting times of '${target.rawPath}': ${String(fsStrerror(err))}\n`)
+        if (isAborting(err)) throw err
+        errors.push(`touch: setting times of '${target.rawPath}': ${strerrorOf(err)}\n`)
         continue
       }
     }
@@ -233,9 +240,10 @@ export async function handleTouch(
       // the rest. Caught here rather than around the write because backends
       // disagree about which call refuses first (an object store answers
       // stat with ENOENT and fails the write; a filesystem or a keyed store
-      // answers stat itself with ENOTDIR).
-      if (!isFsError(err)) throw err
-      errors.push(`touch: cannot touch '${target.rawPath}': ${String(fsStrerror(err))}\n`)
+      // answers stat itself with ENOTDIR). A store's own error (an upload's
+      // HTTP status) is one failed operand too, worded by its message.
+      if (isAborting(err)) throw err
+      errors.push(`touch: cannot touch '${target.rawPath}': ${strerrorOf(err)}\n`)
     }
   }
   return finish('touch', errors, new IOResult())

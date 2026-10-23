@@ -14,7 +14,7 @@
 
 import json
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
@@ -51,6 +51,7 @@ from mirage.runtime.types import ScriptSource, ShellFn
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.executor.command.flags import option_error, parse_flags
@@ -268,6 +269,8 @@ class CLIContext:
         settle (Callable | None): lands what a script leaf's runtime
             holds and drops the caches its program may have gone past;
             None outside a workspace.
+        ids (IdSource): the workspace's source, which the leaf's
+            ``ctx.ids`` draws from.
     """
 
     shell: ShellFn | None = None
@@ -278,6 +281,7 @@ class CLIContext:
     processes: ProcessView | None = None
     routing: RouteDecision[Runtime[Any]] | None = None
     settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
+    ids: IdSource = field(default_factory=SystemIdSource)
 
 
 def reaches_service(spec: CLI) -> bool:
@@ -792,6 +796,7 @@ async def run_walked(
         session=context.session,
         processes=context.processes,
         shell=shell if context.shell is not None else None,
+        ids=context.ids,
     )
     try:
         out = await run(ctx)

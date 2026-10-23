@@ -413,6 +413,7 @@ async def handle_command(
                     else None
                 ),
                 command_limits=registry.command_limits,
+                ids=registry.ids,
                 entries=registry.runtime_entries,
                 vfs=files,
                 session=session_view(
@@ -475,6 +476,7 @@ async def handle_command(
                     else None
                 ),
                 command_limits=registry.command_limits,
+                ids=registry.ids,
                 vfs=files,
                 session=session_view(
                     session,
@@ -801,6 +803,7 @@ async def handle_command(
             ),
             check_unlink=make_check_unlink(registry),
             diff=registry.diff,
+            ids=registry.ids,
             follow=follow,
         )
         if find_expr_tokens is not None:

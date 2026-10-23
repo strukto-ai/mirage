@@ -32,6 +32,7 @@ import {
   exdev,
   fsError,
   fsStrerror,
+  isAborting,
   isDotWalkError,
   isFsError,
   isMissingPath,
@@ -43,7 +44,8 @@ import {
 } from './fs.ts'
 import { posixPhrase } from './posix.ts'
 import { fsErrorLine } from './render.ts'
-import type { FsCondition } from './types.ts'
+import { CommandTimeoutError, type FsCondition } from './types.ts'
+import { makeAbortError } from '../utils/abort.ts'
 import { PathSpec } from '../types.ts'
 
 describe('the constructors', () => {
@@ -245,5 +247,14 @@ describe('walkRefusal', () => {
     expect(isFsError(err)).toBe(true)
     expect(err.virtualPath).toBe(raw)
     expect(fsErrorLine(cmd, spec, err)).toBe(line)
+  })
+})
+
+describe('isAborting', () => {
+  it('takes an abort or a timeout and nothing else', () => {
+    expect(isAborting(new CommandTimeoutError('write', 1))).toBe(true)
+    expect(isAborting(makeAbortError())).toBe(true)
+    expect(isAborting(new Error('upload refused: 503'))).toBe(false)
+    expect(isAborting(enoent('/f'))).toBe(false)
   })
 })

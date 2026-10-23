@@ -74,7 +74,7 @@ import {
 import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import { runWithMountContext, runWithRevisions, withMountContext } from '../../observe/context.ts'
-import { uuid7 } from '../../utils/ids.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { Activity } from '../../utils/activity.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { Accessor } from '../../accessor/base.ts'
@@ -267,6 +267,8 @@ export interface MountInit {
   // The `vfs:` value the driver was built from, recorded for snapshots;
   // null for one constructed in code.
   vfsRef?: string | null
+  /** Where the mount's id is drawn; omitted means the system source. */
+  ids?: IdSource
 }
 
 // What the walk guard proves an operand's `.` and `..` with: the
@@ -332,7 +334,7 @@ function namedSpec(cmd: Command, cmdName: string): CommandSpec {
 
 export class MountEntry {
   visible: ((sessionId: string | null) => boolean) | null = null
-  readonly mountId = uuid7()
+  readonly mountId: string
   readonly prefix: string
   readonly vfs: BaseVFS
   // The functions the VFS answers itself, read once when it is mounted: each
@@ -395,6 +397,7 @@ export class MountEntry {
         )
       }
     }
+    this.mountId = (init.ids ?? new SystemIdSource()).uuid7()
     this.prefix = prefix
     this.vfs = init.vfs
     const vfs = init.vfs

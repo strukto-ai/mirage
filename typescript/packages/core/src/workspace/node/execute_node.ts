@@ -19,6 +19,7 @@ import { type EvaluationContext, childContext } from '../evaluation.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
+import { newExecutionId } from '../../execution/context.ts'
 import { timingReport } from './timing.ts'
 import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
@@ -906,7 +907,8 @@ export async function executeNode(
       executeNode(deps, node, context, stdin, callStack, ownDiagnostics),
     )
   }
-  const executionScope = deps.executionScope ?? new ExecutionScope()
+  const executionScope =
+    deps.executionScope ?? new ExecutionScope(undefined, newExecutionId(deps.registry.ids))
   await executionScope.checkpoint(deps.signal ?? context.frame.abortSignal ?? undefined)
   // The node's own `<(...)` files go when it ends, so a command still
   // reading one is read out first.

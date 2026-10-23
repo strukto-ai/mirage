@@ -32,6 +32,7 @@ from mirage.context import (
     set_redirect_paths,
 )
 from mirage.context.session_context import redirect_syntax_for
+from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
@@ -1000,7 +1001,9 @@ async def execute_node(
     own_diagnostics: bool = True,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
-    execution_scope = execution_scope or ExecutionScope()
+    execution_scope = execution_scope or ExecutionScope(
+        execution_id=new_execution_id(registry.ids)
+    )
     # The node is the whole of a child shell (a background job), which
     # runs its EXIT action when the node ends, its evaluator bound the
     # way `_execute_node` binds it for the node's own lines.

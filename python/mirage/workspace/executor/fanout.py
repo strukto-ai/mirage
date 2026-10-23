@@ -106,6 +106,7 @@ async def _own_part(
             options.get("stdin"),
             follow=follow,
             diff=registry.diff,
+            ids=registry.ids,
         )
     return await run_single(cmd_name, paths, texts, flag_kwargs, **options)
 
@@ -220,6 +221,7 @@ async def _fan_out_traversal(
                 vfs=vfs,
                 session_view=session_view,
                 diff=registry.diff,
+                ids=registry.ids,
                 cwd=cwd,
                 follow=follow,
             )

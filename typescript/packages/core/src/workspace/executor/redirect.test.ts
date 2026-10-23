@@ -30,6 +30,7 @@ import { ExecutionNode } from '../types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, handleRedirect } from './redirect.ts'
@@ -619,23 +620,25 @@ describe('handleRedirect missing < source', () => {
     }
   })
 
-  it('rethrows a non-filesystem read error', async () => {
+  it("fails on a store's own read error, in its words", async () => {
     const dispatch = vi.fn(() =>
       Promise.reject(new Error('backend exploded')),
     ) as unknown as DispatchFn
     const executeNode = vi.fn() as unknown as ExecuteNodeFn
     const redirects = [new Redirect({ fd: 0, target: '/data/missing', kind: RedirectKind.STDIN })]
-    await expect(
-      handleRedirect(
-        executeNode,
-        dispatch,
-        STUB_NODE,
-        redirects,
-        new EvaluationContext(new SessionState({ sessionId: 'test' })),
-        null,
-        null,
-      ),
-    ).rejects.toThrow('backend exploded')
+    const [, io] = await handleRedirect(
+      executeNode,
+      dispatch,
+      STUB_NODE,
+      redirects,
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+      null,
+      null,
+    )
+    expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
+      1,
+      '/data/missing: backend exploded\n',
+    ])
     expect(executeNode).not.toHaveBeenCalled()
   })
 })
@@ -782,7 +785,7 @@ describe('handleRedirect unwritable > target', () => {
     }
   })
 
-  it('rethrows a non-filesystem append error', async () => {
+  it("fails on a store's own append error, in its words", async () => {
     const dispatch = vi.fn<DispatchFn>((op) => {
       if (op === 'append') return Promise.reject(new Error('backend exploded'))
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
@@ -792,18 +795,20 @@ describe('handleRedirect unwritable > target', () => {
     const redirects = [
       new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT, append: true }),
     ]
-    await expect(
-      handleRedirect(
-        execute,
-        dispatch,
-        STUB_NODE,
-        redirects,
-        new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      ),
-    ).rejects.toThrow('backend exploded')
+    const [, io] = await handleRedirect(
+      execute,
+      dispatch,
+      STUB_NODE,
+      redirects,
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    )
+    expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
+      1,
+      '/ram/out.txt: backend exploded\n',
+    ])
   })
 
-  it('rethrows a non-filesystem write error', async () => {
+  it("fails on a store's own write error, in its words", async () => {
     const dispatch = vi.fn<DispatchFn>((op) => {
       if (op === 'write') return Promise.reject(new Error('backend exploded'))
       return Promise.resolve<[unknown, IOResult]>([null, new IOResult()])
@@ -811,15 +816,17 @@ describe('handleRedirect unwritable > target', () => {
     const execute: ExecuteNodeFn = () =>
       Promise.resolve([encode('hi'), new IOResult(), new ExecutionNode()])
     const redirects = [new Redirect({ fd: 1, target: '/ram/out.txt', kind: RedirectKind.STDOUT })]
-    await expect(
-      handleRedirect(
-        execute,
-        dispatch,
-        STUB_NODE,
-        redirects,
-        new EvaluationContext(new SessionState({ sessionId: 'test' })),
-      ),
-    ).rejects.toThrow('backend exploded')
+    const [, io] = await handleRedirect(
+      execute,
+      dispatch,
+      STUB_NODE,
+      redirects,
+      new EvaluationContext(new SessionState({ sessionId: 'test' })),
+    )
+    expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([
+      1,
+      '/ram/out.txt: backend exploded\n',
+    ])
   })
 })
 
@@ -1141,6 +1148,143 @@ it('fails only the redirect when a file read fails midway', async () => {
   } finally {
     await ws.close()
   }
+})
+
+/**
+ * A store whose uploads fail with its own error, no fs code: a Drive 503 or
+ * an S3 client's error on commit.
+ */
+class RejectingVFS extends RAMVFS {
+  constructor(
+    private readonly error: Error,
+    private readonly emptyOk = false,
+    private readonly reads = false,
+    private readonly stats = false,
+  ) {
+    super()
+    this.store.files.set('/r.txt', encode('old\n'))
+  }
+  override stat(path: PathSpec): Promise<FileStat> {
+    if (this.stats) return Promise.reject(this.error)
+    return super.stat(path)
+  }
+  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    if (this.reads) throw this.error
+    return super.readStream(path)
+  }
+  override write(path: PathSpec, data: Uint8Array): Promise<void> {
+    if (this.emptyOk && data.byteLength === 0) return super.write(path, data)
+    return Promise.reject(this.error)
+  }
+  override append(path: PathSpec, data: Uint8Array): Promise<void> {
+    if (this.emptyOk && data.byteLength === 0) return super.append(path, data)
+    return Promise.reject(this.error)
+  }
+  override pwrite(): Promise<void> {
+    return Promise.reject(this.error)
+  }
+}
+
+async function rejecting(vfs: RejectingVFS): Promise<Workspace> {
+  const src = new RAMVFS()
+  src.store.files.set('/s', encode('src\n'))
+  return new Workspace(
+    { '/data': vfs, '/src': src },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+}
+
+describe('a redirect the store refuses', () => {
+  // bash 5.2 in debian:stable-slim: a target it cannot open fails the
+  // command that owns it with status 1, before any later `2>` of that
+  // command applies, and the list goes on.
+  const refused = '/data/r.txt: upload refused: 503\n'
+  it.each([
+    ['echo once > /data/r.txt 2>/dev/null; echo "s=$?"', 's=1\n', refused],
+    ['echo once 2>/dev/null > /data/r.txt; echo "s=$?"', 's=1\n', ''],
+    ['echo once > /data/r.txt; echo "s=$?"', 's=1\n', refused],
+    ['cat /src/s > /data/r.txt; echo "s=$?"', 's=1\n', refused],
+    ['echo once >> /data/r.txt || echo ran', 'ran\n', refused],
+    ['exec 3> /data/r.txt; echo "s=$?"', 's=1\n', refused],
+  ])('fails only its command: %s', async (line, stdout, stderr) => {
+    const ws = await rejecting(new RejectingVFS(new Error('upload refused: 503')))
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, stdout, stderr])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each(['cat /src/s > /data/r.txt', 'cat /src/s >> /data/r.txt'])(
+    'fails only its command past the open: %s',
+    async (line) => {
+      const ws = await rejecting(new RejectingVFS(new Error('upload refused: 503'), true))
+      try {
+        const io = await ws.shell(`${line}; echo "s=$?"`)
+        expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', refused])
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each(['<', '<>'])('fails only its command on a refused read: %s', async (op) => {
+    const ws = await rejecting(new RejectingVFS(new Error('download refused: 503'), false, true))
+    try {
+      const io = await ws.shell(`cat ${op} /data/r.txt; echo "s=$?"`)
+      expect([io.stdoutText, io.stderrText]).toEqual([
+        's=1\n',
+        '/data/r.txt: download refused: 503\n',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('fails only its command when the noclobber probe is refused', async () => {
+    // bash 5.2: `set -C; echo x > f` refuses an existing f on the command
+    // alone, with status 1, and the list goes on.
+    const ws = await rejecting(new RejectingVFS(new Error('stat refused: 503'), false, false, true))
+    try {
+      const io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
+      expect([io.stdoutText, io.stderrText]).toEqual(['s=1\n', '/data/r.txt: stat refused: 503\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('goes on when exec cannot write its own diagnostic', async () => {
+    // bash 5.2 writes the diagnostic of `exec 2>e 3>bad` into e, then goes
+    // on with the line; a store refusing that write loses only it.
+    const ws = new Workspace(
+      {
+        '/data': new RejectingVFS(new Error('upload refused: 503'), true),
+        '/bad': new RejectingVFS(new Error('upload refused: 503')),
+      },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      const io = await ws.shell('exec 2>/data/e 3>/bad/r.txt; echo after')
+      expect([io.exitCode, io.stdoutText]).toEqual([0, 'after\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    'echo once > /data/r.txt; echo after',
+    'echo once > /data/r.txt 2>/dev/null; echo after',
+    'exec 3> /data/r.txt; echo after',
+  ])('still ends the line on a timeout: %s', async (line) => {
+    const ws = await rejecting(new RejectingVFS(new CommandTimeoutError('write', 1)))
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, io.stdoutText]).toEqual([124, ''])
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 const refuseDispatch: DispatchFn = () => Promise.reject(new Error('unexpected dispatch'))

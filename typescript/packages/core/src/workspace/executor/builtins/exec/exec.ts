@@ -30,7 +30,7 @@ import {
 import { Channel } from '../../../../shell/console/index.ts'
 import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
 import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
-import { fsStrerror, isFsError, isMissingPath } from '../../../../errors/fs.ts'
+import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
 import { PathSpec } from '../../../../types.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
@@ -116,8 +116,7 @@ export async function handleExecCommand(
 
 /** bash's line for a redirect target it could not open. */
 function errorLine(label: string, err: unknown): Uint8Array {
-  const strerror = isFsError(err) ? (fsStrerror(err) ?? '') : ''
-  return encodeText(strerror !== '' ? `${label}: ${strerror}\n` : `${label}\n`)
+  return encodeText(`${label}: ${strerrorOf(err)}\n`)
 }
 
 /** The shell-attributed refusal of an `exec` redirect line; the line is
@@ -423,7 +422,7 @@ async function installDescriptor(
         bind(session, claimed, target.virtual, redirect.append, null, file)
     }
   } catch (error) {
-    if (!isFsError(error)) throw error
+    if (error instanceof PipeClosed || isAborting(error)) throw error
     return errorLine(scope.rawPath, error)
   }
   return null
@@ -560,7 +559,9 @@ async function append(dispatch: DispatchFn, target: string, data: ByteSource): P
   try {
     await dispatch('append', scope, [data])
   } catch (err) {
-    if (!isFsError(err)) throw err
+    if (err instanceof PipeClosed || isAborting(err)) throw err
+    // Host diagnostics stay off stdout, which carries the shell's output.
+    console.error(`exec write failed for ${target}: ${String(err)}`)
   }
 }
 
