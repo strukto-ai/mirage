@@ -47,10 +47,13 @@ const sheets = new GSheetsVFS({
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `clientId` | required | Google OAuth client ID. |
-| `clientSecret` | required | Google OAuth client secret. Redacted in snapshots. |
-| `refreshToken` | required | User's refresh token. Redacted in snapshots. |
+| `accessToken` | unset | An access token, or a function that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth. Redacted in snapshots. |
+| `clientId` | unset | Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset. |
+| `clientSecret` | unset | Google OAuth client secret. Omit it for a PKCE client. Redacted in snapshots. |
+| `refreshToken` | unset | User's refresh token. Required with `clientId` when `accessToken` is unset. Redacted in snapshots. |
 | `refreshFn` | built-in | Optional override for the access-token refresh callback. |
+| `apiBase` | Google's hosts | One host for every Google API and the OAuth token endpoint, such as a test server. |
+| `contentSearch` | `false` | Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not its JSON, and indexes a write with a delay, so a file that holds the word can be left out; the [Python docs](/python/vfs/gsheets#grep-and-rg) list the cases. |
 
 ## Mount mode
 

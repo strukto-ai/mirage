@@ -18,6 +18,18 @@ uv add "mirage-ai[redis]"  # Redis
 
 See [Python installation](/python/install) for the available extras.
 
+If `python3` reports that the monty runtime requires the `monty` extra, or
+`node` or `js` reports that the quickjs runtime requires the `quickjs` extra,
+install that extra:
+
+```bash
+uv add "mirage-ai[monty]"    # python3 on the default Monty runtime
+uv add "mirage-ai[quickjs]"  # node and js on the default QuickJS runtime
+```
+
+QuickJS also needs a `qjs-wasi.wasm` module; see
+[QuickJS installation](/home/setup/runtime/quickjs#installation).
+
 ## TypeScript import errors
 
 Use the package for your environment:

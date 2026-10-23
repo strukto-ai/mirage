@@ -28,6 +28,14 @@ specific to the Python SDK.
 
 ## WASI
 
+Install the extra:
+
+```bash
+pip install "mirage-ai[wasi]"
+```
+
+Without it, `WasiRuntime(...)` raises `ImportError`.
+
 - A read-only mount, or a session narrowed to read, refuses a write at
   `open()` with `OSError`: errno 30 on the host and Monty, or preview1 errno 69 under WASI.
 - The CPython build is read-only in the run. A mount at `/` coexists with it:

@@ -22,6 +22,15 @@ uv add mirage-ai
 
 This installs both the `mirage` library and the `mirage` CLI binary.
 Each agent framework adapter is an extra, such as `uv add 'mirage-ai[openai]'`.
+The default runtimes that run `python3`, `node` and `js` inside Mirage are
+extras too:
+
+```bash
+uv add 'mirage-ai[monty,quickjs]'
+```
+
+QuickJS also needs a `qjs-wasi.wasm` module; see
+[QuickJS installation](/home/setup/runtime/quickjs#installation).
 
 ## TypeScript
 

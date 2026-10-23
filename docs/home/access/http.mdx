@@ -129,6 +129,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `409` | The id is taken, or the workspace is busy. |
 | `413` | The request is too large. |
 | `422` | The request body is invalid. |
+| `429` | Too many requests. The TypeScript server only; see [its limits](/typescript/access/server#what-is-particular-to-this-server). |
 | `499` | The job was canceled. |
 | `500` | The job failed inside the server. |
 
@@ -342,6 +343,8 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 
 <ParamField body="command" type="string" required>The line.</ParamField>
 <ParamField body="cwd" type="string">A working directory for this line only.</ParamField>
+<ParamField body="runtime" type="string">Run the line on this [runtime](/home/setup/runtime/overview), by name, instead of the one routing picks.</ParamField>
+<ParamField body="record" type="boolean" default="true">Add the line to the session's history. `false` leaves it out.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 <ParamField query="background" type="boolean" default="false">Answer `202` with `{job_id, workspace_id, submitted_at}` at once.</ParamField>
 <ParamField query="explain" type="boolean" default="false">Answer the line's explanation; run nothing.</ParamField>
@@ -474,6 +477,31 @@ refused it. The errno picks the status:
 | `404` | `ENOENT`, `NO_XATTR` |
 | `409` | `EEXIST`, `ENOTEMPTY`, `EBUSY` |
 | `500` | Anything else, such as `EIO` |
+
+### Stream a file
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/read_stream`
+
+<ParamField body="path" type="string" required>The file.</ParamField>
+<ParamField body="raw" type="boolean" default="false">Read the stored bytes instead of a rendered form.</ParamField>
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
+
+Answers the file's bytes as `application/octet-stream`, read as the response is
+sent. The server reads the whole file into memory first when the backend has
+no streaming read, when the file is rendered, or when a `post_vfs` policy
+applies. A failure before the first byte answers like a failed VFS call.
+
+### Call a custom function
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/{name}`
+
+<ParamField body="path" type="string" required>The path the function acts on.</ParamField>
+<ParamField body="kwargs" type="object">The function's keyword arguments, Python only: a TypeScript custom function takes none, so send `path` alone. Names that start with `_`, and dispatch arguments such as `session_id`, are refused with `400`.</ParamField>
+<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
+
+Calls a function a mount's VFS declares beyond the built-in calls, such as one
+added in a [custom VFS](/python/vfs/new). It goes through the same policy
+checks, and answers its result as JSON.
 
 ### Match paths
 

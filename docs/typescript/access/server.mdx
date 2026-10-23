@@ -81,6 +81,7 @@ The protocol is the same on both servers. These are the differences in how this 
 - **No legacy `scp -O`.** Modern `scp` uses SFTP, which is served; the old SCP protocol is not.
 - **`authorized_keys` options.** `mirage-profile` and `mirage-account` are read: the first binds the key to a [profile](/home/access/ssh#auth-optional), the second opens only that [account](/home/access/http#accounts)'s workspaces. A key line carrying any other option (`from=`, `command=`, ...) is skipped with a warning, rather than accepted as if it had none.
 - **Terminal line limit.** 1024 bytes.
+- **Rate limit.** The server allows each client address 1000 requests a minute, and 60 a minute on `POST /v1/workspaces/load` and `POST /v1/workspaces/{id}/snapshot`. A request past the limit answers `429`.
 - **One event loop.** Every workspace shares Node's loop. Shell evaluation yields between steps, but a long synchronous step in a JavaScript callback or a CPU-heavy runtime holds every workspace until it returns, so run such work in a worker.
 
 ## Code map
