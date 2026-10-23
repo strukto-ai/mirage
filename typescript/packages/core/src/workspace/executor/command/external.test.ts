@@ -724,7 +724,8 @@ class ErringProbe extends ProcessProbe {
     _out: OutputFn | undefined,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    if (errors === undefined) return { stdout: new Uint8Array(), stderr: ENC.encode('whole\n'), exitCode: 0 }
+    if (errors === undefined)
+      return { stdout: new Uint8Array(), stderr: ENC.encode('whole\n'), exitCode: 0 }
     await errors(ENC.encode('streamed\n'))
     return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
   }
