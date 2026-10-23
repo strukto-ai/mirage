@@ -18,15 +18,9 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { changesBetween, changesUnder, lostAt } from '../../events/delta.ts'
-import { type TokenManager } from '../google/client.ts'
-import { currentHistoryId, listHistory } from './history.ts'
-import { type GmailLabel, listLabels } from './labels.ts'
-import {
-  extractAttachments,
-  extractHeader,
-  getMessageRaw,
-  type GmailMessageRaw,
-} from './messages.ts'
+import type { GmailApi } from './api.ts'
+import type { GmailLabel } from './labels.ts'
+import { extractAttachments, extractHeader, type GmailMessageRaw } from './messages.ts'
 import { dateFromInternal, MSG_SUFFIX, msgFilename } from './readdir.ts'
 
 /**
@@ -131,22 +125,22 @@ export class GmailDeltaHook implements DeltaHook {
   constructor(private readonly accessor: GmailAccessor) {}
 
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
-    const tm = this.accessor.tokenManager
+    const gmail = this.accessor.gmail
     const state = decode(checkpoint)
-    if (state === null) return new Delta({ changes: [], checkpoint: await baseline(tm) })
+    if (state === null) return new Delta({ changes: [], checkpoint: await baseline(gmail) })
     const [start, folders, known] = state
     const observed = new Date()
     let records: Record<string, unknown>[]
     let latest: string
     try {
-      ;[records, latest] = await listHistory(tm, start)
+      ;[records, latest] = await gmail.listHistory(start)
     } catch (err) {
       if ((err as { status?: unknown }).status !== 404) throw err
       console.debug(`gmail history ${start} is gone: ${String(err)}`)
-      return new Delta({ changes: [lostAt(root, observed)], checkpoint: await baseline(tm) })
+      return new Delta({ changes: [lostAt(root, observed)], checkpoint: await baseline(gmail) })
     }
     const prefix = mountPrefixOf(root.virtual, root.vfsPath)
-    const listed = await listLabels(tm)
+    const listed = await gmail.listLabels()
     const labels = new Map(listed.map((label) => [label.id, label]))
     const nowFolders = labelFolders(listed)
     const changes: [FileChangeKind, string][] = []
@@ -193,7 +187,7 @@ export class GmailDeltaHook implements DeltaHook {
       if (gone.includes(mid)) continue
       let raw: GmailMessageRaw
       try {
-        raw = await getMessageRaw(tm, mid)
+        raw = await gmail.getMessageRaw(mid)
       } catch (err) {
         if ((err as { status?: unknown }).status !== 404) throw err
         console.debug(`gmail message ${mid} is gone: ${String(err)}`)
@@ -230,9 +224,9 @@ export class GmailDeltaHook implements DeltaHook {
  * A checkpoint at the mailbox's present: its history id and its label folders,
  * with no message seen yet. Mirrors Python's `_baseline`.
  */
-async function baseline(tm: TokenManager): Promise<string> {
-  const history = await currentHistoryId(tm)
-  return encode(history, labelFolders(await listLabels(tm)), new Map())
+async function baseline(gmail: GmailApi): Promise<string> {
+  const history = await gmail.currentHistoryId()
+  return encode(history, labelFolders(await gmail.listLabels()), new Map())
 }
 
 function encode(

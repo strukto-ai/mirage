@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.core.google.constants import TOP_LEVEL_DIRS
 from mirage.core.google.date_glob import glob_to_modified_range
-from mirage.core.google.drive import list_all_files
 from mirage.core.google.entry import app_file
 from mirage.core.hierarchy.scope import DetectFn
 from mirage.errors.fs import enoent
@@ -68,8 +67,7 @@ def make_app_readdir(
         if match.kind != "corpus":
             raise enoent(path_spec.virtual)
 
-        files, complete = await list_all_files(
-            accessor.token_manager,
+        files, complete = await accessor.drive.list_all_files(
             mime_type=mime,
             modified_after=modified_range[0] if modified_range else None,
             modified_before=modified_range[1] if modified_range else None,

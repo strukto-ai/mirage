@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +21,8 @@ from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
+from tests.fixtures.google_api import serve
+from tests.fixtures.gsheets_api import StubSheets
 from tests.fixtures.vfs_io import call_over
 
 
@@ -53,15 +55,12 @@ async def test_read_gsheet_renders_spreadsheet_json(accessor):
         extra={"file_id": "sheet123", "resource_type": "gdrive/gsheet"},
     )
     sheet_json = json.dumps({"spreadsheetId": "sheet123"}).encode()
-    with patch(
-        "mirage.core.gdrive.read.read_spreadsheet",
-        new_callable=AsyncMock,
-        return_value=sheet_json,
-    ) as mock:
+    mock = AsyncMock(return_value=sheet_json)
+    with serve(sheets=StubSheets(read_spreadsheet=mock)):
         result = await read(
             accessor, _scope("/sheets/budget.gsheet.json"), entry=row
         )
-        mock.assert_called_once_with(accessor.token_manager, "sheet123")
+        mock.assert_called_once_with("sheet123")
         assert json.loads(result)["spreadsheetId"] == "sheet123"
 
 

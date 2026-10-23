@@ -1,0 +1,227 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import base64
+import re
+from datetime import datetime
+from typing import Any
+
+from tests.fixtures.google_api import StubApi
+
+LABELS = [
+    {"id": "INBOX", "name": "INBOX", "type": "system"},
+    {"id": "TRASH", "name": "TRASH", "type": "system"},
+    {"id": "Label_1", "name": "Work", "type": "user"},
+]
+
+
+def _message(
+    mid: str,
+    labels: list[str],
+    day: str,
+    sender: str,
+    subject: str,
+    body: str,
+    attachment: str = "",
+    mime: str = "text/plain",
+    snippet: str | None = None,
+    date: str = "Mon, 5 Jan 2026 09:00:00 +0000",
+) -> dict[str, Any]:
+    at = datetime.fromisoformat(f"{day}T09:00:00+00:00")
+    parts: list[dict[str, Any]] = [
+        {
+            "mimeType": "text/plain",
+            "body": {"data": base64.urlsafe_b64encode(body.encode()).decode()},
+        }
+    ]
+    if attachment:
+        parts.append(
+            {
+                "filename": attachment,
+                "mimeType": mime,
+                "body": {"attachmentId": f"A{mid}", "size": 5},
+            }
+        )
+    return {
+        "id": mid,
+        "threadId": mid,
+        "labelIds": labels,
+        "internalDate": str(int(at.timestamp() * 1000)),
+        "snippet": body if snippet is None else snippet,
+        "payload": {
+            "mimeType": "multipart/mixed",
+            "headers": [
+                {"name": "From", "value": sender},
+                {"name": "To", "value": "me@example.com"},
+                {"name": "Subject", "value": subject},
+                {"name": "Date", "value": date},
+            ],
+            "parts": parts,
+        },
+    }
+
+
+MESSAGES = [
+    _message(
+        "a1",
+        ["INBOX"],
+        "2026-01-05",
+        "Ana Lima <ana@example.com>",
+        "Budget review",
+        "numbers for travel",
+        attachment="plan.txt",
+    ),
+    _message(
+        "b2",
+        ["INBOX", "Label_1"],
+        "2026-01-06",
+        "Bo <bo@example.com>",
+        "Lunch",
+        "deploy friday",
+    ),
+    _message(
+        "c3", ["TRASH"], "2026-01-06", "Cy <cy@example.com>", "Old", "deploy"
+    ),
+    _message(
+        "d4", ["INBOX"], "2026-01-07", "Di <di@example.com>", "Notes", "quiet"
+    ),
+    _message(
+        "e5",
+        ["INBOX"],
+        "2026-01-07",
+        "Ed <ed@example.com>",
+        "Report",
+        "see attached",
+        attachment="report",
+        mime="application/rtf",
+    ),
+    _message(
+        "f6",
+        ["INBOX"],
+        "2026-01-07",
+        "Fa <fa@example.com>",
+        "Formats",
+        "rtf beats doc",
+    ),
+    _message(
+        "g7",
+        ["INBOX"],
+        "2026-01-08",
+        "Gi <gi@example.com>",
+        "Trip",
+        "the traveler program",
+        snippet="the travel",
+    ),
+    _message(
+        "h8",
+        ["INBOX"],
+        "2026-01-08",
+        "Ha <ha@example.com>",
+        "Hike",
+        "the mountain trail",
+    ),
+    _message(
+        "i9",
+        ["INBOX"],
+        "2026-01-08",
+        "Io <io@example.com>",
+        "Ping",
+        "quiet",
+        date="Thu, 8 Jan 2026 09:00:00 -0700 (Mountain Standard Time)",
+    ),
+    _message(
+        "j10",
+        ["INBOX"],
+        "2026-01-08",
+        "Jo <jo@example.com>",
+        "Links",
+        "notes at example.com/wombat/guide",
+    ),
+]
+
+
+def _holds(text: str, word: str) -> bool:
+    pattern = rf"(?<![A-Za-z0-9]){re.escape(word)}(?![A-Za-z0-9])"
+    return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+
+def _header(message: dict[str, Any], name: str) -> str:
+    headers = message["payload"]["headers"]
+    return next((h["value"] for h in headers if h["name"] == name), "")
+
+
+class FakeGmail:
+    """The Gmail API a label walk reaches, recording each search.
+
+    A bare word matches whole words of the From, To, Cc and Subject
+    headers and the body in any case, ``filename:`` an attachment name,
+    and ``after:``/``before:`` take epoch seconds, as Gmail does.
+    """
+
+    def __init__(self) -> None:
+        self.searches: list[str] = []
+
+    async def list_labels(self):
+        return LABELS
+
+    async def list_messages(self, label_id=None, query=None, max_results=50):
+        if query is not None and not query.startswith("after:"):
+            self.searches.append(query)
+        found = [
+            {"id": m["id"], "threadId": m["threadId"]}
+            for m in MESSAGES
+            if (label_id is None or label_id in m["labelIds"])
+            and self._matches(m, query or "")
+        ]
+        return found[:max_results]
+
+    def _matches(self, message: dict[str, Any], query: str) -> bool:
+        seconds = int(message["internalDate"]) // 1000
+        for term in query.split():
+            if term.startswith("after:"):
+                if seconds <= int(term[6:]):
+                    return False
+            elif term.startswith("before:"):
+                if seconds >= int(term[7:]):
+                    return False
+            elif term.startswith("filename:"):
+                names = [
+                    p.get("filename", "") for p in message["payload"]["parts"]
+                ]
+                if not any(_holds(name, term[9:]) for name in names):
+                    return False
+            else:
+                headers = [
+                    _header(message, name)
+                    for name in ("From", "To", "Cc", "Subject")
+                ]
+                body = base64.urlsafe_b64decode(
+                    message["payload"]["parts"][0]["body"]["data"]
+                ).decode()
+                if not any(_holds(text, term) for text in [*headers, body]):
+                    return False
+        return True
+
+    async def get_message_raw(self, message_id):
+        return next(m for m in MESSAGES if m["id"] == message_id)
+
+    async def get_attachment(self, message_id, attachment_id):
+        return b"plan\n"
+
+
+class StubGmail(StubApi):
+    """A ``GmailApi`` that answers only the calls a test armed; any other
+    call fails the test."""
+
+    service = "Gmail"

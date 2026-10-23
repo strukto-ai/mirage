@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from http import HTTPStatus
 from unittest.mock import AsyncMock
 
 import pytest
@@ -24,7 +25,7 @@ from mirage.core.google.config import GoogleConfig
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
-from tests.fixtures.gdrive_api import StubDrive, install_drive
+from tests.fixtures.gdrive_api import StubDrive, drive_error, install_drive
 
 STAMP = "2026-04-01T00:00:00.000Z"
 DOC_MIME = "application/vnd.google-apps.document"
@@ -157,7 +158,9 @@ async def test_a_partial_root_does_not_make_a_child_a_permanent_hit(
 
     async def list_shared_drives():
         if phase == "initial":
-            raise RuntimeError("missing scope")
+            raise drive_error(
+                HTTPStatus.FORBIDDEN, "Insufficient scope", "drives"
+            )
         return []
 
     install_drive(

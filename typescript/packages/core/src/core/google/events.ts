@@ -18,7 +18,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { sortedJson } from '../../utils/sort.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { changesUnder, justMade, settle } from '../../events/delta.ts'
-import { listChanges, startPageToken, type DriveFile } from './drive.ts'
+import type { DriveFile } from './drive.ts'
 
 /** What a Drive change-feed checkpoint holds. */
 export interface FeedState {
@@ -73,17 +73,17 @@ export class AppDeltaHook implements DeltaHook {
   }
 
   async pull(root: PathSpec, checkpoint: string | null): Promise<Delta> {
-    const tm = this.accessor.tokenManager
+    const drive = this.accessor.drive
     const observed = new Date()
     const state = feedState(checkpoint)
     if (state === null) {
-      const token = await startPageToken(tm)
+      const token = await drive.startPageToken()
       return new Delta({
         changes: [],
         checkpoint: feedCheckpoint({ token, seen: {} }),
       })
     }
-    const [found, token] = await listChanges(tm, state.token)
+    const [found, token] = await drive.listChanges(state.token)
     const prefix = mountPrefixOf(root.virtual, root.vfsPath)
     const seen: Record<string, string> = { ...(state.seen ?? {}) }
     const changes: [FileChangeKind, string][] = []

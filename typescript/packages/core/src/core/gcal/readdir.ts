@@ -49,7 +49,6 @@ import {
 } from './day.ts'
 import { ROOT } from '../hierarchy/scope.ts'
 import { detectScope } from './scope.ts'
-import { listCalendars, listEvents } from './client.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { compactJsonBytes, compactJsonText } from '../render/json.ts'
 
@@ -85,7 +84,7 @@ export function normalize(path: PathSpec): [string, string, string] {
 export async function calendarIndex(
   accessor: GCalAccessor,
 ): Promise<Map<string, CalendarEntryRow>> {
-  const rows = await listCalendars(accessor.tokenManager, accessor.config.minAccessRole)
+  const rows = await accessor.calendar.listCalendars(accessor.config.minAccessRole)
   const out = new Map<string, CalendarEntryRow>()
   for (const row of rows) {
     const calId = row.id
@@ -296,8 +295,7 @@ export async function readdir(
       accessor.timeRange,
       size,
     )
-    const events = await listEvents(
-      accessor.tokenManager,
+    const events = await accessor.calendar.listEvents(
       calId,
       timeMin,
       timeMax,
@@ -332,13 +330,6 @@ export async function readdir(
 
   const days = scopedBucket(accessor, match.slots.bucket ?? '', tz, path.virtual)
   const [timeMin, timeMax] = dayBounds(days[0] ?? '', tz, days.length)
-  const events = await listEvents(
-    accessor.tokenManager,
-    calId,
-    timeMin,
-    timeMax,
-    tz,
-    accessor.timeRange,
-  )
+  const events = await accessor.calendar.listEvents(calId, timeMin, timeMax, tz, accessor.timeRange)
   return eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.contentSearch)
 }

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,6 +22,8 @@ from mirage.core.gsheets.constants import MIME
 from mirage.core.gsheets.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 
 FILES = [
     {
@@ -54,11 +56,8 @@ READDIR = make_app_readdir(MIME, detect_scope, _name)
 
 @pytest.mark.asyncio
 async def test_a_corpus_lists_its_owners_files_through_the_apps_namer():
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(FILES, True),
-    ) as listed:
+    listed = AsyncMock(return_value=(FILES, True))
+    with serve(drive=StubDrive(list_all_files=listed)):
         out = await READDIR(GoogleApiAccessor(None, None), _spec("/m/owned"))
     (row,) = out.entries
     assert out.partial is False
@@ -70,9 +69,8 @@ async def test_a_corpus_lists_its_owners_files_through_the_apps_namer():
 
 @pytest.mark.asyncio
 async def test_the_root_lists_the_corpora_without_a_request():
-    with patch(
-        "mirage.core.google.readdir.list_all_files", new_callable=AsyncMock
-    ) as listed:
+    listed = AsyncMock()
+    with serve(drive=StubDrive(list_all_files=listed)):
         out = await READDIR(GoogleApiAccessor(None, None), _spec("/m"))
     assert [row.name for row in out] == ["owned", "shared"]
     listed.assert_not_awaited()

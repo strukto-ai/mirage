@@ -21,20 +21,14 @@ from typing import Any
 import aiohttp
 
 from mirage.accessor.gmail import GmailAccessor
-from mirage.core.gmail.history import current_history_id, list_history
-from mirage.core.gmail.labels import list_labels
-from mirage.core.gmail.messages import (
-    _extract_attachments,
-    _extract_header,
-    get_message_raw,
-)
+from mirage.core.gmail.api import GmailApi
+from mirage.core.gmail.messages import _extract_attachments, _extract_header
 from mirage.core.gmail.readdir import (
     MSG_SUFFIX,
     _attach_dir_name,
     _date_from_internal,
     _msg_filename,
 )
-from mirage.core.google.client import TokenManager
 from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_between, changes_under, lost_at
 from mirage.types import Delta, FileChangeKind, PathSpec
@@ -182,21 +176,21 @@ class GmailDeltaHook:
             checkpoint (str | None): The previous pull's state, or None for
                 a baseline.
         """
-        tm = self._accessor.token_manager
+        gmail = self._accessor.gmail
         state = _decode(checkpoint)
         if state is None:
-            return Delta((), await _baseline(tm))
+            return Delta((), await _baseline(gmail))
         start, folders, known = state
         observed = datetime.now(timezone.utc)
         try:
-            records, latest = await list_history(tm, start)
+            records, latest = await gmail.list_history(start)
         except aiohttp.ClientResponseError as exc:
             if exc.status != HTTPStatus.NOT_FOUND:
                 raise
             logger.debug("gmail history %s is gone: %s", start, exc)
-            return Delta((lost_at(root, observed),), await _baseline(tm))
+            return Delta((lost_at(root, observed),), await _baseline(gmail))
         prefix = mount_prefix_of(root.virtual, root.vfs_path)
-        listed = await list_labels(tm)
+        listed = await gmail.list_labels()
         labels = {lb["id"]: lb for lb in listed}
         now_folders = label_folders(listed)
         changes: list[tuple[FileChangeKind, str]] = []
@@ -222,7 +216,7 @@ class GmailDeltaHook:
             if mid in gone:
                 continue
             try:
-                raw = await get_message_raw(tm, mid)
+                raw = await gmail.get_message_raw(mid)
             except aiohttp.ClientResponseError as exc:
                 if exc.status != HTTPStatus.NOT_FOUND:
                     raise
@@ -260,15 +254,15 @@ class GmailDeltaHook:
         return Delta(tuple(events), _encode(latest, now_folders, known))
 
 
-async def _baseline(tm: TokenManager) -> str:
+async def _baseline(gmail: GmailApi) -> str:
     """A checkpoint at the mailbox's present: its history id and its
     label folders, with no message seen yet.
 
     Args:
-        tm (TokenManager): The mailbox's token manager.
+        gmail (GmailApi): The mailbox.
     """
-    history = await current_history_id(tm)
-    return _encode(history, label_folders(await list_labels(tm)), {})
+    history = await gmail.current_history_id()
+    return _encode(history, label_folders(await gmail.list_labels()), {})
 
 
 def _encode(

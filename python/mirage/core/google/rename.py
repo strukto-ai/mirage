@@ -16,7 +16,6 @@ from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.core.google.drive import get_file, patch_file
 from mirage.core.google.scope import DATE_LEN, app_filename
 from mirage.core.hierarchy.scope import INVALID, DetectFn
 from mirage.errors.fs import eisdir, enoent, fs_error
@@ -79,12 +78,14 @@ def make_app_rename(
         if entry is None:
             raise enoent(src)
         doc_id = str(entry.extra["doc_id"])
-        tm = accessor.token_manager
-        modified = str((await get_file(tm, doc_id)).get("modifiedTime", ""))
+        drive = accessor.drive
+        modified = str((await drive.get_file(doc_id)).get("modifiedTime", ""))
         folder, _, name = dst.virtual.rpartition("/")
         title = app_title(name, doc_id, modified, suffix)
         if title is None or folder != src.virtual.rpartition("/")[0]:
             raise fs_error(dst, FsCondition.EPERM)
-        await patch_file(tm, doc_id, {"name": title, "modifiedTime": modified})
+        await drive.patch_file(
+            doc_id, {"name": title, "modifiedTime": modified}
+        )
 
     return rename

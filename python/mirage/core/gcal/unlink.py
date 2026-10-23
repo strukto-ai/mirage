@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import delete_event
 from mirage.core.gcal.readdir import calendar_index
 from mirage.core.gcal.scope import detect_scope
 from mirage.core.hierarchy.scope import ScopeMatch
@@ -45,9 +44,7 @@ async def _delete(
     cal_id = calendar.get("id")
     if not isinstance(cal_id, str):
         raise enoent(match.vfs_path)
-    await delete_event(
-        accessor.token_manager, cal_id, str(entry.extra["event_id"])
-    )
+    await accessor.calendar.delete_event(cal_id, str(entry.extra["event_id"]))
 
 
 unlink = make_unlink(detect_scope, deleters={"event": _delete})

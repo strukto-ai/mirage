@@ -12,35 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { FileChangeKind } from '../../types.ts'
 import type { JsonValue } from '../../types.ts'
-import type * as ClientModule from './client.ts'
 import {
   API,
   EVENTS,
   event,
   HK,
+  installCalendar,
   makeAccessor,
   PRIMARY,
   spec,
 } from '../../../tests/core/gcal/_test_util.ts'
 
-const syncs = vi.hoisted(() => ({
+/** Calendar's incremental sync, scripted by the token it is asked from. */
+const syncs = {
   answers: new Map<string | null, unknown>(),
   asked: [] as (string | null)[],
-}))
+}
 
-vi.mock('./client.ts', async () => ({
-  ...(await import('../../../tests/core/gcal/_test_util.ts')).CLIENT,
-  listed: (await vi.importActual<typeof ClientModule>('./client.ts')).listed,
-  syncEvents: (_tm: unknown, calendarId: string, token: string | null) => {
+beforeEach(() => {
+  installCalendar()
+  API.syncs = (calendarId: string, token: string | null) => {
     expect(calendarId).toBe(PRIMARY.id)
     syncs.asked.push(token)
     const answer = syncs.answers.get(token)
-    return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer)
-  },
-}))
+    return answer instanceof Error
+      ? Promise.reject(answer)
+      : Promise.resolve(answer as [Record<string, JsonValue>[], string | null])
+  }
+})
 
 const { buildDeltaHook, eventPaths } = await import('./events.ts')
 

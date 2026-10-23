@@ -72,7 +72,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import REGISTRY, build_vfs, known_vfs_names
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
+from tests.e2e.gdrive_mock import FakeDriveApi, FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 from tests.fixtures.box_api import FakeBox
 from tests.fixtures.box_api import serve as serve_box
@@ -1653,9 +1653,7 @@ def test_partial_search_cannot_evict_live_app_bytes_or_overlay(
                 await _line(ws, f"cat {virtual}")
                 await _line(ws, f"chmod 600 {virtual}")
                 search = AsyncMock(return_value=([], False))
-                monkeypatch.setattr(
-                    "mirage.core.google.readdir.list_all_files", search
-                )
+                monkeypatch.setattr(FakeDriveApi, "list_all_files", search)
                 before = fake.fetches()
                 assert await _line(ws, f"cat {virtual}") == SEED
                 assert await _line(ws, f"stat -c %a {virtual}") == b"600\n"

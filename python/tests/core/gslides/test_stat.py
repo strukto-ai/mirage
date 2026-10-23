@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,6 +21,8 @@ from mirage.core.gslides.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 
@@ -68,10 +70,8 @@ async def test_stat_deck_from_the_listing(accessor):
         "owners": [{"me": True}],
     }
     mounted = Mounted(GSlidesVFS, accessor, "/gslides")
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=([item], True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=([item], True)))
     ):
         (target,) = await mounted.readdir("/owned")
         result = await mounted.stat(target.removeprefix("/gslides"))
@@ -94,11 +94,8 @@ async def test_stat_cache_miss_fetches_metadata_by_id(accessor):
         }
     ]
     target = "/gslides/owned/2026-04-01_My_Deck__d1.gslide.json"
-    with patch(
-        "mirage.core.google.entry.get_file",
-        new_callable=AsyncMock,
-        return_value=files[0],
-    ) as mock_list:
+    mock_list = AsyncMock(return_value=files[0])
+    with serve(drive=StubDrive(get_file=mock_list)):
         result = await stat(
             accessor,
             PathSpec(
@@ -123,11 +120,7 @@ async def test_stat_not_found_after_fallback(accessor):
             "owners": [{"me": True}],
         }
     ]
-    with patch(
-        "mirage.core.google.entry.get_file",
-        new_callable=AsyncMock,
-        return_value=files[0],
-    ):
+    with serve(drive=StubDrive(get_file=AsyncMock(return_value=files[0]))):
         with pytest.raises(FileNotFoundError):
             await stat(
                 accessor,

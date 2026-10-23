@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.accessor.gmail import GmailAccessor
 from mirage.vfs.gmail import GmailVFS
+from mirage.vfs.gmail.config import GmailConfig
 from mirage.workspace import Workspace
+from tests.fixtures.gmail_api import StubGmail
+from tests.fixtures.google_api import serve
 from tests.fixtures.vfs_io import vfs_over
 
 LABELS = [{"id": "INBOX", "type": "system"}]
@@ -40,22 +44,15 @@ RAW_MESSAGE = {
 
 
 async def _run(line: str) -> list[str]:
-    ws = Workspace({"/gmail/": vfs_over(GmailVFS, AsyncMock())})
+    accessor = GmailAccessor(GmailConfig(access_token="t"), AsyncMock())
+    ws = Workspace({"/gmail/": vfs_over(GmailVFS, accessor)})
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=LABELS,
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages",
-            new_callable=AsyncMock,
-            return_value=[{"id": "m1"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new_callable=AsyncMock,
-            return_value=RAW_MESSAGE,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(return_value=LABELS),
+                list_messages=AsyncMock(return_value=[{"id": "m1"}]),
+                get_message_raw=AsyncMock(return_value=RAW_MESSAGE),
+            )
         ),
     ):
         result = await ws.shell(line)

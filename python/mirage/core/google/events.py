@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.core.google.drive import list_changes, start_page_token
 from mirage.events.base import DeltaHook
 from mirage.events.delta import changes_under, just_made, settle
 from mirage.events.payload import text_field
@@ -90,16 +89,16 @@ class AppDeltaHook:
             checkpoint (str | None): The previous read's state, or None
                 for a baseline.
         """
-        tm = self._accessor.token_manager
+        drive = self._accessor.drive
         observed = datetime.now(timezone.utc)
         state = feed_state(checkpoint)
         if state is None:
-            token = await start_page_token(tm)
+            token = await drive.start_page_token()
             return Delta(
                 (),
                 feed_checkpoint({"token": token, "seen": {}}),
             )
-        found, token = await list_changes(tm, state["token"])
+        found, token = await drive.list_changes(state["token"])
         prefix = mount_prefix_of(root.virtual, root.vfs_path)
         seen: dict[str, str] = dict(state.get("seen") or {})
         changes: list[tuple[FileChangeKind, str]] = []

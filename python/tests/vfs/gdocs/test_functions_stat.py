@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -20,6 +20,8 @@ from mirage.accessor.gdocs import GDocsAccessor
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
@@ -54,21 +56,23 @@ async def test_stat_root_is_directory(accessor):
 @pytest.mark.asyncio
 async def test_stat_doc(accessor):
     mounted = Mounted(GDocsVFS, accessor, "/gdocs")
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=(
-            [
-                {
-                    "mimeType": "application/vnd.google-apps.document",
-                    "id": "doc1",
-                    "name": "Report",
-                    "modifiedTime": "2026-04-01T00:00:00Z",
-                    "owners": [{"me": True}],
-                }
-            ],
-            True,
-        ),
+    with serve(
+        drive=StubDrive(
+            list_all_files=AsyncMock(
+                return_value=(
+                    [
+                        {
+                            "mimeType": "application/vnd.google-apps.document",
+                            "id": "doc1",
+                            "name": "Report",
+                            "modifiedTime": "2026-04-01T00:00:00Z",
+                            "owners": [{"me": True}],
+                        }
+                    ],
+                    True,
+                )
+            )
+        )
     ):
         (target,) = await mounted.readdir(_scope("/gdocs/owned"))
         result = await mounted.stat(_scope(target))
@@ -79,10 +83,8 @@ async def test_stat_doc(accessor):
 @pytest.mark.asyncio
 async def test_stat_not_found(accessor):
     mounted = Mounted(GDocsVFS, accessor, "/gdocs")
-    with patch(
-        "mirage.core.google.readdir.list_all_files",
-        new_callable=AsyncMock,
-        return_value=([], True),
+    with serve(
+        drive=StubDrive(list_all_files=AsyncMock(return_value=([], True)))
     ):
         await mounted.readdir(_scope("/gdocs/owned"))
         with pytest.raises(FileNotFoundError):

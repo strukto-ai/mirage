@@ -13,19 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-import type * as ClientModule from '../google/client.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listAllFiles: vi.fn(), getFile: vi.fn() }
-})
-
-vi.mock('../google/client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('../google/client.ts')
-  return { ...actual, googleGet: vi.fn() }
-})
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import { runWithRecording } from '../../observe/context.ts'
@@ -33,9 +21,21 @@ import { PathSpec, type FileStat } from '../../types.ts'
 import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
-import * as client from '../google/client.ts'
-import { read, readSpreadsheet } from './read.ts'
+import type { SheetsApi } from './api.ts'
+import { read } from './read.ts'
+import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { installApi } from '../../../tests/core/google/_test_util.ts'
+
+const ENC = new TextEncoder()
+
+let drive: StubDrive
+let sheets: { readSpreadsheet: ReturnType<typeof vi.fn<SheetsApi['readSpreadsheet']>> }
+
+beforeEach(() => {
+  drive = stubDrive()
+  sheets = { readSpreadsheet: vi.fn<SheetsApi['readSpreadsheet']>() }
+  installApi({ drive, sheets })
+})
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -47,14 +47,16 @@ function makeAccessor(): GSheetsAccessor {
 
 describe('gsheets read auto-bootstrap', () => {
   it('resolves a read no listing named by its id', async () => {
-    vi.mocked(drive.getFile).mockResolvedValue({
+    drive.getFile.mockResolvedValue({
       mimeType: 'application/vnd.google-apps.spreadsheet',
       id: 'sheet1',
       name: 'Budget',
       modifiedTime: '2026-04-01T00:00:00.000Z',
       owners: [{ me: true }],
     })
-    vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 'sheet1' })
+    sheets.readSpreadsheet.mockResolvedValue(
+      ENC.encode(JSON.stringify({ spreadsheetId: 'sheet1' })),
+    )
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -67,10 +69,8 @@ describe('gsheets read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing by ID', async () => {
-    vi.mocked(drive.getFile).mockRejectedValue(
-      Object.assign(new Error('missing'), { code: 'ENOENT' }),
-    )
-    vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
+    drive.getFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    sheets.readSpreadsheet.mockRejectedValue(new Error('should not call readSpreadsheet'))
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -79,19 +79,6 @@ describe('gsheets read auto-bootstrap', () => {
       vfsPath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
     })
     await expect(read(accessor, path)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  it('asks for grid data, which spreadsheets.get omits by default, and values only', async () => {
-    vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 's1' })
-    await readSpreadsheet(STUB_TOKEN_MANAGER, 's1')
-    expect(vi.mocked(client.googleGet).mock.lastCall?.[1]).toMatch(/\/spreadsheets\/s1$/)
-    expect(vi.mocked(client.googleGet).mock.lastCall?.[2]).toEqual({
-      includeGridData: 'true',
-      fields:
-        'spreadsheetId,spreadsheetUrl,properties,namedRanges,' +
-        'sheets(properties,data(startRow,startColumn,' +
-        'rowData(values(formattedValue,userEnteredValue,effectiveValue))))',
-    })
   })
 })
 
@@ -111,9 +98,9 @@ describe('gsheets read token', () => {
         modifiedTime: stamp,
         owners: [{ me: true }],
       }
-      vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [item], complete: true })
-      vi.mocked(drive.getFile).mockResolvedValue(item)
-      vi.mocked(client.googleGet).mockResolvedValue({ spreadsheetId: 's1' })
+      drive.listAllFiles.mockResolvedValue({ files: [item], complete: true })
+      drive.getFile.mockResolvedValue(item)
+      sheets.readSpreadsheet.mockResolvedValue(ENC.encode(JSON.stringify({ spreadsheetId: 's1' })))
       const accessor = makeAccessor()
       const vfs = Object.assign(
         new GSheetsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import ClientResponseError
@@ -24,6 +24,8 @@ from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.types import PathSpec
 from mirage.vfs.gdocs import GDocsVFS
 from mirage.vfs.gdocs.doc_entry import make_filename
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 ITEM = {
@@ -83,59 +85,45 @@ async def test_a_direct_lookup_proves_the_file(outcome):
                 outcome
             ],
         )
-    with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=item,
-            side_effect=error,
-        ) as get,
-        patch(
-            "mirage.core.google.drive.list_all_files",
-            new_callable=AsyncMock,
-            side_effect=AssertionError("must not search"),
-        ),
-    ):
-        if outcome == "updated":
-            row = await resolve_app_entry(
-                None, MATCH, PATH, ITEM["mimeType"], make_filename
+    get = AsyncMock(return_value=item, side_effect=error)
+    drive = StubDrive(get_file=get)
+    if outcome == "updated":
+        row = await resolve_app_entry(
+            drive, MATCH, PATH, ITEM["mimeType"], make_filename
+        )
+        assert row.modified == ITEM["modifiedTime"]
+        assert row.size is None
+        assert row.extra == {
+            "doc_id": "doc1",
+            "doc_name": "Notes",
+            "source_size": 1000,
+        }
+    elif outcome in ("forbidden", "unavailable"):
+        with pytest.raises(ClientResponseError) as raised:
+            await resolve_app_entry(
+                drive, MATCH, PATH, ITEM["mimeType"], make_filename
             )
-            assert row.modified == ITEM["modifiedTime"]
-            assert row.size is None
-            assert row.extra == {
-                "doc_id": "doc1",
-                "doc_name": "Notes",
-                "source_size": 1000,
-            }
-        elif outcome in ("forbidden", "unavailable"):
-            with pytest.raises(ClientResponseError) as raised:
-                await resolve_app_entry(
-                    None, MATCH, PATH, ITEM["mimeType"], make_filename
-                )
-            assert raised.value is error
-        else:
-            with pytest.raises(FileNotFoundError):
-                await resolve_app_entry(
-                    None, MATCH, PATH, ITEM["mimeType"], make_filename
-                )
-        get.assert_awaited_once_with(None, "doc1")
+        assert raised.value is error
+    else:
+        with pytest.raises(FileNotFoundError):
+            await resolve_app_entry(
+                drive, MATCH, PATH, ITEM["mimeType"], make_filename
+            )
+    get.assert_awaited_once_with("doc1")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("complete", [True, False])
 async def test_only_a_complete_listing_proves_absence(complete):
     mounted = Mounted(GDocsVFS, GDocsAccessor(config=None, token_manager=None))
+    get = AsyncMock(return_value=ITEM)
     with (
-        patch(
-            "mirage.core.google.readdir.list_all_files",
-            new_callable=AsyncMock,
-            return_value=([], complete),
+        serve(
+            drive=StubDrive(
+                list_all_files=AsyncMock(return_value=([], complete)),
+                get_file=get,
+            )
         ),
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=ITEM,
-        ) as get,
     ):
         # One command lists and stats, so its own complete listing is proof.
         async with command_scope():
@@ -147,4 +135,4 @@ async def test_only_a_complete_listing_proves_absence(complete):
             else:
                 row = await mounted.stat("/owned/" + NAME)
                 assert row.extra["doc_id"] == ITEM["id"]
-                get.assert_awaited_once_with(None, "doc1")
+                get.assert_awaited_once_with("doc1")

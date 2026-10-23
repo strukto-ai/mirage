@@ -15,23 +15,12 @@
 import type { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { slidesBase, type TokenManager, googleGet } from '../google/client.ts'
 import { resolveAppEntry } from '../google/entry.ts'
 import { MIME } from './constants.ts'
 import { makeFilename } from '../../vfs/gslides/slide_entry.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
-
-export async function readPresentation(
-  tm: TokenManager,
-  presentationId: string,
-): Promise<Uint8Array> {
-  const url = `${slidesBase(tm)}/presentations/${presentationId}`
-  const data = await googleGet(tm, url)
-  return compactJsonBytes(data)
-}
 
 async function readFile(
   accessor: GSlidesAccessor,
@@ -39,10 +28,9 @@ async function readFile(
   path: PathSpec,
   entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const row =
-    entry ?? (await resolveAppEntry(accessor.tokenManager, match, path, MIME, makeFilename))
+  const row = entry ?? (await resolveAppEntry(accessor.drive, match, path, MIME, makeFilename))
   const timer = startOp()
-  const data = await readPresentation(accessor.tokenManager, match.slots.file_id ?? '')
+  const data = await accessor.slides.readPresentation(match.slots.file_id ?? '')
   record('read', path.virtual, 'gslides', data.length, timer, {
     fingerprint: row.fingerprint,
   })

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gslides import GSlidesAccessor
-from mirage.core.google.drive import delete_file
 from mirage.core.gslides.scope import detect_scope
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.unlink import make_unlink
@@ -23,7 +22,7 @@ from mirage.types import FileStat
 async def _delete(
     accessor: GSlidesAccessor, match: ScopeMatch, entry: FileStat
 ) -> None:
-    await delete_file(accessor.token_manager, match.slots["file_id"])
+    await accessor.drive.delete_file(match.slots["file_id"])
 
 
 unlink = make_unlink(detect_scope, deleters={"file": _delete})

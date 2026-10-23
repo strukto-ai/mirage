@@ -13,19 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-import type * as ClientModule from '../google/client.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listAllFiles: vi.fn(), getFile: vi.fn() }
-})
-
-vi.mock('../google/client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('../google/client.ts')
-  return { ...actual, googleGet: vi.fn() }
-})
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { runWithRecording } from '../../observe/context.ts'
@@ -33,9 +21,21 @@ import { PathSpec, type FileStat } from '../../types.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
-import * as client from '../google/client.ts'
-import { read, readDoc } from './read.ts'
+import type { DocsApi } from './api.ts'
+import { read } from './read.ts'
+import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { installApi } from '../../../tests/core/google/_test_util.ts'
+
+const ENC = new TextEncoder()
+
+let drive: StubDrive
+let docs: { readDoc: ReturnType<typeof vi.fn<DocsApi['readDoc']>> }
+
+beforeEach(() => {
+  drive = stubDrive()
+  docs = { readDoc: vi.fn<DocsApi['readDoc']>() }
+  installApi({ drive, docs })
+})
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -47,14 +47,14 @@ function makeAccessor(): GDocsAccessor {
 
 describe('gdocs read auto-bootstrap', () => {
   it('resolves a read no listing named by its id', async () => {
-    vi.mocked(drive.getFile).mockResolvedValue({
+    drive.getFile.mockResolvedValue({
       mimeType: 'application/vnd.google-apps.document',
       id: 'doc1',
       name: 'Notes',
       modifiedTime: '2026-04-01T00:00:00.000Z',
       owners: [{ me: true }],
     })
-    vi.mocked(client.googleGet).mockResolvedValue({ documentId: 'doc1' })
+    docs.readDoc.mockResolvedValue(ENC.encode('{"documentId":"doc1"}'))
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -67,10 +67,8 @@ describe('gdocs read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing by ID', async () => {
-    vi.mocked(drive.getFile).mockRejectedValue(
-      Object.assign(new Error('missing'), { code: 'ENOENT' }),
-    )
-    vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
+    drive.getFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    docs.readDoc.mockRejectedValue(new Error('should not call readDoc'))
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -84,8 +82,8 @@ describe('gdocs read auto-bootstrap', () => {
   // The Drive-item read family (gdocs/gsheets/gslides) shares this shape:
   // only an absent parent may collapse into the operand's ENOENT.
   it('propagates a failed metadata request instead of reporting ENOENT', async () => {
-    vi.mocked(drive.getFile).mockRejectedValue(new Error('google unavailable'))
-    vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
+    drive.getFile.mockRejectedValue(new Error('google unavailable'))
+    docs.readDoc.mockRejectedValue(new Error('should not call readDoc'))
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -94,27 +92,6 @@ describe('gdocs read auto-bootstrap', () => {
       vfsPath: mountKey('/gdocs/owned/Missing__xyz.gdoc.json', '/gdocs'),
     })
     await expect(read(accessor, path)).rejects.toThrow(/google unavailable/)
-  })
-})
-
-describe('gdocs readDoc', () => {
-  it('requests tab-aware content so multi-tab documents are not truncated', async () => {
-    vi.mocked(client.googleGet).mockResolvedValue({
-      documentId: 'abc123',
-      title: 'Test Doc',
-      tabs: [],
-    })
-
-    const out = await readDoc(STUB_TOKEN_MANAGER, 'abc123')
-    expect(new TextDecoder().decode(out)).toContain('abc123')
-    // The flag rides `params`, the way gsheets sends includeGridData, so
-    // the two halves of one family ask for their content the same way and
-    // python's read_doc has a call to mirror.
-    expect(client.googleGet).toHaveBeenCalledWith(
-      STUB_TOKEN_MANAGER,
-      'https://docs.googleapis.com/v1/documents/abc123',
-      { includeTabsContent: 'true' },
-    )
   })
 })
 
@@ -134,9 +111,9 @@ describe('gdocs read token', () => {
         modifiedTime: stamp,
         owners: [{ me: true }],
       }
-      vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [item], complete: true })
-      vi.mocked(drive.getFile).mockResolvedValue(item)
-      vi.mocked(client.googleGet).mockResolvedValue({ documentId: 'doc1' })
+      drive.listAllFiles.mockResolvedValue({ files: [item], complete: true })
+      drive.getFile.mockResolvedValue(item)
+      docs.readDoc.mockResolvedValue(ENC.encode('{"documentId":"doc1"}'))
       const accessor = makeAccessor()
       const vfs = Object.assign(
         new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),

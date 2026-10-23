@@ -15,54 +15,12 @@
 import type { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { sheetsBase, type TokenManager, googleGet } from '../google/client.ts'
 import { resolveAppEntry } from '../google/entry.ts'
 import { MIME } from './constants.ts'
 import { makeFilename } from '../../vfs/gsheets/sheet_entry.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { compactJsonBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
-
-const GRID_DATA_PARAM = 'true'
-// The fields vfs/gsheets/prompt.ts documents. Without a mask every cell also
-// carries userEnteredFormat and effectiveFormat and every grid its row and
-// column metadata, which outweigh the values many times over.
-const SPREADSHEET_FIELDS =
-  'spreadsheetId,spreadsheetUrl,properties,namedRanges,' +
-  'sheets(properties,data(startRow,startColumn,' +
-  'rowData(values(formattedValue,userEnteredValue,effectiveValue))))'
-
-/**
- * Fetch spreadsheet JSON, cell values included and formats left out.
- *
- * `spreadsheets.get` returns no grid data unless asked, so without
- * `includeGridData` the rendered `.gsheet.json` is tab metadata and nothing
- * an agent can read a cell from. The `fields` mask then keeps the structure
- * the VFS prompt documents; formatting stays reachable through
- * `gws sheets spreadsheets get`.
- */
-export async function readSpreadsheet(
-  tm: TokenManager,
-  spreadsheetId: string,
-): Promise<Uint8Array> {
-  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}`
-  const data = await googleGet(tm, url, {
-    includeGridData: GRID_DATA_PARAM,
-    fields: SPREADSHEET_FIELDS,
-  })
-  return compactJsonBytes(data)
-}
-
-export async function readValues(
-  tm: TokenManager,
-  spreadsheetId: string,
-  range: string,
-): Promise<Uint8Array> {
-  const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}`
-  const data = await googleGet(tm, url)
-  return compactJsonBytes(data)
-}
 
 async function readFile(
   accessor: GSheetsAccessor,
@@ -70,10 +28,9 @@ async function readFile(
   path: PathSpec,
   entry: FileStat | null,
 ): Promise<Uint8Array> {
-  const row =
-    entry ?? (await resolveAppEntry(accessor.tokenManager, match, path, MIME, makeFilename))
+  const row = entry ?? (await resolveAppEntry(accessor.drive, match, path, MIME, makeFilename))
   const timer = startOp()
-  const data = await readSpreadsheet(accessor.tokenManager, match.slots.file_id ?? '')
+  const data = await accessor.sheets.readSpreadsheet(match.slots.file_id ?? '')
   record('read', path.virtual, 'gsheets', data.length, timer, {
     fingerprint: row.fingerprint,
   })

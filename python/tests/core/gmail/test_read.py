@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,6 +23,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.gmail_api import StubGmail
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 
@@ -48,10 +50,8 @@ async def test_read_message(accessor):
             "headers": [{"name": "Subject", "value": "Test Email"}],
         },
     }
-    with patch(
-        "mirage.core.gmail.read.get_message_raw",
-        new_callable=AsyncMock,
-        return_value=raw_msg,
+    with serve(
+        gmail=StubGmail(get_message_raw=AsyncMock(return_value=raw_msg))
     ):
         result = await read(
             accessor,
@@ -116,25 +116,18 @@ async def test_a_cold_read_lists_its_way_to_the_message(accessor):
         },
     }
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"id": "INBOX", "name": "INBOX", "type": "system"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages",
-            new_callable=AsyncMock,
-            return_value=[{"id": "msg-1", "threadId": "t-1"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new_callable=AsyncMock,
-            return_value=raw_msg,
-        ),
-        patch(
-            "mirage.core.gmail.read.get_message_raw",
-            new_callable=AsyncMock,
-            return_value=raw_msg,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[
+                        {"id": "INBOX", "name": "INBOX", "type": "system"}
+                    ]
+                ),
+                list_messages=AsyncMock(
+                    return_value=[{"id": "msg-1", "threadId": "t-1"}]
+                ),
+                get_message_raw=AsyncMock(return_value=raw_msg),
+            )
         ),
     ):
         result = await Mounted(GmailVFS, accessor, "/gmail").read(
@@ -146,10 +139,8 @@ async def test_a_cold_read_lists_its_way_to_the_message(accessor):
 
 @pytest.mark.asyncio
 async def test_read_attachment(accessor):
-    with patch(
-        "mirage.core.gmail.read.get_attachment",
-        new_callable=AsyncMock,
-        return_value=b"pdf-bytes",
+    with serve(
+        gmail=StubGmail(get_attachment=AsyncMock(return_value=b"pdf-bytes"))
     ):
         result = await read(
             accessor,

@@ -15,7 +15,6 @@
 import logging
 
 from mirage.accessor.gcal import GCalAccessor
-from mirage.core.gcal.client import list_events
 from mirage.core.gcal.day import day_bounds
 from mirage.core.gcal.readdir import (
     bucket_zone,
@@ -98,8 +97,7 @@ async def _day_events(
         tz (str): the zone the mount buckets days in.
     """
     time_min, time_max = day_bounds(day, tz)
-    return await list_events(
-        accessor.token_manager,
+    return await accessor.calendar.list_events(
         cal_id,
         time_min,
         time_max,

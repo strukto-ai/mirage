@@ -19,7 +19,7 @@ import * as drive from '../google/drive.ts'
 import type { DriveChange, DriveFile, SharedDrive } from '../google/drive.ts'
 
 /**
- * Every Drive request the gdrive backend makes, as one object. A core op
+ * Every Drive request the Google backends make, as one object. A core op
  * reaches Drive only through `accessor.drive`. Mirrors Python's `DriveApi`.
  */
 export interface DriveApi {
@@ -30,9 +30,15 @@ export interface DriveApi {
   }): Promise<DriveFile[]>
   listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]>
   listSharedDrives(): Promise<SharedDrive[]>
+  listAllFiles(opts?: {
+    mimeType?: string | null
+    modifiedAfter?: string | null
+    modifiedBefore?: string | null
+  }): Promise<{ files: DriveFile[]; complete: boolean }>
   searchFiles(
     text: string,
     parentIds: readonly string[],
+    mimeType?: string | null,
   ): Promise<{ ids: string[]; complete: boolean }>
   getFile(fileId: string, fields?: string): Promise<DriveFile>
   storageQuota(): Promise<{ limit?: string; usage?: string }>
@@ -78,11 +84,22 @@ export class DriveClient implements DriveApi {
     return drive.listSharedDrives(this.tokenManager)
   }
 
+  listAllFiles(
+    opts: {
+      mimeType?: string | null
+      modifiedAfter?: string | null
+      modifiedBefore?: string | null
+    } = {},
+  ): Promise<{ files: DriveFile[]; complete: boolean }> {
+    return drive.listAllFiles(this.tokenManager, opts)
+  }
+
   searchFiles(
     text: string,
     parentIds: readonly string[],
+    mimeType: string | null = null,
   ): Promise<{ ids: string[]; complete: boolean }> {
-    return drive.searchFiles(this.tokenManager, text, parentIds)
+    return drive.searchFiles(this.tokenManager, text, parentIds, mimeType)
   }
 
   getFile(fileId: string, fields?: string): Promise<DriveFile> {

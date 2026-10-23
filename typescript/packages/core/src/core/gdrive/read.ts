@@ -21,9 +21,6 @@ import {
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
-import { readDoc } from '../gdocs/read.ts'
-import { readSpreadsheet } from '../gsheets/read.ts'
-import { readPresentation } from '../gslides/read.ts'
 import type { DriveApi } from './api.ts'
 import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
 import { Md5, md5HexAsync } from '../../utils/hash.ts'
@@ -126,9 +123,9 @@ export async function read(
     return readFileVersioned(accessor.drive, fileId, path.virtual, found, offset, size)
   const timer = startOp()
   let rendered: Uint8Array
-  if (rt === 'gdrive/gdoc') rendered = await readDoc(accessor.tokenManager, fileId)
-  else if (rt === 'gdrive/gsheet') rendered = await readSpreadsheet(accessor.tokenManager, fileId)
-  else rendered = await readPresentation(accessor.tokenManager, fileId)
+  if (rt === 'gdrive/gdoc') rendered = await accessor.docs.readDoc(fileId)
+  else if (rt === 'gdrive/gsheet') rendered = await accessor.sheets.readSpreadsheet(fileId)
+  else rendered = await accessor.slides.readPresentation(fileId)
   const sliced = sliceWindow(rendered, offset, size)
   // No revision: a pin would replace the drift check a render relies on.
   record('read', path.virtual, 'gdrive', sliced.length, timer, {

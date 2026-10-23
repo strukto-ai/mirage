@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
-
 import aiohttp
 import pytest
 
-import mirage.core.google.search as search_mod
+from mirage.accessor.gdocs import GDocsAccessor
 from mirage.core.google.search import drive_queries, files_containing
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.generated.google_vocabulary import DOCS_WORDS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import install_api
 
 MIME = "application/vnd.google-apps.document"
 CORPORA = {
@@ -52,18 +52,18 @@ def _scope(vfs_path: str = "") -> PathSpec:
 def _answer(monkeypatch, ids, complete=True, fail=None) -> list[tuple]:
     asked: list[tuple] = []
 
-    async def search_files(token_manager, text, parent_ids, mime_type=None):
+    async def search_files(text, parent_ids, mime_type=None):
         asked.append((text, parent_ids, mime_type))
         if fail is not None:
             raise fail
         return ids, complete
 
-    monkeypatch.setattr(search_mod, "search_files", search_files)
+    install_api(monkeypatch, drive=StubDrive(search_files=search_files))
     return asked
 
 
 async def _ask(text: str, under: list[PathSpec]) -> list[PathSpec] | None:
-    accessor = SimpleNamespace(token_manager=None)
+    accessor = GDocsAccessor(config=None, token_manager=None)
     return await files_containing(
         accessor, _readdir, MIME, DOCS_WORDS, text, under
     )
@@ -150,7 +150,7 @@ async def _unfinished(accessor, path: PathSpec) -> DirListing:
 @pytest.mark.asyncio
 async def test_an_unfinished_listing_reads_every_file(monkeypatch):
     _answer(monkeypatch, ["a.gdoc.json"])
-    accessor = SimpleNamespace(token_manager=None)
+    accessor = GDocsAccessor(config=None, token_manager=None)
     out = await files_containing(
         accessor,
         _unfinished,

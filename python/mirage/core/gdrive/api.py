@@ -24,9 +24,9 @@ from mirage.utils.ranges import ByteWindow
 
 
 class DriveApi(Protocol):
-    """Every Drive request the gdrive backend makes, as one object.
+    """Every Drive request the Google backends make, as one object.
 
-    A core op reaches Drive only through ``GDriveAccessor.drive``, so the
+    A core op reaches Drive only through its accessor's ``drive``, so the
     backend runs against an in-memory Drive wherever another
     implementation is served there.
     """
@@ -44,8 +44,15 @@ class DriveApi(Protocol):
 
     async def list_shared_drives(self) -> list[dict[str, Any]]: ...
 
+    async def list_all_files(
+        self,
+        mime_type: str | None = None,
+        modified_after: str | None = None,
+        modified_before: str | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]: ...
+
     async def search_files(
-        self, text: str, parent_ids: list[str]
+        self, text: str, parent_ids: list[str], mime_type: str | None = None
     ) -> tuple[list[str], bool]: ...
 
     async def get_file(
@@ -137,10 +144,25 @@ class DriveClient:
     async def list_shared_drives(self) -> list[dict[str, Any]]:
         return await drive.list_shared_drives(self.token_manager)
 
+    async def list_all_files(
+        self,
+        mime_type: str | None = None,
+        modified_after: str | None = None,
+        modified_before: str | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        return await drive.list_all_files(
+            self.token_manager,
+            mime_type=mime_type,
+            modified_after=modified_after,
+            modified_before=modified_before,
+        )
+
     async def search_files(
-        self, text: str, parent_ids: list[str]
+        self, text: str, parent_ids: list[str], mime_type: str | None = None
     ) -> tuple[list[str], bool]:
-        return await drive.search_files(self.token_manager, text, parent_ids)
+        return await drive.search_files(
+            self.token_manager, text, parent_ids, mime_type
+        )
 
     async def get_file(
         self, file_id: str, fields: str = ITEM_FIELDS

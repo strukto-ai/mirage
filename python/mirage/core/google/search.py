@@ -20,7 +20,6 @@ import aiohttp
 
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.core.google.constants import RENDERED_WORDS, TOP_LEVEL_DIRS
-from mirage.core.google.drive import search_files
 from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.record_search import record_queries
@@ -95,9 +94,7 @@ async def files_containing(
     try:
         named: set[str] = set()
         for query in queries:
-            ids, complete = await search_files(
-                accessor.token_manager, query, [], mime
-            )
+            ids, complete = await accessor.drive.search_files(query, [], mime)
             if not complete:
                 return None
             named.update(ids)

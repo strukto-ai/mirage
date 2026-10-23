@@ -12,32 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from './drive.ts'
+import { beforeEach, describe, expect, it } from 'vitest'
 
-const drive = vi.hoisted(() => ({
+const drive = {
   ids: [] as string[],
   complete: true,
   fail: null as Error | null,
   asked: [] as unknown[][],
-}))
-
-vi.mock('./drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('./drive.ts')
-  return {
-    ...actual,
-    searchFiles: (_tm: unknown, text: string, parents: string[], mime: string | null) => {
-      drive.asked.push([text, parents, mime])
-      if (drive.fail !== null) return Promise.reject(drive.fail)
-      return Promise.resolve({ ids: drive.ids, complete: drive.complete })
-    },
-  }
-})
+}
 
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
 import { driveQueries, filesContaining } from './search.ts'
+
+const DRIVE = {
+  searchFiles: (text: string, parents: string[], mime: string | null) => {
+    drive.asked.push([text, parents, mime])
+    if (drive.fail !== null) return Promise.reject(drive.fail)
+    return Promise.resolve({ ids: drive.ids, complete: drive.complete })
+  },
+}
 
 const MIME = 'application/vnd.google-apps.document'
 const CORPORA: Record<string, [string, string][]> = {
@@ -69,7 +64,7 @@ function scope(vfsPath = ''): PathSpec {
 }
 
 function ask(text: string, under: PathSpec[]): Promise<PathSpec[] | null> {
-  const accessor = { tokenManager: null } as unknown as GoogleApiAccessor
+  const accessor = { drive: DRIVE } as unknown as GoogleApiAccessor
   return filesContaining(accessor, readdir, MIME, DOCS_WORDS, text, under)
 }
 
@@ -143,7 +138,7 @@ describe('google app filesContaining', () => {
       Promise.resolve(
         new DirListing({ entries: rows(path.vfsPath.replace(/^\/+|\/+$/g, '')), partial: true }),
       )
-    const accessor = { tokenManager: null } as unknown as GoogleApiAccessor
+    const accessor = { drive: DRIVE } as unknown as GoogleApiAccessor
     expect(
       await filesContaining(accessor, unfinished, MIME, DOCS_WORDS, 'wombat', [scope('owned')]),
     ).toBeNull()

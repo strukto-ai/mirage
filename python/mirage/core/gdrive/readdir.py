@@ -193,12 +193,12 @@ async def readdir(
     complete = True
     if folder_id == "root" and not target.vfs_path.strip("/"):
         # Shared Drive enumeration is best-effort: if the account can't list
-        # them (missing scope, API error), still return My Drive contents.
-        # A folder-scoped mount lists only the folder's children, so shared
-        # drives never surface there.
+        # them (missing scope, API error, network), still return My Drive
+        # contents. A folder-scoped mount lists only the folder's children,
+        # so shared drives never surface there.
         try:
             shared_drives = await drive.list_shared_drives()
-        except Exception:
+        except (OSError, aiohttp.ClientError):
             logger.debug("Unable to list Google Shared Drives", exc_info=True)
             shared_drives = []
             complete = False

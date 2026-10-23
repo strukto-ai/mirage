@@ -13,19 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-import type * as ClientModule from '../google/client.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listAllFiles: vi.fn(), getFile: vi.fn() }
-})
-
-vi.mock('../google/client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('../google/client.ts')
-  return { ...actual, googleGet: vi.fn() }
-})
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { runWithRecording } from '../../observe/context.ts'
@@ -33,9 +21,21 @@ import { PathSpec, type FileStat } from '../../types.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
-import * as client from '../google/client.ts'
+import type { SlidesApi } from './api.ts'
 import { read } from './read.ts'
+import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { installApi } from '../../../tests/core/google/_test_util.ts'
+
+const ENC = new TextEncoder()
+
+let drive: StubDrive
+let slides: { readPresentation: ReturnType<typeof vi.fn<SlidesApi['readPresentation']>> }
+
+beforeEach(() => {
+  drive = stubDrive()
+  slides = { readPresentation: vi.fn<SlidesApi['readPresentation']>() }
+  installApi({ drive, slides })
+})
 
 const STUB_TOKEN_MANAGER = {
   config: { clientId: 'cid', refreshToken: 'rt' },
@@ -47,14 +47,16 @@ function makeAccessor(): GSlidesAccessor {
 
 describe('gslides read auto-bootstrap', () => {
   it('resolves a read no listing named by its id', async () => {
-    vi.mocked(drive.getFile).mockResolvedValue({
+    drive.getFile.mockResolvedValue({
       mimeType: 'application/vnd.google-apps.presentation',
       id: 'slide1',
       name: 'Deck',
       modifiedTime: '2026-04-01T00:00:00.000Z',
       owners: [{ me: true }],
     })
-    vi.mocked(client.googleGet).mockResolvedValue({ presentationId: 'slide1' })
+    slides.readPresentation.mockResolvedValue(
+      ENC.encode(JSON.stringify({ presentationId: 'slide1' })),
+    )
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -67,10 +69,8 @@ describe('gslides read auto-bootstrap', () => {
   })
 
   it('throws ENOENT when file missing by ID', async () => {
-    vi.mocked(drive.getFile).mockRejectedValue(
-      Object.assign(new Error('missing'), { code: 'ENOENT' }),
-    )
-    vi.mocked(client.googleGet).mockRejectedValue(new Error('should not call googleGet'))
+    drive.getFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    slides.readPresentation.mockRejectedValue(new Error('should not call readPresentation'))
 
     const accessor = makeAccessor()
     const path = new PathSpec({
@@ -98,9 +98,11 @@ describe('gslides read token', () => {
         modifiedTime: stamp,
         owners: [{ me: true }],
       }
-      vi.mocked(drive.listAllFiles).mockResolvedValue({ files: [item], complete: true })
-      vi.mocked(drive.getFile).mockResolvedValue(item)
-      vi.mocked(client.googleGet).mockResolvedValue({ presentationId: 'd1' })
+      drive.listAllFiles.mockResolvedValue({ files: [item], complete: true })
+      drive.getFile.mockResolvedValue(item)
+      slides.readPresentation.mockResolvedValue(
+        ENC.encode(JSON.stringify({ presentationId: 'd1' })),
+      )
       const accessor = makeAccessor()
       const vfs = Object.assign(
         new GSlidesVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),

@@ -15,8 +15,9 @@
 import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { GoogleApiError, type TokenManager } from './client.ts'
-import { getFile, type DriveFile } from './drive.ts'
+import type { DriveApi } from '../gdrive/api.ts'
+import { GoogleApiError } from './client.ts'
+import type { DriveFile } from './drive.ts'
 
 /**
  * A native app file as its corpus listing names it and stat answers. The
@@ -47,7 +48,7 @@ export function appFile(name: string, item: DriveFile): FileStat {
  * `resolve_app_entry`.
  */
 export async function resolveAppEntry(
-  tokenManager: TokenManager,
+  drive: DriveApi,
   match: ScopeMatch,
   path: PathSpec,
   mime: string,
@@ -57,7 +58,7 @@ export async function resolveAppEntry(
   if (fileId === undefined) throw enoent(path.virtual)
   let item
   try {
-    item = await getFile(tokenManager, fileId)
+    item = await drive.getFile(fileId)
   } catch (err) {
     if (!(err instanceof GoogleApiError) || err.status !== 404) throw err
     throw enoent(path.virtual)

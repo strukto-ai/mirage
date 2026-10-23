@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,6 +23,8 @@ from mirage.core.google.events import app_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs.doc_entry import make_filename
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 
 ROOT = PathSpec(
     vfs_path=mount_key("/gdocs", "/gdocs"),
@@ -60,49 +62,47 @@ async def test_changes_place_each_doc_where_the_app_lists_it():
         GDocsAccessor(config=None, token_manager=None), MIME, make_filename
     )
     with (
-        patch(
-            "mirage.core.google.events.start_page_token",
-            new_callable=AsyncMock,
-            return_value="1",
-        ),
-        patch(
-            "mirage.core.google.events.list_changes",
-            new_callable=AsyncMock,
-            side_effect=[
-                (
-                    [
-                        doc("old", "Plan", "2026-10-01T09:00:00.000Z"),
-                        doc(
-                            "new",
-                            "Notes",
-                            "2099-01-01T09:00:00.000Z",
-                            created="2099-01-01T09:00:00.000Z",
-                            mine=False,
+        serve(
+            drive=StubDrive(
+                start_page_token=AsyncMock(return_value="1"),
+                list_changes=AsyncMock(
+                    side_effect=[
+                        (
+                            [
+                                doc("old", "Plan", "2026-10-01T09:00:00.000Z"),
+                                doc(
+                                    "new",
+                                    "Notes",
+                                    "2099-01-01T09:00:00.000Z",
+                                    created="2099-01-01T09:00:00.000Z",
+                                    mine=False,
+                                ),
+                                doc(
+                                    "sheet",
+                                    "Budget",
+                                    "2026-10-01T09:00:00.000Z",
+                                    mime="application/vnd.google-apps.spreadsheet",
+                                ),
+                            ],
+                            "2",
                         ),
-                        doc(
-                            "sheet",
-                            "Budget",
-                            "2026-10-01T09:00:00.000Z",
-                            mime="application/vnd.google-apps.spreadsheet",
+                        (
+                            [
+                                doc("old", "Plan", "2026-10-02T09:00:00.000Z"),
+                                doc(
+                                    "new",
+                                    "Notes",
+                                    "2099-01-01T09:00:00.000Z",
+                                    trashed=True,
+                                    mine=False,
+                                ),
+                                {"fileId": "gone", "removed": True},
+                            ],
+                            "3",
                         ),
-                    ],
-                    "2",
+                    ]
                 ),
-                (
-                    [
-                        doc("old", "Plan", "2026-10-02T09:00:00.000Z"),
-                        doc(
-                            "new",
-                            "Notes",
-                            "2099-01-01T09:00:00.000Z",
-                            trashed=True,
-                            mine=False,
-                        ),
-                        {"fileId": "gone", "removed": True},
-                    ],
-                    "3",
-                ),
-            ],
+            )
         ),
     ):
         baseline = await hook.pull(ROOT, None)

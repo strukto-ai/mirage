@@ -18,7 +18,7 @@ from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
 
-from mirage.accessor.gdrive import GDriveAccessor
+from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.core.google.drive import ITEM_FIELDS
 from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
@@ -286,18 +286,6 @@ class FakeGDrive:
         return None
 
 
-_RENDERERS = (
-    "mirage.core.gdrive.read.read_doc",
-    "mirage.core.gdrive.read.read_spreadsheet",
-    "mirage.core.gdrive.read.read_presentation",
-    "mirage.core.gdocs.read.read_doc",
-    "mirage.core.gsheets.read.read_spreadsheet",
-    "mirage.core.gslides.read.read_presentation",
-)
-_APP_GET_FILE = "mirage.core.google.entry.get_file"
-_APP_LIST_ALL_FILES = "mirage.core.google.readdir.list_all_files"
-
-
 def _sliced(data: bytes, window: ByteWindow | None) -> bytes:
     """Serve a byte window the way Drive serves a ``Range``.
 
@@ -355,6 +343,19 @@ class FakeDriveApi:
 
     async def list_shared_drives(self) -> list[dict]:
         return []
+
+    async def list_all_files(
+        self,
+        mime_type: str | None = None,
+        modified_after: str | None = None,
+        modified_before: str | None = None,
+    ) -> tuple[list[dict], bool]:
+        del modified_after, modified_before
+        return [
+            f
+            for f in self._fake.all_files()
+            if mime_type is None or f["mimeType"] == mime_type
+        ], True
 
     async def get_file(self, file_id: str, fields: str = ITEM_FIELDS) -> dict:
         del fields
@@ -424,6 +425,32 @@ class FakeDriveApi:
         raise FileNotFoundError(file_id)
 
 
+class FakeRenderApi:
+    """The Docs, Sheets and Slides renderings of one ``FakeGDrive``'s
+    native files: their stored bytes, counted on the fake. Any other call
+    fails the test."""
+
+    def __init__(self, drive: FakeDriveApi) -> None:
+        """Args:
+        drive (FakeDriveApi): the Drive whose files are rendered.
+        """
+        self._drive = drive
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise AssertionError(f"gdrive_mock does not render {name}")
+
+    async def read_doc(self, doc_id: str) -> bytes:
+        return self._drive.render(doc_id)
+
+    async def read_spreadsheet(self, spreadsheet_id: str) -> bytes:
+        return self._drive.render(spreadsheet_id)
+
+    async def read_presentation(self, presentation_id: str) -> bytes:
+        return self._drive.render(presentation_id)
+
+
 def _resolve_fake(token_manager, registry) -> FakeGDrive:
     for tm, fake in registry:
         if tm is None or tm is token_manager:
@@ -434,9 +461,9 @@ def _resolve_fake(token_manager, registry) -> FakeGDrive:
 def patch_gdrive(*pairs) -> ExitStack:
     """Serve gdrive from in-memory fakes, selected by token manager.
 
-    Every ``GDriveAccessor`` serves a ``FakeDriveApi``, so any Drive call
-    the backend makes is answered by the fake or fails the test. The
-    renderers and the app mounts' own Drive calls are patched by name.
+    Every Google accessor serves a ``FakeDriveApi`` as its Drive and a
+    ``FakeRenderApi`` as its Docs, Sheets and Slides, so any call a
+    Drive-backed mount makes is answered by the fake or fails the test.
 
     Args:
         *pairs: (token_manager, FakeGDrive) tuples, or one FakeGDrive.
@@ -456,42 +483,25 @@ def patch_gdrive(*pairs) -> ExitStack:
     async def fake_refresh(_config):
         return _FAKE_TOKEN, _FAKE_EXPIRES_IN
 
-    async def fake_get_file(token_manager, file_id: str) -> dict:
-        return await drive_for(token_manager).get_file(file_id)
-
-    async def fake_list_all_files(
-        token_manager,
-        mime_type: str | None = None,
-        trashed: bool = False,
-        page_size: int = 1000,
-        modified_after: str | None = None,
-        modified_before: str | None = None,
-    ) -> tuple[list[dict], bool]:
-        del trashed, page_size, modified_after, modified_before
-        fake = _resolve_fake(token_manager, registry)
-        return [
-            f
-            for f in fake.all_files()
-            if mime_type is None or f["mimeType"] == mime_type
-        ], True
-
-    async def fake_render(token_manager, file_id: str) -> bytes:
-        return drive_for(token_manager).render(file_id)
-
-    by_name = {
-        "mirage.core.google.client.refresh_access_token": fake_refresh,
-        _APP_GET_FILE: fake_get_file,
-        _APP_LIST_ALL_FILES: fake_list_all_files,
-        **dict.fromkeys(_RENDERERS, fake_render),
-    }
+    rendered = property(
+        lambda accessor: FakeRenderApi(drive_for(accessor.token_manager))
+    )
     with ExitStack() as stack:
         stack.enter_context(
             patch.object(
-                GDriveAccessor,
+                GoogleApiAccessor,
                 "drive",
                 property(lambda accessor: drive_for(accessor.token_manager)),
             )
         )
-        for target, fake in by_name.items():
-            stack.enter_context(patch(target, new=fake))
+        for service in ("docs", "sheets", "slides"):
+            stack.enter_context(
+                patch.object(GoogleApiAccessor, service, rendered)
+            )
+        stack.enter_context(
+            patch(
+                "mirage.core.google.client.refresh_access_token",
+                new=fake_refresh,
+            )
+        )
         return stack.pop_all()

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,6 +24,8 @@ from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
+from tests.fixtures.gmail_api import StubGmail
+from tests.fixtures.google_api import serve
 from tests.fixtures.mounted import Mounted
 
 
@@ -55,20 +57,14 @@ RAW = {
 def _mailbox():
     """One label holding one message, on 2026-04-12, with an attachment."""
     with (
-        patch(
-            "mirage.core.gmail.readdir.list_labels",
-            new_callable=AsyncMock,
-            return_value=[{"type": "system", "id": "INBOX"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.list_messages",
-            new_callable=AsyncMock,
-            return_value=[{"id": "msg1"}],
-        ),
-        patch(
-            "mirage.core.gmail.readdir.get_message_raw",
-            new_callable=AsyncMock,
-            return_value=RAW,
+        serve(
+            gmail=StubGmail(
+                list_labels=AsyncMock(
+                    return_value=[{"type": "system", "id": "INBOX"}]
+                ),
+                list_messages=AsyncMock(return_value=[{"id": "msg1"}]),
+                get_message_raw=AsyncMock(return_value=RAW),
+            )
         ),
     ):
         yield
@@ -146,26 +142,19 @@ async def test_stat_attachment(accessor):
 
 @pytest.mark.asyncio
 async def test_stat_not_found(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[],
-    ):
-        with patch(
-            "mirage.core.gmail.readdir.list_messages",
-            new_callable=AsyncMock,
-            return_value=([], None),
-        ):
-            with pytest.raises(FileNotFoundError):
-                await _stat_at(accessor, "/INBOX/nonexistent.gmail.json")
+    with serve(gmail=StubGmail(list_labels=AsyncMock(return_value=[]))):
+        with pytest.raises(FileNotFoundError):
+            await _stat_at(accessor, "/INBOX/nonexistent.gmail.json")
 
 
 @pytest.mark.asyncio
 async def test_stat_unknown_top_level_raises(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[{"type": "system", "id": "INBOX"}],
+    with serve(
+        gmail=StubGmail(
+            list_labels=AsyncMock(
+                return_value=[{"type": "system", "id": "INBOX"}]
+            )
+        )
     ):
         with pytest.raises(FileNotFoundError):
             await _stat_at(accessor, "/NoSuchLabel")
@@ -173,10 +162,12 @@ async def test_stat_unknown_top_level_raises(accessor):
 
 @pytest.mark.asyncio
 async def test_stat_real_label_via_api(accessor):
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        return_value=[{"type": "system", "id": "STARRED"}],
+    with serve(
+        gmail=StubGmail(
+            list_labels=AsyncMock(
+                return_value=[{"type": "system", "id": "STARRED"}]
+            )
+        )
     ):
         result = await _stat_at(accessor, "/STARRED")
     assert result.type == FileType.DIRECTORY
@@ -186,11 +177,7 @@ async def test_stat_real_label_via_api(accessor):
 @pytest.mark.asyncio
 async def test_stat_propagates_parent_refresh_failure(accessor):
     failure = RuntimeError("gmail unavailable")
-    with patch(
-        "mirage.core.gmail.readdir.list_labels",
-        new_callable=AsyncMock,
-        side_effect=failure,
-    ):
+    with serve(gmail=StubGmail(list_labels=AsyncMock(side_effect=failure))):
         with pytest.raises(RuntimeError, match="gmail unavailable"):
             await _stat_at(
                 accessor, "/INBOX/2026-04-12/missing__x1.gmail.json"

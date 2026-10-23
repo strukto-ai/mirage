@@ -47,7 +47,7 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
             datetime.now(timezone.utc) + timedelta(hours=1),
         )
         with patch(
-            f"mirage.core.{module}.read.google_get",
+            f"mirage.core.{module}.api.google_get",
             new=AsyncMock(return_value={"title": "needle\0tail"}),
         ):
             io = await ws.shell(f"grep -I needle /drive/{name}")

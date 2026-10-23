@@ -20,7 +20,6 @@ import { recordQueries } from '../../utils/record_search.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { GoogleApiError } from './client.ts'
 import { RENDERED_WORDS, TOP_LEVEL_DIRS } from './constants.ts'
-import { searchFiles } from './drive.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -75,7 +74,7 @@ export async function filesContaining<A extends GoogleApiAccessor>(
   try {
     const named = new Set<string>()
     for (const query of queries) {
-      const answer = await searchFiles(accessor.tokenManager, query, [], mime)
+      const answer = await accessor.drive.searchFiles(query, [], mime)
       if (!answer.complete) return null
       for (const id of answer.ids) named.add(id)
     }

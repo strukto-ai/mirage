@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { API, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
-
-vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
+import { API, installCalendar, makeAccessor, spec } from '../../../tests/core/gcal/_test_util.ts'
 
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
 const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')
@@ -47,6 +45,7 @@ async function unlink(accessor: GCalAccessor, path: PathSpec): Promise<void> {
 
 beforeEach(() => {
   API.reset()
+  installCalendar()
 })
 
 describe('gcal unlink', () => {

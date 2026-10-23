@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,6 +22,8 @@ from mirage.core.gdocs.rename import rename
 from mirage.core.google.rename import app_title
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
 
 MODIFIED = "2026-10-01T09:00:00.000Z"
 OLD = "2026-10-01_Old_Plan__doc1.gdoc.json"
@@ -38,15 +40,16 @@ def spec(virtual: str) -> PathSpec:
 
 @pytest.fixture
 def patched():
+    patched = AsyncMock()
     with (
-        patch(
-            "mirage.core.google.rename.get_file",
-            new_callable=AsyncMock,
-            return_value={"id": "doc1", "modifiedTime": MODIFIED},
+        serve(
+            drive=StubDrive(
+                get_file=AsyncMock(
+                    return_value={"id": "doc1", "modifiedTime": MODIFIED}
+                ),
+                patch_file=patched,
+            )
         ),
-        patch(
-            "mirage.core.google.rename.patch_file", new_callable=AsyncMock
-        ) as patched,
     ):
         yield patched
 
@@ -82,7 +85,7 @@ def test_only_a_name_the_listing_renders_back_gives_a_title(name, title):
 @pytest.mark.asyncio
 async def test_rename_sets_the_title_and_keeps_the_modified_time(patched):
     await renamed(f"/gdocs/owned/{NEW}")
-    assert patched.await_args.args[1:] == (
+    assert patched.await_args.args == (
         "doc1",
         {"name": "New_Plan", "modifiedTime": MODIFIED},
     )

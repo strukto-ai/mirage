@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,6 +22,9 @@ from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.gdrive_api import StubDrive
+from tests.fixtures.google_api import serve
+from tests.fixtures.gslides_api import StubSlides
 from tests.fixtures.mounted import Mounted
 
 
@@ -42,15 +45,13 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
         }
     ]
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            return_value=files[0],
-        ),
-        patch(
-            "mirage.core.gslides.read.read_presentation",
-            new_callable=AsyncMock,
-            return_value=b'{"presentationId":"slide1"}',
+        serve(
+            drive=StubDrive(get_file=AsyncMock(return_value=files[0])),
+            slides=StubSlides(
+                read_presentation=AsyncMock(
+                    return_value=b'{"presentationId":"slide1"}'
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -68,15 +69,17 @@ async def test_a_read_no_listing_named_resolves_by_id(accessor):
 @pytest.mark.asyncio
 async def test_read_missing_file_raises_by_id(accessor):
     with (
-        patch(
-            "mirage.core.google.entry.get_file",
-            new_callable=AsyncMock,
-            side_effect=FileNotFoundError("missing"),
-        ),
-        patch(
-            "mirage.core.gslides.read.read_presentation",
-            new_callable=AsyncMock,
-            side_effect=AssertionError("should not call read_presentation"),
+        serve(
+            drive=StubDrive(
+                get_file=AsyncMock(side_effect=FileNotFoundError("missing"))
+            ),
+            slides=StubSlides(
+                read_presentation=AsyncMock(
+                    side_effect=AssertionError(
+                        "should not call read_presentation"
+                    )
+                )
+            ),
         ),
     ):
         path = PathSpec(
@@ -109,20 +112,16 @@ async def test_read_records_the_token_stat_reports(accessor, stamp, token):
     scope = RecordingScope()
     try:
         with (
-            patch(
-                "mirage.core.google.readdir.list_all_files",
-                new_callable=AsyncMock,
-                return_value=([item], True),
-            ),
-            patch(
-                "mirage.core.google.entry.get_file",
-                new_callable=AsyncMock,
-                return_value=item,
-            ),
-            patch(
-                "mirage.core.gslides.read.read_presentation",
-                new_callable=AsyncMock,
-                return_value=b'{"presentationId":"d1"}',
+            serve(
+                drive=StubDrive(
+                    list_all_files=AsyncMock(return_value=([item], True)),
+                    get_file=AsyncMock(return_value=item),
+                ),
+                slides=StubSlides(
+                    read_presentation=AsyncMock(
+                        return_value=b'{"presentationId":"d1"}'
+                    )
+                ),
             ),
         ):
             (target,) = await mounted.readdir("/owned")

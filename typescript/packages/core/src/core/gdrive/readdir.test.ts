@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
@@ -20,11 +20,14 @@ import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixtu
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { DriveFile } from '../google/drive.ts'
 import {
+  FakeDrive,
   type StubDrive,
+  driveError,
   makeGDriveAccessor,
   stubDrive,
 } from '../../../tests/core/gdrive/_test_util.ts'
-import { readdir } from './readdir.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { liveRow, readdir } from './readdir.ts'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
@@ -181,13 +184,17 @@ describe('readdir shared drives', () => {
     expect(listed.get('Team [Shared Drive 2]')?.extra.file_id).toBe('drive3')
   })
 
-  it('answers a root short of its shared drives as partial', async () => {
+  it.each([
+    ['forbidden', driveError(403, 'Insufficient scope')],
+    ['dropped', new TypeError('fetch failed')],
+    ['timeout', new DOMException('The operation timed out.', 'TimeoutError')],
+  ])('answers a root short of its shared drives as partial: %s', async (_name, failure) => {
     // A short root listing must not be kept as the directory: it would hold
     // the mount My-Drive-only until it expires, long after the cause (a
     // missing scope) is fixed. The rows are real, so they come back as a
     // partial listing, and the next readdir retries enumeration.
     drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
-    drive.listSharedDrives.mockRejectedValue(new Error('no scope'))
+    drive.listSharedDrives.mockRejectedValue(failure)
     const short = await readdir(makeAccessor(), ROOT)
     expect(short).toBeInstanceOf(DirListing)
     expect((short as DirListing).partial).toBe(true)
@@ -196,6 +203,14 @@ describe('readdir shared drives', () => {
     const full = await readdir(makeAccessor(), ROOT)
     expect(full).not.toBeInstanceOf(DirListing)
     expect(rows(full).has('Team')).toBe(true)
+  })
+
+  it('raises any other fault in listing the shared drives', async () => {
+    // Only Drive refusing or the network failing makes the root partial; any
+    // other fault is raised, not hidden behind a My-Drive-only listing.
+    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
+    drive.listSharedDrives.mockRejectedValue(new RangeError('nextPageToken'))
+    await expect(readdir(makeAccessor(), ROOT)).rejects.toThrow(RangeError)
   })
 
   it('leaves a shared drive root without a token', async () => {
@@ -285,5 +300,39 @@ describe('readdir rows', () => {
     expect(native?.extra.source_size).toBe(9999)
     expect('md5_checksum' in (native?.extra ?? {})).toBe(false)
     expect('head_revision_id' in (native?.extra ?? {})).toBe(false)
+  })
+})
+
+// Mirrors python's test_a_listed_file_deleted_since_is_looked_up_again.
+describe('a listed file deleted since', () => {
+  it.each([true, false])('is looked up again (replaced: %s)', async (replaced) => {
+    // Drive answers 404 for the id a listing named once another client
+    // deletes the file; the folder is listed again, and what it names at the
+    // path now answers, null for nothing.
+    const fake = new FakeDrive()
+    const accessor = makeGDriveAccessor(fake)
+    const folder = fake.folder('docs')
+    const listedId = fake.add('a.txt', folder)
+    const path = PathSpec.fromStrPath('/docs/a.txt')
+    const listed = await entryAt(readdir, accessor, path)
+    await fake.deleteFile(listedId)
+    const made = replaced ? fake.add('a.txt', folder) : null
+    const row = await liveRow(accessor, path, listed)
+    if (made === null) expect(row).toBeNull()
+    else expect(row?.extra.file_id).toBe(made)
+  })
+
+  it('raises a refused lookup of a listed file', async () => {
+    // Only Drive's 404 sends the folder to be listed again; a refusal
+    // reaches the caller as it is.
+    const fake = new FakeDrive()
+    const accessor = makeGDriveAccessor(fake)
+    const folder = fake.folder('docs')
+    fake.add('a.txt', folder)
+    const path = PathSpec.fromStrPath('/docs/a.txt')
+    const listed = await entryAt(readdir, accessor, path)
+    const refused = driveError(403, 'Forbidden')
+    vi.spyOn(fake, 'getFile').mockRejectedValue(refused)
+    await expect(liveRow(accessor, path, listed)).rejects.toBe(refused)
   })
 })

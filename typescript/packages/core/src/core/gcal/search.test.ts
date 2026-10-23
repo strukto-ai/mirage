@@ -16,14 +16,13 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { JsonValue } from '../../types.ts'
 import {
   API,
-  CLIENT,
-  PRIMARY,
+  CALENDAR,
   event,
+  installCalendar,
   makeAccessor,
+  PRIMARY,
   spec,
 } from '../../../tests/core/gcal/_test_util.ts'
-
-vi.mock('./client.ts', async () => (await import('../../../tests/core/gcal/_test_util.ts')).CLIENT)
 
 const { filesContaining } = await import('./search.ts')
 const { PAGE_LIMIT } = await import('./client.ts')
@@ -53,6 +52,7 @@ async function ids(
 
 beforeEach(() => {
   API.reset()
+  installCalendar()
   API.calendars = [PRIMARY]
   API.events = EVENTS
 })
@@ -98,8 +98,8 @@ it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
   'reads every file when a search fails with %s',
   async (error) => {
     const listEvents = vi
-      .spyOn(CLIENT, 'listEvents')
-      .mockImplementation((_tm, calendarId, timeMin, timeMax, timeZone, scope, query) =>
+      .spyOn(CALENDAR, 'listEvents')
+      .mockImplementation((calendarId, timeMin, timeMax, timeZone, scope, query) =>
         query === undefined
           ? Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope))
           : Promise.reject(error),
