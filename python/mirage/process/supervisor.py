@@ -10,6 +10,7 @@ from mirage.process.handle import ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
 from mirage.process.view import ProcessView
 from mirage.types import PathSpec
+from mirage.utils.ids import IdSource
 
 
 class ProcessSupervisor:
@@ -17,9 +18,14 @@ class ProcessSupervisor:
 
     IDs are workspace-local and never reused. Exited runners leave this
     live registry; holders of their handles retain the final result.
+
+    Args:
+        ids (IdSource | None): where a process's execution id is drawn
+            when its caller names none; None means the system source.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ids: IdSource | None = None) -> None:
+        self._ids = ids
         self._next_pid = 1
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
         self._generations: dict[str, int] = {}
@@ -89,7 +95,7 @@ class ProcessSupervisor:
                     command,
                     cwd,
                     time.time(),
-                    execution_id=execution_id or new_execution_id(),
+                    execution_id=execution_id or new_execution_id(self._ids),
                     parent_pid=parent_pid,
                     group_id=group_id,
                 ),

@@ -4126,6 +4126,99 @@
       ]
     },
     {
+      "id": "failed_upload_fails_only_the_command_that_wrote",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "rejected-upload",
+            "config": {
+              "message": "upload refused: 503"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "echo once > /data/r.txt 2>/dev/null; echo \"write=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "write=1\n",
+              "stderr": "/data/r.txt: upload refused: 503\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo once 2>/dev/null > /data/r.txt; echo \"write=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "write=1\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo once >> /data/r.txt || echo ran",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "ran\n",
+              "stderr": "/data/r.txt: upload refused: 503\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "exec 3> /data/r.txt; echo \"exec=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "exec=1\n",
+              "stderr": "/data/r.txt: upload refused: 503\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "touch /data/r3.txt 2>/dev/null; echo \"touch=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "touch=1\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "touch /data/r3.txt; echo \"touch=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "touch=1\n",
+              "stderr": "touch: cannot touch '/data/r3.txt': upload refused: 503\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "echo once | tee /data/r.txt >/dev/null 2>&1; echo \"tee=$?\"",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "tee=1\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "stream_grep_quiet_closes_without_fetching_tail",
       "settings": {
         "mounts": {

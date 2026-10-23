@@ -625,7 +625,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const recursive = fieldsOf(options).recursive === true
     // A mount root is refused however it is spelled (`/data/.`), before
     // the stat a backend may answer for that spelling or not.
-    if (this.ws.registry.isMountRoot(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
+    if (this.ws.vfs.isMount(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
     let st: VFSStat
     try {
       st = await this.files.stat(path, true)
@@ -666,7 +666,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     top: string,
     where: string,
   ): Promise<void> {
-    if (this.ws.registry.isMountRoot(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
+    if (this.ws.vfs.isMount(posix.normalize(path))) throw refusal('EBUSY', 'rm', path)
     if (isDir) {
       this.held(path, where)
       let rows: VFSEntry[]
@@ -700,7 +700,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   async rmdir(path: string): Promise<void> {
     // rmdir(2) on a mount point is EBUSY. A mount root is the
     // deployment's own, which the shell's rm refuses the same way.
-    if (this.ws.registry.isMountRoot(posix.normalize(path))) {
+    if (this.ws.vfs.isMount(posix.normalize(path))) {
       throw refusal('EBUSY', 'rmdir', path)
     }
     await this.files.rmdir(path)
@@ -988,9 +988,10 @@ export function patchNodeFs(ws: Workspace): () => void {
       const path = mountedIn(name, args)
       if (path === null) return original(...args)
       // existsSync answers false where it cannot look, as node's does for
-      // any path whose stat fails; a mount's root is the one name it
-      // knows is there without asking.
-      if (name === 'exists') return ws.registry.isMountRoot(path)
+      // any path whose stat fails; the root of a mount the session sees
+      // is the one name it knows is there without asking, unless a `..`
+      // in the spelling walks through a name it has not checked.
+      if (name === 'exists') return !path.split('/').includes('..') && ws.vfs.isMount(path)
       throw syncRefusal(`${name}Sync`, path)
     })
   }

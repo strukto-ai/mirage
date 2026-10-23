@@ -237,6 +237,7 @@ async def run_on_mount(
             flag_kwargs,
             Context(
                 diff=registry.diff,
+                ids=registry.ids,
                 stdin=stdin,
                 cwd=PathSpec.from_str_path(session.cwd),
                 vfs=Files(

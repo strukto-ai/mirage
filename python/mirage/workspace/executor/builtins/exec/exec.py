@@ -19,8 +19,7 @@ from operator import itemgetter
 from typing import Any
 
 from mirage.context import reset_program_invocation, set_program_invocation
-from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror
+from mirage.errors.fs import is_aborting, strerror_of
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import PipeInput, SharedInput, share
 from mirage.io.errors import PipeClosed
@@ -347,7 +346,11 @@ async def _install_descriptor(
                     redirect.append,
                     file=file,
                 )
-    except FS_ERRORS as exc:
+    except PipeClosed:
+        raise
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
         return _error_line(scope.raw_path, exc)
     return None
 
@@ -385,15 +388,14 @@ async def _roll_back(
     )
 
 
-def _error_line(label: str, exc: OSError) -> bytes:
+def _error_line(label: str, exc: Exception) -> bytes:
     """bash's line for a redirect target it could not open.
 
     Args:
         label (str): the target as typed.
-        exc (OSError): what the dispatcher raised.
+        exc (Exception): what the dispatcher raised.
     """
-    strerror = fs_strerror(exc)
-    return encode_text(f"{label}: {strerror}\n" if strerror else f"{label}\n")
+    return encode_text(f"{label}: {strerror_of(exc)}\n")
 
 
 def _exec_failure(
@@ -748,7 +750,11 @@ async def _append(dispatch: DispatchFn, target: str, data: ByteSource) -> None:
     scope = _to_scope(target)
     try:
         await dispatch("append", scope, data=data)
-    except FS_ERRORS as exc:
+    except PipeClosed:
+        raise
+    except Exception as exc:
+        if is_aborting(exc):
+            raise
         logger.debug("exec write failed for %s: %s", target, exc)
 
 

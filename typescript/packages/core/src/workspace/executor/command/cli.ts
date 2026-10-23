@@ -53,6 +53,7 @@ import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { optionError, parseFlags } from './flags.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import type { IdSource } from '../../../utils/ids.ts'
 
 // A textual rest operand is a CLI node's pass-through form: parsed under
 // unknownIsOperand, it takes the undeclared dashed tokens the node does not
@@ -257,6 +258,8 @@ export interface CLIContext {
    * program may have gone past; absent outside a workspace.
    */
   settle?: (runtime: Runtime) => Promise<void>
+  /** The workspace's source, which the leaf's `ctx.ids` draws from. */
+  ids?: IdSource
 }
 
 /**
@@ -669,6 +672,7 @@ export async function runWalked(
     ...(context.session !== undefined ? { session: context.session } : {}),
     ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.shell !== undefined ? { shell } : {}),
+    ...(context.ids === undefined ? {} : { ids: context.ids }),
   }
   let out: CommandFnResult
   try {

@@ -328,6 +328,28 @@ class TrackedStreamVFS extends CachedRAMVFS {
   }
 }
 
+/**
+ * A store whose uploads fail with its own error, no fs code, as a Drive 503
+ * or an S3 client's error on commit does.
+ */
+class RejectedUploadVFS extends RAMVFS {
+  constructor(private readonly message: string) {
+    super()
+  }
+
+  override write(): Promise<void> {
+    return Promise.reject(new Error(this.message))
+  }
+
+  override append(): Promise<void> {
+    return Promise.reject(new Error(this.message))
+  }
+
+  override pwrite(): Promise<void> {
+    return Promise.reject(new Error(this.message))
+  }
+}
+
 /** A registered CLI exercising stdin, deferred status, and producer closure. */
 class TrackedStreamCLI {
   pulls = 0
@@ -390,6 +412,11 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
     return Promise.resolve(vfs)
   })
   register('listed-ram', () => Promise.resolve(new ListedRAMVFS()))
+  register('rejected-upload', (config) =>
+    Promise.resolve(
+      new RejectedUploadVFS((config.message as string | undefined) ?? 'upload refused'),
+    ),
+  )
   register('cached-ram', (config) => {
     const vfs = new CachedRAMVFS()
     const files = (config.files ?? {}) as Record<string, string>

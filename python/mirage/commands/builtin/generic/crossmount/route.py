@@ -43,6 +43,7 @@ from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.types import CheckFn, PathSpec
+from mirage.utils.ids import IdSource
 from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.files import Files
 
@@ -64,6 +65,7 @@ async def handle_cross_mount(
     check_unlink: CheckFn | None = None,
     follow: FollowOperands | None = None,
     diff: DiffComputer | None = None,
+    ids: IdSource | None = None,
 ) -> CrossResult:
     """Run a command whose path operands span mounts.
 
@@ -175,6 +177,7 @@ async def handle_cross_mount(
                 argv,
                 check_unlink,
                 diff=diff,
+                ids=ids,
             )
         if strategy is Strategy.STREAM:
             return await run_stream(

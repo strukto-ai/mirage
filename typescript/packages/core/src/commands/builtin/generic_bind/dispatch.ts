@@ -1,4 +1,5 @@
 import type { DiffComputer } from '../../../rs/diff_types.ts'
+import type { IdSource } from '../../../utils/ids.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,6 +73,7 @@ export async function runDispatch(
   argv: readonly string[] = [],
   follow?: FollowOperands,
   diff?: DiffComputer,
+  ids?: IdSource,
 ): Promise<[ByteSource | null, IOResult]> {
   return runWithCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
@@ -83,6 +85,7 @@ export async function runDispatch(
       ).servedBy(null),
       argv,
       ...(diff === undefined ? {} : { diff }),
+      ...(ids === undefined ? {} : { ids }),
       ...(signal === undefined ? {} : { signal }),
     })
     if (result === null) return [null, new IOResult()]

@@ -86,6 +86,7 @@ async def _shuf(
         # shuf: without a write of its own it is refused at ``-o``.
         write_bytes=(files.write if files.answers("write") else None),
         root=mount_root(ctx),
+        ids=ctx.ids,
     )
 
 
