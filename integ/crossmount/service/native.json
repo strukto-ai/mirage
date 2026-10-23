@@ -782,10 +782,10 @@
       "command": "calls /a >/dev/null; calls /b >/dev/null; timeout 0.1 rev /a/first.slow /b/second.slow; echo rc=$?; calls /a | grep \"^closed \"",
       "expect": {
         "exit": 0,
-        "stdout": "rc=124\nclosed /a/first.slow\n",
+        "stdout": "/a/first.slow\nrc=124\nclosed /a/first.slow\n",
         "stderr": ""
       },
-      "note": "The timeout builtin discards the cancelled invocation output; native stream cleanup must still run."
+      "note": "timeout keeps what the cut command had printed, as the pinned image's timeout does; native stream cleanup must still run."
     },
     {
       "id": "xm_native_stream_early_close",
