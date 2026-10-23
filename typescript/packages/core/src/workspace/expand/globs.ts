@@ -586,9 +586,17 @@ export async function resolveGlobs(
           }
           resolved = kept
         }
-        const limit = mount.vfs.fullScanLimit
-        if (limit >= 0 && resolved.length > limit) {
-          throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
+        // Each match counts against the mount serving it, as a word can
+        // reach into a mount below its own.
+        const counts = new Map<string, number>()
+        for (const match of resolved) {
+          const owner = mountOf(registry, match.virtual, mount)
+          const count = (counts.get(owner.prefix) ?? 0) + 1
+          counts.set(owner.prefix, count)
+          const limit = owner.vfs.fullScanLimit
+          if (limit >= 0 && count > limit) {
+            throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
+          }
         }
         if (resolved.length === 0) {
           // bash's three answers to a zero-match glob: the literal word

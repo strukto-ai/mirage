@@ -3531,6 +3531,63 @@ describe('a hide filters a one-call read', () => {
     },
   )
 
+  // Twin of test_a_glob_counts_each_match_against_its_own_mount.
+  it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
+    const top = new RAMVFS({ fullScanLimit: -1 })
+    top.store.dirs.add('/b')
+    top.store.files.set('/b/t.txt', new TextEncoder().encode('t\n'))
+    const remote = new RAMVFS({ fullScanLimit: 2 })
+    for (let i = 0; i < 3; i++) {
+      remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
+    }
+    const ws = new Workspace(
+      { '/a': top, '/a/remote': remote },
+      { shellParser: await getTestParser() },
+    )
+    const refused = '/a/*/*.txt: matches more than 2 files (full_scan_limit); narrow the path'
+    try {
+      const out = await ws.shell(`${command} /a/*/*.txt; echo $?`)
+      expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+        '126\n',
+        `${command}: Argument list too long\n${command}: ${refused}\n`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_rm_r_leaves_the_files_a_nested_mount_covers.
+  it.each([LimitedRAM, ListedRAM])(
+    'rm -r leaves the files a nested mount covers (%o)',
+    async (cls) => {
+      const vfs = new cls()
+      vfs.store.dirs.add('/d')
+      vfs.store.dirs.add('/d/sub')
+      vfs.store.files.set('/d/x.txt', new TextEncoder().encode('x\n'))
+      for (let i = 0; i < 3; i++) {
+        vfs.store.files.set(`/d/sub/c${String(i)}.txt`, new TextEncoder().encode('c\n'))
+      }
+      const ws = new Workspace(
+        { '/ram': vfs, '/ram/d/sub': new RAMVFS() },
+        { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      )
+      try {
+        const out = await ws.shell('rm -r /ram/d; echo $?')
+        expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
+          '1\n',
+          "rm: skipping '/ram/d/sub', since it's on a different device\n",
+        ])
+      } finally {
+        await ws.close()
+      }
+      expect([...vfs.store.files.keys()].sort()).toEqual([
+        '/d/sub/c0.txt',
+        '/d/sub/c1.txt',
+        '/d/sub/c2.txt',
+      ])
+    },
+  )
+
   // Twin of test_a_copy_past_the_full_scan_limit_is_refused.
   it.each([LimitedRAM, ListedRAM])('refuses a copy past the full scan limit (%o)', async (cls) => {
     const ws = new Workspace(

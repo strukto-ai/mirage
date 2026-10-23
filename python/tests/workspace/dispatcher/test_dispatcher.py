@@ -3182,6 +3182,52 @@ async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
         )
 
 
+NESTED_REFUSED = (
+    "/a/*/*.txt: matches more than 2 files (full_scan_limit); narrow the path"
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["cat", "echo"])
+async def test_a_glob_counts_each_match_against_its_own_mount(command):
+    top = RAMVFS(full_scan_limit=-1)
+    top._store.dirs.add("/b")
+    top._store.files["/b/t.txt"] = b"t\n"
+    remote = RAMVFS(full_scan_limit=2)
+    for i in range(3):
+        remote._store.files[f"/r{i}.txt"] = b"r\n"
+    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+        out = await ws.shell(f"{command} /a/*/*.txt; echo $?")
+        assert (await out.stdout_str(), await out.stderr_str()) == (
+            "126\n",
+            f"{command}: Argument list too long\n"
+            f"{command}: {NESTED_REFUSED}\n",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
+async def test_rm_r_leaves_the_files_a_nested_mount_covers(cls):
+    vfs = cls()
+    vfs._store.dirs.update({"/d", "/d/sub"})
+    vfs._store.files["/d/x.txt"] = b"x\n"
+    for i in range(3):
+        vfs._store.files[f"/d/sub/c{i}.txt"] = b"c\n"
+    with Workspace(
+        {"/ram/": vfs, "/ram/d/sub/": RAMVFS()}, mode=MountMode.WRITE
+    ) as ws:
+        out = await ws.shell("rm -r /ram/d; echo $?")
+        assert (await out.stdout_str(), await out.stderr_str()) == (
+            "1\n",
+            "rm: skipping '/ram/d/sub', since it's on a different device\n",
+        )
+    assert sorted(vfs._store.files) == [
+        "/d/sub/c0.txt",
+        "/d/sub/c1.txt",
+        "/d/sub/c2.txt",
+    ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
 async def test_a_copy_past_the_full_scan_limit_is_refused(cls):

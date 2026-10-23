@@ -726,11 +726,18 @@ async def resolve_globs(
                         ):
                             kept.append(p)
                     resolved = kept
-                if 0 <= mount.vfs.full_scan_limit < len(resolved):
-                    refused = GlobLimitError(
-                        unmark_globs(typed.raw_path), mount.vfs.full_scan_limit
-                    )
-                    raise TooManyMatches(str(refused))
+                # Each match counts against the mount serving it, as a
+                # word can reach into a mount below its own.
+                counts: dict[str, int] = {}
+                for match in resolved:
+                    owner = _mount_of(registry, match.virtual, mount)
+                    counts[owner.prefix] = counts.get(owner.prefix, 0) + 1
+                    limit = owner.vfs.full_scan_limit
+                    if 0 <= limit < counts[owner.prefix]:
+                        refused = GlobLimitError(
+                            unmark_globs(typed.raw_path), limit
+                        )
+                        raise TooManyMatches(str(refused))
                 if not resolved:
                     # bash's three answers to a zero-match glob: the
                     # literal word (default), nothing at all under

@@ -84,7 +84,11 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
           const probe = (spec: PathSpec): Promise<FileStat> => files.stat(spec)
           // -v names each entry before the tree goes in one call; a tree it
           // cannot list whole goes entry by entry, as does one on a mount
-          // without rm_r or one the dispatcher declines for the caller's view.
+          // without rm_r, one the dispatcher declines for the caller's view,
+          // and one holding a mount, whose covered keys one call would take
+          // with it.
+          const mounts = mountsOf(ctx)
+          const nested = mountPoints(mounts, p.virtual)
           const unlisted: string[] = []
           let listed = verbose
             ? (await walk(listing, probe, p, 'rm', unlisted)).map(({ path, kind }) => ({
@@ -92,7 +96,10 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
                 isDir: kind === FileType.DIRECTORY,
               }))
             : []
-          let declined = unlisted.length > 0 || !files.answers('rm_r')
+          let declined =
+            unlisted.length > 0 ||
+            (mounts?.descendants(p.virtual).length ?? 0) > 0 ||
+            !files.answers('rm_r')
           if (!declined) {
             try {
               await files.rmR(p)
@@ -108,7 +115,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
               stat: probe,
               unlink: (spec) => files.unlink(spec),
               rmdir: (spec) => files.rmdir(spec),
-              mounts: mountsOf(ctx),
+              mounts,
               force,
             }))
             for (const [entry, why] of failures) {
@@ -118,7 +125,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
           entryLines = verbose ? removalLines(listed, p) : []
           // A removal never crosses into a mount below, so it says so as
           // GNU's --one-file-system does.
-          for (const root of mountPoints(mountsOf(ctx), p.virtual))
+          for (const root of nested)
             errors.push(
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )

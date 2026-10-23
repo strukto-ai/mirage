@@ -101,8 +101,12 @@ async def rm(
                     await before_full_scan(dispatch_of(ctx), p, "rm")
                     # -v names each entry before the tree goes in one
                     # call; a tree it cannot list whole goes entry by
-                    # entry, as does one on a mount without rm_r or one
-                    # the dispatcher declines for the caller's view.
+                    # entry, as does one on a mount without rm_r, one
+                    # the dispatcher declines for the caller's view, and
+                    # one holding a mount, whose covered keys one call
+                    # would take with it.
+                    mounts = mounts_of(ctx)
+                    nested = mount_points(mounts, p.virtual)
                     unlisted: list[str] = []
                     listed = (
                         [
@@ -114,7 +118,12 @@ async def rm(
                         if v
                         else []
                     )
-                    declined = bool(unlisted) or not files.answers("rm_r")
+                    declined = (
+                        bool(unlisted)
+                        or mounts is not None
+                        and bool(mounts.descendants(p.virtual))
+                        or not files.answers("rm_r")
+                    )
                     if not declined:
                         try:
                             await files.rm_r(p)
@@ -128,7 +137,7 @@ async def rm(
                             stat=stat,
                             unlink=files.unlink,
                             rmdir=files.rmdir,
-                            mounts=mounts_of(ctx),
+                            mounts=mounts,
                             force=f,
                         )
                         errors.extend(
@@ -142,10 +151,7 @@ async def rm(
                     errors.extend(
                         f"rm: skipping '{operand_spelling(root, p)}', "
                         "since it's on a different device"
-                        for root in mount_points(
-                            mounts_of(ctx),
-                            p.virtual,
-                        )
+                        for root in nested
                     )
                     if failures:
                         verbose_parts.extend(entry_lines)
