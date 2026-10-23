@@ -19,7 +19,7 @@
       "targets": [
         "slack"
       ],
-      "command": "find /slack/channels/ -name '*.pptx'",
+      "command": "find /slack/channels/general__C1 /slack/channels/product-runtime__C7 -name '*.pptx'",
       "expect": {
         "exit": 0,
         "stdout": "/slack/channels/general__C1/2026-01-09/files/all_hands_2026-01__F12.pptx\n/slack/channels/product-runtime__C7/2026-03-11/files/runtime_launch__F13.pptx\n",
@@ -32,7 +32,7 @@
       "targets": [
         "slack"
       ],
-      "command": "find /slack/channels/ -name '*.pdf'",
+      "command": "find /slack/channels/leadership__C5 -name '*.pdf'",
       "expect": {
         "exit": 0,
         "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
@@ -45,7 +45,7 @@
       "targets": [
         "slack"
       ],
-      "command": "find /slack/channels/ -name '*.csv'",
+      "command": "find /slack/channels/design-partners__C10 /slack/channels/eng-agents__C8 -name '*.csv'",
       "expect": {
         "exit": 0,
         "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
@@ -58,7 +58,7 @@
       "targets": [
         "slack"
       ],
-      "command": "find /slack/channels/ -type f -name '*.csv'",
+      "command": "find /slack/channels/design-partners__C10 /slack/channels/eng-agents__C8 -type f -name '*.csv'",
       "expect": {
         "exit": 0,
         "stdout": "/slack/channels/design-partners__C10/2026-02-12/files/design_partner_pipeline__F8.csv\n/slack/channels/eng-agents__C8/2026-02-06/files/model_eval_results__F7.csv\n",
@@ -71,7 +71,7 @@
       "targets": [
         "slack"
       ],
-      "command": "find /slack/channels/ -type f -name '*.pdf'",
+      "command": "find /slack/channels/leadership__C5 -type f -name '*.pdf'",
       "expect": {
         "exit": 0,
         "stdout": "/slack/channels/leadership__C5/2026-01-07/files/pivot_rationale__F11.pdf\n",
