@@ -15,7 +15,7 @@
 import { ProcessSupervisor } from '../../process/supervisor.ts'
 import { PathSpec } from '../../types.ts'
 import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
-import { KILLED_EXIT_CODE } from './constants.ts'
+import { KILLED_EXIT_CODE, STOP_WAIT_SECONDS } from './constants.ts'
 import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { encodeText } from '../bytes.ts'
 
@@ -35,6 +35,18 @@ function isAbortError(err: unknown): boolean {
  * Status is set before the console is finished, so a reader released by
  * the ending chunk always sees settled fields.
  */
+/**
+ * The status a stopped job answers: the one its program exited with after
+ * handling the signal, when the job is that one program, else 128 plus
+ * the signal, KILL's 137 without one. Mirrors Python's `_stopped_status`.
+ */
+function stoppedStatus(job: Job): number {
+  const code = job.process?.programCode ?? null
+  if (job.simple && code !== null) return code
+  const signal = job.process?.signal ?? null
+  return signal === null ? KILLED_EXIT_CODE : 128 + signal
+}
+
 async function settle(run: JobRunner, job: Job): Promise<number> {
   let result: JobResult
   try {
@@ -43,10 +55,15 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
   } catch (err) {
     // A job killed while it was still running is already settled; the
     // runner unwinding afterwards must not reopen or relabel it.
-    if (job.status !== JobStatus.RUNNING) return isAbortError(err) ? job.exitCode : 1
+    if (job.status !== JobStatus.RUNNING) {
+      if (!isAbortError(err)) return 1
+      // Final only now the runner has ended: a program that handled the
+      // signal leaves its own status.
+      job.exitCode = stoppedStatus(job)
+      return job.exitCode
+    }
     if (isAbortError(err)) {
-      const signal = job.process?.signal ?? null
-      const code = signal === null ? KILLED_EXIT_CODE : 128 + signal
+      const code = stoppedStatus(job)
       job.status = JobStatus.KILLED
       job.exitCode = code
       await job.console.emit(Channel.STDERR, encodeText('Killed'))
@@ -162,6 +179,8 @@ export class JobTable {
     sessionId?: string
     parentPid?: number | null
     limit?: number | null
+    // The job is one simple command (`Job.simple`).
+    simple?: boolean
   }): Job {
     const sessionId = init.sessionId ?? ''
     const jobs = this.sessionJobs(sessionId)
@@ -202,6 +221,7 @@ export class JobTable {
         cwd: init.cwd,
         sessionId,
         console: jobConsole,
+        simple: init.simple ?? false,
       })
     } catch (error) {
       process.terminate()
@@ -373,6 +393,12 @@ export class JobTable {
    * `Killed` or the ending chunk is persisted. A restored job has no
    * task and its console already holds the ending chunk, so it
    * returns without waiting.
+   *
+   * A killed job's console ends at the kill, so its runner is joined
+   * too, for at most `STOP_WAIT_SECONDS`: what it started stops in that
+   * time (a handler finishes, a sandbox is reaped) and the status it
+   * leaves is the one answered, as bash's `wait` answers once the child
+   * has gone.
    */
   async wait(jobId: number, sessionId = ''): Promise<Job> {
     const job = this.get(jobId, sessionId)
@@ -381,6 +407,19 @@ export class JobTable {
     }
     if (job.task === null) return job
     await job.console.waitFinished()
+    if (job.process !== null) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const late = new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(null)
+        }, STOP_WAIT_SECONDS * 1000)
+      })
+      try {
+        await Promise.race([job.process.join(), late])
+      } finally {
+        clearTimeout(timer)
+      }
+    }
     return job
   }
 

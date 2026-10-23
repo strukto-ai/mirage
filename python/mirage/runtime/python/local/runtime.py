@@ -210,6 +210,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             env={**self.config.env, **env},
             children=self._children,
             output=output,
+            direct=True,
         )
         return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 

@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import os
+import shlex
 import signal
 import sys
 
@@ -160,9 +162,13 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
     assert await _ended(int(pid_file.read_text()))
 
 
-def _start_runner(supervisor: ProcessSupervisor, script: str):
+def _start_runner(
+    supervisor: ProcessSupervisor, script: str, direct: bool = False
+):
     async def run() -> int:
-        _, _, code = await run_cli("sh", None, ["-c", script], None)
+        _, _, code = await run_cli(
+            "sh", None, ["-c", script], None, direct=direct
+        )
         return code
 
     return supervisor.start(
@@ -208,6 +214,91 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
     assert not said.exists()
     assert info.exit_code == 137
     assert await _ended(child)
+
+
+# A child that is the program itself and exits on its own after a gentler
+# signal leaves its status with the runner; a client's (``docker exec``)
+# says nothing about the program, and a child the signal ended has none.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "direct,trap,signum,code",
+    [
+        (True, "trap 'exit 3' TERM; ", signal.SIGTERM, 3),
+        (False, "trap 'exit 3' TERM; ", signal.SIGTERM, None),
+        (True, "", signal.SIGTERM, None),
+        (True, "trap 'exit 3' TERM; ", signal.SIGKILL, None),
+    ],
+)
+async def test_a_direct_child_that_handles_the_signal_leaves_its_status(
+    tmp_path, direct, trap, signum, code
+):
+    pid_file = tmp_path / "pid"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"{trap}echo $$ > {pid_file}; while :; do sleep 0.05; done",
+        direct,
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signum)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert (info.exit_code, runner.program_code) == (128 + signum, code)
+
+
+# A kill reaches the program once, as bash's does: a handler that counts
+# its signals, or one already exiting, must not see a second.
+@pytest.mark.asyncio
+async def test_a_kill_signals_the_child_once(tmp_path):
+    pid_file, count = tmp_path / "pid", tmp_path / "count"
+    program = (
+        "import os, signal, sys, time\n"
+        "def stop(*_):\n"
+        f"    open({str(count)!r}, 'a').write('x\\n')\n"
+        "    time.sleep(0.2)\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n"
+    )
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert count.read_text() == "x\n"
+
+
+# macOS answers EPERM where Linux answers ESRCH for a group whose members
+# have all exited but are not yet reaped; either way the group is gone,
+# and the stop must not fail on it.
+@pytest.mark.asyncio
+async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
+    killpg = os.killpg
+
+    def darwin(pid: int, signum: int) -> None:
+        try:
+            killpg(pid, signum)
+        except ProcessLookupError:
+            raise PermissionError(
+                errno.EPERM, "Operation not permitted"
+            ) from None
+
+    monkeypatch.setattr(os, "killpg", darwin)
+    pid_file = tmp_path / "pid"
+    runner = _start_runner(
+        ProcessSupervisor(),
+        f"trap 'exit 0' TERM; echo $$ > {pid_file}; "
+        "while :; do sleep 0.05; done",
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert (info.exit_code, info.failure) == (143, None)
 
 
 # The grace is the group's: a descendant still handling the signal after

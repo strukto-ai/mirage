@@ -58,6 +58,7 @@ from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
+from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.types import Refusal
@@ -72,6 +73,7 @@ from mirage.workspace.executor.statement import (
     statement_stdin,
 )
 from mirage.workspace.executor.traps import inherit_traps
+from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import (
     SessionState,
@@ -195,6 +197,44 @@ def _job_streams(
                 for fd in (1, 2) if r.fd == FD_BOTH else (r.fd,):
                     fds[fd] = None
     return {stream for stream in fds.values() if stream is not None}
+
+
+def _one_program(left: TSNodeLike, session: SessionState) -> bool:
+    """Whether a job is one program, as bash runs ``cmd &`` as the program
+    itself: a simple command whose word names neither a function nor a
+    shell builtin a runtime cannot take (``eval``, ``source``), either of
+    which keeps a shell between the job and the program, and which the
+    signal ends. ``exec`` and ``command`` run the word after their
+    options in place, so that word is the one judged; ``command -v``
+    only looks it up. A word an expansion spells, or one still quoting a
+    character (``e\\val``), is not known before it runs, and words that
+    run commands of their own (``$( )``) run them as the job, so neither
+    is one.
+
+    Args:
+        left (TSNodeLike): the job's command.
+        session (SessionState): the session the job is forked from.
+    """
+    if not simple_command(left):
+        return False
+    invocations = command_invocations(left)
+    if len(invocations) != 1:
+        return False
+    head, args = invocations[0]
+    words = [head, *args]
+    while words and words[0] in ("exec", "command"):
+        wrapper, words = words[0], words[1:]
+        while words and words[0] is not None and words[0].startswith("-"):
+            if wrapper == "command" and set(words[0]) & {"v", "V"}:
+                return False
+            words = words[2:] if words[0] == "-a" else words[1:]
+    head = words[0] if words else None
+    return (
+        head is not None
+        and "\\" not in head
+        and (head not in SHELL_NAMES or head in CAPTURABLE_BUILTINS)
+        and head not in session.functions
+    )
 
 
 async def handle_background(
@@ -387,6 +427,7 @@ async def handle_background(
             session_id=session.session_id,
             parent_pid=session.process_id,
             limit=session.processes.max,
+            simple=_one_program(left, session),
         )
     except Exception as exc:
         release_job()

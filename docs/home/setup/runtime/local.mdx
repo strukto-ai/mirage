@@ -251,4 +251,5 @@ the host interpreter's Python version.
 ## Notes
 
 - A timeout kills the subprocess. `kill` sends it the signal it names, then
-  `KILL` a second later if it is still running.
+  `KILL` a second later if it is still running. A program that handles the
+  signal and exits gives `wait` its own exit status, as in Bash.

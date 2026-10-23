@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 
 import { ExecutionScope } from '../execution.ts'
@@ -47,6 +48,7 @@ import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionState } from '../session/session.ts'
+import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import { answerClosed, failedRead, statementStdin } from './statement.ts'
@@ -170,6 +172,40 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
   const streams = new Set<Channel | OwnedStream>()
   for (const stream of fds.values()) if (stream !== null) streams.add(stream)
   return streams
+}
+
+/**
+ * Whether a job is one program, as bash runs `cmd &` as the program
+ * itself: a simple command whose word names neither a function nor a shell
+ * builtin a runtime cannot take (`eval`, `source`), either of which keeps a
+ * shell between the job and the program, and which the signal ends. `exec`
+ * and `command` run the word after their options in place, so that word is
+ * the one judged; `command -v` only looks it up. A word an expansion
+ * spells, or one still quoting a character (`e\val`), is not known before
+ * it runs, and words that run commands of their own (`$( )`) run them as
+ * the job, so neither is one. Mirrors Python's `_one_program`.
+ */
+function oneProgram(left: TSNodeLike, session: SessionState): boolean {
+  if (!simpleCommand(left)) return false
+  const invocations = commandInvocations(left)
+  const first = invocations[0]
+  if (invocations.length !== 1 || first === undefined) return false
+  let words = [first[0], ...first[1]]
+  while (words[0] === 'exec' || words[0] === 'command') {
+    const wrapper = words[0]
+    words = words.slice(1)
+    while (words[0]?.startsWith('-') === true) {
+      if (wrapper === 'command' && /[vV]/.test(words[0])) return false
+      words = words.slice(words[0] === '-a' ? 2 : 1)
+    }
+  }
+  const head = words[0] ?? null
+  return (
+    head !== null &&
+    !head.includes('\\') &&
+    (!SHELL_NAMES.has(head) || CAPTURABLE_BUILTINS.has(head)) &&
+    !Object.hasOwn(session.functions, head)
+  )
 }
 
 export async function handleBackground(
@@ -339,6 +375,7 @@ export async function handleBackground(
       sessionId: session.sessionId,
       parentPid: session.processId,
       limit: session.processes.max,
+      simple: oneProgram(left, session),
     })
   } catch (err) {
     releaseProgram()

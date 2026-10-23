@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "id": "local_kill_waits_for_the_program_and_takes_its_status",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "python3",
+              "@external"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\nsaved\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import sys, time; open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill -9 %1; wait %1; echo $?; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "137\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; { python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"; echo after; } & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; f() { python3 -c \"$P\" \"$1\"; }; f \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\nsaved\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; eval 'python3 -c \"$P\" \"$F\"' & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "143\nsaved\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; exec python3 -c \"$P\" \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\nsaved\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; P='import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.3), open(sys.argv[1] + \".done\", \"w\").close(), sys.exit(0))); open(sys.argv[1], \"w\").close(); time.sleep(60)'; command python3 -c \"$P\" \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; kill %1; wait %1; echo $?; perl -e 'print -e $ARGV[0] ? qq(saved\\n) : qq(missing\\n)' \"$F.done\"; perl -e 'unlink @ARGV' \"$F\" \"$F.done\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\nsaved\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

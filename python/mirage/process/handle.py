@@ -34,6 +34,7 @@ class ProcessHandle:
         self._finished = finished
         self._cancel_children = cancel_children
         self._signal: int | None = None
+        self._program_code: int | None = None
         self._completion: Future[ProcessInfo] = Future()
         self.task = asyncio.create_task(
             run_with_execution(info.execution_id, run, self)
@@ -50,6 +51,24 @@ class ProcessHandle:
         """The signal the runner was stopped with, None while it runs."""
         with self._lock:
             return self._signal
+
+    @property
+    def program_code(self) -> int | None:
+        """The status a program the runner started exited with on its
+        own after the stop signal, None unless one did."""
+        with self._lock:
+            return self._program_code
+
+    def program_exited(self, code: int) -> None:
+        """Record that a program the runner started handled the stop
+        signal and exited: a job that is that one program reports its
+        status, as bash reports a child that handled the signal.
+
+        Args:
+            code (int): the program's exit status.
+        """
+        with self._lock:
+            self._program_code = code
 
     def terminate(self, signal: int = 9) -> bool:
         """Request cancellation without waiting for the runner to exit.
