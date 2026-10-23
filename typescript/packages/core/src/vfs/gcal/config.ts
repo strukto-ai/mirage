@@ -33,19 +33,37 @@ export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
   // One zone for the whole mount, not one per calendar: the Calendar UI
   // draws its whole grid in the primary zone, and per-calendar bucketing
   // would make the same day directory name mean different 24-hour windows
-  // on different calendars. Defaults to the primary calendar's zone.
-  timeZone: z.string().optional(),
-  bucketDays: z.literal([1, 7, 30]).default(1),
-  // Keep only calendars at or above this accessRole, e.g. "writer" for
-  // ones the agent can actually schedule into.
-  minAccessRole: z.string().optional(),
-  // Pin the day the rolling window centres on; test and snapshot use.
-  today: z.string().optional(),
-  // Let grep -w and rg -w read only the events Calendar's search names
-  // (`filesContaining`). Off by default: Calendar searches an event's text
-  // by word, and the listing then keeps each event's other fields to check
-  // them itself.
-  contentSearch: z.boolean().default(false),
+  // on different calendars.
+  timeZone: z
+    .string()
+    .optional()
+    .describe(
+      "IANA time zone the mount buckets every calendar's days in. Unset uses the primary calendar's zone.",
+    ),
+  bucketDays: z
+    .literal([1, 7, 30])
+    .default(1)
+    .describe(
+      'Days each date directory under a calendar holds: `1` names it by its day, `7` and `30` by its first and last day (`<first>--<last>`).',
+    ),
+  minAccessRole: z
+    .string()
+    .optional()
+    .describe(
+      'List only calendars where the account has at least this access role: `freeBusyReader`, `reader`, `writer` or `owner`. Unset lists every calendar.',
+    ),
+  today: z
+    .string()
+    .optional()
+    .describe(
+      "Day (`YYYY-MM-DD`) the default listing's 90-day future horizon is measured from, for tests and snapshots. Unset uses the current date in the mount's time zone.",
+    ),
+  contentSearch: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Let `grep -w` and `rg -w` read only the events Calendar search names. The listing then keeps each event's fields that search does not cover and checks them itself.",
+    ),
 }).refine(orderedTimes, timeRangeOrderError)
 
 export type GCalConfig = ConfigOf<typeof GCalConfigSchema>

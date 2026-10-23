@@ -32,6 +32,11 @@ with your data sources mounted at their respective paths.
 Use the shell tool for complex operations. \
 Use read/write/edit for simple file operations.
 """
+"""The default system prompt: how the Mirage filesystem differs from a plain one.
+
+``build_system_prompt`` starts from it; pass it as the agent's
+instructions when no mount description is needed.
+"""
 
 
 async def build_system_prompt(

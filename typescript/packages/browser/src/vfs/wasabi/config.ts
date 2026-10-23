@@ -12,10 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const WasabiConfigSchema = browserAliasSchema({})
+const WasabiConfigSchema = browserAliasSchema({
+  region: z.string().optional().meta({
+    description:
+      'Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.',
+    default: 'us-east-1',
+  }),
+})
 
 export type WasabiConfig = ConfigOf<typeof WasabiConfigSchema>
 

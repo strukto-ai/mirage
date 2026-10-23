@@ -15,11 +15,11 @@
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
-  secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
+import { ALIAS_SHAPE } from '../s3_alias.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export const GCS_ENDPOINT = 'https://storage.googleapis.com'
@@ -39,17 +39,15 @@ export interface GCSConfig {
 }
 
 const GCSConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  profile: z.string().optional(),
-  endpoint: z.string().optional(),
-  region: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  proxy: secretStr().optional(),
+  ...ALIAS_SHAPE,
+  region: z.string().optional().meta({
+    description: 'Region requests are signed for; GCS serves every region from one host.',
+    default: 'auto',
+  }),
+  endpoint: z.string().optional().meta({
+    description: 'Endpoint URL of the S3 interoperability API.',
+    default: 'https://storage.googleapis.com',
+  }),
 })
 
 // Only the redacted twin derives; the redactor fills in the region and

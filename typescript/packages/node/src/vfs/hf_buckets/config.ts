@@ -72,11 +72,23 @@ const HF_NORMALIZER: FieldNormalizer = {
 }
 
 const HfBucketsConfigSchema = z.object({
-  bucket: z.string(),
-  token: secretStr().optional(),
-  endpoint: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  keyPrefix: z.string().optional(),
+  bucket: z.string().describe('Bucket id in `namespace/name` form.'),
+  token: secretStr().optional().describe('Hugging Face access token.'),
+  endpoint: z.string().optional().meta({
+    description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
+    default: 'https://huggingface.co',
+  }),
+  timeoutMs: z.number().optional().meta({
+    description:
+      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
+    default: 30_000,
+  }),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Path inside the bucket that becomes the mount root; files outside it are not listed.',
+    ),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with
@@ -118,13 +130,41 @@ export interface HfRepoConfig {
 }
 
 const HfRepoConfigSchema = z.object({
-  repoId: z.string(),
-  token: secretStr().optional(),
-  endpoint: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  keyPrefix: z.string().optional(),
-  revision: z.string().optional(),
-  expandCommits: z.boolean().optional(),
+  repoId: z
+    .string()
+    .describe(
+      "Repository id as `namespace/name`, or a bare `name` that resolves against the token's owner.",
+    ),
+  token: secretStr()
+    .optional()
+    .describe(
+      'Hugging Face access token; unset sends anonymous requests, which reach public repositories only.',
+    ),
+  endpoint: z.string().optional().meta({
+    description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
+    default: 'https://huggingface.co',
+  }),
+  timeoutMs: z.number().optional().meta({
+    description:
+      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
+    default: 30_000,
+  }),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Path inside the repository that becomes the mount root; files outside it are not listed.',
+    ),
+  revision: z
+    .string()
+    .optional()
+    .describe('Branch, tag or commit the mount reads; unset reads `main`.'),
+  expandCommits: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether a listing asks the Hub for each file's last commit, a Hub file's only source of an mtime, which cuts a listing page from 1000 entries to 50. Unset fetches one expanded page and keeps it if the whole repository fits, otherwise lists without commits; `true` or `false` forces either.",
+    ),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with

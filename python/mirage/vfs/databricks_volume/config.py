@@ -32,12 +32,23 @@ class DatabricksVolumeConfig(BaseModel):
     )
 
     catalog: str
+    """Unity Catalog catalog name; one path segment, no `/`."""
     schema_name: str = Field(alias="schema")
+    """Unity Catalog schema name, `schema` in a config; one path segment,
+    no `/`."""
     volume: str
+    """Unity Catalog volume name; one path segment, no `/`."""
     root_path: str = "/"
+    """Subdirectory inside the volume that becomes the mount root; `..`
+    segments are refused."""
     host: str
+    """Workspace origin, `http://` or `https://`, with no path, query,
+    fragment or credentials."""
     token: SecretStr | TokenProvider
+    """Bearer token as a string, or a function, synchronous or
+    asynchronous, that returns one for each request."""
     timeout: int = Field(default=30, gt=0)
+    """Seconds one request may take before it fails."""
 
     @field_validator("catalog", "schema_name", "volume")
     @classmethod

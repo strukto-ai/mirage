@@ -42,11 +42,34 @@ export interface SharePointConfig extends MsGraphConfig {
 
 const SharePointConfigSchema = z.object({
   ...MSGRAPH_CONFIG_SHAPE,
-  siteFilter: z.string().optional(),
-  site: z.string().optional(),
-  drive: z.string().optional(),
-  keyPrefix: z.string().optional(),
-  contentSearch: z.boolean().optional(),
+  siteFilter: z.string().optional().meta({
+    description:
+      "Search term passed to Graph's `/sites?search=` to choose which sites the mount lists.",
+    default: '*',
+  }),
+  site: z
+    .string()
+    .optional()
+    .describe(
+      'Site, by display name or internal name, that scopes the mount to one document library together with `drive`. With either unset the mount lists every site as `/<site>/<library>/...`.',
+    ),
+  drive: z
+    .string()
+    .optional()
+    .describe(
+      'Document library in `site` that the mount uses as its root; takes effect only with `site` set.',
+    ),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Folder path inside the scoped library that the mount uses as its root; takes effect only with `site` and `drive` set. `..` segments are rejected.',
+    ),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      'Let `grep -w` and `rg -w` read only the files Graph search names. Graph searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out.',
+    default: false,
+  }),
 })
 
 export type SharePointConfigRedacted = RedactedConfig<

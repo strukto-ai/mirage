@@ -19,11 +19,19 @@ class JaegerConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     host: str = "http://localhost:16686"
+    """Jaeger query service URL."""
     default_trace_limit: int = 100
+    """The most traces one service's `traces/` listing shows, newest first.
+    An older trace is still readable by its id."""
     # Jaeger's search endpoint takes an explicit microsecond window and its
     # `lookback` parameter is ignored, so a window is always sent. Unset means
     # "from the beginning": an implicit recent-only window would hide traces
     # that read() happily serves.
     default_from_timestamp: str | None = None
+    """Lower bound of trace listings, an ISO 8601 timestamp. Unset searches
+    from the beginning."""
     default_to_timestamp: str | None = None
+    """Upper bound of trace listings, an ISO 8601 timestamp. Unset means
+    now."""
     request_timeout: int = 30
+    """Seconds to wait for one HTTP request to Jaeger."""

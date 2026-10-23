@@ -30,10 +30,16 @@ type HeaderProvider = () => Promise<Record<string, string>> | Record<string, str
 const DiscordConfigSchema = z
   .object({
     ...timeRangeShape,
-    proxyUrl: z.string(),
-    getHeaders: secretSchema(
-      z.custom<HeaderProvider>((value) => typeof value === 'function'),
-    ).optional(),
+    proxyUrl: z
+      .string()
+      .describe(
+        "URL of your backend proxy, which forwards to `https://discord.com/api/v10` and attaches the bot token. A path resolves against the page's origin; no query string or fragment.",
+      ),
+    getHeaders: secretSchema(z.custom<HeaderProvider>((value) => typeof value === 'function'))
+      .optional()
+      .describe(
+        'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
+      ),
   })
   .refine(orderedTimes, timeRangeOrderError)
 

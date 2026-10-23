@@ -8,14 +8,24 @@ from mirage.utils import key_prefix as kp
 
 class SharePointConfig(MsGraphConfig):
     site_filter: str | None = None
+    """Search term passed to Graph's `/sites?search=` to choose which sites
+    the mount lists. Unset searches `*`."""
     site: str | None = None
+    """Site, by display name or internal name, that scopes the mount to one
+    document library together with `drive`. With either unset the mount
+    lists every site as `/<site>/<library>/...`."""
     drive: str | None = None
+    """Document library in `site` that the mount uses as its root; takes
+    effect only with `site` set."""
     key_prefix: str | None = None
-    # Let grep -w and rg -w read only the files Graph search names
-    # (`files_containing`). Off by default: Graph indexes a write some time
-    # after it lands, and searches the text it extracted rather than the
-    # bytes grep reads.
+    """Folder path inside the scoped library that the mount uses as its
+    root; takes effect only with `site` and `drive` set. `..` segments are
+    rejected."""
     content_search: bool = False
+    """Let `grep -w` and `rg -w` read only the files Graph search names.
+    Graph searches the text it extracted, not the bytes grep reads, and
+    indexes a write with a delay, so a file that holds the word can be
+    left out."""
 
     @field_validator("key_prefix")
     @classmethod

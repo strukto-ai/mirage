@@ -65,6 +65,10 @@ import {
   NO_STDIN,
 } from './constants.ts'
 
+/**
+ * The serializable state of a `MirageSandboxSession`: the SDK's sandbox
+ * state plus `mirageSessionId`, the Mirage session it runs in.
+ */
 export interface MirageSandboxSessionState extends SandboxSessionState {
   mirageSessionId: string
 }

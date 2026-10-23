@@ -16,7 +16,14 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const SupabaseConfigSchema = browserAliasSchema({ projectRef: z.string().optional() })
+const SupabaseConfigSchema = browserAliasSchema({
+  projectRef: z
+    .string()
+    .optional()
+    .describe(
+      'Supabase project reference. It builds the endpoint `https://<projectRef>.storage.supabase.co/storage/v1/s3` unless `endpoint` is set.',
+    ),
+})
 
 export type SupabaseConfig = ConfigOf<typeof SupabaseConfigSchema>
 

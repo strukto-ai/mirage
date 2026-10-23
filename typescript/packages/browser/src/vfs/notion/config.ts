@@ -24,8 +24,13 @@ import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secret
 const NotionConfigSchema = z.object({
   authProvider: secretSchema(
     z.custom<OAuthClientProvider>((value) => value !== null && typeof value === 'object'),
+  ).describe(
+    "`OAuthClientProvider` from `@modelcontextprotocol/client` that authorizes the browser with Notion's MCP server.",
   ),
-  serverUrl: z.string().optional(),
+  serverUrl: z.string().optional().meta({
+    description: 'Notion MCP endpoint; override to route MCP through your own URL.',
+    default: 'https://mcp.notion.com/mcp',
+  }),
 })
 
 export type NotionConfig = ConfigOf<typeof NotionConfigSchema>

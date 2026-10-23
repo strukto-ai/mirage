@@ -16,9 +16,18 @@ import { z } from 'zod'
 import { type ConfigOf, secretStr } from '../../vfs/secrets.ts'
 
 export const SlackConfigSchema = z.object({
-  token: secretStr(),
-  searchToken: secretStr().optional(),
-  baseUrl: z.string().optional(),
+  token: secretStr().describe(
+    'Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`).',
+  ),
+  searchToken: secretStr()
+    .optional()
+    .describe(
+      "User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`.",
+    ),
+  baseUrl: z.string().optional().meta({
+    description: 'Slack Web API root; override to point at a fake or proxy.',
+    default: 'https://slack.com/api',
+  }),
 })
 
 export type SlackConfig = ConfigOf<typeof SlackConfigSchema>

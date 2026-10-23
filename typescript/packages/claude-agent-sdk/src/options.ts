@@ -17,11 +17,20 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import { buildSystemPrompt } from '@struktoai/mirage-core/agents/prompt'
 import { MirageServer } from './server.ts'
 
+/**
+ * Options for `buildOptions`: `systemPrompt` replaces the generated prompt,
+ * and `sessionId` names the Mirage session the tools act as.
+ */
 export interface BuildOptionsOptions {
   systemPrompt?: string
   sessionId?: string | undefined
 }
 
+/**
+ * Returns ready-to-use query `Options` backed by a workspace: the
+ * `MirageServer` tools as the `mirage` MCP server, only those tools allowed,
+ * and a system prompt describing the mounts.
+ */
 export async function buildOptions(
   workspace: Workspace,
   opts: BuildOptionsOptions = {},

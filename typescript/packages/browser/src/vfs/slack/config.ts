@@ -30,13 +30,21 @@ type HeaderProvider = () => Promise<Record<string, string>> | Record<string, str
 const SlackConfigSchema = z
   .object({
     ...timeRangeShape,
-    proxyUrl: z.string(),
-    getHeaders: secretSchema(
-      z.custom<HeaderProvider>((value) => typeof value === 'function'),
-    ).optional(),
-    // See node's SlackConfig: grep -w and rg -w read only the channel days
-    // Slack search names. Off by default.
-    contentSearch: z.boolean().optional(),
+    proxyUrl: z
+      .string()
+      .describe(
+        "URL of your backend proxy, which forwards to `https://slack.com/api` and attaches the token. A path resolves against the page's origin; no query string or fragment.",
+      ),
+    getHeaders: secretSchema(z.custom<HeaderProvider>((value) => typeof value === 'function'))
+      .optional()
+      .describe(
+        'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
+      ),
+    contentSearch: z.boolean().optional().meta({
+      description:
+        'Let `grep -rw` and `rg -w` read only the channel and DM days Slack search names. Needs a token that can search. Slack indexes a message some time after it is posted, and searches only message text, file names and titles and reactions.',
+      default: false,
+    }),
   })
   .refine(orderedTimes, timeRangeOrderError)
 

@@ -15,11 +15,11 @@
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
-  secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
+import { ALIAS_SHAPE } from '../s3_alias.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface WasabiConfig {
@@ -37,17 +37,16 @@ export interface WasabiConfig {
 }
 
 const WasabiConfigSchema = z.object({
-  bucket: z.string(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  profile: z.string().optional(),
-  region: z.string().optional(),
-  endpoint: z.string().optional(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
+  ...ALIAS_SHAPE,
+  region: z.string().optional().meta({
+    description:
+      'Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.',
+    default: 'us-east-1',
+  }),
+  endpoint: z
+    .string()
+    .optional()
+    .describe('Endpoint URL that replaces the one the provider derives.'),
 })
 
 // Only the redacted twin derives; the redactor fills in the region and

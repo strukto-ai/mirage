@@ -59,12 +59,33 @@ function driveTargetError(named: readonly string[]): string {
 const OneDriveConfigSchema = z
   .object({
     ...MSGRAPH_CONFIG_SHAPE,
-    driveId: z.string().optional(),
-    siteId: z.string().optional(),
-    groupId: z.string().optional(),
-    userId: z.string().optional(),
-    keyPrefix: z.string().optional(),
-    contentSearch: z.boolean().optional(),
+    driveId: z
+      .string()
+      .optional()
+      .describe(
+        "Graph drive ID of the drive to mount. Set at most one of `driveId`, `siteId`, `groupId` and `userId`; with none the mount uses the signed-in user's drive.",
+      ),
+    siteId: z
+      .string()
+      .optional()
+      .describe('Graph site ID whose default document library the mount uses.'),
+    groupId: z
+      .string()
+      .optional()
+      .describe('Microsoft 365 or Teams group ID whose document library the mount uses.'),
+    userId: z
+      .string()
+      .optional()
+      .describe('User ID or UPN whose drive the mount uses, under app-only auth.'),
+    keyPrefix: z
+      .string()
+      .optional()
+      .describe('Folder path from the drive root that the mount uses as its root.'),
+    contentSearch: z.boolean().optional().meta({
+      description:
+        'Let `grep -w` and `rg -w` read only the files Graph search names. Graph searches the text it extracted, not the bytes grep reads, and indexes a write with a delay, so a file that holds the word can be left out.',
+      default: false,
+    }),
   })
   // With four fields and a fixed precedence, setting two would make the
   // mount silently address whichever won, which is the kind of

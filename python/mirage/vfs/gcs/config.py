@@ -25,4 +25,7 @@ class GCSConfig(RegionEndpointConfig):
     """
 
     endpoint_url: str = GCS_ENDPOINT
+    """Endpoint URL of the S3 interoperability API."""
     region: str = "auto"
+    """Region requests are signed for; GCS serves every region from one
+    host."""

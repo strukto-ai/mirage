@@ -22,10 +22,11 @@ import {
 } from '../secrets.ts'
 
 const GmailConfigSchema = GoogleConfigSchema.extend({
-  // Keep each listed message's text so grep and rg read only the messages
-  // that hold the text (`filesContaining`). Off by default: the listing then
-  // holds every listed message's body.
-  contentSearch: z.boolean().optional(),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      "Keep each listed message's text in the listing so `grep -r` and `rg` read only the messages that hold the text. The listing then holds every listed message's body.",
+    default: false,
+  }),
 })
 
 export type GmailConfig = ConfigOf<typeof GmailConfigSchema>

@@ -12,13 +12,24 @@ class DifyConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
+    """Dify Knowledge API key, sent as `Authorization: Bearer`."""
     base_url: str
+    """Dify API root, such as `https://api.dify.ai/v1`."""
     dataset_id: str
+    """ID of the Knowledge dataset the mount shows."""
     slug_metadata_name: str = "slug"
+    """Document metadata field whose value is the document's path in the
+    mount. A document without it is mounted under its document name."""
     max_concurrency: PositiveInt = 10
+    """The most Dify API requests in flight at once."""
     request_timeout: PositiveFloat = 30.0
+    """Seconds to wait for one HTTP request to Dify."""
     retry_attempts: PositiveInt = 4
+    """Attempts per request, the first included. A 429, a 5xx or a
+    transport error is retried."""
     retry_max_delay: PositiveFloat = 30.0
+    """Longest wait in seconds before a retry, whether from backoff or
+    `Retry-After`."""
 
     @field_validator("base_url")
     @classmethod

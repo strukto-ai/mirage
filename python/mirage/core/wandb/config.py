@@ -19,7 +19,16 @@ Name = Annotated[
 class WandbConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     entities: list[Name] = Field(min_length=1)
+    """W&B entities (users or teams) the mount shows as top-level
+    directories; no other entity is reachable."""
     api_key: SecretStr = SecretStr("")
+    """W&B API key, sent as HTTP Basic auth. Empty sends no credentials."""
     base_url: str = "https://api.wandb.ai"
+    """W&B API root. Queries go to its `/graphql`, and only downloads from
+    the same origin carry the key."""
     page_size: int = Field(default=100, ge=1, le=1000)
+    """Items per GraphQL page, and steps per window when reading
+    `history.jsonl`."""
     max_pages: int = Field(default=10000, ge=1)
+    """The most pages one listing or history read fetches. Past it the
+    read fails rather than return a partial result."""

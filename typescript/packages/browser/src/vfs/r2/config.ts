@@ -16,7 +16,18 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-const R2ConfigSchema = browserAliasSchema({ accountId: z.string().optional() })
+const R2ConfigSchema = browserAliasSchema({
+  region: z.string().optional().meta({
+    description: 'Region of the bucket; R2 addresses a bucket by account, not by region.',
+    default: 'auto',
+  }),
+  accountId: z
+    .string()
+    .optional()
+    .describe(
+      'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set.',
+    ),
+})
 
 export type R2Config = ConfigOf<typeof R2ConfigSchema>
 

@@ -16,7 +16,7 @@ from mirage.core.google.config import GoogleConfig
 
 
 class GmailConfig(GoogleConfig):
-    # Keep each listed message's text so grep and rg read only the
-    # messages that hold the text (`files_containing`). Off by default:
-    # the listing then holds every listed message's body.
     content_search: bool = False
+    """Keep each listed message's text in the listing so `grep -r` and `rg`
+    read only the messages that hold the text. The listing then holds
+    every listed message's body."""

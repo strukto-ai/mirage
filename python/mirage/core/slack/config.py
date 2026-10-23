@@ -19,5 +19,11 @@ class SlackConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr
+    """Slack token every API call sends: a bot token (`xoxb-`) or a user
+    token (`xoxp-`)."""
     search_token: SecretStr | None = None
+    """User token (`xoxp-`) with `search:read`, used only for Slack's
+    `search.*` methods, which refuse a bot token. Unset searches with
+    `token`."""
     base_url: str = "https://slack.com/api"
+    """Slack Web API root; override to point at a fake or proxy."""

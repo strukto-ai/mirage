@@ -19,11 +19,18 @@ class TrelloConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
+    """Trello API key."""
     api_token: SecretStr
+    """Trello API token."""
     workspace_id: str | None = None
+    """Only this workspace and its boards are listed or readable. Unset
+    shows every workspace of the token's member."""
     board_ids: list[str] | None = None
+    """Only these boards are listed or readable. Unset shows every open
+    board of the shown workspaces."""
     base_url: str = "https://api.trello.com/1"
-    # Let grep -w and rg -w read only the cards Trello's search names, and
-    # those whose other fields hold the word (`files_containing`). Off by
-    # default: Trello indexes a write some time after it lands.
+    """Trello API root; override to point at a fake or proxy."""
     content_search: bool = False
+    """Let `grep -rw` and `rg -w` read only the cards Trello's search names,
+    plus those whose other fields hold the word. Trello indexes a write
+    some time after it lands, so a fresh edit can be missed."""

@@ -17,11 +17,19 @@ import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../vfs/secrets.ts'
 
 const GitHubConfigSchema = z.object({
-  token: secretStr(),
-  owner: z.string(),
-  repo: z.string(),
-  ref: z.string().optional(),
-  baseUrl: z.string().optional(),
+  token: secretStr().describe('GitHub personal access token.'),
+  owner: z.string().describe('Repository owner, a user or an organization.'),
+  repo: z.string().describe('Repository name.'),
+  ref: z
+    .string()
+    .optional()
+    .describe(
+      "Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read.",
+    ),
+  baseUrl: z.string().optional().meta({
+    description: 'GitHub API root; set it for GitHub Enterprise.',
+    default: 'https://api.github.com',
+  }),
 })
 
 export type GitHubConfig = ConfigOf<typeof GitHubConfigSchema>

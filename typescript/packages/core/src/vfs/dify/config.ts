@@ -24,14 +24,31 @@ import {
 } from '../secrets.ts'
 
 const DifyConfigSchema = z.object({
-  apiKey: secretStr(),
-  baseUrl: z.string(),
-  datasetId: z.string(),
-  slugMetadataName: z.string().optional(),
-  maxConcurrency: z.number().optional(),
-  requestTimeout: z.number().optional(),
-  retryAttempts: z.number().optional(),
-  retryMaxDelay: z.number().optional(),
+  apiKey: secretStr().describe('Dify Knowledge API key, sent as `Authorization: Bearer`.'),
+  baseUrl: z.string().describe('Dify API root, such as `https://api.dify.ai/v1`.'),
+  datasetId: z.string().describe('ID of the Knowledge dataset the mount shows.'),
+  slugMetadataName: z.string().optional().meta({
+    description:
+      "Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name.",
+    default: 'slug',
+  }),
+  maxConcurrency: z.number().optional().meta({
+    description: 'The most Dify API requests in flight at once.',
+    default: 10,
+  }),
+  requestTimeout: z.number().optional().meta({
+    description: 'Seconds to wait for one HTTP request to Dify.',
+    default: 30,
+  }),
+  retryAttempts: z.number().optional().meta({
+    description:
+      'Attempts per request, the first included. A 429, a 5xx or a transport error is retried.',
+    default: 4,
+  }),
+  retryMaxDelay: z.number().optional().meta({
+    description: 'Longest wait in seconds before a retry, whether from backoff or `Retry-After`.',
+    default: 30,
+  }),
 })
 
 export type DifyConfig = ConfigOf<typeof DifyConfigSchema>

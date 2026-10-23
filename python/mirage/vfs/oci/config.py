@@ -24,4 +24,8 @@ class OCIConfig(RegionEndpointConfig):
     )
 
     namespace: str
+    """Object Storage namespace of the tenancy. With `region` it builds the
+    endpoint
+    `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com`
+    unless `endpoint_url` is set."""
     path_style: bool = True

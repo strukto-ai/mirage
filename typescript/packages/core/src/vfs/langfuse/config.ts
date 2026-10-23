@@ -16,11 +16,23 @@ import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 
 const LangfuseConfigSchema = z.object({
-  publicKey: z.string(),
-  secretKey: secretStr(),
-  host: z.string().optional(),
-  defaultTraceLimit: z.number().optional(),
-  defaultFromTimestamp: z.string().optional(),
+  publicKey: z.string().describe('Langfuse project public key.'),
+  secretKey: secretStr().describe('Langfuse project secret key.'),
+  host: z.string().optional().meta({
+    description: 'Langfuse API host; override for a self-hosted or regional instance.',
+    default: 'https://cloud.langfuse.com',
+  }),
+  defaultTraceLimit: z.number().optional().meta({
+    description:
+      "The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id.",
+    default: 100,
+  }),
+  defaultFromTimestamp: z
+    .string()
+    .optional()
+    .describe(
+      'List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `defaultTraceLimit`.',
+    ),
 })
 
 export type LangfuseConfig = ConfigOf<typeof LangfuseConfigSchema>

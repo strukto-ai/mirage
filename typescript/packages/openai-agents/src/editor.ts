@@ -18,6 +18,10 @@ import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/works
 import { applyDiff } from '@openai/agents'
 import type { ApplyPatchOperation, ApplyPatchResult, Editor } from '@openai/agents'
 
+/**
+ * An `Editor` that applies patches through the workspace's file operations;
+ * pass it to `applyPatchTool({ editor })`.
+ */
 export class MirageEditor implements Editor {
   constructor(private readonly ws: Workspace) {}
 

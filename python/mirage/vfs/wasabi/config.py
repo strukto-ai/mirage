@@ -25,6 +25,9 @@ class WasabiConfig(RegionEndpointConfig):
     ENDPOINT = "https://s3.{region}.wasabisys.com"
 
     region: str = "us-east-1"
+    """Wasabi region. It builds the endpoint
+    `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for
+    `us-east-1`) unless `endpoint_url` is set, and signs every request."""
 
     def resolved_endpoint_url(self) -> str:
         if not self.endpoint_url and self.region == "us-east-1":

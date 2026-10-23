@@ -22,11 +22,22 @@ import {
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
 const GridFSConfigSchema = z.object({
-  uri: secretStr(),
-  database: z.string(),
-  bucket: z.string().optional(),
-  keyPrefix: z.string().optional(),
-  chunkSizeBytes: z.number().optional(),
+  uri: secretStr().describe('MongoDB connection URI.'),
+  database: z.string().describe('Database that holds the GridFS bucket.'),
+  bucket: z.string().optional().meta({
+    description: 'GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`.',
+    default: 'fs',
+  }),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe('Filename prefix the mount treats as its root; files outside it are not listed.'),
+  chunkSizeBytes: z
+    .number()
+    .optional()
+    .describe(
+      "Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB.",
+    ),
 })
 
 export type GridFSConfig = ConfigOf<typeof GridFSConfigSchema>

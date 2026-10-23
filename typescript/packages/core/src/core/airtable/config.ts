@@ -21,22 +21,33 @@ import {
   secretStr,
 } from '../../vfs/secrets.ts'
 
-/**
- * Credentials and bounds for one Airtable account. `token` is a personal
- * access token (or an OAuth access token) sent as `Authorization: Bearer`;
- * `baseIds` restricts the mount to those bases; `maxReadRecords` is the
- * most records one file may render, so a full read of a larger table stops
- * at the cap rather than paging at 5 requests a second for minutes; and
- * `requestsPerSecond` paces each base (Airtable allows 5 and answers a
- * burst with a 30-second penalty).
- */
+/** Credentials and bounds for one Airtable account. */
 export const AirtableConfigSchema = z
   .object({
-    token: secretStr(),
-    baseIds: z.array(z.string()).readonly().optional(),
-    baseUrl: z.string().optional(),
-    maxReadRecords: z.number().int().min(1).optional(),
-    requestsPerSecond: z.number().positive().optional(),
+    token: secretStr().describe(
+      'Personal access token (or OAuth access token), sent as `Authorization: Bearer`.',
+    ),
+    baseIds: z
+      .array(z.string())
+      .readonly()
+      .optional()
+      .describe(
+        'Only these bases are listed or readable. Unset shows every base the token can reach.',
+      ),
+    baseUrl: z.string().optional().meta({
+      description: 'Airtable API root; override to point at a fake or proxy.',
+      default: 'https://api.airtable.com/v0',
+    }),
+    maxReadRecords: z.number().int().min(1).optional().meta({
+      description:
+        'The most records one file renders. A full read of a larger table or view fails with `File too large` once it passes the cap; `head -n N` still reads its first records.',
+      default: 10000,
+    }),
+    requestsPerSecond: z.number().positive().optional().meta({
+      description:
+        'Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty.',
+      default: 5,
+    }),
   })
   .strict()
 

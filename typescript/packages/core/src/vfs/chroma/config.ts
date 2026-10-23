@@ -16,12 +16,29 @@ import { z } from 'zod'
 import { type ConfigOf, normalizeNonEmpty, parseConfigWithSchema } from '../secrets.ts'
 
 const ChromaConfigSchema = z.object({
-  host: z.string().optional(),
-  port: z.number().optional(),
-  ssl: z.boolean().optional(),
-  collectionName: z.string(),
-  slugField: z.string().optional(),
-  chunkIndexField: z.string().optional(),
+  host: z
+    .string()
+    .optional()
+    .meta({ description: 'Host name of the Chroma HTTP server.', default: 'localhost' }),
+  port: z
+    .number()
+    .optional()
+    .meta({ description: 'Port of the Chroma HTTP server.', default: 8000 }),
+  ssl: z
+    .boolean()
+    .optional()
+    .meta({ description: 'Connect over HTTPS instead of HTTP.', default: false }),
+  collectionName: z.string().describe('Name of the existing Chroma collection to mount.'),
+  slugField: z.string().optional().meta({
+    description:
+      'Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`).',
+    default: 'page_slug',
+  }),
+  chunkIndexField: z.string().optional().meta({
+    description:
+      "Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.",
+    default: 'chunk_index',
+  }),
 })
 
 export type ChromaConfig = ConfigOf<typeof ChromaConfigSchema>

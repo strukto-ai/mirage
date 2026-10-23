@@ -359,6 +359,13 @@ def combined_output(result: ExecResult) -> str:
 
 
 class MirageSandboxClient(BaseSandboxClient[None]):
+    """The OpenAI Agents SDK sandbox client over an in-process Mirage workspace.
+
+    Pass it to a ``SandboxAgent`` run as
+    ``RunConfig(sandbox=SandboxRunConfig(client=...))``. Every session
+    shares the one workspace and gets its own Mirage session.
+    """
+
     # In-process integration: every sandbox session shares one Workspace
     # instance owned by the agent's process. No HTTP, no daemon -- the
     # agent and the workspace run on the same event loop.

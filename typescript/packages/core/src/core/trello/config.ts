@@ -16,15 +16,30 @@ import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../
 import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
 
 export const TrelloConfigSchema = z.object({
-  apiKey: secretStr(),
-  apiToken: secretStr(),
-  workspaceId: z.string().optional(),
-  boardIds: z.array(z.string()).readonly().optional(),
-  baseUrl: z.string().optional(),
-  // Let grep -w and rg -w read only the cards Trello's search names, and those
-  // whose other fields hold the word (`filesContaining`). Off by default:
-  // Trello indexes a write some time after it lands.
-  contentSearch: z.boolean().optional(),
+  apiKey: secretStr().describe('Trello API key.'),
+  apiToken: secretStr().describe('Trello API token.'),
+  workspaceId: z
+    .string()
+    .optional()
+    .describe(
+      "Only this workspace and its boards are listed or readable. Unset shows every workspace of the token's member.",
+    ),
+  boardIds: z
+    .array(z.string())
+    .readonly()
+    .optional()
+    .describe(
+      'Only these boards are listed or readable. Unset shows every open board of the shown workspaces.',
+    ),
+  baseUrl: z.string().optional().meta({
+    description: 'Trello API root; override to point at a fake or proxy.',
+    default: 'https://api.trello.com/1',
+  }),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      "Let `grep -rw` and `rg -w` read only the cards Trello's search names, plus those whose other fields hold the word. Trello indexes a write some time after it lands, so a fresh edit can be missed.",
+    default: false,
+  }),
 })
 
 export type TrelloConfig = ConfigOf<typeof TrelloConfigSchema>

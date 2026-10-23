@@ -19,17 +19,28 @@ class SSHConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     host: str
+    """Host name, IP address or `~/.ssh/config` alias of the remote."""
     hostname: str | None = None
+    """Address to connect to instead of `host`."""
     port: int | None = None
+    """SSH port; unset uses the client's default, `22` unless
+    `~/.ssh/config` sets one for the host."""
     username: str | None = None
+    """Login user; unset uses the local user name unless `~/.ssh/config`
+    sets one for the host."""
     identity_file: str | None = None
-    # Password authentication, and the passphrase of an encrypted
-    # identity_file. Both are credentials, so both are SecretStr and both
-    # redact out of snapshot state; without them a password-only host and
-    # an encrypted key were unreachable, and a config naming either had the
-    # key dropped by pydantic's extra="ignore" without a word.
+    """Path to a private key; `~` is expanded. Unset tries the SSH agent
+    and the default keys in `~/.ssh`."""
     password: SecretStr | None = None
+    """Password for password authentication; prefer `identity_file`."""
     passphrase: SecretStr | None = None
+    """Passphrase of an encrypted `identity_file`; ignored when
+    `identity_file` is unset."""
     root: str = "/"
+    """Path on the remote that becomes the mount root."""
     timeout: int = 30
+    """Seconds to wait for the TCP connection, and again for
+    authentication."""
     known_hosts: str | None = None
+    """Path to a `known_hosts` file the server's host key is checked
+    against; unset disables host-key checking."""

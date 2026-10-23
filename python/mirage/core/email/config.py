@@ -19,21 +19,33 @@ class EmailConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     imap_host: str
+    """IMAP server hostname."""
     imap_port: int = 993
+    """IMAP server port."""
     smtp_host: str
+    """SMTP server hostname `himalaya` sends mail through."""
     smtp_port: int = 587
+    """SMTP server port. `465` uses implicit TLS; any other port starts in
+    plaintext and upgrades with STARTTLS when the server offers it."""
     username: str
+    """Login for both IMAP and SMTP, usually the email address."""
     password: SecretStr
+    """Password or app password for `username`."""
     use_ssl: bool = True
+    """Speak TLS from the first byte of the IMAP connection (IMAPS); off
+    connects in plaintext. SMTP follows `smtp_port` instead."""
     max_messages: int = 200
-    # grep and rg ask IMAP SEARCH TEXT which messages may match and read
-    # only those. Off by default: the server searches headers and body,
-    # not the mounted JSON's keys, uids or flags (``record_queries``
-    # refuses words that can sit there, but a custom keyword cannot be
-    # told apart from a word).
+    """How many of a folder's newest messages the mount lists and `grep`
+    searches, and the window `himalaya envelope list` and `search` page
+    through."""
     content_search: bool = False
-    # Upstream himalaya's message.send.save-copy, whose default is true
-    # since pimalaya/himalaya#536. sent_folder is its folder.alias.sent:
-    # unset means ask the server for its \Sent mailbox.
+    """Let `grep` and `rg` ask the server (IMAP `SEARCH TEXT`) which
+    messages may match and read only those. The server searches headers
+    and body, not the mounted JSON's keys, uids or flags."""
     save_copy: bool = True
+    """After `himalaya` sends a message, append a copy to `sent_folder`,
+    as upstream himalaya's `message.send.save-copy`. Off saves a copy
+    only when `--save` names a mailbox."""
     sent_folder: str | None = None
+    """Mailbox a sent copy goes to. Unset asks the server for the mailbox
+    tagged `\\Sent` and falls back to `Sent`."""

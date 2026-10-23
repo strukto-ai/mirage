@@ -62,24 +62,49 @@ export const GoogleConfigSchema = z
         z.string(),
         z.custom<GoogleAccessTokenProvider>((value) => typeof value === 'function'),
       ]),
-    ).optional(),
-    clientId: z.string().optional(),
-    // Optional: omit in browser PKCE flows. The PKCE verifier authenticates
-    // the client at the token endpoint, so no secret is sent.
-    clientSecret: secretStr().optional(),
-    refreshToken: secretStr().optional(),
+    )
+      .optional()
+      .describe(
+        'OAuth access token, or a function (sync or async) that returns one, read on every request. Use it instead of `clientId` and `refreshToken` when your app already manages OAuth; it wins when both are set.',
+      ),
+    clientId: z
+      .string()
+      .optional()
+      .describe(
+        'Google OAuth client ID. Required with `refreshToken` when `accessToken` is unset; mirage then mints and renews access tokens itself.',
+      ),
+    // The PKCE verifier authenticates the client at the token endpoint, so
+    // no secret is sent.
+    clientSecret: secretStr()
+      .optional()
+      .describe(
+        'Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client.',
+      ),
+    refreshToken: secretStr()
+      .optional()
+      .describe(
+        "User's OAuth refresh token. Required with `clientId` when `accessToken` is unset.",
+      ),
     // Declared here rather than on a CLI-only extension: parse strips what
     // the schema does not name, and marking it secret is what keeps a
     // callback out of snapshot state.
-    refreshFn: secretSchema(
-      z.custom<GoogleRefreshFn>((value) => typeof value === 'function'),
-    ).optional(),
-    // Single-host override for every Google API (drive/docs/sheets/slides)
-    // plus the OAuth token endpoint; used to point backends at a fake server.
-    apiBase: z.string().optional(),
-    // Drive-only: scope the mount to this folder ID instead of the Drive
-    // root, the s3 key_prefix analog. Other Google backends ignore it.
-    folderId: z.string().optional(),
+    refreshFn: secretSchema(z.custom<GoogleRefreshFn>((value) => typeof value === 'function'))
+      .optional()
+      .describe(
+        "Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Google's token endpoint, for example so the client secret stays on a backend. `clientId` and `refreshToken` are still required.",
+      ),
+    apiBase: z
+      .string()
+      .optional()
+      .describe(
+        "One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts.",
+      ),
+    folderId: z
+      .string()
+      .optional()
+      .describe(
+        'Drive folder ID the `gdrive` mount uses as its root instead of My Drive; it may be a folder in a Shared Drive. Other Google mounts ignore it.',
+      ),
   })
   .refine(hasGoogleCredential, { message: GOOGLE_CREDENTIAL_ERROR })
 
@@ -89,11 +114,11 @@ export const GoogleConfigSchema = z
 export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
 
 export const GoogleAppConfigSchema = GoogleConfigSchema.extend({
-  // Let grep -w and rg -w read only the files Drive full-text search names
-  // (`filesContaining`). Off by default: Drive indexes a write some time
-  // after it lands, and searches a file's text rather than the JSON the
-  // mount renders it as.
-  contentSearch: z.boolean().optional(),
+  contentSearch: z.boolean().optional().meta({
+    description:
+      "Let `grep -w` and `rg -w` read only the files Drive full-text search names. Drive searches a file's text, not the JSON the mount renders, and indexes a write with a delay, so a file that holds the word can be left out.",
+    default: false,
+  }),
 })
 
 export type GoogleAppConfig = ConfigOf<typeof GoogleAppConfigSchema>

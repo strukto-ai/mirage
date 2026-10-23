@@ -23,18 +23,24 @@ DRIVE_TARGETS = ("drive_id", "site_id", "group_id", "user_id")
 
 class OneDriveConfig(MsGraphConfig):
     drive_id: str | None = None
+    """Graph drive ID of the drive to mount. Set at most one of `drive_id`,
+    `site_id`, `group_id` and `user_id`; with none the mount uses the
+    signed-in user's drive."""
     site_id: str | None = None
-    # A Teams/Microsoft 365 group's document library, and another user's
-    # drive under app-only auth. Both are reachable without first
-    # resolving a drive id out of band.
+    """Graph site ID whose default document library the mount uses."""
+    # Both reachable without first resolving a drive id out of band.
     group_id: str | None = None
+    """Microsoft 365 or Teams group ID whose document library the mount
+    uses."""
     user_id: str | None = None
+    """User ID or UPN whose drive the mount uses, under app-only auth."""
     key_prefix: str | None = None
-    # Let grep -w and rg -w read only the files Graph search names
-    # (`files_containing`). Off by default: Graph indexes a write some time
-    # after it lands, and searches the text it extracted rather than the
-    # bytes grep reads.
+    """Folder path from the drive root that the mount uses as its root."""
     content_search: bool = False
+    """Let `grep -w` and `rg -w` read only the files Graph search names.
+    Graph searches the text it extracted, not the bytes grep reads, and
+    indexes a write with a delay, so a file that holds the word can be
+    left out."""
 
     @model_validator(mode="after")
     def _one_drive_target(self) -> "OneDriveConfig":

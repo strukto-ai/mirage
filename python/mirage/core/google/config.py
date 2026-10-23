@@ -33,17 +33,29 @@ class GoogleConfig(BaseModel):
     # service account cannot produce; a consumer worked around that by
     # monkeypatching `refresh_access_token`.
     access_token: SecretStr | Callable[[], str | SecretStr] | None = None
+    """OAuth access token, or a zero-argument callable that returns one,
+    read on every request. Use it instead of `client_id` and
+    `refresh_token` when your app already manages OAuth; it wins when both
+    are set."""
     # Or the refresh-token grant, where mirage mints and renews the
     # access token itself through TokenManager.
     client_id: str | None = None
+    """Google OAuth client ID. Required with `refresh_token` when
+    `access_token` is unset; mirage then mints and renews access tokens
+    itself."""
     client_secret: SecretStr | None = None
+    """Google OAuth client secret, sent with the refresh-token grant. Omit
+    it for a PKCE client."""
     refresh_token: SecretStr | None = None
-    # Single-host override for every Google API (drive/docs/sheets/slides)
-    # plus the OAuth token endpoint; used to point backends at a fake server.
+    """User's OAuth refresh token. Required with `client_id` when
+    `access_token` is unset."""
     api_base: str | None = None
-    # Drive-only: scope the mount to this folder ID instead of the Drive
-    # root, the s3 key_prefix analog. Other Google backends ignore it.
+    """One base URL that replaces every Google API host and the OAuth token
+    endpoint, such as a test server. Unset uses Google's hosts."""
     folder_id: str | None = None
+    """Drive folder ID the `gdrive` mount uses as its root instead of My
+    Drive; it may be a folder in a Shared Drive. Other Google mounts ignore
+    it."""
 
     @model_validator(mode="after")
     def _one_credential(self) -> "GoogleConfig":
@@ -71,8 +83,8 @@ class GoogleConfig(BaseModel):
 
 
 class GoogleAppConfig(GoogleConfig):
-    # Let grep -w and rg -w read only the files Drive full-text search
-    # names (`files_containing`). Off by default: Drive indexes a write
-    # some time after it lands, and searches a file's text rather than
-    # the JSON the mount renders it as.
     content_search: bool = False
+    """Let `grep -w` and `rg -w` read only the files Drive full-text search
+    names. Drive searches a file's text, not the JSON the mount renders,
+    and indexes a write with a delay, so a file that holds the word can be
+    left out."""

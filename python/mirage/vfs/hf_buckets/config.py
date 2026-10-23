@@ -21,10 +21,18 @@ class HfBucketsConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
+    """Bucket id in `namespace/name` form."""
     token: SecretStr | None = None
+    """Hugging Face access token."""
     endpoint: str = "https://huggingface.co"
+    """Hub origin requests go to, for a mirror or a self-hosted Hub."""
     timeout: int = 30
+    """Seconds one Hub request may go without progress: connecting, waiting
+    for the answer, or between two chunks of a download. `0` turns the bound
+    off."""
     key_prefix: str | None = None
+    """Path inside the bucket that becomes the mount root; files outside it
+    are not listed."""
 
     @field_validator("bucket")
     @classmethod
@@ -54,20 +62,28 @@ class HfRepoConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     repo_id: str
+    """Repository id as `namespace/name`, or a bare `name` that resolves
+    against the token's owner."""
     token: SecretStr | None = None
+    """Hugging Face access token; unset sends anonymous requests, which
+    reach public repositories only."""
     endpoint: str = "https://huggingface.co"
+    """Hub origin requests go to, for a mirror or a self-hosted Hub."""
     timeout: int = 30
+    """Seconds one Hub request may go without progress: connecting, waiting
+    for the answer, or between two chunks of a download. `0` turns the bound
+    off."""
     key_prefix: str | None = None
+    """Path inside the repository that becomes the mount root; files outside
+    it are not listed."""
     revision: str | None = None
-    # Whether the listing asks the Hub for each path's last commit, which
-    # is a Hub file's only source of an mtime and drops the tree page
-    # from 1000 rows to 50. None is the default and means decide by size:
-    # ask for one expanded page, and keep it if the whole repository fit
-    # in it, otherwise re-walk bare. A small repo therefore gets mtimes
-    # for the same one request it would have cost without them, and a
-    # sharded dataset pays one wasted page rather than a twentyfold walk.
-    # True and False force it either way.
+    """Branch, tag or commit the mount reads; unset reads `main`."""
     expand_commits: bool | None = None
+    """Whether a listing asks the Hub for each file's last commit, a Hub
+    file's only source of an mtime, which cuts a listing page from 1000
+    entries to 50. Unset fetches one expanded page and keeps it if the whole
+    repository fits, otherwise lists without commits; `True` or `False`
+    forces either."""
 
     @field_validator("repo_id")
     @classmethod

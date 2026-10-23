@@ -16,8 +16,8 @@ from mirage.core.google.config import GoogleConfig
 
 
 class GoogleDriveConfig(GoogleConfig):
-    # Let grep -w and rg -w read only the files Drive full-text search
-    # names (`files_containing`). Off by default: Drive indexes a write
-    # some time after it lands, and searches the text it extracted rather
-    # than the bytes grep reads.
     content_search: bool = False
+    """Let `grep -w` and `rg -w` read only the files Drive full-text search
+    names. Drive searches the text it extracted, not the bytes grep reads,
+    and indexes a write with a delay, so a file that holds the word can be
+    left out."""

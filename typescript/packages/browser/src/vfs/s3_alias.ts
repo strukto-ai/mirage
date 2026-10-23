@@ -49,14 +49,34 @@ export interface S3BrowserAliasConfig {
 }
 
 export const BROWSER_ALIAS_FIELDS = {
-  bucket: z.string(),
+  bucket: z.string().describe('Name of the bucket to mount.'),
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
+  ).describe(
+    "Function `(path, operation, options)` that returns a signed URL for one S3 operation (`GET`, `PUT`, `HEAD`, `DELETE`, `LIST` or `COPY`). Your server signs it with the provider's keys, so the browser holds none.",
   ),
-  region: z.string().optional(),
-  endpoint: z.string().optional(),
-  defaultContentType: z.string().optional(),
-  keyPrefix: z.string().optional(),
+  region: z
+    .string()
+    .optional()
+    .describe(
+      'Region of the bucket. Most providers derive the endpoint from it; requests go to the host each presigned URL names.',
+    ),
+  endpoint: z
+    .string()
+    .optional()
+    .describe(
+      'Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location.',
+    ),
+  defaultContentType: z.string().optional().meta({
+    description: '`Content-Type` stored with every object the mount writes.',
+    default: 'application/octet-stream',
+  }),
+  keyPrefix: z
+    .string()
+    .optional()
+    .describe(
+      'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
+    ),
 }
 
 /**

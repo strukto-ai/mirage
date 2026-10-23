@@ -29,11 +29,31 @@ const DEFAULT_GRAPH_API = `https://graph.microsoft.com/${GRAPH_VERSION}`
 export const MSGRAPH_CONFIG_SHAPE = {
   accessToken: secretSchema(
     z.union([z.string(), z.custom<AccessTokenProvider>((value) => typeof value === 'function')]),
+  ).describe(
+    'Microsoft Graph bearer token, or a function (sync or async) that returns one. A function is called for every request, and once more after a `401`, so it can hand out a refreshed token.',
   ),
-  tenantHost: z.string().optional(),
-  graphBaseUrl: z.string().optional(),
-  timeout: z.number().optional(),
-  maxRetries: z.number().optional(),
+  tenantHost: z
+    .string()
+    .optional()
+    .describe(
+      'SharePoint host, such as `contoso.sharepoint.com`; the `sharepoint` mount lists only the sites whose `webUrl` is on it. The `onedrive` mount ignores it.',
+    ),
+  graphBaseUrl: z
+    .string()
+    .optional()
+    .describe(
+      'Full Graph service root, version segment included, for any deployment but the worldwide one: a sovereign cloud, a private endpoint or a test server. Unset uses `https://graph.microsoft.com/v1.0`.',
+    ),
+  timeout: z.number().optional().meta({
+    description:
+      'Seconds one Graph request may take; also how long a server-side copy is polled before it fails as unconfirmed.',
+    default: 30,
+  }),
+  maxRetries: z.number().optional().meta({
+    description:
+      'Times a request is retried after a `429`, `503` or `504` response. Each retry waits what `Retry-After` asks or an exponential backoff, at most 30 seconds.',
+    default: 5,
+  }),
 }
 
 export interface MsGraphConfig {

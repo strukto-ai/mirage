@@ -15,11 +15,11 @@
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
-  secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { S3_FAMILY_NORMALIZER } from '../s3/config.ts'
+import { ALIAS_SHAPE } from '../s3_alias.ts'
 import type { S3Config } from '../s3/config.ts'
 
 export interface OCIConfig {
@@ -38,18 +38,22 @@ export interface OCIConfig {
 }
 
 const OCIConfigSchema = z.object({
-  bucket: z.string(),
-  namespace: z.string(),
-  region: z.string(),
-  accessKeyId: secretStr().optional(),
-  secretAccessKey: secretStr().optional(),
-  sessionToken: secretStr().optional(),
-  profile: z.string().optional(),
-  endpoint: z.string().optional(),
-  forcePathStyle: z.boolean().optional(),
-  keyPrefix: z.string().optional(),
-  timeoutMs: z.number().optional(),
-  proxy: secretStr().optional(),
+  ...ALIAS_SHAPE,
+  forcePathStyle: z.boolean().optional().meta({ default: true }),
+  region: z
+    .string()
+    .describe(
+      'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
+    ),
+  endpoint: z
+    .string()
+    .optional()
+    .describe('Endpoint URL that replaces the one the provider derives.'),
+  namespace: z
+    .string()
+    .describe(
+      'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
+    ),
 })
 
 // Only the redacted twin derives; the redactor fills in the region and

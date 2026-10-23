@@ -67,18 +67,44 @@ function validToken(value: string): boolean {
 }
 
 const DatabricksVolumeConfigSchema = z.object({
-  catalog: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
-  schema: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
-  volume: z.string().refine(validVolumePart, 'must be a non-empty path segment'),
-  rootPath: z.string().transform(normalizeRootPath).default('/'),
-  host: z.string().transform(normalizeHost),
+  catalog: z
+    .string()
+    .refine(validVolumePart, 'must be a non-empty path segment')
+    .describe('Unity Catalog catalog name; one path segment, no `/`.'),
+  schema: z
+    .string()
+    .refine(validVolumePart, 'must be a non-empty path segment')
+    .describe('Unity Catalog schema name; one path segment, no `/`.'),
+  volume: z
+    .string()
+    .refine(validVolumePart, 'must be a non-empty path segment')
+    .describe('Unity Catalog volume name; one path segment, no `/`.'),
+  rootPath: z
+    .string()
+    .transform(normalizeRootPath)
+    .default('/')
+    .describe(
+      'Subdirectory inside the volume that becomes the mount root; `..` segments are refused.',
+    ),
+  host: z
+    .string()
+    .transform(normalizeHost)
+    .describe(
+      'Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials.',
+    ),
   token: secretSchema(
     z.union([
       z.string().refine(validToken, 'token must be nonblank without CR or LF'),
       z.custom<TokenProvider>((value) => typeof value === 'function'),
     ]),
+  ).describe(
+    'Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request.',
   ),
-  timeout: z.number().positive().default(30),
+  timeout: z
+    .number()
+    .positive()
+    .default(30)
+    .describe('Seconds one request may take before it fails.'),
 })
 
 export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>

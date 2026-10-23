@@ -19,7 +19,12 @@ class R2Config(RegionEndpointConfig):
     """Cloudflare R2, addressed by account rather than region."""
 
     account_id: str | None = None
+    """Cloudflare account ID. It builds the endpoint
+    `https://<account_id>.r2.cloudflarestorage.com` unless `endpoint_url`
+    is set; one of the two is required."""
     region: str = "auto"
+    """Region requests are signed for; R2 addresses a bucket by account,
+    not by region."""
 
     def resolved_endpoint_url(self) -> str:
         if self.endpoint_url:

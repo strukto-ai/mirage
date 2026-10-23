@@ -32,6 +32,10 @@ import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_t
 
 export { StaleMirageFileError } from '@struktoai/mirage-core/workspace/tools/file_version'
 
+/**
+ * Options for `mirageOperations`: `staleWriteProtection` (default `true`)
+ * and `sessionId`, the Mirage session the operations act as.
+ */
 export interface MirageOperationsOptions {
   staleWriteProtection?: boolean
   /**
@@ -41,6 +45,10 @@ export interface MirageOperationsOptions {
   sessionId?: string
 }
 
+/**
+ * The operations `mirageOperations` returns, one per Pi tool: `read`,
+ * `write`, `edit`, `bash`, `grep`, `find` and `ls`.
+ */
 export interface MirageOperationsBundle {
   read: ReadOperations
   write: WriteOperations
@@ -76,6 +84,10 @@ async function walkDirectory(
   }
 }
 
+/**
+ * Returns the lower-level `{ read, write, edit, bash, grep, find, ls }`
+ * operation bundle backed by `ws`, for wiring Pi tools by hand.
+ */
 export function mirageOperations(
   ws: Workspace,
   options: MirageOperationsOptions = {},

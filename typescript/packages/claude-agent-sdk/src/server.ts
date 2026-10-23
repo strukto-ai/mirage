@@ -39,6 +39,9 @@ import {
 } from '@struktoai/mirage-core/workspace/tools/tool_descriptions'
 
 /**
+ * An in-process MCP server exposing the Mirage tools; pass it to
+ * `options.mcpServers`.
+ *
  * The SDK takes zod shapes, so each one restates its tool's input schema
  * from `tool_descriptions`, descriptions read off the same constants. The
  * server carries the tools the session's profile leaves it
