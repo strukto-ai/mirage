@@ -1347,3 +1347,46 @@ describe('a live redirect channel', () => {
     expect(String(recorder.failure)).toContain('upload refused')
   })
 })
+
+describe('a first write across workspaces', () => {
+  it('streams while another workspace streams the same path', async () => {
+    let entered = (): void => undefined
+    const started = new Promise<void>((resolve) => (entered = resolve))
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => (release = resolve))
+    class Held extends RAMVFS {
+      override async write(
+        path: PathSpec,
+        data: ByteSource,
+        signal?: AbortSignal,
+        handed?: Handed,
+        atomic = false,
+      ): Promise<void> {
+        if (!(data instanceof Uint8Array && data.byteLength === 0)) {
+          entered()
+          await released
+        }
+        await super.write(path, data, signal, handed, atomic)
+      }
+    }
+    const parser = await getTestParser()
+    const plain = new RAMVFS()
+    vi.spyOn(plain, 'pwrite').mockRejectedValue(new Error('windowed'))
+    const first = new Workspace(
+      { '/data': new Held() },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    const second = new Workspace({ '/data': plain }, { mode: MountMode.WRITE, shellParser: parser })
+    const held = first.shell('seq 1 3 > /data/out')
+    try {
+      await started
+      const io = await second.shell('seq 1 3 > /data/out; cat /data/out')
+      expect([io.exitCode, io.stdoutText]).toEqual([0, '1\n2\n3\n'])
+    } finally {
+      release()
+      await held
+      await first.close()
+      await second.close()
+    }
+  })
+})

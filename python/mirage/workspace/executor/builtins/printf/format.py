@@ -65,12 +65,14 @@ async def printf_output(
             stream.end_input(index)
             await budget.run()
         output = stream.finish()
-        errors.append(stream.take_stderr())
+        if err := stream.take_stderr():
+            errors.append(err)
         if output:
             yield output
         while stream.busy():
             output = stream.drain()
-            errors.append(stream.take_stderr())
+            if err := stream.take_stderr():
+                errors.append(err)
             if output:
                 yield output
             await budget.run()

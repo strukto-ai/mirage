@@ -11,12 +11,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.context import DEFAULT_UMASK
+from mirage.context.session_context import SessionOwner, current_caller
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
 from mirage.io.spool import MEMORY_LIMIT
@@ -29,7 +29,7 @@ from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
-_streaming: dict[tuple[int, str], object] = {}
+_streaming: dict[SessionOwner | None, set[str]] = {}
 
 
 async def create_file(
@@ -208,11 +208,12 @@ async def _first_write(
 
     The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
     file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
-    would move the file's size squared. The path is claimed before the
-    stat and kept until the stream ends, so another description of the
-    file writing meanwhile takes the windows, which interleave as two
-    descriptors do, instead of replacing what this one wrote. A stream
-    that fails leaves the offset at what landed.
+    would move the file's size squared. The path is claimed in the
+    caller's workspace before the stat and kept until the stream ends, so
+    another description of the file writing meanwhile takes the windows,
+    which interleave as two descriptors do, instead of replacing what this
+    one wrote; another workspace's claims never touch it. A stream that
+    fails leaves the offset at what landed.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -221,26 +222,30 @@ async def _first_write(
         data (ByteSource): bytes emitted by the command, untouched when
             this answers False.
     """
-    key = (id(asyncio.get_running_loop()), file.scope.virtual)
-    claim = object()
-    if _streaming.setdefault(key, claim) is not claim:
+    owner = current_caller().owner
+    held = _streaming.setdefault(owner, set())
+    path = file.scope.virtual
+    if path in held:
         return False
+    held.add(path)
     try:
-        if await _size(dispatch, file.scope) != 0:
+        if await _size_of(dispatch, file.scope) != 0:
             return False
         try:
             file.offset = await create_counted(
                 dispatch, session, file.scope, data
             )
         except BaseException:
-            file.offset = await _size(dispatch, file.scope) or 0
+            file.offset = await _size_of(dispatch, file.scope) or 0
             raise
         return True
     finally:
-        del _streaming[key]
+        held.discard(path)
+        if not held:
+            _streaming.pop(owner, None)
 
 
-async def _size(dispatch: DispatchFn, scope: PathSpec) -> int | None:
+async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
     """The size of the file a description opened, None when unknown.
 
     Args:

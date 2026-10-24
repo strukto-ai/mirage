@@ -58,11 +58,13 @@ export async function* printfOutput(
       await budget.run()
     }
     const output = stream.finish()
-    errors.push(stream.takeStderr())
+    const first = stream.takeStderr()
+    if (first.byteLength > 0) errors.push(first)
     if (output.byteLength > 0) yield output
     while (stream.busy()) {
       const part = stream.drain()
-      errors.push(stream.takeStderr())
+      const more = stream.takeStderr()
+      if (more.byteLength > 0) errors.push(more)
       if (part.byteLength > 0) yield part
       await budget.run()
     }

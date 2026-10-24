@@ -1149,3 +1149,39 @@ async def test_a_failed_live_file_does_not_silence_the_other_channel():
     assert landed == {"/good": b"err\n"}
     assert recorder.file is bad
     assert str(recorder.failure) == "upload refused"
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_streams_while_another_workspace_streams_its_path():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Held(RAMVFS):
+        async def write(self, path, data, *, atomic=False):
+            if data != b"":
+                entered.set()
+                await release.wait()
+            await super().write(path, data, atomic=atomic)
+
+    plain = RAMVFS()
+    plain.pwrite = AsyncMock(side_effect=AssertionError("windowed"))
+    first = Workspace(
+        {"/data": (Held(), MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    second = Workspace(
+        {"/data": (plain, MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    held = asyncio.create_task(
+        first.shell("seq 1 3 > /data/out", record=False)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        io = await second.shell(
+            "seq 1 3 > /data/out; cat /data/out", record=False
+        )
+        assert (io.exit_code, io.stdout) == (0, b"1\n2\n3\n")
+    finally:
+        release.set()
+        await held
+        await first.close()
+        await second.close()

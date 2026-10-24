@@ -15,7 +15,12 @@
 import { chunks } from '../../io/cooperative.ts'
 import { OpReport, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
-import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
+import {
+  DEFAULT_UMASK,
+  currentCaller,
+  getCurrentEvaluation,
+  type SessionOwner,
+} from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -162,16 +167,17 @@ export async function writeDescription(
   }
 }
 
-const streaming = new Set<string>()
+const streaming = new Map<SessionOwner | null, Set<string>>()
 
 /**
  * Land an opened description's first write into a file still empty as one
  * stream, and answer whether it did. The same bytes from offset 0 in `pwrite`
  * windows cost a copy of the file each on a store whose `pwrite` rewrites it,
- * so `cmd > f` would move the file's size squared. The path is claimed before
- * the stat and kept until the stream ends, so another description of the file
- * writing meanwhile takes the windows, which interleave as two descriptors
- * do, instead of replacing what this one wrote. A stream that fails leaves the
+ * so `cmd > f` would move the file's size squared. The path is claimed in the
+ * caller's workspace before the stat and kept until the stream ends, so
+ * another description of the file writing meanwhile takes the windows, which
+ * interleave as two descriptors do, instead of replacing what this one wrote;
+ * another workspace's claims never touch it. A stream that fails leaves the
  * offset at what landed. `data` is untouched when this answers false. Mirrors
  * Python's _first_write.
  */
@@ -181,9 +187,15 @@ async function firstWrite(
   file: FileDescription,
   data: ByteSource,
 ): Promise<boolean> {
-  const key = file.scope.virtual
-  if (streaming.has(key)) return false
-  streaming.add(key)
+  const owner = currentCaller().owner
+  let held = streaming.get(owner)
+  if (held === undefined) {
+    held = new Set()
+    streaming.set(owner, held)
+  }
+  const path = file.scope.virtual
+  if (held.has(path)) return false
+  held.add(path)
   try {
     if ((await sizeOf(dispatch, file.scope)) !== 0) return false
     try {
@@ -194,7 +206,8 @@ async function firstWrite(
     }
     return true
   } finally {
-    streaming.delete(key)
+    held.delete(path)
+    if (held.size === 0) streaming.delete(owner)
   }
 }
 
