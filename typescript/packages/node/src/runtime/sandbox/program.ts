@@ -38,8 +38,8 @@ export interface CliResult {
   code: number
 }
 
-/** Where and how `runCli` starts its child. */
-export interface CliOptions {
+/** Where and how `runProgram` starts its child. */
+export interface ProgramOptions {
   // The working directory; this process's when unset.
   cwd?: string
   // The whole environment; this process's when unset.
@@ -84,14 +84,14 @@ async function untilInputCloses<T>(
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
  * when the child exits is left to close on its own. Mirrors Python's
- * `run_cli`.
+ * `run_program`.
  */
-export async function runCli(
+export async function runProgram(
   executable: string,
   hint: string | null,
   args: string[],
   stdin: ByteSource | null,
-  options: CliOptions = {},
+  options: ProgramOptions = {},
 ): Promise<CliResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
@@ -208,8 +208,8 @@ async function readInto(
 }
 
 /**
- * A sandbox CLI's exec arguments, the same for every CLI that runs a
- * command in a box: the CLI's own words (`head`: `exec -i`, smolvm's
+ * A sandbox program's exec arguments, the same for every program that runs a
+ * command in a box: the program's own words (`head`: `exec -i`, smolvm's
  * `machine exec --name M`), `/` as the working directory and each
  * variable as `-e`, the target or `--` (`tail`: `--` where the command is
  * a trailing var arg, so a line starting with a dash is not read as a
@@ -344,9 +344,9 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
  * can say why. Stopping ends the helper's input; one that has not closed
  * 100 ms later loses its process group and our ends of its pipes, which
  * output nobody read would otherwise hold open, exited or not. Mirrors
- * Python's `open_cli_pipe`.
+ * Python's `open_program_pipe`.
  */
-export function openCliPipe(executable: string, args: string[]): Promise<SandboxPipe> {
+export function openProgramPipe(executable: string, args: string[]): Promise<SandboxPipe> {
   const child = spawn(executable, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',

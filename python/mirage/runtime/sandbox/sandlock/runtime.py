@@ -21,15 +21,15 @@ from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
     cwd_refusal,
-    run_cli,
+    run_program,
 )
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (
-    SANDLOCK_CLI_HINT,
+    SANDLOCK_HINT,
     SYSTEM_READABLE,
 )
 from mirage.runtime.types import OutputFn, RunResult
@@ -39,7 +39,7 @@ from mirage.types import PathSpec
 class SandlockRuntime(
     Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
-    """Run native commands through the Linux Sandlock CLI.
+    """Run native commands through the Linux `sandlock` program.
 
     Paths are native paths. Workspace files require an existing filesystem
     mount granted through fs_readable/fs_writable.
@@ -113,12 +113,12 @@ class SandlockRuntime(
             return refusal
         cli = shutil.which("sandlock")
         if cli is None:
-            raise FileNotFoundError(SANDLOCK_CLI_HINT)
+            raise FileNotFoundError(SANDLOCK_HINT)
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**self.config.env, **(ctx.env or {})}.items():
             wrapper += ["--env", f"{key}={value}"]
         # Variables belong to the confined child, never the wrapper's loader.
-        stdout, stderr, code = await run_cli(
+        stdout, stderr, code = await run_program(
             cli,
             None,
             [*wrapper, "--", *argv],

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const MICROSANDBOX_CLI_HINT =
-  'the microsandbox runtime needs the msb CLI on PATH (https://microsandbox.dev); ' +
+export const MICROSANDBOX_HINT =
+  'the microsandbox runtime needs `msb` on PATH (https://microsandbox.dev); ' +
   'start the sandbox before connecting'
 
 export const RUNNING_STATE = 'Running'

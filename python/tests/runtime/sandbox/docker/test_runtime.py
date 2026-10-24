@@ -20,7 +20,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
-from mirage.runtime.sandbox import cli
+from mirage.runtime.sandbox import program
 from mirage.runtime.sandbox.docker import DockerRuntime
 from mirage.runtime.types import SandboxPipe
 
@@ -102,13 +102,13 @@ def test_mount_type_is_one_of_ssh_fuse_both():
 @pytest.mark.asyncio
 async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
     spawned: list[tuple[str, ...]] = []
-    spawn = cli._spawn
+    spawn = program._spawn
 
     async def as_cat(executable, args, **kwargs):
         spawned.append((executable, *args))
         return await spawn("cat", [], **kwargs)
 
-    monkeypatch.setattr(cli, "_spawn", as_cat)
+    monkeypatch.setattr(program, "_spawn", as_cat)
     runtime = DockerRuntime(config={"container": "cid-42"})
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert spawned == [

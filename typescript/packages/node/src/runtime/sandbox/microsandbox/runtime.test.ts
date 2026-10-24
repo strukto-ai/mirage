@@ -19,7 +19,7 @@ import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { MicrosandboxRuntime } from './runtime.ts'
-import * as cli from '../cli.ts'
+import * as program from '../program.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -38,7 +38,7 @@ describe('MicrosandboxRuntime', () => {
     ['[]', 'invalid status object'],
     ['not json', 'unreadable json'],
   ])('refuses unusable status %s before exec', async (status, message) => {
-    const invoke = vi.spyOn(cli, 'runCli').mockResolvedValue({
+    const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
       stdout: ENC.encode(status),
       stderr: new Uint8Array(),
       code: 0,
@@ -65,8 +65,8 @@ describe('MicrosandboxRuntime', () => {
     }
   })
 
-  it('preserves the status CLI error', async () => {
-    const invoke = vi.spyOn(cli, 'runCli').mockResolvedValue({
+  it('preserves the status error', async () => {
+    const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
       stdout: new Uint8Array(),
       stderr: ENC.encode('sandbox not found'),
       code: 1,
@@ -93,9 +93,9 @@ describe('MicrosandboxRuntime', () => {
     )
   })
 
-  it('maps process requests to the msb CLI contract', async () => {
+  it('maps process requests to the msb contract', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
-    const invoke = vi.spyOn(cli, 'runCli').mockImplementation((_exe, _hint, args) => {
+    const invoke = vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args) => {
       if (args[0] === 'status')
         return Promise.resolve({
           stdout: ENC.encode('{"status":"Running"}'),
@@ -163,7 +163,7 @@ describe('MicrosandboxRuntime', () => {
       started = resolve
     })
     const invoke = vi
-      .spyOn(cli, 'runCli')
+      .spyOn(program, 'runProgram')
       .mockImplementation((_exe, _hint, _args, _stdin, options) => {
         probeSignal = options?.signal
         started()

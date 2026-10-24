@@ -49,7 +49,7 @@ export const PIPE_SERVER_HINT =
 
 /**
  * Every argv a sandbox runs goes under this POSIX sh prelude, with the
- * cwd as $1: a provider CLI's exec passes `-w /` (`execArgs`), and a
+ * cwd as $1: a provider program's exec passes `-w /` (`execArgs`), and a
  * provider whose exec takes one command line dresses it (`wrapLine`), so
  * no provider's own cwd is used. An exec's `-e` can append to the image's
  * environment rather than replace a name it already sets, `-w` can

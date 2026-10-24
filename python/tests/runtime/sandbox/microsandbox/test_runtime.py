@@ -53,7 +53,7 @@ async def test_refuses_unusable_status_before_exec(
         return status, b"", 0
 
     monkeypatch.setattr(
-        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+        "mirage.runtime.sandbox.microsandbox.runtime.run_program", invoke
     )
     runtime = build_runtime("microsandbox", config={"sandbox": "box"})
     with pytest.raises(RuntimeError, match=message):
@@ -78,7 +78,7 @@ async def _missing_sandbox(
 @pytest.mark.asyncio
 async def test_status_failure_preserves_cli_error(monkeypatch):
     monkeypatch.setattr(
-        "mirage.runtime.sandbox.microsandbox.runtime.run_cli",
+        "mirage.runtime.sandbox.microsandbox.runtime.run_program",
         _missing_sandbox,
     )
     with pytest.raises(RuntimeError, match="sandbox not found"):
@@ -103,7 +103,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
         return b"output", b"diagnostic", 7
 
     monkeypatch.setattr(
-        "mirage.runtime.sandbox.microsandbox.runtime.run_cli", invoke
+        "mirage.runtime.sandbox.microsandbox.runtime.run_program", invoke
     )
     runtime = build_runtime(
         "microsandbox", config={"sandbox": "box", "env": {"MARK": "config"}}

@@ -20,14 +20,14 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './config.ts'
-import { RUNNING_STATE, SMOLVM_CLI_HINT, notRunningHint } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { RUNNING_STATE, SMOLVM_HINT, notRunningHint } from './constants.ts'
+import { type CliResult, execArgs, openProgramPipe, runProgram } from '../program.ts'
 
 /**
  * A microVM the user runs as a whole-line runtime.
  *
  * You start the machine yourself; mirage only connects to it and
- * execs lines. The smolvm CLI is the transport, so there is no SDK
+ * execs lines. The `smolvm` program is the transport, so there is no SDK
  * dependency and no daemon socket wiring; each line is one `smolvm
  * machine exec` with the merged environment, the session cwd, real
  * stdin, and separated stderr.
@@ -47,7 +47,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
     requireId('smolvm', 'machine', this.config.machine)
   }
 
-  // One smolvm CLI invocation; the seam tests override.
+  // Run `smolvm` once; the seam tests override.
   protected smolvm(
     args: string[],
     stdin: ByteSource | null = null,
@@ -55,7 +55,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
     signal?: AbortSignal,
     errors: OutputFn | null = null,
   ): Promise<CliResult> {
-    return runCli('smolvm', SMOLVM_CLI_HINT, args, stdin, {
+    return runProgram('smolvm', SMOLVM_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -105,7 +105,7 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
   }
 
   async openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe(
+    return openProgramPipe(
       'smolvm',
       execArgs(this.head(), ['--'], {}, null, ['/bin/sh', '-c', command]),
     )

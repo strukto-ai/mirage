@@ -128,16 +128,18 @@ else {
     expect(() => buildRuntime('sandlock', { config: { home: 'python3' } })).toThrow('home')
   })
 
-  it('reports an absent CLI', async () => {
+  it('reports an absent sandlock', async () => {
     await rm(join(dir, 'sandlock'))
-    await expect(execute(new SandlockRuntime(), ['node'])).rejects.toThrow('sandlock CLI on PATH')
+    await expect(execute(new SandlockRuntime(), ['node'])).rejects.toThrow(
+      'needs `sandlock` on PATH',
+    )
   })
 
   it('rejects empty argv', async () => {
     await expect(execute(new SandlockRuntime(), [])).rejects.toThrow('argv must not be empty')
   })
 
-  it('cancels the CLI', async () => {
+  it('cancels sandlock', async () => {
     const controller = new AbortController()
     const runtime = new SandlockRuntime()
     const running = execute(runtime, ['wait'], '/', { signal: controller.signal })

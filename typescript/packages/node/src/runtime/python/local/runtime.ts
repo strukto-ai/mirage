@@ -30,7 +30,7 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
-import { closeChildren, cwdRefusal, runCli } from '../../sandbox/cli.ts'
+import { closeChildren, cwdRefusal, runProgram } from '../../sandbox/program.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
 
@@ -241,7 +241,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
         ? `local python interpreter not found: '${this.python}' (set the ` +
           `runtime entry's config home or ${LOCAL_HOME_ENV})`
         : null
-    const { stdout, stderr, code } = await runCli(program, missing, argv, stdin, {
+    const { stdout, stderr, code } = await runProgram(program, missing, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
       direct: true,

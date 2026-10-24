@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SANDLOCK_CLI_HINT =
-  'the sandlock runtime needs the sandlock CLI on PATH ' +
+export const SANDLOCK_HINT =
+  'the sandlock runtime needs `sandlock` on PATH ' +
   '(https://github.com/multikernel/sandlock); Linux only, and the full ' +
   'ruleset wants Landlock ABI v6 (Linux 6.12+)'
 

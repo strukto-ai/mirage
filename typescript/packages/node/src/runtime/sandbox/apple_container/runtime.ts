@@ -26,18 +26,18 @@ import {
   validateAppleContainerConfig,
 } from './config.ts'
 import {
-  APPLE_CONTAINER_CLI_HINT,
+  APPLE_CONTAINER_HINT,
   RUNNING_STATE,
   noContainerHint,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openProgramPipe, runProgram } from '../program.ts'
 
 /**
  * Containers under Apple's `container` tool as a whole-line runtime.
  *
  * You start the containers yourself; mirage only connects to them and
- * execs lines. The `container` CLI is the transport, so there is no
+ * execs lines. The `container` program is the transport, so there is no
  * SDK dependency and no XPC wiring; each line is one `container exec`
  * with the merged environment, the session cwd, real stdin, and
  * separated stderr.
@@ -66,7 +66,7 @@ export class AppleContainerRuntime
     validateAppleContainerConfig(this.config)
   }
 
-  /** Run one container CLI invocation; the seam tests override. */
+  /** Run `container` once; the seam tests override. */
   protected container(
     args: string[],
     stdin: ByteSource | null = null,
@@ -74,7 +74,7 @@ export class AppleContainerRuntime
     signal?: AbortSignal,
     errors: OutputFn | null = null,
   ): Promise<CliResult> {
-    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, {
+    return runProgram('container', APPLE_CONTAINER_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -151,7 +151,7 @@ export class AppleContainerRuntime
 
   async openPipe(command: string): Promise<SandboxPipe> {
     const target = [await this.target()]
-    return openCliPipe(
+    return openProgramPipe(
       'container',
       execArgs(['exec', '-i'], target, {}, null, ['/bin/sh', '-c', command]),
     )

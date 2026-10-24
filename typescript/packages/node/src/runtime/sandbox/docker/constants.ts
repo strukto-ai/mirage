@@ -12,5 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const DOCKER_CLI_HINT =
-  'the docker runtime needs the docker CLI on PATH (Docker Desktop, colima, or a podman alias)'
+export const DOCKER_HINT =
+  'the docker runtime needs `docker` on PATH (Docker Desktop, colima, or a podman alias)'

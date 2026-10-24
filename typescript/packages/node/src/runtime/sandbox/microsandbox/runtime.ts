@@ -22,14 +22,14 @@ import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
 import {
   RUNNING_STATE,
-  MICROSANDBOX_CLI_HINT,
+  MICROSANDBOX_HINT,
   INSPECT_TIMEOUT_SECONDS,
   notRunningHint,
 } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { type CliResult, execArgs, openProgramPipe, runProgram } from '../program.ts'
 
 /**
- * Run programs in an existing Microsandbox guest through the msb CLI.
+ * Run programs in an existing Microsandbox guest through `msb`.
  * The user starts the sandbox and serves its workspace at the same paths
  * inside the guest. Mirage forwards commands, stdin, environment, and cwd
  * without managing the sandbox's lifecycle.
@@ -52,7 +52,7 @@ export class MicrosandboxRuntime
     return Promise.resolve()
   }
 
-  // One msb CLI invocation.
+  // Run `msb` once.
   protected microsandbox(
     args: string[],
     stdin: ByteSource | null = null,
@@ -60,7 +60,7 @@ export class MicrosandboxRuntime
     signal?: AbortSignal,
     errors: OutputFn | null = null,
   ): Promise<CliResult> {
-    return runCli('msb', MICROSANDBOX_CLI_HINT, args, stdin, {
+    return runProgram('msb', MICROSANDBOX_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -127,7 +127,7 @@ export class MicrosandboxRuntime
 
   async openPipe(command: string): Promise<SandboxPipe> {
     await this.connect()
-    return openCliPipe(
+    return openProgramPipe(
       'msb',
       execArgs([...this.head(), '--stream'], ['--'], {}, null, ['/bin/sh', '-c', command]),
     )

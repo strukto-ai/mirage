@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SMOLVM_CLI_HINT =
-  'the smolvm runtime needs the smolvm CLI on PATH (https://smolmachines.com); ' +
+export const SMOLVM_HINT =
+  'the smolvm runtime needs `smolvm` on PATH (https://smolmachines.com); ' +
   'the host also needs a hypervisor: /dev/kvm on Linux, Hypervisor.framework on macOS, WHP on Windows'
 
 /**

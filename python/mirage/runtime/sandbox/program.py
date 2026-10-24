@@ -44,7 +44,7 @@ Children = dict[
 STREAM_LIMIT = 2**16
 
 
-async def run_cli(
+async def run_program(
     executable: str,
     hint: str | None,
     args: list[str],
@@ -253,8 +253,8 @@ def exec_args(
     cwd: str | None,
     argv: Sequence[str],
 ) -> list[str]:
-    """A sandbox CLI's exec arguments, the same for every CLI that runs
-    a command in a box: the CLI's own words, ``/`` as the working
+    """A sandbox program's exec arguments, the same for every program that runs
+    a command in a box: the program's own words, ``/`` as the working
     directory and each variable as ``-e``, the target or ``--``, then
     the command.
 
@@ -265,7 +265,7 @@ def exec_args(
     given, for a helper pipe.
 
     Args:
-        head (Sequence[str]): the CLI's exec words before the working
+        head (Sequence[str]): the program's exec words before the working
             directory (``exec -i``, smolvm's ``machine exec --name M``).
         tail (Sequence[str]): what follows the flags: the target, or
             ``--`` where the command is a trailing var arg, so a line
@@ -314,7 +314,7 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
     answers ESRCH; either way nothing in it is left to signal.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        process (asyncio.subprocess.Process): a child ``run_program`` started.
         signum (int): the signal, KILL (9) by default.
     """
     if sys.platform == "win32":
@@ -336,7 +336,7 @@ async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
     caller's to kill (``stop_tree``). Mirrors TypeScript's ``endTree``.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started,
+        process (asyncio.subprocess.Process): a child ``run_program`` started,
             with nothing else reading its output.
         signum (int): the signal.
     """
@@ -387,7 +387,7 @@ def stop_tree(
     kill holding. Mirrors TypeScript's ``stopTree``.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        process (asyncio.subprocess.Process): a child ``run_program`` started.
         transport (asyncio.SubprocessTransport): the child's transport.
     """
     kill_tree(process)
@@ -421,7 +421,7 @@ async def close_children(children: Children) -> None:
     )
 
 
-async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
+async def open_program_pipe(executable: str, args: list[str]) -> SandboxPipe:
     """Hold a byte transport to a sandbox helper until stopped.
 
     The tail of what the helper says on stderr is kept for
@@ -431,7 +431,7 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
     would otherwise hold open.
 
     Args:
-        executable (str): the provider's CLI.
+        executable (str): the provider's program.
         args (list[str]): arguments starting a foreground helper.
     """
     child, transport = await _spawn(

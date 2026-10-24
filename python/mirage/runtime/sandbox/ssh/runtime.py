@@ -20,9 +20,9 @@ from mirage.context.session_context import current_caller
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import STREAM_LIMIT
 from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import STREAM_LIMIT
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe

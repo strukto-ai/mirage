@@ -28,11 +28,11 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.local.config import LocalConfig
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
     cwd_refusal,
-    run_cli,
+    run_program,
 )
 from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
@@ -204,7 +204,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         output: Callable[[bytes], Awaitable[None]] | None = None,
         errors: Callable[[bytes], Awaitable[None]] | None = None,
     ) -> RunResult:
-        stdout, stderr, code = await run_cli(
+        stdout, stderr, code = await run_program(
             program,
             None,
             argv,

@@ -23,13 +23,13 @@ import pytest
 
 from mirage.context.session_context import run_with_execution
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
-    open_cli_pipe,
-    run_cli,
+    open_program_pipe,
+    run_program,
 )
-from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.types import PathSpec
 
 # A child that starts a sleep in a session of its own, so killing the
@@ -74,7 +74,7 @@ async def _ended(pid: int) -> bool:
 
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
-    out, err, code = await run_cli(
+    out, err, code = await run_program(
         "sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in"
     )
     assert (out, err, code) == (b"in", b"e\n", 3)
@@ -92,7 +92,7 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     async def output(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, _, code = await run_cli(
+    out, _, code = await run_program(
         "sh", None, ["-c", "cat; kill -TERM $$"], _two_chunks(), output=output
     )
     assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
@@ -106,7 +106,7 @@ async def test_run_cli_streams_stderr_to_its_callback():
     async def errors(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, err, code = await run_cli(
+    out, err, code = await run_program(
         "sh", None, ["-c", "echo o; echo e >&2; exit 3"], None, errors=errors
     )
     assert (out, err, b"".join(seen), code) == (b"o\n", b"", b"e\n", 3)
@@ -121,7 +121,7 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
         yield b""
 
     async with asyncio.timeout(5):
-        out, _, code = await run_cli(
+        out, _, code = await run_program(
             "sh", None, ["-c", "printf done"], source()
         )
     assert (out, code) == (b"done", 0)
@@ -130,14 +130,14 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
 @pytest.mark.asyncio
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
-        await run_cli("mirage-no-such-cli", "install it", [], None)
+        await run_program("mirage-no-such-program", "install it", [], None)
 
 
 @pytest.mark.asyncio
 async def test_cancelling_a_call_kills_the_child(tmp_path):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh", "no sh", ["-c", f"echo $$ > {pid_file}; exec sleep 30"], None
         )
     )
@@ -159,7 +159,7 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
     # alone left the wait running until the grandchild exited.
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -181,7 +181,7 @@ def _start_runner(
     supervisor: ProcessSupervisor, script: str, direct: bool = False
 ):
     async def run() -> int:
-        _, _, code = await run_cli(
+        _, _, code = await run_program(
             "sh", None, ["-c", script], None, direct=direct
         )
         return code
@@ -395,7 +395,7 @@ async def test_close_children_kills_every_running_tree(tmp_path):
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -424,7 +424,7 @@ async def test_a_cancelled_call_does_not_wait_on_a_descendant_that_left(
 ):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
+        run_program(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
     )
     escaped = await _wait_for_pid(pid_file)
     try:
@@ -443,7 +443,7 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             sys.executable,
             None,
             ["-c", ESCAPE, str(pid_file)],
@@ -463,7 +463,7 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
 
 @pytest.mark.asyncio
 async def test_a_pipe_keeps_the_tail_of_its_stderr():
-    pipe = await open_cli_pipe(
+    pipe = await open_program_pipe(
         sys.executable,
         [
             "-c",
@@ -488,7 +488,7 @@ async def test_a_pipe_keeps_the_tail_of_its_stderr():
     ids=["exits_once_its_input_closes", "never_exits"],
 )
 async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
-    pipe = await open_cli_pipe(sys.executable, ["-c", script])
+    pipe = await open_program_pipe(sys.executable, ["-c", script])
     await asyncio.sleep(0.5)
     async with asyncio.timeout(5):
         await pipe.stop()

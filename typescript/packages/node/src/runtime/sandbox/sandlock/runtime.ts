@@ -28,8 +28,8 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
-import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
-import { closeChildren, cwdRefusal, runCli } from '../cli.ts'
+import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
+import { closeChildren, cwdRefusal, runProgram } from '../program.ts'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
@@ -91,10 +91,10 @@ export class SandlockRuntime
     for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))
       wrapper.push('--env', `${key}=${value}`)
     wrapper.push('--', ...argv)
-    // Only host PATH locates the CLI; requested variables go to the confined child.
-    const { stdout, stderr, code } = await runCli(
+    // Only host PATH locates `sandlock`; requested variables go to the confined child.
+    const { stdout, stderr, code } = await runProgram(
       'sandlock',
-      SANDLOCK_CLI_HINT,
+      SANDLOCK_HINT,
       wrapper,
       ctx.stdin,
       {

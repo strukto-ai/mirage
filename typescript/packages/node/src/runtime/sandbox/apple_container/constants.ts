@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const APPLE_CONTAINER_CLI_HINT =
-  "the apple_container runtime needs Apple's container CLI on PATH " +
+export const APPLE_CONTAINER_HINT =
+  "the apple_container runtime needs Apple's `container` on PATH " +
   '(`brew install container`, or the installer from ' +
   'https://github.com/apple/container/releases); it runs on Apple silicon ' +
   'with macOS 26 or later'

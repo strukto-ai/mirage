@@ -17,20 +17,24 @@ import json
 
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
 from mirage.runtime.sandbox.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
-    MICROSANDBOX_CLI_HINT,
+    MICROSANDBOX_HINT,
     RUNNING_STATE,
     not_running_hint,
 )
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import (
+    exec_args,
+    open_program_pipe,
+    run_program,
+)
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
 class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
-    """Run programs in an existing Microsandbox guest through the msb CLI.
+    """Run programs in an existing Microsandbox guest through `msb`.
 
     The user starts the sandbox and serves its workspace at the same
     paths inside the guest. Mirage forwards commands, stdin, environment,
@@ -55,10 +59,10 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
-        """Run one msb CLI invocation."""
-        return await run_cli(
+        """Run `msb` once."""
+        return await run_program(
             "msb",
-            MICROSANDBOX_CLI_HINT,
+            MICROSANDBOX_HINT,
             args,
             stdin,
             output=output,
@@ -122,7 +126,7 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Hold a byte-preserving msb stream open for guest sshfs."""
         await self.connect()
-        return await open_cli_pipe(
+        return await open_program_pipe(
             "msb",
             exec_args(
                 (*self._head(), "--stream"),

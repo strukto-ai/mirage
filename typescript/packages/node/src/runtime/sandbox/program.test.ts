@@ -18,7 +18,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { closeChildren, openCliPipe, runCli } from './cli.ts'
+import { closeChildren, openProgramPipe, runProgram } from './program.ts'
 import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -74,7 +74,7 @@ function shRunner(
     },
     run: async () =>
       (
-        await runCli('sh', null, ['-c', script], null, {
+        await runProgram('sh', null, ['-c', script], null, {
           signal: abort.signal,
           direct,
           ...(output === undefined ? {} : { output }),
@@ -83,11 +83,11 @@ function shRunner(
   })
 }
 
-describe('runCli', () => {
+describe('runProgram', () => {
   // A kill that names TERM reaches the program as TERM, so its handler
   // runs, and the runner's status is bash's 143 for a child TERM ended.
   it('lets the child handle the TERM a kill sent its runner', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
     const runner = shRunner(
       `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
@@ -100,7 +100,7 @@ describe('runCli', () => {
   })
 
   it('gives the child no handler when a kill sent its runner KILL', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
     const runner = shRunner(
       `trap 'echo bye > ${said}; exit 0' TERM; echo $$ > ${pidFile}; ` +
@@ -124,7 +124,7 @@ describe('runCli', () => {
   ] as const)(
     'leaves the status of a direct child that handled the signal (direct %s, %j, %d)',
     async (direct, trap, signum, code) => {
-      const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
       const pidFile = join(dir, 'pid')
       const runner = shRunner(
         `${trap}echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
@@ -141,7 +141,7 @@ describe('runCli', () => {
   // A kill reaches the program once, as bash's does: a handler that counts
   // its signals, or one already exiting, must not see a second.
   it('signals the child once for a kill', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, count] = [join(dir, 'pid'), join(dir, 'count')]
     const program = [
       'const fs = require("node:fs")',
@@ -170,7 +170,7 @@ describe('runCli', () => {
       }
     })
     try {
-      const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+      const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
       const pidFile = join(dir, 'pid')
       const runner = shRunner(
         `trap 'exit 0' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`,
@@ -187,7 +187,7 @@ describe('runCli', () => {
   // The grace is the group's: a descendant still handling the signal after
   // the program it ran under has exited keeps its second.
   it('lets a descendant keep the grace after its parent exits', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
     const runner = shRunner(
       `sh -c 'trap "sleep 0.3; echo bye > ${said}; exit 0" TERM; ` +
@@ -203,7 +203,7 @@ describe('runCli', () => {
   // What ignores the signal, a descendant too, ends with KILL after the
   // grace, though the program it ran under exited at once.
   it('kills a descendant that ignores the signal after its parent exits', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, kidFile] = [join(dir, 'pid'), join(dir, 'kid')]
     const runner = shRunner(
       `sh -c "trap '' TERM; while :; do sleep 0.05; done" >/dev/null 2>&1 & ` +
@@ -220,7 +220,7 @@ describe('runCli', () => {
   // A handler that writes more than a pipe holds is not blocked on it, even
   // with a consumer that no longer reads: the output is dropped.
   it('lets a handler writing its output finish in the grace', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
     const runner = shRunner(
       `trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; ` +
@@ -236,7 +236,7 @@ describe('runCli', () => {
 
   // A program that ignores the signal still ends: KILL follows the grace.
   it('kills a child that ignores the signal once the grace has passed', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
     const child = await escapedPid(pidFile)
@@ -246,7 +246,7 @@ describe('runCli', () => {
   })
 
   it('returns both streams and the status', async () => {
-    const r = await runCli(
+    const r = await runProgram(
       'sh',
       'no sh',
       ['-c', 'cat; echo e >&2; exit 3'],
@@ -258,7 +258,7 @@ describe('runCli', () => {
   // stderr goes to its own callback as it arrives, as stdout goes to output.
   it('streams stderr to its callback', async () => {
     const seen: Uint8Array[] = []
-    const r = await runCli('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
+    const r = await runProgram('sh', null, ['-c', 'echo o; echo e >&2; exit 3'], null, {
       errors: (chunk) => {
         seen.push(chunk)
         return Promise.resolve()
@@ -285,7 +285,7 @@ describe('runCli', () => {
         yield await Promise.resolve(new Uint8Array(1024))
       }
     }
-    const result = await runCli('wc', null, ['-c'], input(), { children })
+    const result = await runProgram('wc', null, ['-c'], input(), { children })
     expect(result.code).toBe(0)
     expect(Number(DEC.decode(result.stdout).trim())).toBe(5000 * 1024)
     expect(chunks).toBe(5000)
@@ -293,7 +293,7 @@ describe('runCli', () => {
 
   it('finishes an exited command with an open, idle managed stdin', async () => {
     const input = new ProcessInput()
-    const result = await runCli('sh', null, ['-c', 'printf done'], input.stream())
+    const result = await runProgram('sh', null, ['-c', 'printf done'], input.stream())
     expect(result.code).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('done')
     await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
@@ -309,7 +309,7 @@ describe('runCli', () => {
       yield new Uint8Array()
     }
     try {
-      const result = await runCli('sh', null, ['-c', 'printf done'], input())
+      const result = await runProgram('sh', null, ['-c', 'printf done'], input())
       expect([result.code, DEC.decode(result.stdout)]).toEqual([0, 'done'])
     } finally {
       release()
@@ -319,7 +319,7 @@ describe('runCli', () => {
   it('aborts a command while its managed input pull is waiting', async () => {
     const input = new ProcessInput()
     const controller = new AbortController()
-    const run = runCli('sh', null, ['-c', 'exec sleep 30'], input.stream(), {
+    const run = runProgram('sh', null, ['-c', 'exec sleep 30'], input.stream(), {
       signal: controller.signal,
     })
     controller.abort()
@@ -327,14 +327,18 @@ describe('runCli', () => {
     await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
   })
 
-  it('rejects a missing CLI with its hint', async () => {
-    await expect(runCli('mirage-no-such-cli', 'install it', [], null)).rejects.toThrow('install it')
+  it('rejects a missing program with its hint', async () => {
+    await expect(runProgram('mirage-no-such-program', 'install it', [], null)).rejects.toThrow(
+      'install it',
+    )
   })
 
   it('kills the child when the call is aborted', async () => {
     const controller = new AbortController()
     const started = Date.now()
-    const run = runCli('sh', 'no sh', ['-c', 'exec sleep 30'], null, { signal: controller.signal })
+    const run = runProgram('sh', 'no sh', ['-c', 'exec sleep 30'], null, {
+      signal: controller.signal,
+    })
     setTimeout(() => {
       controller.abort()
     }, 50)
@@ -344,9 +348,9 @@ describe('runCli', () => {
 
   it('kills what the child started, which holds its pipes open', async () => {
     const controller = new AbortController()
-    const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-'))
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
-    const run = runCli('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
+    const run = runProgram('sh', null, ['-c', `sleep 30 & echo $! > ${pidFile}; wait`], null, {
       signal: controller.signal,
     })
     while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
@@ -361,8 +365,8 @@ describe('runCli', () => {
 
   it('does not wait on a descendant that left the group when aborted', async () => {
     const controller = new AbortController()
-    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-cli-')), 'pid')
-    const run = runCli(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
+    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, {
       signal: controller.signal,
     })
     const escaped = await escapedPid(pidFile)
@@ -378,8 +382,8 @@ describe('runCli', () => {
 
   it('closeChildren does not wait on a descendant that left the group', async () => {
     const children = new Set<ChildProcess>()
-    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-cli-')), 'pid')
-    const run = runCli(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
+    const pidFile = join(mkdtempSync(join(tmpdir(), 'mirage-program-')), 'pid')
+    const run = runProgram(process.execPath, null, ['-e', ESCAPE, pidFile], null, { children })
     const escaped = await escapedPid(pidFile)
     try {
       const started = Date.now()
@@ -412,7 +416,7 @@ describe('runCli', () => {
         return { done: true, value: undefined }
       },
     }
-    const run = runCli('sh', null, ['-c', 'exit 0'], input, { children })
+    const run = runProgram('sh', null, ['-c', 'exit 0'], input, { children })
     const exited = Promise.all(
       [...children].map(
         (child) =>
@@ -432,7 +436,7 @@ describe('runCli', () => {
 
   it('closeChildren kills every running tree and waits for it', async () => {
     const children = new Set<ChildProcess>()
-    const run = runCli('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
+    const run = runProgram('sh', null, ['-c', 'sleep 30 & wait'], null, { children })
     expect(children.size).toBe(1)
     const started = Date.now()
     await closeChildren(children)
@@ -452,9 +456,9 @@ const UNREAD_THEN_EXIT = [
 ].join('\n')
 const UNREAD_FOREVER = "import os\nos.write(1, b'x' * (1 << 20))"
 
-describe('openCliPipe', () => {
+describe('openProgramPipe', () => {
   it('keeps the tail of its stderr', async () => {
-    const pipe = await openCliPipe(process.execPath, [
+    const pipe = await openProgramPipe(process.execPath, [
       '-e',
       "process.stderr.write('x'.repeat(40000) + 'the-end'); setTimeout(() => undefined, 30000)",
     ])
@@ -473,7 +477,7 @@ describe('openCliPipe', () => {
     ['exits once its input closes', UNREAD_THEN_EXIT],
     ['never exits', UNREAD_FOREVER],
   ])('stops a command that %s without waiting on output nobody read', async (_name, script) => {
-    const pipe = await openCliPipe('python3', ['-c', script])
+    const pipe = await openProgramPipe('python3', ['-c', script])
     await delay(500)
     const stopped = pipe.stop().then(() => 'stopped')
     expect(await Promise.race([stopped, delay(5000, 'stuck', { ref: false })])).toBe('stopped')

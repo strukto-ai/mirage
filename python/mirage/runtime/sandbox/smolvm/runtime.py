@@ -16,12 +16,16 @@ import json
 
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import (
+    exec_args,
+    open_program_pipe,
+    run_program,
+)
 from mirage.runtime.sandbox.smolvm.config import SmolvmConfig
 from mirage.runtime.sandbox.smolvm.constants import (
     RUNNING_STATE,
-    SMOLVM_CLI_HINT,
+    SMOLVM_HINT,
     not_running_hint,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
@@ -31,7 +35,7 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
     """A microVM the user runs as a whole-line runtime.
 
     You start the machine yourself; mirage only connects to it and
-    execs lines. The smolvm CLI is the transport, so there is no SDK
+    execs lines. The `smolvm` program is the transport, so there is no SDK
     dependency and no daemon socket wiring; each line is one `smolvm
     machine exec` with the merged environment, the session cwd, real
     stdin, and separated stderr.
@@ -58,10 +62,10 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes, int]:
-        """One smolvm CLI invocation; the seam tests override."""
-        return await run_cli(
+        """Run `smolvm` once; the seam tests override."""
+        return await run_program(
             "smolvm",
-            SMOLVM_CLI_HINT,
+            SMOLVM_HINT,
             args,
             stdin,
             output=output,
@@ -112,7 +116,7 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_cli_pipe(
+        return await open_program_pipe(
             "smolvm",
             exec_args(
                 self._head(), ("--",), {}, None, ("/bin/sh", "-c", command)

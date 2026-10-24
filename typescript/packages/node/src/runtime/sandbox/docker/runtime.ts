@@ -20,14 +20,14 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
-import { DOCKER_CLI_HINT } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { DOCKER_HINT } from './constants.ts'
+import { type CliResult, execArgs, openProgramPipe, runProgram } from '../program.ts'
 
 /**
  * A container the user runs as a whole-line runtime.
  *
  * You start the container yourself; mirage only connects to it and
- * execs lines. The docker CLI is the transport (Docker Desktop,
+ * execs lines. The `docker` program is the transport (Docker Desktop,
  * colima, or a podman alias all work), so there is no SDK dependency
  * and no daemon socket wiring; each line is one `docker exec -i` with
  * the merged environment, the session cwd, real stdin, and separated
@@ -42,7 +42,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     requireId('docker', 'container', this.config.container)
   }
 
-  // One docker CLI invocation; the seam tests override.
+  // Run `docker` once; the seam tests override.
   protected docker(
     args: string[],
     stdin: ByteSource | null = null,
@@ -50,7 +50,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     signal?: AbortSignal,
     errors: OutputFn | null = null,
   ): Promise<CliResult> {
-    return runCli('docker', DOCKER_CLI_HINT, args, stdin, {
+    return runProgram('docker', DOCKER_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -87,7 +87,7 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
   }
 
   openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe(
+    return openProgramPipe(
       'docker',
       execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
     )

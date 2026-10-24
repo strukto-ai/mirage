@@ -229,7 +229,7 @@ describe.skipIf(process.platform === 'win32')('AppleContainerRuntime against a r
     expect(result.exitCode).toBe(0)
   })
 
-  it('a missing CLI names how to install it', async () => {
+  it('a missing program names how to install it', async () => {
     await withFakeCli(null, async () => {
       const runtime = new AppleContainerRuntime({ config: { container: 'box' } })
       await expect(runtime.execLine('pwd', null, {}, '/')).rejects.toThrow('brew install container')

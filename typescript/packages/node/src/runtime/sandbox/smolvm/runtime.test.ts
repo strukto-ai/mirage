@@ -106,7 +106,7 @@ describe('SmolvmRuntime', () => {
     ['a frozen machine', { state: 'frozen' }, 'frozen fork base'],
     ['a created machine', { state: 'created' }, 'never been started'],
     ['an unknown state', { state: 'quiesced' }, 'state: quiesced'],
-    ['a CLI error', { statusCode: 1 }, "machine 'vm' not found"],
+    ['a status error', { statusCode: 1 }, "machine 'vm' not found"],
     ['unreadable json', { statusStdout: 'not json' }, 'unreadable json'],
   ])('connect names why it refuses %s', async (_name, fake, refusal) => {
     const runtime = Object.assign(makeRuntime(), fake)

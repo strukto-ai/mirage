@@ -592,7 +592,7 @@ describe('SandboxMounts', () => {
 
       override async openPipe(command: string) {
         const pipe = await super.openPipe(command)
-        pipe.diagnostic = () => Promise.resolve('CLI refused: sandbox is not running')
+        pipe.diagnostic = () => Promise.resolve('msb refused: sandbox is not running')
         return pipe
       }
     }
@@ -602,7 +602,7 @@ describe('SandboxMounts', () => {
       expect(result.exitCode).toBe(1)
       const said = DEC.decode(result.stderr)
       expect(said).toContain('guest unavailable')
-      expect(said).toContain('CLI: CLI refused: sandbox is not running')
+      expect(said).toContain('helper said: msb refused: sandbox is not running')
     } finally {
       await ws.close()
     }
