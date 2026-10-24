@@ -19,7 +19,7 @@ import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 import { Glob } from './glob.ts'
 import { PosixRegex } from './regex.ts'
-import { compiledModule, openStream, serveRequests } from './stream.ts'
+import { compiledModule, mergeOutput, openStream, serveRequests } from './stream.ts'
 import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
@@ -224,6 +224,20 @@ describe('serveRequests', () => {
     for await (const _ of serveRequests(stream, host)) void _
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(500000)
     expect(Math.max(...sizes)).toBeLessThan(70000)
+    stream.close()
+  })
+})
+
+describe('mergeOutput', () => {
+  it('stops its work loop once the signal aborts', async () => {
+    const stream = await openStream('tsort', { name: '-' })
+    const controller = new AbortController()
+    controller.abort()
+    const run = async (): Promise<void> => {
+      for await (const _ of mergeOutput(stream, () => Promise.resolve(null), controller.signal))
+        void _
+    }
+    await expect(run()).rejects.toThrow()
     stream.close()
   })
 })

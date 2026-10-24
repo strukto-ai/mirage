@@ -203,6 +203,40 @@
         "stdout": "c\nm\nx\nd\nn\ny\na\nb\nc\nd\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tsort_reads_names_as_bytes_split_at_blanks_alone",
+      "seq": 15811104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\034b c\\n' | tsort | od -An -c; printf 'a\\302\\240b c d\\n' | tsort; echo rc=$?; printf 'a\\vb\\fc\\rd\\n' | tsort; echo rc=$?; printf '\\377 a\\n\\376 a\\n\\303\\251 a\\n' | tsort | od -An -c; printf 'a\\000b x\\na\\000c y\\n' | tsort",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a 034   b  \\n   c  \\n\nrc=1\nrc=1\n 303 251  \\n 376  \\n 377  \\n   a  \\n\na\ny\nx\n",
+        "stderr": "tsort: -: input contains an odd number of tokens\ntsort: -: input contains an odd number of tokens\n"
+      }
     }
   ]
 }

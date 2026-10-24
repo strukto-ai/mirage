@@ -1,3 +1,5 @@
+use regex_automata::{Anchored, Input};
+
 use super::backtrack::{Program, Scratch, Shape, unit_at};
 use super::hir::Lower;
 use super::parse::{self, Ast, Dialect, Unit};
@@ -42,6 +44,11 @@ pub(crate) struct Posix {
     groups: usize,
     scratch: Scratch,
     utf8: bool,
+    /// The bytes a match can start with, which a backward search alone
+    /// tries; found on its first call.
+    starts: Option<[bool; 256]>,
+    /// The place whose backtracked attempt ran out of steps.
+    suspended: Option<usize>,
 }
 
 impl Posix {
@@ -113,6 +120,8 @@ impl Posix {
             groups,
             scratch: Scratch::default(),
             utf8: options.utf8,
+            starts: None,
+            suspended: None,
         })
     }
 
@@ -186,6 +195,73 @@ impl Posix {
     /// left unplaced.
     pub(crate) fn find(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
         self.extent(hay, at)
+    }
+
+    /// The latest place in `from..to` a match starts, tried from `to`
+    /// down, and where the longest match there ends, `hay` being the
+    /// whole subject: tac's backward search. Each place tried and each
+    /// step of a backtracked attempt spends `budget`; out of it, `Err`
+    /// holds the place below which none has been, and an attempt cut short
+    /// goes on where it stopped on the next call.
+    pub(crate) fn latest(
+        &mut self,
+        hay: &[u8],
+        from: usize,
+        to: usize,
+        budget: &mut u64,
+    ) -> Result<Option<(usize, usize)>, usize> {
+        if let Some(literal) = &self.literal {
+            let stop = (to + literal.len() - 1).min(hay.len());
+            let found = memchr::memmem::rfind(&hay[from..stop], literal);
+            return Ok(found.map(|at| (from + at, from + at + literal.len())));
+        }
+        let starts = *self
+            .starts
+            .get_or_insert_with(|| first_bytes(&mut self.automata));
+        let mut below = to;
+        while let Some(at) = hay[from..below]
+            .iter()
+            .rposition(|&b| starts[usize::from(b)])
+        {
+            if *budget == 0 {
+                return Err(below);
+            }
+            *budget -= 1;
+            let place = from + at;
+            if self.utf8 && super::splits_char(hay, place) {
+                below = place;
+                continue;
+            }
+            let resume = self.suspended.take() == Some(place);
+            match self.anchored(hay, place, resume, budget) {
+                Step::Paused => {
+                    self.suspended = Some(place);
+                    return Err(place + 1);
+                }
+                Step::Done(Some(stop)) => return Ok(Some((place, stop))),
+                Step::Done(None) => below = place,
+            }
+        }
+        Ok(None)
+    }
+
+    /// Where the longest match that starts at `at` ends.
+    fn anchored(
+        &mut self,
+        hay: &[u8],
+        at: usize,
+        resume: bool,
+        budget: &mut u64,
+    ) -> Step<Option<usize>> {
+        let automaton = self.automata.as_mut().and_then(|a| a.longest.as_mut());
+        if let Some((dfa, cache)) = automaton.filter(|_| !resume) {
+            let input = Input::new(hay).span(at..hay.len()).anchored(Anchored::Yes);
+            if let Ok(found) = dfa.try_search_fwd(cache, &input) {
+                return Step::Done(found.map(|end| end.offset()));
+            }
+        }
+        self.program
+            .longest_from(hay, at, resume, &mut self.scratch, budget)
     }
 
     /// Whether the pattern matches anywhere in `hay`, as sed's addresses
@@ -466,6 +542,28 @@ fn required(ast: &Ast, fold: bool) -> Required {
 /// a mount's search is asked for.
 fn printable(ast: &Ast) -> bool {
     !ast.any_unit(&|unit| !unit.ascii().is_some_and(|b| (b' '..=b'~').contains(&b)))
+}
+
+/// The bytes the forward automaton takes a first step on, after the
+/// subject's start, a newline, a word byte or another byte: every one
+/// when there is no automaton or it gives up.
+fn first_bytes(automata: &mut Option<Automata>) -> [bool; 256] {
+    let mut set = [true; 256];
+    let Some((dfa, cache)) = automata.as_mut().and_then(|a| a.longest.as_mut()) else {
+        return set;
+    };
+    for byte in 0..=u8::MAX {
+        set[usize::from(byte)] = [&b""[..], b"\n", b"a", b" "].iter().any(|before| {
+            let hay = [before, &[byte][..]].concat();
+            let input = Input::new(&hay)
+                .span(before.len()..hay.len())
+                .anchored(Anchored::Yes);
+            let start = dfa.start_state_forward(cache, &input).ok();
+            let next = start.and_then(|state| dfa.next_state(cache, state, byte).ok());
+            next.is_none_or(|state| !state.is_dead())
+        });
+    }
+    set
 }
 
 /// Printable ASCII texts one of which every line any of `asts` matches

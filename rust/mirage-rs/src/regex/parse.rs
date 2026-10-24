@@ -300,6 +300,11 @@ pub(crate) enum Dialect {
     /// `\y` is a word boundary, `\d` a digit, `\A` and `\Z` the subject's
     /// edges; a malformed interval is text, an unmatched `)` refused.
     Awk,
+    /// GNU tac 9.7's -r, Emacs's syntax over a basic expression: `+` and
+    /// `?` repeat and `\+`, `\?`, `\{` are text, there are no intervals
+    /// and no `[:class:]`, an inverted range is empty, and a negated set
+    /// matches a newline that `.` does not.
+    Emacs,
 }
 
 // The refusals, worded as GNU grep prints them after `grep: `.
@@ -737,7 +742,11 @@ impl<'a> Parser<'a> {
         Ok((
             match c {
                 // Basic operators with nothing to repeat are their literals.
-                b'{' | b'}' | b'+' | b'?' if !self.extended && bare => Ast::Unit(unit),
+                b'{' | b'}' | b'+' | b'?'
+                    if !self.extended && (bare || self.dialect == Dialect::Emacs) =>
+                {
+                    Ast::Unit(unit)
+                }
                 b'1'..=b'9' => {
                     let n = usize::from(c - b'0');
                     if n > self.groups || !self.closed[n] || self.hidden[n] {
@@ -775,6 +784,12 @@ impl<'a> Parser<'a> {
             }
             let (min, max, width) = if self.is(self.pos, b'*') {
                 (0, None, 1)
+            } else if self.dialect == Dialect::Emacs {
+                match self.peek(self.pos).and_then(Unit::ascii) {
+                    Some(b'+') => (1, None, 1),
+                    Some(b'?') => (0, Some(1), 1),
+                    _ => return Ok((atom, depth)),
+                }
             } else if self.extended {
                 match self.peek(self.pos).and_then(Unit::ascii) {
                     Some(b'+') => (1, None, 1),
@@ -948,7 +963,7 @@ impl<'a> Parser<'a> {
                 if low.ordinal() > high.ordinal() {
                     // A basic expression's inverted range is empty to
                     // regcomp; grep, sed and an extended one refuse it.
-                    if self.extended || self.dialect != Dialect::Posix {
+                    if self.extended || !matches!(self.dialect, Dialect::Posix | Dialect::Emacs) {
                         return Err(BAD_RANGE);
                     }
                     continue;
@@ -959,7 +974,7 @@ impl<'a> Parser<'a> {
             }
         }
         let body = &self.units[content..self.pos];
-        if !matches!(self.dialect, Dialect::Posix | Dialect::Awk)
+        if !matches!(self.dialect, Dialect::Posix | Dialect::Awk | Dialect::Emacs)
             && body.len() >= 2
             && body[0].is(b':')
             && body[body.len() - 1].is(b':')
@@ -970,7 +985,7 @@ impl<'a> Parser<'a> {
         Ok(Set {
             negated,
             items,
-            bracket: true,
+            bracket: self.dialect != Dialect::Emacs,
         })
     }
 
@@ -988,7 +1003,7 @@ impl<'a> Parser<'a> {
                 return Ok((Item::Unit(byte.map_or(next, Unit::Byte)), true));
             }
         }
-        if unit.is(b'[') {
+        if unit.is(b'[') && self.dialect != Dialect::Emacs {
             if let Some(kind) = self.peek(self.pos + 1).and_then(Unit::ascii) {
                 if matches!(kind, b':' | b'=' | b'.') {
                     let open = self.pos + 2;

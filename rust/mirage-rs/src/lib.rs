@@ -17,6 +17,7 @@ mod grep;
 mod host;
 mod join;
 mod jq;
+mod look;
 pub mod nfs;
 mod nl;
 mod numfmt;
@@ -34,7 +35,10 @@ mod rg_matcher;
 mod sed;
 mod seq;
 mod sort;
+mod strings;
+mod tac;
 mod tr;
+mod tsort;
 mod uniq;
 mod utf8;
 mod wc;
@@ -325,6 +329,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_scan" => jq::open_scan(config),
         "jq_format" => jq::open_format(config),
         "jq_decode" => jq::open_decode(config),
+        "look" => look::open(config),
         "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),
         "paste" => paste::open(config),
@@ -336,7 +341,10 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "sed" => sed::open(config),
         "seq" => seq::open(config),
         "sort" => sort::open(config),
+        "strings" => strings::open(config),
+        "tac" => tac::open(config),
         "tr" => tr::open(config),
+        "tsort" => tsort::open(config),
         "unexpand" => expand::open_unexpand(config),
         "uniq" => uniq::open(config),
         "wc" => wc::open(config),

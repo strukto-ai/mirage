@@ -12,19 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
 
-from tests.commands.builtin.conftest import output_bytes as _bytes
-from tests.commands.builtin.conftest import ram_workspace as _ws
-from tests.commands.builtin.conftest import run_raw as _run_raw
-
-
-def test_tsort_simple():
-    ws, _ = _ws()
-    stdout, io = _run_raw(ws, "tsort", stdin=b"a b\nb c\n")
-    assert _bytes(stdout).strip() == b"a\nb\nc"
+from mirage.types import MountMode
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 
 
-def test_tsort_cycle():
-    ws, _ = _ws()
-    stdout, io = _run_raw(ws, "tsort", stdin=b"a b\nb a\n")
+@pytest.mark.asyncio
+async def test_an_operand_that_does_not_read_is_named_as_gnu_names_it():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    io = await ws.shell("mkdir /data/d; tsort /data/nope; tsort /data/d")
+    assert await io.materialize_stdout() == b""
+    assert await io.materialize_stderr() == (
+        b"tsort: /data/nope: No such file or directory\n"
+        b"tsort: /data/d: read error: Is a directory\n"
+    )
     assert io.exit_code == 1
+    await ws.close()
