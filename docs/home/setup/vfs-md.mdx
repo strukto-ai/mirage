@@ -1,24 +1,19 @@
 ---
 title: VFS.md and SKILL.md
-description: Two Markdown files that tell an agent what each path holds and which commands work there.
+description: Two Markdown files that tell an agent what is mounted and which commands it can run.
 icon: file-lines
 ---
 
 A workspace describes itself to an agent in two Markdown files, in the
 [VFS.md](https://agentvfs.org/vfs) format:
 
-- **VFS.md** covers the virtual filesystem: every path with its backend and
-  mode, the layout and file formats of each path that has one, which Unix
-  commands each path supports, and where it differs from a local filesystem.
-- **SKILL.md** covers the registered CLIs, with each one's help.
+- **VFS.md**: every mounted path, its layout and which Unix commands work
+  there.
+- **SKILL.md**: the registered CLIs, with each one's help.
 
-Both are built from the live workspace and follow a
-[profile](/home/policy/overview): a session's files follow its profile, a
-named profile previews that one, and with neither the workspace's default
-profile applies. A command the profile denies is never named, and neither is
-a path it hides. A command its allow list names only in a longer form, such
-as `rm -f`, still counts, unless that form only asks for `--help` or
-`--version`. Each VFS page shows its VFS.md, rendered and raw, such as
+Both are built from the live workspace and follow the session's
+[profile](/home/policy/overview): a command the profile denies, or a path it
+hides, is never mentioned. Each VFS page shows its VFS.md, such as
 [Gmail](/python/vfs/gmail).
 
 ## Get them
@@ -63,33 +58,25 @@ as `rm -f`, still counts, unless that form only asks for `--help` or
   </Tab>
 </Tabs>
 
-A path exposes the file inside the workspace as a live, read-only file, so an
-agent finds it with `cat /VFS.md`, rendered for whichever session reads it.
-See [HTTP](/home/access/http) and [CLI](/home/access/cli) for every option.
+- **No session or profile**: what the workspace's default profile allows.
+- **A session**: what that session's agent sees.
+- **A profile**: a preview of what a session with that profile would see.
+- **A path**: the file appears in the workspace, read-only and always
+  current, so the agent runs `cat /VFS.md`. Each session reads its own
+  version.
 
-## What VFS.md says about a path
+## What VFS.md says about each path
 
-The file commands (`ls`, `cat`, `grep`, `find`, `jq` and the rest) read every
-path. What changes files depends on what the path's VFS can do:
+- **Mode**: `read`, `write` or `exec`. A path whose VFS cannot change files
+  shows `read`, whatever mode it is mounted with.
+- **Layout**: how its files are organized and what they hold, for a VFS that
+  has one. A VFS sets it with [`vfs_md`](/home/setup/custom-vfs#attributes).
+- **Supported commands**: the Unix commands that work there, which of them
+  use the service's own search, and the path's own commands, such as
+  `chroma-query` on Chroma.
+- **Limitations**: where it differs from a local filesystem, such as being
+  read only, or the [`walk_limit`](/home/integration/search#walk_limit) on
+  large folders.
 
-| Command | Works where the VFS has |
-| --- | --- |
-| `>`, `tee`, `touch` of a new file, `sed -i` | `write` |
-| `>>`, `tee -a` | `append`, or `write` |
-| `cp` | `write`, or `copy` |
-| `cp -r` | `mkdir`, and `write` or `copy`; or `copy` and `dir_copy` |
-| `mkdir` | `mkdir` |
-| `mv` | `rename` |
-| `rm`, `unlink` | `unlink` |
-| `rm -r` | `rm_r`, or `unlink` and `rmdir` |
-| `rmdir` | `rmdir` |
-| `truncate` | `truncate`, or `write` |
-
-A path where none of them works, and none of its VFS's own commands writes,
-reads `read`, whatever mode it is mounted with. A path's layout is its VFS's [`vfs_md`](/home/setup/custom-vfs#attributes).
-
-A path the VFS answers a search for says so: `grep -r` and `rg` use the
-service's search, some only with `-w`, and only over the files the VFS names
-in `searchable`. A path's own commands, such as `search` on a vector store,
-are listed beside it, and so is its
-[`walk_limit`](/home/integration/search#walk_limit).
+Which commands can change files depends on the methods the VFS implements;
+[Custom VFS](/home/setup/custom-vfs) lists them.
