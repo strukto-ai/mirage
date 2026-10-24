@@ -6,9 +6,8 @@ import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './co
 
 import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir } from '../../core/mem0/readdir.ts'
-import { read, readStream } from '../../core/mem0/read.ts'
+import { readStream } from '../../core/mem0/read.ts'
 import { stat } from '../../core/mem0/stat.ts'
 import { searchMany } from '../../core/mem0/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
@@ -50,15 +49,9 @@ export class Mem0VFS extends BaseVFS {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return readStream(this.accessor, path, handed?.entry)
-    const data = await read(this.accessor, path, handed?.entry)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return readStream(this.accessor, path, handed?.entry)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

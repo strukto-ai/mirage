@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { read as mongodbRead, streamAny as mongodbStream } from '../../core/mongodb/read.ts'
+import { streamAny as mongodbStream } from '../../core/mongodb/read.ts'
 import { readdir as mongodbReaddir } from '../../core/mongodb/readdir.ts'
 import { linesContaining as mongodbLinesContaining } from '../../core/mongodb/search.ts'
 import { stat as mongodbStat } from '../../core/mongodb/stat.ts'
@@ -24,7 +24,6 @@ import {
 } from '../../core/mongodb/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
@@ -56,15 +55,9 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
     return mongodbReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return mongodbStream(this.accessor, path)
-    const data = await mongodbRead(this.accessor, path)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec): Promise<ByteSource> {
+    return mongodbStream(this.accessor, path)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

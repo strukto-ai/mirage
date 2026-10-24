@@ -18,7 +18,6 @@ from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.search import files_containing as _files_containing
 from mirage.core.lancedb.tree import SEARCH, read, readdir, stat
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.lancedb.config import LanceDBConfig
 
@@ -59,11 +58,8 @@ class LanceDBVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         return await readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        data = await read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> bytes:
+        return await read(self.accessor, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await stat(self.accessor, path)

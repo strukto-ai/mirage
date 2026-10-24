@@ -33,9 +33,8 @@ import {
 } from '../../core/github/config.ts'
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
-import { read as githubRead, readStream as githubStream } from '../../core/github/read.ts'
+import { readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 
@@ -129,15 +128,9 @@ export class GitHubVFS extends BaseVFS {
     return githubReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return githubStream(this.accessor, path, handed?.entry)
-    const data = await githubRead(this.accessor, path, handed?.entry)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return githubStream(this.accessor, path, handed?.entry)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

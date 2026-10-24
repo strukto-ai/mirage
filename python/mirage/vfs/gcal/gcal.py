@@ -27,7 +27,6 @@ from mirage.core.gcal.unlink import unlink as _unlink
 from mirage.core.google.client import TokenManager
 from mirage.events.base import DeltaHook
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gcal.config import GCalConfig
 
@@ -130,11 +129,8 @@ class GCalVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         return await _readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        data = await _read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> bytes:
+        return await _read(self.accessor, path)
 
     async def read_many(
         self, paths: list[PathSpec], limit: int

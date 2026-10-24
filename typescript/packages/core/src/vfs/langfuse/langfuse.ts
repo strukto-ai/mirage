@@ -21,7 +21,6 @@ import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
@@ -85,14 +84,8 @@ export class LangfuseVFS extends BaseVFS {
     return langfuseReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await langfuseRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return langfuseRead(this.accessor, path)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

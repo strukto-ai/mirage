@@ -21,7 +21,6 @@ import { VFSName } from '../../types.ts'
 import { redactGmailConfig, type GmailConfig, type GmailConfigRedacted } from './config.ts'
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
 import { buildDeltaHook } from '../../core/gmail/events.ts'
 import type { DeltaHook } from '../../events/base.ts'
@@ -127,14 +126,8 @@ export class GmailVFS extends BaseVFS {
     return gmailReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await gmailRead(this.accessor, path, handed?.entry)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return gmailRead(this.accessor, path, handed?.entry)
   }
 
   override deltaHook(): DeltaHook {

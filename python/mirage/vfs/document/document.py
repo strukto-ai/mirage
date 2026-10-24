@@ -19,7 +19,6 @@ from mirage.core.document.read import read as document_read
 from mirage.core.document.readdir import readdir as document_readdir
 from mirage.core.document.stat import stat as document_stat
 from mirage.types import FileStat, PathSpec
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 
@@ -43,14 +42,8 @@ class DocumentVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await document_readdir(self.accessor, path)
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
-        data = await document_read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> bytes:
+        return await document_read(self.accessor, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await document_stat(self.accessor, path)

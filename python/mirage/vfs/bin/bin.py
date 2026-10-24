@@ -22,7 +22,6 @@ from mirage.core.bin.refuse import refuse
 from mirage.core.bin.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 
@@ -56,14 +55,8 @@ class BinViewVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
-        data = await _read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> bytes:
+        return await _read(self.accessor, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)

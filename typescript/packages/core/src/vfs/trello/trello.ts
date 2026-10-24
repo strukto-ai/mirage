@@ -25,7 +25,6 @@ import {
   type TrelloConfigRedacted,
 } from '../../core/trello/config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
 import { stat as trelloStat } from '../../core/trello/stat.ts'
@@ -124,14 +123,8 @@ export class TrelloVFS extends BaseVFS {
     return trelloReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await trelloRead(this.accessor, path, null, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return trelloRead(this.accessor, path, null, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

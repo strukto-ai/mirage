@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
@@ -25,7 +24,6 @@ import {
   type QdrantConfigResolved,
 } from './config.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
 import { filesContaining } from '../../core/qdrant/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
@@ -90,14 +88,8 @@ export class QdrantVFS extends BaseVFS {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return read(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

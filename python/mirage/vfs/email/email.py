@@ -22,7 +22,6 @@ from mirage.core.email.readdir import readdir as _readdir
 from mirage.core.email.search import files_containing as _files_containing
 from mirage.core.email.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
@@ -68,14 +67,9 @@ class EmailVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return await _read(self.accessor, path, entry)
 
     async def read_many(
         self,

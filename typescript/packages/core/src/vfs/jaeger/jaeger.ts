@@ -17,7 +17,6 @@ import { read as jaegerRead } from '../../core/jaeger/read.ts'
 import { readdir as jaegerReaddir } from '../../core/jaeger/readdir.ts'
 import { stat as jaegerStat } from '../../core/jaeger/stat.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
@@ -41,14 +40,8 @@ export class JaegerVFSBase extends BaseVFS<JaegerAccessor> {
     return jaegerReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await jaegerRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return jaegerRead(this.accessor, path)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

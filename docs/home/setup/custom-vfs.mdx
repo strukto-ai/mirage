@@ -22,7 +22,7 @@ The methods you can override, with the arguments you normally use:
 
         async def readdir(self, path: PathSpec) -> list[FileStat]: ...
         async def stat(self, path: PathSpec) -> FileStat: ...
-        async def read(self, path: PathSpec, *, offset: int = 0, size: int | None = None) -> bytes | AsyncIterator[bytes]: ...
+        async def read(self, path: PathSpec) -> bytes | AsyncIterator[bytes]: ...
 
         async def write(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
         async def append(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
@@ -177,9 +177,7 @@ This VFS serves pages from a dictionary:
             self.page(path)
             return FileStat(name=path.vfs_path, type=FileType.FILE)
 
-        async def read(
-            self, path: PathSpec, *, offset: int = 0, size: int | None = None
-        ) -> bytes:
+        async def read(self, path: PathSpec) -> bytes:
             return self.page(path).encode()
     ```
   </Tab>

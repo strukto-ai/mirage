@@ -16,9 +16,7 @@ import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { filesContaining } from '../../core/lancedb/search.ts'
 import { SEARCH, read, readdir, stat } from '../../core/lancedb/tree.ts'
 import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 
 export const VFS_MD = `This mount is a LanceDB table exposed as a filesystem.
 
@@ -38,14 +36,8 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return read(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

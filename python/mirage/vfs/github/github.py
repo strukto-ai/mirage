@@ -18,7 +18,6 @@ from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA
-from mirage.core.github.read import read as _read
 from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.search import files_containing as _files_containing
@@ -33,7 +32,6 @@ from mirage.types import (
     PathSpec,
     VFSName,
 )
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 
@@ -158,16 +156,9 @@ class GitHubVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, entry)
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, entry)
 
     async def stat(
         self,

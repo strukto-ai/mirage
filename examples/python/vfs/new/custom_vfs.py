@@ -105,14 +105,9 @@ class PagesVFS(BaseVFS):
         known = self.accessor.known_sizes
         return [_row(name, child, known) for name, child in node.items()]
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
-        # reads_ranges stays False, so a byte window is cut from the whole
-        # page for us and offset and size can be ignored here.
+    # reads_ranges stays False, so a byte window is cut from the whole page
+    # for us and read takes no offset or size.
+    async def read(self, path: PathSpec) -> bytes:
         node = _node(self.accessor.pages, path.vfs_path)
         if isinstance(node, dict):
             raise IsADirectoryError(path.virtual)

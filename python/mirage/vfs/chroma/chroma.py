@@ -2,7 +2,6 @@ from typing import Any
 
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
-from mirage.core.chroma.read import read as _read
 from mirage.core.chroma.read import read_stream as _read_stream
 from mirage.core.chroma.search import files_containing as _files_containing
 from mirage.core.chroma.search import search_many
@@ -10,7 +9,6 @@ from mirage.core.chroma.stat import stat as _stat
 from mirage.core.chroma.tree import CHROMA_TREE
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
 
@@ -48,16 +46,9 @@ class ChromaVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, entry)
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, entry)
 
     async def stat(
         self,
