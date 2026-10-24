@@ -107,7 +107,62 @@ parent group; ambiguous listings are refused, and opening a basename directory
 checks every point of its parent group, so a second source past `maxRows` is
 refused rather than hidden.
 
-## Filesystem layout
+## VFS.md
+
+What `ws.vfsMd()` answers with Qdrant mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md qdrant start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `qdrant`, write |
+
+## `/<path>` layout
+
+```text
+This mount is a Qdrant vector database exposed as a filesystem.
+
+At the root each directory is a collection (unless a single collection is pinned
+in config). Inside a collection, directories are the configured group-by payload
+fields; descending narrows a filter. Each matching point appears as files named
+by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
+when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
+field is configured, where <id> is the Qdrant point id. The embedding vector is
+never shown. For semantic search use the search command, which returns ranked
+points as their content file paths with a similarity score, e.g.
+search "red running shoes" /mount then cat one of the returned files.
+Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
+contain spaces.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `qdrant` search. Also `search`. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | No command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md qdrant end */}
 
 ```text
 /fashion/<gender>/<articleType>/<baseColour>/<id>.json  # full payload (metadata)

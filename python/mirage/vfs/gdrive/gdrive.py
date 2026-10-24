@@ -59,6 +59,7 @@ class GoogleDriveVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     prompt: str = PROMPT
+    whole_word_search: bool = True
     supports_snapshot: bool = True
     read_revalidatable: bool = True
 

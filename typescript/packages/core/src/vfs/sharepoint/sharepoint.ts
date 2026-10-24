@@ -47,6 +47,7 @@ export class SharePointVFS extends BaseVFS {
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly accessor: SharePointAccessor
   private readonly config: SharePointConfig
 

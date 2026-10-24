@@ -50,8 +50,4 @@ describe('@struktoai/mirage-browser barrel exports', () => {
     expect(browserPkg.OPFSVFS).toBeDefined()
     expect(typeof browserPkg.OPFSVFS).toBe('function')
   })
-
-  it('exports OPFS_PROMPT string', () => {
-    expect(typeof browserPkg.OPFS_PROMPT).toBe('string')
-  })
 })

@@ -15,12 +15,10 @@
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
 import { r2ToS3Config, redactR2Config, type R2Config, type R2ConfigRedacted } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type R2VFSState = S3AliasVFSState<R2ConfigRedacted>
 
 export class R2VFS extends S3AliasVFS<R2Config, R2ConfigRedacted> {
-  override readonly prompt: string = PROMPT
 
   constructor(config: R2Config) {
     super(VFSName.R2, config, r2ToS3Config(config), redactR2Config)

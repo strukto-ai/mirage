@@ -6,7 +6,6 @@ import {
   type OneDriveConfigRedacted,
 } from '../../accessor/onedrive.ts'
 import { VFSName } from '../../types.ts'
-import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { buildDeltaHook } from '../../core/onedrive/events.ts'
 import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
@@ -48,7 +47,7 @@ export class OneDriveVFS extends BaseVFS {
   // read taking it before the bytes, so the gate compares like with like.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
-  override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly accessor: OneDriveAccessor
   private readonly config: OneDriveConfig
 

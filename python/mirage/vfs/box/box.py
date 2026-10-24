@@ -56,6 +56,7 @@ class BoxVFS(BaseVFS):
     # checks its bytes against the row it resolved through.
     read_revalidatable: bool = True
     prompt: str = PROMPT
+    whole_word_search: bool = True
 
     reads_ranges: bool = True
 

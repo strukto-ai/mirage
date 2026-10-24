@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { MountMode, Workspace, buildVfs, knownVfsNames } from '@struktoai/mirage-node'
 
 import { type ConfigShape, configShapes, fieldDoc, moduleFile, parse } from './vfs_facts.ts'
 
@@ -33,6 +34,38 @@ const MARKER =
 const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+)(?: omit=[\w,]+)? (start|end) \*\/\}/g
 const CODE_SPAN = /(`+)(.+?)\1/g
 const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'node', 'server'])
+// The path a docs page mounts its VFS at: a mount goes wherever its
+// workspace puts it.
+const PLACEHOLDER = '/<path>'
+// A config each VFS builds from where a placeholder per required field is
+// not one it accepts. Nothing is reached: building a VFS opens no
+// connection. Mirrors scripts/gen_doc_tables.py.
+const SAMPLES: Record<string, Record<string, string | string[]>> = {
+  box: { access_token: 'token' },
+  databricks_volume: {
+    host: 'https://example.cloud.databricks.com',
+    token: 'token',
+    catalog: 'main',
+    schema: 'default',
+    volume: 'files',
+  },
+  disk: { root: '/' },
+  gcal: { access_token: 'token' },
+  gdocs: { access_token: 'token' },
+  gdrive: { access_token: 'token' },
+  github: { token: 'token', owner: 'owner', repo: 'repo' },
+  gmail: { access_token: 'token' },
+  gsheets: { access_token: 'token' },
+  gslides: { access_token: 'token' },
+  hf_buckets: { bucket: 'owner/bucket' },
+  mem0: { api_key: 'key', user_id: 'user' },
+  r2: { bucket: 'bucket', account_id: 'account' },
+  supabase: { bucket: 'bucket', region: 'us-east-1', project_ref: 'ref' },
+  wandb: { entities: ['entity'] },
+}
+// GitHubVFS.create reads the repository it mounts, so a GitHub mount has
+// no document without the network.
+const ONLINE = new Set(['github'])
 
 // Which feature needs each optional peer. Every optional peer of core and
 // node must appear exactly once; the generator refuses a peer missing here
@@ -374,6 +407,55 @@ function exportsTable(file: string, omit: ReadonlySet<string>): Rendered {
   return { body: rows.join('\n'), bare, unknown: [...omit].filter((name) => !known.has(name)) }
 }
 
+// `text` in a code fence longer than any fence line inside it.
+function fenced(text: string, info: string): string {
+  const runs = text
+    .split('\n')
+    .filter((line) => /^`+$/.test(line))
+    .map((line) => line.length + 1)
+  return `${'`'.repeat(Math.max(3, ...runs))}${info}\n${text}\n${'`'.repeat(Math.max(3, ...runs))}`
+}
+
+// The VFS.md a workspace with each VFS mounted writable at `PLACEHOLDER`
+// answers, by registry name. Rendered before the pages are, as a document
+// comes back asynchronously.
+async function documents(): Promise<Map<string, Renderer>> {
+  const shapes = configShapes(resolve(PACKAGES, 'node', 'src', 'vfs', 'registry.ts'), PACKAGES)
+  const out = new Map<string, Renderer>()
+  const online = globalThis.fetch
+  globalThis.fetch = () => Promise.reject(new Error('a VFS reached the network while it was built'))
+  try {
+    for (const name of knownVfsNames().sort(compareCodePoints)) {
+      if (ONLINE.has(name)) continue
+      const body = fenced(await vfsMd(name, shapes[name]?.fields ?? {}), 'markdown')
+      out.set(name, (omit) => ({ body, bare: [], unknown: [...omit] }))
+    }
+  } finally {
+    globalThis.fetch = online
+  }
+  return out
+}
+
+// One VFS's document, its trailing newline dropped.
+async function vfsMd(name: string, fields: Record<string, { required: boolean }>): Promise<string> {
+  const config =
+    SAMPLES[name] ??
+    Object.fromEntries(
+      Object.entries(fields)
+        .filter(([, field]) => field.required)
+        .map(([field]) => [field, 'value']),
+    )
+  const vfs = await buildVfs(name, config)
+  const ws = new Workspace({ [PLACEHOLDER]: [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
+  // The scratch root every workspace adds is no part of this VFS.
+  ws.mount('/').visible = () => false
+  try {
+    return (await ws.vfsMd()).replace(/\n+$/, '')
+  } finally {
+    await ws.close()
+  }
+}
+
 function renderers(): Renderers {
   const adapters = readdirSync(PACKAGES, { withFileTypes: true })
     .filter((d) => d.isDirectory() && !NOT_ADAPTERS.has(d.name))
@@ -506,13 +588,13 @@ function diff(before: string, after: string, page: string): string {
   ].join('\n')
 }
 
-function main(): void {
+async function main(): Promise<void> {
   if (process.argv.includes('--selftest')) {
     selftest()
     return
   }
   const check = process.argv.includes('--check')
-  const kinds = renderers()
+  const kinds = new Map([...renderers(), ['vfs-md', await documents()]])
   const seen = new Set<string>()
   const errors: string[] = []
   const stale: string[] = []
@@ -546,4 +628,4 @@ function main(): void {
   console.log(`doc tables ${check ? 'checked' : 'generated'}: ${String(seen.size)} regions`)
 }
 
-main()
+await main()

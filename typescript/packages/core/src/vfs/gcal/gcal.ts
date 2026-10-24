@@ -64,6 +64,7 @@ export class GCalVFS extends BaseVFS {
   // already moved.
   override readonly indexTtl: number = 300
   override readonly prompt: string
+  override readonly wholeWordSearch: boolean = true
   override readonly writePrompt: string = WRITE_PROMPT
   // Calendar's search answers for events; calendar.json is always read.
   override readonly searchable: readonly string[] = ['*/*/*.gcal.json']

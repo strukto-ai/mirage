@@ -16,13 +16,11 @@ from mirage.accessor.hf_hub import HfModelsAccessor
 from mirage.types import VFSName
 from mirage.vfs.hf_hub.base import HfHubVFS
 from mirage.vfs.hf_models.config import HfModelsConfig
-from mirage.vfs.hf_models.prompt import PROMPT
 
 
 class HfModelsVFS(HfHubVFS[HfModelsAccessor]):
     ACCESSOR = HfModelsAccessor
     name: str = VFSName.HF_MODELS
-    prompt: str = PROMPT
 
     def __init__(self, config: HfModelsConfig) -> None:
         super().__init__(config)

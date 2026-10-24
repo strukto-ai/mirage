@@ -66,6 +66,7 @@ class GCalVFS(BaseVFS):
     # already moved.
     index_ttl: float = 300
     prompt: str = PROMPT
+    whole_word_search: bool = True
     write_prompt: str = WRITE_PROMPT
     searchable = ("*/*/*.gcal.json",)
 

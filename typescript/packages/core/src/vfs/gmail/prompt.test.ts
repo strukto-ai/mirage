@@ -49,10 +49,8 @@ describe('WRITE_PROMPT', () => {
     expect(WRITE_PROMPT).toContain('--body')
   })
 
-  it('documents rm (trash) and the newline gotcha', () => {
-    expect(WRITE_PROMPT).toContain('rm ')
-    expect(WRITE_PROMPT).toContain('.gmail.json')
-    expect(WRITE_PROMPT).toContain('Trash')
+  it('documents trashing and the newline gotcha', () => {
+    expect(WRITE_PROMPT).toContain('gws gmail users messages trash')
     expect(WRITE_PROMPT).toContain("$'")
   })
 })

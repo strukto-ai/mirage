@@ -75,6 +75,7 @@ export class BoxVFS extends BaseVFS {
     filesContaining: ['entry'],
   } as const
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
 

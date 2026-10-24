@@ -257,6 +257,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly searchable: readonly string[] | null = null
   /**
+   * `filesContaining` answers only a whole-word search (grep -w, rg -w);
+   * any other pattern reads every file.
+   */
+  readonly wholeWordSearch: boolean = false
+  /**
    * The most files one command walks under a directory of this mount: grep
    * -r, rg and git grep stop reading there, find, ls -R, tree, du and
    * getfattr -R stop listing, git status and the other verbs that walk a

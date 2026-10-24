@@ -40,7 +40,6 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
-from mirage.vfs.s3.prompt import PROMPT
 
 
 def _declared_endpoint(config: S3Config) -> str | None:
@@ -69,7 +68,6 @@ class S3VFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     caches_reads: bool = True
-    prompt: str = PROMPT
     supports_snapshot: bool = True
     # stat and read both stamp the ETag, so the gate compares like with
     # like. Inherited by every S3AliasVFS provider.

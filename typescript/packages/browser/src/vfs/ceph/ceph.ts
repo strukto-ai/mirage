@@ -20,12 +20,10 @@ import {
   type CephConfig,
   type CephConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type CephVFSState = S3AliasVFSState<CephConfigRedacted>
 
 export class CephVFS extends S3AliasVFS<CephConfig, CephConfigRedacted> {
-  override readonly prompt: string = PROMPT
 
   constructor(config: CephConfig) {
     super(VFSName.CEPH, config, cephToS3Config(config), redactCephConfig)

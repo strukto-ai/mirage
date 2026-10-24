@@ -22,7 +22,6 @@ import {
   type HfDatasetsConfigRedacted,
   redactHfDatasetsConfig,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfDatasetsVFSState {
@@ -32,7 +31,6 @@ export interface HfDatasetsVFSState {
 
 export class HfDatasetsVFS extends HfHubVFS {
   override readonly name: string = VFSName.HF_DATASETS
-  readonly prompt: string = PROMPT
   readonly config: HfDatasetsConfig
   readonly accessor: HfDatasetsAccessor
 

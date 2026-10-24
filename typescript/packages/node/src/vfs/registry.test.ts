@@ -172,7 +172,9 @@ describe('node VFS registry', () => {
       })
       const ws = new Workspace({ '/gh': vfs })
       try {
-        expect(await ws.vfsMd()).toContain('/gh\n  Mirrors the GitHub repository file tree.')
+        const markdown = await ws.vfsMd()
+        expect(markdown).toContain('| `/gh` | `github`, read |')
+        expect(markdown).toContain('`grep -r` and `rg` with `-w` use `github` search.')
       } finally {
         await ws.close()
       }

@@ -18,7 +18,6 @@ import { accountOf, HfModelsAccessor } from '../../accessor/hf_hub.ts'
 import { assertHfRepoRef } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
 import { type HfModelsConfig, type HfModelsConfigRedacted, redactHfModelsConfig } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfModelsVFSState {
@@ -28,7 +27,6 @@ export interface HfModelsVFSState {
 
 export class HfModelsVFS extends HfHubVFS {
   override readonly name: string = VFSName.HF_MODELS
-  readonly prompt: string = PROMPT
   readonly config: HfModelsConfig
   readonly accessor: HfModelsAccessor
 

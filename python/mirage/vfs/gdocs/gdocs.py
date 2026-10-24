@@ -47,6 +47,7 @@ class GDocsVFS(BaseVFS):
     # Reads stamp listing metadata; a fresh stat checks Drive by file ID.
     read_revalidatable: bool = True
     prompt: str = PROMPT
+    whole_word_search: bool = True
     write_prompt: str = WRITE_PROMPT
 
     # Every file here is a rendering; there are no stored bytes to read.

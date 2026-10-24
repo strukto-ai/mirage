@@ -44,7 +44,6 @@ from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ssh.config import SSHConfig
-from mirage.vfs.ssh.prompt import PROMPT
 
 
 class SSHVFS(BaseVFS):
@@ -57,7 +56,6 @@ class SSHVFS(BaseVFS):
     # A remote filesystem: short-lived index, long enough to spare a
     # re-walk inside one command pipeline. Mirrors the TypeScript VFS.
     index_ttl: float = 60
-    prompt: str = PROMPT
 
     reads_ranges: bool = True
 

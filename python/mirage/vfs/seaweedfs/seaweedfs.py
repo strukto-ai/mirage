@@ -15,12 +15,10 @@
 from mirage.types import VFSName
 from mirage.vfs.s3_alias import S3AliasVFS
 from mirage.vfs.seaweedfs.config import SeaweedFSConfig
-from mirage.vfs.seaweedfs.prompt import PROMPT
 
 
 class SeaweedFSVFS(S3AliasVFS):
     name: str = VFSName.SEAWEEDFS
-    prompt: str = PROMPT
 
     def __init__(self, config: SeaweedFSConfig) -> None:
         super().__init__(config)

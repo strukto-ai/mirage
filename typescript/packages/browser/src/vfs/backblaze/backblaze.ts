@@ -20,12 +20,10 @@ import {
   type BackblazeConfig,
   type BackblazeConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type BackblazeVFSState = S3AliasVFSState<BackblazeConfigRedacted>
 
 export class BackblazeVFS extends S3AliasVFS<BackblazeConfig, BackblazeConfigRedacted> {
-  override readonly prompt: string = PROMPT
 
   constructor(config: BackblazeConfig) {
     super(VFSName.BACKBLAZE, config, backblazeToS3Config(config), redactBackblazeConfig)

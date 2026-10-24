@@ -46,8 +46,6 @@ def test_write_prompt_examples_match_actual_signatures():
     assert "--body" in WRITE_PROMPT
 
 
-def test_write_prompt_documents_rm_and_newline_gotcha():
-    assert "rm " in WRITE_PROMPT
-    assert ".gmail.json" in WRITE_PROMPT
-    assert "Trash" in WRITE_PROMPT
+def test_write_prompt_documents_trashing_and_newline_gotcha():
+    assert "gws gmail users messages trash" in WRITE_PROMPT
     assert "$'" in WRITE_PROMPT

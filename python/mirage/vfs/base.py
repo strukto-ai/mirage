@@ -166,6 +166,10 @@ class BaseVFS:
     # file whatever the answer, as a full scan would.
     searchable: tuple[str, ...] | None = None
 
+    # ``files_containing`` answers only a whole-word search (grep -w,
+    # rg -w); any other pattern reads every file.
+    whole_word_search: bool = False
+
     # The most files one command walks under a directory of this mount:
     # grep -r, rg and git grep stop reading there, find, ls -R, tree, du
     # and getfattr -R stop listing, git status and the other verbs that

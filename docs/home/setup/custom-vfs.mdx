@@ -115,6 +115,9 @@ Writes need a writable mount: `MountMode.WRITE`, or `mode: write` in YAML.
 | `dir_copy` | `cp -r` calls it once when it copies a folder to a new place and `copy` is overridden too. | `cp -r` calls `mkdir` for each folder and `copy`, or a read and `write`, for each file. |
 | `setattr` | `chmod` and `touch -d` call it. | Mirage keeps the mode and times itself. |
 
+[VFS.md](/home/setup/vfs-md) tells the agent which of these commands work on
+each mount, from the methods its VFS overrides.
+
 ### Answer commands with your service
 
 Override these to answer from your service's own search, query or metadata API
@@ -135,8 +138,9 @@ instead of reading files. Each links to its guide.
 | Attribute | Does |
 | --- | --- |
 | `name` | Names the VFS. |
-| `prompt` | Describes the mount to the agent in its VFS.md. `{prefix}` becomes the mount's folder. |
+| `prompt` | The mount's layout and file formats in its VFS.md; leave it empty for plain files. `{prefix}` becomes the mount's folder. |
 | `write_prompt` | Added to the description when the mount is writable. |
+| `whole_word_search` | `files_containing` answers only a whole-word search (`grep -w`, `rg -w`); VFS.md tells the agent so. |
 
 Set them as class attributes or pass them to `super().__init__()`
 (`super({...})` in TypeScript).

@@ -69,6 +69,152 @@ Fields marked secret are redacted in snapshots.
 
 For the JSON shape see the [Python Google Docs docs](/python/vfs/gdocs).
 
+## VFS.md
+
+What `ws.vfsMd()` answers with Google Docs mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md gdocs start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `gdocs`, write |
+
+## `/<path>` layout
+
+```text
+/<path>
+  owned/
+    <date>_<title>__<doc-id>.gdoc.json
+  shared/
+    <date>_<title>__<doc-id>.gdoc.json
+
+  Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+    <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <doc-id>      Google Docs document ID
+
+  Buckets:
+    owned/   docs you created
+    shared/  docs shared with you by others
+             - does NOT include docs you own and shared with others;
+               those are still in owned/.
+
+  gdoc.json structure (the Google Docs API documents.get response, read
+  with includeTabsContent=true so every tab is present):
+    {
+      "documentId": "...",
+      "title": "...",
+      "tabs": [                          # one entry per top-level tab
+        {
+          "tabProperties": {
+            "tabId": "t.0",              # names a tab for gws docs write
+            "title": "Tab 1",
+            "index": 0
+          },
+          "documentTab": {
+            "body": {
+              "content": [
+                {                          # one element per block
+                  "paragraph": {
+                    "elements": [
+                      { "textRun": { "content": "the actual text\n",
+                                     "textStyle": {...} } }
+                    ],
+                    "paragraphStyle": {...}
+                  }
+                },
+                { "table": {...} },
+                { "sectionBreak": {...} }
+              ]
+            },
+            "documentStyle": {...},
+            "namedStyles": {...}
+          },
+          "childTabs": [ { ...same shape, nested to any depth... } ]
+                                       # a NESTED tab additionally carries
+                                       # parentTabId and nestingLevel; a
+                                       # root tab carries neither
+        }
+      ],
+      "revisionId": "..."
+    }
+
+  There is no top-level .body. A tab-aware response leaves the singleton
+  fields (.body, .documentStyle, .namedStyles) empty and hangs every
+  tab's content off .tabs[].documentTab instead. Tabs also nest, so text
+  can sit at any depth under .childTabs; the recursive recipes below read
+  a one-tab and a fifty-tab document alike.
+
+  Useful jq paths:
+    .title
+    [.. | .tabProperties? // empty | .title]             # every tab name
+    [.. | .textRun? // empty | .content] | add           # all text, any depth
+    [.. | .tabProperties? // empty] | length             # tab count
+    [.tabs[0].documentTab.body.content[]
+      | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+    .revisionId
+
+  The first block of a body is always a sectionBreak, which carries no
+  .paragraph, so a path through .paragraph needs the `?` or it fails with
+  "Cannot iterate over null".
+
+  Writes go through the gws CLI if installed:
+    gws docs write --document <doc-id> --text "text to append"
+    gws docs write --document <doc-id> --tab <tab-id> --text "..."
+    See gws docs --help for the raw API passthroughs.
+
+  Tab targeting: without --tab the text lands on the FIRST tab, which is
+  the Docs API's own default. Read the tab ids out of the file with
+  [.. | .tabProperties? // empty | .tabId].
+
+  Newline gotcha: bash double-quoted "...\n..." is NOT a newline; the
+  literal characters \ + n end up in the doc. Either:
+    --text $'line1\nline2'                          # ANSI-C quoting
+    --text "$(printf 'line1\nline2')"               # printf interprets
+    gws docs documents batchUpdate --json '{...}'    # JSON handles escapes
+
+  Delete:
+    rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
+    rm -f <path>                            # ignore if missing
+    Only operates on .gdoc.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
+       /<path>/owned/<date>_<new>__<id>.gdoc.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv` and `rm`. `grep -r` and `rg` with `-w` use `gdocs` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Not supported: `>`, `>>`, `tee`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md gdocs end */}
+
 ## Integration
 
 What Google Docs answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.

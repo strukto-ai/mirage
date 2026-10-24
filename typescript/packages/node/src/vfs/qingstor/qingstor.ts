@@ -20,12 +20,10 @@ import {
   type QingStorConfig,
   type QingStorConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type QingStorVFSState = S3AliasVFSState<QingStorConfigRedacted>
 
 export class QingStorVFS extends S3AliasVFS<QingStorConfig, QingStorConfigRedacted> {
-  override readonly prompt: string = PROMPT
 
   constructor(config: QingStorConfig) {
     super(VFSName.QINGSTOR, config, qingStorToS3Config(config), redactQingStorConfig)

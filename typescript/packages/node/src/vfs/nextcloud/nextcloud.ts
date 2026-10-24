@@ -7,7 +7,6 @@ import {
   type NextcloudConfig,
   type NextcloudConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type {
   CapacityResult,
   PathSpec,
@@ -47,7 +46,6 @@ export class NextcloudVFS extends BaseVFS {
   // backfills any lister-omitted size with one stat per affected file.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot = true
-  override readonly prompt = PROMPT
   override readonly accessor: NextcloudAccessor
 
   override readonly walkLimit: number

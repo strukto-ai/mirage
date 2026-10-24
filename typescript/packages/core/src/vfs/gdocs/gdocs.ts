@@ -49,6 +49,7 @@ export class GDocsVFS extends BaseVFS {
   // Reads stamp listing metadata; a fresh stat checks Drive by file ID.
   override readonly readRevalidatable: boolean = true
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly writePrompt: string = WRITE_PROMPT
   readonly config: GDocsConfig
   override readonly accessor: GDocsAccessor

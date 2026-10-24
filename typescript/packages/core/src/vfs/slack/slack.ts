@@ -33,6 +33,7 @@ import type { Handed } from '../types.ts'
  */
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly readsRanges: boolean = true
+  override readonly wholeWordSearch: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],

@@ -389,6 +389,7 @@ def _capabilities() -> dict[str, dict[str, Any]]:
             ],
             "reads_ranges": cls.reads_ranges,
             "local": cls.local,
+            "whole_word_search": cls.whole_word_search,
         }
     return out
 

@@ -15,12 +15,10 @@
 import { VFSName } from '@struktoai/mirage-core/types'
 import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
 import { ociToS3Config, redactOciConfig, type OCIConfig, type OCIConfigRedacted } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type OCIVFSState = S3AliasVFSState<OCIConfigRedacted>
 
 export class OCIVFS extends S3AliasVFS<OCIConfig, OCIConfigRedacted> {
-  override readonly prompt: string = PROMPT
 
   constructor(config: OCIConfig) {
     super(VFSName.OCI, config, ociToS3Config(config), redactOciConfig)

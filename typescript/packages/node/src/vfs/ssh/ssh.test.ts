@@ -18,7 +18,6 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import type { SSHConfig } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import { SSHVFS } from './ssh.ts'
 
 function makeVfs(state: FakeSftp, config?: Partial<SSHConfig>): SSHVFS {
@@ -48,9 +47,8 @@ describe('SSHVFS — identity', () => {
     expect(res.cachesReads).toBe(true)
   })
 
-  it('prompt equals PROMPT', () => {
-    const res = makeVfs(state)
-    expect(res.prompt).toBe(PROMPT)
+  it('describes no layout of its own', () => {
+    expect(makeVfs(state).prompt).toBe('')
   })
 
   it('serves no commands of its own', () => {

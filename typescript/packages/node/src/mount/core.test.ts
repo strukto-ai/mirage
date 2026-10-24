@@ -927,7 +927,7 @@ it('refreshes generated documents through an already open handle', async () => {
   const core = new MountCore(ws.vfs, { session })
   const skill = await core.open('/SKILL.md')
   expect(new TextDecoder().decode(await core.read('/SKILL.md', skill, 0, 100000))).toContain(
-    'name: mirage',
+    'name: workspace-commands',
   )
   await core.release(skill)
   const fd = await core.open('/VFS.md')

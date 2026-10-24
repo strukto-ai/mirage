@@ -62,7 +62,7 @@ export class PostgresVFS extends PostgresVFSBase {
     this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.driver = driver ?? new NeonPgDriver(this.config.dsn)
     this.accessor = new PostgresAccessor(this.driver, this.config)
-    this.prompt = PROMPT.replace('{prefix}', prefix ?? '')
+    this.prompt = prefix === undefined ? PROMPT : PROMPT.replace('{prefix}', prefix)
   }
 
   override getState(): PostgresVFSState {

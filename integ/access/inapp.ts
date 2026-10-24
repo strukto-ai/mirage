@@ -62,12 +62,13 @@ function stdinBytes(spec: string | { repeat: string; times: number }): Uint8Arra
   return encoder.encode(typeof spec === 'string' ? spec : spec.repeat.repeat(spec.times))
 }
 
-// The mount paths a VFS.md names, one per "## `/path`" heading.
+// The paths a VFS.md names, one per row of its first table.
 function headings(markdown: string): string {
-  return markdown
+  const first = (markdown.split('| Path | Description |').at(-1) ?? '').split('\n\n')[0] ?? ''
+  return first
     .split('\n')
-    .filter((line) => line.startsWith('## `') && line.endsWith('`'))
-    .map((line) => line.slice(4, -1))
+    .filter((line) => line.startsWith('| `/'))
+    .map((line) => line.split('`')[1])
     .join(' ')
 }
 

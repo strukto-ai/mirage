@@ -23,9 +23,6 @@ PROMPT = """\
   Email body is in the .gmail.json file. The sibling dir holds attachments
   only. Read with `cat`/`head`/`jq` on `<path>.gmail.json` (keep the suffix).
 
-  Commands: cat, ls, head, tail, nl, wc, stat, find, tree, grep, rg, jq,
-  basename, dirname, realpath. No others (no readFile, etc.).
-
   Path: <label>/<yyyy-mm-dd>/<subject>__<message-id>.gmail.json
     <label>       Gmail label (INBOX, SENT, DRAFT, IMPORTANT, STARRED,
                   TRASH, SPAM, or any user label)
@@ -49,7 +46,7 @@ PROMPT = """\
       "labels":  [ "INBOX", "IMPORTANT", ... ],
       "attachments": [
         { "id": "...", "filename": "invoice.pdf",
-           "mime_type": "application/pdf", "size": 12345 }
+          "mime_type": "application/pdf", "size": 12345 }
       ]
     }
 
@@ -83,9 +80,5 @@ WRITE_PROMPT = """\
   Use $'line1\\nline2' (ANSI-C quoting) or "$(printf '...\\n...')"
   if you need real newlines in the body.
 
-  Delete:
-    rm {prefix}/<label>/<yyyy-mm-dd>/<subject>__<message-id>.gmail.json
-                                            # moves the message to Trash
-    rm -f <path>                            # ignore if missing
-    Only operates on .gmail.json files; label/, date/, and the
-    attachments folder cannot be removed (they are virtual)."""
+  Trashing a message goes through gws too:
+    gws gmail users messages trash --params '{"userId": "me", "id": "<message-id>"}'"""

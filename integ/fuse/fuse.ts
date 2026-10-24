@@ -306,7 +306,7 @@ async function runSessionProbe(
     }
     result.document_kernel_skill = (
       await readFile(join(handle.mountpoint, 'SKILL.md'), 'utf8')
-    ).startsWith('---\nname: mirage\n')
+    ).startsWith('---\nname: workspace-commands\n')
     try {
       await writeFile(documentPath, 'changed')
       result.document_kernel_readonly = false

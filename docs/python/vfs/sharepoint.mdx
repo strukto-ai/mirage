@@ -70,7 +70,57 @@ mounts survive token expiry.
 `graph_base_url` selects the Graph deployment, and means the same here as for
 OneDrive: see [The service root](/python/vfs/onedrive#the-service-root).
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with SharePoint mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md sharepoint start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `sharepoint`, write |
+
+## `/<path>` layout
+
+```text
+/<path>
+  SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
+  Unscoped mounts use: /{site_name}/{library_name}/{path_to_file}
+  Unscoped level 0 (ls /): lists all accessible SharePoint sites.
+  Unscoped level 1 (ls /site/): lists document libraries (drives) in that site.
+  Unscoped level 2+ (ls /site/lib/...): lists files and folders in the drive.
+  IMPORTANT: This is a remote mount. Prefer targeted reads (grep, head) over full scans. Avoid cat on large files without piping to head/tail.
+  File versions are retained, snapshots pin and read prior versions.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` use `sharepoint` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md sharepoint end */}
 
 SharePoint paths follow the structure `/{site}/{library}/{path}`. The first two
 levels are virtual (sites and drives), and everything below is a real Graph

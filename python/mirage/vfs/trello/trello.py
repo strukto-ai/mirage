@@ -31,6 +31,7 @@ class TrelloVFS(BaseVFS):
     name: str = VFSName.TRELLO
     caches_reads: bool = True
     prompt: str = PROMPT
+    whole_word_search: bool = True
     write_prompt: str = WRITE_PROMPT
     # Trello's search answers for cards; comments and the board's other
     # files are always read.

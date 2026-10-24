@@ -75,6 +75,7 @@ export class GoogleDriveVFS extends BaseVFS {
     filesContaining: ['entry'],
   } as const
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   readonly config: GDriveConfig
   override readonly accessor: GDriveAccessor
 

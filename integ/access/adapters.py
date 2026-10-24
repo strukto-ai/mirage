@@ -941,15 +941,16 @@ class CliSteps:
 
 
 def _headings(markdown: str) -> str:
-    """The mount paths a VFS.md names, one per ``## `/path` `` heading.
+    """The paths a VFS.md names, one per row of its first table.
 
     Args:
         markdown (str): the rendered document.
     """
+    first = markdown.split("| Path | Description |", 1)[-1].split("\n\n", 1)[0]
     return " ".join(
-        line[4:-1]
-        for line in markdown.splitlines()
-        if line.startswith("## `") and line.endswith("`")
+        line.split("`")[1]
+        for line in first.splitlines()
+        if line.startswith("| `/")
     )
 
 

@@ -1450,7 +1450,10 @@ export class Workspace {
     return this.documents.get('vfs', path, options.profile, options.sessionId)
   }
 
-  /** Render a self-contained CLI skill, optionally exposing a live workspace file. */
+  /**
+   * Render the skill (what changes files on each mount, and the registered
+   * CLIs), optionally exposing a live workspace file.
+   */
   skillMd(
     path?: string | PathSpec,
     options: { profile?: string | undefined; sessionId?: string | undefined } = {},

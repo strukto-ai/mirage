@@ -62,6 +62,45 @@ Both `READ` and `WRITE` modes are supported.
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table aliyun end */}
 
+## VFS.md
+
+What `ws.vfs_md()` answers with Alibaba OSS mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md aliyun start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `aliyun`, write |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md aliyun end */}
+
 ## Example
 
 ```python

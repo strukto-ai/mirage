@@ -12,8 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-PROMPT = """\
-{prefix}
-  Remote Google Cloud Storage bucket.
-  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat."""
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Change:
+    """One command that changes files, and the ops it runs on.
+
+    Args:
+        label (str): how the documents name it.
+        command (tuple[str, ...]): its words, as a profile's rules match
+            them; empty for a redirection, which no rule names.
+        needs (tuple[tuple[str, ...], ...]): alternatives, each the ops
+            a mount must answer for it to work there.
+    """
+
+    label: str
+    command: tuple[str, ...]
+    needs: tuple[tuple[str, ...], ...]

@@ -49,6 +49,7 @@ export class GSheetsVFS extends BaseVFS {
   // Reads stamp listing metadata; a fresh stat checks Drive by file ID.
   override readonly readRevalidatable: boolean = true
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly writePrompt: string = WRITE_PROMPT
   readonly config: GSheetsConfig
   override readonly accessor: GSheetsAccessor

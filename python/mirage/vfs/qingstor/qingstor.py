@@ -14,13 +14,11 @@
 
 from mirage.types import VFSName
 from mirage.vfs.qingstor.config import QingStorConfig
-from mirage.vfs.qingstor.prompt import PROMPT
 from mirage.vfs.s3_alias import S3AliasVFS
 
 
 class QingStorVFS(S3AliasVFS):
     name: str = VFSName.QINGSTOR
-    prompt: str = PROMPT
 
     def __init__(self, config: QingStorConfig) -> None:
         super().__init__(config)

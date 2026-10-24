@@ -1395,7 +1395,8 @@ class Workspace:
         profile: str | None = None,
         session_id: str | None = None,
     ) -> str:
-        """Render a self-contained CLI skill, optionally exposing a live file.
+        """Render the skill (what changes files on each mount, and the
+        registered CLIs), optionally exposing a live file.
 
         Args:
             path (str | PathSpec | None): existing-parent virtual destination.

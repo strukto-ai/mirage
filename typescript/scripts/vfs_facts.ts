@@ -43,6 +43,7 @@ const CAPABILITY_FIELDS = [
   'listingVersion',
   'readsRanges',
   'local',
+  'wholeWordSearch',
 ] as const
 
 // The functions a backend may define, as BaseVFS declares them. Which ones
@@ -97,6 +98,7 @@ export interface Capabilities {
   functions: string[]
   reads_ranges: boolean | string
   local: boolean | string
+  whole_word_search: boolean | string
 }
 
 interface ClassInfo {
@@ -397,6 +399,7 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
     functions: [...functions].sort(compareCodePoints),
     reads_ranges: booleanCapability(values, 'readsRanges', false, className),
     local: booleanCapability(values, 'local', false, className),
+    whole_word_search: booleanCapability(values, 'wholeWordSearch', false, className),
   }
 }
 

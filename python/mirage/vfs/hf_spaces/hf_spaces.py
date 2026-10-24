@@ -16,13 +16,11 @@ from mirage.accessor.hf_hub import HfSpacesAccessor
 from mirage.types import VFSName
 from mirage.vfs.hf_hub.base import HfHubVFS
 from mirage.vfs.hf_spaces.config import HfSpacesConfig
-from mirage.vfs.hf_spaces.prompt import PROMPT
 
 
 class HfSpacesVFS(HfHubVFS[HfSpacesAccessor]):
     ACCESSOR = HfSpacesAccessor
     name: str = VFSName.HF_SPACES
-    prompt: str = PROMPT
 
     def __init__(self, config: HfSpacesConfig) -> None:
         super().__init__(config)

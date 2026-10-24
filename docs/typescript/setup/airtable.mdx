@@ -64,6 +64,87 @@ the last `__` of the mount's directory names.
 For the mounted layout (`bases/`, `table.json`, `records.jsonl`, `views/`)
 and the reading rules see the [Python Airtable docs](/python/vfs/airtable).
 
+## VFS.md
+
+What `ws.vfsMd()` answers with Airtable mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md airtable start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `airtable`, write |
+
+## `/<path>` layout
+
+```text
+/<path>
+  bases/
+    <base-name>__<base-id>/
+      base.json                    base id, name, permission, table list
+      <table-name>__<table-id>/
+        table.json                 typed fields (with options) and views
+        records.jsonl              one record per line
+        views/
+          <view-name>__<view-id>.jsonl   records the view shows, in its order
+  Always ls directories first to discover exact names: the name part of
+  a segment is sanitized, the id after the LAST "__" is exact.
+
+  A records.jsonl line is a mirage-normalized record:
+    record_id, created_time, and fields (keyed by field NAME, values as
+    Airtable returns them). Read table.json for each field's type.
+  Airtable omits empty cells, so a missing key means empty (checkbox
+  false included). A link field is a list of record ids; an attachment
+  url expires two hours after it was read.
+  records.jsonl lists in the API's own order; a view file applies the
+  view's filter and sort. A file over max_read_records records stops
+  with File too large after that many, while head -n N fetches just N
+  records:
+    head -n 20 /<path>/bases/<base>/<table>/records.jsonl | jq .fields
+  The airtable CLI, if installed, reaches what a file cannot: server-side
+  filters (airtable record list --formula or --view), one record by id
+  (airtable record get), and comments (airtable comment list).
+
+  Writes go through the airtable CLI if installed; a record line is the
+  records.jsonl shape, and the ids are the ones after the LAST "__":
+    airtable record create --base <base-id> --table <table-id> \
+      --fields '{"Name": "New feature"}'
+    jq -c 'select(.fields.Status == "Todo") | .fields.Status = "Done"' \
+      /<path>/bases/<base>/<table>/records.jsonl \
+      | airtable record update --base <base-id> --table <table-id>
+    airtable comment add --base <base-id> --table <table-id> <record-id> \
+      --text "comment"
+  See airtable --help for every verb.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep` and `rg` ask `airtable` for the matching lines. `head` ask `airtable` instead of reading a file. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | No command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md airtable end */}
+
 ## Integration
 
 What Airtable answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.

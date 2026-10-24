@@ -12,8 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const PROMPT = `\
-{prefix}
-  Remote Ceph Rados Gateway bucket (S3-compatible).
-  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Supports: ls, cat, head, tail, grep, rg, wc, find, tree, jq, stat.`
+/** One command that changes files, and the ops it runs on. */
+export interface Change {
+  /** How the documents name it. */
+  readonly label: string
+  /** Its words, as a profile's rules match them; empty for a redirection, which no rule names. */
+  readonly command: readonly string[]
+  /** Alternatives, each the ops a mount must answer for it to work there. */
+  readonly needs: readonly (readonly string[])[]
+}

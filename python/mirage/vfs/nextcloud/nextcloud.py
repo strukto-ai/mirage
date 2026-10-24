@@ -24,7 +24,6 @@ from mirage.io.types import ByteSource, materialize
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.nextcloud.config import NextcloudConfig
-from mirage.vfs.nextcloud.prompt import PROMPT
 
 
 class NextcloudVFS(BaseVFS):
@@ -34,7 +33,6 @@ class NextcloudVFS(BaseVFS):
     # WebDAV PROPFIND carries getcontentlength for every file; readdir
     # backfills any lister-omitted size with one stat per affected file.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
     supports_snapshot: bool = True
 
     reads_ranges: bool = True

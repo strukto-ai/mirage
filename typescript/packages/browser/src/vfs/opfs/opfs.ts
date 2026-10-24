@@ -19,7 +19,6 @@ import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { OPFSAccessor } from '../../accessor/opfs.ts'
 import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
@@ -101,7 +100,6 @@ export class OPFSVFS extends BaseVFS {
   // OPFS is a real filesystem: getFile().size is the exact byte count a
   // read returns.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly prompt = PROMPT
   readonly rootName: string
   override readonly accessor: OPFSAccessor
   private rootHandle: FileSystemDirectoryHandle | null = null

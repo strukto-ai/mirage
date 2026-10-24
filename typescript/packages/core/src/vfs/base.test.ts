@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CLIHandler } from '../commands/cli/types.ts'
 
+import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
@@ -542,4 +544,22 @@ it('serves a custom driver through CLI, namespace and runtime entry points', asy
   } finally {
     await ws.close()
   }
+})
+
+describe('wholeWordSearch', () => {
+  it('is set exactly where filesContaining answers only whole words', () => {
+    const root = fileURLToPath(new URL('.', import.meta.url))
+    for (const dir of readdirSync(root, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue
+      for (const file of readdirSync(`${root}${dir.name}`)) {
+        if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue
+        const source = readFileSync(`${root}${dir.name}/${file}`, 'utf8')
+        if (!source.includes('filesContaining(')) continue
+        expect([file, source.includes('wholeWordSearch: boolean = true')]).toEqual([
+          file,
+          source.includes('!opts.wholeWord'),
+        ])
+      }
+    }
+  })
 })

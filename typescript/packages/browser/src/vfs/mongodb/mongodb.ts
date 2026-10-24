@@ -65,7 +65,7 @@ export class MongoDBVFS extends MongoDBVFSBase {
     this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.driver = driver ?? new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri })
     this.accessor = new MongoDBAccessor(this.driver, this.config)
-    this.prompt = PROMPT.replace('{prefix}', prefix ?? '')
+    this.prompt = prefix === undefined ? PROMPT : PROMPT.replace('{prefix}', prefix)
   }
 
   override getState(): MongoDBVFSState {

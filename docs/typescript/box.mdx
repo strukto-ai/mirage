@@ -258,6 +258,62 @@ For a rich, editable view of Google-format documents, mount them through
 [Google Drive](/home/setup/google) with Google credentials instead, the `gws docs ...`
 commands operate on Google file IDs and do not apply to Box.
 
+## VFS.md
+
+What `ws.vfsMd()` answers with Box mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md box start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `box`, write |
+
+## `/<path>` layout
+
+```text
+/<path>
+  Mirrors Box folder hierarchy. Every item is served as its raw bytes:
+    <name>.boxnote      Box Note    (raw ProseMirror-style JSON; pipe to jq)
+    <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
+    <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
+                        Office Open XML (docx/xlsx/pptx) - opaque binary
+    <other-files>       PDFs, images, binaries, etc. - raw bytes
+
+  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
+  Box uses numeric folder IDs internally (root = 0); mirage caches the
+  path -> id mapping, so nested dirs cost one API call per level on first
+  access. Use ls on the parent dir before constructing a path.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` use `box` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md box end */}
+
 ## Integration
 
 What Box answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.

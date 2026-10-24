@@ -35,7 +35,6 @@ from mirage.types import (
 )
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.github.prompt import PROMPT
 
 
 def _pin_of(ref: str | None) -> str | None:
@@ -77,7 +76,7 @@ class GitHubVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
+    whole_word_search: bool = True
 
     def __init__(
         self,

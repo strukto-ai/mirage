@@ -17,7 +17,6 @@ import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import type { S3HttpAgents } from '@struktoai/mirage-core/vfs/s3/config'
-import { PROMPT } from '@struktoai/mirage-core/vfs/s3/prompt'
 import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
 import { VFSName } from '@struktoai/mirage-core/types'
 
@@ -59,7 +58,6 @@ export class S3VFS extends S3VFSBase {
   // stat and read both stamp the ETag, so the gate compares like with
   // like. Inherited by every S3AliasVFS provider.
   override readonly readRevalidatable: boolean = true
-  override readonly prompt: string = PROMPT
   readonly config: S3Config
   override readonly accessor: S3Accessor
 

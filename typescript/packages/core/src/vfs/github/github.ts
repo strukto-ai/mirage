@@ -23,7 +23,6 @@ import {
   fetchTree as fetchGitHubTree,
 } from '../../core/github/tree.ts'
 
-import { PROMPT } from './prompt.ts'
 import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
 
@@ -79,7 +78,7 @@ export class GitHubVFS extends BaseVFS {
   override readonly listingVersion: ListingVersion = ListingVersion.MOUNT
   override readonly listingsPin: string | null
   override readonly indexTtl: number = 86_400
-  override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   readonly config: GitHubConfig
   override readonly accessor: GitHubAccessor
 

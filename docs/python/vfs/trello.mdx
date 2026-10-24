@@ -37,7 +37,77 @@ ws = Workspace({"/trello": vfs}, mode=MountMode.READ)
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table trello end */}
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with Trello mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md trello start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `trello`, write |
+
+## `/<path>` layout
+
+```text
+/<path>
+  workspaces/
+    <workspace-name>__<workspace-id>/
+      workspace.json
+      boards/
+        <board-name>__<board-id>/
+          board.json
+          members/
+            <full-name>__<member-id>.json
+          labels/
+            <label-name>__<label-id>.json
+          lists/
+            <list-name>__<list-id>/
+              list.json
+              cards/
+                <card-name>__<card-id>/
+                  card.json
+                  comments.jsonl
+  Always ls directories first to discover exact names.
+
+  To act on boards and cards (list boards, members, lists, labels,
+  cards and comments; create, update, move, assign, label and comment
+  on cards), use the trello CLI if installed: trello --help
+
+  Writes go through the trello CLI if installed:
+    trello card create --list_id <list-id> --name <name>
+    trello card comment --card_id <card-id> --text <text>
+  See trello --help for every verb.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` use `trello` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | No command changes files. Without `-w`, `grep -r` and `rg` read every file. `trello` search covers only `workspaces/*/boards/*/lists/*/cards/*/card.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md trello end */}
 
 ```text
 /trello/

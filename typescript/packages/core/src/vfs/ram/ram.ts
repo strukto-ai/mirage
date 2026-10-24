@@ -18,7 +18,6 @@ import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { LOCAL_WALK_LIMIT } from '../constants.ts'
 import { VFSConfigError } from '../errors.ts'
-import { PROMPT } from './prompt.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
@@ -56,7 +55,6 @@ export class RAMVFS extends BaseVFS {
   override readonly indexTtl: number = 0
   readonly store = new RAMStore()
   override readonly accessor = new RAMAccessor(this.store)
-  override readonly prompt = PROMPT
   override readonly readsRanges: boolean = true
 
   override readonly local: boolean = true

@@ -42,6 +42,7 @@ class SlackVFS(BaseVFS):
     # file blobs carry Slack's upload byte count.
     sizes_always_known: bool = True
     prompt: str = PROMPT
+    whole_word_search: bool = True
     write_prompt: str = WRITE_PROMPT
 
     reads_ranges: bool = True

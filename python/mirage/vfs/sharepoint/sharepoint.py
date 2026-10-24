@@ -40,6 +40,7 @@ class SharePointVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     prompt: str = PROMPT
+    whole_word_search: bool = True
     supports_snapshot: bool = True
     # stat and every read that can fill the cache stamp the item's cTag,
     # the read taking it before the bytes, so the gate compares like with

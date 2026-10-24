@@ -49,6 +49,7 @@ export class TrelloVFS extends BaseVFS {
   override readonly name: string = VFSName.TRELLO
   override readonly cachesReads: boolean = true
   override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly writePrompt: string = WRITE_PROMPT
   readonly config: TrelloConfig
   override readonly accessor: TrelloAccessor

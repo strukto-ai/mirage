@@ -1,18 +1,1 @@
-{
-  "browser/aliyun/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/backblaze/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/ceph/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/digitalocean/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/gcs/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/minio/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/oci/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/opfs/PROMPT": "OPFS is a browser-only backend with no Python counterpart.",
-  "browser/qingstor/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/r2/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/s3/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/scaleway/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/seaweedfs/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/supabase/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/tencent/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements.",
-  "browser/wasabi/PROMPT": "Browser object storage uses a host-provided presigner; the prompt explains its LIST/COPY requirements."
-}
+{}

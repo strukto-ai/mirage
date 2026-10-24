@@ -174,7 +174,7 @@ repos:
         name: Generated doc tables (python)
         entry: bash -c 'python/.venv/bin/python scripts/gen_doc_tables.py --selftest && python/.venv/bin/python scripts/gen_doc_tables.py --check'
         language: system
-        files: ^(docs/python/.*\.mdx|python/mirage/(accessor|agents|core|secrets|vfs)/.*\.py|scripts/gen_doc_tables\.py)$
+        files: ^(docs/python/.*\.mdx|python/mirage/(accessor|agents|core|secrets|vfs|workspace/documentation)/.*\.py|scripts/gen_doc_tables\.py)$
         pass_filenames: false
       - id: doc-tables-typescript
         name: Generated doc tables (typescript)

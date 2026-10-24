@@ -40,7 +40,6 @@ import { checksum as hubChecksum } from '../../core/hf_hub/checksum.ts'
  */
 
 export abstract class HfHubVFS extends BaseVFS {
-  abstract override readonly prompt: string
   abstract override readonly accessor: HfHubAccessor
   // Narrowed back to abstract: all three carry a config and so owe their own
   // redaction, and inheriting BaseVFS's bare `{type}` would drop it and read
