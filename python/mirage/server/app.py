@@ -17,9 +17,10 @@ import importlib
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI
 
@@ -110,7 +111,7 @@ def _load_ssh_starter() -> StartSSH:
             "ssh_port is set but the SSH server needs asyncssh; install "
             "the ssh extra (pip install 'mirage-ai[ssh]')"
         ) from exc
-    return getattr(module, attr)
+    return cast(StartSSH, getattr(module, attr))
 
 
 async def _start_ssh(app: FastAPI) -> SSHListener | None:
@@ -135,7 +136,7 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI):
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     listener = await _start_ssh(app)
     app.state.ssh = listener
     if app.state.pid_file is not None:

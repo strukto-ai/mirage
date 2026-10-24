@@ -24,7 +24,7 @@ import {
 import { sha256Hex } from '../utils/hash.ts'
 import type { Refusal } from '../types.ts'
 import { PolicyDenied } from './errors.ts'
-import { Outcome } from './types.ts'
+import { DecisionOwner, Outcome } from './types.ts'
 import type {
   Abandoned,
   Ask,
@@ -278,7 +278,7 @@ export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
   return false
 }
 
-export class Decisions {
+export class Decisions extends DecisionOwner {
   private readonly sessions: SessionDecisionsQuery | null
   private readonly onAsk: AskHandler | null
   private readonly memory = new Map<string, Decision[]>()
@@ -288,6 +288,7 @@ export class Decisions {
   private readonly live = new Map<string, Set<HandOff>>()
 
   constructor(sessions: SessionDecisionsQuery | null = null, onAsk: AskHandler | null = null) {
+    super()
     this.sessions = sessions
     this.onAsk = onAsk
   }
@@ -938,14 +939,6 @@ export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
     .reverse()
     .find(([ledger, , session]) => ledger === owner && session === sessionId)
   return call?.[1] ?? null
-}
-
-// The ledger's call on the caller: added here, where Decisions lives, so
-// the caller's module imports no policy module.
-declare module '../context/session_context.ts' {
-  interface Caller {
-    readonly call: readonly [Decisions, HandOff, string] | null
-  }
 }
 
 /**

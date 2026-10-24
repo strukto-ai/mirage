@@ -21,7 +21,7 @@ from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
 from mirage.policy import Policies
-from mirage.runtime.routing import RouteDecision
+from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell import parse
 from mirage.shell.barrier import BarrierPolicy, apply_barrier

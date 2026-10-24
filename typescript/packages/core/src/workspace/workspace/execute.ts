@@ -25,14 +25,9 @@ import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
-import {
-  activeRecords,
-  lostPaths,
-  runWithRecording,
-  type RecordingState,
-} from '../../observe/context.ts'
+import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import type { OpRecord, RecordingState } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
@@ -64,7 +59,7 @@ import {
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import type { RouteDecision } from '../../runtime/routing/index.ts'
+import type { RouteDecision } from '../../runtime/types.ts'
 import { wholeLineRuntime } from '../../runtime/table.ts'
 import { RouteError } from '../../runtime/routing/errors.ts'
 import type { Deny, HandOff, Pending } from '../../policy/index.ts'

@@ -15,11 +15,21 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Literal, TypeAlias
+from typing import Literal, Protocol, TypeAlias
 
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 WriteKind = Literal["put", "copy", "delete"]
+
+
+class CacheInvalidator(Protocol):
+    """The active cache operations a backend needs from its cache manager."""
+
+    async def cached_size(self, path: PathSpec) -> int | None: ...
+
+    async def is_cached(self, path: PathSpec) -> bool: ...
+
+    def probed_stat(self, path: PathSpec) -> FileStat | None: ...
 
 
 @dataclass(frozen=True, slots=True)

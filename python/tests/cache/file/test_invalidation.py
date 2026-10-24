@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.cache.invalidation import Invalidation
+import pytest
+
+from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 
 
 def test_a_removal_of_the_key_makes_the_stamp_stale():
@@ -90,3 +92,30 @@ def test_a_prefix_invalidation_spares_an_excluded_root():
     assert inv.stale("/a/nested2", sibling)
     for key in ("/a/nested/f", "/a/nested", "/a/nested2"):
         inv.leave(key)
+
+
+def test_fill_guard_tracks_a_batch_and_releases_duplicate_keys_once():
+    inv = Invalidation()
+    with with_fill_guard(inv, ["/a", "/b", "/a"]) as is_live:
+        assert is_live("/a")
+        assert is_live("/b")
+        assert not is_live("/unknown")
+        with with_fill_guard(inv, ["/a"]) as inner_live:
+            inv.invalidate("/a")
+            assert not inner_live("/a")
+        assert not is_live("/a")
+        assert is_live("/b")
+    assert inv._writers == {}
+    assert inv._keys == {}
+
+
+def test_fill_guard_releases_every_key_and_preserves_the_error():
+    inv = Invalidation()
+    error = RuntimeError("fill failed")
+    with pytest.raises(RuntimeError) as caught:
+        with with_fill_guard(inv, ["/a", "/b"]):
+            inv.invalidate("/a")
+            raise error
+    assert caught.value is error
+    assert inv._writers == {}
+    assert inv._keys == {}

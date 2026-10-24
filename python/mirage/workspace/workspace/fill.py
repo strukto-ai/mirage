@@ -13,11 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import fetch_secret
@@ -164,7 +162,7 @@ def line_nodes(node: TSNodeLike, session: SessionState) -> list[TSNodeLike]:
 
 def guest_bound(
     nodes: Sequence[TSNodeLike],
-    decision: RouteDecision[Runtime[Any]],
+    decision: RouteDecision[RuntimeIdentity],
 ) -> bool:
     """Whether any of the line's commands runs on a guest runtime.
 

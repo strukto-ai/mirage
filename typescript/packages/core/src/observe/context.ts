@@ -18,29 +18,15 @@ import {
   liveCallers,
   runWithCaller,
 } from '../context/session_context.ts'
-import { OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS } from './record.ts'
-import { underPath } from '../utils/key_prefix.ts'
+import {
+  LostPaths,
+  OpRecord,
+  RecordIndex,
+  STAMP_FINGERPRINT_OPS,
+  type RecordingState,
+  type RevisionsState,
+} from './record.ts'
 import type { PathSpec } from '../types.ts'
-
-/**
- * A line's recording: its records, the mount serving them, and the
- * workspace ledger the line hands its records to when it ends (null for a
- * file call's own recording, which no other call joins).
- */
-export interface RecordingState {
-  records: OpRecord[]
-  mountId: string | null
-  ledger: OpRecord[] | null
-}
-
-/**
- * Per-task revision pins. Independent of the recording context so that
- * direct {@link Workspace.dispatch} calls (which run outside
- * {@link runWithRecording}) still honour installed pins.
- */
-export interface RevisionsState {
-  map: Map<string, string> | null
-}
 
 // Where the running line records its calls, with the mount serving them,
 // and the revision pins, on the caller: added here, where their shapes
@@ -75,67 +61,6 @@ export async function commandRecords<T>(
   const held = currentCaller().commandSink
   const command = own ? mine : (held?.[0] ?? null)
   return runWithCaller({ ...currentCaller(), commandSink: [command, mine] }, () => fn(mine))
-}
-
-/** One lost path's mark. Mirrors Python's `LostMark`. */
-export interface LostMark {
-  /** Where in the line's records it was lost. */
-  readonly at: number
-  /** Its place among the line's marks, from 1. */
-  readonly order: number
-  /** The version its write lost on, if any. */
-  readonly version: string | null
-}
-
-/**
- * The paths whose conditional write lost on a line. A lost path's cached
- * copy was dropped; nothing the line read of it before the loss may be
- * cached again. The version the write lost on is the one a retry sends, so
- * it is refused again until a read. A read or write of the path after the
- * loss names the bytes now there, and lifts the mark. Mirrors Python's
- * `LostPaths`, which rides the recorder; here it is keyed by the line's
- * records, since `keepVersions` runs after the recording scope ends.
- */
-export class LostPaths {
-  readonly marks = new Map<string, LostMark>()
-  /** The marks made so far. */
-  count = 0
-
-  constructor(private readonly records: readonly OpRecord[]) {}
-
-  mark(key: string, version: string | null = null): void {
-    this.count += 1
-    this.marks.set(key, {
-      at: this.records.length,
-      order: this.count,
-      version: version !== null && version !== '' ? version : null,
-    })
-  }
-
-  /**
-   * Lift the marks a removal or move of `key` (and, with `subtree`, below it)
-   * ended: only those made by the time it began (`upto`, the `count` then), so
-   * a refusal another command of the line made while it ran stays.
-   */
-  lift(key: string, upto: number, subtree = false): void {
-    for (const [marked, mark] of [...this.marks]) {
-      const covered = marked === key || (subtree && underPath(marked, key))
-      if (covered && mark.order <= upto) this.marks.delete(marked)
-    }
-  }
-
-  /** The version a write to `key` lost on, while it is still lost. */
-  version(key: string): string | null {
-    return this.holds(key) ? (this.marks.get(key)?.version ?? null) : null
-  }
-
-  holds(key: string): boolean {
-    const mark = this.marks.get(key)
-    if (mark === undefined) return false
-    return !this.records
-      .slice(mark.at)
-      .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
-  }
 }
 
 /**

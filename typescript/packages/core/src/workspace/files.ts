@@ -14,8 +14,8 @@
 
 import { type ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
-import type { OpRecord } from '../observe/record.ts'
-import { finishRecord, record, type RecordingState, startOp } from '../observe/context.ts'
+import type { OpRecord, RecordingState } from '../observe/record.ts'
+import { finishRecord, record, startOp } from '../observe/context.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, type MountMode, PathSpec } from '../types.ts'
@@ -842,22 +842,4 @@ export function operandsOf(files: Files): FollowOperands | null {
  */
 export function withCaller(files: Files, changes: Partial<Caller>): Files {
   return callerFilesOf(files, changes)
-}
-
-// What a method reads files through: added to the method contexts here, where
-// `Files` lives, so the policy and routing types import no workspace
-// module. Read only: a write is refused and no method runs again for a read.
-declare module '../policy/types.ts' {
-  interface CommandContext {
-    vfs?: Files
-  }
-  interface VfsContext {
-    vfs?: Files
-  }
-  interface SessionContext {
-    vfs?: Files
-  }
-  interface RouteContext {
-    vfs?: Files
-  }
 }

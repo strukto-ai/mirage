@@ -16,7 +16,7 @@ import json
 import math
 import sys
 import time
-from typing import Any, Callable, NoReturn
+from typing import Any, Callable, NoReturn, cast
 
 import httpx
 import typer
@@ -73,7 +73,7 @@ def handle_response(r: httpx.Response) -> dict[str, Any] | list[Any]:
         fail(f"daemon error {r.status_code}: {detail}", exit_code=2)
     if not r.content:
         return {}
-    return r.json()
+    return cast(dict[str, Any] | list[Any], r.json())
 
 
 def format_age(epoch: float) -> str:

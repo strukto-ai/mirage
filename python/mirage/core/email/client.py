@@ -16,7 +16,7 @@ import logging
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.email import EmailAccessor
 from mirage.accessor.imap import IMAPClient, IMAPResponse
@@ -301,7 +301,7 @@ async def fetch_attachment(
     attachments = parse_with_payloads(raw_bytes)
     for att in attachments:
         if att["filename"] == filename:
-            return att["payload"]
+            return cast(bytes, att["payload"])
     return None
 
 

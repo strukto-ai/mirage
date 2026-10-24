@@ -13,15 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypeVar
 
-from mirage.context import Caller
+from mirage.context.session_context import Caller
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.types import VfsCall
 
 if TYPE_CHECKING:
     from mirage.policy.decisions import Decisions
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +75,8 @@ class Boundary:
         )
 
     async def complete(
-        self, call: VfsCall, path: PathSpec, write: bool, result: Any
-    ) -> Any:
+        self, call: VfsCall, path: PathSpec, write: bool, result: T
+    ) -> T:
         """Fire post_vfs on a finished call and hand its result back
         whole.
 
@@ -82,7 +84,7 @@ class Boundary:
             call (VfsCall): what the mount's VFS declares for the call.
             path (PathSpec): the path the call named.
             write (bool): whether the call writes.
-            result (Any): what the call returned.
+            result (T): what the call returned.
         """
         await post_vfs_gate(
             self.policies,

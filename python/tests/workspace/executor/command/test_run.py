@@ -15,9 +15,22 @@
 import pytest
 
 from mirage.accessor.base import Accessor
+from mirage.runtime.types import RouteDecision
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
+from mirage.workspace.executor.command.run import line_runtime_for
+
+
+class _RuntimeDescription:
+    name = "description"
+    captures = ("python3",)
+
+
+def test_route_metadata_cannot_be_used_as_an_executable_runtime():
+    decision = RouteDecision(bindings={"python3": _RuntimeDescription()})
+    with pytest.raises(TypeError, match="routed entry is not a Runtime"):
+        line_runtime_for("python3", decision)
 
 
 async def _cli_write_case(

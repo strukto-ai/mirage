@@ -24,7 +24,7 @@ def _to_scope(path: str) -> PathSpec:
     )
 
 
-def _scope_path(val) -> str:
+def _scope_path(val: str | PathSpec) -> str:
     """Extract path string from str or PathSpec."""
     if isinstance(val, PathSpec):
         return val.virtual

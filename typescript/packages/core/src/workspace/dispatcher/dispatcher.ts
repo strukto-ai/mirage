@@ -67,7 +67,6 @@ import type { DryRun, EntryGate, VfsExplanation } from '../../policy/types.ts'
 import {
   activeRecords,
   commandRecords,
-  type LostPaths,
   lostPaths,
   record,
   recordIndex,
@@ -76,7 +75,7 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import type { LostPaths, OpRecord } from '../../observe/record.ts'
 import { RETRACT_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'

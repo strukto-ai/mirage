@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { underPath } from '../utils/key_prefix.ts'
+import { underPath } from '../../utils/key_prefix.ts'
 
 export type Stamp = readonly [epoch: number, key: number]
 
@@ -24,13 +24,13 @@ export type Stamp = readonly [epoch: number, key: number]
  * granted its turn after it. The writer takes a stamp before it waits and
  * compares it before it installs.
  *
- * The window is open only where the writer actually suspends in between:
- * behind another writer of the key, or in a store that awaits its client
- * (redis). A free lock admits a writer without suspending on both hosts
- * (`KeyLock.withLock` runs it at once, as python's `asyncio.Lock.acquire`
- * returns), so for an uncontended in-memory write the check is dormant
- * rather than dead -- it is the contract both hosts share, and the guard
- * that keeps a future await from silently reopening the window.
+ * The RAM store holds a per-key lock only for its in-memory install,
+ * never across hashing or backend I/O. A free lock admits its writer
+ * without suspending on both hosts; a queued writer checks its stamp
+ * after acquiring the lock. Redis holds no client-side key lock: it
+ * sends atomic writes to the server and checks after acquiring its
+ * client (an await on TypeScript, synchronous on Python). The guard
+ * tracks local invalidations, not writes by other Redis clients.
  *
  * Two counters, because invalidations have different reaches. The
  * store-wide epoch answers `clear`. The per-key counter answers a removal
@@ -87,5 +87,29 @@ export class Invalidation {
   /** Record an invalidation whose victims cannot be enumerated. */
   invalidateAll(): void {
     this.epoch++
+  }
+}
+
+/**
+ * Track a fill's keys until it completes, fails or is cancelled.
+ *
+ * The callback starts without a yield, before any lock/client wait. Call
+ * its predicate immediately before each install or retry. Unknown keys
+ * are not live, and duplicate keys count as one writer.
+ */
+export async function withFillGuard(
+  invalidation: Invalidation,
+  keys: Iterable<string>,
+  fill: (isLive: (key: string) => boolean) => Promise<void>,
+): Promise<void> {
+  const stamps = new Map([...new Set(keys)].map((key) => [key, invalidation.enter(key)]))
+  const isLive = (key: string): boolean => {
+    const stamp = stamps.get(key)
+    return stamp !== undefined && !invalidation.stale(key, stamp)
+  }
+  try {
+    await fill(isLive)
+  } finally {
+    for (const key of stamps.keys()) invalidation.leave(key)
   }
 }

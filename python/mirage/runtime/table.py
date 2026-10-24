@@ -24,6 +24,7 @@ from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.runtime.python.wasi import WasiRuntime
 from mirage.runtime.sandbox.sandlock import SandlockRuntime
+from mirage.runtime.types import RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 
 # The builtin runtimes by name. The command -> runtime mapping is
@@ -206,7 +207,7 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
 
 
 def whole_line_runtime(
-    bindings: Mapping[str, Runtime[Any] | None],
+    bindings: Mapping[str, RuntimeIdentity | None],
 ) -> LineExecutorMixin[Any] | None:
     """The runtime that runs this entire line, if any.
 

@@ -15,6 +15,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 
 class KeyLockMixin:
@@ -27,7 +28,7 @@ class KeyLockMixin:
     concurrency natively and do not need this mixin.
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._key_locks: dict[str, asyncio.Lock] = {}
 

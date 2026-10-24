@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any, Generic, Literal, Protocol, TypeAlias, TypeVar
 
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
@@ -29,6 +29,32 @@ class RuntimeIdentity(Protocol):
 
     @property
     def captures(self) -> Sequence[str]: ...
+
+
+_R = TypeVar("_R", bound=RuntimeIdentity, covariant=True)
+
+
+@dataclass(frozen=True, slots=True)
+class RouteDecision(Generic[_R]):
+    """The one-line placement decision the dispatcher consults.
+
+    Both fields hold runtimes: the decision IS "which runtime runs
+    which command". The workspace runtime is a legal value in either; a
+    command placed on it is served by the workspace executor itself.
+
+    Args:
+        bindings (Mapping[str, _R | None]): every command some entry
+            captures, resolved for this line: the runtime it runs on,
+            or None when a route to the workspace keeps the line off
+            its only capturer, a ``*`` line executor (exit 126, never a
+            silent fallback to the workspace).
+        fallback (_R | None): where commands no entry captures run:
+            the catch-all workspace runtime, or None when the workspace
+            runtime declares captures; unbound commands then exit 126.
+    """
+
+    bindings: Mapping[str, _R | None] = field(default_factory=dict)
+    fallback: _R | None = None
 
 
 # The languages a runtime can interpret. A Literal, not str, so a typo is

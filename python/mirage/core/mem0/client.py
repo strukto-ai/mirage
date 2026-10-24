@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, cast
 
 from mem0 import AsyncMemoryClient
 from mem0.client.types import GetAllMemoryOptions, SearchMemoryOptions
@@ -69,4 +69,4 @@ async def search_memories(
         threshold=threshold,
     )
     resp = await client.search(query, options=options)
-    return resp.get("results", [])
+    return cast(list[dict[str, Any]], resp.get("results", []))

@@ -15,7 +15,8 @@
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
+from typing import TypeVar
 
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.stream import OutputStream, close_quietly, ensure_stream
@@ -23,6 +24,7 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 async def with_timeout(
@@ -107,14 +109,16 @@ def maybe_with_timeout(
     )
 
 
-async def run_with_timeout(coro, seconds: float | None, name: str):
+async def run_with_timeout(
+    coro: Awaitable[T], seconds: float | None, name: str
+) -> T:
     """Wrap a coroutine with a deadline, mapping overrun to a timeout error.
 
     Used by eager builtins, dry-run, and VFS ops. Returns the coroutine
     result unchanged when seconds is falsy or non-positive.
 
     Args:
-        coro: the awaitable to run.
+        coro (Awaitable[T]): the awaitable to run.
         seconds (float | None): timeout budget, or None to disable.
         name (str): command/op name for the timeout message.
     """

@@ -25,6 +25,7 @@ from mirage.shell.constants import BIN_PREFIX
 from mirage.utils.path import norm_dir
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.history import HISTORY_PREFIX
+from mirage.workspace.mount.mount import MountEntry
 
 _AUTO_PREFIXES = {
     "/dev/",
@@ -45,7 +46,7 @@ def _mount_description(vfs: BaseVFS) -> str:
     return raw[: _DESCRIPTION_MAX - 1].rstrip() + "\u2026"
 
 
-def _user_mounts(ws: Workspace):
+def _user_mounts(ws: Workspace) -> list[MountEntry]:
     return [m for m in ws._registry.mounts() if not _is_auto_prefix(m.prefix)]
 
 

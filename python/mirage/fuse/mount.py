@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 
 from mirage.fuse.backend import MountBackend, prepare_backend
@@ -114,7 +115,7 @@ def unmount_with_fusermount(mountpoint: str) -> None:
         )
 
 
-def _marshal_utimens(self: Any, path: bytes | None, buf: Any) -> int:
+def _marshal_utimens(self: Any, path: bytes | None, buf: Any) -> int | None:
     # mfusepy folds each timespec into one number, which loses
     # utimensat's set-to-now and leave-as-is markers (libfuse 3 passes
     # them through for `touch -m` and `touch -a`), so they are read off
@@ -129,7 +130,10 @@ def _marshal_utimens(self: Any, path: bytes | None, buf: Any) -> int:
         )
     )
     name = None if path is None else path.decode(self.encoding, self.errors)
-    return self.operations.utimens(name, times)
+    utimens: Callable[
+        [str | None, tuple[int | None, int | None] | None], int | None
+    ] = self.operations.utimens
+    return utimens(name, times)
 
 
 def load_fuse() -> Any:

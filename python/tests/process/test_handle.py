@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import current_caller, run_with_execution
 from mirage.process.handle import ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessState
 from mirage.types import PathSpec
@@ -67,7 +67,9 @@ async def test_terminate_asks_once_and_the_runner_exits_137():
         await asyncio.Event().wait()
         return 0
 
-    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, bind=run_with_execution
+    )
     await started.wait()
     assert handle.terminate() is True
     assert handle.terminate() is False
@@ -93,7 +95,9 @@ async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
             seen.append(runner.signal if runner is not None else None)
         return 0
 
-    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, bind=run_with_execution
+    )
     await started.wait()
     assert handle.signal is None
     assert handle.terminate(signal) is True
@@ -117,7 +121,9 @@ async def test_a_program_that_handled_the_signal_keeps_its_own_status():
             runner.program_exited(3)
         return 0
 
-    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, bind=run_with_execution
+    )
     await started.wait()
     assert handle.program_code is None
     assert handle.terminate(15) is True

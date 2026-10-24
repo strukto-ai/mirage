@@ -31,12 +31,12 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision, RouteError
+from mirage.runtime.routing import RouteError
 from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
-from mirage.view.types import SessionView
-from mirage.workspace.files import Files
+from mirage.view.types import FileView, SessionView
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
@@ -72,12 +72,12 @@ class Router:
         command: str,
         runtime: str | None,
         session: SessionState,
-        inherited: RouteDecision[Runtime[Any]] | None,
+        inherited: RouteDecision[RuntimeIdentity] | None,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
         held: Callable[[], Awaitable[bool]] | None = None,
         claimant: Claimant | None = None,
         cancel: asyncio.Event | None = None,
-    ) -> RouteDecision[Runtime[Any]] | Deny | Pending:
+    ) -> RouteDecision[RuntimeIdentity] | Deny | Pending:
         """Resolve the routing decision for one typed line.
 
         Returns the static bindings as the decision when nothing decides
@@ -153,7 +153,7 @@ class Router:
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
-        RouteDecision[Runtime[Any]] | Deny | Pending,
+        RouteDecision[RuntimeIdentity] | Deny | Pending,
     ]:
         """Every ``pre_execute`` answer for a line and what they decide,
         without running it: what ``explain`` shows. An Ask reads the
@@ -190,7 +190,7 @@ class Router:
 
     def _routed(
         self, entries: list[Runtime[Any]], name: str
-    ) -> RouteDecision[Runtime[Any]]:
+    ) -> RouteDecision[RuntimeIdentity]:
         """The decision a policy's route places a line on. ``workspace``
         keeps the line in Mirage: no line executor (a ``*`` capture)
         takes it, and each command stays on its first other capturer.
@@ -214,7 +214,7 @@ class Router:
 
     def _unplaced(
         self, entries: list[Runtime[Any]]
-    ) -> RouteDecision[Runtime[Any]]:
+    ) -> RouteDecision[RuntimeIdentity]:
         """The decision for a line no policy placed: each command on its
         first capturer, kept for the line's nested evals.
 
@@ -227,7 +227,7 @@ class Router:
         )
 
     def runtime_for(
-        self, command: str, decision: RouteDecision[Runtime[Any]]
+        self, command: str, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
         """The runtime entry that serves a command under a decision,
         empty when the workspace runs it itself.
@@ -243,7 +243,7 @@ class Router:
 
     def _placed(
         self, entries: list[Runtime[Any]], name: str
-    ) -> RouteDecision[Runtime[Any]]:
+    ) -> RouteDecision[RuntimeIdentity]:
         """The decision that serves a line on one named runtime: its
         captures over the static bindings.
 
@@ -285,7 +285,7 @@ class Router:
 
         def handles(
             walked: SessionState,
-        ) -> tuple[SessionView | None, Files | None, PolicyCaller | None]:
+        ) -> tuple[SessionView | None, FileView | None, PolicyCaller | None]:
             found = views(walked.session_id, walked) if views else None
             return found or (None, None, None)
 

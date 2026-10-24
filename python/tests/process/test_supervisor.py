@@ -4,7 +4,10 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from mirage.context.session_context import current_execution_id
+from mirage.context.session_context import (
+    current_execution_id,
+    run_with_execution,
+)
 from mirage.process.config import ProcessPermissions
 from mirage.process.handle import ProcessHandle
 from mirage.process.supervisor import ProcessSupervisor
@@ -14,7 +17,7 @@ from mirage.types import PathSpec
 
 @pytest.mark.asyncio
 async def test_execution_context_isolated_between_concurrent_runners():
-    supervisor = ProcessSupervisor()
+    supervisor = ProcessSupervisor(bind=run_with_execution)
     release = asyncio.Event()
     seen = []
 

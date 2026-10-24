@@ -15,7 +15,7 @@
 import re
 from collections.abc import Awaitable, Callable, Sequence
 
-from mirage.policy import PolicyDenied
+from mirage.policy.errors import PolicyDenied
 from mirage.shell.array import (
     array_count,
     array_extent,
