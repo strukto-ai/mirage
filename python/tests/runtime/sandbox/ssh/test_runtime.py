@@ -275,7 +275,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
     runtime._conn = HungConn(process)
 
     async def run() -> int:
-        _, _, code = await runtime._ssh("sleep 30", None, tagged=tagged)
+        code = (await runtime._ssh("sleep 30", None, tagged=tagged)).exit_code
         return code
 
     runner = ProcessSupervisor(bind=run_with_execution).start(

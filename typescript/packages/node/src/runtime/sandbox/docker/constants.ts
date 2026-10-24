@@ -14,3 +14,9 @@
 
 export const DOCKER_HINT =
   'the docker runtime needs `docker` on PATH (Docker Desktop, colima, or a podman alias)'
+
+/**
+ * `docker inspect` reports State.Status: created, running, paused,
+ * restarting, removing, exited or dead. Only "running" takes a line.
+ */
+export const RUNNING_STATE = 'running'

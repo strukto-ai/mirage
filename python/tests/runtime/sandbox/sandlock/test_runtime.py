@@ -109,7 +109,7 @@ def test_registry_declares_process_and_shell_without_language_or_workspace_fs():
 @pytest.mark.asyncio
 async def test_missing_cli_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="needs `sandlock` on PATH"):
+    with pytest.raises(RuntimeError, match="needs `sandlock` on PATH"):
         await SandlockRuntime().execute(
             [], ["node"], Context(), kind="process"
         )

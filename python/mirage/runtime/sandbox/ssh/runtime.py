@@ -91,14 +91,13 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        stdout, stderr, code = await self._ssh(
+        return await self._ssh(
             wrap_line(argv, env, cwd),
             stdin,
             output,
             errors,
             tagged=EXEC_ID in env,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def _ssh(
         self,
@@ -107,7 +106,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
         tagged: bool = False,
-    ) -> tuple[bytes, bytes, int]:
+    ) -> RunResult:
         """One exec channel on the connection; the seam tests override.
 
         Input is written as it is read, and closed at its end, or at once
@@ -189,7 +188,11 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             process.close()
         await process.wait_closed()
         code = result.returncode if result.returncode is not None else 1
-        return stdout, stderr, 128 - code if code < 0 else code
+        return RunResult(
+            stdout=stdout,
+            stderr=stderr or None,
+            exit_code=128 - code if code < 0 else code,
+        )
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         process = await self._conn.create_process(

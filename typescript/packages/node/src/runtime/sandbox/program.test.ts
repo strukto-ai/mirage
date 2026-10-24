@@ -79,7 +79,7 @@ function shRunner(
           direct,
           ...(output === undefined ? {} : { output }),
         })
-      ).code,
+      ).exitCode,
   })
 }
 
@@ -252,7 +252,11 @@ describe('runProgram', () => {
       ['-c', 'cat; echo e >&2; exit 3'],
       new TextEncoder().encode('in'),
     )
-    expect([DEC.decode(r.stdout), DEC.decode(r.stderr), r.code]).toEqual(['in', 'e\n', 3])
+    expect([DEC.decode(r.stdout), DEC.decode(r.stderr ?? undefined), r.exitCode]).toEqual([
+      'in',
+      'e\n',
+      3,
+    ])
   })
 
   // stderr goes to its own callback as it arrives, as stdout goes to output.
@@ -266,9 +270,9 @@ describe('runProgram', () => {
     })
     expect([
       DEC.decode(r.stdout),
-      DEC.decode(r.stderr),
+      DEC.decode(r.stderr ?? undefined),
       DEC.decode(Buffer.concat(seen)),
-      r.code,
+      r.exitCode,
     ]).toEqual(['o\n', '', 'e\n', 3])
   })
 
@@ -286,7 +290,7 @@ describe('runProgram', () => {
       }
     }
     const result = await runProgram('wc', null, ['-c'], input(), { children })
-    expect(result.code).toBe(0)
+    expect(result.exitCode).toBe(0)
     expect(Number(DEC.decode(result.stdout).trim())).toBe(5000 * 1024)
     expect(chunks).toBe(5000)
   })
@@ -294,7 +298,7 @@ describe('runProgram', () => {
   it('finishes an exited command with an open, idle managed stdin', async () => {
     const input = new ProcessInput()
     const result = await runProgram('sh', null, ['-c', 'printf done'], input.stream())
-    expect(result.code).toBe(0)
+    expect(result.exitCode).toBe(0)
     expect(DEC.decode(result.stdout)).toBe('done')
     await expect(input.write(new TextEncoder().encode('late'))).rejects.toBeInstanceOf(PipeClosed)
   })
@@ -310,7 +314,7 @@ describe('runProgram', () => {
     }
     try {
       const result = await runProgram('sh', null, ['-c', 'printf done'], input())
-      expect([result.code, DEC.decode(result.stdout)]).toEqual([0, 'done'])
+      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'done'])
     } finally {
       release()
     }
@@ -388,7 +392,7 @@ describe('runProgram', () => {
     try {
       const started = Date.now()
       await closeChildren(children)
-      expect((await run).code).not.toBe(0)
+      expect((await run).exitCode).not.toBe(0)
       expect(Date.now() - started).toBeLessThan(3000)
     } finally {
       process.kill(escaped, 'SIGKILL')
@@ -431,7 +435,7 @@ describe('runProgram', () => {
     await exited
     await closeChildren(children)
     release()
-    expect((await run).code).toBe(0)
+    expect((await run).exitCode).toBe(0)
   })
 
   it('closeChildren kills every running tree and waits for it', async () => {
@@ -440,7 +444,7 @@ describe('runProgram', () => {
     expect(children.size).toBe(1)
     const started = Date.now()
     await closeChildren(children)
-    expect((await run).code).not.toBe(0)
+    expect((await run).exitCode).not.toBe(0)
     expect(Date.now() - started).toBeLessThan(5000)
     expect(children.size).toBe(0)
   })

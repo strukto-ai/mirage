@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-import shutil
 from collections.abc import Sequence
 from typing import Any
 
@@ -111,25 +110,22 @@ class SandlockRuntime(
         refusal = cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
             return refusal
-        cli = shutil.which("sandlock")
-        if cli is None:
-            raise FileNotFoundError(SANDLOCK_HINT)
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**self.config.env, **(ctx.env or {})}.items():
             wrapper += ["--env", f"{key}={value}"]
-        # Variables belong to the confined child, never the wrapper's loader.
-        stdout, stderr, code = await run_program(
-            cli,
-            None,
+        # Only host PATH locates `sandlock`; requested variables go to the
+        # confined child.
+        return await run_program(
+            "sandlock",
+            SANDLOCK_HINT,
             [*wrapper, "--", *argv],
             ctx.stdin,
             cwd=ctx.cwd.virtual,
-            env={},
+            env={"PATH": os.environ.get("PATH", "")},
             children=self._children,
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""

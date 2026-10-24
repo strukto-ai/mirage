@@ -18,7 +18,7 @@ import { once } from 'node:events'
 import { stat } from 'node:fs/promises'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import {
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
@@ -32,12 +32,6 @@ import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 
-export interface CliResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
-
 /** Where and how `runProgram` starts its child. */
 export interface ProgramOptions {
   // The working directory; this process's when unset.
@@ -48,9 +42,9 @@ export interface ProgramOptions {
   signal?: AbortSignal
   // Where the child is kept while it runs, for `closeChildren`.
   children?: Set<ChildProcess>
-  output?: (chunk: Uint8Array) => Promise<void>
+  output?: OutputFn
   // Receives stderr as it arrives instead of returning it.
-  errors?: (chunk: Uint8Array) => Promise<void>
+  errors?: OutputFn
   // The child is the program itself, not a client that runs it elsewhere
   // and exits on its own terms (`docker exec` answers a TERM with 0 and
   // leaves the program running).
@@ -92,7 +86,7 @@ export async function runProgram(
   args: string[],
   stdin: ByteSource | null,
   options: ProgramOptions = {},
-): Promise<CliResult> {
+): Promise<RunResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
   // Read now: an abort's listener runs as the caller that aborted.
@@ -168,7 +162,8 @@ export async function runProgram(
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
-    return { stdout: Buffer.concat(out), stderr: Buffer.concat(err), code }
+    const stderr = Buffer.concat(err)
+    return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {
     if (stopping !== null) await stopping
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
@@ -205,6 +200,34 @@ async function readInto(
     debuglog('mirage')('process output closed: %s', error)
     stream.resume()
   }
+}
+
+/**
+ * The state a sandbox's status command printed as JSON, at `path`: the keys
+ * and indexes down to it. Throws when the command failed or its JSON holds
+ * no state. Mirrors Python's `reported_state`.
+ */
+export function reportedState(
+  result: RunResult,
+  command: string,
+  path: readonly (string | number)[],
+): string {
+  if (result.exitCode !== 0) {
+    const said = DECODER.decode(result.stderr ?? new Uint8Array()).trim()
+    throw new Error(`${command} failed: ${said}`)
+  }
+  let state: unknown
+  try {
+    state = JSON.parse(DECODER.decode(result.stdout))
+    for (const key of path) {
+      if (state === null || typeof state !== 'object' || !Object.hasOwn(state, key))
+        throw new Error(`no ${String(key)}`)
+      state = (state as Record<string | number, unknown>)[key]
+    }
+  } catch (error) {
+    throw new Error(`${command} returned unreadable json: ${String(error)}`)
+  }
+  return String(state)
 }
 
 /**
@@ -385,3 +408,5 @@ export function openProgramPipe(executable: string, args: string[]): Promise<San
     },
   })
 }
+
+const DECODER = new TextDecoder()

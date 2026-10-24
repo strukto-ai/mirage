@@ -20,13 +20,9 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
-import {
-  RUNNING_STATE,
-  MICROSANDBOX_HINT,
-  INSPECT_TIMEOUT_SECONDS,
-  notRunningHint,
-} from './constants.ts'
-import { type CliResult, execArgs, openProgramPipe, runProgram } from '../program.ts'
+import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { RUNNING_STATE, MICROSANDBOX_HINT, INSPECT_TIMEOUT_SECONDS } from './constants.ts'
+import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
 
 /**
  * Run programs in an existing Microsandbox guest through `msb`.
@@ -59,7 +55,7 @@ export class MicrosandboxRuntime
     output: OutputFn | null = null,
     signal?: AbortSignal,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
+  ): Promise<RunResult> {
     return runProgram('msb', MICROSANDBOX_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
@@ -86,25 +82,16 @@ export class MicrosandboxRuntime
   }
 
   private async inspect(signal: AbortSignal): Promise<void> {
-    const args = ['status', this.config.sandbox, '--format', 'json']
-    const result = await this.microsandbox(args, null, null, signal)
-    if (result.code !== 0) {
-      const detail = DECODER.decode(result.stderr).trim()
-      throw new Error(`msb status failed: ${detail}`)
-    }
-    let status: unknown
-    try {
-      status = JSON.parse(DECODER.decode(result.stdout))
-    } catch (error) {
-      throw new Error(`msb status returned unreadable json: ${String(error)}`)
-    }
-    if (status === null || typeof status !== 'object' || Array.isArray(status)) {
-      throw new Error('msb status returned an invalid status object')
-    }
-    const state = (status as { status?: unknown }).status
-    if (state !== RUNNING_STATE) {
-      throw new Error(notRunningHint(this.config.sandbox, String(state)))
-    }
+    const sandbox = this.config.sandbox
+    const status = await this.microsandbox(
+      ['status', sandbox, '--format', 'json'],
+      null,
+      null,
+      signal,
+    )
+    const state = reportedState(status, 'msb status', ['status'])
+    if (state !== RUNNING_STATE)
+      throw new Error(notRunningHint('sandbox', sandbox, state, {}, 'start it with msb start'))
   }
 
   protected override async execArgv(
@@ -121,8 +108,7 @@ export class MicrosandboxRuntime
     await this.connect(signal)
     signal?.throwIfAborted()
     const args = execArgs(this.head(), ['--'], env, cwd, argv)
-    const result = await this.microsandbox(args, stdin, output, signal, errors)
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+    return this.microsandbox(args, stdin, output, signal, errors)
   }
 
   async openPipe(command: string): Promise<SandboxPipe> {
@@ -137,7 +123,5 @@ export class MicrosandboxRuntime
     return ['exec', this.config.sandbox, '--quiet']
   }
 }
-
-const DECODER = new TextDecoder()
 
 registerRuntime('microsandbox', MicrosandboxRuntime)

@@ -13,21 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import json
 
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
+from mirage.runtime.sandbox.constants import not_running_hint
 from mirage.runtime.sandbox.microsandbox.config import MicrosandboxConfig
 from mirage.runtime.sandbox.microsandbox.constants import (
     INSPECT_TIMEOUT_SECONDS,
     MICROSANDBOX_HINT,
     RUNNING_STATE,
-    not_running_hint,
 )
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.program import (
     exec_args,
     open_program_pipe,
+    reported_state,
     run_program,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
@@ -58,7 +58,7 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
-    ) -> tuple[bytes, bytes, int]:
+    ) -> RunResult:
         """Run `msb` once."""
         return await run_program(
             "msb",
@@ -81,27 +81,16 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
             ) from error
 
     async def _connect(self) -> None:
-        args = [
-            "status",
-            self.config.sandbox,
-            "--format",
-            "json",
-        ]
-        stdout, stderr, code = await self._microsandbox(args)
-        if code != 0:
-            raise RuntimeError(f"msb status failed: {stderr.decode().strip()}")
-        try:
-            status = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"msb status returned unreadable json: {exc}"
-            ) from exc
-        if not isinstance(status, dict):
-            raise RuntimeError("msb status returned an invalid status object")
-        state = status.get("status")
+        sandbox = self.config.sandbox
+        status = await self._microsandbox(
+            ["status", sandbox, "--format", "json"]
+        )
+        state = reported_state(status, "msb status", ("status",))
         if state != RUNNING_STATE:
             raise RuntimeError(
-                not_running_hint(self.config.sandbox, str(state))
+                not_running_hint(
+                    "sandbox", sandbox, state, {}, "start it with msb start"
+                )
             )
 
     async def _exec_argv(
@@ -115,13 +104,12 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
-        stdout, stderr, code = await self._microsandbox(
+        return await self._microsandbox(
             exec_args(self._head(), ("--",), env, cwd, argv),
             stdin=stdin,
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         """Hold a byte-preserving msb stream open for guest sshfs."""

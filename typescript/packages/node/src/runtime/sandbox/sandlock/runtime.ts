@@ -92,21 +92,14 @@ export class SandlockRuntime
       wrapper.push('--env', `${key}=${value}`)
     wrapper.push('--', ...argv)
     // Only host PATH locates `sandlock`; requested variables go to the confined child.
-    const { stdout, stderr, code } = await runProgram(
-      'sandlock',
-      SANDLOCK_HINT,
-      wrapper,
-      ctx.stdin,
-      {
-        cwd: ctx.cwd.virtual,
-        env: { PATH: process.env.PATH ?? '' },
-        children: this.children,
-        ...(output !== undefined ? { output } : {}),
-        ...(errors !== undefined ? { errors } : {}),
-        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      },
-    )
-    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
+    return runProgram('sandlock', SANDLOCK_HINT, wrapper, ctx.stdin, {
+      cwd: ctx.cwd.virtual,
+      env: { PATH: process.env.PATH ?? '' },
+      children: this.children,
+      ...(output !== undefined ? { output } : {}),
+      ...(errors !== undefined ? { errors } : {}),
+      ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+    })
   }
 
   override close(): Promise<void> {

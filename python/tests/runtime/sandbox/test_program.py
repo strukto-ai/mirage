@@ -74,10 +74,10 @@ async def _ended(pid: int) -> bool:
 
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
-    out, err, code = await run_program(
+    ran = await run_program(
         "sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in"
     )
-    assert (out, err, code) == (b"in", b"e\n", 3)
+    assert (ran.stdout, ran.stderr, ran.exit_code) == (b"in", b"e\n", 3)
 
 
 async def _two_chunks():
@@ -92,10 +92,14 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     async def output(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, _, code = await run_program(
+    ran = await run_program(
         "sh", None, ["-c", "cat; kill -TERM $$"], _two_chunks(), output=output
     )
-    assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
+    assert (ran.stdout, b"".join(seen), ran.exit_code) == (
+        b"",
+        b"ab",
+        128 + signal.SIGTERM,
+    )
 
 
 # stderr goes to its own callback as it arrives, as stdout goes to output.
@@ -106,10 +110,15 @@ async def test_run_cli_streams_stderr_to_its_callback():
     async def errors(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, err, code = await run_program(
+    ran = await run_program(
         "sh", None, ["-c", "echo o; echo e >&2; exit 3"], None, errors=errors
     )
-    assert (out, err, b"".join(seen), code) == (b"o\n", b"", b"e\n", 3)
+    assert (ran.stdout, ran.stderr, b"".join(seen), ran.exit_code) == (
+        b"o\n",
+        None,
+        b"e\n",
+        3,
+    )
 
 
 @pytest.mark.asyncio
@@ -121,10 +130,8 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
         yield b""
 
     async with asyncio.timeout(5):
-        out, _, code = await run_program(
-            "sh", None, ["-c", "printf done"], source()
-        )
-    assert (out, code) == (b"done", 0)
+        ran = await run_program("sh", None, ["-c", "printf done"], source())
+    assert (ran.stdout, ran.exit_code) == (b"done", 0)
 
 
 @pytest.mark.asyncio
@@ -181,10 +188,10 @@ def _start_runner(
     supervisor: ProcessSupervisor, script: str, direct: bool = False
 ):
     async def run() -> int:
-        _, _, code = await run_program(
+        ran = await run_program(
             "sh", None, ["-c", script], None, direct=direct
         )
-        return code
+        return ran.exit_code
 
     return supervisor.start(
         session_id="s",
@@ -407,8 +414,8 @@ async def test_close_children_kills_every_running_tree(tmp_path):
         while not (pid_file.exists() and pid_file.read_text().strip()):
             await asyncio.sleep(0.01)
         await close_children(children)
-        _, _, code = await task
-    assert code != 0 and not children
+        ran = await task
+    assert ran.exit_code != 0 and not children
     assert await _ended(int(pid_file.read_text()))
 
 
@@ -455,8 +462,8 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
     try:
         async with asyncio.timeout(5):
             await close_children(children)
-            _, _, code = await task
-        assert code != 0 and not children
+            ran = await task
+        assert ran.exit_code != 0 and not children
     finally:
         os.kill(escaped, signal.SIGKILL)
 

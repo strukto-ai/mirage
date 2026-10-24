@@ -23,6 +23,7 @@ from mirage.io.types import materialize
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
+from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 
 
@@ -45,10 +46,12 @@ class FakeSmolvmRuntime(SmolvmRuntime):
         self.calls.append((list(args), stdin))
         if args[1] == "status":
             if self.status_stdout is not None:
-                return self.status_stdout, b"", self.status_code
+                return RunResult(self.status_stdout, b"", self.status_code)
             if self.status_code != 0:
-                return b"", b"machine 'vm' not found", self.status_code
-            return (
+                return RunResult(
+                    b"", b"machine 'vm' not found", self.status_code
+                )
+            return RunResult(
                 json.dumps({"name": "vm", "state": self.state}).encode(),
                 b"",
                 0,
@@ -56,8 +59,8 @@ class FakeSmolvmRuntime(SmolvmRuntime):
         script = args[-1]
         if output is not None:
             await output(f"out:{script}".encode())
-            return b"", b"warn", 0
-        return f"out:{script}".encode(), b"warn", 0
+            return RunResult(b"", b"warn", 0)
+        return RunResult(f"out:{script}".encode(), b"warn", 0)
 
 
 @pytest.mark.asyncio

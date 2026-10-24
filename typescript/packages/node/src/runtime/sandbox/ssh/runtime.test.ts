@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
-import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { SSHVFS } from '../../../vfs/ssh/ssh.ts'
@@ -39,12 +39,6 @@ vi.mock('node:os', async (original) => ({
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-interface SshResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
-
 class FakeSSHRuntime extends SSHRuntime {
   readonly calls: [string, Uint8Array | null][] = []
 
@@ -56,14 +50,14 @@ class FakeSSHRuntime extends SSHRuntime {
     command: string,
     stdin: ByteSource | null,
     output: OutputFn | null = null,
-  ): Promise<SshResult> {
+  ): Promise<RunResult> {
     this.calls.push([command, stdin === null ? null : await materialize(stdin)])
     const stdout = ENC.encode(`out:${command}`)
     if (output !== null) await output(stdout)
     return {
       stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
-      code: 0,
+      exitCode: 0,
     }
   }
 }
@@ -104,8 +98,8 @@ class FakeClient {
 }
 
 class SdkFakeRuntime extends SSHRuntime {
-  protected override ssh(): Promise<SshResult> {
-    return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), code: 0 })
+  protected override ssh(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: new Uint8Array(), exitCode: 0 })
   }
   protected override loadSdk(): Promise<Ssh2Sdk> {
     return Promise.resolve({ Client: FakeClient } as unknown as Ssh2Sdk)

@@ -23,6 +23,7 @@ from mirage.commands.config import Context
 from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 from mirage.runtime.table import build_runtime
+from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 
 
@@ -37,9 +38,9 @@ from mirage.types import PathSpec
         (b'{"status":"Starting"}', "not running"),
         (b'{"status":"Created"}', "not running"),
         (b'{"status":"unknown"}', "not running"),
-        (b"{}", "not running"),
-        (b"null", "invalid status object"),
-        (b"[]", "invalid status object"),
+        (b"{}", "unreadable json"),
+        (b"null", "unreadable json"),
+        (b"[]", "unreadable json"),
         (b"not json", "unreadable json"),
     ],
 )
@@ -50,7 +51,7 @@ async def test_refuses_unusable_status_before_exec(
 
     async def invoke(executable, hint, args, stdin, output=None, errors=None):
         calls.append(args)
-        return status, b"", 0
+        return RunResult(status, b"", 0)
 
     monkeypatch.setattr(
         "mirage.runtime.sandbox.microsandbox.runtime.run_program", invoke
@@ -72,7 +73,7 @@ async def test_refuses_unusable_status_before_exec(
 async def _missing_sandbox(
     executable, hint, args, stdin, output=None, errors=None
 ):
-    return b"", b"sandbox not found", 1
+    return RunResult(b"", b"sandbox not found", 1)
 
 
 @pytest.mark.asyncio
@@ -99,8 +100,8 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
     async def invoke(executable, hint, args, stdin, output=None, errors=None):
         calls.append((executable, args, stdin))
         if args[0] == "status":
-            return b'{"status":"Running"}', b"", 0
-        return b"output", b"diagnostic", 7
+            return RunResult(b'{"status":"Running"}', b"", 0)
+        return RunResult(b"output", b"diagnostic", 7)
 
     monkeypatch.setattr(
         "mirage.runtime.sandbox.microsandbox.runtime.run_program", invoke
@@ -302,7 +303,7 @@ def test_mount_type_rejects_an_unknown_value():
 )
 async def test_real_stopped_guest_is_not_started():
     runtime = MicrosandboxRuntime(config={"sandbox": STOPPED_SANDBOX})
-    with pytest.raises(RuntimeError, match="status: Stopped"):
+    with pytest.raises(RuntimeError, match="state: Stopped"):
         await runtime.execute(
             [],
             [],
@@ -312,7 +313,7 @@ async def test_real_stopped_guest_is_not_started():
             ),
             kind="line",
         )
-    with pytest.raises(RuntimeError, match="status: Stopped"):
+    with pytest.raises(RuntimeError, match="state: Stopped"):
         await MicrosandboxRuntime(
             config={"sandbox": STOPPED_SANDBOX}
         ).connect()

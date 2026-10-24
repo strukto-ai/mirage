@@ -16,7 +16,7 @@ import errno
 import os
 import shutil
 import sys
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -201,10 +201,10 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         env: dict[str, str],
         stdin: ByteSource | None = None,
         cwd: str | None = None,
-        output: Callable[[bytes], Awaitable[None]] | None = None,
-        errors: Callable[[bytes], Awaitable[None]] | None = None,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
-        stdout, stderr, code = await run_program(
+        return await run_program(
             program,
             None,
             argv,
@@ -216,7 +216,6 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             errors=errors,
             direct=True,
         )
-        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""

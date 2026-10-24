@@ -33,15 +33,15 @@ describe('MicrosandboxRuntime', () => {
     ['{"status":"Starting"}', 'not running'],
     ['{"status":"Created"}', 'not running'],
     ['{"status":"unknown"}', 'not running'],
-    ['{}', 'not running'],
-    ['null', 'invalid status object'],
-    ['[]', 'invalid status object'],
+    ['{}', 'unreadable json'],
+    ['null', 'unreadable json'],
+    ['[]', 'unreadable json'],
     ['not json', 'unreadable json'],
   ])('refuses unusable status %s before exec', async (status, message) => {
     const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
       stdout: ENC.encode(status),
       stderr: new Uint8Array(),
-      code: 0,
+      exitCode: 0,
     })
     try {
       const runtime = buildRuntime('microsandbox', { config: { sandbox: 'box' } })
@@ -69,7 +69,7 @@ describe('MicrosandboxRuntime', () => {
     const invoke = vi.spyOn(program, 'runProgram').mockResolvedValue({
       stdout: new Uint8Array(),
       stderr: ENC.encode('sandbox not found'),
-      code: 1,
+      exitCode: 1,
     })
     try {
       await expect(
@@ -100,12 +100,12 @@ describe('MicrosandboxRuntime', () => {
         return Promise.resolve({
           stdout: ENC.encode('{"status":"Running"}'),
           stderr: new Uint8Array(),
-          code: 0,
+          exitCode: 0,
         })
       return Promise.resolve({
         stdout: ENC.encode('output'),
         stderr: ENC.encode('diagnostic'),
-        code: 7,
+        exitCode: 7,
       })
     })
     try {
@@ -276,10 +276,10 @@ it.skipIf(!STOPPED_SANDBOX)('does not start a real stopped guest', async () => {
       { flags: { c: 'echo must-not-run' }, cwd: PathSpec.fromStrPath('/'), env: {}, stdin: null },
       { kind: 'line' },
     ),
-  ).rejects.toThrow('status: Stopped')
+  ).rejects.toThrow('state: Stopped')
   await expect(
     new MicrosandboxRuntime({ config: { sandbox: STOPPED_SANDBOX } }).connect(),
-  ).rejects.toThrow('status: Stopped')
+  ).rejects.toThrow('state: Stopped')
 })
 
 describe.skipIf(!SANDBOX)('MicrosandboxRuntime real guest', () => {

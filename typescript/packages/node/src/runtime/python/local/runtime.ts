@@ -226,22 +226,22 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     })
   }
 
-  private async spawnProgram(
+  private spawnProgram(
     program: string,
     argv: string[],
     env: Record<string, string>,
     stdin: ByteSource | null,
     signal?: AbortSignal,
     cwd?: string,
-    output?: (chunk: Uint8Array) => Promise<void>,
-    errors?: (chunk: Uint8Array) => Promise<void>,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const missing =
       program === this.python
         ? `local python interpreter not found: '${this.python}' (set the ` +
           `runtime entry's config home or ${LOCAL_HOME_ENV})`
         : null
-    const { stdout, stderr, code } = await runProgram(program, missing, argv, stdin, {
+    return runProgram(program, missing, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
       direct: true,
@@ -250,7 +250,6 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),
     })
-    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   }
 
   override close(): Promise<void> {

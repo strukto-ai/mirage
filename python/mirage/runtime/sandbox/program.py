@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -29,7 +30,7 @@ from mirage.runtime.sandbox.constants import (
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
 )
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +54,10 @@ async def run_program(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     children: Children | None = None,
-    output: Callable[[bytes], Awaitable[None]] | None = None,
-    errors: Callable[[bytes], Awaitable[None]] | None = None,
+    output: OutputFn | None = None,
+    errors: OutputFn | None = None,
     direct: bool = False,
-) -> tuple[bytes, bytes, int]:
+) -> RunResult:
     """One process run to its end: its output and its exit status.
 
     The child leads a process group of its own, and a cancelled call
@@ -83,10 +84,10 @@ async def run_program(
             inherits this process's.
         children (Children | None): where the child is kept while it
             runs, for ``close_children``.
-        output (Callable[[bytes], Awaitable[None]] | None): receives
-            stdout as it arrives instead of returning it.
-        errors (Callable[[bytes], Awaitable[None]] | None): receives
-            stderr as it arrives instead of returning it.
+        output (OutputFn | None): receives stdout as it arrives instead
+            of returning it.
+        errors (OutputFn | None): receives stderr as it arrives instead
+            of returning it.
         direct (bool): the child is the program itself, not a client
             that runs it elsewhere and exits on its own terms (``docker
             exec`` answers a TERM with 0 and leaves the program running).
@@ -183,7 +184,11 @@ async def run_program(
         if children is not None:
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
-    return stdout, stderr, 128 - code if code < 0 else code
+    return RunResult(
+        stdout=stdout,
+        stderr=stderr or None,
+        exit_code=128 - code if code < 0 else code,
+    )
 
 
 async def _read_into(
@@ -244,6 +249,33 @@ async def _spawn(
         start_new_session=True,
     )
     return asyncio.subprocess.Process(transport, protocol, loop), transport
+
+
+def reported_state(
+    result: RunResult, command: str, path: Sequence[str | int]
+) -> str:
+    """The state a sandbox's status command printed as JSON, at ``path``.
+
+    Args:
+        result (RunResult): the status command's run.
+        command (str): the command, for the message (``docker inspect``).
+        path (Sequence[str | int]): the keys and indexes down to the state.
+
+    Raises:
+        RuntimeError: the command failed, or its JSON holds no state.
+    """
+    if result.exit_code != 0:
+        said = (result.stderr or b"").decode().strip()
+        raise RuntimeError(f"{command} failed: {said}")
+    try:
+        state = json.loads(result.stdout)
+        for key in path:
+            state = state[key]
+    except (ValueError, LookupError, TypeError) as exc:
+        raise RuntimeError(
+            f"{command} returned unreadable json: {exc}"
+        ) from exc
+    return str(state)
 
 
 def exec_args(

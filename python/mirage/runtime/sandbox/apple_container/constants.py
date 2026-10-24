@@ -25,10 +25,10 @@ APPLE_CONTAINER_HINT = (
 RUNNING_STATE = "running"
 
 STATE_HINTS: dict[str, str] = {
-    "stopped": "it is stopped; start it with `container start {container}`",
+    "stopped": "it is stopped; start it with `container start {name}`",
     "stopping": (
         "it is shutting down; once it stops, start it again with "
-        "`container start {container}`"
+        "`container start {name}`"
     ),
 }
 
@@ -44,17 +44,3 @@ def no_container_hint(session_id: str | None) -> str:
         f"apple_container has no container for session {session}: "
         "list it under containers or set container"
     )
-
-
-def not_running_hint(container: str, state: str) -> str:
-    """Why this container cannot take a line, named by its state.
-
-    Args:
-        container (str): the configured container id.
-        state (str): the state string `container inspect` reported.
-    """
-    detail = STATE_HINTS.get(state)
-    if detail is None:
-        return f"container {container} is not running (state: {state})"
-    reason = detail.format(container=container)
-    return f"container {container} is not running: {reason}"

@@ -25,9 +25,9 @@ export const APPLE_CONTAINER_HINT =
  */
 export const RUNNING_STATE = 'running'
 
-const STATE_HINTS: Record<string, string> = {
-  stopped: 'it is stopped; start it with `container start {container}`',
-  stopping: 'it is shutting down; once it stops, start it again with `container start {container}`',
+export const STATE_HINTS: Readonly<Record<string, string>> = {
+  stopped: 'it is stopped; start it with `container start {name}`',
+  stopping: 'it is shutting down; once it stops, start it again with `container start {name}`',
 }
 
 /** Why a line has nowhere to run: its session maps to no container. */
@@ -36,11 +36,4 @@ export function noContainerHint(sessionId: string | null): string {
     `apple_container has no container for session ${sessionId ?? '(none)'}: ` +
     'list it under containers or set container'
   )
-}
-
-/** Why this container cannot take a line, named by its state. */
-export function notRunningHint(container: string, state: string): string {
-  const detail = STATE_HINTS[state]
-  if (detail === undefined) return `container ${container} is not running (state: ${state})`
-  return `container ${container} is not running: ${detail.replaceAll('{container}', container)}`
 }

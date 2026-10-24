@@ -15,6 +15,26 @@
 import { singleQuote } from '../../utils/quote.ts'
 import type { MountType } from '../types.ts'
 
+/**
+ * Why a sandbox cannot take a line, named by the state its status command
+ * reported. `hints` holds the provider's advice per state, with `{name}`
+ * standing for `name`; `otherwise` is the advice for a state it lacks.
+ * Mirrors Python's `not_running_hint`.
+ */
+export function notRunningHint(
+  noun: string,
+  name: string,
+  state: string,
+  hints: Readonly<Record<string, string>>,
+  otherwise: string | null = null,
+): string {
+  const detail = Object.hasOwn(hints, state) ? hints[state] : undefined
+  if (detail !== undefined)
+    return `${noun} ${name} is not running: ${detail.replaceAll('{name}', name)}`
+  const said = `${noun} ${name} is not running (state: ${state})`
+  return otherwise === null ? said : `${said}; ${otherwise}`
+}
+
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
 
 // How long a sandbox has to show a served prefix as mounted, and how

@@ -18,8 +18,3 @@ export const MICROSANDBOX_HINT =
 
 export const RUNNING_STATE = 'Running'
 export const INSPECT_TIMEOUT_SECONDS = 10
-
-/** Explain why the configured sandbox cannot take a command. */
-export function notRunningHint(sandbox: string, state: string): string {
-  return `sandbox ${sandbox} is not running (status: ${state}); start it with msb start`
-}

@@ -26,7 +26,6 @@ import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
 import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
-import type { CliResult } from '../program.ts'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { asyncChain } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -94,7 +93,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     this.client = client
   }
 
-  protected override async execArgv(
+  protected override execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
@@ -103,7 +102,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.ssh(
+    return this.ssh(
       wrapLine(argv, env, cwd),
       stdin,
       output,
@@ -111,7 +110,6 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       env[EXEC_ID] !== undefined,
       errors,
     )
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   /**
@@ -136,7 +134,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     signal?: AbortSignal,
     tagged = false,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
+  ): Promise<RunResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
     // Read now: an abort's listener runs as the caller that aborted.
@@ -204,10 +202,11 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)
+            const stderr = Buffer.concat(errs)
             resolveFn({
               stdout: new Uint8Array(Buffer.concat(out)),
-              stderr: new Uint8Array(Buffer.concat(errs)),
-              code: code ?? 1,
+              stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
+              exitCode: code ?? 1,
             })
           })
         })

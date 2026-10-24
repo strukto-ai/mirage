@@ -19,16 +19,3 @@ MICROSANDBOX_HINT = (
 
 RUNNING_STATE = "Running"
 INSPECT_TIMEOUT_SECONDS = 10
-
-
-def not_running_hint(sandbox: str, state: str) -> str:
-    """Explain why the configured sandbox cannot take a command.
-
-    Args:
-        sandbox (str): the configured sandbox name.
-        state (str): the status reported by msb status.
-    """
-    return (
-        f"sandbox {sandbox} is not running (status: {state}); "
-        "start it with msb start"
-    )

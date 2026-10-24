@@ -31,6 +31,32 @@ def sdk_install_hint(name: str) -> str:
     )
 
 
+def not_running_hint(
+    noun: str,
+    name: str,
+    state: str,
+    hints: Mapping[str, str],
+    otherwise: str | None = None,
+) -> str:
+    """Why a sandbox cannot take a line, named by the state its status
+    command reported.
+
+    Args:
+        noun (str): what the provider calls it (container, machine,
+            sandbox).
+        name (str): the configured id or name.
+        state (str): the reported state.
+        hints (Mapping[str, str]): the provider's advice per state, with
+            ``{name}`` standing for ``name``.
+        otherwise (str | None): advice for a state ``hints`` lacks.
+    """
+    detail = hints.get(state)
+    if detail is not None:
+        return f"{noun} {name} is not running: {detail.format(name=name)}"
+    said = f"{noun} {name} is not running (state: {state})"
+    return said if otherwise is None else f"{said}; {otherwise}"
+
+
 MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")
 
 # How long a sandbox has to show a served prefix as mounted, and how
