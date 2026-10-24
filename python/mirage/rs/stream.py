@@ -168,7 +168,8 @@ class RequestHost(Protocol):
     """Serves the requests of a stream that reaches files and commands;
     ``errors`` gathers its stderr and theirs, in order."""
 
-    errors: ByteSpool
+    @property
+    def errors(self) -> ByteSpool: ...
 
     async def serve(
         self, request: Mapping[str, JsonValue], data: bytes

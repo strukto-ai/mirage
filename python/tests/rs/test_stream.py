@@ -2,13 +2,16 @@ import asyncio
 import base64
 import sys
 import threading
+from collections.abc import Mapping
 
 import pytest
 
 from mirage.concurrency.worker import Worker
+from mirage.io.spool import ByteSpool
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.glob import Glob
 from mirage.rs.stream import Served, open_stream, run_stream, serve_requests
+from mirage.types import JsonValue
 from mirage.workspace import Workspace
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
@@ -157,19 +160,23 @@ async def test_native_refusal_keeps_message_and_partial_output_through_worker():
         await worker.close()
 
 
-class _Errors:
+class _Errors(ByteSpool):
     def __init__(self) -> None:
+        super().__init__()
         self.sizes: list[int] = []
 
     async def append(self, data: bytes) -> None:
         self.sizes.append(len(data))
+        await super().append(data)
 
 
 class _NoRequests:
     def __init__(self) -> None:
         self.errors = _Errors()
 
-    async def serve(self, request: object, data: bytes) -> Served:
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
         raise AssertionError(f"unexpected request {request!r}")
 
 
@@ -180,7 +187,8 @@ async def test_stderr_leaves_the_stream_after_each_drain() -> None:
     )
     stream = open_stream("awk", {"program": program})
     host = _NoRequests()
-    async for _ in serve_requests(stream, host):  # type: ignore[arg-type]
+    async for _ in serve_requests(stream, host):
         pass
+    await host.errors.close()
     assert sum(host.errors.sizes) == 500000
     assert max(host.errors.sizes) < 70000
