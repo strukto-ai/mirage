@@ -1,13 +1,19 @@
+use std::collections::VecDeque;
+
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{Euclid, One, Signed, ToPrimitive, Zero};
 use serde::Deserialize;
 
 use crate::printf::number::{
-    Decimal, FloatKind, FloatToken, render_decimal, render_hex, render_special, scan_float,
+    Decimal, FloatKind, FloatToken, Rendered, render_decimal, render_hex, render_special,
+    scan_float,
 };
 use crate::{Stream, StreamError, latin1, latin1_list, latin1_opt, parse_config, quoted};
 
 const OUTPUT: usize = 64 * 1024;
+// A run of one byte longer than this stays a count, so a wide field or a
+// long precision never sits whole in memory.
+const RUN: u64 = 64;
 const TRY: &str = "Try 'seq --help' for more information.";
 const CONVERSIONS: &[u8] = b"efgaEFGA";
 
@@ -278,6 +284,52 @@ fn operand(raw: &[u8]) -> Result<Operand, StreamError> {
     })
 }
 
+/// A printed line as its bytes, a long run of one byte (padding, or
+/// fraction zeros past the exact digits) kept as a count.
+#[derive(Clone, Default, PartialEq, Eq)]
+struct Line {
+    pieces: Vec<Piece>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum Piece {
+    Bytes(Vec<u8>),
+    Run(u8, u64),
+}
+
+impl Line {
+    fn bytes(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        match self.pieces.last_mut() {
+            Some(Piece::Bytes(held)) => held.extend_from_slice(bytes),
+            _ => self.pieces.push(Piece::Bytes(bytes.to_vec())),
+        }
+    }
+
+    fn run(&mut self, byte: u8, count: u64) {
+        if count > RUN {
+            self.pieces.push(Piece::Run(byte, count));
+        } else {
+            self.bytes(&vec![byte; count as usize]);
+        }
+    }
+
+    /// The line as reading it back sees it: a long run is padding or
+    /// fraction zeros, which read the same cut to one byte.
+    fn reading(&self) -> Vec<u8> {
+        let mut text = Vec::new();
+        for piece in &self.pieces {
+            match piece {
+                Piece::Bytes(bytes) => text.extend_from_slice(bytes),
+                Piece::Run(byte, _) => text.push(*byte),
+            }
+        }
+        text
+    }
+}
+
 /// A seq format around its one floating directive.
 struct Format {
     prefix: Vec<u8>,
@@ -460,7 +512,7 @@ fn quad(value: &Number) -> (u128, i32) {
 
 impl Format {
     /// One number through the format, as C's printf renders it.
-    fn render(&self, value: &Number, out: &mut Vec<u8>) {
+    fn render(&self, value: &Number, line: &mut Line) {
         let upper = self.conversion.is_ascii_uppercase();
         let rendered = match value.kind {
             Kind::Finite if self.conversion.eq_ignore_ascii_case(&b'a') => {
@@ -488,9 +540,37 @@ impl Format {
             ),
             kind => render_special(value.negative, kind == Kind::Nan, upper, &self.flags),
         };
-        out.extend_from_slice(&self.prefix);
-        rendered.write_padded(self.width, &self.flags, out);
-        out.extend_from_slice(&self.suffix);
+        line.bytes(&self.prefix);
+        self.padded(&rendered, line);
+        line.bytes(&self.suffix);
+    }
+
+    /// A field padded to the width as printf pads it: on the right for
+    /// `-`, with zeros after the sign for `0`, else with blanks.
+    fn padded(&self, rendered: &Rendered, line: &mut Line) {
+        let pad = self.width.saturating_sub(rendered.byte_len());
+        let left = self.flags.contains(&b'-');
+        let zero = rendered.allow_zero && self.flags.contains(&b'0') && !left;
+        if !left && !zero {
+            line.run(b' ', pad);
+        }
+        line.bytes(&rendered.prefix);
+        if zero {
+            line.run(b'0', pad);
+        }
+        line.bytes(&rendered.body);
+        line.run(b'0', rendered.zero_tail);
+        line.bytes(&rendered.suffix);
+        if left {
+            line.run(b' ', pad);
+        }
+    }
+
+    /// Whether printf refuses the format outright: a width or precision
+    /// past what C's int holds is EOVERFLOW (coreutils 9.7).
+    fn overflows(&self) -> bool {
+        let limit = i32::MAX as u64;
+        self.width > limit || self.precision.is_some_and(|precision| precision > limit)
     }
 
     /// The width a `%.0f`-shaped format zero-pads whole numbers to: None
@@ -545,7 +625,8 @@ struct Seq {
     format: Format,
     separator: Vec<u8>,
     cursor: Cursor,
-    shown: Vec<u8>,
+    shown: Line,
+    pending: VecDeque<Piece>,
     started: bool,
     printed: bool,
     ended: bool,
@@ -591,18 +672,25 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         last.expect("LAST"),
     );
     let format = format.unwrap_or_else(|| implied(&first, &step, &last, config.equal_width));
-    Ok(Box::new(Seq {
+    let seq = Seq {
         first: first.value,
         step: step.value,
         last: last.value,
         format,
         separator: config.separator,
         cursor: Cursor::First,
-        shown: Vec::new(),
+        shown: Line::default(),
+        pending: VecDeque::new(),
         started: false,
         printed: false,
         ended: false,
-    }))
+    };
+    if seq.format.overflows() && !seq.beyond(&seq.first) {
+        return Err(StreamError::new(
+            "seq: write error: Value too large for defined data type",
+        ));
+    }
+    Ok(Box::new(seq))
 }
 
 impl Seq {
@@ -663,7 +751,7 @@ impl Seq {
     /// Each number of the sequence as printed, FIRST to LAST, then the one
     /// past LAST as well when it prints differently from the one before it
     /// and reads back as LAST (`seq -f %.1f 0 0.34 1` ends in `1.0`).
-    fn next_line(&mut self, line: &mut Vec<u8>) -> bool {
+    fn next_line(&mut self, line: &mut Line) -> bool {
         let value = match std::mem::replace(&mut self.cursor, Cursor::Done) {
             Cursor::Done => return false,
             Cursor::First => {
@@ -693,11 +781,11 @@ impl Seq {
                 }
                 let digits = next.magnitude().to_str_radix(10);
                 if next.is_negative() {
-                    line.push(b'-');
+                    line.bytes(b"-");
                 }
-                let width = (pad as usize).saturating_sub(usize::from(next.is_negative()));
-                line.resize(line.len() + width.saturating_sub(digits.len()), b'0');
-                line.extend_from_slice(digits.as_bytes());
+                let width = pad.saturating_sub(u64::from(next.is_negative()));
+                line.run(b'0', width.saturating_sub(digits.len() as u64));
+                line.bytes(digits.as_bytes());
                 self.cursor = Cursor::Integers {
                     next: next + &delta,
                     delta,
@@ -733,19 +821,40 @@ impl Seq {
         self.format.render(&value, line);
         if self.beyond(&value) {
             self.cursor = Cursor::Done;
-            return *line != self.shown && self.format.names_last(line, &self.last);
+            return *line != self.shown && self.format.names_last(&line.reading(), &self.last);
         }
         self.shown.clone_from(line);
         true
     }
 
     /// The lines joined by SEPARATOR and ended by a newline, a bounded
-    /// window per call; nothing at all when there is no line.
+    /// window per call, a long run spread over as many as it takes;
+    /// nothing at all when there is no line.
     fn window(&mut self, out: &mut Vec<u8>) {
-        let mut line = Vec::new();
         let start = out.len();
-        while out.len() - start < OUTPUT {
-            line.clear();
+        loop {
+            while let Some(piece) = self.pending.front_mut() {
+                let room = OUTPUT.saturating_sub(out.len() - start) as u64;
+                if room == 0 {
+                    return;
+                }
+                match piece {
+                    Piece::Bytes(bytes) => out.extend_from_slice(bytes),
+                    Piece::Run(byte, count) => {
+                        let taken = (*count).min(room);
+                        out.resize(out.len() + taken as usize, *byte);
+                        *count -= taken;
+                        if *count > 0 {
+                            continue;
+                        }
+                    }
+                }
+                self.pending.pop_front();
+            }
+            if out.len() - start >= OUTPUT {
+                return;
+            }
+            let mut line = Line::default();
             if !self.next_line(&mut line) {
                 if self.printed {
                     out.push(b'\n');
@@ -754,9 +863,9 @@ impl Seq {
                 return;
             }
             if self.printed {
-                out.extend_from_slice(&self.separator);
+                self.pending.push_back(Piece::Bytes(self.separator.clone()));
             }
-            out.extend_from_slice(&line);
+            self.pending.extend(line.pieces);
             self.printed = true;
         }
     }
@@ -1036,5 +1145,36 @@ mod tests {
             stream.drain(&mut out).unwrap();
         }
         assert!(out.starts_with(b"\n") || out[0].is_ascii_digit());
+    }
+
+    #[test]
+    fn a_wide_field_streams_in_bounded_windows() {
+        let config = serde_json::json!({
+            "operands": ["2"], "format": "%-2000000000.3f|", "equal_width": false,
+            "separator": "\n",
+        });
+        let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.finish(&mut out).unwrap();
+        assert!(out.starts_with(b"1.000    ") && out.len() <= super::OUTPUT);
+        for _ in 0..4 {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+            assert!(out.len() <= super::OUTPUT && out.iter().all(|b| *b == b' '));
+        }
+        assert!(stream.busy());
+        let precision = seq(&["0.5", "0.5", "1"], Some("%.100f"), false).unwrap();
+        assert_eq!(precision, format!("0.5{0}\n1.0{0}\n", "0".repeat(99)));
+    }
+
+    #[test]
+    fn a_format_past_c_int_is_a_write_error() {
+        let refusal = Err("seq: write error: Value too large for defined data type".to_owned());
+        assert_eq!(seq(&["1"], Some("%2147483648f"), false), refusal);
+        assert_eq!(seq(&["1"], Some("%.2147483648f"), false), refusal);
+        assert_eq!(
+            seq(&["2", "1"], Some("%2147483648f"), false),
+            Ok(String::new())
+        );
     }
 }

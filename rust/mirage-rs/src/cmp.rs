@@ -111,7 +111,7 @@ impl Cmp {
         self.skip[index] -= skipped;
         input = &input[skipped as usize..];
         if let Some(limit) = self.config.limit {
-            input = &input[..input.len().min((limit - self.taken[index]) as usize)];
+            input = &input[..(input.len() as u64).min(limit - self.taken[index]) as usize];
         }
         self.taken[index] += input.len() as u64;
         self.held[index].extend_from_slice(input);

@@ -930,4 +930,168 @@ mod tests {
         assert_eq!(lines.len(), 185);
         assert!(lines[..184].iter().all(|line| line.starts_with(b"\t")));
     }
+
+    fn lines(out: &[u8]) -> Vec<&[u8]> {
+        let mut lines: Vec<&[u8]> = out.split(|&byte| byte == b'\n').collect();
+        lines.pop();
+        lines
+    }
+
+    fn repeated(word: &[u8], count: usize) -> Vec<u8> {
+        vec![word; count].join(&b' ')
+    }
+
+    #[test]
+    fn a_piece_with_punctuation_carries_the_lines_it_weighs_best() {
+        let list: Vec<Vec<u8>> = lcg_words(1, 1300)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut word)| {
+                word.extend_from_slice(match (i % 7, i % 11) {
+                    (3, _) => b",",
+                    (_, 5) => b".",
+                    _ => b"",
+                });
+                word
+            })
+            .collect();
+        assert_eq!(
+            words_per_line(&fmt(json!({"width": 40}), &words(&list))),
+            "754465585655665766666657555656566577665657666565456655666665555656\
+             665565577776574656556675566555575477667566664565556665775766566768\
+             567565446667765476546656657555656576556567864646565677776566766955\
+             5568655676566865565557568674"
+        );
+    }
+
+    #[test]
+    fn a_piece_does_not_count_its_first_word_as_a_sentences() {
+        let mut data: Vec<u8> = lcg_words(10, 1300)
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, mut word)| {
+                word.extend_from_slice(if i % 3 == 2 { b".  " } else { b" " });
+                word
+            })
+            .collect();
+        data.truncate(data.trim_ascii_end().len());
+        data.push(b'\n');
+        let counts = words_per_line(&fmt(json!({"width": 14}), &data));
+        assert_eq!(counts.len(), 784);
+        assert_eq!(
+            &counts[540..600],
+            "111121212212322222222121222212122121211112123131111212212121"
+        );
+    }
+
+    #[test]
+    fn a_word_filling_a_piece_prints_its_first_5000_bytes_bare() {
+        let long = vec![b'x'; 5010];
+        let data = [&b"a "[..], &long, b" b\n"].concat();
+        let out = fmt(json!({"width": 30}), &data);
+        assert_eq!(out, [&b"a\n"[..], &long, b" b\n"].concat());
+    }
+
+    #[test]
+    fn a_crown_line_past_a_piece_hangs_from_the_word_that_overflowed() {
+        // The 501st word does not fit the piece; it starts in input column
+        // 8 + 500 * 11 = 5508, and the piece's later lines start there too.
+        let data = [&b"\t"[..], &repeated(b"abcdefghij", 520), b"\n"].concat();
+        let out = fmt(json!({"crown": true, "width": 40}), &data);
+        let hanging = [vec![b'\t'; 688], b"    abcdefghij".to_vec()].concat();
+        let pair = b"\tabcdefghij abcdefghij".as_slice();
+        let mut expected = vec![pair];
+        expected.extend(vec![hanging.as_slice(); 497]);
+        expected.extend(vec![pair; 10]);
+        expected.push(b"\tabcdefghij");
+        assert_eq!(lines(&out), expected);
+    }
+
+    #[test]
+    fn a_piece_fills_on_bytes_before_the_word_ends() {
+        // The piece is printed before the tab after the long word is read.
+        let long = vec![b'x'; 4100];
+        let data = [
+            &b"        "[..],
+            &repeated(b"a", 998),
+            b" ",
+            &long,
+            b"\tb c d e\n",
+        ]
+        .concat();
+        let out = fmt(json!({"width": 40}), &data);
+        let lines = lines(&out);
+        assert_eq!(lines.len(), 68);
+        assert!(
+            lines[..65]
+                .iter()
+                .all(|line| line.starts_with(b"        a"))
+        );
+        let first = [&b"\t"[..], &repeated(b"a", 16)].concat();
+        let second = [&b"\t"[..], &long].concat();
+        assert_eq!(
+            lines[65..],
+            [first.as_slice(), second.as_slice(), b"\tb c d e"]
+        );
+    }
+
+    #[test]
+    fn a_word_printed_bare_takes_no_columns() {
+        // After the bare 5000 bytes the line goes on in column 8, so the piece
+        // that fills at the 501st word hangs from 8 + 1 + 1 + 499 * 11 = 5499.
+        let data = [
+            &b"\t"[..],
+            &vec![b'x'; 5001],
+            b" ",
+            &repeated(b"abcdefghij", 520),
+            b"\n",
+        ]
+        .concat();
+        let out = fmt(json!({"crown": true, "width": 40}), &data);
+        let lines = lines(&out);
+        let first = [&vec![b'x'; 5000][..], b"\tx abcdefghij abcdefghij"].concat();
+        let hanging = [vec![b'\t'; 687], b"   abcdefghij".to_vec()].concat();
+        assert_eq!(lines[0], first.as_slice());
+        assert!(lines[1..497].iter().all(|line| *line == hanging.as_slice()));
+        assert_eq!(lines[497..], vec![&b"\tabcdefghij abcdefghij"[..]; 11]);
+    }
+
+    /// Feeds `chunk` without end, failing once fmt holds more than `limit`
+    /// bytes of it unprinted, until 200,000 bytes have come out.
+    fn endless(flags: Value, chunk: &[u8], limit: usize) {
+        let mut config = json!({
+            "width": null, "goal": null, "prefix": null, "split_only": false,
+            "tagged": false, "crown": false, "uniform": false,
+        });
+        for (key, value) in flags.as_object().expect("flags") {
+            config[key] = value.clone();
+        }
+        let mut stream = super::open(config.to_string().as_bytes()).expect("fmt opens");
+        let (mut sent, mut got) = (0, 0);
+        while got < 200_000 {
+            assert!(sent - got <= limit, "fmt holds {} bytes", sent - got);
+            let mut out = Vec::new();
+            stream.feed(chunk, &mut out).expect("feed");
+            while stream.busy() {
+                stream.drain(&mut out).expect("drain");
+            }
+            sent += chunk.len();
+            got += out.len();
+        }
+    }
+
+    #[test]
+    fn a_line_that_never_ends_prints_a_piece_at_a_time() {
+        endless(json!({"width": 40}), &b"abcd ".repeat(200), 8000);
+    }
+
+    #[test]
+    fn a_word_that_never_ends_prints_5000_bytes_at_a_time() {
+        endless(json!({}), &[b'x'; 1000], 7000);
+    }
+
+    #[test]
+    fn a_copied_line_that_never_ends_streams_through() {
+        endless(json!({"prefix": "#"}), &b"abcd ".repeat(200), 2000);
+    }
 }

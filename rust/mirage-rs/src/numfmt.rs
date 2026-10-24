@@ -272,6 +272,8 @@ struct Numfmt {
     header: u64,
     separator: u8,
     held: Vec<u8>,
+    /// How much of `held` is known to hold no separator.
+    scanned: usize,
     failed: bool,
 }
 
@@ -322,6 +324,7 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         header,
         config,
         held: Vec::new(),
+        scanned: 0,
         failed: false,
     }))
 }
@@ -419,16 +422,19 @@ impl Stream for Numfmt {
         self.held.extend_from_slice(input);
         let held = std::mem::take(&mut self.held);
         let mut start = 0;
+        let mut from = self.scanned;
         let mut result = Ok(());
-        while let Some(at) = memchr::memchr(self.separator, &held[start..]) {
-            result = self.line(&held[start..start + at], true, out);
-            start += at + 1;
+        while let Some(at) = memchr::memchr(self.separator, &held[from..]) {
+            result = self.line(&held[start..from + at], true, out);
+            start = from + at + 1;
+            from = start;
             if result.is_err() {
                 break;
             }
         }
         self.held = held;
         self.held.drain(..start);
+        self.scanned = self.held.len();
         self.checked(result)
     }
 
@@ -697,5 +703,19 @@ mod tests {
             opened(serde_json::json!({"headers": [" 1"], "delimiters": [""]})),
             None
         );
+    }
+
+    #[test]
+    fn a_record_split_over_many_feeds_is_searched_once() {
+        let config = r#"{"to":"si","from":"none","suffix":"","operands":[]}"#;
+        let mut stream = super::open(config.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.feed(b"1000", &mut out).unwrap();
+        for _ in 0..1000 {
+            stream.feed(b" xxxxxxxx", &mut out).unwrap();
+        }
+        stream.feed(b"\n2000\n", &mut out).unwrap();
+        assert!(out.starts_with(b"1.0k xxxxxxxx") && out.ends_with(b"xxxxxxxx\n2.0k\n"));
+        assert_eq!(out.len(), 4 + 9 * 1000 + 1 + 5);
     }
 }

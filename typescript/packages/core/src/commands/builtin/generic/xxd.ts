@@ -19,7 +19,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { materialize, type ByteSource } from '../../../io/types.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -92,31 +92,48 @@ async function* xxdReverseStream(
 }
 
 /**
- * Revert a hexdump into the stretches xxd writes into OUTFILE. Each run lands
- * at its offset, or where the last one ended; runs that meet join one
- * stretch, so a whole dump is one write at 0. Mirrors Python's
- * _reverse_segments.
+ * Revert a hexdump into the stretches xxd writes into OUTFILE, each framed run
+ * decoded as its bytes arrive. Each run lands at its offset, or where the last
+ * one ended; runs that meet join one stretch, so a whole dump is one write at
+ * 0. Mirrors Python's _reverse_segments.
  */
 async function reverseSegments(
   source: AsyncIterable<Uint8Array>,
   plain: boolean,
 ): Promise<[number, Uint8Array][]> {
-  const raw = await materialize(
-    runStream('xxd', { mode: 'reverse', plain, segments: true }, source),
-  )
-  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength)
   const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
-  for (let at = 0; at < raw.byteLength;) {
-    const start = Number(view.getBigUint64(at, true))
-    const size = Number(view.getBigUint64(at + 8, true))
-    const data = raw.subarray(at + 16, at + 16 + size)
-    at += 16 + size
-    const last = segments.at(-1)
-    if (last?.end === start) {
-      last.parts.push(data)
-      last.end += size
-    } else {
-      segments.push({ start, end: start + size, parts: [data] })
+  const header = new Uint8Array(16)
+  const view = new DataView(header.buffer)
+  let held = 0
+  let left = 0
+  let current: { start: number; end: number; parts: Uint8Array[] } = {
+    start: -1,
+    end: -1,
+    parts: [],
+  }
+  for await (const part of runStream('xxd', { mode: 'reverse', plain, segments: true }, source)) {
+    let at = 0
+    while (at < part.byteLength) {
+      if (left === 0) {
+        const taken = Math.min(header.byteLength - held, part.byteLength - at)
+        header.set(part.subarray(at, at + taken), held)
+        held += taken
+        at += taken
+        if (held < header.byteLength) break
+        held = 0
+        const start = Number(view.getBigUint64(0, true))
+        left = Number(view.getBigUint64(8, true))
+        if (current.end !== start) {
+          current = { start, end: start, parts: [] }
+          segments.push(current)
+        }
+        continue
+      }
+      const taken = Math.min(left, part.byteLength - at)
+      current.parts.push(part.slice(at, at + taken))
+      current.end += taken
+      at += taken
+      left -= taken
     }
   }
   return segments.map(({ start, parts }): [number, Uint8Array] => [start, concat(parts)])

@@ -26,27 +26,6 @@ impl Rendered {
             self.prefix.len() as u64 + self.body.len() as u64 + self.suffix.len() as u64,
         )
     }
-
-    /// The field padded to `width` as printf pads it: on the right for
-    /// `-`, with zeros after the sign or `0x` for `0`, else with blanks.
-    pub(crate) fn write_padded(&self, width: u64, flags: &[u8], out: &mut Vec<u8>) {
-        let pad = width.saturating_sub(self.byte_len()) as usize;
-        let left = flag(flags, b'-');
-        let zero = self.allow_zero && flag(flags, b'0') && !left;
-        if !left && !zero {
-            out.resize(out.len() + pad, b' ');
-        }
-        out.extend_from_slice(&self.prefix);
-        if zero {
-            out.resize(out.len() + pad, b'0');
-        }
-        out.extend_from_slice(&self.body);
-        out.resize(out.len() + self.zero_tail as usize, b'0');
-        out.extend_from_slice(&self.suffix);
-        if left {
-            out.resize(out.len() + pad, b' ');
-        }
-    }
 }
 
 fn space(byte: u8) -> bool {

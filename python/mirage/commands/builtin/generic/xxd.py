@@ -102,8 +102,9 @@ async def _xxd_reverse_stream(
 
 async def _reverse_segments(
     source: AsyncIterator[bytes], plain: bool
-) -> list[tuple[int, bytes]]:
-    """Revert a hexdump into the stretches xxd writes into OUTFILE.
+) -> list[tuple[int, bytearray]]:
+    """Revert a hexdump into the stretches xxd writes into OUTFILE, each
+    framed run decoded as its bytes arrive.
 
     Each run lands at its offset, or where the last one ended; runs that
     meet join one stretch, so a whole dump is one write at 0.
@@ -117,22 +118,34 @@ async def _reverse_segments(
         "plain": plain,
         "segments": True,
     }
-    async with aclosing(run_stream("xxd", config, source)) as parts:
-        raw = b"".join([part async for part in parts])
+    frame = struct.Struct("<QQ")
     segments: list[tuple[int, bytearray]] = []
-    at = 0
-    while at < len(raw):
-        start, size = struct.unpack_from("<QQ", raw, at)
-        data = raw[at + 16 : at + 16 + size]
-        at += 16 + size
-        if segments and segments[-1][0] + len(segments[-1][1]) == start:
-            segments[-1][1].extend(data)
-        else:
-            segments.append((start, bytearray(data)))
-    return [(start, bytes(data)) for start, data in segments]
+    header = bytearray()
+    left = 0
+    async with aclosing(run_stream("xxd", config, source)) as parts:
+        async for part in parts:
+            at = 0
+            while at < len(part):
+                if left == 0:
+                    taken = min(frame.size - len(header), len(part) - at)
+                    header += part[at : at + taken]
+                    at += taken
+                    if len(header) < frame.size:
+                        break
+                    start, left = frame.unpack(header)
+                    header.clear()
+                    last = segments[-1] if segments else None
+                    if last is None or last[0] + len(last[1]) != start:
+                        segments.append((start, bytearray()))
+                    continue
+                taken = min(left, len(part) - at)
+                segments[-1][1].extend(part[at : at + taken])
+                at += taken
+                left -= taken
+    return segments
 
 
-def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
+def _patched(existing: bytes, segments: list[tuple[int, bytearray]]) -> bytes:
     """A file's bytes with the stretches written into it, as pwrite does.
 
     The bytes around each stretch stay, and the file grows only where one
@@ -140,7 +153,7 @@ def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
 
     Args:
         existing (bytes): OUTFILE's bytes, empty when it does not exist.
-        segments (list[tuple[int, bytes]]): The stretches, in order.
+        segments (list[tuple[int, bytearray]]): The stretches, in order.
     """
     buf = bytearray(existing)
     for start, data in segments:
@@ -414,7 +427,7 @@ async def _write_output(
         base (int): the offset of INFILE's first byte.
     """
     target = paths[1]
-    segments: list[tuple[int, bytes]] = []
+    segments: list[tuple[int, bytearray]] = []
     data: ByteSource = b""
     read_failed = False
 
@@ -446,7 +459,7 @@ async def _write_output(
         data = b""
     if reverse and pwrite_bytes is not None:
         try:
-            for start, chunk in segments or [(0, b"")]:
+            for start, chunk in segments or [(0, bytearray())]:
                 await pwrite_bytes(target, chunk, start)
         except FS_ERRORS as exc:
             return None, IOResult(
