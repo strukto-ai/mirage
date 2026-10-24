@@ -94,6 +94,68 @@ function gdocs(): GDocsVFS {
   return new GDocsVFS({ clientId: 'x', clientSecret: 'y', refreshToken: 'z' })
 }
 
+function gws(): CLI {
+  const spec = new CommandSpec({
+    name: 'gws',
+    subcommands: [
+      new CommandSpec({
+        name: 'drive',
+        subcommands: [
+          new CommandSpec({ name: 'list', description: 'List files.' }),
+          new CommandSpec({ name: 'delete', description: 'Delete one.' }),
+        ],
+      }),
+    ],
+  })
+  return new CLI({
+    spec,
+    handlers: {
+      'drive list': new CLIHandler({ fn: () => null }),
+      'drive delete': new CLIHandler({ fn: () => null }),
+    },
+  })
+}
+
+const SETUP = 'echo hello > /m/f; mkdir /m/d0 /m/d1; echo x > /m/d1/a'
+const RUNS: Record<string, string> = {
+  '`>`': 'echo hi > /m/n',
+  '`>>`': 'echo hi >> /m/f',
+  '`tee`': 'echo hi | tee /m/t',
+  '`tee -a`': 'echo hi | tee -a /m/f',
+  '`touch` of a new file': 'touch /m/new',
+  '`cp`': 'cp /m/f /m/c',
+  '`cp -r`': 'cp -r /m/d1 /m/d3',
+  '`mkdir`': 'mkdir /m/d',
+  '`mv`': 'mv /m/f /m/g',
+  '`rm`': 'rm /m/f',
+  '`unlink`': 'unlink /m/f',
+  '`rm -r`': 'rm -r /m/d1',
+  '`rmdir`': 'rmdir /m/d0',
+  '`truncate`': 'truncate -s 0 /m/f',
+  '`sed -i`': 'sed -i s/h/j/ /m/f',
+}
+
+async function seeded(
+  ops: readonly string[],
+  vfs: RAMVFS = new RAMVFS(),
+  profile: Record<string, unknown> | null = null,
+): Promise<Workspace> {
+  const shellParser = await getTestParser()
+  const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { shellParser })
+  expect((await seed.shell(SETUP)).exitCode).toBe(0)
+  const base = BaseVFS.prototype as unknown as Record<string, unknown>
+  for (const op of ops)
+    (vfs as unknown as Record<string, unknown>)[methodName(op)] = base[methodName(op)]
+  return new Workspace(
+    { '/m': [vfs, MountMode.WRITE] },
+    {
+      mode: MountMode.WRITE,
+      shellParser,
+      profiles: profile === null ? {} : { default: parseSessionProfile(profile) },
+    },
+  )
+}
+
 describe('vfsMd', () => {
   it('opens with its frontmatter', async () => {
     const ws = new Workspace({ '/': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
@@ -380,6 +442,50 @@ describe('vfsMd', () => {
     const ws = new Workspace({ '/docs': [docs, MountMode.READ] }, { mode: MountMode.READ })
     expect(await ws.vfsMd()).not.toContain('search')
   })
+
+  it.each([
+    [[]],
+    [['write']],
+    [['write', 'append', 'pwrite', 'truncate']],
+    [['mkdir']],
+    [['unlink']],
+    [['rmdir']],
+    [['rm_r']],
+    [['rmdir', 'rm_r']],
+    [['rename']],
+  ])('VFS.md says what each command runs on without %j', async (ops: string[]) => {
+    expect(CHANGES.map((c) => c.label)).toEqual(Object.keys(RUNS))
+    const limits = row(await (await seeded(ops)).vfsMd(), LIMITS, '/m')
+    const missing = limits.includes('Not supported: ')
+      ? ((limits.split('Not supported: ')[1] ?? '').split('.')[0]?.split(', ') ?? [])
+      : []
+    for (const [label, line] of Object.entries(RUNS)) {
+      const result = await (await seeded(ops)).shell(line)
+      expect([label, result.exitCode === 0]).toEqual([label, !missing.includes(label)])
+    }
+  })
+
+  it('says cp -r copies a whole tree in one call', async () => {
+    const ws = await seeded(['mkdir'], new TreeCopyVFS())
+    expect(row(await ws.vfsMd(), LIMITS, '/m')).toMatch(/^Not supported: `mkdir`\. /)
+    expect((await ws.shell('cp -r /m/d1 /m/d3')).exitCode).toBe(0)
+    expect((await ws.shell('cat /m/d3/a')).stdoutText).toBe('x\n')
+  })
+
+  it('judges tee -a by its own ops', async () => {
+    const ws = await seeded(['write'], new RAMVFS(), { commands: { allow: ['cat', 'tee -a'] } })
+    const markdown = await ws.vfsMd()
+    expect(row(markdown, SUPPORTED, '/m')).toContain('`tee -a`')
+    expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`\. /)
+  })
+
+  it('counts rm -r on a file where only unlink works', async () => {
+    const ws = await seeded(['write', 'append', 'rmdir', 'rm_r'], new RAMVFS(), {
+      commands: { allow: ['cat', 'rm -r'] },
+    })
+    expect(row(await ws.vfsMd(), '', '/m')).toMatch(/, write$/)
+    expect((await ws.shell('rm -r /m/f')).exitCode).toBe(0)
+  })
 })
 
 describe('skillMd', () => {
@@ -403,28 +509,6 @@ describe('skillMd', () => {
     expect(skill).toContain('## `shown`')
     expect(skill).not.toContain('hidden')
   })
-
-  function gws(): CLI {
-    const spec = new CommandSpec({
-      name: 'gws',
-      subcommands: [
-        new CommandSpec({
-          name: 'drive',
-          subcommands: [
-            new CommandSpec({ name: 'list', description: 'List files.' }),
-            new CommandSpec({ name: 'delete', description: 'Delete one.' }),
-          ],
-        }),
-      ],
-    })
-    return new CLI({
-      spec,
-      handlers: {
-        'drive list': new CLIHandler({ fn: () => null }),
-        'drive delete': new CLIHandler({ fn: () => null }),
-      },
-    })
-  }
 
   it('keeps the path to an allowed leaf', async () => {
     const ws = new Workspace(
@@ -493,89 +577,5 @@ describe('skillMd', () => {
   it('says when no CLI is registered', async () => {
     const ws = new Workspace({ '/': [new RAMVFS(), MountMode.WRITE] })
     expect(await ws.skillMd()).toMatch(/No CLIs are registered\.\n$/)
-  })
-
-  const SETUP = 'echo hello > /m/f; mkdir /m/d0 /m/d1; echo x > /m/d1/a'
-  const RUNS: Record<string, string> = {
-    '`>`': 'echo hi > /m/n',
-    '`>>`': 'echo hi >> /m/f',
-    '`tee`': 'echo hi | tee /m/t',
-    '`tee -a`': 'echo hi | tee -a /m/f',
-    '`touch` of a new file': 'touch /m/new',
-    '`cp`': 'cp /m/f /m/c',
-    '`cp -r`': 'cp -r /m/d1 /m/d3',
-    '`mkdir`': 'mkdir /m/d',
-    '`mv`': 'mv /m/f /m/g',
-    '`rm`': 'rm /m/f',
-    '`unlink`': 'unlink /m/f',
-    '`rm -r`': 'rm -r /m/d1',
-    '`rmdir`': 'rmdir /m/d0',
-    '`truncate`': 'truncate -s 0 /m/f',
-    '`sed -i`': 'sed -i s/h/j/ /m/f',
-  }
-
-  async function seeded(
-    ops: readonly string[],
-    vfs: RAMVFS = new RAMVFS(),
-    profile: Record<string, unknown> | null = null,
-  ): Promise<Workspace> {
-    const shellParser = await getTestParser()
-    const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { shellParser })
-    expect((await seed.shell(SETUP)).exitCode).toBe(0)
-    const base = BaseVFS.prototype as unknown as Record<string, unknown>
-    for (const op of ops)
-      (vfs as unknown as Record<string, unknown>)[methodName(op)] = base[methodName(op)]
-    return new Workspace(
-      { '/m': [vfs, MountMode.WRITE] },
-      {
-        mode: MountMode.WRITE,
-        shellParser,
-        profiles: profile === null ? {} : { default: parseSessionProfile(profile) },
-      },
-    )
-  }
-
-  it.each([
-    [[]],
-    [['write']],
-    [['write', 'append', 'pwrite', 'truncate']],
-    [['mkdir']],
-    [['unlink']],
-    [['rmdir']],
-    [['rm_r']],
-    [['rmdir', 'rm_r']],
-    [['rename']],
-  ])('VFS.md says what each command runs on without %j', async (ops: string[]) => {
-    expect(CHANGES.map((c) => c.label)).toEqual(Object.keys(RUNS))
-    const limits = row(await (await seeded(ops)).vfsMd(), LIMITS, '/m')
-    const missing = limits.includes('Not supported: ')
-      ? ((limits.split('Not supported: ')[1] ?? '').split('.')[0]?.split(', ') ?? [])
-      : []
-    for (const [label, line] of Object.entries(RUNS)) {
-      const result = await (await seeded(ops)).shell(line)
-      expect([label, result.exitCode === 0]).toEqual([label, !missing.includes(label)])
-    }
-  })
-
-  it('says cp -r copies a whole tree in one call', async () => {
-    const ws = await seeded(['mkdir'], new TreeCopyVFS())
-    expect(row(await ws.vfsMd(), LIMITS, '/m')).toMatch(/^Not supported: `mkdir`\. /)
-    expect((await ws.shell('cp -r /m/d1 /m/d3')).exitCode).toBe(0)
-    expect((await ws.shell('cat /m/d3/a')).stdoutText).toBe('x\n')
-  })
-
-  it('judges tee -a by its own ops', async () => {
-    const ws = await seeded(['write'], new RAMVFS(), { commands: { allow: ['cat', 'tee -a'] } })
-    const markdown = await ws.vfsMd()
-    expect(row(markdown, SUPPORTED, '/m')).toContain('`tee -a`')
-    expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`\. /)
-  })
-
-  it('counts rm -r on a file where only unlink works', async () => {
-    const ws = await seeded(['write', 'append', 'rmdir', 'rm_r'], new RAMVFS(), {
-      commands: { allow: ['cat', 'rm -r'] },
-    })
-    expect(row(await ws.vfsMd(), '', '/m')).toMatch(/, write$/)
-    expect((await ws.shell('rm -r /m/f')).exitCode).toBe(0)
   })
 })
