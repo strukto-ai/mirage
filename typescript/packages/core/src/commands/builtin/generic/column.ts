@@ -14,11 +14,27 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { JsonValue, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { chainOutput, closeStream, openStream } from '../../../rs/stream.ts'
+
+interface ColumnFlags {
+  readonly table: boolean
+  readonly separator: string | null
+  readonly outputSeparator: string
+}
+
+function parseFlags(bag: Record<string, FlagValue>): ColumnFlags {
+  const fl = new FlagView(bag, specOf('column'))
+  return {
+    table: fl.asBool('t'),
+    separator: fl.asStr('s') ?? null,
+    outputSeparator: fl.asStr('o', '  '),
+  }
+}
 
 async function* columned(
   config: Readonly<Record<string, JsonValue>>,
@@ -40,14 +56,13 @@ export async function columnGeneric(
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags, specOf('column'))
-  const separator = fl.asStr('s')
+  const parsed = parseFlags(ctx.flags)
   const sources: ByteSource[] = []
   for (const path of paths) sources.push(await materialize(stream(path)))
   const config = {
-    table: fl.asBool('t'),
-    separator: separator === undefined ? null : byteView(separator),
-    output_separator: byteView(fl.asStr('o', '  ')),
+    table: parsed.table,
+    separator: parsed.separator === null ? null : byteView(parsed.separator),
+    output_separator: byteView(parsed.outputSeparator),
     columns: ctx.env?.COLUMNS ?? null,
     inputs: Math.max(1, sources.length),
   }

@@ -110,6 +110,43 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "column_t_keeps_a_leading_bom_as_zero_width",
+      "seq": 333,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\357\\273\\277a b\\nc d\\n' | LC_ALL=C.UTF-8 column -t | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": " 357 273 277   a           b  \\n   c           d  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

@@ -1,11 +1,13 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import aclosing
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import reported_stream
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream, chain_output, open_stream
@@ -24,6 +26,31 @@ OPTIONS = (
     "header_numbering",
     "number_format",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class NlFlags:
+    """nl's options as typed: every occurrence of the ones GNU validates, in
+    the order the line typed them, for the engine to validate and resolve."""
+
+    options: tuple[tuple[str, str], ...] = ()
+    separator: str = "\t"
+    delimiter: str = "\\:"
+    no_renumber: bool = False
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> NlFlags:
+    fl = FlagView(flags, spec=SPECS["nl"])
+    return NlFlags(
+        options=tuple(
+            (dest, raw)
+            for dest in fl.typed_order(*OPTIONS)
+            for raw in fl.as_list(dest)
+        ),
+        separator=fl.as_str("number_separator", "\t"),
+        delimiter=fl.as_str("section_delimiter", "\\:"),
+        no_renumber=fl.as_bool("no_renumber"),
+    )
 
 
 async def _numbered(
@@ -63,19 +90,17 @@ async def nl_generic(
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``, refusing a directory.
     """
-    fl = FlagView(ctx.flags, spec=SPECS["nl"])
+    parsed = parse_flags(ctx.flags)
     try:
         engine = open_stream(
             "nl",
             {
                 "options": [
-                    [dest, byte_view(raw)]
-                    for dest in fl.typed_order(*OPTIONS)
-                    for raw in fl.as_list(dest)
+                    [dest, byte_view(raw)] for dest, raw in parsed.options
                 ],
-                "separator": byte_view(fl.as_str("number_separator", "\t")),
-                "delimiter": byte_view(fl.as_str("section_delimiter", "\\:")),
-                "no_renumber": fl.as_bool("no_renumber"),
+                "separator": byte_view(parsed.separator),
+                "delimiter": byte_view(parsed.delimiter),
+                "no_renumber": parsed.no_renumber,
                 "utf8": utf8_locale(ctx.env),
                 "inputs": max(1, len(paths)),
             },

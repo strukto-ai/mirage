@@ -22,6 +22,7 @@ import { concat } from '../../../utils/bytes.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
@@ -38,6 +39,28 @@ const OPTIONS = [
   'header_numbering',
   'number_format',
 ]
+
+// nl's options as typed: every occurrence of the ones GNU validates, in the
+// order the line typed them, for the engine to validate and resolve. Mirrors
+// Python's NlFlags.
+interface NlFlags {
+  readonly options: readonly (readonly [string, string])[]
+  readonly separator: string
+  readonly delimiter: string
+  readonly noRenumber: boolean
+}
+
+function parseFlags(bag: Record<string, FlagValue>): NlFlags {
+  const fl = new FlagView(bag, specOf('nl'))
+  return {
+    options: fl
+      .typedOrder(...OPTIONS)
+      .flatMap((dest) => fl.asList(dest).map((raw) => [dest, raw] as const)),
+    separator: fl.asStr('number_separator', '\t'),
+    delimiter: fl.asStr('section_delimiter', '\\:'),
+    noRenumber: fl.asBool('no_renumber'),
+  }
+}
 
 /**
  * The inputs numbered: a refused option prints its refusal, and a counter
@@ -77,14 +100,12 @@ export function nlGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin)
-  const fl = new FlagView(ctx.flags, specOf('nl'))
+  const parsed = parseFlags(ctx.flags)
   const config = {
-    options: fl
-      .typedOrder(...OPTIONS)
-      .flatMap((dest) => fl.asList(dest).map((raw) => [dest, byteView(raw)])),
-    separator: byteView(fl.asStr('number_separator', '\t')),
-    delimiter: byteView(fl.asStr('section_delimiter', '\\:')),
-    no_renumber: fl.asBool('no_renumber'),
+    options: parsed.options.map(([dest, raw]) => [dest, byteView(raw)]),
+    separator: byteView(parsed.separator),
+    delimiter: byteView(parsed.delimiter),
+    no_renumber: parsed.noRenumber,
     utf8: utf8Locale(ctx.env),
     inputs: Math.max(1, paths.length),
   }
