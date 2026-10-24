@@ -13,13 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from typing import NamedTuple, Protocol
 
 from mirage._rs import Stream, StreamError
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
@@ -278,6 +285,31 @@ async def merge_output(
             yield output
     if output := stream.finish():
         yield output
+
+
+async def chain_output(
+    stream: OpenStream, sources: Sequence[ByteSource]
+) -> AsyncGenerator[bytes, None]:
+    """Feed a stream that reads its inputs one after another each source in
+    turn, through ``merge_output``, and close the sources.
+
+    Args:
+        stream (OpenStream): The command engine.
+        sources (Sequence[ByteSource]): Its inputs, in order.
+    """
+    inputs = [chunks(source) for source in sources]
+
+    async def read(index: int) -> bytes | None:
+        return await anext(inputs[index], None)
+
+    try:
+        async with aclosing(merge_output(stream, read)) as output:
+            async for chunk in output:
+                yield chunk
+    finally:
+        for each, source in zip(inputs, sources):
+            await each.aclose()
+            await close_quietly(source)
 
 
 async def stream_output_chunks(
