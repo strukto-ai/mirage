@@ -6670,6 +6670,27 @@
                 "/c.txt": "gamma\n"
               }
             }
+          },
+          "/w": {
+            "vfs": "limited-ram",
+            "config": {
+              "walk_limit": 1,
+              "files": {
+                "/b.txt": "hello\n",
+                "/z.txt": "hello\n"
+              }
+            }
+          },
+          "/w/n": {
+            "vfs": "limited-ram",
+            "config": {
+              "walk_limit": 2,
+              "files": {
+                "/r0.txt": "hello\n",
+                "/r1.txt": "hello\n",
+                "/r2.txt": "hello\n"
+              }
+            }
           }
         },
         "clis": {
@@ -6863,6 +6884,17 @@
               "exit_code": 0,
               "stdout": "rc=0\na.txt\n",
               "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "rg --sort path -l hello /w",
+          "expect": {
+            "value": {
+              "exit_code": 2,
+              "stdout": "/w/b.txt\n/w/n/r0.txt\n/w/n/r1.txt\n",
+              "stderr": "rg: /w/n: stopped after 2 files (walk_limit); narrow the path\nrg: /w: stopped after 1 files (walk_limit); narrow the path\n"
             }
           }
         }

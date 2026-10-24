@@ -3525,31 +3525,6 @@ describe('a hide filters a one-call read', () => {
     },
   )
 
-  // Twin of test_a_planned_rg_names_its_operand_spent_before_a_mount_below.
-  it('names a planned rg operand spent before a mount below', async () => {
-    const enc = new TextEncoder()
-    const top = new RAMVFS({ walkLimit: 1 })
-    top.store.files.set('/b.txt', enc.encode('hello\n'))
-    top.store.files.set('/z.txt', enc.encode('hello\n'))
-    const remote = new RAMVFS({ walkLimit: 2 })
-    for (let i = 0; i < 3; i++) remote.store.files.set(`/r${String(i)}.txt`, enc.encode('hello\n'))
-    const ws = new Workspace(
-      { '/a': top, '/a/remote': remote },
-      { shellParser: await getTestParser() },
-    )
-    try {
-      const out = await ws.shell('rg --sort path -l hello /a')
-      expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
-        '/a/b.txt\n/a/remote/r0.txt\n/a/remote/r1.txt\n',
-        'rg: /a/remote: stopped after 2 files (walk_limit); narrow the path\n' +
-          'rg: /a: stopped after 1 files (walk_limit); narrow the path\n',
-        2,
-      ])
-    } finally {
-      await ws.close()
-    }
-  })
-
   // Twin of test_a_glob_counts_each_match_against_its_own_mount.
   it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
     const top = new RAMVFS({ walkLimit: -1 })

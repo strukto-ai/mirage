@@ -3170,25 +3170,6 @@ async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
         )
 
 
-@pytest.mark.asyncio
-async def test_a_planned_rg_names_its_operand_spent_before_a_mount_below():
-    top = RAMVFS(walk_limit=1)
-    top._store.files["/b.txt"] = b"hello\n"
-    top._store.files["/z.txt"] = b"hello\n"
-    remote = RAMVFS(walk_limit=2)
-    for i in range(3):
-        remote._store.files[f"/r{i}.txt"] = b"hello\n"
-    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
-        out = await ws.shell("rg --sort path -l hello /a")
-        assert (await out.stdout_str(), out.stderr, out.exit_code) == (
-            "/a/b.txt\n/a/remote/r0.txt\n/a/remote/r1.txt\n",
-            b"rg: /a/remote: stopped after 2 files (walk_limit); "
-            b"narrow the path\n"
-            b"rg: /a: stopped after 1 files (walk_limit); narrow the path\n",
-            2,
-        )
-
-
 NESTED_REFUSED = (
     "/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path"
 )
