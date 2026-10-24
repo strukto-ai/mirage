@@ -86,13 +86,13 @@ impl Host {
         }
     }
 
-    fn read(&mut self, fd: u64, path: Option<&str>) -> (Json, Vec<u8>) {
+    fn read(&mut self, fd: u64, path: Option<&str>, file: bool) -> (Json, Vec<u8>) {
         if let Some(path) = path {
             if self.directories.iter().any(|dir| dir == path) {
                 return (failure("EISDIR", "Is a directory"), Vec::new());
             }
             let source = match path {
-                "-" | "/dev/stdin" => Some(std::mem::take(&mut self.stdin)),
+                "-" | "/dev/stdin" if !file => Some(std::mem::take(&mut self.stdin)),
                 _ => self.files.get(path).cloned(),
             };
             let fault = self.faults.get(path).cloned();
@@ -154,7 +154,11 @@ impl Host {
             self.files.insert(path.clone(), Vec::new());
         }
         let data = match request["spool"].as_u64() {
-            Some(fd) => self.spools.remove(&fd).unwrap_or_default(),
+            Some(fd) => {
+                let spool = self.spools.remove(&fd).unwrap_or_default();
+                let skip = request["skip"].as_u64().unwrap_or(0) as usize;
+                spool.get(skip..).unwrap_or_default().to_vec()
+            }
             None => data,
         };
         if !data.is_empty() {
@@ -173,7 +177,7 @@ impl Host {
         let request: Json = serde_json::from_slice(header).expect("a JSON request");
         let fd = request["fd"].as_u64().unwrap_or(0);
         match request["op"].as_str().unwrap_or_default() {
-            "read" => self.read(fd, request["path"].as_str()),
+            "read" => self.read(fd, request["path"].as_str(), request["file"] == json!(true)),
             "close" => {
                 self.inputs.remove(&fd);
                 (json!({}), Vec::new())

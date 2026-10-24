@@ -13,8 +13,22 @@ pub(crate) enum WriteMode {
     /// Replace the file whole, once flushed, with what this write and the
     /// appends after it carry; never flushed, it changes nothing.
     Replace,
-    /// Append what a spool holds, and drop the spool.
-    Spool(u32),
+    /// Append what a spool holds past its first `skip` bytes, and drop
+    /// the spool.
+    Spool {
+        fd: u32,
+        skip: u64,
+    },
+}
+
+/// What a read opens: an operand still as typed, a name a program reads
+/// (where `-` and `/dev/stdin` are standard input), or a file a script
+/// names, which no spelling of standard input stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opening {
+    Operand(usize),
+    Name,
+    File,
 }
 
 /// What the host is asked to do, in the order the run asks.
@@ -24,7 +38,7 @@ pub(crate) enum Request {
     /// which file, and which operand when it is one still as typed.
     Read {
         fd: u32,
-        open: Option<(Vec<u8>, Option<usize>)>,
+        open: Option<(Vec<u8>, Opening)>,
     },
     Close {
         fd: u32,
@@ -80,10 +94,12 @@ impl Request {
             Request::Read { fd, open } => {
                 put("op", "read".into());
                 put("fd", (*fd).into());
-                if let Some((path, operand)) = open {
+                if let Some((path, opening)) = open {
                     put("path", latin1(path));
-                    if let Some(operand) = operand {
-                        put("operand", (*operand).into());
+                    match opening {
+                        Opening::Operand(operand) => put("operand", (*operand).into()),
+                        Opening::File => put("file", true.into()),
+                        Opening::Name => {}
                     }
                 }
             }
@@ -102,9 +118,12 @@ impl Request {
                     WriteMode::Truncate => put("append", false.into()),
                     WriteMode::Append => put("append", true.into()),
                     WriteMode::Replace => put("atomic", true.into()),
-                    WriteMode::Spool(fd) => {
+                    WriteMode::Spool { fd, skip } => {
                         put("append", true.into());
                         put("spool", (*fd).into());
+                        if *skip > 0 {
+                            put("skip", (*skip).into());
+                        }
                     }
                 }
                 take_payload(data, payload);

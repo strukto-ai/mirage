@@ -795,3 +795,53 @@ fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
     assert_eq!(out("s/x*/-/g", "abc\n"), "-a-b-c-\n");
     assert_eq!(out("s/b/X/3", "abbbb\n"), "abbXb\n");
 }
+
+#[test]
+fn script_files_named_dash_are_files() {
+    let files = [("/-", "DASH\n"), ("/in", "a\nb\n")];
+    let mut host = Host::with(&files, "stdin\n");
+    host.files.insert("-".into(), b"DASH\n".to_vec());
+    let config = json!({"pieces": expressions(&["r -"]), "inputs": ["/in"]});
+    assert_eq!(run_host(config, host).out, "a\nDASH\nb\nDASH\n");
+    let mut host = Host::with(&files, "stdin\n");
+    host.files.insert("-".into(), b"DASH\n".to_vec());
+    let config = json!({"pieces": expressions(&["R -"]), "inputs": ["/in"]});
+    assert_eq!(run_host(config, host).out, "a\nDASH\nb\n");
+}
+
+#[test]
+fn every_way_a_space_grows_meets_the_cap() {
+    let max = super::io::MAX_LEN;
+    let exhausted = ("sed: memory exhausted\n", 1);
+    let line = format!("{}\n", "a".repeat(max / 4));
+    let run = sed("s/.*/&&&&&&&&&&/", &line);
+    assert_eq!((run.err.as_str(), run.status), exhausted);
+    let run = sed("s/a/\\U&&&&&&&&&&/g", &line);
+    assert_eq!((run.err.as_str(), run.status), exhausted);
+    let run = run_host(
+        json!({"pieces": expressions(&["y/a/\u{20ac}/"]), "utf8": true}),
+        Host::with(&[], &format!("{}\n", "a".repeat(max / 2))),
+    );
+    assert_eq!((run.err.as_str(), run.status), exhausted);
+    let run = sed("p", &format!("{}\nb\n", "a".repeat(max + 1)));
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: read error on stdin: Cannot allocate memory\n", 4)
+    );
+    let run = sed("$!d", &format!("{}\nb\n", "a".repeat(max)));
+    assert_eq!((run.out.as_str(), run.status), ("b\n", 0));
+}
+
+#[test]
+fn a_later_spelling_waits_in_a_host_spool() {
+    let lines: String = (0..2000).map(|n| format!("{n}\n")).collect();
+    let run = files_run(
+        "1w /o\nw ./o",
+        &["/in"],
+        &[("/in", &lines)],
+        json!({"quiet": true}),
+    );
+    let mut want = b"0\n".to_vec();
+    want.extend_from_slice(&lines.as_bytes()[2..]);
+    assert_eq!(run.files["/o"], want);
+}

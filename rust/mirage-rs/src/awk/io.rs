@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use super::text::{Regexes, take_record};
 use super::value::MAX_LEN;
 use super::vm::no_memory;
-use crate::request::{Reply, Request, WriteMode, bytes};
+use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
 /// How much output, or what one file or pipe holds, waits before it goes
 /// to the host.
@@ -137,7 +137,7 @@ pub(super) enum Next {
 /// from the host only as far as the next record needs.
 pub(super) struct Reader {
     pub(super) fd: u32,
-    open: Option<(Vec<u8>, Option<usize>)>,
+    open: Option<(Vec<u8>, Opening)>,
     pub(super) buf: Vec<u8>,
     start: usize,
     pub(super) ended: bool,
@@ -146,7 +146,7 @@ pub(super) struct Reader {
 }
 
 impl Reader {
-    pub(super) fn new(fd: u32, open: Option<(Vec<u8>, Option<usize>)>) -> Reader {
+    pub(super) fn new(fd: u32, open: Option<(Vec<u8>, Opening)>) -> Reader {
         Reader {
             fd,
             open,

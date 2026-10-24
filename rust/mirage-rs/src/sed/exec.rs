@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::task::Poll;
 
 use crate::regex::posix::{Posix, Spans};
-use crate::request::{Reply, Request, WriteMode, bytes};
+use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
 use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
 use super::script::{Address, Command, Part, Program, Subst, Translit};
@@ -96,8 +96,8 @@ enum Target {
 /// A file `w` writes. GNU opens each spelling of a file (`w out`,
 /// `w ./out`) as its own stream from offset 0, and the first opened is
 /// flushed last: its bytes win, and a later spelling's show only past its
-/// end. A later spelling keeps only the bytes past what the spellings
-/// before it wrote.
+/// end. A later spelling's bytes wait in a host spool until the end, when
+/// what lies past the spellings before it lands.
 struct WFile {
     name: Vec<u8>,
     path: Vec<u8>,
@@ -112,8 +112,6 @@ struct WFile {
     /// What the host has been sent for the file under this name.
     sent: u64,
     writer: bool,
-    tail: Vec<u8>,
-    tail_at: u64,
 }
 
 enum Phase {
@@ -260,7 +258,13 @@ fn quit_code(number: Option<i64>) -> i32 {
 }
 
 /// The replacement for one match, with `\U \L \u \l \E` applied.
-fn expand(parts: &[Part], ps: &[u8], groups: &Spans, utf8: bool, out: &mut Vec<u8>) {
+fn expand(
+    parts: &[Part],
+    ps: &[u8],
+    groups: &Spans,
+    utf8: bool,
+    out: &mut Vec<u8>,
+) -> Result<(), Refusal> {
     let mut mode: Option<bool> = None;
     let mut pending: Option<bool> = None;
     let mut passed = 0;
@@ -283,6 +287,17 @@ fn expand(parts: &[Part], ps: &[u8], groups: &Spans, utf8: bool, out: &mut Vec<u
             },
             Part::Text(text) => text,
         };
+        // A case conversion may grow a character by half.
+        let converting = mode.is_some() || pending.is_some();
+        room(
+            out.len(),
+            text.len()
+                + if converting {
+                    text.len().div_ceil(2)
+                } else {
+                    0
+                },
+        )?;
         let text = match mode {
             Some(upper) => {
                 converted.clear();
@@ -307,9 +322,9 @@ fn expand(parts: &[Part], ps: &[u8], groups: &Spans, utf8: bool, out: &mut Vec<u
             None => out.extend_from_slice(text),
         }
     }
+    Ok(())
 }
 
-/// The pattern space after `s`, None when nothing was replaced.
 fn exhausted() -> Refusal {
     Refusal::new(b"sed: memory exhausted\n".to_vec(), 1)
 }
@@ -333,22 +348,32 @@ fn substitute(
     let skip = usize::try_from(subst.occurrence - 1).unwrap_or(usize::MAX);
     let (mut seen, mut at, mut replaced) = (0usize, 0, false);
     let mut out = Vec::with_capacity(ps.len());
+    let mut failed = None;
     let mut visit = |groups: Spans| {
         seen += 1;
         if seen <= skip {
             return true;
         }
         let (start, end) = groups[0].unwrap_or((at, at));
-        out.extend_from_slice(&ps[at..start]);
-        expand(&subst.parts, ps, &groups, utf8, &mut out);
+        let expanded = room(out.len(), start - at).and_then(|()| {
+            out.extend_from_slice(&ps[at..start]);
+            expand(&subst.parts, ps, &groups, utf8, &mut out)
+        });
+        if let Err(refusal) = expanded {
+            failed = Some(refusal);
+            return false;
+        }
         at = end;
         replaced = true;
-        subst.global && out.len() <= MAX_LEN
+        subst.global
     };
     if subst.global || subst.occurrence > 1 {
         regex.each(ps, &mut visit);
     } else if let Some(groups) = regex.search(ps, 0) {
         visit(groups);
+    }
+    if let Some(refusal) = failed {
+        return Err(refusal);
     }
     if !replaced {
         return Ok(None);
@@ -358,7 +383,7 @@ fn substitute(
     Ok(Some(out))
 }
 
-fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) {
+fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) -> Result<(), Refusal> {
     match table {
         Translit::Bytes(table) => {
             for byte in ps.iter_mut() {
@@ -371,12 +396,15 @@ fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) {
             while at < ps.len() {
                 let len = unit(ps, at, utf8);
                 let piece = &ps[at..at + len];
-                out.extend_from_slice(table.get(piece).map_or(piece, Vec::as_slice));
+                let mapped = table.get(piece).map_or(piece, Vec::as_slice);
+                room(out.len(), mapped.len())?;
+                out.extend_from_slice(mapped);
                 at += len;
             }
             *ps = out;
         }
     }
+    Ok(())
 }
 
 fn couldnt(what: &[u8], name: &[u8], text: &[u8]) -> Vec<u8> {
@@ -458,8 +486,6 @@ impl Machine {
                     produced: 0,
                     sent: 0,
                     writer: false,
-                    tail: Vec::new(),
-                    tail_at: 0,
                 });
                 Target::File(files.len() - 1)
             })
@@ -742,7 +768,11 @@ impl Machine {
         let (mut reader, mut lines) = match self.snapshot_reader.take() {
             Some(open) => open,
             None => (
-                LineReader::new(&mut self.io, self.reader_files[index].clone(), None),
+                LineReader::new(
+                    &mut self.io,
+                    self.reader_files[index].clone(),
+                    Opening::File,
+                ),
                 VecDeque::new(),
             ),
         };
@@ -787,7 +817,7 @@ impl Machine {
             Some(reader) => reader,
             None => {
                 let input = &self.feed.inputs[index];
-                LineReader::new(&mut self.io, input.name.clone(), input.operand)
+                LineReader::new(&mut self.io, input.name.clone(), input.opening)
             }
         };
         match reader.peek(&mut self.io) {
@@ -1074,49 +1104,32 @@ impl Machine {
     }
 
     /// Hand on what a `w` file holds: dropped once the file failed or -i
-    /// edited it, kept as a tail for a later spelling, spooled by the host
-    /// until the end when output waits, and sent otherwise.
+    /// edited it, spooled by the host until the end for a later spelling or
+    /// when output waits, and sent otherwise.
     fn route(&mut self, index: usize) {
         let data = std::mem::take(&mut self.files[index].buf);
         let file = &self.files[index];
         if data.is_empty() || file.failed || self.edited.contains(&file.path) {
             return;
         }
-        if let Some(first) = file.first {
-            let bound = self
-                .files
-                .iter()
-                .enumerate()
-                .take(index)
-                .filter(|(at, f)| *at == first || f.first == Some(first))
-                .map(|(_, f)| f.produced)
-                .max()
-                .unwrap_or_default();
-            let file = &mut self.files[index];
-            file.produced += data.len() as u64;
-            file.tail.extend_from_slice(&data);
-            let drop = usize::try_from(bound.saturating_sub(file.tail_at))
-                .unwrap_or(usize::MAX)
-                .min(file.tail.len());
-            file.tail.drain(..drop);
-            file.tail_at += drop as u64;
-            return;
-        }
+        let later = file.first.is_some();
         self.files[index].produced += data.len() as u64;
-        if self.defer {
-            let fd = match self.files[index].spool {
-                Some(fd) => fd,
-                None => {
-                    let fd = self.io.fd();
-                    self.files[index].spool = Some(fd);
-                    self.deferred.push(index);
-                    fd
-                }
-            };
-            self.io.push(Request::Spool { fd, data });
+        if !later && !self.defer {
+            self.send(index, WriteMode::Append, data);
             return;
         }
-        self.send(index, WriteMode::Append, data);
+        let fd = match self.files[index].spool {
+            Some(fd) => fd,
+            None => {
+                let fd = self.io.fd();
+                self.files[index].spool = Some(fd);
+                if !later {
+                    self.deferred.push(index);
+                }
+                fd
+            }
+        };
+        self.io.push(Request::Spool { fd, data });
     }
 
     fn send(&mut self, index: usize, mode: WriteMode, data: Vec<u8>) {
@@ -1143,7 +1156,7 @@ impl Machine {
             let file = &self.files[index];
             if let Some(fd) = file.spool.filter(|_| !self.edited.contains(&file.path)) {
                 let produced = file.produced;
-                self.send(index, WriteMode::Spool(fd), Vec::new());
+                self.send(index, WriteMode::Spool { fd, skip: 0 }, Vec::new());
                 self.files[index].sent = produced;
             }
         }
@@ -1155,12 +1168,12 @@ impl Machine {
             if head.failed || self.edited.contains(&head.path) {
                 continue;
             }
+            let skip = head.sent;
             let file = &self.files[index];
-            let skip =
-                usize::try_from(head.sent.saturating_sub(file.tail_at)).unwrap_or(usize::MAX);
-            if skip < file.tail.len() {
-                let data = file.tail[skip..].to_vec();
-                self.send(first, WriteMode::Append, data);
+            if let Some(fd) = file.spool.filter(|_| file.produced > skip) {
+                let produced = file.produced;
+                self.send(first, WriteMode::Spool { fd, skip }, Vec::new());
+                self.files[first].sent = produced;
             }
         }
         for &index in &self.writers {
@@ -1181,7 +1194,7 @@ impl Machine {
                 None => Lines::Stream(LineReader::new(
                     &mut self.io,
                     self.reader_files[index].clone(),
-                    None,
+                    Opening::File,
                 )),
             };
             self.readers.insert(index, lines);
@@ -1260,7 +1273,7 @@ impl Machine {
         }
         if !std::mem::replace(&mut emit.waiting, true) {
             let open = (!std::mem::replace(&mut emit.opened, true))
-                .then(|| (self.rfiles[emit.file].clone(), None));
+                .then(|| (self.rfiles[emit.file].clone(), Opening::File));
             self.io.push(Request::Read { fd: emit.fd, open });
         }
         Ok(())
@@ -1534,7 +1547,7 @@ impl Machine {
             }
             b'y' => {
                 let table = self.commands[pc].translit.as_ref().expect("y has a table");
-                translate(table, &mut self.ps, self.opts.utf8);
+                translate(table, &mut self.ps, self.opts.utf8)?;
             }
             b'z' => self.ps.clear(),
             b'F' => {

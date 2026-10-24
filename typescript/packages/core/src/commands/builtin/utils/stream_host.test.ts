@@ -109,6 +109,32 @@ describe('StreamHost', () => {
     await h.close()
   })
 
+  it('reads a file a script names, never stdin', async () => {
+    const h = host({}, parts('p\n'))
+    const read = await h.serve({ op: 'read', fd: 1, path: '-', file: true }, new Uint8Array())
+    expect(read.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
+  })
+
+  it('lets a stalled read lose to the abort', async () => {
+    const controller = new AbortController()
+    const stalled = (): AsyncIterable<Uint8Array> => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+      }),
+    })
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      signal: controller.signal,
+    } as unknown as Context
+    const h = new StreamHost([spec('/a.txt')], stalled, ctx, () => true)
+    const pending = h.serve({ op: 'read', fd: 1, path: '/a.txt', operand: 1 }, new Uint8Array())
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await h.close()
+  })
+
   it('refuses what needs a workspace outside one', async () => {
     const h = host({})
     const write = await h.serve({ op: 'write', path: 'out', append: false }, ENC.encode('x'))

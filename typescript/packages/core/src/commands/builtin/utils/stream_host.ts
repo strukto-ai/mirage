@@ -21,7 +21,7 @@ import { ByteSpool, spooledPair } from '../../../io/spool.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 import type { Served } from '../../../rs/stream.ts'
-import { textView } from '../../../shell/bytes.ts'
+import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
@@ -46,7 +46,8 @@ async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
 /** A failed request's reply: the failure's words and the condition it names, when the vocabulary names one. */
 function failure(err: unknown): Record<string, util.JSONType> {
   const errno = classify(err)
-  return errno === null ? { error: failureText(err) } : { error: failureText(err), errno }
+  const error = byteView(failureText(err))
+  return errno === null ? { error } : { error, errno }
 }
 
 /**
@@ -96,8 +97,13 @@ export class StreamHost {
       : callerStream(dispatch, this.caller, path)
   }
 
-  /** Open an input by name: `-` or `/dev/stdin` is stdin; `operand` is the operand, from 1, the name came from. */
-  openInput(name: string, operand: number | null): AsyncIterable<Uint8Array> {
+  /**
+   * Open an input by name: `-` or `/dev/stdin` is stdin; `operand` is the
+   * operand, from 1, the name came from; `file` is a file a script names,
+   * which no spelling of stdin stands for.
+   */
+  openInput(name: string, operand: number | null, file = false): AsyncIterable<Uint8Array> {
+    if (file) return this.readPath(name)
     if (operand !== null && operand > 0 && operand <= this.operands.length) {
       const path = this.operands[operand - 1]
       if (path?.rawPath === name) {
@@ -178,7 +184,13 @@ export class StreamHost {
     let source = this.inputs.get(fd)
     if (source === undefined && typeof request.path === 'string') {
       const operand = typeof request.operand === 'number' ? request.operand : null
-      source = this.openInput(textView(request.path), operand)[Symbol.asyncIterator]()
+      // Each pull loses to the abort, and a producer left mid-pull is
+      // closed without a wait.
+      source = chunks(
+        this.openInput(textView(request.path), operand, request.file === true),
+        this.ctx.signal,
+        false,
+      )
       this.inputs.set(fd, source)
     }
     if (source === undefined) return { reply: { end: true } }
@@ -201,7 +213,7 @@ export class StreamHost {
    * Write to a file: `append` adds to it, otherwise it is emptied first,
    * every held write committed before; `atomic` replaces it whole, once
    * flushed, with what this and later writes carry; `spool` writes that
-   * spool's bytes and drops it.
+   * spool's bytes past its first `skip` and drops it.
    */
   private async write(
     request: Readonly<Record<string, util.JSONType>>,
@@ -236,7 +248,8 @@ export class StreamHost {
       }
       if (writer !== undefined && data.byteLength > 0) await writer.write(data)
       if (writer !== undefined && spool !== undefined) {
-        for await (const chunk of spool.stream()) await writer.write(chunk)
+        const skip = typeof request.skip === 'number' ? request.skip : 0
+        for await (const chunk of spool.stream(skip)) await writer.write(chunk)
       }
     } catch (error) {
       if (!isWalkError(error)) throw error

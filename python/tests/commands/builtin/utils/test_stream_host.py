@@ -144,3 +144,46 @@ async def test_a_replacement_lands_whole_once_flushed() -> None:
         "path": "/ro",
     }
     await host.close()
+
+
+@pytest.mark.asyncio
+async def test_a_file_a_script_names_is_never_stdin() -> None:
+    host = _host({}, stdin=b"p\n")
+    read: dict[str, JsonValue] = {
+        "op": "read",
+        "fd": 1,
+        "path": "-",
+        "file": True,
+    }
+    assert (await host.serve(read, b"")).reply == {
+        "error": "No such file or directory",
+        "errno": "ENOENT",
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_error_reply_carries_its_words_as_bytes() -> None:
+    async def dispatch(
+        name: str,
+        path: PathSpec,
+        /,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[None, IOResult]:
+        raise ValueError("refusé")
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        yield b""
+
+    host = StreamHost(
+        [], stream, None, dispatch, ROOT_CWD, None, lambda path: True
+    )
+    write: dict[str, JsonValue] = {
+        "op": "write",
+        "path": "/o",
+        "append": False,
+    }
+    assert (await host.serve(write, b"")).reply == {
+        "error": "refusé".encode().decode("latin-1")
+    }

@@ -13,6 +13,7 @@ mod tests;
 
 use serde::Deserialize;
 
+use crate::request::Opening;
 use crate::{Stream, StreamError, parse_config};
 
 use self::exec::{Machine, Options};
@@ -94,13 +95,13 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 .enumerate()
                 .map(|(at, name)| Input {
                     name,
-                    operand: Some(at + 1),
+                    opening: Opening::Operand(at + 1),
                 })
                 .collect();
             if inputs.is_empty() && !config.in_place {
                 inputs.push(Input {
                     name: b"-".to_vec(),
-                    operand: None,
+                    opening: Opening::Name,
                 });
             }
             let opts = Options {

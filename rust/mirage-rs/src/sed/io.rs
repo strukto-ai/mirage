@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::task::Poll;
 
-use crate::request::{Reply, Request, bytes};
+use crate::request::{Opening, Reply, Request, bytes};
 
 /// How much output, or what one file holds, waits before it goes to the
 /// host.
@@ -95,7 +95,7 @@ type Taken = Result<Option<(Line, usize)>, Vec<u8>>;
 /// searched once each, however many chunks it arrives in.
 pub(super) struct LineReader {
     pub(super) fd: u32,
-    open: Option<(Vec<u8>, Option<usize>)>,
+    open: Option<(Vec<u8>, Opening)>,
     buf: Vec<u8>,
     start: usize,
     scanned: usize,
@@ -107,10 +107,10 @@ pub(super) struct LineReader {
 }
 
 impl LineReader {
-    pub(super) fn new(io: &mut Io, name: Vec<u8>, operand: Option<usize>) -> LineReader {
+    pub(super) fn new(io: &mut Io, name: Vec<u8>, opening: Opening) -> LineReader {
         LineReader {
             fd: io.fd(),
-            open: Some((name, operand)),
+            open: Some((name, opening)),
             buf: Vec::new(),
             start: 0,
             scanned: 0,
@@ -147,8 +147,16 @@ impl LineReader {
     /// The next line, None at the end.
     pub(super) fn line(&mut self, io: &mut Io) -> Poll<Result<Option<Line>, Failure>> {
         let from = self.scanned.max(self.start);
-        if let Some(at) = memchr::memchr(b'\n', &self.buf[from..]) {
-            let cut = from + at;
+        let cut = memchr::memchr(b'\n', &self.buf[from..]).map(|at| from + at);
+        // A line longer than sed holds is a read it cannot make.
+        if cut.unwrap_or(self.buf.len()) - self.start > MAX_LEN {
+            return Poll::Ready(Err(Failure::from(Reply {
+                error: Some("Cannot allocate memory".into()),
+                errno: Some("ENOMEM".into()),
+                ..Reply::default()
+            })));
+        }
+        if let Some(cut) = cut {
             let line = self.buf[self.start..cut].to_vec();
             self.start = cut + 1;
             self.scanned = self.start;
@@ -165,13 +173,6 @@ impl LineReader {
         }
         if let Some(failure) = self.failed.take() {
             return Poll::Ready(Err(failure));
-        }
-        if self.buf.len() - self.start > MAX_LEN {
-            return Poll::Ready(Err(Failure::from(Reply {
-                error: Some("Cannot allocate memory".into()),
-                errno: Some("ENOMEM".into()),
-                ..Reply::default()
-            })));
         }
         self.pull(io);
         Poll::Pending
@@ -203,7 +204,7 @@ impl LineReader {
 /// One input as `F` names it, and the operand it is, from 1.
 pub(super) struct Input {
     pub(super) name: Vec<u8>,
-    pub(super) operand: Option<usize>,
+    pub(super) opening: Opening,
 }
 
 /// What reading an input reported along the way: the inputs that never
@@ -270,7 +271,7 @@ impl Feed {
         }
         self.index = Some(next);
         let input = &self.inputs[next];
-        self.reader = Some(LineReader::new(io, input.name.clone(), input.operand));
+        self.reader = Some(LineReader::new(io, input.name.clone(), input.opening));
         true
     }
 

@@ -29,7 +29,7 @@ from mirage.io.types import ByteSource
 from mirage.io.writer import ByteWriter
 from mirage.rs.stream import Served
 from mirage.runtime.types import DispatchFn, ShellFn
-from mirage.shell.bytes import text_view
+from mirage.shell.bytes import byte_view, text_view
 from mirage.shell.join import shell_join
 from mirage.types import JsonValue, PathSpec, ReadStreamFn
 
@@ -45,7 +45,7 @@ async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:
 def _failure(exc: BaseException) -> dict[str, JsonValue]:
     """A failed request's reply: the failure's words and the condition it
     names, when the vocabulary names one."""
-    reply: dict[str, JsonValue] = {"error": failure_text(exc)}
+    reply: dict[str, JsonValue] = {"error": byte_view(failure_text(exc))}
     condition = classify(exc)
     if condition is not None:
         reply["errno"] = condition.name
@@ -127,14 +127,18 @@ class StreamHost:
                 yield chunk
 
     def open_input(
-        self, name: str, operand: int | None
+        self, name: str, operand: int | None, file: bool = False
     ) -> AsyncIterator[bytes]:
         """Open an input by name.
 
         Args:
             name (str): The file name, ``-`` or ``/dev/stdin`` for stdin.
             operand (int | None): The operand, from 1, the name came from.
+            file (bool): a file a script names, which no spelling of
+                stdin stands for.
         """
+        if file:
+            return self.read_path(name)
         if operand is not None and 0 < operand <= len(self.operands):
             path = self.operands[operand - 1]
             if path.raw_path == name:
@@ -212,7 +216,9 @@ class StreamHost:
         if source is None and isinstance(path, str):
             operand = request.get("operand")
             source = self.open_input(
-                text_view(path), operand if isinstance(operand, int) else None
+                text_view(path),
+                operand if isinstance(operand, int) else None,
+                request.get("file") is True,
             )
             self.inputs[fd] = source
         if source is None:
@@ -240,7 +246,8 @@ class StreamHost:
         """Write to a file: ``append`` adds to it, otherwise it is emptied
         first, every held write committed before; ``atomic`` replaces it
         whole, once flushed, with what this and later writes carry;
-        ``spool`` writes that spool's bytes and drops it."""
+        ``spool`` writes that spool's bytes past its first ``skip`` and
+        drops it."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         name = str(request["path"])
@@ -268,7 +275,9 @@ class StreamHost:
             if writer is not None and data:
                 await writer.write(data)
             if writer is not None and spool is not None:
-                async for chunk in spool.stream():
+                skip = request.get("skip")
+                offset = skip if isinstance(skip, int) else 0
+                async for chunk in spool.stream(offset):
                     await writer.write(chunk)
         except WALK_ERRORS as exc:
             return Served(_failure(exc))
