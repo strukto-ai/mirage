@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { defineConfig } from 'tsup'
-
-export default defineConfig({
+export const BASE = {
   entry: ['src/index.ts'],
   format: ['esm'],
   dts: {
@@ -25,4 +23,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2022',
-})
+}
+
+export default BASE
