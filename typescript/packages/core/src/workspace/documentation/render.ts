@@ -117,12 +117,41 @@ function runnable(
   return forms(session, words, spec).some((form) => allowed(session, path, form, true))
 }
 
-/** The mount's own commands that change files and that the profile lets run at `path`. */
+/**
+ * Whether the profile lets the mount's own command `name` run at `path`
+ * without changing files, and whether it lets it change them. A command tree
+ * answers leaf by leaf, each by its own `write`.
+ */
+function uses(
+  session: SessionState,
+  mount: MountEntry,
+  path: string,
+  name: string,
+): [boolean, boolean] {
+  const tree = mount.cliFor(name)
+  if (tree === null) {
+    const ok = runnable(session, mount, path, [name])
+    const writes = mount.mayWrite(name)
+    return [ok && !writes, ok && writes]
+  }
+  const leaves = Object.entries(tree.handlers)
+    .filter(([, handler]) => handler.fn !== null)
+    .map(
+      ([verbs, handler]) =>
+        [
+          handler.write,
+          runnable(session, mount, path, [name, ...verbs.split(' ').filter(Boolean)]),
+        ] as const,
+    )
+  return [leaves.some(([write, ok]) => ok && !write), leaves.some(([write, ok]) => ok && write)]
+}
+
+/** The mount's own commands that the profile lets change files at `path`. */
 function writers(session: SessionState, mount: MountEntry, path: string): string[] {
   return Object.keys(mount.commands())
     .filter((n) => !SHARED.has(n))
     .sort(compareCodePoints)
-    .filter((n) => mount.mayWrite(n) && runnable(session, mount, path, [n]))
+    .filter((n) => uses(session, mount, path, n)[1])
 }
 
 function works(mount: MountEntry, change: Change): boolean {
@@ -225,10 +254,14 @@ function supported(
   )
   if (asks.length > 0)
     parts.push(`${listing(asks)} ${agree(asks, 'ask')} ${name} instead of reading a file.`)
+  const offered = (name: string): boolean => {
+    const [reads, writes] = uses(session, mount, path, name)
+    return reads || (writes && mode !== MountMode.READ)
+  }
   const own = Object.keys(mount.commands())
     .filter((n) => !SHARED.has(n))
     .sort(compareCodePoints)
-    .filter((n) => runs([n]))
+    .filter(offered)
     .map(code)
   if (own.length > 0) parts.push(`Also ${listing(own)}.`)
   return parts.join(' ')

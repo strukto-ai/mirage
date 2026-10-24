@@ -60,6 +60,21 @@ function row(markdown: string, section: string, path: string): string {
   return (body.split(`| \`${path}\` | `)[1] ?? '').split(' |\n')[0] ?? ''
 }
 
+function dify(): DifyVFS {
+  return new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
+}
+
+const NOTES = new CLI({
+  spec: new CommandSpec({
+    name: 'notes',
+    subcommands: [new CommandSpec({ name: 'show' }), new CommandSpec({ name: 'add' })],
+  }),
+  handlers: {
+    show: new CLIHandler({ fn: () => null }),
+    add: new CLIHandler({ fn: () => null, write: true }),
+  },
+})
+
 function gdocs(): GDocsVFS {
   return new GDocsVFS({ clientId: 'x', clientSecret: 'y', refreshToken: 'z' })
 }
@@ -120,7 +135,7 @@ describe('vfsMd', () => {
     const markdown = await ws.vfsMd()
     expect(row(markdown, SUPPORTED, '/')).toBe('Almost all Unix commands.')
     expect(row(markdown, SUPPORTED, '/docs')).toBe(
-      'Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv` and `rm`. ' +
+      'Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. ' +
         '`grep -r` and `rg` with `-w` use `gdocs` search.',
     )
     expect(row(markdown, LIMITS, '/data')).toMatch(/^Read only: no command changes files\./)
@@ -133,8 +148,7 @@ describe('vfsMd', () => {
   })
 
   it("names a mount's own commands", async () => {
-    const dify = new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
-    const ws = new Workspace({ '/kb': [dify, MountMode.READ] })
+    const ws = new Workspace({ '/kb': [dify(), MountMode.READ] })
     expect(row(await ws.vfsMd(), SUPPORTED, '/kb')).toMatch(/Also `search`\.$/)
   })
 
@@ -156,8 +170,7 @@ describe('vfsMd', () => {
   })
 
   it('reads read where no command changes files', async () => {
-    const dify = new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
-    const ws = new Workspace({ '/kb': [dify, MountMode.WRITE] }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/kb': [dify(), MountMode.WRITE] }, { mode: MountMode.WRITE })
     const markdown = await ws.vfsMd()
     expect(markdown).toContain('| `/kb` | `dify`, read |')
     expect(row(markdown, LIMITS, '/kb')).toMatch(/^Read only: no command changes files\./)
@@ -274,13 +287,49 @@ describe('vfsMd', () => {
   })
 
   it("counts a writer of the mount's own", async () => {
-    const dify = new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
-    const ws = new Workspace({ '/kb': [dify, MountMode.WRITE] }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/kb': [dify(), MountMode.WRITE] }, { mode: MountMode.WRITE })
     ws.mount('/kb').registerCommands(POST)
     const markdown = await ws.vfsMd()
     expect(markdown).toContain('| `/kb` | `dify`, write |')
     expect(row(markdown, SUPPORTED, '/kb')).toContain('`post`')
     expect(row(markdown, LIMITS, '/kb')).toMatch(/^No Unix command changes files\./)
+  })
+
+  it('names no writer of a read-only mount', async () => {
+    const ws = new Workspace({ '/kb': [dify(), MountMode.READ] })
+    ws.mount('/kb').registerCommands(POST)
+    expect(row(await ws.vfsMd(), SUPPORTED, '/kb')).not.toContain('`post`')
+  })
+
+  it('reads a tree leaf by leaf', async () => {
+    const ws = new Workspace(
+      { '/kb': [dify(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          default: parseSessionProfile({ commands: { allow: ['cat', 'notes show'] } }),
+        },
+      },
+    )
+    ws.mount('/kb').registerCommands([NOTES])
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/kb` | `dify`, read |')
+    expect(row(markdown, SUPPORTED, '/kb')).toContain('`notes`')
+  })
+
+  it('counts unlink as a change', async () => {
+    const ws = new Workspace(
+      { '/docs': [gdocs(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: { default: parseSessionProfile({ commands: { allow: ['cat', 'unlink'] } }) },
+      },
+    )
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/docs` | `gdocs`, write |')
+    expect(row(markdown, SUPPORTED, '/docs')).toBe(
+      'Commands that read files (`cat` and the rest), and `unlink`.',
+    )
   })
 
   it('describes each path shown with its own mode', async () => {
@@ -408,6 +457,7 @@ describe('skillMd', () => {
     '`mkdir`': 'mkdir /m/d',
     '`mv`': 'mv /m/f /m/g',
     '`rm`': 'rm /m/f',
+    '`unlink`': 'unlink /m/f',
     '`rm -r`': 'rm -r /m/d1',
     '`rmdir`': 'rmdir /m/d0',
     '`truncate`': 'truncate -s 0 /m/f',

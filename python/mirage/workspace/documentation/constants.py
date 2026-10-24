@@ -41,6 +41,7 @@ CHANGES = (
     Change("`mkdir`", ("mkdir",), (("mkdir",),)),
     Change("`mv`", ("mv",), (("rename",),)),
     Change("`rm`", ("rm",), (("unlink",),)),
+    Change("`unlink`", ("unlink",), (("unlink",),)),
     Change("`rm -r`", ("rm", "-r"), (("rm_r",), ("unlink", "rmdir"))),
     Change("`rmdir`", ("rmdir",), (("rmdir",),)),
     Change("`truncate`", ("truncate",), (("truncate",),)),

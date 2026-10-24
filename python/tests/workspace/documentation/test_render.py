@@ -51,6 +51,24 @@ async def post(accessor, paths, texts, opts):
     return None, IOResult()
 
 
+NOTES = CLI(
+    CommandSpec(
+        name="notes",
+        subcommands=(CommandSpec(name="show"), CommandSpec(name="add")),
+    ),
+    handlers={
+        "show": CLIHandler(AsyncMock()),
+        "add": CLIHandler(AsyncMock(), write=True),
+    },
+)
+
+
+def dify() -> DifyVFS:
+    return DifyVFS(
+        DifyConfig(api_key="k", base_url="https://dify.test", dataset_id="d")
+    )
+
+
 class TreeCopyVFS(RAMVFS):
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         store = self.accessor.store
@@ -171,8 +189,8 @@ async def test_vfs_md_says_what_each_path_supports():
     assert row(markdown, supported, "/") == "Almost all Unix commands."
     assert row(markdown, supported, "/docs") == (
         "Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and "
-        "the rest), and `mv` and `rm`. `grep -r` and `rg` with `-w` use "
-        "`gdocs` search."
+        "the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` "
+        "use `gdocs` search."
     )
     assert row(markdown, limits, "/data").startswith(
         "Read only: no command changes files."
@@ -330,10 +348,7 @@ async def test_vfs_md_names_no_search_whose_whole_word_form_is_denied():
 
 @pytest.mark.asyncio
 async def test_vfs_md_counts_a_writer_of_the_mounts_own():
-    dify = DifyVFS(
-        DifyConfig(api_key="k", base_url="https://dify.test", dataset_id="d")
-    )
-    ws = Workspace({"/kb": (dify, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws = Workspace({"/kb": (dify(), MountMode.WRITE)}, mode=MountMode.WRITE)
     ws.mount("/kb").register_commands([post])
     markdown = await ws.vfs_md()
     assert "| `/kb` | `dify`, write |" in markdown
@@ -343,6 +358,46 @@ async def test_vfs_md_counts_a_writer_of_the_mounts_own():
     assert row(
         markdown, "## Limitations of Unix Commands for VFS", "/kb"
     ).startswith("No Unix command changes files.")
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_names_no_writer_of_a_read_only_mount():
+    ws = Workspace({"/kb": (dify(), MountMode.READ)})
+    ws.mount("/kb").register_commands([post])
+    markdown = await ws.vfs_md()
+    assert "`post`" not in row(
+        markdown, "## Supported Unix Commands for VFS", "/kb"
+    )
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_reads_a_tree_leaf_by_leaf():
+    ws = Workspace(
+        {"/kb": (dify(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"allow": ["cat", "notes show"]}}},
+    )
+    ws.mount("/kb").register_commands([NOTES])
+    markdown = await ws.vfs_md()
+    assert "| `/kb` | `dify`, read |" in markdown
+    assert "`notes`" in row(
+        markdown, "## Supported Unix Commands for VFS", "/kb"
+    )
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_counts_unlink_as_a_change():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"allow": ["cat", "unlink"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert "| `/docs` | `gdocs`, write |" in markdown
+    assert row(markdown, "## Supported Unix Commands for VFS", "/docs") == (
+        "Commands that read files (`cat` and the rest), and `unlink`."
+    )
 
 
 @pytest.mark.asyncio
@@ -477,6 +532,7 @@ RUNS = {
     "`mkdir`": "mkdir /m/d",
     "`mv`": "mv /m/f /m/g",
     "`rm`": "rm /m/f",
+    "`unlink`": "unlink /m/f",
     "`rm -r`": "rm -r /m/d1",
     "`rmdir`": "rmdir /m/d0",
     "`truncate`": "truncate -s 0 /m/f",

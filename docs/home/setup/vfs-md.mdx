@@ -80,7 +80,7 @@ path. What changes files depends on what the path's VFS can do:
 | `cp -r` | `mkdir`, and `write` or `copy`; or `copy` and `dir_copy` |
 | `mkdir` | `mkdir` |
 | `mv` | `rename` |
-| `rm` | `unlink` |
+| `rm`, `unlink` | `unlink` |
 | `rm -r` | `rm_r`, or `unlink` and `rmdir` |
 | `rmdir` | `rmdir` |
 | `truncate` | `truncate`, or `write` |

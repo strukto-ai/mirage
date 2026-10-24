@@ -43,6 +43,7 @@ export const CHANGES: readonly Change[] = [
   { label: '`mkdir`', command: ['mkdir'], needs: [['mkdir']] },
   { label: '`mv`', command: ['mv'], needs: [['rename']] },
   { label: '`rm`', command: ['rm'], needs: [['unlink']] },
+  { label: '`unlink`', command: ['unlink'], needs: [['unlink']] },
   { label: '`rm -r`', command: ['rm', '-r'], needs: [['rm_r'], ['unlink', 'rmdir']] },
   { label: '`rmdir`', command: ['rmdir'], needs: [['rmdir']] },
   { label: '`truncate`', command: ['truncate'], needs: [['truncate']] },

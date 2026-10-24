@@ -147,9 +147,41 @@ def runnable(
     )
 
 
+def uses(
+    session: SessionState, mount: MountEntry, path: str, name: str
+) -> tuple[bool, bool]:
+    """Whether the profile lets the mount's own command ``name`` run at
+    ``path`` without changing files, and whether it lets it change them.
+    A command tree answers leaf by leaf, each by its own ``write``.
+
+    Args:
+        session (SessionState): the session the document is for.
+        mount (MountEntry): the mount holding ``path``.
+        path (str): the path described.
+        name (str): the command.
+    """
+    tree = mount.cli_for(name)
+    if tree is None:
+        ok = runnable(session, mount, path, (name,))
+        writes = mount.may_write(name)
+        return ok and not writes, ok and writes
+    leaves = [
+        (
+            handler.write,
+            runnable(session, mount, path, (name, *verbs.split())),
+        )
+        for verbs, handler in tree.handlers.items()
+        if handler.fn is not None
+    ]
+    return (
+        any(ok and not write for write, ok in leaves),
+        any(ok and write for write, ok in leaves),
+    )
+
+
 def writers(session: SessionState, mount: MountEntry, path: str) -> list[str]:
-    """The mount's own commands that change files and that the profile
-    lets run at ``path``.
+    """The mount's own commands that the profile lets change files at
+    ``path``.
 
     Args:
         session (SessionState): the session the document is for.
@@ -159,7 +191,7 @@ def writers(session: SessionState, mount: MountEntry, path: str) -> list[str]:
     return [
         name
         for name in sorted(set(mount.commands()) - SHARED)
-        if mount.may_write(name) and runnable(session, mount, path, (name,))
+        if uses(session, mount, path, name)[1]
     ]
 
 
@@ -286,8 +318,13 @@ def supported(
             f"{listing(asks)} {agree(asks, 'ask')} {name} instead of "
             "reading a file."
         )
+
+    def offered(name: str) -> bool:
+        reads, writes = uses(session, mount, path, name)
+        return reads or (writes and mode != MountMode.READ)
+
     own = [
-        code(n) for n in sorted(set(mount.commands()) - SHARED) if runs((n,))
+        code(n) for n in sorted(set(mount.commands()) - SHARED) if offered(n)
     ]
     if own:
         parts.append(f"Also {listing(own)}.")
