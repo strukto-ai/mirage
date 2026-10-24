@@ -268,3 +268,27 @@ def test_a_clock_behind_restored_history_does_not_reorder_it():
     asyncio.run(restored.load_events(snapshot))
     asyncio.run(restored.log_clear("s"))
     assert asyncio.run(restored.session_command_events("s")) == []
+
+
+class _NoScanStore(RAMObserverStore):
+    async def read_all(self) -> dict[str, bytes]:
+        raise AssertionError("read every session's history")
+
+
+def test_the_floor_reads_only_the_entry_s_session():
+    store = _NoScanStore()
+    first = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    asyncio.run(first.log_command_text("a", session="s"))
+    asyncio.run(first.log_command_text("x", session="t"))
+    reopened = Observer(store=store, clock=ManualClock())
+    asyncio.run(reopened.log_clear("s"))
+    assert asyncio.run(reopened.session_command_events("s")) == []
+    shown = asyncio.run(reopened.session_command_events("t"))
+    assert [e["command"] for e in shown] == ["x"]
+
+
+def test_an_empty_history_sets_no_floor():
+    obs = Observer(clock=ManualClock(start=-1.0))
+    asyncio.run(obs.log_command_text("a", session="s"))
+    events = asyncio.run(obs.events())
+    assert [e["timestamp"] for e in events] == [-1000]

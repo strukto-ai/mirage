@@ -265,4 +265,26 @@ describe('a clock behind stored history', () => {
     await restored.logClear('s')
     expect(await restored.sessionCommandEvents('s')).toEqual([])
   })
+
+  it('reads only the entry session for the floor', async () => {
+    class NoScanStore extends RAMObserverStore {
+      override readAll(): Promise<Map<string, Uint8Array>> {
+        return Promise.reject(new Error("read every session's history"))
+      }
+    }
+    const store = new NoScanStore()
+    const first = new Observer(store, new ManualClock(NEW_YEAR))
+    await first.logCommandText('a', 's')
+    await first.logCommandText('x', 't')
+    const reopened = new Observer(store, new ManualClock())
+    await reopened.logClear('s')
+    expect(await reopened.sessionCommandEvents('s')).toEqual([])
+    expect((await reopened.sessionCommandEvents('t')).map((e) => e.command)).toEqual(['x'])
+  })
+
+  it('sets no floor for an empty history', async () => {
+    const o = new Observer(undefined, new ManualClock(-1))
+    await o.logCommandText('a', 's')
+    expect((await o.events()).map((e) => e.timestamp)).toEqual([-1000])
+  })
 })
