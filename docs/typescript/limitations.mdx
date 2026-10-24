@@ -244,9 +244,7 @@ only the central directory or selected members.
 Streaming bounds payload memory in supported host packages; it does not make
 every algorithm constant-memory. A single large record, archive metadata,
 AWK arrays, regex `tac`, `diff`/`patch` and `jq --slurp` retain their algorithmic
-working data. Whole-byte results still collect output. Custom whole-byte
-compression codecs also retain their buffering behavior; the Node XZ and
-bzip2 decoders use incremental codecs.
+working data. Whole-byte results still collect output.
 
 The standard `rg` engine on Python, Node and Browser limits requested scratch
 storage for each search to 64 MiB. This covers both state tables, their capture rows,

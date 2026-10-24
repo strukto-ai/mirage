@@ -32,11 +32,6 @@ STRTOD = re.compile(
     r"|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))"
 )
 
-# The binary128 long double strtold rounds to: a value from 2**16384 -
-# 2**16270 up (LDBL_MAX plus half its ulp, a tie rounding to the even
-# infinity) overflows.
-LONG_DOUBLE_OVERFLOW = ((1 << 114) - 1) << 16270
-
 
 def strtod_whole(text: str) -> re.Match[str] | None:
     """A STRTOD match spanning the whole word, as xstrtod demands, or None.

@@ -169,6 +169,40 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "cmp_n_past_32_bits_still_compares",
+      "seq": 601148,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cmp -n 4294967296 /data/a.txt /data/b.txt; echo rc=$?; cmp -n 4294967297 /data/a.txt /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt /data/b.txt differ: char 1, line 1\nrc=1\nrc=0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

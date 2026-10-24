@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compareCodePoints } from '../../../utils/sort.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -20,14 +19,13 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin } from '../utils/stream.ts'
-import { recordSeparator } from '../utils/lines.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
+import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
+import { byteView, encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 // comm's options; `checkOrder` is the later of --check-order and
 // --nocheck-order, null when neither was given.
@@ -74,106 +72,49 @@ export function commGeneric(
   const shared = new AsyncLineIterator(ctx.stdin ?? new Uint8Array())
   const reader = (p: PathSpec): AsyncLineIterator =>
     isStdin(p) ? shared : new AsyncLineIterator(read(p))
+  const readers: [AsyncLineIterator, AsyncLineIterator] = [reader(p1), reader(p2)]
   const io = new IOResult()
-  return [commStream([reader(p1), reader(p2)], io, parsed, [p1, p2]), io]
+  return [commStream(parsed, readers, io, [p1, p2]), io]
 }
 
 /**
- * Merge the two inputs, checking each one's order as GNU comm does.
- *
- * Each newly read line is checked against its file's previous one: always
- * under --check-order, where the first disorder ends the run, never under
- * --nocheck-order, and by default only once a line unique to one file has
- * printed, warning once per file and closing with `input is not in sorted
- * order`. Both exit 1. A failed read ends the run too, named for its
- * operand; two `-` operands share one stdin reader, and GNU, closing stdin
- * twice, ends with `comm: -: Bad file descriptor`, exit 1, before --total.
+ * Run comm's merge over the two inputs; a failed read ends the run, named
+ * for its operand after what comm already printed to stderr. Mirrors
+ * Python's _comm_stream.
  */
 async function* commStream(
+  flags: CommFlags,
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   io: IOResult,
-  flags: CommFlags,
   paths: readonly [PathSpec, PathSpec],
 ): AsyncIterable<Uint8Array> {
-  const separator = recordSeparator(flags.zeroTerminated)
-  const lines: [string | null, string | null] = [null, null]
-  const warned = [false, false]
-  const counts = [0, 0, 0]
-  const errors: string[] = []
-  const suppressed = [flags.suppress1, flags.suppress2, flags.suppress3]
-  let unpairable = false
-  // Read file WHICH's next line; whether its order ends the run.
-  async function pull(which: 0 | 1): Promise<boolean> {
-    let raw: Uint8Array | null
-    try {
-      raw = await readers[which].readline(undefined, separator)
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      errors.push(fsErrorLine('comm', paths[which], error))
-      io.stderr = ENC.encode(errors.join(''))
-      io.exitCode = 1
-      return true
-    }
-    const before = lines[which]
-    const line = raw === null ? null : DEC.decode(raw)
-    lines[which] = line
-    if (
-      flags.checkOrder === false ||
-      !(flags.checkOrder === true || unpairable) ||
-      warned[which] === true ||
-      line === null ||
-      before === null ||
-      compareCodePoints(line, before) >= 0
-    )
-      return false
-    warned[which] = true
-    errors.push(`comm: file ${String(which + 1)} is not in sorted order\n`)
-    io.stderr = ENC.encode(errors.join(''))
-    io.exitCode = 1
-    return flags.checkOrder === true
+  const stream = await openStream('comm', {
+    suppress: [flags.suppress1, flags.suppress2, flags.suppress3],
+    check_order: flags.checkOrder,
+    delimiter: byteView(flags.outputDelimiter),
+    total: flags.total,
+    zero_terminated: flags.zeroTerminated,
+    shared: readers[0] === readers[1],
+    stdin_twice: paths[0].rawPath === '-' && paths[1].rawPath === '-',
+  })
+  let failed: 0 | 1 = 0
+  const pull = (which: number): Promise<Uint8Array | null> => {
+    failed = which === 0 ? 0 : 1
+    return readers[failed].readChunk()
   }
+  let error = ''
   try {
-    if ((await pull(0)) || (await pull(1))) return
-    for (;;) {
-      const [left, right] = lines
-      if (left === null && right === null) break
-      const column =
-        right === null || (left !== null && compareCodePoints(left, right) < 0)
-          ? 1
-          : left === null || compareCodePoints(right, left) < 0
-            ? 2
-            : 3
-      unpairable ||= column !== 3
-      const text = column === 2 ? right : left
-      counts[column - 1] = (counts[column - 1] ?? 0) + 1
-      if (!suppressed[column - 1])
-        yield ENC.encode(
-          flags.outputDelimiter.repeat(
-            suppressed.slice(0, column - 1).filter((hidden) => !hidden).length,
-          ) +
-            (text ?? '') +
-            String.fromCharCode(separator),
-        )
-      if (column !== 2 && (await pull(0))) return
-      if (column !== 1 && (await pull(1))) return
-    }
-    if (paths.every((p) => p.rawPath === '-')) {
-      errors.push('comm: -: Bad file descriptor\n')
-      io.stderr = ENC.encode(errors.join(''))
-      io.exitCode = 1
-      return
-    }
-    if (flags.total)
-      yield ENC.encode(
-        [...counts.filter((_, i) => !suppressed[i]).map(String), 'total'].join(
-          flags.outputDelimiter,
-        ) + String.fromCharCode(separator),
-      )
-    if (warned.includes(true)) {
-      errors.push('comm: input is not in sorted order\n')
-      io.stderr = ENC.encode(errors.join(''))
+    try {
+      yield* mergeOutput(stream, pull)
+    } catch (caught) {
+      if (!isFsError(caught)) throw caught
+      error = fsErrorLine('comm', paths[failed], caught)
     }
   } finally {
+    const stderr = concat([stream.takeStderr(), encodeText(error)])
+    io.stderr = stderr.byteLength > 0 ? stderr : null
+    io.exitCode = error === '' ? stream.status() : 1
+    await closeStream(stream)
     for (const reader of new Set(readers)) await reader.discard()
   }
 }

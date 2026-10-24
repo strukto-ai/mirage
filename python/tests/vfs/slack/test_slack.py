@@ -51,7 +51,7 @@ def test_vfs_commands_registered(config):
     # 71 native (the whole generic factory set, whose writers answer
     # ENOTSUP at the op Slack lacks, + md5sum/sha1sum/sha384sum/sha512sum);
     # acting on Slack moved to the slack CLI
-    assert len(mount_commands(vfs)) == 71
+    assert len(mount_commands(vfs)) == 73
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,10 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { closeStream, openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import type { JsonValue } from '../../../types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
@@ -23,7 +27,6 @@ import { formatFsError } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
 import { CMP_SIZE_UNITS, INTMAX, SUFFIXED_COUNT_PATTERN } from '../constants.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
-import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { parseBase0 } from '../utils/size_suffix.ts'
 import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
@@ -33,11 +36,6 @@ import { UsageError } from '../../errors.ts'
 const ENC = new TextEncoder()
 
 const TRY_HELP = `\n${usageHint(CommandName.CMP)}`
-const NEWLINE = 0x0a
-
-function octal(n: number, width = 0): string {
-  return n.toString(8).padStart(width)
-}
 
 /**
  * One GNU `cmp` byte count, read the way diffutils 3.10 reads it.
@@ -90,20 +88,6 @@ export function parseSkip(raw: string): [number, number] {
   ]
 }
 
-/**
- * One byte rendered the way GNU `cmp -b` renders it.
- *
- * The cat -v alphabet: a control byte becomes `^X` (so tab is `^I`,
- * unlike `cat -v` itself), DEL becomes `^?`, and a high byte becomes
- * `M-` followed by the same rules on its low seven bits.
- */
-export function visible(byte: number): string {
-  if (byte >= 128) return `M-${visible(byte - 128)}`
-  if (byte === 127) return '^?'
-  if (byte < 32) return `^${String.fromCharCode(byte + 64)}`
-  return String.fromCharCode(byte)
-}
-
 interface CmpFlags {
   readonly silent: boolean
   readonly verbose: boolean
@@ -130,52 +114,6 @@ function parseFlags(fl: FlagView): CmpFlags {
 }
 
 /**
- * GNU's `EOF on FILE` diagnostic for a common-prefix difference.
- *
- * It is a diagnostic, not output: GNU writes it to stderr and still
- * exits 1. A shorter file with no bytes to compare is `which is empty`.
- * Otherwise `-l` reports the byte only, and every other mode adds the
- * line: `line N` when the file ends on a newline, `in line N` when it
- * ends inside line N. `held` is how many bytes the shorter file had past
- * its skip, `lines` the newlines among them and `last` the last of them,
- * -1 for none. Mirrors Python's _eof_error.
- */
-function eofError(
-  shorter: string,
-  held: number,
-  lines: number,
-  last: number,
-  verbose: boolean,
-): Uint8Array {
-  if (held === 0) return ENC.encode(`cmp: EOF on ${shorter} which is empty\n`)
-  let msg = `cmp: EOF on ${shorter} after byte ${String(held)}`
-  if (!verbose) {
-    msg += last === NEWLINE ? `, line ${String(lines)}` : `, in line ${String(lines + 1)}`
-  }
-  return ENC.encode(`${msg}\n`)
-}
-
-function newlines(data: Uint8Array): number {
-  let count = 0
-  for (const byte of data) if (byte === NEWLINE) count += 1
-  return count
-}
-
-/**
- * The width GNU `cmp -l` pads its offset column to.
- *
- * GNU sizes the column for the largest offset it could print: the `-n`
- * limit, cut to the bytes left in each regular file after its skip. A
- * stream has no size to cut by, so a line comparing two of them pads to
- * the width of the largest file offset.
- */
-function offsetWidth(sizes: readonly number[], limit: number | null): number {
-  let most = limit !== null ? BigInt(limit) : INTMAX
-  for (const size of sizes) if (BigInt(size) < most) most = BigInt(size)
-  return String(most > 0n ? most : 0n).length
-}
-
-/**
  * The skips cmp's SKIP1 and SKIP2 operands give, beside -i's.
  *
  * Each is read as -i reads its counts, and each file keeps the larger of the
@@ -196,53 +134,28 @@ export function operandSkips(
   return skips
 }
 
-interface Compared {
-  readonly silent: boolean
-  readonly verbose: boolean
-  readonly limit: number | null
-  readonly printBytes: boolean
-}
-
-/** One operand's bytes as cmp pulls them, a chunk at a time. Mirrors Python's
- * _Operand. */
+/** One operand's bytes as cmp pulls them, its first chunk read on open,
+ * which is where an unreadable operand fails. Mirrors Python's _Operand. */
 class Operand {
-  held: Uint8Array = new Uint8Array()
+  private held: Uint8Array | null = null
   private readonly source: AsyncIterator<Uint8Array>
 
   constructor(source: Uint8Array | AsyncIterable<Uint8Array>, signal?: AbortSignal) {
     this.source = chunks(source, signal)
   }
 
-  /** Hold the next chunk when none is held; false at the end. */
-  async pull(): Promise<boolean> {
-    if (this.held.byteLength === 0) {
-      const next = await this.source.next()
-      if (next.done !== true) this.held = next.value
-    }
-    return this.held.byteLength > 0
+  async open(): Promise<void> {
+    const next = await this.source.next()
+    this.held = next.done === true ? new Uint8Array() : next.value
   }
 
-  /** Drop the first `count` bytes. */
-  async skip(count: number): Promise<void> {
-    let left = count
-    while (left > 0 && (await this.pull())) {
-      const dropped = Math.min(left, this.held.byteLength)
-      this.held = this.held.subarray(dropped)
-      left -= dropped
-    }
-  }
-
-  /** What is left, up to `limit` bytes. */
-  async rest(limit: number | null): Promise<Uint8Array> {
-    const parts: Uint8Array[] = []
-    let left = limit
-    while ((left === null || left > 0) && (await this.pull())) {
-      const part = left === null ? this.held : this.held.subarray(0, left)
-      this.held = this.held.subarray(part.byteLength)
-      parts.push(part)
-      if (left !== null) left -= part.byteLength
-    }
-    return concat(parts)
+  /** The next chunk, null at the end. */
+  async next(): Promise<Uint8Array | null> {
+    const held = this.held
+    this.held = null
+    if (held !== null) return held.byteLength > 0 ? held : null
+    const next = await this.source.next()
+    return next.done === true ? null : next.value
   }
 
   async close(): Promise<void> {
@@ -281,124 +194,42 @@ async function sizesDiffer(
   return a !== b && (limit === null || Math.min(a, b) < limit)
 }
 
-/** GNU's `differ:` line for the first byte the files disagree on, at offset
- * `at` from the skip (from 0) on line `line`. Mirrors Python's _differ. */
-function differ(
-  names: readonly [string, string],
-  at: number,
-  line: number,
-  a: number,
-  b: number,
-  printBytes: boolean,
-): [ByteSource | null, IOResult] {
-  // GNU counts in `byte` under -b and in `char` otherwise, on the same
-  // offset -- the word tracks the flag, not a unit.
-  const unit = printBytes ? 'byte' : 'char'
-  let msg = `${names[0]} ${names[1]} differ: ${unit} ${String(at + 1)}, line ${String(line)}`
-  if (printBytes) msg += ` is ${octal(a, 3)} ${visible(a)} ${octal(b, 3)} ${visible(b)}`
-  return [formatRecords([msg]), new IOResult({ exitCode: 1 })]
-}
-
-/** cmp's answer without -l, read only to the first difference. Mirrors
- * Python's _streamed. */
-async function streamed(
-  first: Operand,
-  second: Operand,
-  names: readonly [string, string],
-  parsed: Compared,
+/**
+ * cmp's answer for two opened operands: the mirage-rs stream skips, compares
+ * and words it, and asks for the operand it needs next, so without -l the
+ * reads stop at the first difference. Mirrors Python's _compare.
+ */
+async function compare(
+  operands: readonly [Operand, Operand],
+  config: Readonly<Record<string, JsonValue>>,
+  signal?: AbortSignal,
 ): Promise<[ByteSource | null, IOResult]> {
-  const { silent, limit } = parsed
-  let compared = 0
-  let lines = 0
-  let last = -1
-  while (limit === null || compared < limit) {
-    const more1 = await first.pull()
-    const more2 = await second.pull()
-    if (!more1 && !more2) return [null, new IOResult()]
-    if (!more1 || !more2) {
-      if (silent) return [null, new IOResult({ exitCode: 1 })]
-      const shorter = more1 ? names[1] : names[0]
-      return [
-        null,
-        new IOResult({ exitCode: 1, stderr: eofError(shorter, compared, lines, last, false) }),
-      ]
+  const stream = await openStream('cmp', config)
+  const budget = new YieldBudget(signal)
+  const out: Uint8Array[] = []
+  const drain = async (): Promise<void> => {
+    while (stream.busy()) {
+      await budget.run()
+      out.push(stream.drain())
     }
-    let count = Math.min(first.held.byteLength, second.held.byteLength)
-    if (limit !== null) count = Math.min(count, limit - compared)
-    const a = first.held.subarray(0, count)
-    const b = second.held.subarray(0, count)
-    for (let at = 0; at < count; at++) {
-      if (a[at] === b[at]) continue
-      if (silent) return [null, new IOResult({ exitCode: 1 })]
-      const line = 1 + lines + newlines(a.subarray(0, at))
-      return differ(names, compared + at, line, a[at] ?? 0, b[at] ?? 0, parsed.printBytes)
+  }
+  try {
+    for (let index = stream.wants(); index !== null; index = stream.wants()) {
+      const chunk = await operands[index]?.next()
+      out.push(chunk == null ? stream.endInput(index) : stream.feedInput(index, chunk))
+      await drain()
     }
-    compared += count
-    lines += newlines(a)
-    last = a[count - 1] ?? -1
-    first.held = first.held.subarray(count)
-    second.held = second.held.subarray(count)
+    out.push(stream.finish())
+    await drain()
+    const stdout = concat(out)
+    const stderr = stream.takeStderr()
+    return [
+      stdout.byteLength > 0 ? stdout : null,
+      new IOResult({ exitCode: stream.status(), stderr: stderr.byteLength > 0 ? stderr : null }),
+    ]
+  } finally {
+    await closeStream(stream)
   }
-  return [null, new IOResult()]
-}
-
-/** cmp's answer for two inputs past their skips: read to the first
- * difference, or with -l, which lists every one, to the end. `piped` says
- * whether each is stdin, which has no size to width -l's offset column.
- * Mirrors Python's _answered. */
-async function answered(
-  first: Operand,
-  second: Operand,
-  names: readonly [string, string],
-  piped: readonly [boolean, boolean],
-  parsed: Compared,
-): Promise<[ByteSource | null, IOResult]> {
-  if (!parsed.verbose) return await streamed(first, second, names, parsed)
-  const data1 = await first.rest(parsed.limit)
-  const data2 = await second.rest(parsed.limit)
-  const sizes = [data1, data2].filter((_, i) => !piped[i]).map((data) => data.byteLength)
-  return listed(data1, data2, names, sizes, parsed)
-}
-
-/** cmp -l's answer for two inputs read past their skips and within `-n`: a
- * row for every byte they differ on. Mirrors Python's _listed. */
-function listed(
-  data1: Uint8Array,
-  data2: Uint8Array,
-  names: readonly [string, string],
-  sizes: readonly number[],
-  parsed: Compared,
-): [ByteSource | null, IOResult] {
-  const common = Math.min(data1.byteLength, data2.byteLength)
-  let same = data1.byteLength === data2.byteLength
-  for (let idx = 0; same && idx < common; idx++) if (data1[idx] !== data2[idx]) same = false
-  if (same) return [null, new IOResult()]
-  if (parsed.silent) return [null, new IOResult({ exitCode: 1 })]
-  const width = offsetWidth(sizes, parsed.limit)
-  const outLines: string[] = []
-  for (let idx = 0; idx < common; idx++) {
-    const a = data1[idx] ?? 0
-    const b = data2[idx] ?? 0
-    if (a === b) continue
-    let row = `${String(idx + 1).padStart(width)} ${octal(a, 3)}`
-    if (parsed.printBytes) row += ` ${visible(a).padEnd(4)}`
-    row += ` ${octal(b, 3)}`
-    if (parsed.printBytes) row += ` ${visible(b)}`
-    outLines.push(row)
-  }
-  if (data1.byteLength === data2.byteLength) {
-    return [formatRecords(outLines), new IOResult({ exitCode: 1 })]
-  }
-  const firstShorter = data1.byteLength < data2.byteLength
-  const held = firstShorter ? data1 : data2
-  const stderr = eofError(
-    firstShorter ? names[0] : names[1],
-    held.byteLength,
-    0,
-    held[held.byteLength - 1] ?? -1,
-    true,
-  )
-  return [formatRecords(outLines), new IOResult({ exitCode: 1, stderr })]
 }
 
 /**
@@ -419,7 +250,8 @@ async function oneStdinTwice(
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
   p: PathSpec,
   skip: readonly [number, number],
-  parsed: Compared,
+  parsed: CmpFlags,
+  options: Readonly<Record<string, JsonValue>>,
 ): Promise<[ByteSource | null, IOResult]> {
   if (skip[0] === skip[1] || skip[1] === 0) return [null, new IOResult()]
   const data = await materialize(read(p))
@@ -432,12 +264,9 @@ async function oneStdinTwice(
       return [null, new IOResult({ exitCode: 1 })]
     }
   }
-  const [out, io] = await answered(
-    new Operand(data.slice(skip[0] + skip[1])),
-    new Operand(new Uint8Array()),
-    ['-', '-'],
-    [true, true],
-    parsed,
+  const [out, io] = await compare(
+    [new Operand(data.slice(skip[0] + skip[1])), new Operand(new Uint8Array())],
+    { ...options, names: ['-', '-'], piped: [true, true], skip: [0, 0] },
   )
   const held = io.stderr === null ? new Uint8Array() : await materialize(io.stderr)
   const tail = ENC.encode('cmp: -: Bad file descriptor\n')
@@ -470,8 +299,13 @@ export async function cmpGeneric(
   // A lone FILE1 is compared with stdin, which GNU names `-`.
   const p1 = paths[1] ?? STDIN_OPERAND
   const read = stdinStream(stream, ctx.stdin, true)
-  if (isStdin(p0) && isStdin(p1)) return oneStdinTwice(read, p0, skip, parsed)
-  const names = [p0.rawPath, p1.rawPath] as const
+  const options: Readonly<Record<string, JsonValue>> = {
+    silent: parsed.silent,
+    verbose: parsed.verbose,
+    limit: parsed.limit,
+    print_bytes: parsed.printBytes,
+  }
+  if (isStdin(p0) && isStdin(p1)) return oneStdinTwice(read, p0, skip, parsed, options)
   const same = p0.virtual === p1.virtual && skip[0] === skip[1]
   if (
     parsed.silent &&
@@ -494,7 +328,7 @@ export async function cmpGeneric(
       const operand = new Operand(read(p), ctx.signal)
       operands.push(operand)
       try {
-        await operand.pull()
+        await operand.open()
       } catch (err) {
         if (isEisdir(err)) {
           unread ??= err
@@ -508,10 +342,16 @@ export async function cmpGeneric(
     if (same) return [null, new IOResult()]
     if (unread !== null)
       return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', unread, paths) })]
-    const [first, second] = operands as [Operand, Operand]
-    await first.skip(skip[0])
-    await second.skip(skip[1])
-    return await answered(first, second, names, [isStdin(p0), isStdin(p1)], parsed)
+    return await compare(
+      operands as [Operand, Operand],
+      {
+        ...options,
+        names: [byteView(p0.rawPath), byteView(p1.rawPath)],
+        piped: [isStdin(p0), isStdin(p1)],
+        skip: [skip[0], skip[1]],
+      },
+      ctx.signal,
+    )
   } finally {
     for (const operand of operands) await operand.close()
   }

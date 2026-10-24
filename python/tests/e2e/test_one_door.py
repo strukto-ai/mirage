@@ -111,8 +111,8 @@ ROWS: dict[str, str] = {
     **{
         name: f"{name} /t/a.txt"
         for name in (
-            "base64 expand fmt md5 md5sum nl rev sha1sum sha256sum sha384sum"
-            " sha512sum strings tac unexpand uniq wc xxd"
+            "b2sum base64 expand fmt md5 md5sum nl rev sha1sum sha224sum"
+            " sha256sum sha384sum sha512sum strings tac unexpand uniq wc xxd"
         ).split()
     },
     "awk": "awk '{print $1}' /t/a.txt",

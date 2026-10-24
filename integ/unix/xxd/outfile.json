@@ -169,6 +169,43 @@
         "stdout": "[A]\n[ABC]\n[AC]\n[]\n[AB]\n[]\n[]\n[A]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "xxd_reverse_of_an_empty_dump_creates_an_empty_outfile",
+      "seq": 963231,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '' | xxd -r - /data/xxd_empty_new; echo rc=$?; wc -c < /data/xxd_empty_new; rm /data/xxd_empty_new",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "r"
+      ]
     }
   ]
 }

@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Stream, StreamError, parse_config};
 
+mod bz2;
+mod xz;
+
 const INPUT: usize = 16 * 1024;
 const OUTPUT: usize = 64 * 1024;
 const EOF: &str = "\ngzip: {}: unexpected end of file";
@@ -13,6 +16,8 @@ const CORRUPT: &str = "\ngzip: {}: invalid compressed data--format violated";
 enum Format {
     Gzip,
     Raw,
+    Bzip2,
+    Xz,
 }
 
 #[derive(Deserialize)]
@@ -48,13 +53,194 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             if !(-1..=9).contains(&level) {
                 return Err(StreamError::new("invalid compression level"));
             }
-            Ok(Box::new(Encoder::new(format, level, name)))
+            Ok(match format {
+                Format::Bzip2 => Box::new(Packer::new(bz2::Encoder::new(level))),
+                Format::Xz => Box::new(Packer::new(xz::Encoder::new(level)?)),
+                _ => Box::new(Encoder::new(format, level, name)),
+            })
         }
         Config::Decode {
             format,
             test,
             passthrough,
-        } => Ok(Box::new(Decoder::new(format, test, passthrough))),
+        } => Ok(match format {
+            Format::Bzip2 => Box::new(Unpacker::new(bz2::Decoder::new())),
+            Format::Xz => Box::new(Unpacker::new(xz::Decoder::new())),
+            _ => Box::new(Decoder::new(format, test, passthrough)),
+        }),
+    }
+}
+
+/// What one call into a codec past gzip did: the input it consumed, the
+/// output it wrote, and whether its data ended or failed there.
+#[derive(Default)]
+struct Step {
+    consumed: usize,
+    produced: usize,
+    ended: bool,
+    failure: Option<Failure>,
+}
+
+/// A decoder whose failures are its program's own lines. With `eof` no
+/// input follows `input`, and a call that can make no progress then ends
+/// or fails.
+trait Unpack: Send + Sync {
+    fn unpack(&mut self, input: &[u8], output: &mut [u8], eof: bool) -> Step;
+}
+
+/// An encoder; with `eof` it flushes and ends its data.
+trait Pack: Send + Sync {
+    fn pack(&mut self, input: &[u8], output: &mut [u8], eof: bool) -> Result<Step, StreamError>;
+}
+
+/// The bounded stream over an `Unpack`: a feed is held and decoded a window
+/// of output per call, and a failure is reported as gzip's is.
+struct Unpacker<U> {
+    codec: U,
+    input: Vec<u8>,
+    at: usize,
+    eof: bool,
+    again: bool,
+    ended: bool,
+    failure: Option<Failure>,
+    reported: bool,
+}
+
+impl<U: Unpack> Unpacker<U> {
+    fn new(codec: U) -> Self {
+        Self {
+            codec,
+            input: Vec::new(),
+            at: 0,
+            eof: false,
+            again: false,
+            ended: false,
+            failure: None,
+            reported: false,
+        }
+    }
+
+    fn step(&mut self, out: &mut Vec<u8>) {
+        let mut output = [0; OUTPUT];
+        let step = self
+            .codec
+            .unpack(&self.input[self.at..], &mut output, self.eof);
+        self.at += step.consumed;
+        out.extend_from_slice(&output[..step.produced]);
+        self.again = step.produced == OUTPUT;
+        self.ended = step.ended || step.failure.is_some();
+        self.failure = step.failure;
+        if self.at == self.input.len() || self.ended {
+            self.input.clear();
+            self.at = 0;
+        }
+    }
+}
+
+impl<U: Unpack> Stream for Unpacker<U> {
+    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if input.len() > INPUT || self.busy() {
+            return Err(StreamError::new(
+                "compression input must be bounded and drained",
+            ));
+        }
+        if !self.ended {
+            self.input.extend_from_slice(input);
+            self.step(out);
+        }
+        Ok(())
+    }
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.eof = true;
+        if !self.ended {
+            self.step(out);
+        }
+        Ok(())
+    }
+    fn busy(&self) -> bool {
+        !self.ended && (self.at < self.input.len() || self.again || self.eof)
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if !self.ended {
+            self.step(out);
+        }
+        Ok(())
+    }
+    fn done(&self) -> bool {
+        self.ended
+    }
+    fn status(&self) -> i32 {
+        self.failure.as_ref().map_or(0, |f| f.exit_code)
+    }
+    fn take_stderr(&mut self, out: &mut Vec<u8>) {
+        if let Some(failure) = self.failure.as_ref().filter(|_| !self.reported) {
+            serde_json::to_writer(out, failure).expect("codec failure serializes");
+            self.reported = true;
+        }
+    }
+}
+
+/// The bounded stream over a `Pack`, a window of output per call.
+struct Packer<P> {
+    codec: P,
+    input: Vec<u8>,
+    at: usize,
+    eof: bool,
+    again: bool,
+    ended: bool,
+}
+
+impl<P: Pack> Packer<P> {
+    fn new(codec: P) -> Self {
+        Self {
+            codec,
+            input: Vec::new(),
+            at: 0,
+            eof: false,
+            again: false,
+            ended: false,
+        }
+    }
+
+    fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if self.ended {
+            return Ok(());
+        }
+        let mut output = [0; INPUT];
+        let step = self
+            .codec
+            .pack(&self.input[self.at..], &mut output, self.eof)?;
+        self.at += step.consumed;
+        out.extend_from_slice(&output[..step.produced]);
+        self.again = step.produced == INPUT;
+        self.ended = step.ended;
+        if self.at == self.input.len() {
+            self.input.clear();
+            self.at = 0;
+        }
+        Ok(())
+    }
+}
+
+impl<P: Pack> Stream for Packer<P> {
+    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if input.len() > INPUT || self.busy() || self.eof {
+            return Err(StreamError::new(
+                "compression input must be bounded and drained",
+            ));
+        }
+        self.input.extend_from_slice(input);
+        self.step(out)
+    }
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.eof = true;
+        self.step(out)
+    }
+    fn busy(&self) -> bool {
+        !self.ended && (self.at < self.input.len() || self.again || self.eof)
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.step(out)
     }
 }
 
@@ -850,5 +1036,128 @@ mod tests {
         assert!(record.is_empty());
         assert_eq!(decoder.status(), 1);
         assert!(decoder.done());
+    }
+
+    fn codec(
+        operation: &str,
+        format: &str,
+        data: &[u8],
+        width: usize,
+    ) -> (Vec<u8>, Option<String>) {
+        let config = format!(r#"{{"operation":"{operation}","format":"{format}"}}"#);
+        let mut stream = open(config.as_bytes()).unwrap();
+        let mut out = Vec::new();
+        for input in data.chunks(width.max(1)) {
+            let mut window = Vec::new();
+            stream.feed(input, &mut window).unwrap();
+            assert!(window.len() <= OUTPUT);
+            out.extend(window);
+            while stream.busy() {
+                let mut window = Vec::new();
+                stream.drain(&mut window).unwrap();
+                assert!(window.len() <= OUTPUT);
+                out.extend(window);
+            }
+        }
+        stream.finish(&mut out).unwrap();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
+        let mut record = Vec::new();
+        stream.take_stderr(&mut record);
+        let reason = (!record.is_empty()).then(|| {
+            let failure: serde_json::Value = serde_json::from_slice(&record).unwrap();
+            failure["reasons"][0].as_str().unwrap().to_owned()
+        });
+        (out, reason)
+    }
+
+    #[test]
+    fn bzip2_and_xz_round_trip_at_every_width_and_concatenate() {
+        let plain: Vec<u8> = (0..40000u32)
+            .flat_map(|i| i.to_string().into_bytes())
+            .collect();
+        for format in ["bzip2", "xz"] {
+            let (packed, _) = codec("encode", format, &plain, INPUT);
+            for width in [1, 7, 4096, INPUT] {
+                let (out, failure) = codec(
+                    "decode",
+                    format,
+                    &[&packed[..], &packed[..]].concat(),
+                    width,
+                );
+                assert!(
+                    out == [&plain[..], &plain[..]].concat() && failure.is_none(),
+                    "{format} {width}"
+                );
+            }
+        }
+        assert_eq!(
+            codec("encode", "bzip2", b"", 1).0,
+            b"BZh9\x17rE8P\x90\0\0\0\0"
+        );
+        let (empty, _) = codec("encode", "xz", b"", 1);
+        assert_eq!(&empty[..12], b"\xfd7zXZ\0\0\x04\xe6\xd6\xb4\x46");
+        assert_eq!(empty.len(), 32);
+    }
+
+    #[test]
+    fn bzip2_failures_are_bzip2s_lines() {
+        let (hello, _) = codec("encode", "bzip2", b"hello\n", INPUT);
+        for width in [1, 5, INPUT] {
+            let decode = |data: &[u8]| codec("decode", "bzip2", data, width);
+            assert_eq!(
+                decode(&hello[..hello.len() / 2]),
+                (vec![], Some(bz2::ENDS.into()))
+            );
+            assert_eq!(decode(b""), (vec![], Some(bz2::ENDS.into())));
+            assert_eq!(
+                decode(b"BZh9junkjunkjunk").1.as_deref(),
+                Some(bz2::INTEGRITY)
+            );
+            assert_eq!(decode(b"\0junk").1.as_deref(), Some(bz2::NOT_BZIP2));
+            assert_eq!(
+                decode(&[&hello[..], b"\0junk"].concat()),
+                (b"hello\n".to_vec(), None)
+            );
+            assert_eq!(
+                decode(&[&hello[..], b"B"].concat()),
+                (b"hello\n".to_vec(), Some(bz2::ENDS.into()))
+            );
+        }
+    }
+
+    #[test]
+    fn xz_failures_are_xzs_lines() {
+        let (hello, _) = codec("encode", "xz", b"hello\n", INPUT);
+        for width in [1, 5, INPUT] {
+            let decode = |data: &[u8]| codec("decode", "xz", data, width);
+            assert_eq!(decode(b""), (vec![], Some(xz::FORMAT.into())));
+            assert_eq!(decode(b"\xfd7z"), (vec![], Some(xz::FORMAT.into())));
+            assert_eq!(decode(b"PK\x03\x04junk").1.as_deref(), Some(xz::FORMAT));
+            assert_eq!(decode(b"\xfd7zXZ\0").1.as_deref(), Some(xz::TRUNCATED));
+            assert_eq!(
+                decode(b"\xfd7zXZ\0junkjunkjunk").1.as_deref(),
+                Some(xz::CORRUPT)
+            );
+            let tail = |junk: &[u8]| decode(&[&hello[..], junk].concat());
+            assert_eq!(tail(b"\0\0\0\0"), (b"hello\n".to_vec(), None));
+            assert_eq!(
+                tail(b"\0\0\0"),
+                (b"hello\n".to_vec(), Some(xz::CORRUPT.into()))
+            );
+            assert_eq!(
+                tail(b"junk"),
+                (b"hello\n".to_vec(), Some(xz::TRUNCATED.into()))
+            );
+            assert_eq!(
+                tail(b"junkjunkjunkjunk"),
+                (b"hello\n".to_vec(), Some(xz::CORRUPT.into()))
+            );
+            assert_eq!(
+                decode(&hello[..hello.len() - 1]).1.as_deref(),
+                Some(xz::TRUNCATED)
+            );
+        }
     }
 }

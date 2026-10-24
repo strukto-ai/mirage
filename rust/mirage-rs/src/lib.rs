@@ -1,25 +1,36 @@
 mod base64;
 mod bc;
+mod cmp;
+mod comm;
 mod compress;
 mod cut;
 mod diff;
 mod digest;
+mod expand;
+mod fold;
 mod generated;
 mod glob;
 mod grep;
+mod join;
 mod jq;
 pub mod nfs;
+mod numfmt;
 mod printf;
+mod records;
+mod reflow;
 mod regex;
 mod rg;
 mod rg_format;
 mod rg_grapheme;
 mod rg_matcher;
+mod seq;
 mod sort;
 mod tr;
+mod uniq;
 mod utf8;
 mod wc;
 mod width;
+mod xxd;
 
 use std::fmt;
 
@@ -260,6 +271,29 @@ pub(crate) fn latin1_list<'de, D: serde::Deserializer<'de>>(
         .collect()
 }
 
+/// A word as gnulib's `quote()` writes it in the C locale, the quotes
+/// left to the message: named C escapes, `\'` and `\\`, every other byte
+/// outside the printable ASCII range as three octal digits.
+pub(crate) fn quoted(text: &[u8]) -> String {
+    let mut out = String::new();
+    for &byte in text {
+        match byte {
+            7 => out.push_str("\\a"),
+            8 => out.push_str("\\b"),
+            b'\t' => out.push_str("\\t"),
+            b'\n' => out.push_str("\\n"),
+            11 => out.push_str("\\v"),
+            12 => out.push_str("\\f"),
+            b'\r' => out.push_str("\\r"),
+            b'\'' => out.push_str("\\'"),
+            b'\\' => out.push_str("\\\\"),
+            32..=126 => out.push(char::from(byte)),
+            _ => out.push_str(&format!("\\{byte:03o}")),
+        }
+    }
+    out
+}
+
 /// A refusal: the message is the command's own stderr wording, or what the
 /// host reports it as (`sort -c` sends the disordered record's number).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -288,22 +322,33 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     match kind {
         "base64" => base64::open(config),
         "bc" => bc::open(config),
+        "cmp" => cmp::open(config),
+        "comm" => comm::open(config),
         "compress" => compress::open(config),
         "cut" => cut::open(config),
         "digest" => digest::open(config),
+        "expand" => expand::open_expand(config),
+        "fmt" => reflow::open(config),
+        "fold" => fold::open(config),
         "diff" => diff::open(config),
         "glob" => glob::open(config),
         "grep" => grep::open(config),
+        "join" => join::open(config),
         "jq_scan" => jq::open_scan(config),
         "jq_format" => jq::open_format(config),
         "jq_decode" => jq::open_decode(config),
+        "numfmt" => numfmt::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
+        "seq" => seq::open(config),
         "sort" => sort::open(config),
         "tr" => tr::open(config),
+        "unexpand" => expand::open_unexpand(config),
+        "uniq" => uniq::open(config),
         "wc" => wc::open(config),
+        "xxd" => xxd::open(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),
     }
 }
@@ -328,6 +373,18 @@ pub(crate) fn run(kind: &str, config: &str, chunks: &[&[u8]]) -> (Vec<u8>, Optio
     let err = stream.finish(&mut out).err();
     drain_all(stream.as_mut(), &mut out);
     (out, err)
+}
+
+/// A stream's JSON configuration: `defaults` with `options`' fields laid
+/// over them.
+#[cfg(test)]
+pub(crate) fn config(defaults: &str, options: &str) -> String {
+    let mut config: serde_json::Value = serde_json::from_str(defaults).expect("defaults");
+    let options: serde_json::Value = serde_json::from_str(options).expect("options");
+    for (name, value) in options.as_object().expect("an object") {
+        config[name] = value.clone();
+    }
+    config.to_string()
 }
 
 #[cfg(test)]

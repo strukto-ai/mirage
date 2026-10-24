@@ -55,6 +55,7 @@ _GZIP: tuple[tuple[str, ...], ...] = (
 )
 
 GNU_LONG_OPTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "b2sum": (("--length",), *_CHECKSUM),
     "base64": (
         ("--decode",),
         ("--ignore-garbage",),
@@ -589,6 +590,7 @@ GNU_LONG_OPTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("--version",),
     ),
     "sha1sum": _CHECKSUM,
+    "sha224sum": _CHECKSUM,
     "sha256sum": _CHECKSUM,
     "sha384sum": _CHECKSUM,
     "sha512sum": _CHECKSUM,

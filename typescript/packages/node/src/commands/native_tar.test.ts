@@ -16,18 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { makeEnv, NATIVE_BACKENDS } from '../../tests/commands/native_fixture.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
-
-// A .tar.bz2 holding a.txt and b.txt, written by GNU-compatible tar rather
-// than by mirage: bzip2 is decompress-only here, so the read path has no
-// writer of its own to round-trip against.
-const BZIP2_FIXTURE = Uint8Array.from(
-  atob(
-    'QlpoOTFBWSZTWb5cDKYAAIl7gMmQABBAAXWAAAhwAB5ACCggAHQShE0aA0eoNqBVJAAAaA+6YFC2QJVR' +
-      'EIU4zaLiTBWsQhIczkjNuTLKIYCgg4wgxJypYcoUGGDPpbubQsplyCC5BU0EQPxdyRThQkL5cDKY',
-  ),
-  (c) => c.charCodeAt(0),
-)
 
 describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
   it('tar cz tf', async () => {
@@ -37,77 +25,6 @@ describe.each(NATIVE_BACKENDS)('native tar (%s backend)', (kind) => {
       env.createFile('b.txt', ENC.encode('bbb\n'))
       await env.mirage('tar -c -z -f /data/out.tar.gz /data/a.txt /data/b.txt')
       const listing = await env.mirage('tar -t -f /data/out.tar.gz')
-      const names = listing.trim().split('\n')
-      expect(names.join(' ')).toContain('a.txt')
-      expect(names.join(' ')).toContain('b.txt')
-    } finally {
-      await env.cleanup()
-    }
-  })
-
-  it('tar j lists an archive another tar wrote (bzip2)', async () => {
-    const env = makeEnv(kind)
-    try {
-      env.createFile('out.tar.bz2', BZIP2_FIXTURE)
-      const listing = await env.mirage('tar -t -f /data/out.tar.bz2')
-      const names = listing.trim().split('\n')
-      expect(names.join(' ')).toContain('a.txt')
-      expect(names.join(' ')).toContain('b.txt')
-    } finally {
-      await env.cleanup()
-    }
-  })
-
-  it('tar xJ round-trips file bodies through the xz codec', async () => {
-    // Listing only proves the headers survived; extracting proves the
-    // decompressed bodies are byte-exact.
-    const env = makeEnv(kind)
-    try {
-      env.createFile('a.txt', ENC.encode('aaa\n'))
-      env.createFile('b.txt', ENC.encode('bbb\n'))
-      await env.mirage('tar -c -J -f /data/out.tar.xz /data/a.txt /data/b.txt')
-      env.createFile('ex/.keep', new Uint8Array())
-      await env.mirage('tar -x -J -f /data/out.tar.xz -C /data/ex')
-      expect(await env.mirage('cat /data/ex/data/a.txt')).toBe('aaa\n')
-      expect(await env.mirage('cat /data/ex/data/b.txt')).toBe('bbb\n')
-    } finally {
-      await env.cleanup()
-    }
-  })
-
-  it('tar xj extracts an archive another tar wrote (bzip2)', async () => {
-    const env = makeEnv(kind)
-    try {
-      env.createFile('out.tar.bz2', BZIP2_FIXTURE)
-      env.createFile('ex/.keep', new Uint8Array())
-      await env.mirage('tar -x -j -f /data/out.tar.bz2 -C /data/ex')
-      expect(await env.mirage('cat /data/ex/a.txt')).toBe('aaa\n')
-      expect(await env.mirage('cat /data/ex/b.txt')).toBe('bbb\n')
-    } finally {
-      await env.cleanup()
-    }
-  })
-
-  it('tar cj refuses to create, since bzip2 is decompress-only', async () => {
-    const env = makeEnv(kind)
-    try {
-      env.createFile('a.txt', ENC.encode('aaa\n'))
-      env.ws.cwd = '/data'
-      const io = await env.ws.shell('tar -c -j -f /data/out.tar.bz2 /data/a.txt')
-      expect(io.exitCode).toBe(1)
-      expect(DEC.decode(io.stderr)).toBe('tar: bzip2 not supported\n')
-    } finally {
-      await env.cleanup()
-    }
-  })
-
-  it('tar J create list (xz)', async () => {
-    const env = makeEnv(kind)
-    try {
-      env.createFile('a.txt', ENC.encode('aaa\n'))
-      env.createFile('b.txt', ENC.encode('bbb\n'))
-      await env.mirage('tar -c -J -f /data/out.tar.xz /data/a.txt /data/b.txt')
-      const listing = await env.mirage('tar -t -f /data/out.tar.xz')
       const names = listing.trim().split('\n')
       expect(names.join(' ')).toContain('a.txt')
       expect(names.join(' ')).toContain('b.txt')

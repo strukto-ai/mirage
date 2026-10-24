@@ -18,7 +18,6 @@ from mirage.commands.builtin.generic.cmp import (
     parse_count,
     parse_flags,
     parse_skip,
-    visible,
 )
 from mirage.commands.errors import UsageError
 from mirage.io.stream import materialize
@@ -133,22 +132,6 @@ def test_parse_skip_names_the_operand_from_where_it_stopped(raw, named):
 def test_parse_skip_takes_a_colon_pair_for_one_each():
     assert parse_skip("0:3") == (0, 3)
     assert parse_skip("1K:2") == (1024, 2)
-
-
-@pytest.mark.parametrize(
-    "byte,rendered",
-    [
-        (ord("b"), "b"),
-        (9, "^I"),
-        (1, "^A"),
-        (127, "^?"),
-        (0xC3, "M-C"),
-        (0xA9, "M-)"),
-        (0x80, "M-^@"),
-    ],
-)
-def test_visible_renders_one_byte_the_cat_v_way(byte, rendered):
-    assert visible(byte) == rendered
 
 
 @pytest.mark.parametrize("value", ["1é", "1\x01", "1\r", "1'", "1\\"])

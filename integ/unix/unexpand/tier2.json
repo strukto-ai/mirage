@@ -13,7 +13,7 @@
       "seq": 910019,
       "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
       "command": "printf '        a        b\n' | unexpand --all --tabs 4 | cat -A",
-      "expect": { "exit": 0, "stdout": "^I^Ia^I^Ib$\n", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "^I^Ia^I^I b$\n", "stderr": "" },
       "flags": ["all", "tabs"]
     }
   ]

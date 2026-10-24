@@ -1,16 +1,6 @@
-# The plain (-p) reader follows xxd 2024-12-07 from vim, under its
-# X11-MIT option (see licenses/third_party/xxd.txt).
-
-import binascii
-import re
+import struct
 from collections import deque
-from collections.abc import (
-    AsyncGenerator,
-    AsyncIterator,
-    Awaitable,
-    Callable,
-    Mapping,
-)
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 
@@ -18,6 +8,7 @@ from mirage.commands.builtin.utils.stream import (
     is_stdin,
     resolve_source,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.builtin.utils.strtol import c_int, strtol
 from mirage.commands.config import Context
@@ -27,16 +18,18 @@ from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, read_fail_exit_code
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.cooperative import chunks
 from mirage.io.stream import (
+    OutputStream,
     async_chain,
     close_quietly,
     prime_stream,
     yield_bytes,
 )
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, ReadBytesFn, ReadStreamFn
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream, run_stream, stream_output_chunks
+from mirage.types import JsonValue, PathSpec, ReadBytesFn, ReadStreamFn
 
 # xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 # where -s says, and for a dump that seeks backwards on a stream (vim's
@@ -49,251 +42,110 @@ CANNOT_SEEK = b"xxd: Sorry, cannot seek.\n"
 # refusal of a -c past that or under 1.
 COLS_MAX = 256
 COLS_REFUSAL = f"xxd: invalid number of columns (max. {COLS_MAX})."
-# The most NUL bytes one chunk carries when a dump's offset skips ahead.
-GAP_CHUNK = 65536
-# What a plain dump's bytes decode to, and the ones it skips.
-HEX_DIGITS = {c: int(chr(c), 16) for c in b"0123456789abcdefABCDEF"}
-PLAIN_BLANKS = frozenset(b" \t\r\n")
 
 
-async def _xxd_dump_stream(
+def _dump(
     source: AsyncIterator[bytes],
     cols: int,
     group: int,
     uppercase: bool,
-    base: int = 0,
-) -> AsyncIterator[bytes]:
-    fmt = "{:02X}" if uppercase else "{:02x}"
-    offset_fmt = "{:08X}: " if uppercase else "{:08x}: "
-    # The hex column holds every group a full line has, the last one short
-    # when ``group`` does not divide ``cols``, one blank between each.
-    width = cols * 2 + -(-cols // group) - 1
-    offset = base
-    leftover = b""
-    async for chunk in source:
-        data = leftover + chunk
-        i = 0
-        while i + cols <= len(data):
-            row = data[i : i + cols]
-            hex_parts: list[str] = []
-            for g in range(0, len(row), group):
-                hex_parts.append(
-                    "".join(fmt.format(b) for b in row[g : g + group])
-                )
-            hex_part = " ".join(hex_parts)
-            ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
-            line = (
-                offset_fmt.format(offset)
-                + f"{hex_part:<{width}}  {ascii_part}\n"
-            )
-            yield line.encode()
-            offset += cols
-            i += cols
-        leftover = data[i:]
-    if leftover:
-        hex_parts = []
-        for g in range(0, len(leftover), group):
-            hex_parts.append(
-                "".join(fmt.format(b) for b in leftover[g : g + group])
-            )
-        hex_part = " ".join(hex_parts)
-        ascii_part = "".join(
-            chr(b) if 32 <= b < 127 else "." for b in leftover
-        )
-        line = (
-            offset_fmt.format(offset) + f"{hex_part:<{width}}  {ascii_part}\n"
-        )
-        yield line.encode()
+    base: int,
+) -> OutputStream:
+    return stream_output(
+        open_stream(
+            "xxd",
+            {
+                "mode": "dump",
+                "cols": cols,
+                "group": group,
+                "uppercase": uppercase,
+                "base": base,
+            },
+        ),
+        source,
+    )
 
 
-async def _xxd_plain_stream(
-    source: AsyncIterator[bytes], uppercase: bool
-) -> AsyncIterator[bytes]:
-    async for chunk in source:
-        h = binascii.hexlify(chunk)
-        yield h.upper() if uppercase else h
-    yield b"\n"
-
-
-def _unhex(digits: str) -> bytes:
-    """The bytes the hex digit pairs at the start of ``digits`` spell.
-
-    xxd stops at the first character that is not a hex digit and drops a
-    digit left without its pair.
-
-    Args:
-        digits (str): Hex digits, whitespace already removed.
-    """
-    match = re.match(r"[0-9A-Fa-f]*", digits)
-    run = match.group() if match is not None else ""
-    return binascii.unhexlify(run[: len(run) // 2 * 2])
-
-
-def _reverse_line(line: str) -> tuple[int | None, bytes]:
-    """One hexdump line as the offset its bytes go to and the bytes.
-
-    A line without an offset continues where the last one ended (None); a
-    line whose offset is not hex decodes to nothing, as xxd skips it.
-
-    Args:
-        line (str): One line of the hexdump.
-    """
-    offset = None
-    if ":" in line:
-        head, line = line.split(":", 1)
-        try:
-            offset = int(head, 16)
-        except ValueError:
-            return None, b""
-    parts = re.split(r"  +", line, maxsplit=1)
-    return offset, _unhex(parts[0].replace(" ", ""))
-
-
-async def _reverse_runs(
-    source: AsyncIterator[bytes],
-) -> AsyncGenerator[tuple[int | None, bytes], None]:
-    """Decode a hexdump into runs of bytes and the offsets they go to.
-
-    Args:
-        source (AsyncIterator[bytes]): The hexdump.
-    """
-    reader = AsyncLineIterator(source)
-    first = True
-    try:
-        while True:
-            raw, ended = await reader.read_until(b"\n")
-            if not raw and not ended:
-                return
-            line = raw.decode(errors="replace")
-            if first and line and ":" not in line:
-                lines = [line]
-                while ended:
-                    rest, ended = await reader.read_until(b"\n")
-                    lines.append(rest.decode(errors="replace"))
-                if any(":" in row for row in lines):
-                    for row in lines:
-                        if row:
-                            yield _reverse_line(row)
-                else:
-                    digits = "".join(
-                        match.group()
-                        for row in lines
-                        if (match := re.match(r"[0-9A-Fa-f\s]*", row))
-                        is not None
-                    )
-                    yield None, _unhex(re.sub(r"\s+", "", digits))
-                return
-            if line:
-                first = False
-                yield _reverse_line(line)
-    finally:
-        await reader.discard()
-
-
-async def _plain_runs(
-    source: AsyncIterator[bytes],
-) -> AsyncGenerator[tuple[int | None, bytes], None]:
-    """Decode a plain (``-p``) hexdump as it arrives, as xxd 2024-12-07 does.
-
-    Space, tab, CR and LF never count, so two digits make a byte across
-    them and across lines. Any other byte is ignored before the first
-    digit and after a skipped line; past that it drops a digit left
-    without its pair, and a run of them skips the rest of the line.
-
-    Args:
-        source (AsyncIterator[bytes]): The hexdump.
-    """
-    high, low, lead, skip = 0, -1, True, False
-    async with aclosing(chunks(source)) as parts:
-        async for part in parts:
-            out = bytearray()
-            for c in part:
-                if skip:
-                    if c == 0x0A:
-                        skip, lead = False, True
-                    continue
-                if c in PLAIN_BLANKS:
-                    continue
-                before, high, low = high, low, HEX_DIGITS.get(c, -1)
-                if low < 0 and lead:
-                    continue
-                lead = False
-                if high >= 0 and low >= 0:
-                    out.append(high << 4 | low)
-                    low = -1
-                elif low < 0 and high < 0 and before < 0:
-                    skip = True
-            if out:
-                yield None, bytes(out)
+def _plain(source: AsyncIterator[bytes], uppercase: bool) -> OutputStream:
+    return stream_output(
+        open_stream("xxd", {"mode": "plain", "uppercase": uppercase}), source
+    )
 
 
 async def _xxd_reverse_stream(
-    source: AsyncIterator[bytes],
-    io: IOResult | None = None,
-    plain: bool = False,
+    source: AsyncIterator[bytes], io: IOResult, plain: bool
 ) -> AsyncIterator[bytes]:
     """Revert a hexdump onto a stream, which can only move forward.
 
-    An offset past the bytes written so far is reached with NUL bytes; one
-    before them cannot be, so the stream stops there with xxd's refusal.
     Deliberate divergence: stdout is a stream here even when the line
-    redirects it to a file, which xxd would seek.
+    redirects it to a file, which xxd would seek, so an offset before the
+    bytes written stops the dump with xxd's refusal.
 
     Args:
         source (AsyncIterator[bytes]): The hexdump.
-        io (IOResult | None): The result to mark on a backward seek.
+        io (IOResult): The result to mark on a backward seek.
+        plain (bool): -p.
     """
-    position = 0
-    async with aclosing(
-        (_plain_runs if plain else _reverse_runs)(source)
-    ) as runs:
-        async for offset, data in runs:
-            if not data:
-                continue
-            if offset is not None and offset < position:
-                if io is not None:
-                    io.exit_code = SEEK_BACK_EXIT
-                    io.stderr = b"xxd: Sorry, cannot seek backwards.\n"
-                return
-            while offset is not None and position < offset:
-                gap = min(offset - position, GAP_CHUNK)
-                yield bytes(gap)
-                position += gap
-            yield data
-            position += len(data)
+    stream = open_stream(
+        "xxd", {"mode": "reverse", "plain": plain, "segments": False}
+    )
+    try:
+        async with aclosing(stream_output_chunks(stream, source)) as parts:
+            async for part in parts:
+                yield part
+    except StreamRefusal as refusal:
+        if refusal.output:
+            yield refusal.output
+        io.exit_code = SEEK_BACK_EXIT
+        io.stderr = f"{refusal.message}\n".encode()
 
 
 async def _reverse_segments(
-    source: AsyncIterator[bytes],
-    plain: bool = False,
-) -> list[tuple[int, bytes]]:
-    """Revert a hexdump into the stretches xxd writes into OUTFILE.
+    source: AsyncIterator[bytes], plain: bool
+) -> list[tuple[int, bytearray]]:
+    """Revert a hexdump into the stretches xxd writes into OUTFILE, each
+    framed run decoded as its bytes arrive.
 
     Each run lands at its offset, or where the last one ended; runs that
     meet join one stretch, so a whole dump is one write at 0.
 
     Args:
         source (AsyncIterator[bytes]): The hexdump.
+        plain (bool): -p.
     """
+    config: dict[str, JsonValue] = {
+        "mode": "reverse",
+        "plain": plain,
+        "segments": True,
+    }
+    frame = struct.Struct("<QQ")
     segments: list[tuple[int, bytearray]] = []
-    position = 0
-    async with aclosing(
-        (_plain_runs if plain else _reverse_runs)(source)
-    ) as runs:
-        async for offset, data in runs:
-            if not data:
-                continue
-            if offset is not None:
-                position = offset
-            if segments and segments[-1][0] + len(segments[-1][1]) == position:
-                segments[-1][1].extend(data)
-            else:
-                segments.append((position, bytearray(data)))
-            position += len(data)
-    return [(start, bytes(data)) for start, data in segments]
+    header = bytearray()
+    left = 0
+    async with aclosing(run_stream("xxd", config, source)) as parts:
+        async for part in parts:
+            at = 0
+            while at < len(part):
+                if left == 0:
+                    taken = min(frame.size - len(header), len(part) - at)
+                    header += part[at : at + taken]
+                    at += taken
+                    if len(header) < frame.size:
+                        break
+                    start, left = frame.unpack(header)
+                    header.clear()
+                    last = segments[-1] if segments else None
+                    if last is None or last[0] + len(last[1]) != start:
+                        segments.append((start, bytearray()))
+                    continue
+                taken = min(left, len(part) - at)
+                segments[-1][1].extend(part[at : at + taken])
+                at += taken
+                left -= taken
+    return segments
 
 
-def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
+def _patched(existing: bytes, segments: list[tuple[int, bytearray]]) -> bytes:
     """A file's bytes with the stretches written into it, as pwrite does.
 
     The bytes around each stretch stay, and the file grows only where one
@@ -301,7 +153,7 @@ def _patched(existing: bytes, segments: list[tuple[int, bytes]]) -> bytes:
 
     Args:
         existing (bytes): OUTFILE's bytes, empty when it does not exist.
-        segments (list[tuple[int, bytes]]): The stretches, in order.
+        segments (list[tuple[int, bytearray]]): The stretches, in order.
     """
     buf = bytearray(existing)
     for start, data in segments:
@@ -538,10 +390,8 @@ async def xxd(
     if reverse:
         return _xxd_reverse_stream(source, io, plain), io
     if plain:
-        return _xxd_plain_stream(source, uppercase=uppercase), io
-    return _xxd_dump_stream(
-        source, cols=cols, group=group, uppercase=uppercase, base=base
-    ), io
+        return _plain(source, uppercase), io
+    return _dump(source, cols, group, uppercase, base), io
 
 
 async def _write_output(
@@ -577,7 +427,7 @@ async def _write_output(
         base (int): the offset of INFILE's first byte.
     """
     target = paths[1]
-    segments: list[tuple[int, bytes]] = []
+    segments: list[tuple[int, bytearray]] = []
     data: ByteSource = b""
     read_failed = False
 
@@ -588,19 +438,11 @@ async def _write_output(
     try:
         if reverse:
             segments = await _reverse_segments(source, plain)
-        elif plain:
-            data = await prime_stream(
-                _xxd_plain_stream(source, uppercase=uppercase), failed
-            )
         else:
             data = await prime_stream(
-                _xxd_dump_stream(
-                    source,
-                    cols=cols,
-                    group=group,
-                    uppercase=uppercase,
-                    base=base,
-                ),
+                _plain(source, uppercase)
+                if plain
+                else _dump(source, cols, group, uppercase, base),
                 failed,
             )
     except FS_ERRORS as exc:
@@ -617,8 +459,8 @@ async def _write_output(
         data = b""
     if reverse and pwrite_bytes is not None:
         try:
-            for start, chunk in segments or [(0, b"")]:
-                await pwrite_bytes(target, chunk, start)
+            for start, chunk in segments or [(0, bytearray())]:
+                await pwrite_bytes(target, bytes(chunk), start)
         except FS_ERRORS as exc:
             return None, IOResult(
                 stderr=fs_error_line("xxd", target, exc).encode(),

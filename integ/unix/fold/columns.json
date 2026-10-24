@@ -1,0 +1,156 @@
+{
+  "cases": [
+    {
+      "id": "fold_counts_tab_backspace_and_return_columns",
+      "seq": 9100101,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tbcdefghijk\\nabcd\\bxyzwvu\\nabcdef\\rghij\\n' | fold -w 5 | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a  \\n  \\t  \\n   b   c   d   e   f  \\n   g   h   i   j   k  \\n\n   a   b   c   d  \\b   x   y  \\n   z   w   v   u  \\n   a   b   c\n   d   e  \\n   f  \\r   g   h   i   j  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "w"
+      ]
+    },
+    {
+      "id": "fold_s_breaks_after_a_leading_blank",
+      "seq": 9100102,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf ' abcdefgh\\nab cd\\tefghijklmnop\\n' | fold -s -w 4",
+      "expect": {
+        "exit": 0,
+        "stdout": " \nabcd\nefgh\nab \ncd\n\t\nefgh\nijkl\nmnop\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s",
+        "w"
+      ]
+    },
+    {
+      "id": "fold_counts_a_character_by_its_width",
+      "seq": 9100103,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'h\\303\\251llo w\\303\\266rld\\n\\344\\270\\255\\346\\226\\207\\345\\255\\227\\n' | fold -w 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "héll\no wö\nrld\n中文\n字\n",
+        "stderr": ""
+      },
+      "flags": [
+        "w"
+      ]
+    },
+    {
+      "id": "fold_c_counts_characters_and_b_bytes",
+      "seq": 9100104,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\344\\270\\255\\346\\226\\207\\345\\255\\227\\n' | fold -c -w 2; printf 'h\\303\\251llo\\n' | fold -b -w 2; printf 'h\\303\\251llo\\n' | fold -b -c -w 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "中文\n字\nh\né\nll\no\nhé\nll\no\n",
+        "stderr": ""
+      },
+      "flags": [
+        "characters",
+        "bytes",
+        "w"
+      ]
+    }
+  ]
+}

@@ -122,7 +122,7 @@ const SEED = [
 
 const ROWS: Record<string, string> = {
   ...Object.fromEntries(
-    'base64 expand fmt md5 md5sum nl rev sha1sum sha256sum sha384sum sha512sum strings tac unexpand uniq wc xxd'
+    'b2sum base64 expand fmt md5 md5sum nl rev sha1sum sha224sum sha256sum sha384sum sha512sum strings tac unexpand uniq wc xxd'
       .split(' ')
       .map((name) => [name, `${name} /t/a.txt`]),
   ),

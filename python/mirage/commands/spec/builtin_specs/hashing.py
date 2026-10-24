@@ -35,6 +35,10 @@ CHECKSUM = CommandSpec(
     )
 )
 
+B2SUM = CommandSpec(
+    arguments=(Argument("-l", "--length"), *CHECKSUM.arguments)
+)
+
 SPECS: dict[str, CommandSpec] = {
     "md5": CommandSpec(arguments=(PATHS_OPERAND,)),
     "diff": CommandSpec(
@@ -67,7 +71,9 @@ SPECS: dict[str, CommandSpec] = {
         )
     ),
     "md5sum": CHECKSUM,
+    "b2sum": B2SUM,
     "sha1sum": CHECKSUM,
+    "sha224sum": CHECKSUM,
     "sha256sum": CHECKSUM,
     "sha384sum": CHECKSUM,
     "sha512sum": CHECKSUM,

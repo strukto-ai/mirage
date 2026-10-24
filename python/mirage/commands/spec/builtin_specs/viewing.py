@@ -130,7 +130,7 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "unexpand": CommandSpec(
         arguments=(
-            Argument("-t", "--tabs"),
+            Argument("-t", "--tabs", action="append"),
             Argument("-a", "--all", action="store_true"),
             Argument("--first-only", action="store_true"),
             PATHS_OPERAND,

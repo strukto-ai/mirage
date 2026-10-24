@@ -1,8 +1,11 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
-from functools import partial
+from dataclasses import dataclass, field
 
-from mirage.commands.builtin.utils.lines import map_stream
+from mirage.commands.builtin.generic.expand import (
+    TabStops,
+    read_tab_stops,
+    tab_config,
+)
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     reported_stream,
@@ -19,82 +22,34 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
-from mirage.utils.width import TAB_WIDTH
+from mirage.rs.stream import run_stream
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 
 
 @dataclass(frozen=True, slots=True)
 class UnexpandFlags:
-    tabsize: int = TAB_WIDTH
+    tabs: TabStops = field(default_factory=TabStops)
     all_spaces: bool = False
-    first_only: bool = False
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> UnexpandFlags:
+    """Read unexpand's flags once, refusing a tab list GNU refuses.
+
+    A tab list implies -a, and --first-only overrides both (GNU 9.7).
+
+    Args:
+        flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
+
+    Raises:
+        ValueError: the stderr text to print, exit 1.
+    """
     fl = FlagView(flags, spec=SPECS["unexpand"])
+    tabs = fl.as_list("tabs")
     return UnexpandFlags(
-        tabsize=int(fl.as_nonempty("tabs", str(TAB_WIDTH))),
-        all_spaces=fl.as_bool("all"),
-        first_only=fl.as_bool("first_only"),
+        tabs=read_tab_stops(tabs, "unexpand"),
+        all_spaces=(fl.as_bool("all") or bool(tabs))
+        and not fl.as_bool("first_only"),
     )
-
-
-def _unexpand_line(line: str, tabsize: int, all_spaces: bool) -> str:
-    if all_spaces:
-        result: list[str] = []
-        i = 0
-        while i < len(line):
-            count = 0
-            while i + count < len(line) and line[i + count] == " ":
-                count += 1
-            if count >= tabsize:
-                tabs = count // tabsize
-                remainder = count % tabsize
-                result.append("\t" * tabs + " " * remainder)
-                i += count
-            elif count > 0:
-                result.append(" " * count)
-                i += count
-            else:
-                result.append(line[i])
-                i += 1
-        return "".join(result)
-    leading = 0
-    while leading < len(line) and line[leading] == " ":
-        leading += 1
-    if leading >= tabsize:
-        tabs = leading // tabsize
-        remainder = leading % tabsize
-        return "\t" * tabs + " " * remainder + line[leading:]
-    return line
-
-
-def _unexpand_record(line: bytes, tabsize: int, all_spaces: bool) -> bytes:
-    return _unexpand_line(
-        line.decode(errors="replace"), tabsize, all_spaces
-    ).encode()
-
-
-async def unexpand(
-    paths: list[PathSpec],
-    *,
-    read_stream: PolymorphicReadFn,
-    stdin: ByteSource | None = None,
-    tabsize: int = TAB_WIDTH,
-    all_spaces: bool = False,
-    first_only: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    io = IOResult()
-    read = stdin_stream(read_stream, stdin)
-    sources = [reported_stream(read(p), io, p, "unexpand") for p in paths]
-    transform = partial(
-        _unexpand_record,
-        tabsize=tabsize,
-        all_spaces=all_spaces and not first_only,
-    )
-    source = async_chain(sources) if paths else resolve_source(stdin)
-    output = map_stream(source, transform)
-    return output, io
 
 
 async def unexpand_generic(
@@ -115,21 +70,23 @@ async def unexpand_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    parsed = parse_flags(ctx.flags)
+    try:
+        parsed = parse_flags(ctx.flags)
+    except ValueError as exc:
+        return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
     readable, err = await split_readable(paths, stat, "unexpand")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await unexpand(
-            readable,
-            read_stream=stream,
-            stdin=ctx.stdin,
-            tabsize=parsed.tabsize,
-            all_spaces=parsed.all_spaces,
-            first_only=parsed.first_only,
-        ),
-        err,
-    )
+    io = IOResult()
+    read = stdin_stream(stream, ctx.stdin)
+    sources = [reported_stream(read(p), io, p, "unexpand") for p in readable]
+    source = async_chain(sources) if readable else resolve_source(ctx.stdin)
+    config: dict[str, JsonValue] = {
+        "tabs": tab_config(parsed.tabs),
+        "all": parsed.all_spaces,
+    }
+    output = run_stream("unexpand", config, source)
+    return await merge_split_errors((output, io), err)
 
 
-__all__ = ["unexpand", "unexpand_generic"]
+__all__ = ["unexpand_generic"]

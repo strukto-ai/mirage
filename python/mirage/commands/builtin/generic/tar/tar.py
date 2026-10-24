@@ -1,7 +1,5 @@
-import bz2
 import io
 import logging
-import lzma
 import re
 import stat as stat_mode
 import tarfile
@@ -29,6 +27,7 @@ from mirage.commands.builtin.generic.archive.walk import (
 from mirage.commands.builtin.generic.tar.constants import (
     CHILD_NAME,
     CHILD_STATUS,
+    CODECS,
     CREATE_ERROR_EXIT,
     EMPTY_PIPE,
     ERROR_TRAILER,
@@ -38,7 +37,6 @@ from mirage.commands.builtin.generic.tar.constants import (
     MODE_CONFLICT,
     MULTIPLE_ARCHIVES,
     NO_MODE,
-    READ_MODES,
     STRIP_COUNT,
     TAPE_START,
     UNEXPECTED_EOF,
@@ -53,7 +51,6 @@ from mirage.commands.builtin.generic.tar.types import (
     CompressionSuffix,
     CreateResult,
     Member,
-    ReadMode,
     ReadResult,
 )
 from mirage.commands.builtin.utils.links import links_of, mount_view
@@ -80,6 +77,8 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import (
     GZIP_MAGIC,
     GzipDataError,
+    compress_stream,
+    decompress_stream,
     gunzip_stream,
     gzip_compress_stream,
 )
@@ -129,30 +128,42 @@ class ZeroTail(io.RawIOBase):
 
 
 def _index_archive(
-    file: BinaryIO, mode: ReadMode, size: int
+    file: BinaryIO, size: int
 ) -> tuple[tarfile.TarFile, int | None]:
-    plain = mode == "r:"
-    tf = tarfile.open(
-        fileobj=ZeroTail(file, size // 512 * 512) if plain else file, mode=mode
-    )
+    tf = tarfile.open(fileobj=ZeroTail(file, size // 512 * 512), mode="r:")
     try:
         members = tf.getmembers()
     except BaseException:
         tf.close()
         raise
-    cut = (
-        next(
-            (
-                idx
-                for idx, member in enumerate(members)
-                if member.offset_data + member.size > size // 512 * 512
-            ),
-            None,
-        )
-        if plain
-        else None
+    cut = next(
+        (
+            idx
+            for idx, member in enumerate(members)
+            if member.offset_data + member.size > size // 512 * 512
+        ),
+        None,
     )
     return tf, cut
+
+
+def _detect_compression(first: bytes) -> CompressionSuffix:
+    """The compression whose magic opens an archive, as GNU tar sniffs
+    one that -z, -j and -J did not name.
+
+    Args:
+        first (bytes): the archive's first bytes.
+    """
+    if first.startswith(GZIP_MAGIC):
+        return ":gz"
+    return next(
+        (
+            kind
+            for kind, (magic, *_) in FOREIGN_INPUT.items()
+            if first.startswith(magic)
+        ),
+        "",
+    )
 
 
 @asynccontextmanager
@@ -175,16 +186,18 @@ async def _open_archive(
             )
             return
         failure = None
-        mode = READ_MODES[suffix]
         source = data
-        if suffix == ":gz" or (suffix == "" and first.startswith(GZIP_MAGIC)):
+        kind = suffix or _detect_compression(first)
+        if kind:
             try:
-                await decoded.fill(gunzip_stream(data.stream()))
+                await decoded.fill(
+                    gunzip_stream(data.stream())
+                    if kind == ":gz"
+                    else decompress_stream(data.stream(), CODECS[kind])
+                )
             except GzipDataError as exc:
                 failure = exc
-            source, mode = decoded, "r:"
-        elif suffix == "" and not first.startswith((b"BZh", b"\xfd7zXZ\0")):
-            mode = "r:"
+            source = decoded
         if failure is not None and source.size == 0:
             yield ReadResult(None, failure)
             return
@@ -192,10 +205,10 @@ async def _open_archive(
         cut = None
         tail: ByteSource = b""
         try:
-            if source.size < 512 and mode == "r:":
+            if source.size < 512:
                 raise tarfile.ReadError("short header")
             tf, cut = await run_blocking(
-                _index_archive, await source.file(), mode, source.size
+                _index_archive, await source.file(), source.size
             )
             if cut is not None:
                 assert tf is not None
@@ -441,19 +454,12 @@ async def _write_archive(
                 ) as compressed:
                     async for data in compressed:
                         yield data
-            elif mode_suffix in (":bz2", ":xz"):
-                codec = (
-                    bz2.BZ2Compressor()
-                    if mode_suffix == ":bz2"
-                    else lzma.LZMACompressor()
-                )
-                async for data in source:
-                    async for part in chunks(
-                        await run_blocking(codec.compress, data)
-                    ):
-                        yield part
-                async for part in chunks(await run_blocking(codec.flush)):
-                    yield part
+            elif mode_suffix:
+                async with aclosing(
+                    compress_stream(source, CODECS[mode_suffix])
+                ) as compressed:
+                    async for data in compressed:
+                        yield data
             else:
                 async for data in source:
                     yield data

@@ -2,7 +2,6 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mirage.commands.builtin.generic.tar.constants import READ_MODES
     from mirage.commands.builtin.generic.tar.create import (
         excluded,
         member_name,
@@ -19,11 +18,9 @@ if TYPE_CHECKING:
         CompressionSuffix,
         CreateResult,
         Member,
-        ReadMode,
     )
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.commands.builtin.generic.tar.constants": ("READ_MODES",),
     "mirage.commands.builtin.generic.tar.create": (
         "excluded",
         "member_name",
@@ -40,7 +37,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "CompressionSuffix",
         "CreateResult",
         "Member",
-        "ReadMode",
     ),
 }
 _MODULE_OF = {
@@ -51,8 +47,6 @@ __all__ = [
     "CompressionSuffix",
     "CreateResult",
     "Member",
-    "READ_MODES",
-    "ReadMode",
     "TarFlags",
     "excluded",
     "member_name",

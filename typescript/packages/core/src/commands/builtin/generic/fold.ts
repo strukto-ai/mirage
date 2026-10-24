@@ -20,18 +20,18 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
-import { mapStream } from '../utils/lines.ts'
 import { ERANGE_REASON, ULONG_MAX, unsignedDecimal } from '../utils/strtol.ts'
 import { quoteText } from '../../quote.ts'
+import { runStream } from '../../../rs/stream.ts'
 
 // GNU fold's line width when -w names none.
-const WIDTH = 80
+const WIDTH = 80n
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 // GNU 9.7 takes -w as a decimal from 1 to 2**64 - 10, so 0 and anything past
 // this are out of range.
 const WIDTH_MAX = ULONG_MAX - 9n
+
+type Count = 'columns' | 'characters' | 'bytes'
 
 // fold's refusal of a -w value, the range clause only for a number. Mirrors
 // Python's `_width_refusal`.
@@ -40,85 +40,35 @@ function widthRefusal(text: string, value: bigint | null): string {
   return `fold: invalid number of columns: '${quoteText(text)}'${reason}`
 }
 
-function foldLine(line: string, width: number, breakSpaces: boolean): string {
-  if (line.length <= width) return line
-  const parts: string[] = []
-  let rest = line
-  while (rest.length > width) {
-    if (breakSpaces) {
-      const idx = rest.lastIndexOf(' ', width - 1)
-      if (idx > 0) {
-        parts.push(rest.slice(0, idx + 1))
-        rest = rest.slice(idx + 1)
-      } else {
-        parts.push(rest.slice(0, width))
-        rest = rest.slice(width)
-      }
-    } else {
-      parts.push(rest.slice(0, width))
-      rest = rest.slice(width)
-    }
-  }
-  if (rest !== '') parts.push(rest)
-  return parts.join('\n')
-}
-
-function foldBytes(data: Uint8Array, width: number): Uint8Array {
-  const output: number[] = []
-  let column = 0
-  for (const byte of data) {
-    if (byte === 0x0a) {
-      output.push(byte)
-      column = 0
-      continue
-    }
-    if (column === width) {
-      output.push(0x0a)
-      column = 0
-    }
-    output.push(byte)
-    column += 1
-  }
-  return new Uint8Array(output)
-}
-
 interface FoldFlags {
-  readonly width: number
+  readonly width: bigint
   readonly breakSpaces: boolean
-  readonly countBytes: boolean
+  readonly count: Count
 }
 
 function parseFlags(bag: Record<string, FlagValue>): FoldFlags {
   const fl = new FlagView(bag, specOf('fold'))
   const width = fl.asNumber('width', unsignedDecimal, widthRefusal, { low: 1n, high: WIDTH_MAX })
-  return {
-    width: width === undefined ? WIDTH : Number(width),
-    breakSpaces: fl.asBool('spaces'),
-    countBytes: fl.asBool('bytes'),
+  // The later of -b and -c wins, as in GNU 9.10.
+  let count: Count = 'columns'
+  for (const name of fl.typedOrder('bytes', 'characters')) {
+    count = name === 'bytes' ? 'bytes' : 'characters'
   }
+  return { width: width ?? WIDTH, breakSpaces: fl.asBool('spaces'), count }
 }
 
-function foldRecord(
-  line: Uint8Array,
-  width: number,
-  breakSpaces: boolean,
-  countBytes: boolean,
-): Uint8Array {
-  return countBytes
-    ? foldBytes(line, width)
-    : ENC.encode(foldLine(DEC.decode(line), width, breakSpaces))
-}
-
+// Each operand is folded on its own, from column 0. Mirrors Python's
+// fold_generic.
 export function foldGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin)
-  const { width, breakSpaces, countBytes } = parseFlags(ctx.flags)
+  const { width, breakSpaces, count } = parseFlags(ctx.flags)
+  // A width past 2**53 is past any line, so the nearest double serves.
+  const config = { width: Number(width), spaces: breakSpaces, count }
   const io = new IOResult()
-  const transform = (line: Uint8Array): Uint8Array =>
-    foldRecord(line, width, breakSpaces, countBytes)
-  const each = (source: ByteSource) => mapStream(source, transform)
+  const each = (source: ByteSource) => runStream('fold', config, source, ctx.signal)
   return [perOperand(paths, stream, ctx.stdin, io, 'fold', each), io]
 }

@@ -55,6 +55,7 @@ const GZIP: readonly (readonly string[])[] = [
 ]
 
 export const GNU_LONG_OPTIONS: Readonly<Record<string, readonly (readonly string[])[]>> = {
+  b2sum: [['--length'], ...CHECKSUM],
   base64: [['--decode'], ['--ignore-garbage'], ['--wrap'], ['--help'], ['--version']],
   basename: [['--multiple'], ['--suffix'], ['--zero'], ['--help'], ['--version']],
   cat: [
@@ -553,6 +554,7 @@ export const GNU_LONG_OPTIONS: Readonly<Record<string, readonly (readonly string
   ],
   seq: [['--equal-width'], ['--format'], ['--separator'], ['--help'], ['--version']],
   sha1sum: CHECKSUM,
+  sha224sum: CHECKSUM,
   sha256sum: CHECKSUM,
   sha384sum: CHECKSUM,
   sha512sum: CHECKSUM,

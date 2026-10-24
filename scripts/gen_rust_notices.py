@@ -16,6 +16,7 @@ ADAPTED = [
     ROOT / "licenses/third_party/regex-automata.txt",
     ROOT / "licenses/third_party/ripgrep.txt",
     ROOT / "licenses/third_party/unicode-data.txt",
+    ROOT / "licenses/third_party/xxd.txt",
 ]
 CORE_LEAD = (
     "The WebAssembly module embedded in this package (src/generated/"

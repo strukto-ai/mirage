@@ -31,7 +31,7 @@ The hash of one file.
 | Argument | Meaning |
 | --- | --- |
 | `path` | The file. |
-| `algorithm` | `md5`, `sha1`, `sha256`, `sha384` or `sha512`. |
+| `algorithm` | `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`, `blake2b`, or `blake2b-N` for BLAKE2b at N bits. |
 
 | Return | Mirage then |
 | --- | --- |
@@ -42,9 +42,11 @@ These commands call `checksum`, with this `algorithm`:
 
 - `md5sum`, `md5`: `md5`
 - `sha1sum`: `sha1`
+- `sha224sum`: `sha224`
 - `sha256sum`: `sha256`
 - `sha384sum`: `sha384`
 - `sha512sum`: `sha512`
+- `b2sum`: `blake2b`, or `blake2b-N` with `-l N`
 
 This reads the file instead:
 

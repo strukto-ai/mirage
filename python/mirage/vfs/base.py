@@ -395,7 +395,8 @@ class BaseVFS:
         Args:
             path (PathSpec): the file.
             algorithm (str): the hashlib name, ``md5``, ``sha1``,
-                ``sha256``, ``sha384`` or ``sha512``.
+                ``sha224``, ``sha256``, ``sha384``, ``sha512`` or
+                ``blake2b``, or ``blake2b-N`` for BLAKE2b at N bits.
         """
         raise enotsup(self.name, "checksum", path)
 

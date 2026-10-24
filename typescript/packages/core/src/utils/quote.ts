@@ -62,6 +62,7 @@ export const NAMED_ESCAPES = new Map([
 // tools that are nobody's coreutils — awk, column, file, iconv, jq, look,
 // xxd — keep their own original's diagnostic, which is not this one.
 export const SHELL_QUOTED_COMMANDS: ReadonlySet<string> = new Set([
+  'b2sum',
   'base64',
   'cat',
   'comm',
@@ -79,6 +80,7 @@ export const SHELL_QUOTED_COMMANDS: ReadonlySet<string> = new Set([
   'readlink',
   'realpath',
   'sha1sum',
+  'sha224sum',
   'sha256sum',
   'sha384sum',
   'sha512sum',

@@ -39,6 +39,45 @@
       ]
     },
     {
+      "id": "tar_j_creates_a_bzip2_archive",
+      "seq": 15100002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(tar -cjf /data/fcA_j2.tbz -C /data a.txt b.txt && od -An -tx1 -N4 /data/fcA_j2.tbz && tar -tjf /data/fcA_j2.tbz && tar -xOjf /data/fcA_j2.tbz b.txt; rc=$?; rm /data/fcA_j2.tbz; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": " 42 5a 68 39\na.txt\nb.txt\n1\n2\n3\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "j",
+        "C"
+      ]
+    },
+    {
       "id": "tar_j_refuses_what_is_not_bzip2",
       "seq": 15100003,
       "targets": [
@@ -70,6 +109,44 @@
         "exit": 2,
         "stdout": "",
         "stderr": "bzip2: (stdin) is not a bzip2 file.\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "j"
+      ]
+    },
+    {
+      "id": "tar_j_reports_a_corrupt_bzip2_stream",
+      "seq": 15100004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'BZh91AY&SYjunkjunkjunk' | tar -tjf -",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "\nbzip2: Data integrity error when decompressing.\n\tInput file = (stdin), output file = (stdout)\n\nIt is possible that the compressed file(s) have become corrupted.\nYou can use the -tvv option to test integrity of such files.\n\nYou can use the `bzip2recover' program to attempt to recover\ndata from undamaged sections of corrupted files.\n\ntar: Child returned status 2\ntar: Error is not recoverable: exiting now\n"
       },
       "flags": [
         "t",

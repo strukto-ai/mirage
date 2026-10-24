@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import aclosing
 
 from mirage._rs import Stream, StreamError
@@ -154,6 +154,39 @@ async def run_stream(
     async with aclosing(stream_output_chunks(stream, source)) as output:
         async for chunk in output:
             yield chunk
+
+
+async def merge_output(
+    stream: OpenStream, read: Callable[[int], Awaitable[bytes | None]]
+) -> AsyncGenerator[bytes, None]:
+    """Feed a multi-input stream the input its ``wants`` names until it
+    wants none, handing on its output a bounded call at a time.
+
+    Args:
+        stream (OpenStream): The command engine.
+        read (Callable[[int], Awaitable[bytes | None]]): An input's next
+            chunk, None at its end.
+    """
+    budget = YieldBudget()
+    while True:
+        while stream.busy():
+            await budget.run()
+            if output := stream.drain():
+                yield output
+        index = stream.wants()
+        if index is None:
+            break
+        await budget.run()
+        chunk = await read(index)
+        output = (
+            stream.end_input(index)
+            if chunk is None
+            else stream.feed_input(index, bytes(chunk))
+        )
+        if output:
+            yield output
+    if output := stream.finish():
+        yield output
 
 
 async def stream_output_chunks(

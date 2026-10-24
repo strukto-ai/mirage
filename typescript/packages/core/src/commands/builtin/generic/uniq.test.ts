@@ -114,9 +114,9 @@ it.each<[Context['flags'], string, string]>([
   [{ count: true }, 'a\na\nb\n', '      2 a\n'],
   [{ repeated: true }, 'a\na\n', 'a\n'],
   [{ unique: true }, 'a\nb\n', 'a\n'],
-  [{ D: true }, 'a\na\n', 'a\n'],
-  [{ group: 'prepend' }, 'a\n', '\n'],
-  [{ all_repeated: 'prepend' }, 'a\na\n', '\n'],
+  [{ D: true }, 'a\na\n', 'a\na\n'],
+  [{ group: 'prepend' }, 'a\n', '\na\n'],
+  [{ all_repeated: 'prepend' }, 'a\na\n', '\na\na\n'],
   [{ zero_terminated: true }, 'a\0', 'a\0'],
 ])('uniq emits before the tail and closes %j', async (flags, data, expected) => {
   let closed = false

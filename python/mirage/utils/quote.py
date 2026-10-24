@@ -61,6 +61,7 @@ NAMED_ESCAPES = {
 # xxd -- keep their own original's diagnostic, which is not this one.
 SHELL_QUOTED_COMMANDS: frozenset[str] = frozenset(
     {
+        "b2sum",
         "base64",
         "cat",
         "comm",
@@ -78,6 +79,7 @@ SHELL_QUOTED_COMMANDS: frozenset[str] = frozenset(
         "readlink",
         "realpath",
         "sha1sum",
+        "sha224sum",
         "sha256sum",
         "sha384sum",
         "sha512sum",

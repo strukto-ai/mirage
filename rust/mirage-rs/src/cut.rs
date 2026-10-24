@@ -4,15 +4,14 @@ use std::sync::Arc;
 use memchr::memchr;
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, parse_config, quoted};
 
 const BLOCK: usize = 8192;
 const WORK: usize = 16384;
-const TRY: &str = "Try 'cut --help' for more information.";
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum Mode {
+pub(crate) enum Mode {
     Bytes,
     Characters,
     Fields,
@@ -67,40 +66,27 @@ struct Options {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Interval {
-    first: u64,
-    last: u64,
+pub(crate) struct Interval {
+    pub(crate) first: u64,
+    pub(crate) last: u64,
 }
 
-fn refusal(message: impl AsRef<str>) -> StreamError {
-    StreamError::new(format!("cut: {}\n{TRY}", message.as_ref()))
-}
-
-fn quoted(text: &[u8]) -> String {
-    let mut out = String::new();
-    for &byte in text {
-        match byte {
-            7 => out.push_str("\\a"),
-            8 => out.push_str("\\b"),
-            b'\t' => out.push_str("\\t"),
-            b'\n' => out.push_str("\\n"),
-            11 => out.push_str("\\v"),
-            12 => out.push_str("\\f"),
-            b'\r' => out.push_str("\\r"),
-            b'\'' => out.push_str("\\'"),
-            b'\\' => out.push_str("\\\\"),
-            32..=126 => out.push(char::from(byte)),
-            _ => out.push_str(&format!("\\{byte:03o}")),
-        }
-    }
-    out
-}
-
-struct Words {
+struct Words<'a> {
+    program: &'a str,
     value: &'static str,
     range: &'static str,
     zero: &'static str,
     large: &'static str,
+}
+
+impl Words<'_> {
+    fn refusal(&self, message: impl AsRef<str>) -> StreamError {
+        let program = self.program;
+        StreamError::new(format!(
+            "{program}: {}\nTry '{program} --help' for more information.",
+            message.as_ref()
+        ))
+    }
 }
 
 fn bound(spec: &[u8], cursor: &mut usize, words: &Words) -> Result<Option<u64>, StreamError> {
@@ -117,7 +103,7 @@ fn bound(spec: &[u8], cursor: &mut usize, words: &Words) -> Result<Option<u64>, 
         return Ok(None);
     }
     value.map(Some).ok_or_else(|| {
-        refusal(format!(
+        words.refusal(format!(
             "{} '{}' is too large",
             words.large,
             quoted(&spec[start..*cursor])
@@ -125,9 +111,16 @@ fn bound(spec: &[u8], cursor: &mut usize, words: &Words) -> Result<Option<u64>, 
     })
 }
 
-fn intervals(spec: &[u8], mode: Mode) -> Result<Vec<Interval>, StreamError> {
+/// GNU's list of fields or positions, in the words of `program` (cut, or
+/// numfmt's --field), its ranges sorted and merged.
+pub(crate) fn intervals(
+    spec: &[u8],
+    mode: Mode,
+    program: &str,
+) -> Result<Vec<Interval>, StreamError> {
     let words = if mode == Mode::Fields {
         Words {
+            program,
             value: "invalid field value",
             range: "invalid field range",
             zero: "fields are numbered from 1",
@@ -135,6 +128,7 @@ fn intervals(spec: &[u8], mode: Mode) -> Result<Vec<Interval>, StreamError> {
         }
     } else {
         Words {
+            program,
             value: "invalid byte/character position",
             range: "invalid byte or character range",
             zero: "byte/character positions are numbered from 1",
@@ -149,32 +143,28 @@ fn intervals(spec: &[u8], mode: Mode) -> Result<Vec<Interval>, StreamError> {
         let mut high = None;
         if is_range {
             if low == Some(0) {
-                return Err(refusal(words.zero));
+                return Err(words.refusal(words.zero));
             }
             cursor += 1;
             high = bound(spec, &mut cursor, &words)?;
             if spec.get(cursor) == Some(&b'-') {
-                return Err(refusal(words.range));
+                return Err(words.refusal(words.range));
             }
         }
         if spec
             .get(cursor)
             .is_some_and(|byte| !matches!(byte, b',' | b' ' | b'\t'))
         {
-            return Err(refusal(format!(
-                "{} '{}'",
-                words.value,
-                quoted(&spec[cursor..])
-            )));
+            return Err(words.refusal(format!("{} '{}'", words.value, quoted(&spec[cursor..]))));
         }
         let first = if is_range {
             if low.is_none() && high.is_none() {
-                return Err(refusal("invalid range with no endpoint: -"));
+                return Err(words.refusal("invalid range with no endpoint: -"));
             }
             low.unwrap_or(1)
         } else {
             match low {
-                None | Some(0) => return Err(refusal(words.zero)),
+                None | Some(0) => return Err(words.refusal(words.zero)),
                 Some(n) => n,
             }
         };
@@ -184,7 +174,7 @@ fn intervals(spec: &[u8], mode: Mode) -> Result<Vec<Interval>, StreamError> {
             first
         };
         if last < first {
-            return Err(refusal("invalid decreasing range"));
+            return Err(words.refusal("invalid decreasing range"));
         }
         ranges.push(Interval { first, last });
         if cursor == spec.len() {
@@ -812,7 +802,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         ));
     };
     let character = char::from_u32(*character);
-    let ranges = intervals(&config.list, config.mode)?;
+    let ranges = intervals(&config.list, config.mode, "cut")?;
     let (output_delimiter, output_encoding) = match config.output_delimiter {
         Some(OutputDelimiter::Bytes { value }) => (value, OutputEncoding::Valid),
         Some(OutputDelimiter::DeferredUtf8EncodingError) => {
@@ -855,6 +845,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 mod tests {
     use super::*;
     use serde_json::{Value, json};
+
+    const TRY: &str = "Try 'cut --help' for more information.";
 
     fn config(list: &str, mode: &str) -> Value {
         json!({
@@ -905,7 +897,7 @@ mod tests {
     #[test]
     fn merges_sorted_intervals_once() {
         assert_eq!(
-            intervals(b"3,1-2,2-4,8,6-7,12-", Mode::Bytes).unwrap(),
+            intervals(b"3,1-2,2-4,8,6-7,12-", Mode::Bytes, "cut").unwrap(),
             [
                 Interval { first: 1, last: 4 },
                 Interval { first: 6, last: 8 },
@@ -916,7 +908,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            intervals(b"4294967296-", Mode::Characters).unwrap(),
+            intervals(b"4294967296-", Mode::Characters, "cut").unwrap(),
             [Interval {
                 first: 4294967296,
                 last: u64::MAX
@@ -954,7 +946,7 @@ mod tests {
             ("1\r", "invalid field value '\\r'"),
         ];
         for (spec, expected) in cases {
-            let error = intervals(spec.as_bytes(), Mode::Fields).unwrap_err();
+            let error = intervals(spec.as_bytes(), Mode::Fields, "cut").unwrap_err();
             assert_eq!(error.message, format!("cut: {expected}\n{TRY}"), "{spec:?}");
         }
         for mode in [Mode::Bytes, Mode::Characters] {
@@ -968,7 +960,7 @@ mod tests {
                 ),
             ] {
                 assert_eq!(
-                    intervals(spec.as_bytes(), mode).unwrap_err().message,
+                    intervals(spec.as_bytes(), mode, "cut").unwrap_err().message,
                     format!("cut: {expected}\n{TRY}")
                 );
             }
@@ -989,14 +981,16 @@ mod tests {
             ("😀", "\\360\\237\\230\\200"),
         ] {
             assert_eq!(
-                intervals(spec.as_bytes(), Mode::Fields)
+                intervals(spec.as_bytes(), Mode::Fields, "cut")
                     .unwrap_err()
                     .message,
                 format!("cut: invalid field value '{expected}'\n{TRY}")
             );
         }
         assert_eq!(
-            intervals(b"2\xff", Mode::Fields).unwrap_err().message,
+            intervals(b"2\xff", Mode::Fields, "cut")
+                .unwrap_err()
+                .message,
             format!("cut: invalid field value '\\377'\n{TRY}")
         );
         let zeros = "0".repeat(5000);
@@ -1010,12 +1004,12 @@ mod tests {
         );
         let nines = "9".repeat(5000);
         assert_eq!(
-            intervals(format!("1-{nines}").as_bytes(), Mode::Fields)
+            intervals(format!("1-{nines}").as_bytes(), Mode::Fields, "cut")
                 .unwrap_err()
                 .message,
             format!("cut: field number '{nines}' is too large\n{TRY}")
         );
-        assert!(intervals(b"18446744073709551614", Mode::Fields).is_ok());
+        assert!(intervals(b"18446744073709551614", Mode::Fields, "cut").is_ok());
     }
 
     #[test]
@@ -1155,7 +1149,7 @@ mod tests {
                 output_delimiter: Vec::new(),
                 separator: b'\n',
             },
-            ranges: intervals(b"1-", Mode::Bytes).unwrap(),
+            ranges: intervals(b"1-", Mode::Bytes, "cut").unwrap(),
             input: Vec::new(),
             cursor: 0,
             record: Record::default(),

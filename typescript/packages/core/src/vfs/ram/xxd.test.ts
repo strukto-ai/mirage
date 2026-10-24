@@ -12,45 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { onMount } from '../../test-utils.ts'
-import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-const RAM_XXD = GENERIC_COMMANDS.filter((c) => c.name === 'xxd' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-
-async function runXxd(
-  vfs: RAMVFS,
-  paths: PathSpec[],
-  flags: Record<string, string | boolean | number | string[]> = {},
-  stdin: Uint8Array | null = null,
-): Promise<{ out: string; outBytes: Uint8Array; exitCode: number }> {
-  const cmd = RAM_XXD[0]
-  if (cmd === undefined) throw new Error('xxd not registered')
-  const result = await onMount(vfs, (files) =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, paths, [], {
-      stdin,
-      flags,
-      vfs: files,
-      cwd: PathSpec.fromStrPath('/'),
-    }),
-  )
-  if (result === null) return { out: '', outBytes: new Uint8Array(), exitCode: -1 }
-  const [out, ioResult] = result
-  const buf =
-    out === null
-      ? new Uint8Array()
-      : out instanceof Uint8Array
-        ? out
-        : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), outBytes: buf, exitCode: ioResult.exitCode }
-}
 
 // Renders `.tally` reads, as a VFS that ships a renderer does.
 class TallyRAMVFS extends RAMVFS {
@@ -60,60 +29,6 @@ class TallyRAMVFS extends RAMVFS {
     return Promise.resolve(ENC.encode('RENDERED'))
   }
 }
-
-describe('xxd', () => {
-  it('-p plain hex', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/f.txt', ENC.encode('AB'))
-    const r = await runXxd(vfs, [PathSpec.fromStrPath('/f.txt')], { p: true })
-    expect(r.exitCode).toBe(0)
-    expect(r.out.trim()).toBe('4142')
-  })
-
-  it('-r -p reverse hex from stdin', async () => {
-    const vfs = new RAMVFS()
-    const r = await runXxd(vfs, [], { r: true, p: true }, ENC.encode('4142'))
-    expect(r.exitCode).toBe(0)
-    expect(DEC.decode(r.outBytes)).toBe('AB')
-  })
-
-  it('replaces OUTFILE with the dump', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/in', ENC.encode('hi\n'))
-    vfs.store.files.set('/out', ENC.encode('old old old\n'))
-    const r = await runXxd(vfs, [PathSpec.fromStrPath('/in'), PathSpec.fromStrPath('/out')])
-    expect(r.exitCode).toBe(0)
-    expect(r.out).toBe('')
-    expect(DEC.decode(vfs.store.files.get('/out'))).toBe(
-      '00000000: 6869 0a                                  hi.\n',
-    )
-  })
-
-  it('-r writes into OUTFILE at its offsets', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/out', ENC.encode('ABCDEFGH'))
-    const paths = [PathSpec.fromStrPath('-'), PathSpec.fromStrPath('/out')]
-    const r = await runXxd(vfs, paths, { r: true }, ENC.encode('00000004: 6869  hi\n'))
-    expect(r.exitCode).toBe(0)
-    expect(DEC.decode(vfs.store.files.get('/out'))).toBe('ABCDhiGH')
-  })
-
-  it('-r on a stream fills forward and refuses a backward seek', async () => {
-    const vfs = new RAMVFS()
-    const dump = ENC.encode('00000002: 6869  hi\n00000000: 4142  AB\n')
-    const r = await runXxd(vfs, [], { r: true }, dump)
-    expect([...r.outBytes]).toEqual([0, 0, 0x68, 0x69])
-    expect(r.exitCode).toBe(5)
-  })
-
-  it('-u uppercase', async () => {
-    const vfs = new RAMVFS()
-    const r = await runXxd(vfs, [], { u: true }, new Uint8Array([0xab, 0xcd]))
-    expect(r.exitCode).toBe(0)
-    const text = r.out
-    expect(text.includes('AB') || text.includes('CD')).toBe(true)
-  })
-})
 
 describe('xxd -r into its own input', () => {
   it('reads back patched on a caching mount', async () => {

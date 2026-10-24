@@ -112,6 +112,44 @@
         "t",
         "J"
       ]
+    },
+    {
+      "id": "tar_J_lists_an_xz_archive_before_its_trailing_junk",
+      "seq": 15100014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ printf %s '/Td6WFoAAATm1rRGBMCAAYBQIQEWAAAAAAAAALZMWvfgJ/8AeF0AMxjEIf2z4Qq5wmiDd/q5mnnDDYfMZK/5QkjHhJTEpr8w9/LwdJgKfz2XFl9g5ipo8PRZaBE2pnahFkJlgzPhZGwoEhKfrVm+9KMH4ADLDveNCJQgzdNKGuMDKvDKiFMRjn/AJuH6ol1IStYLwKYUHFRmUPoK536tAKQfwJJcUgZxAAGcAYBQAADes3QVscRn+wIAAAAABFla' | base64 -d; printf junk; } | tar -tJf -",
+      "expect": {
+        "exit": 2,
+        "stdout": "fcA/\nfcA/a.txt\nfcA/b.txt\n",
+        "stderr": "xz: (stdin): Unexpected end of input\ntar: Child returned status 1\ntar: Error is not recoverable: exiting now\n"
+      },
+      "flags": [
+        "t",
+        "J"
+      ]
     }
   ]
 }

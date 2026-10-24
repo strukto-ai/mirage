@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator, Mapping
+from contextlib import aclosing
 from dataclasses import dataclass
 
-from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.config import Context
@@ -16,6 +16,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.stream import OpenStream, merge_output, open_stream
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 
 
@@ -46,132 +48,58 @@ async def comm(
     readers = [
         shared if is_stdin(p) else AsyncLineIterator(read(p)) for p in paths
     ]
+    stream = open_stream(
+        "comm",
+        {
+            "suppress": [suppress1, suppress2, suppress3],
+            "check_order": check_order,
+            "delimiter": byte_view(output_delimiter),
+            "total": total,
+            "zero_terminated": zero_terminated,
+            "shared": readers[0] is readers[1],
+            "stdin_twice": all(p.raw_path == "-" for p in paths),
+        },
+    )
     io = IOResult()
-    return _comm_stream(
-        readers,
-        io,
-        (suppress1, suppress2, suppress3),
-        check_order,
-        output_delimiter,
-        total,
-        record_separator(zero_terminated),
-        paths,
-    ), io
+    return _comm_stream(stream, readers, io, paths), io
 
 
 async def _comm_stream(
+    stream: OpenStream,
     readers: list[AsyncLineIterator],
     io: IOResult,
-    suppressed: tuple[bool, bool, bool],
-    check_order: bool | None,
-    delimiter: str,
-    total: bool,
-    separator: bytes,
     paths: list[PathSpec],
 ) -> AsyncIterator[bytes]:
-    """Merge the two inputs, checking each one's order as GNU comm does.
-
-    Each newly read line is checked against its file's previous one:
-    always under --check-order, where the first disorder ends the run,
-    never under --nocheck-order, and by default only once a line unique
-    to one file has printed, warning once per file and closing with
-    ``input is not in sorted order``. Both exit 1. A failed read ends the
-    run too, named for its operand; two ``-`` operands share one stdin
-    reader, and GNU, closing stdin twice, ends with ``comm: -: Bad file
-    descriptor``, exit 1, before --total.
+    """Run comm's merge over the two inputs; a failed read ends the run,
+    named for its operand after what comm already printed to stderr.
 
     Args:
-        readers (list[AsyncLineIterator]): file 1 and file 2.
+        stream (OpenStream): the ``comm`` engine.
+        readers (list[AsyncLineIterator]): file 1 and file 2, one reader
+            when both are stdin.
         io (IOResult): where the warnings and the status land.
-        suppressed (tuple[bool, bool, bool]): -1, -2 and -3.
-        check_order (bool | None): --check-order (True),
-            --nocheck-order (False), or neither (None).
-        delimiter (str): the column separator.
-        total (bool): --total.
-        separator (bytes): the record terminator.
         paths (list[PathSpec]): file 1 and file 2, as typed.
     """
-    lines: list[str | None] = [None, None]
-    warned = [False, False]
-    counts = [0, 0, 0]
-    errors: list[str] = []
-    unpairable = False
+    failed: list[int] = []
 
-    async def pull(which: int) -> bool:
-        """Read file WHICH's next line; whether its order ends the run.
-
-        Args:
-            which (int): 0 for file 1, 1 for file 2.
-        """
+    async def pull(which: int) -> bytes | None:
         try:
-            raw = await readers[which].readline(separator)
-        except FS_ERRORS as exc:
-            errors.append(fs_error_line("comm", paths[which], exc))
-            io.stderr, io.exit_code = "".join(errors).encode(), 1
-            return True
-        before = lines[which]
-        line = lines[which] = (
-            None if raw is None else raw.decode(errors="replace")
-        )
-        if (
-            check_order is False
-            or not (check_order or unpairable)
-            or warned[which]
-            or line is None
-            or before is None
-            or line >= before
-        ):
-            return False
-        warned[which] = True
-        errors.append(f"comm: file {which + 1} is not in sorted order\n")
-        io.stderr, io.exit_code = "".join(errors).encode(), 1
-        return bool(check_order)
+            return await readers[which].read_chunk()
+        except FS_ERRORS:
+            failed.append(which)
+            raise
 
+    error = b""
     try:
-        if await pull(0) or await pull(1):
-            return
-        while lines[0] is not None or lines[1] is not None:
-            left, right = lines
-            column = (
-                1
-                if right is None or (left is not None and left < right)
-                else 2
-                if left is None or right < left
-                else 3
-            )
-            unpairable = unpairable or column != 3
-            text = left if column != 2 else right
-            counts[column - 1] += 1
-            if not suppressed[column - 1]:
-                yield (
-                    delimiter
-                    * sum(not value for value in suppressed[: column - 1])
-                    + (text or "")
-                ).encode() + separator
-            if column != 2 and await pull(0):
-                return
-            if column != 1 and await pull(1):
-                return
-        if all(p.raw_path == "-" for p in paths):
-            errors.append("comm: -: Bad file descriptor\n")
-            io.stderr, io.exit_code = "".join(errors).encode(), 1
-            return
-        if total:
-            yield (
-                delimiter.join(
-                    [
-                        str(count)
-                        for count, hidden in zip(counts, suppressed)
-                        if not hidden
-                    ]
-                    + ["total"]
-                ).encode()
-                + separator
-            )
-        if any(warned):
-            errors.append("comm: input is not in sorted order\n")
-            io.stderr = "".join(errors).encode()
+        try:
+            async with aclosing(merge_output(stream, pull)) as output:
+                async for chunk in output:
+                    yield chunk
+        except FS_ERRORS as exc:
+            error = encode_text(fs_error_line("comm", paths[failed[-1]], exc))
     finally:
+        io.stderr = stream.take_stderr() + error or None
+        io.exit_code = 1 if error else stream.status()
         for reader in dict.fromkeys(readers):
             await reader.discard()
 

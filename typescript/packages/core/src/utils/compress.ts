@@ -182,22 +182,23 @@ export async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return materialize(inflateRawStream(yieldBytes(bytes)))
 }
 
-// `compress` is optional because a codec may be decompress-only: every
-// permissively licensed bzip2 implementation decompresses only, so mirage
-// reads a .tar.bz2 and refuses to create one.
-export interface CompressionCodec {
-  compressStream?(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>
-  decompressStream?(source: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>
-  compress?(bytes: Uint8Array): Promise<Uint8Array>
-  decompress(bytes: Uint8Array): Promise<Uint8Array>
+export type Codec = 'bzip2' | 'xz'
+
+/** Encode one bzip2 or xz stream at its program's default level. */
+export function compressStream(
+  source: AsyncIterable<Uint8Array>,
+  codec: Codec,
+): AsyncGenerator<Uint8Array, void> {
+  return codecStream(source, { operation: 'encode', format: codec })
 }
 
-const codecs = new Map<string, CompressionCodec>()
-
-export function registerCompressionCodec(name: string, codec: CompressionCodec): void {
-  codecs.set(name, codec)
-}
-
-export function getCompressionCodec(name: string): CompressionCodec | undefined {
-  return codecs.get(name)
+/**
+ * Decode concatenated bzip2 or xz streams, failing in that program's words
+ * as `gunzipStream` fails in gzip's.
+ */
+export function decompressStream(
+  source: AsyncIterable<Uint8Array>,
+  codec: Codec,
+): AsyncGenerator<Uint8Array, void> {
+  return codecStream(source, { operation: 'decode', format: codec })
 }

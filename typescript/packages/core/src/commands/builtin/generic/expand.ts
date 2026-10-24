@@ -21,13 +21,12 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
-import { mapStream } from '../utils/lines.ts'
 import { quoteText } from '../../quote.ts'
 import { boundedDecimal } from '../utils/strtol.ts'
-import { TAB_WIDTH } from '../../../utils/width.ts'
+import { runStream } from '../../../rs/stream.ts'
+import type { JsonValue } from '../../../types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
 
 // A tab stop's digits are ASCII only: GNU reports U+0663 and the other
 // non-ASCII digits as invalid characters, which a unicode-aware test (a `\d`
@@ -73,14 +72,15 @@ export interface ExpandFlags {
 // The stops stay bigints until the walk has compared them: 2**63 - 2 and
 // 2**63 - 1 are ascending and the same double. Mirrors Python's _TabList.
 interface TabList {
+  readonly prog: string
   stops: bigint[]
   extend: number
   increment: number
   problems: string[]
 }
 
-function invalid(rest: string): string {
-  return `expand: tab size contains invalid character(s): '${quoteText(rest)}'`
+function invalid(prog: string, rest: string): string {
+  return `${prog}: tab size contains invalid character(s): '${quoteText(rest)}'`
 }
 
 // Settle one number of a -t value: the character that set a size, or null
@@ -105,7 +105,7 @@ function invalid(rest: string): string {
 function giveValue(tabs: TabList, value: bigint, waiting: string[], given: string): string | null {
   if (waiting.length === 0) {
     if (given !== '') {
-      tabs.problems.push(`expand: '${given}' specifier only allowed with the last value`)
+      tabs.problems.push(`${tabs.prog}: '${given}' specifier only allowed with the last value`)
       return null
     }
     tabs.stops.push(value)
@@ -113,12 +113,12 @@ function giveValue(tabs: TabList, value: bigint, waiting: string[], given: strin
   }
   const size = waiting.includes('/') ? '/' : '+'
   if ((size === '/' ? tabs.extend : tabs.increment) !== 0) {
-    tabs.problems.push(`expand: '${size}' specifier only allowed with the last value`)
+    tabs.problems.push(`${tabs.prog}: '${size}' specifier only allowed with the last value`)
     return null
   }
   if (value === 0n) return given
   if ((size === '/' ? tabs.increment : tabs.extend) !== 0) {
-    tabs.problems.push("expand: '/' specifier is mutually exclusive with '+'")
+    tabs.problems.push(`${tabs.prog}: '/' specifier is mutually exclusive with '+'`)
     return null
   }
   if (size === '/') tabs.extend = Number(value)
@@ -144,20 +144,20 @@ function readNumber(
     const char = raw.charAt(at)
     if (SPECIFIERS.has(char)) {
       tabs.problems.push(
-        `expand: '${char}' specifier not at start of number: '${quoteText(raw.slice(at))}'`,
+        `${tabs.prog}: '${char}' specifier not at start of number: '${quoteText(raw.slice(at))}'`,
       )
       misplaced.push(char)
       at++
       continue
     }
     if (!DIGITS.has(char)) {
-      tabs.problems.push(invalid(raw.slice(at)))
+      tabs.problems.push(invalid(tabs.prog, raw.slice(at)))
       return null
     }
     const run = at
     while (at < raw.length && DIGITS.has(raw.charAt(at))) at++
     if (boundedDecimal(raw.slice(run, at), TOO_LARGE) === null) {
-      tabs.problems.push(`expand: tab stop is too large '${quoteText(raw.slice(run, at))}'`)
+      tabs.problems.push(`${tabs.prog}: tab stop is too large '${quoteText(raw.slice(run, at))}'`)
       oversized = true
     }
     digits += raw.slice(run, at)
@@ -191,7 +191,7 @@ function readTabList(raw: string, tabs: TabList): boolean {
       continue
     }
     if (!DIGITS.has(char)) {
-      tabs.problems.push(invalid(raw.slice(at)))
+      tabs.problems.push(invalid(tabs.prog, raw.slice(at)))
       return false
     }
     const number = readNumber(raw, at, tabs)
@@ -212,11 +212,11 @@ function readTabList(raw: string, tabs: TabList): boolean {
 // diagnostic line, or null when they pass. Each stop is tested for zero before
 // it is tested against the one before it, so `-t 3,0` cannot be 0 and
 // `-t 3,1,0` must be ascending. Mirrors Python's _refused_order.
-function refusedOrder(stops: readonly bigint[]): string | null {
+function refusedOrder(prog: string, stops: readonly bigint[]): string | null {
   let previous = 0n
   for (const stop of stops) {
-    if (stop === 0n) return 'expand: tab size cannot be 0'
-    if (stop <= previous) return 'expand: tab sizes must be ascending'
+    if (stop === 0n) return `${prog}: tab size cannot be 0`
+    if (stop <= previous) return `${prog}: tab sizes must be ascending`
     previous = stop
   }
   return null
@@ -227,15 +227,16 @@ function refusedOrder(stops: readonly bigint[]): string | null {
 // is handed every occurrence in typed order rather than the one value the flag
 // bag kept. A value that leaves any problem ends the parse there: `-t 4+ -t x`
 // reports only the '+'. Returns the stderr text (one newline-terminated line
-// per problem) instead of the list when GNU refuses it.
-export function readTabStops(occurrences: readonly string[]): TabStops | string {
-  const tabs: TabList = { stops: [], extend: 0, increment: 0, problems: [] }
+// per problem) instead of the list when GNU refuses it. unexpand reads its list
+// the same way, in its own name.
+export function readTabStops(occurrences: readonly string[], prog = 'expand'): TabStops | string {
+  const tabs: TabList = { prog, stops: [], extend: 0, increment: 0, problems: [] }
   for (const raw of occurrences) {
     if (!readTabList(raw, tabs) || tabs.problems.length > 0) {
       return tabs.problems.map((line) => `${line}\n`).join('')
     }
   }
-  const refused = refusedOrder(tabs.stops)
+  const refused = refusedOrder(prog, tabs.stops)
   if (refused !== null) return `${refused}\n`
   return { stops: tabs.stops.map(Number), extend: tabs.extend, increment: tabs.increment }
 }
@@ -250,95 +251,10 @@ export function parseFlags(bag: Record<string, FlagValue>): ExpandFlags | string
   return { tabs, initialOnly: fl.asBool('initial') }
 }
 
-// The column a TAB in `column` pads to.
-//
-// The chosen stop is the first one STRICTLY greater than the current column,
-// so a TAB sitting exactly on a stop takes the next one (`expand -t 2,5`
-// turns `ab\tc` into `ab` and three blanks). Past the last explicit stop GNU
-// has four different answers and they are all observable:
-//
-//   * `/N` rounds up to a strictly greater multiple of N.
-//   * `+N` adds N to the last explicit stop, repeatedly.
-//   * ONE explicit stop repeats as a tab SIZE, which is what makes `-t 3`
-//     mean 3, 6, 9 and not "one stop at 3".
-//   * SEVERAL explicit stops give exactly one blank, forever, so `-t 5,9`
-//     pads column 10 by one where `-t 5` pads it by five.
-//
-// No stops and neither specifier is the default size 8.
-export function nextTabStop(tabs: TabStops, column: number): number {
-  for (const stop of tabs.stops) {
-    if (stop > column) return stop
-  }
-  if (tabs.extend !== 0) return column + tabs.extend - (column % tabs.extend)
-  if (tabs.increment !== 0) {
-    const last = tabs.stops.length > 0 ? (tabs.stops[tabs.stops.length - 1] ?? 0) : 0
-    return last + tabs.increment * (Math.floor((column - last) / tabs.increment) + 1)
-  }
-  if (tabs.stops.length === 1) {
-    const size = tabs.stops[0] ?? TAB_WIDTH
-    return column + size - (column % size)
-  }
-  if (tabs.stops.length > 0) return column + 1
-  return column + TAB_WIDTH - (column % TAB_WIDTH)
-}
-
-// Replace every TAB with blanks up to its tab stop.
-//
-// Only a NEWLINE resets the column, and only a BACKSPACE moves it left. A
-// carriage return does neither: `printf 'a\r\tb\n' | expand` pads by six,
-// not eight, because the `\r` advanced the column to 2 like any other
-// character.
-//
-// Backspace decrements, floored at 0, so `printf 'a\bb\tX\n'` pads by
-// seven (column 1, 0, 1) while `printf '\b\tX\n'` pads by eight -- three
-// leading backspaces still leave column 0. It composes with the tab-stop
-// list like any other column, which is why it is one branch here and not a
-// special case: under `-t 1,3` the same input pads by two, the first stop
-// past column 1. `\v` and `\f` are ordinary and advance. Measured,
-// ground truth NL3-E.
-function expandTabs(text: string, tabs: TabStops): string {
-  const out: string[] = []
-  let col = 0
-  for (const ch of text) {
-    if (ch === '\t') {
-      const target = nextTabStop(tabs, col)
-      out.push(' '.repeat(target - col))
-      col = target
-    } else if (ch === '\n') {
-      out.push(ch)
-      col = 0
-    } else if (ch === '\b') {
-      out.push(ch)
-      col = Math.max(col - 1, 0)
-    } else {
-      out.push(ch)
-      col += 1
-    }
-  }
-  return out.join('')
-}
-
-// -i: expand only the blanks before a line's first other byte.
-function expandLeadingTabs(text: string, tabs: TabStops): string {
-  const result: string[] = []
-  for (const line of text.split('\n')) {
-    let i = 0
-    while (i < line.length && BLANKS.has(line[i] ?? '')) i += 1
-    if (i === 0) {
-      result.push(line)
-    } else {
-      result.push(expandTabs(line.slice(0, i), tabs) + line.slice(i))
-    }
-  }
-  return result.join('\n')
-}
-
-export function applyExpand(txt: string, tabs: TabStops, initialOnly: boolean): string {
-  return initialOnly ? expandLeadingTabs(txt, tabs) : expandTabs(txt, tabs)
-}
-
-function expandRecord(line: Uint8Array, tabs: TabStops, initialOnly: boolean): Uint8Array {
-  return ENC.encode(applyExpand(DEC.decode(line), tabs, initialOnly))
+// The tab list as the expand and unexpand streams take it. Mirrors Python's
+// tab_config.
+export function tabConfig(tabs: TabStops): Record<string, JsonValue> {
+  return { stops: [...tabs.stops], extend: tabs.extend, increment: tabs.increment }
 }
 
 export function expandGeneric(
@@ -351,13 +267,9 @@ export function expandGeneric(
   if (typeof parsed === 'string') {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
   }
-  const { tabs, initialOnly } = parsed
   const io = new IOResult()
   const sources = paths.map((p) => reportedStream(stream(p), io, p, 'expand'))
-  const transform = (line: Uint8Array): Uint8Array => expandRecord(line, tabs, initialOnly)
-  const output = mapStream(
-    paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array()),
-    transform,
-  )
-  return [output, io]
+  const config = { tabs: tabConfig(parsed.tabs), initial_only: parsed.initialOnly }
+  const source = paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array())
+  return [runStream('expand', config, source, ctx.signal), io]
 }

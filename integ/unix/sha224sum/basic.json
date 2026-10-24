@@ -1,0 +1,151 @@
+{
+  "cases": [
+    {
+      "id": "sha224sum_prints_the_digest",
+      "seq": 15310001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha224sum /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0b7ef6ba9d72fddbee3c745c49f10854087be89021eb7155ffb62047  /data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "sha224sum_tag_names_sha224",
+      "seq": 15310002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha224sum --tag /data/a.txt /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "SHA224 (/data/a.txt) = 0b7ef6ba9d72fddbee3c745c49f10854087be89021eb7155ffb62047\nSHA224 (/data/b.txt) = 420a7f3bc2540a26999ccc6d00dd88193ab8513b1a3a1a61807445cb\n",
+        "stderr": ""
+      },
+      "flags": [
+        "tag"
+      ]
+    },
+    {
+      "id": "sha224sum_c_verifies_its_own_lines",
+      "seq": 15310003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha224sum /data/a.txt | sha224sum -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: OK\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c"
+      ]
+    },
+    {
+      "id": "sha224sum_c_refuses_another_digests_tag",
+      "seq": 15310004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'SHA256 (x) = 00\\n' | sha224sum -c -w",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "sha224sum: 'standard input': 1: improperly formatted SHA224 checksum line\nsha224sum: 'standard input': no properly formatted checksum lines found\n"
+      },
+      "flags": [
+        "c",
+        "w"
+      ]
+    }
+  ]
+}

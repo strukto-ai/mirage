@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_sha224sum_both_mounts",
+      "seq": 9900030,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_sha224sum && printf xyz > /data2/xm_sha224sum && sha224sum /data/xm_sha224sum /data2/xm_sha224sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7  /data/xm_sha224sum\n30e90f1cd0ceff8eb3dd6a540a605c0666f841d35de63c57e4dd2877  /data2/xm_sha224sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_sha224sum_continues_after_missing",
+      "seq": 9900031,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sha224sum /data/xm_sha224sum_missing /data2/xm_sha224sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "30e90f1cd0ceff8eb3dd6a540a605c0666f841d35de63c57e4dd2877  /data2/xm_sha224sum\n",
+        "stderr": "sha224sum: /data/xm_sha224sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}
