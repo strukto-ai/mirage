@@ -50,9 +50,14 @@ export async function write(
   let size = 0
   const pipe = activePipe(accessor, p)
   if (pipe !== null) {
-    for await (const chunk of chunks(data)) {
-      await pipe.write(chunk, path, signal)
-      size += chunk.byteLength
+    if (data instanceof Uint8Array) {
+      await pipe.write(data, path, signal)
+      size = data.byteLength
+    } else {
+      for await (const chunk of chunks(data)) {
+        await pipe.write(chunk, path, signal)
+        size += chunk.byteLength
+      }
     }
     record(op, path.virtual, VFSName.RAM, size, timer)
     return
@@ -61,7 +66,7 @@ export async function write(
   checkWriteTarget(accessor, path, p)
   const { files, modified } = accessor.store
   if (data instanceof Uint8Array || atomic) {
-    const whole = await materialize(data)
+    const whole = data instanceof Uint8Array ? data : await materialize(data)
     const current = append ? files.get(p) : undefined
     if (current !== undefined && whole.byteLength === 0) return
     files.set(p, current === undefined ? whole : concat([current, whole]))

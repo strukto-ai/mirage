@@ -62,10 +62,14 @@ async def write(
     size = 0
     pipe = active_pipe(accessor, p)
     if pipe is not None:
-        async with aclosing(chunks(data)) as source:
-            async for chunk in source:
-                await pipe.write(chunk, path_spec)
-                size += len(chunk)
+        if isinstance(data, bytes):
+            await pipe.write(data, path_spec)
+            size = len(data)
+        else:
+            async with aclosing(chunks(data)) as source:
+                async for chunk in source:
+                    await pipe.write(chunk, path_spec)
+                    size += len(chunk)
         record(op, path_spec.virtual, "ram", size, timer)
         return
     check_dest_parents(store, path_spec, p)

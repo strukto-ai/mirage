@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMAccessor } from '../../accessor/ram.ts'
+import { DevicePipe } from '../dev/pipe.ts'
+import { DevFiles, DevStore } from '../../vfs/dev/store.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -290,5 +292,25 @@ describe('streamed write', () => {
     const accessor = mkAccessor()
     await expect(write(accessor, mkPath('/f'), broken())).rejects.toThrow('source gone')
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept\n')
+  })
+})
+
+describe('core/ram write of bytes', () => {
+  it('checks and stores in one step, so a racing mkdir finds the file', async () => {
+    const accessor = mkAccessor()
+    const writing = write(accessor, mkPath('/race'), ENC.encode('x'))
+    const making = codeOf(() => mkdir(accessor, mkPath('/race')))
+    await writing
+    expect(await making).toBe('EEXIST')
+    expect(accessor.store.dirs.has('/race')).toBe(false)
+  })
+
+  it('refuses a write into an input pipe, an empty one too', async () => {
+    const files = new DevFiles('owner')
+    const [path] = files.allocateInput(new DevicePipe(true))
+    const accessor = new RAMAccessor(new DevStore(files) as unknown as RAMStore)
+    for (const data of [new Uint8Array(), ENC.encode('x')]) {
+      expect(await codeOf(() => write(accessor, mkPath(path.slice(4)), data))).toBe('EBADF')
+    }
   })
 })

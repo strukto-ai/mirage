@@ -13,13 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.write import write
 from mirage.types import PathSpec
+from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
 
 
@@ -290,3 +293,14 @@ async def test_an_empty_streamed_append_leaves_the_file_alone(store):
     assert store.store.modified["/f"] == "2020-01-01T00:00:00Z"
     await write(store, _spec("new"), _chunks_of(), append=True)
     assert store.store.files["/new"] == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [b"", b"x"])
+async def test_a_write_into_an_input_pipe_is_refused_even_empty(data):
+    files = DevFiles("owner")
+    path, _ = files.allocate_input(DevicePipe(True))
+    accessor = RAMAccessor(DevStore(files))
+    with pytest.raises(OSError) as caught:
+        await write(accessor, PathSpec.from_str_path(path[4:]), data)
+    assert caught.value.errno == errno.EBADF

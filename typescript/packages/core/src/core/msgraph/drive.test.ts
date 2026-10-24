@@ -622,9 +622,19 @@ describe('batchTree', () => {
   })
 })
 
-it.each([false, true])(
-  'stream upload bounds parts and cancels a failed session (%s)',
-  async (fail) => {
+async function* streamed(data: Uint8Array): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield data
+}
+
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+])(
+  'an upload bounds parts and cancels a failed session (fail %s, streamed %s)',
+  async (fail, stream) => {
     const upload = 'https://upload.test/session'
     const total = 5 * 1024 * 1024
     const part = 10 * 327680
@@ -648,7 +658,8 @@ it.each([false, true])(
         })
       }),
     )
-    const uploading = writeItem(config, loc('file'), new Uint8Array(total))
+    const data = new Uint8Array(total)
+    const uploading = writeItem(config, loc('file'), stream ? streamed(data) : data)
     if (fail) await expect(uploading).rejects.toBeInstanceOf(GraphError)
     else expect(await uploading).toBe(total)
     expect(calls.map((c) => (c.body as Uint8Array).length)).toEqual([part, total - part])
