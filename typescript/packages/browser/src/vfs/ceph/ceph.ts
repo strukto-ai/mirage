@@ -24,7 +24,6 @@ import {
 export type CephVFSState = S3AliasVFSState<CephConfigRedacted>
 
 export class CephVFS extends S3AliasVFS<CephConfig, CephConfigRedacted> {
-
   constructor(config: CephConfig) {
     super(VFSName.CEPH, config, cephToS3Config(config), redactCephConfig)
   }

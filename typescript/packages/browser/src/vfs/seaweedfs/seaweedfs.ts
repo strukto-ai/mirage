@@ -24,7 +24,6 @@ import {
 export type SeaweedFSVFSState = S3AliasVFSState<SeaweedFSConfigRedacted>
 
 export class SeaweedFSVFS extends S3AliasVFS<SeaweedFSConfig, SeaweedFSConfigRedacted> {
-
   constructor(config: SeaweedFSConfig) {
     super(VFSName.SEAWEEDFS, config, seaweedfsToS3Config(config), redactSeaweedFSConfig)
   }

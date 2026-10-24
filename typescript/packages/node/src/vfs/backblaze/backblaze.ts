@@ -24,7 +24,6 @@ import {
 export type BackblazeVFSState = S3AliasVFSState<BackblazeConfigRedacted>
 
 export class BackblazeVFS extends S3AliasVFS<BackblazeConfig, BackblazeConfigRedacted> {
-
   constructor(config: BackblazeConfig) {
     super(VFSName.BACKBLAZE, config, backblazeToS3Config(config), redactBackblazeConfig)
   }

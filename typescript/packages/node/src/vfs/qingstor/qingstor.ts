@@ -24,7 +24,6 @@ import {
 export type QingStorVFSState = S3AliasVFSState<QingStorConfigRedacted>
 
 export class QingStorVFS extends S3AliasVFS<QingStorConfig, QingStorConfigRedacted> {
-
   constructor(config: QingStorConfig) {
     super(VFSName.QINGSTOR, config, qingStorToS3Config(config), redactQingStorConfig)
   }

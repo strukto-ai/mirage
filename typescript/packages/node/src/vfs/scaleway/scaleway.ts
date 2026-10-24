@@ -24,7 +24,6 @@ import {
 export type ScalewayVFSState = S3AliasVFSState<ScalewayConfigRedacted>
 
 export class ScalewayVFS extends S3AliasVFS<ScalewayConfig, ScalewayConfigRedacted> {
-
   constructor(config: ScalewayConfig) {
     super(VFSName.SCALEWAY, config, scalewayToS3Config(config), redactScalewayConfig)
   }

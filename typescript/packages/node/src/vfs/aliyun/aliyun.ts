@@ -24,7 +24,6 @@ import {
 export type AliyunVFSState = S3AliasVFSState<AliyunConfigRedacted>
 
 export class AliyunVFS extends S3AliasVFS<AliyunConfig, AliyunConfigRedacted> {
-
   constructor(config: AliyunConfig) {
     super(VFSName.ALIYUN, config, aliyunToS3Config(config), redactAliyunConfig)
   }

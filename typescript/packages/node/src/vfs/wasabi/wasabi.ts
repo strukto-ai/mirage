@@ -24,7 +24,6 @@ import {
 export type WasabiVFSState = S3AliasVFSState<WasabiConfigRedacted>
 
 export class WasabiVFS extends S3AliasVFS<WasabiConfig, WasabiConfigRedacted> {
-
   constructor(config: WasabiConfig) {
     super(VFSName.WASABI, config, wasabiToS3Config(config), redactWasabiConfig)
   }

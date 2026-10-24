@@ -19,7 +19,6 @@ import { ociToS3Config, redactOciConfig, type OCIConfig, type OCIConfigRedacted 
 export type OCIVFSState = S3AliasVFSState<OCIConfigRedacted>
 
 export class OCIVFS extends S3AliasVFS<OCIConfig, OCIConfigRedacted> {
-
   constructor(config: OCIConfig) {
     super(VFSName.OCI, config, ociToS3Config(config), redactOciConfig)
   }

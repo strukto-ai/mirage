@@ -24,7 +24,6 @@ import {
 export type TencentVFSState = S3AliasVFSState<TencentConfigRedacted>
 
 export class TencentVFS extends S3AliasVFS<TencentConfig, TencentConfigRedacted> {
-
   constructor(config: TencentConfig) {
     super(VFSName.TENCENT, config, tencentToS3Config(config), redactTencentConfig)
   }

@@ -19,7 +19,6 @@ import { r2ToS3Config, redactR2Config, type R2Config, type R2ConfigRedacted } fr
 export type R2VFSState = S3AliasVFSState<R2ConfigRedacted>
 
 export class R2VFS extends S3AliasVFS<R2Config, R2ConfigRedacted> {
-
   constructor(config: R2Config) {
     super(VFSName.R2, config, r2ToS3Config(config), redactR2Config)
   }

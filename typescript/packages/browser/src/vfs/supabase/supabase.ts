@@ -24,7 +24,6 @@ import {
 export type SupabaseVFSState = S3AliasVFSState<SupabaseConfigRedacted>
 
 export class SupabaseVFS extends S3AliasVFS<SupabaseConfig, SupabaseConfigRedacted> {
-
   constructor(config: SupabaseConfig) {
     super(VFSName.SUPABASE, config, supabaseToS3Config(config), redactSupabaseConfig)
   }

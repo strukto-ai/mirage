@@ -24,7 +24,6 @@ import {
 export type MinIOVFSState = S3AliasVFSState<MinIOConfigRedacted>
 
 export class MinIOVFS extends S3AliasVFS<MinIOConfig, MinIOConfigRedacted> {
-
   constructor(config: MinIOConfig) {
     super(VFSName.MINIO, config, minioToS3Config(config), redactMinIOConfig)
   }

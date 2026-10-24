@@ -24,7 +24,6 @@ import {
 export type DigitalOceanVFSState = S3AliasVFSState<DigitalOceanConfigRedacted>
 
 export class DigitalOceanVFS extends S3AliasVFS<DigitalOceanConfig, DigitalOceanConfigRedacted> {
-
   constructor(config: DigitalOceanConfig) {
     super(VFSName.DIGITALOCEAN, config, digitalOceanToS3Config(config), redactDigitalOceanConfig)
   }

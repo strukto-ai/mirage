@@ -19,7 +19,6 @@ import { gcsToS3Config, redactGcsConfig, type GCSConfig, type GCSConfigRedacted 
 export type GCSVFSState = S3AliasVFSState<GCSConfigRedacted>
 
 export class GCSVFS extends S3AliasVFS<GCSConfig, GCSConfigRedacted> {
-
   constructor(config: GCSConfig) {
     super(VFSName.GCS, config, gcsToS3Config(config), redactGcsConfig)
   }
