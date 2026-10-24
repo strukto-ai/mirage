@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 from datetime import datetime, timezone
 from functools import partial
@@ -38,6 +39,8 @@ from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 # GNU's phrase for a refused attribute write, per command
 # (`chmod: changing permissions of 'f': Read-only file system`); `touch`
@@ -373,7 +376,8 @@ async def before_recursive_change(
     """Ask the mount of ``root``, and every mount below it, before ``-R``
     changes anything, as for rm -r: a change cut short would leave a
     tree that looks done. The walk crosses into each mount below, so
-    each one may refuse.
+    each one may refuse. A folder the session is refused is not asked:
+    the walk does not enter it either, and reports it itself.
 
     Args:
         mounts (MountView): the mount boundaries (``mounts(False)`` of
@@ -387,7 +391,12 @@ async def before_recursive_change(
     """
     below = mounts.visible_descendants(root.virtual)
     for virtual in [root.virtual, *below]:
-        await before_full_scan(dispatch, PathSpec.from_str_path(virtual), cmd)
+        try:
+            await before_full_scan(
+                dispatch, PathSpec.from_str_path(virtual), cmd
+            )
+        except PermissionError as exc:
+            logger.debug("scan guard skipped at %s: %s", virtual, exc)
 
 
 async def walk_stats(

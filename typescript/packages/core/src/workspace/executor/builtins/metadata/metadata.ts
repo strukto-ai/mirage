@@ -237,8 +237,9 @@ export async function resolveOperand(
 
 // Ask the mount of `root`, and every mount below it, before -R changes
 // anything, as for rm -r: a change cut short would leave a tree that looks
-// done. The walk crosses into each mount below, so each one may refuse.
-// Mirrors Python's before_recursive_change.
+// done. The walk crosses into each mount below, so each one may refuse. A
+// folder the session is refused is not asked: the walk does not enter it
+// either, and reports it itself. Mirrors Python's before_recursive_change.
 export async function beforeRecursiveChange(
   mounts: MountView,
   dispatch: DispatchFn,
@@ -246,7 +247,12 @@ export async function beforeRecursiveChange(
   cmd: string,
 ): Promise<void> {
   for (const virtual of [root.virtual, ...mounts.visibleDescendants(root.virtual)]) {
-    await beforeFullScan(dispatch, PathSpec.fromStrPath(virtual), cmd)
+    try {
+      await beforeFullScan(dispatch, PathSpec.fromStrPath(virtual), cmd)
+    } catch (err) {
+      if (!isEacces(err)) throw err
+      console.debug(`scan guard skipped at ${virtual}: ${String(err)}`)
+    }
   }
 }
 

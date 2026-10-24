@@ -579,11 +579,12 @@ describe('recursive metadata flags (-R)', () => {
 
 // The rule lives on a session so the tree is seeded under the
 // unrestricted default session; every probe runs as "g". A deny rule
-// lets a stat through and refuses the attribute write and the listing.
-async function sealedWs(): Promise<Workspace> {
+// lets a stat through and refuses the attribute write and the listing. With
+// `mounted`, the sealed folder is a mount of its own.
+async function sealedWs(mounted = false): Promise<Workspace> {
   const parser = await getTestParser()
   const ws = new Workspace(
-    { '/data': new RAMVFS() },
+    mounted ? { '/data': new RAMVFS(), '/data/t/sealed': new RAMVFS() } : { '/data': new RAMVFS() },
     { mode: MountMode.WRITE, shellParser: parser },
   )
   ws.createSession('g', {
@@ -638,26 +639,36 @@ describe("a rule's refusal is one file's error", () => {
   })
 
   it.each([
-    ['chmod -R 600', '%a'],
-    ['chown -R 7', '%u'],
-    ['chgrp -R 7', '%g'],
-  ])('%s reports a refused listing and does not descend it', async (cmd, fmt) => {
-    // fts's unreadable directory: its own change is still tried (and
-    // refused here), its line follows, its subtree (the link in it
-    // included) is left alone, and the walk goes on with its siblings.
-    const ws = await sealedWs()
-    const name = cmd.split(' ')[0] ?? ''
-    expect(await guarded(ws, `cd /data && ${cmd} t; echo rc=$?`)).toEqual([
-      0,
-      'rc=1\n',
-      `${name}: t/sealed: Permission denied\n` +
-        `${name}: cannot read directory 't/sealed': Permission denied\n` +
-        `${name}: t/secret.txt: Permission denied\n`,
-    ])
-    const value = cmd.split(' ').at(-1) ?? ''
-    expect((await guarded(ws, `stat -c ${fmt} /data/t/box/pub.txt`))[1]).toBe(`${value}\n`)
-    await ws.close()
-  })
+    ['chmod -R 600', '%a', false],
+    ['chown -R 7', '%u', false],
+    ['chgrp -R 7', '%g', false],
+    ['chmod -R 600', '%a', true],
+    ['chown -R 7', '%u', true],
+    ['chgrp -R 7', '%g', true],
+  ])(
+    '%s reports a refused listing and does not descend it (mount: %s)',
+    async (cmd, fmt, mounted) => {
+      // fts's unreadable directory: its own change is still tried (and
+      // refused here), its line follows, its subtree (the link in it
+      // included) is left alone, and the walk goes on with its siblings.
+      // A denied mount below is skipped the same way, not asked first; it
+      // lists after the folder's own entries.
+      const ws = await sealedWs(mounted)
+      const name = cmd.split(' ')[0] ?? ''
+      const sealed =
+        `${name}: t/sealed: Permission denied\n` +
+        `${name}: cannot read directory 't/sealed': Permission denied\n`
+      const secret = `${name}: t/secret.txt: Permission denied\n`
+      expect(await guarded(ws, `cd /data && ${cmd} t; echo rc=$?`)).toEqual([
+        0,
+        'rc=1\n',
+        mounted ? secret + sealed : sealed + secret,
+      ])
+      const value = cmd.split(' ').at(-1) ?? ''
+      expect((await guarded(ws, `stat -c ${fmt} /data/t/box/pub.txt`))[1]).toBe(`${value}\n`)
+      await ws.close()
+    },
+  )
 })
 
 /** A dispatch whose mount refuses every listing. */
