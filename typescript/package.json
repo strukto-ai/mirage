@@ -66,6 +66,7 @@
       "toml@<5.0.1": ">=5.0.1 <6",
       "source-map-js@>=1.0.0 <1.2.2": ">=1.2.2 <2",
       "deepmerge-ts@<8.0.0": ">=8.0.0 <9",
+      "zod@>=4.0.0 <4.6.6": ">=4.6.6 <5",
       "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
       "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
       "@deepseek-ai/dsh-sandbox": "0.2.0-rc.2",

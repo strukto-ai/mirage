@@ -863,10 +863,12 @@ describe('MountCore chunks', () => {
     await core.read('/data/a.bin', early, 0, 1)
     const real = ws.vfs.read.bind(ws.vfs)
     const late: Promise<number>[] = []
-    const reads = vi.spyOn(ws.vfs, 'read').mockImplementation((path, options) => {
-      if (options === undefined && late.length === 0) late.push(core.open('/data/a.bin'))
-      return real(path, options)
-    })
+    const reads = vi
+      .spyOn(ws.vfs, 'read')
+      .mockImplementation((path, options?: { offset?: number; size?: number | null }) => {
+        if (options === undefined && late.length === 0) late.push(core.open('/data/a.bin'))
+        return real(path, options)
+      })
     await core.unlink('/data/a.bin')
     reads.mockRestore()
     expect(late).toHaveLength(1)
