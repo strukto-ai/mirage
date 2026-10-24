@@ -33,6 +33,7 @@ from mirage.types import JsonValue, MountMode
 from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
 from mirage.vfs.secrets import secret_field_names
 from mirage.workspace import Workspace
+from mirage.workspace.documentation.constants import INTRO
 from mirage.workspace.documentation.render import fenced
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -462,10 +463,11 @@ def hidden(session_id: str | None) -> bool:
 async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
     vfs = build_vfs(name, dict(config))
     ws = Workspace({PLACEHOLDER: (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
-    # The scratch root every workspace adds is no part of this VFS.
+    # The scratch root every workspace adds is no part of this VFS, and
+    # the agent's opening paragraph is no part of a docs page.
     ws.mount("/").visible = hidden
     try:
-        return await ws.vfs_md()
+        return (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
     finally:
         await ws.close()
 

@@ -18,6 +18,7 @@ from mirage import Workspace
 from mirage.core.airtable.config import AirtableConfig
 from mirage.types import VFSName
 from mirage.vfs.airtable import AirtableVFS
+from mirage.vfs.airtable.airtable import VFS_MD
 from mirage.vfs.registry import build_vfs
 from tests.fixtures.airtable_api import TOKEN
 from tests.fixtures.mount_commands import mount_commands
@@ -109,3 +110,20 @@ async def test_head_pushes_its_line_count_into_max_records(airtable_api):
     calls = airtable_api.record_calls()
     assert [c["maxRecords"] for c in calls] == ["2", "6", "6"]
     assert "offset" in calls[2]
+
+
+def test_vfs_md_maps_every_file_and_the_record_shape():
+    rendered = VFS_MD.replace("{prefix}", "/airtable")
+    for name in ("base.json", "table.json", "records.jsonl", "views/"):
+        assert name in rendered
+    assert "record_id, created_time, and fields" in rendered
+    assert "max_read_records" in rendered
+    assert "head -n 20 /airtable/bases/" in rendered
+    assert "{" not in rendered and "}" not in rendered
+
+
+def test_vfs_md_points_at_the_cli_for_what_a_file_cannot_do():
+    rendered = VFS_MD.replace("{prefix}", "/airtable")
+    assert "airtable record list --formula or --view" in rendered
+    assert "airtable record get" in rendered
+    assert "airtable comment list" in rendered

@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
-
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGSlidesConfig, type GSlidesConfig, type GSlidesConfigRedacted } from './config.ts'
@@ -37,6 +35,71 @@ import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 import { rename as gslidesRename } from '../../core/gslides/rename.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
+export const VFS_MD = `{prefix}
+  owned/
+    <date>_<title>__<presentation-id>.gslide.json
+  shared/
+    <date>_<title>__<presentation-id>.gslide.json
+
+  Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+    <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <presentation-id>  Google Slides presentation ID
+
+  Buckets:
+    owned/   presentations you created
+    shared/  presentations shared with you by others
+             - does NOT include presentations you own and shared with others;
+               those are still in owned/.
+
+  gslide.json structure (matches the Google Slides API presentations.get response):
+    {
+      "presentationId": "...",
+      "title": "...",
+      "pageSize": { "width": {...}, "height": {...} },
+      "slides": [
+        {                                      # one element per slide
+          "objectId": "...",
+          "pageElements": [
+            {
+              "objectId": "...",
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "text": {
+                  "textElements": [
+                    { "textRun": { "content": "the actual text\\n",
+                                   "style": {...} } }
+                  ]
+                }
+              }
+            },
+            { "image": {...} },
+            { "table": {...} }
+          ]
+        }
+      ],
+      "masters": [...],
+      "layouts": [...]
+    }
+
+  Useful jq paths:
+    .title
+    .slides | length                                                    # slide count
+    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
+    .slides[0].objectId
+
+  Delete:
+    rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive
+    rm -f <path>                             # ignore if missing
+    Only operates on .gslide.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
+       {prefix}/owned/<date>_<new>__<id>.gslide.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.`
+
 export interface GSlidesVFSState {
   type: string
   config: GSlidesConfigRedacted
@@ -48,9 +111,8 @@ export class GSlidesVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   // Reads stamp listing metadata; a fresh stat checks Drive by file ID.
   override readonly readRevalidatable: boolean = true
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
-  override readonly writePrompt: string = WRITE_PROMPT
   readonly config: GSlidesConfig
   override readonly accessor: GSlidesAccessor
 
@@ -70,6 +132,15 @@ export class GSlidesVFS extends BaseVFS {
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gslide.json': 'readDeck' }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
+  }
 
   override filesContaining(
     path: PathSpec,

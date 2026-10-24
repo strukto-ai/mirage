@@ -20,7 +20,7 @@ import { FakeAirtable, TOKEN } from '../../../tests/core/airtable/_test_util.ts'
 import { VFSName } from '../../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { AirtableVFS } from './airtable.ts'
+import { AirtableVFS, VFS_MD } from './airtable.ts'
 
 const TABLE = '/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001'
 const DEC = new TextDecoder()
@@ -110,5 +110,27 @@ describe('AirtableVFS', () => {
     const calls = fake.recordCalls()
     expect(calls.map((c) => c.maxRecords)).toEqual(['2', '6', '6'])
     expect(calls[2]?.offset).toBeDefined()
+  })
+})
+
+describe('VFS_MD', () => {
+  it('maps every file and the record shape', () => {
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/airtable')
+    for (const name of ['base.json', 'table.json', 'records.jsonl', 'views/']) {
+      expect(rendered).toContain(name)
+    }
+    expect(rendered).toContain('record_id, created_time, and fields')
+    expect(rendered).toContain('max_read_records')
+    expect(rendered).toContain('head -n 20 /airtable/bases/')
+    expect(rendered).not.toMatch(/[{}]/)
+  })
+})
+
+describe('VFS_MD and the CLI', () => {
+  it('points at the CLI for what a file cannot do', () => {
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/airtable')
+    expect(rendered).toContain('airtable record list --formula or --view')
+    expect(rendered).toContain('airtable record get')
+    expect(rendered).toContain('airtable comment list')
   })
 })

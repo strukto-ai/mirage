@@ -84,27 +84,32 @@ async def test_vfs_md_shows_a_layout_only_where_the_vfs_has_one():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_shows_write_commands_for_writable_mounts():
+async def test_vfs_md_reads_read_where_no_command_changes_files():
     slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
     ws = Workspace(
         {"/slack": (slack, MountMode.WRITE)},
         mode=MountMode.WRITE,
     )
-    assert "slack send-message" in await ws.vfs_md()
+    markdown = await ws.vfs_md()
+    assert "| `/slack` | `slack`, read |" in markdown
+    assert row(
+        markdown, "## Limitations of Unix Commands for VFS", "/slack"
+    ).startswith("Read only: no command changes files.")
+    assert "slack send-message" not in markdown
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_hides_write_commands_for_readonly():
+async def test_vfs_md_shows_the_users_own_text():
     slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
-    ws = Workspace(
-        {"/slack": (slack, MountMode.READ)},
-        mode=MountMode.READ,
-    )
-    assert "slack send-message" not in await ws.vfs_md()
+    slack.vfs_md = "{prefix}/channels holds our team's chat."
+    ws = Workspace({"/slack": (slack, MountMode.READ)})
+    markdown = await ws.vfs_md()
+    assert "/slack/channels holds our team's chat." in markdown
+    assert "<channel-name>__<channel-id>" not in markdown
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_substitutes_prefix_in_write_prompt():
+async def test_vfs_md_substitutes_prefix():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     gdocs = GDocsVFS(config=cfg)
     ws = Workspace(
@@ -187,10 +192,94 @@ async def test_vfs_md_names_no_command_the_profile_denies():
         profiles={"default": {"commands": {"deny": ["rm", "grep", "tree"]}}},
     )
     markdown = await ws.vfs_md()
-    assert "`rm" not in markdown
+    assert "`rm`" not in markdown
+    assert "`rm -r`" not in markdown
+    assert "`rmdir`" in markdown
     assert "`grep" not in markdown
     assert "tree" not in markdown
     assert "`find` and `du` stop after" in markdown
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_names_each_search_command_the_profile_allows():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"deny": ["rg"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert "`rg`" not in markdown
+    assert "`grep -r` with `-w` uses `gdocs` search." in markdown
+    assert "Without `-w`, `grep -r` reads every file." in markdown
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_follows_a_rule_written_for_paths():
+    ws = Workspace(
+        {
+            "/": (RAMVFS(), MountMode.WRITE),
+            "/data": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {
+                "commands": {"deny": [{"commands": {"rm": ["/data/*"]}}]}
+            }
+        },
+    )
+    markdown = await ws.vfs_md()
+    supported = "## Supported Unix Commands for VFS"
+    assert row(markdown, supported, "/") == "Almost all Unix commands."
+    assert "`rm`" not in row(markdown, supported, "/data")
+    assert "`mv`" in row(markdown, supported, "/data")
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_summarizes_nothing_for_an_allow_list():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"allow": ["cat"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert row(markdown, "## Supported Unix Commands for VFS", "/") == (
+        "Commands that read files (`cat` and the rest), and `>` and `>>`."
+    )
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_describes_each_path_shown_with_its_own_mode():
+    ws = Workspace(
+        {
+            "/": (RAMVFS(), MountMode.WRITE),
+            "/data": (RAMVFS(), MountMode.WRITE),
+        },
+        mode=MountMode.WRITE,
+    )
+    await ws.set_session_profile(
+        ws.default_session_id, {"paths": {"show": {"/data/public": "r"}}}
+    )
+    markdown = await ws.vfs_md()
+    assert row(
+        markdown, "## Limitations of Unix Commands for VFS", "/data/public"
+    ).startswith("Read only: no command changes files.")
+    assert row(
+        markdown, "## Supported Unix Commands for VFS", "/data/public"
+    ).startswith("Commands that read files")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_names_no_search_a_mount_turned_off():
+    cfg = GDocsConfig(
+        client_id="x", client_secret="y", refresh_token="z", full_scan_limit=-1
+    )
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.READ)},
+        mode=MountMode.READ,
+    )
+    assert "search" not in await ws.vfs_md()
 
 
 @pytest.mark.asyncio
@@ -215,6 +304,51 @@ async def test_skill_md_lists_the_clis_the_profile_allows():
     )
     assert "## `shown`" in skill
     assert "hidden" not in skill
+
+
+def gws() -> CLI:
+    leaf = {
+        "drive list": CLIHandler(AsyncMock()),
+        "drive delete": CLIHandler(AsyncMock()),
+    }
+    spec = CommandSpec(
+        name="gws",
+        subcommands=(
+            CommandSpec(
+                name="drive",
+                subcommands=(
+                    CommandSpec(name="list", description="List files."),
+                    CommandSpec(name="delete", description="Delete one."),
+                ),
+            ),
+        ),
+    )
+    return CLI(spec, handlers=leaf)
+
+
+@pytest.mark.asyncio
+async def test_skill_md_keeps_an_allowed_leaf_under_a_denied_parent():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"allow": ["gws drive list"]}}},
+    )
+    ws.register_cli("gws", gws())
+    skill = await ws.skill_md()
+    assert "## `gws drive list`" in skill
+    assert "## `gws`\n" not in skill
+    assert "delete" not in skill
+
+
+@pytest.mark.asyncio
+async def test_skill_md_lists_no_denied_subcommand():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"deny": ["gws drive delete"]}}},
+    )
+    ws.register_cli("gws", gws())
+    skill = await ws.skill_md()
+    assert "## `gws drive`" in skill
+    assert "delete" not in skill.lower()
 
 
 @pytest.mark.asyncio

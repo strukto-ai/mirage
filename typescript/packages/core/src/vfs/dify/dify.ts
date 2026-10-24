@@ -24,7 +24,6 @@ import {
   type DifyConfig,
   type DifyConfigResolved,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type { DirListing, PathSpec, FileStat, SearchQuery } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { DIFY_TREE } from '../../core/dify/tree.ts'
@@ -32,6 +31,26 @@ import { read, readStream } from '../../core/dify/read.ts'
 import { stat } from '../../core/dify/stat.ts'
 import { searchMany } from '../../core/dify/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `This is a Dify Knowledge Base mounted as a read-only filesystem.
+
+All files are plain text assembled from Dify document segments, regardless of
+their original extension. You can use cat, head, tail, grep, find, ls, wc, and
+search on these files.
+
+For semantic or relevance-based queries, use:
+
+search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword] [--top-k N] [--threshold F]
+
+Use grep for exact pattern or regex matching; use search when meaning matters.
+Search can target multiple files, folders, or globs. Each result is returned as
+an absolute workspace path, optionally followed by the Dify relevance score,
+then the matched chunk content. Multiple hits from the same document stay as
+separate results.
+
+Scoped search requires documents with the configured slug metadata field
+(default: slug) or Dify Built-in Fields enabled for name-based documents.
+Otherwise, scoped searches against name-based paths may return empty results.`
 
 export interface DifyVFSOptions {
   config: DifyConfig
@@ -47,7 +66,7 @@ export class DifyVFS extends BaseVFS {
   override readonly name: string = VFSName.DIFY
   override readonly cachesReads: boolean = true
   override readonly supportsSnapshot: boolean = false
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],

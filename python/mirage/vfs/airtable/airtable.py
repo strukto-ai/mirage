@@ -29,8 +29,35 @@ from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
-from mirage.vfs.airtable.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.base import BaseVFS
+
+VFS_MD = """\
+{prefix}
+  bases/
+    <base-name>__<base-id>/
+      base.json                    base id, name, permission, table list
+      <table-name>__<table-id>/
+        table.json                 typed fields (with options) and views
+        records.jsonl              one record per line
+        views/
+          <view-name>__<view-id>.jsonl   records the view shows, in its order
+  Always ls directories first to discover exact names: the name part of
+  a segment is sanitized, the id after the LAST "__" is exact.
+
+  A records.jsonl line is a mirage-normalized record:
+    record_id, created_time, and fields (keyed by field NAME, values as
+    Airtable returns them). Read table.json for each field's type.
+  Airtable omits empty cells, so a missing key means empty (checkbox
+  false included). A link field is a list of record ids; an attachment
+  url expires two hours after it was read.
+  records.jsonl lists in the API's own order; a view file applies the
+  view's filter and sort. A file over max_read_records records stops
+  with File too large after that many, while head -n N fetches just N
+  records:
+    head -n 20 {prefix}/bases/<base>/<table>/records.jsonl | jq .fields
+  The airtable CLI, if installed, reaches what a file cannot: server-side
+  filters (airtable record list --formula or --view), one record by id
+  (airtable record get), and comments (airtable comment list)."""
 
 
 class AirtableVFS(BaseVFS):
@@ -47,8 +74,7 @@ class AirtableVFS(BaseVFS):
     accessor: AirtableAccessor
     name: str = VFSName.AIRTABLE
     caches_reads: bool = False
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: AirtableConfig) -> None:
         super().__init__()

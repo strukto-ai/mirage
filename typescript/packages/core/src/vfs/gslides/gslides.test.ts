@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import { VFS_MD } from './gslides.ts'
 
-describe('PROMPT', () => {
+describe('VFS_MD', () => {
   it('renders prefix and includes buckets, structure, jq paths', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gslides')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gslides')
     expect(rendered).toContain('owned/')
     expect(rendered).toContain('shared/')
     expect(rendered).toContain('shared with you by others')
@@ -27,16 +27,9 @@ describe('PROMPT', () => {
   })
 })
 
-describe('WRITE_PROMPT', () => {
-  it('matches actual command flag signatures', () => {
-    expect(WRITE_PROMPT).toContain('gws slides presentations create')
-    expect(WRITE_PROMPT).toContain('--json')
-    expect(WRITE_PROMPT).toContain('{"title":')
-    expect(WRITE_PROMPT).toContain('gws slides --help')
-  })
-
-  it('documents rm', () => {
-    expect(WRITE_PROMPT).toContain('rm ')
-    expect(WRITE_PROMPT).toContain('.gslide.json')
+describe('VFS_MD file commands', () => {
+  it('documents rm and mv', () => {
+    expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gslide.json')
+    expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gslide.json')
   })
 })

@@ -60,7 +60,7 @@ filtering locally, so recursive searches avoid fetching the whole collection.
 
 ## VFS.md
 
-What `ws.vfsMd()` answers with Chroma mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfsMd()` answers with Chroma mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md chroma start */}
 ````markdown
@@ -71,18 +71,19 @@ description: The virtual filesystem layout of this workspace.
 
 # Virtual Filesystem
 
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
-
 | Path | Description |
 | --- | --- |
-| `/<path>` | `chroma`, write |
+| `/<path>` | `chroma`, read |
 
 ## `/<path>` layout
 
 ```text
-Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB collection.
+Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
+collection.
 
-Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect indexed documents. Paths are document slugs from the collection path tree. Writes are not supported.
+Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
+indexed documents. Paths are document slugs from the collection path tree.
+Writes are not supported.
 ```
 
 ## Supported Unix Commands for VFS
@@ -99,7 +100,7 @@ Where a path differs from a local filesystem:
 
 | Path | Limitations |
 | --- | --- |
-| `/<path>` | No command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
 Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
 ````

@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
-
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGSheetsConfig, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
@@ -37,6 +35,71 @@ import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
+export const VFS_MD = `{prefix}
+  owned/
+    <date>_<title>__<spreadsheet-id>.gsheet.json
+  shared/
+    <date>_<title>__<spreadsheet-id>.gsheet.json
+
+  Filename: <YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json
+    <YYYY-MM-DD>      modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>           sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <spreadsheet-id>  Google Sheets spreadsheet ID
+
+  Buckets:
+    owned/   sheets you created
+    shared/  sheets shared with you by others
+             - does NOT include sheets you own and shared with others;
+               those are still in owned/.
+
+  gsheet.json structure (matches the Google Sheets API spreadsheets.get response):
+    {
+      "spreadsheetId": "...",
+      "spreadsheetUrl": "...",
+      "properties": { "title": "...", "locale": "...", "timeZone": "..." },
+      "sheets": [
+        {                                      # one element per tab
+          "properties": {
+            "sheetId": 0, "title": "...", "index": 0,
+            "gridProperties": { "rowCount": 1000, "columnCount": 26 }
+          },
+          "data": [
+            {
+              "rowData": [
+                { "values": [
+                    { "formattedValue": "...",
+                      "userEnteredValue": {...},
+                      "effectiveValue": {...} }
+                ]}    # an empty cell is {}, a trailing one absent
+              ]
+            }
+          ]
+        }
+      ],
+      "namedRanges": [...]
+    }
+
+  Useful jq paths:
+    .properties.title
+    .sheets[].properties.title                              # tab names
+    .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
+    .namedRanges[]
+
+  For range-scoped reads and writes, use the gws CLI if installed:
+    gws sheets read --spreadsheet <id> --range Sheet1!A1:C10
+
+  Delete:
+    rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive
+    rm -f <path>                             # ignore if missing
+    Only operates on .gsheet.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
+       {prefix}/owned/<date>_<new>__<id>.gsheet.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.`
+
 export interface GSheetsVFSState {
   type: string
   config: GSheetsConfigRedacted
@@ -48,9 +111,8 @@ export class GSheetsVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   // Reads stamp listing metadata; a fresh stat checks Drive by file ID.
   override readonly readRevalidatable: boolean = true
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
-  override readonly writePrompt: string = WRITE_PROMPT
   readonly config: GSheetsConfig
   override readonly accessor: GSheetsAccessor
 
@@ -70,6 +132,15 @@ export class GSheetsVFS extends BaseVFS {
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gsheet.json': 'readSheet' }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
+  }
 
   override filesContaining(
     path: PathSpec,

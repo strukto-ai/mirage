@@ -27,7 +27,35 @@ from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.discord.config import DiscordConfig
-from mirage.vfs.discord.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  <guild-name>__<guild-id>/
+    channels/
+      <channel-name>__<channel-id>/
+        <yyyy-mm-dd>/
+          chat.jsonl              # messages for that date
+          files/                  # attachments shared that day (may be empty)
+            <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
+    members/
+      <username>__<user-id>.json  # member profile
+  Naming: guild, channel, member, attachment names are `<display-name>__<id>`.
+  The display name keeps the original spelling from Discord (spaces,
+  apostrophes, emoji); only `/` is replaced with `∕` (U+2215) so paths
+  don't break. Quote names containing spaces in shell commands. Always
+  ls the parent dir first to discover exact entry names (they include
+  IDs).
+  Without time bounds, bare channel listings show the latest 30 days
+  ending at the newest message. Date globs can discover earlier days.
+  With start_time/end_time, listings cover that scope; messages and their
+  attachments outside it are absent, including through direct paths.
+  Users and channel metadata remain available as context.
+  grep and rg read the files they reach, so grep needs -r to search a
+  directory; under a channel that reads every listed day, attachments
+  included (downloaded from the CDN; binary ones such as JPG or PDF
+  produce noise).
+  Messages are JSONL; use jq to extract fields like .content, .author.username,
+  .attachments."""
 
 
 class DiscordVFS(BaseVFS):
@@ -38,8 +66,7 @@ class DiscordVFS(BaseVFS):
     # are rendered at readdir from payloads the listing already fetched, and
     # attachments carry Discord's CDN byte count.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
 
     reads_ranges: bool = True
 
@@ -51,7 +78,7 @@ class DiscordVFS(BaseVFS):
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),
         )
-        self.prompt = PROMPT + self.accessor.time_range.prompt()
+        self.vfs_md = VFS_MD + self.accessor.time_range.vfs_md()
 
     async def readdir(
         self, path: PathSpec, entry: FileStat | None = None

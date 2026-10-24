@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import { VFS_MD } from './gmail.ts'
 
-describe('PROMPT', () => {
+describe('VFS_MD', () => {
   it('renders prefix and includes path anatomy + processed shape', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gmail')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gmail')
     expect(rendered).toContain('<label>')
     expect(rendered).toContain('INBOX')
     expect(rendered).toContain('after:/before:')
@@ -27,7 +27,7 @@ describe('PROMPT', () => {
   })
 
   it('documents file-per-message layout with sibling attachments dir', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gmail')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gmail')
     expect(rendered).toContain('<subject>__<message-id>.gmail.json')
     expect(rendered).toContain('<subject>__<message-id>/')
     expect(rendered).toContain('attachments dir')
@@ -35,22 +35,8 @@ describe('PROMPT', () => {
   })
 
   it('mentions grep skips binary attachments', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gmail')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gmail')
     expect(rendered).toContain('grep')
     expect(rendered.toLowerCase()).toContain('binary')
-  })
-})
-
-describe('WRITE_PROMPT', () => {
-  it('matches actual command flag signatures', () => {
-    expect(WRITE_PROMPT).toContain('gws gmail send')
-    expect(WRITE_PROMPT).toContain('--to')
-    expect(WRITE_PROMPT).toContain('--subject')
-    expect(WRITE_PROMPT).toContain('--body')
-  })
-
-  it('documents trashing and the newline gotcha', () => {
-    expect(WRITE_PROMPT).toContain('gws gmail users messages trash')
-    expect(WRITE_PROMPT).toContain("$'")
   })
 })

@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.trello.config import TrelloConfig
 from mirage.types import VFSName
-from mirage.vfs.trello.trello import TrelloVFS
+from mirage.vfs.trello.trello import VFS_MD, TrelloVFS
 from mirage.workspace.mount.backends import commands_for
 
 
@@ -44,3 +44,7 @@ def test_vfs_accessor(config):
 def test_vfs_serves_no_commands_of_its_own(config):
     vfs = TrelloVFS(config)
     assert commands_for(vfs) == []
+
+
+def test_vfs_md_points_at_the_cli():
+    assert "trello --help" in VFS_MD

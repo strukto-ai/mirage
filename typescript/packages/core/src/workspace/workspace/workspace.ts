@@ -1451,8 +1451,9 @@ export class Workspace {
   }
 
   /**
-   * Render the skill (what changes files on each mount, and the registered
-   * CLIs), optionally exposing a live workspace file.
+   * Render the skill: the registered CLIs and their help, as the profile
+   * allows them; `vfsMd` says what each mount supports. Optionally exposes
+   * a live workspace file.
    */
   skillMd(
     path?: string | PathSpec,

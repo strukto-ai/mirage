@@ -24,7 +24,20 @@ from mirage.core.email.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.email.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  <folder>/
+    <yyyy-mm-dd>/
+      <subject>__<uid>.email.json
+      <subject>__<uid>/           # if attachments exist
+        <attachment-filename>
+  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
+
+  <subject> is sanitized (don't construct it; ls the date dir).
+
+  To act on mail (list/search/read/compose/reply/forward), use the
+  himalaya CLI if installed: himalaya --help"""
 
 
 class EmailVFS(BaseVFS):
@@ -39,8 +52,7 @@ class EmailVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
     # IMAP search names messages; an attachment is read as usual.
     searchable = ("*/*/*.email.json",)
 
@@ -79,6 +91,17 @@ class EmailVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await _stat(self.accessor, path, entry)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

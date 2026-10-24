@@ -32,8 +32,73 @@ from mirage.utils.generated.google_vocabulary import SHEETS_WORDS
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gsheets.config import GSheetsConfig
-from mirage.vfs.gsheets.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.gsheets.sheet_entry import make_filename
+
+VFS_MD = """\
+{prefix}
+  owned/
+    <date>_<title>__<spreadsheet-id>.gsheet.json
+  shared/
+    <date>_<title>__<spreadsheet-id>.gsheet.json
+
+  Filename: <YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json
+    <YYYY-MM-DD>      modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>           sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <spreadsheet-id>  Google Sheets spreadsheet ID
+
+  Buckets:
+    owned/   sheets you created
+    shared/  sheets shared with you by others
+             - does NOT include sheets you own and shared with others;
+               those are still in owned/.
+
+  gsheet.json structure (matches the Google Sheets API spreadsheets.get response):
+    {
+      "spreadsheetId": "...",
+      "spreadsheetUrl": "...",
+      "properties": { "title": "...", "locale": "...", "timeZone": "..." },
+      "sheets": [
+        {                                      # one element per tab
+          "properties": {
+            "sheetId": 0, "title": "...", "index": 0,
+            "gridProperties": { "rowCount": 1000, "columnCount": 26 }
+          },
+          "data": [
+            {
+              "rowData": [
+                { "values": [
+                    { "formattedValue": "...",
+                      "userEnteredValue": {...},
+                      "effectiveValue": {...} }
+                ]}    # an empty cell is {}, a trailing one absent
+              ]
+            }
+          ]
+        }
+      ],
+      "namedRanges": [...]
+    }
+
+  Useful jq paths:
+    .properties.title
+    .sheets[].properties.title                              # tab names
+    .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
+    .namedRanges[]
+
+  For range-scoped reads and writes, use the gws CLI if installed:
+    gws sheets read --spreadsheet <id> --range Sheet1!A1:C10
+
+  Delete:
+    rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive
+    rm -f <path>                             # ignore if missing
+    Only operates on .gsheet.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
+       {prefix}/owned/<date>_<new>__<id>.gsheet.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused."""
 
 
 class GSheetsVFS(BaseVFS):
@@ -46,9 +111,8 @@ class GSheetsVFS(BaseVFS):
     index_ttl: float = 86_400
     # Reads stamp listing metadata; a fresh stat checks Drive by file ID.
     read_revalidatable: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     whole_word_search: bool = True
-    write_prompt: str = WRITE_PROMPT
 
     # Every file here is a rendering; there are no stored bytes to read.
     renderers: Mapping[str, str] = MappingProxyType(
@@ -79,6 +143,17 @@ class GSheetsVFS(BaseVFS):
         """
         data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

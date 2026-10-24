@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 
 import { TokenManager } from '../../core/google/client.ts'
-
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGDocsConfig, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
@@ -37,6 +35,94 @@ import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
 import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
+export const VFS_MD = `{prefix}
+  owned/
+    <date>_<title>__<doc-id>.gdoc.json
+  shared/
+    <date>_<title>__<doc-id>.gdoc.json
+
+  Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+    <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <doc-id>      Google Docs document ID
+
+  Buckets:
+    owned/   docs you created
+    shared/  docs shared with you by others
+             - does NOT include docs you own and shared with others;
+               those are still in owned/.
+
+  gdoc.json structure (the Google Docs API documents.get response, read
+  with includeTabsContent=true so every tab is present):
+    {
+      "documentId": "...",
+      "title": "...",
+      "tabs": [                          # one entry per top-level tab
+        {
+          "tabProperties": {
+            "tabId": "t.0",              # names a tab for gws docs write
+            "title": "Tab 1",
+            "index": 0
+          },
+          "documentTab": {
+            "body": {
+              "content": [
+                {                          # one element per block
+                  "paragraph": {
+                    "elements": [
+                      { "textRun": { "content": "the actual text\\n",
+                                     "textStyle": {...} } }
+                    ],
+                    "paragraphStyle": {...}
+                  }
+                },
+                { "table": {...} },
+                { "sectionBreak": {...} }
+              ]
+            },
+            "documentStyle": {...},
+            "namedStyles": {...}
+          },
+          "childTabs": [ { ...same shape, nested to any depth... } ]
+                                       # a NESTED tab additionally carries
+                                       # parentTabId and nestingLevel; a
+                                       # root tab carries neither
+        }
+      ],
+      "revisionId": "..."
+    }
+
+  There is no top-level .body. A tab-aware response leaves the singleton
+  fields (.body, .documentStyle, .namedStyles) empty and hangs every
+  tab's content off .tabs[].documentTab instead. Tabs also nest, so text
+  can sit at any depth under .childTabs; the recursive recipes below read
+  a one-tab and a fifty-tab document alike.
+
+  Useful jq paths:
+    .title
+    [.. | .tabProperties? // empty | .title]             # every tab name
+    [.. | .textRun? // empty | .content] | add           # all text, any depth
+    [.. | .tabProperties? // empty] | length             # tab count
+    [.tabs[0].documentTab.body.content[]
+      | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+    .revisionId
+
+  The first block of a body is always a sectionBreak, which carries no
+  .paragraph, so a path through .paragraph needs the \`?\` or it fails with
+  "Cannot iterate over null".
+
+  Delete:
+    rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive
+    rm -f <path>                            # ignore if missing
+    Only operates on .gdoc.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
+       {prefix}/owned/<date>_<new>__<id>.gdoc.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused.`
+
 export interface GDocsVFSState {
   type: string
   config: GDocsConfigRedacted
@@ -48,9 +134,8 @@ export class GDocsVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   // Reads stamp listing metadata; a fresh stat checks Drive by file ID.
   override readonly readRevalidatable: boolean = true
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
-  override readonly writePrompt: string = WRITE_PROMPT
   readonly config: GDocsConfig
   override readonly accessor: GDocsAccessor
 
@@ -70,6 +155,15 @@ export class GDocsVFS extends BaseVFS {
   } as const
 
   override readonly renderers: Readonly<Record<string, string>> = { '.gdoc.json': 'readDoc' }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
+  }
 
   override filesContaining(
     path: PathSpec,

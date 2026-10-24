@@ -13,7 +13,14 @@ from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
-from mirage.vfs.chroma.prompt import PROMPT
+
+VFS_MD = """\
+Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
+collection.
+
+Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
+indexed documents. Paths are document slugs from the collection path tree.
+Writes are not supported."""
 
 _readdir = CHROMA_TREE.readdir
 
@@ -26,7 +33,7 @@ class ChromaVFS(BaseVFS):
     # caller stats; the path tree's own size is the producer's source
     # number and never becomes the reported byte length.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     supports_snapshot: bool = False
 
     def __init__(self, config: ChromaConfig) -> None:

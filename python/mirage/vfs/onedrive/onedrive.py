@@ -123,6 +123,17 @@ class OneDriveVFS(BaseVFS):
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
 
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
+
     async def files_containing(
         self,
         path: PathSpec,

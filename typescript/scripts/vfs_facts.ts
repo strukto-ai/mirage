@@ -93,8 +93,7 @@ export interface Capabilities {
   listing_version: string
   storage_location: boolean
   capacity: boolean
-  has_prompt: boolean
-  has_write_prompt: boolean
+  has_vfs_md: boolean
   functions: string[]
   reads_ranges: boolean | string
   local: boolean | string
@@ -293,7 +292,7 @@ function isEmptyString(node: ts.Expression): boolean {
 }
 
 // Whether the class's constructor assigns `this.<name>` a value other than
-// the empty string. A prompt that embeds the mount prefix is built there
+// the empty string. A VFS.md text that embeds the mount prefix is built there
 // (postgres, mongodb), so its field is declared with no initializer.
 function assignsInConstructor(info: ClassInfo, name: string): boolean {
   let found = false
@@ -321,11 +320,10 @@ function assignsInConstructor(info: ClassInfo, name: string): boolean {
  *
  * The nearest declaration decides, as it does at runtime: an initializer
  * other than `''`, a getter, or a bare declaration its constructor fills.
- * `BaseVFS` declares both slots without a value: its constructor only
+ * `BaseVFS` declares the slot without a value: its constructor only
  * forwards what a table-built driver passes in, which no static read can
- * see, so reaching the base means the class gives none. `buildFilePrompt`
- * skips a mount whose prompt is absent, so a class that gives neither
- * describes nothing to an agent.
+ * see, so reaching the base means the class gives none, and VFS.md then
+ * shows no layout for its mounts.
  *
  * Args:
  *   ancestry: the class and its ancestors, nearest first.
@@ -394,8 +392,7 @@ export function capabilitiesOf(className: string, classes: Map<string, ClassInfo
     listing_version: stringCapability(values, 'listingVersion', className),
     storage_location: overrides.some((info) => declaresMethod(info, 'storageLocation')),
     capacity: overrides.some((info) => declaresMethod(info, 'capacity')),
-    has_prompt: givesText(ancestry, 'prompt'),
-    has_write_prompt: givesText(ancestry, 'writePrompt'),
+    has_vfs_md: givesText(ancestry, 'vfsMd'),
     functions: [...functions].sort(compareCodePoints),
     reads_ranges: booleanCapability(values, 'readsRanges', false, className),
     local: booleanCapability(values, 'local', false, className),

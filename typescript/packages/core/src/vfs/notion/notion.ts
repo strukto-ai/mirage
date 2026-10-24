@@ -26,6 +26,33 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `{prefix}
+  pages/
+    <page-title>__<page-id>/
+      page.json
+      <child-page-title>__<child-id>/
+        page.json
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <data-source-title>__<data-source-id>/
+        data_source.json
+        rows.jsonl
+  Hierarchical page tree plus shared databases. cat page.json shows
+  metadata, the page body rendered as markdown, and raw blocks (nested
+  blocks under "children"). A database is a container plus one or more
+  data sources: database.json holds the container's identity and its
+  data_sources stubs, data_source.json holds the typed property schema,
+  and rows.jsonl holds the rows, one JSON line each: the row page's
+  page.json without the body, plus "path", that page.json's path below
+  the data source dir. Row dirs are not listed; open one by its path.
+
+  Titles are sanitized; don't construct paths: ls the parent dir, or
+  take a row's "path" from rows.jsonl.
+  ntn takes ids as positional operands, not flags: ntn pages get
+  <page-id>, ntn datasources query <data-source-id>, ntn datasources
+  resolve <database-id>.`
+
 /**
  * Notion's functions over its accessor, which the node and browser
  * packages build over their own transport.

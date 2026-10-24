@@ -24,7 +24,7 @@ import { normalizeMem0Config } from '@struktoai/mirage-core/vfs/mem0/config'
 import { Mem0VFS } from '@struktoai/mirage-core/vfs/mem0/mem0'
 import { OneDriveVFS } from '@struktoai/mirage-core/vfs/onedrive/onedrive'
 import { vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
-import { MountMode, VFSName } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { Workspace } from '../workspace.ts'
 import { normalizeS3Config } from './s3/config.ts'
 import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
@@ -180,26 +180,6 @@ describe('node VFS registry', () => {
       }
     } finally {
       vi.unstubAllGlobals()
-    }
-  })
-
-  // EMAIL_WRITE_PROMPT was exported but never attached to EmailVFS, so a
-  // writable mailbox said nothing about sending. Its wording also named
-  // `himalaya message send --to`, a verb that takes a raw RFC 5322 message
-  // and refuses those flags; python's `message compose ... --send` is the
-  // line the CLI accepts.
-  it('tells a writable email mount how to send', async () => {
-    const vfs = await buildVfs('email', {
-      imap_host: 'h',
-      smtp_host: 'h',
-      username: 'me@example.com',
-      password: 'p',
-    })
-    const ws = new Workspace({ '/mail': vfs }, { mode: MountMode.WRITE })
-    try {
-      expect(await ws.vfsMd()).toContain('himalaya message compose --to')
-    } finally {
-      await ws.close()
     }
   })
 

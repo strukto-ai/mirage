@@ -18,8 +18,7 @@ The methods you can override, with the arguments you normally use:
     ```python
     class BaseVFS:
         name: str
-        prompt: str
-        write_prompt: str
+        vfs_md: str
 
         async def readdir(self, path: PathSpec) -> list[FileStat]: ...
         async def stat(self, path: PathSpec) -> FileStat: ...
@@ -53,8 +52,7 @@ The methods you can override, with the arguments you normally use:
     ```typescript
     declare class BaseVFS {
       name: string
-      prompt: string
-      writePrompt: string
+      vfsMd: string
 
       readdir(path: PathSpec): Promise<FileStat[]>
       stat(path: PathSpec): Promise<FileStat>
@@ -138,12 +136,14 @@ instead of reading files. Each links to its guide.
 | Attribute | Does |
 | --- | --- |
 | `name` | Names the VFS. |
-| `prompt` | The mount's layout and file formats in its VFS.md; leave it empty for plain files. `{prefix}` becomes the mount's folder. |
-| `write_prompt` | Added to the description when the mount is writable. |
+| `vfs_md` | The mount's layout and file formats in its VFS.md; leave it empty for plain files. `{prefix}` becomes the mount's folder. |
 | `whole_word_search` | `files_containing` answers only a whole-word search (`grep -w`, `rg -w`); VFS.md tells the agent so. |
 
-Set them as class attributes or pass them to `super().__init__()`
-(`super({...})` in TypeScript).
+Set them as class attributes. `name` and `vfs_md` can also be passed to
+`super().__init__()` (`super({...})` in TypeScript, with `vfsMd`).
+
+To describe a built-in VFS your own way, set `vfs_md` on it (`vfsMd` in
+TypeScript); VFS.md shows your text in place of the built-in one.
 
 ## Example: a read-only VFS
 

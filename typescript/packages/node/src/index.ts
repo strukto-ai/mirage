@@ -347,8 +347,6 @@ export {
   type EmailConfig,
   type EmailConfigInput,
   type EmailConfigRedacted,
-  EMAIL_PROMPT,
-  EMAIL_WRITE_PROMPT,
 } from './vfs/email/index.ts'
 export { EmailAccessor } from './accessor/email.ts'
 export { HF } from './commands/cli/builtin/hf/index.ts'

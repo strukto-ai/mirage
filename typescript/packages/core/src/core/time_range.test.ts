@@ -78,11 +78,11 @@ describe('TimeRange', () => {
     ])
   })
 
-  it('states both ends in its prompt', () => {
-    expect(new TimeRange().prompt()).toContain('start_time=unbounded')
-    const prompt = new TimeRange('2026-06-01T00:00:00Z', null).prompt()
-    expect(prompt).toContain('start_time=2026-06-01T00:00:00.000Z (inclusive)')
-    expect(prompt).toContain('end_time=unbounded (exclusive)')
+  it('states both ends in its VFS.md text', () => {
+    expect(new TimeRange().vfsMd()).toContain('start_time=unbounded')
+    const text = new TimeRange('2026-06-01T00:00:00Z', null).vfsMd()
+    expect(text).toContain('start_time=2026-06-01T00:00:00.000Z (inclusive)')
+    expect(text).toContain('end_time=unbounded (exclusive)')
   })
 })
 

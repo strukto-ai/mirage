@@ -15,7 +15,6 @@
 import { BaseVFS } from '../base.ts'
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { TokenManager } from '../../core/google/client.ts'
-import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 import { redactGDriveConfig, type GDriveConfig, type GDriveConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/gdrive/events.ts'
@@ -42,6 +41,23 @@ import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
 import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  Mirrors Google Drive folder hierarchy. May contain:
+    <name>.gdoc.json    Google Docs    (cat returns gdoc.json - see /gdocs layout)
+    <name>.gsheet.json  Google Sheets  (cat returns gsheet.json - see /gsheets layout)
+    <name>.gslide.json  Google Slides  (cat returns gslide.json - see /gslides layout)
+    <other-files>       PDFs, images, etc. - cat returns raw bytes
+
+  No owned/ vs shared/ split here: gdrive shows the user's full Drive view,
+  including files shared with the user that have been added to My Drive.
+  Shared drives visible to the user are included as top-level directories.
+
+  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
+  Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
+
+  To act on Drive items by id (create, update, export, permissions),
+  use the gws CLI if installed: gws drive --help`
 
 export interface GDriveVFSState {
   type: string
@@ -74,7 +90,7 @@ export class GoogleDriveVFS extends BaseVFS {
     setattr: ['entry'],
     filesContaining: ['entry'],
   } as const
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
   readonly config: GDriveConfig
   override readonly accessor: GDriveAccessor
@@ -181,6 +197,15 @@ export class GoogleDriveVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<void> {
     return gdriveTruncate(this.accessor, path, length, noCreate, handed)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

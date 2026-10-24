@@ -36,7 +36,7 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfsMd()` answers with Weights & Biases mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfsMd()` answers with Weights & Biases mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md wandb start */}
 ````markdown
@@ -47,11 +47,9 @@ description: The virtual filesystem layout of this workspace.
 
 # Virtual Filesystem
 
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
-
 | Path | Description |
 | --- | --- |
-| `/<path>` | `wandb`, write |
+| `/<path>` | `wandb`, read |
 
 ## `/<path>` layout
 
@@ -83,7 +81,7 @@ Where a path differs from a local filesystem:
 
 | Path | Limitations |
 | --- | --- |
-| `/<path>` | No command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
 Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
 ````

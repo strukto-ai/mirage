@@ -42,8 +42,7 @@ describe('DiscordVFS (browser)', () => {
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ proxyUrl: '/api/discord' })
-    expect(typeof r.prompt).toBe('string')
-    expect(typeof r.writePrompt).toBe('string')
+    expect(typeof r.vfsMd).toBe('string')
   })
 
   it('constructs with proxyUrl and getHeaders', () => {

@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { jqEval } from '../../core/jq/eval.ts'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import { VFS_MD } from './gdocs.ts'
 
 const ALL_TEXT = '[.. | .textRun? // empty | .content] | add'
 const TAB_NAMES = '[.. | .tabProperties? // empty | .title]'
@@ -56,9 +56,9 @@ const DOC = {
   revisionId: 'rev-3',
 }
 
-describe('PROMPT', () => {
+describe('VFS_MD', () => {
   it('renders prefix and includes buckets, structure, jq paths', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gdocs')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
     expect(rendered).toContain('owned/')
     expect(rendered).toContain('shared/')
     expect(rendered).toContain('shared with you by others')
@@ -72,20 +72,20 @@ describe('PROMPT', () => {
   it('no longer promises a top-level body', () => {
     // includeTabsContent=true leaves the singleton fields empty, so the
     // old recipe would return nothing at all on a live document.
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gdocs')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
     expect(rendered).not.toContain(OLD_FLAT_RECIPE)
     expect(rendered).toContain('There is no top-level .body')
   })
 
   it('states the recipes this test runs', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gdocs')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdocs')
     for (const recipe of [ALL_TEXT, TAB_NAMES, TAB_COUNT, FIRST_TAB]) {
       expect(rendered).toContain(recipe)
     }
   })
 })
 
-describe('PROMPT jq recipes', () => {
+describe('VFS_MD jq recipes', () => {
   it('reads every tab at any depth', async () => {
     expect(await jqEval(DOC, ALL_TEXT)).toEqual(['first tab\nsecond tab\nchild tab\n'])
   })
@@ -103,24 +103,9 @@ describe('PROMPT jq recipes', () => {
   })
 })
 
-describe('WRITE_PROMPT', () => {
-  it('matches actual command flag signatures', () => {
-    expect(WRITE_PROMPT).toContain('gws docs write')
-    expect(WRITE_PROMPT).toContain('--document')
-    expect(WRITE_PROMPT).toContain('--text')
-    expect(WRITE_PROMPT).toContain('--tab')
-    expect(WRITE_PROMPT).toContain('gws docs --help')
-    expect(WRITE_PROMPT).toContain('gws docs documents batchUpdate --json')
-  })
-
-  it('says an unnamed tab is the first one', () => {
-    expect(WRITE_PROMPT).toContain('FIRST tab')
-    expect(WRITE_PROMPT).toContain('[.. | .tabProperties? // empty | .tabId]')
-  })
-
-  it('documents rm and the newline gotcha', () => {
-    expect(WRITE_PROMPT).toContain('rm ')
-    expect(WRITE_PROMPT).toContain('.gdoc.json')
-    expect(WRITE_PROMPT).toContain("$'")
+describe('VFS_MD file commands', () => {
+  it('documents rm and mv', () => {
+    expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gdoc.json')
+    expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gdoc.json')
   })
 })

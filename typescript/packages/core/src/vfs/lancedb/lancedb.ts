@@ -20,6 +20,15 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `This mount is a LanceDB table exposed as a filesystem.
+
+Directories are the configured group-by columns; descending narrows a filter.
+Each matching row is a <id>.md card plus a <id>.<ext> blob file. For semantic
+search use the search command, which returns ranked rows as canonical file
+paths with a score, e.g. search "red running shoes" /mount then cat one of the
+returned <path>.md files. Use ls/cd/cat/tree/find/wc as usual; grep/rg stay
+lexical. Quote queries that contain spaces.`
+
 /**
  * LanceDB's functions over its accessor, which a host package builds
  * over its own transport.

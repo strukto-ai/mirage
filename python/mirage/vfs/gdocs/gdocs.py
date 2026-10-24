@@ -33,7 +33,95 @@ from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.doc_entry import make_filename
-from mirage.vfs.gdocs.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  owned/
+    <date>_<title>__<doc-id>.gdoc.json
+  shared/
+    <date>_<title>__<doc-id>.gdoc.json
+
+  Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+    <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <doc-id>      Google Docs document ID
+
+  Buckets:
+    owned/   docs you created
+    shared/  docs shared with you by others
+             - does NOT include docs you own and shared with others;
+               those are still in owned/.
+
+  gdoc.json structure (the Google Docs API documents.get response, read
+  with includeTabsContent=true so every tab is present):
+    {
+      "documentId": "...",
+      "title": "...",
+      "tabs": [                          # one entry per top-level tab
+        {
+          "tabProperties": {
+            "tabId": "t.0",              # names a tab for gws docs write
+            "title": "Tab 1",
+            "index": 0
+          },
+          "documentTab": {
+            "body": {
+              "content": [
+                {                          # one element per block
+                  "paragraph": {
+                    "elements": [
+                      { "textRun": { "content": "the actual text\\n",
+                                     "textStyle": {...} } }
+                    ],
+                    "paragraphStyle": {...}
+                  }
+                },
+                { "table": {...} },
+                { "sectionBreak": {...} }
+              ]
+            },
+            "documentStyle": {...},
+            "namedStyles": {...}
+          },
+          "childTabs": [ { ...same shape, nested to any depth... } ]
+                                       # a NESTED tab additionally carries
+                                       # parentTabId and nestingLevel; a
+                                       # root tab carries neither
+        }
+      ],
+      "revisionId": "..."
+    }
+
+  There is no top-level .body. A tab-aware response leaves the singleton
+  fields (.body, .documentStyle, .namedStyles) empty and hangs every
+  tab's content off .tabs[].documentTab instead. Tabs also nest, so text
+  can sit at any depth under .childTabs; the recursive recipes below read
+  a one-tab and a fifty-tab document alike.
+
+  Useful jq paths:
+    .title
+    [.. | .tabProperties? // empty | .title]             # every tab name
+    [.. | .textRun? // empty | .content] | add           # all text, any depth
+    [.. | .tabProperties? // empty] | length             # tab count
+    [.tabs[0].documentTab.body.content[]
+      | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+    .revisionId
+
+  The first block of a body is always a sectionBreak, which carries no
+  .paragraph, so a path through .paragraph needs the `?` or it fails with
+  "Cannot iterate over null".
+
+  Delete:
+    rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive
+    rm -f <path>                            # ignore if missing
+    Only operates on .gdoc.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename (a new title):
+    mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
+       {prefix}/owned/<date>_<new>__<id>.gdoc.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused."""
 
 
 class GDocsVFS(BaseVFS):
@@ -46,9 +134,8 @@ class GDocsVFS(BaseVFS):
     index_ttl: float = 86_400
     # Reads stamp listing metadata; a fresh stat checks Drive by file ID.
     read_revalidatable: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     whole_word_search: bool = True
-    write_prompt: str = WRITE_PROMPT
 
     # Every file here is a rendering; there are no stored bytes to read.
     renderers: Mapping[str, str] = MappingProxyType({".gdoc.json": "read_doc"})
@@ -77,6 +164,17 @@ class GDocsVFS(BaseVFS):
         """
         data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

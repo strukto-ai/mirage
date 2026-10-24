@@ -14,6 +14,10 @@
 
 import type { Change } from './types.ts'
 
+// The paragraph that opens VFS.md for an agent.
+export const INTRO =
+  'You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.'
+
 // The file commands VFS.md names as reading every path.
 export const READS: readonly string[] = ['ls', 'cat', 'grep', 'find', 'jq']
 

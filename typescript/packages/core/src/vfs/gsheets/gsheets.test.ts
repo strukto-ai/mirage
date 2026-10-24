@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
+import { VFS_MD } from './gsheets.ts'
 
-describe('PROMPT', () => {
+describe('VFS_MD', () => {
   it('renders prefix and includes buckets, structure, jq paths, read command', () => {
-    const rendered = PROMPT.replace(/\{prefix\}/g, '/gsheets')
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gsheets')
     expect(rendered).toContain('owned/')
     expect(rendered).toContain('shared/')
     expect(rendered).toContain('shared with you by others')
@@ -28,19 +28,9 @@ describe('PROMPT', () => {
   })
 })
 
-describe('WRITE_PROMPT', () => {
-  it('matches actual command flag signatures', () => {
-    expect(WRITE_PROMPT).toContain('gws sheets write')
-    expect(WRITE_PROMPT).toContain('gws sheets append')
-    expect(WRITE_PROMPT).toContain('--spreadsheet')
-    expect(WRITE_PROMPT).toContain('--range')
-    expect(WRITE_PROMPT).toContain('--values')
-    expect(WRITE_PROMPT).toContain('--json-values')
-    expect(WRITE_PROMPT).toContain('gws sheets --help')
-  })
-
-  it('documents rm', () => {
-    expect(WRITE_PROMPT).toContain('rm ')
-    expect(WRITE_PROMPT).toContain('.gsheet.json')
+describe('VFS_MD file commands', () => {
+  it('documents rm and mv', () => {
+    expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gsheet.json')
+    expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gsheet.json')
   })
 })

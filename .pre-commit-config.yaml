@@ -164,11 +164,11 @@ repos:
         # one change most likely to break it.
         files: ^(python/(mirage|tests)/.*\.py|scripts/check_test_pathspec\.py)$
         pass_filenames: false
-      - id: prompt-parity
-        name: VFS prompt parity
-        entry: python3 scripts/check_prompt_parity.py --selftest
+      - id: vfs-md-parity
+        name: VFS.md parity
+        entry: python3 scripts/check_vfs_md_parity.py --selftest
         language: system
-        files: ^(python/mirage/vfs/.*/prompt\.py|typescript/packages/[^/]+/src/vfs/.*/prompt\.ts|scripts/check_prompt_parity\.py|scripts/parity/prompt_exceptions\.json)$
+        files: ^(python/mirage/vfs/.*\.py|typescript/packages/[^/]+/src/vfs/.*\.ts|scripts/check_vfs_md_parity\.py|scripts/parity/vfs_md_exceptions\.json)$
         pass_filenames: false
       - id: doc-tables-python
         name: Generated doc tables (python)

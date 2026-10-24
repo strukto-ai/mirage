@@ -12,10 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-PROMPT = """\
-{prefix}
-  services/
-    <service-name>/
-      operations.json
-      traces/
-        <trace-id>.json"""
+from mirage.vfs.gslides.gslides import VFS_MD
+
+
+def test_vfs_md_includes_buckets_and_structure():
+    rendered = VFS_MD.replace("{prefix}", "/gslides")
+    assert "owned/" in rendered
+    assert "shared/" in rendered
+    assert "shared with you by others" in rendered
+    assert "still in owned/" in rendered
+    assert "gslide.json structure" in rendered
+    text_path = (
+        ".slides[].pageElements[].shape.text.textElements[].textRun.content"
+    )
+    assert text_path in rendered
+
+
+def test_vfs_md_documents_rm_and_mv():
+    assert "rm {prefix}/owned/<file>.gslide.json" in VFS_MD
+    assert "mv {prefix}/owned/<date>_<old>__<id>.gslide.json" in VFS_MD

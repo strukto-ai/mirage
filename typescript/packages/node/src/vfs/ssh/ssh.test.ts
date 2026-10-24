@@ -48,7 +48,7 @@ describe('SSHVFS — identity', () => {
   })
 
   it('describes no layout of its own', () => {
-    expect(makeVfs(state).prompt).toBe('')
+    expect(makeVfs(state).vfsMd).toBe('')
   })
 
   it('serves no commands of its own', () => {

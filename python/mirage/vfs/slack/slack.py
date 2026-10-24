@@ -29,7 +29,39 @@ from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.config import SlackConfig
-from mirage.vfs.slack.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  channels/
+    <channel-name>__<channel-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl                # messages for that date
+        files/                    # attachments shared that day (may be empty)
+          <name>__<F-id>.<ext>    # cat to download bytes
+  dms/
+    <user-name>__<dm-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
+  users/
+    <username>__<user-id>.json    # user profile
+  Naming: channel/DM/user directory names are `<display-name>__<id>`.
+  The display name keeps the original spelling from Slack; only `/` is
+  replaced with `∕` (U+2215) so paths don't break. Quote names
+  containing spaces in shell commands. Always ls the parent dir first
+  to discover exact entry names (they include IDs).
+  Without time bounds, bare channel listings show the latest 90 days
+  ending at the newest message. Date globs can discover earlier days.
+  With start_time/end_time, listings cover that scope; messages and their
+  attachments outside it are absent, including through direct paths.
+  Users and channel metadata remain available as context.
+  On a time-scoped mount grep and rg see only the in-scope files.
+  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
+  .user is a user ID (U…), not a username; resolve it through
+  users/<username>__<user-id>.json and filter messages by the ID.
+  Unless walk_limit is -1, grep -rw and rg -w read only the channel
+  and DM days Slack search names; attachments under files/ are always read."""
 
 
 class SlackVFS(BaseVFS):
@@ -41,9 +73,8 @@ class SlackVFS(BaseVFS):
     # (users.list is payload-identical to users.info, verified live), and
     # file blobs carry Slack's upload byte count.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     whole_word_search: bool = True
-    write_prompt: str = WRITE_PROMPT
 
     reads_ranges: bool = True
     # Slack search names channel and DM days; users and file blobs are
@@ -58,7 +89,7 @@ class SlackVFS(BaseVFS):
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),
         )
-        self.prompt = PROMPT + self.accessor.time_range.prompt()
+        self.vfs_md = VFS_MD + self.accessor.time_range.vfs_md()
 
     async def readdir(
         self, path: PathSpec, entry: FileStat | None = None
@@ -110,6 +141,17 @@ class SlackVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> FileStat:
         return await _stat(self.accessor, path, entry, parent)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

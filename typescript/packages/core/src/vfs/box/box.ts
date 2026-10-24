@@ -15,7 +15,6 @@
 import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
 import { BoxTokenManager } from '../../core/box/client.ts'
-import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/events.ts'
@@ -39,6 +38,19 @@ import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  Mirrors Box folder hierarchy. Every item is served as its raw bytes:
+    <name>.boxnote      Box Note    (raw ProseMirror-style JSON; pipe to jq)
+    <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
+    <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
+                        Office Open XML (docx/xlsx/pptx) - opaque binary
+    <other-files>       PDFs, images, binaries, etc. - raw bytes
+
+  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
+  Box uses numeric folder IDs internally (root = 0); mirage caches the
+  path -> id mapping, so nested dirs cost one API call per level on first
+  access. Use ls on the parent dir before constructing a path.`
 
 export interface BoxVFSState {
   type: string
@@ -74,7 +86,7 @@ export class BoxVFS extends BaseVFS {
     truncate: ['entry', 'parent'],
     filesContaining: ['entry'],
   } as const
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly wholeWordSearch: boolean = true
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
@@ -182,6 +194,15 @@ export class BoxVFS extends BaseVFS {
     handed: Handed = {},
   ): Promise<void> {
     return boxTruncate(this.accessor, path, length, noCreate, handed)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

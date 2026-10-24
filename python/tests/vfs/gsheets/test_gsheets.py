@@ -12,17 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.vfs.gdrive.prompt import PROMPT
+from mirage.vfs.gsheets.gsheets import VFS_MD
 
 
-def test_prompt_cross_references_per_service_shapes():
-    rendered = PROMPT.replace("{prefix}", "/gdrive")
-    assert ".gdoc.json" in rendered
-    assert ".gsheet.json" in rendered
-    assert ".gslide.json" in rendered
-    assert "/gdocs prompt" in rendered
-    assert "/gsheets prompt" in rendered
-    assert "/gslides prompt" in rendered
-    assert "remote mount" in rendered
-    assert "modifiedTime range" in rendered
-    assert "No owned/ vs shared/" in rendered
+def test_vfs_md_includes_buckets_and_structure():
+    rendered = VFS_MD.replace("{prefix}", "/gsheets")
+    assert "owned/" in rendered
+    assert "shared/" in rendered
+    assert "shared with you by others" in rendered
+    assert "still in owned/" in rendered
+    assert "gsheet.json structure" in rendered
+    assert ".sheets[].properties.title" in rendered
+    assert "gws sheets read" in rendered
+
+
+def test_vfs_md_documents_rm_and_mv():
+    assert "rm {prefix}/owned/<file>.gsheet.json" in VFS_MD
+    assert "mv {prefix}/owned/<date>_<old>__<id>.gsheet.json" in VFS_MD

@@ -128,6 +128,15 @@ export class OneDriveVFS extends BaseVFS {
     return truncate(this.accessor, path, length, noCreate)
   }
 
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    return super.supports(name)
+  }
+
   override filesContaining(
     path: PathSpec,
     text: string,

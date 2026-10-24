@@ -73,8 +73,7 @@ class BaseVFS:
 
     name: str = "base"
     accessor: Accessor = Accessor()
-    prompt: str = ""
-    write_prompt: str = ""
+    vfs_md: str = ""
 
     # How long the mount's index keeps a listing or a stat, in seconds,
     # when no index config says otherwise.
@@ -193,8 +192,7 @@ class BaseVFS:
         *,
         name: str | None = None,
         accessor: Accessor | None = None,
-        prompt: str | None = None,
-        write_prompt: str | None = None,
+        vfs_md: str | None = None,
         commands: list[Any] | None = None,
         caches_reads: bool | None = None,
         sizes_always_known: bool | None = None,
@@ -212,8 +210,9 @@ class BaseVFS:
                 ``register_vfs`` or a ``mirage.vfs`` entry point. None
                 keeps the class attribute.
             accessor (Accessor | None): backend handle the functions use.
-            prompt (str | None): LLM-facing description of the layout.
-            write_prompt (str | None): appended when mounted writable.
+            vfs_md (str | None): this VFS's part of VFS.md: its layout
+                and file formats, ``{prefix}`` standing for the mount
+                path. None keeps the class attribute.
             commands (list[Any] | None): extra ``@command`` functions,
                 ``Command`` values or ``CLI`` trees: bespoke verbs, a
                 program's verbs as one command tree under its root's
@@ -242,10 +241,8 @@ class BaseVFS:
             self.name = name
         if accessor is not None:
             self.accessor = accessor
-        if prompt is not None:
-            self.prompt = prompt
-        if write_prompt is not None:
-            self.write_prompt = write_prompt
+        if vfs_md is not None:
+            self.vfs_md = vfs_md
         if caches_reads is not None:
             self.caches_reads = caches_reads
         if sizes_always_known is not None:

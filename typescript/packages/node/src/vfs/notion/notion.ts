@@ -19,7 +19,7 @@ import { HttpNotionTransport } from '@struktoai/mirage-core/core/notion/client'
 import { redactNotionConfig } from '@struktoai/mirage-core/core/notion/config'
 import type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/core/notion/config'
 
-import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/notion/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
@@ -31,8 +31,7 @@ export interface NotionVFSState {
 export class NotionVFS extends NotionVFSBase {
   override readonly name: string = VFSName.NOTION
   override readonly cachesReads: boolean = true
-  override readonly prompt: string = PROMPT
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string = VFS_MD
   readonly config: NotionConfig
   override readonly accessor: NotionAccessor
 

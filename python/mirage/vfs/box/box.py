@@ -40,7 +40,19 @@ from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
-from mirage.vfs.box.prompt import PROMPT
+
+VFS_MD = """{prefix}
+  Mirrors Box folder hierarchy. Every item is served as its raw bytes:
+    <name>.boxnote      Box Note    (raw ProseMirror-style JSON; pipe to jq)
+    <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
+    <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
+                        Office Open XML (docx/xlsx/pptx) - opaque binary
+    <other-files>       PDFs, images, binaries, etc. - raw bytes
+
+  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
+  Box uses numeric folder IDs internally (root = 0); mirage caches the
+  path -> id mapping, so nested dirs cost one API call per level on first
+  access. Use ls on the parent dir before constructing a path."""
 
 
 class BoxVFS(BaseVFS):
@@ -55,7 +67,7 @@ class BoxVFS(BaseVFS):
     # and GET /files/{id} carry. A download names no version, so a read
     # checks its bytes against the row it resolved through.
     read_revalidatable: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     whole_word_search: bool = True
 
     reads_ranges: bool = True
@@ -185,6 +197,17 @@ class BoxVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> None:
         await _truncate(self.accessor, path, length, no_create, entry, parent)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.full_scan_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

@@ -37,9 +37,9 @@ afterEach(() => {
 })
 
 describe('OPFSVFS — identity', () => {
-  it('has kind, prompt, defaults', () => {
+  it('has kind, vfsMd, defaults', () => {
     expect(res.name).toBe(VFSName.OPFS)
-    expect(typeof res.prompt).toBe('string')
+    expect(typeof res.vfsMd).toBe('string')
     expect(res.rootName).toBe('')
   })
   it('serves only the generic set', () => {

@@ -85,11 +85,11 @@ def test_listing_days_clip_to_a_glob_span():
     assert days == ["2026-05-30", "2026-05-31"]
 
 
-def test_prompt_states_both_ends():
-    assert "start_time=unbounded" in TimeRange().prompt()
-    prompt = TimeRange(JUNE_1, None).prompt()
-    assert "start_time=2026-06-01T00:00:00+00:00 (inclusive)" in prompt
-    assert "end_time=unbounded (exclusive)" in prompt
+def test_vfs_md_states_both_ends():
+    assert "start_time=unbounded" in TimeRange().vfs_md()
+    text = TimeRange(JUNE_1, None).vfs_md()
+    assert "start_time=2026-06-01T00:00:00+00:00 (inclusive)" in text
+    assert "end_time=unbounded (exclusive)" in text
 
 
 @dataclass

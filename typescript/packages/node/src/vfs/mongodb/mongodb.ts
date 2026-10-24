@@ -24,7 +24,7 @@ import type {
   MongoDBConfigRedacted,
   MongoDBConfigResolved,
 } from '@struktoai/mirage-core/vfs/mongodb/config'
-import { PROMPT } from '@struktoai/mirage-core/vfs/mongodb/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { MongoDBStore } from './store.ts'
@@ -45,7 +45,7 @@ export class MongoDBVFS extends MongoDBVFSBase {
   override readonly name: string = VFSName.MONGODB
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
-  override readonly prompt: string
+  override vfsMd: string
   readonly config: MongoDBConfigResolved
   readonly store: MongoDBStore
   override readonly accessor: MongoDBAccessor
@@ -59,7 +59,7 @@ export class MongoDBVFS extends MongoDBVFSBase {
     this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.store = new MongoDBStore(this.config.uri)
     this.accessor = new MongoDBAccessor(this.store, this.config)
-    this.prompt = prefix === undefined ? PROMPT : PROMPT.replace('{prefix}', prefix)
+    this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
   override getState(): MongoDBVFSState {

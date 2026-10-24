@@ -72,7 +72,7 @@ A Shared Drive is writable on the same terms as My Drive: every Drive call carri
 
 ## VFS.md
 
-What `ws.vfsMd()` answers with Google Drive mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfsMd()` answers with Google Drive mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md gdrive start */}
 ````markdown
@@ -83,8 +83,6 @@ description: The virtual filesystem layout of this workspace.
 
 # Virtual Filesystem
 
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
-
 | Path | Description |
 | --- | --- |
 | `/<path>` | `gdrive`, write |
@@ -94,9 +92,9 @@ You work in a terminal over a virtual filesystem. Read files with shell commands
 ```text
 /<path>
   Mirrors Google Drive folder hierarchy. May contain:
-    <name>.gdoc.json    Google Docs    (cat returns gdoc.json - see /gdocs prompt)
-    <name>.gsheet.json  Google Sheets  (cat returns gsheet.json - see /gsheets prompt)
-    <name>.gslide.json  Google Slides  (cat returns gslide.json - see /gslides prompt)
+    <name>.gdoc.json    Google Docs    (cat returns gdoc.json - see /gdocs layout)
+    <name>.gsheet.json  Google Sheets  (cat returns gsheet.json - see /gsheets layout)
+    <name>.gslide.json  Google Slides  (cat returns gslide.json - see /gslides layout)
     <other-files>       PDFs, images, etc. - cat returns raw bytes
 
   No owned/ vs shared/ split here: gdrive shows the user's full Drive view,

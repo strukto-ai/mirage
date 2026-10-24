@@ -34,7 +34,7 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfs_md()` answers with Notion mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfs_md()` answers with Notion mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md notion start */}
 ````markdown
@@ -45,11 +45,9 @@ description: The virtual filesystem layout of this workspace.
 
 # Virtual Filesystem
 
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
-
 | Path | Description |
 | --- | --- |
-| `/<path>` | `notion`, write |
+| `/<path>` | `notion`, read |
 
 ## `/<path>` layout
 
@@ -80,16 +78,6 @@ You work in a terminal over a virtual filesystem. Read files with shell commands
   ntn takes ids as positional operands, not flags: ntn pages get
   <page-id>, ntn datasources query <data-source-id>, ntn datasources
   resolve <database-id>.
-
-  Writes go through the ntn CLI if installed:
-    ntn pages create --parent data-source:<data-source-id> --content '# Title'
-    ntn pages edit <page-id> --content '## Notes'
-    ntn pages trash <page-id> --yes
-  --parent takes page:<id>, database:<id> or data-source:<id>, and
-  --content also reads stdin. Blocks, comments and search have no typed
-  verb; reach them through ntn api:
-    ntn api v1/blocks/<block-id>/children -X PATCH -d '{"children":[...]}'
-  See ntn --help: api, auth, datasources, pages, whoami.
 ```
 
 ## Supported Unix Commands for VFS
@@ -98,7 +86,7 @@ Unix commands work on each path as on a local filesystem, as far as the path sup
 
 | Path | Supported |
 | --- | --- |
-| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` ask `notion` instead of reading a file. |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` asks `notion` instead of reading a file. |
 
 ## Limitations of Unix Commands for VFS
 
@@ -106,7 +94,7 @@ Where a path differs from a local filesystem:
 
 | Path | Limitations |
 | --- | --- |
-| `/<path>` | No command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
 Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
 ````

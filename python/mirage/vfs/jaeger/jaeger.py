@@ -22,7 +22,14 @@ from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
-from mirage.vfs.jaeger.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  services/
+    <service-name>/
+      operations.json
+      traces/
+        <trace-id>.json"""
 
 
 class JaegerVFS(BaseVFS):
@@ -33,7 +40,7 @@ class JaegerVFS(BaseVFS):
     # from the search payload the listing already fetched, and operations.json
     # is sized by one call per service directory the caller opens.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: JaegerConfig) -> None:
         super().__init__()

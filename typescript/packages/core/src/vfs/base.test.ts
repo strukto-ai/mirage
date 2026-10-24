@@ -34,6 +34,7 @@ import { BaseVFS, VFS_BRAND, type VFSOptions } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
 import { vfsStateRequiresOverride } from './secrets.ts'
+import { TrelloVFS } from './trello/trello.ts'
 import type { Handed } from './types.ts'
 
 const ENC = new TextEncoder()
@@ -333,10 +334,9 @@ describe('a plug-in VFS', () => {
     }
   })
 
-  it('carries the prompts', () => {
-    const vfs = makeVfs({ prompt: 'wiki files', writePrompt: 'writable' })
-    expect(vfs.prompt).toBe('wiki files')
-    expect(vfs.writePrompt).toBe('writable')
+  it('carries its vfsMd', () => {
+    const vfs = makeVfs({ vfsMd: 'wiki files' })
+    expect(vfs.vfsMd).toBe('wiki files')
   })
 
   it('resolves a glob through its readdir', async () => {
@@ -561,5 +561,29 @@ describe('wholeWordSearch', () => {
         ])
       }
     }
+  })
+})
+
+describe('supports', () => {
+  it('drops a search turned off without a walk limit', () => {
+    const root = fileURLToPath(new URL('.', import.meta.url))
+    const guard = /this\.fullScanLimit < 0( \|\||\) return Promise\.resolve\(null\))/
+    for (const dir of readdirSync(root, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue
+      for (const file of readdirSync(`${root}${dir.name}`)) {
+        if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue
+        const source = readFileSync(`${root}${dir.name}/${file}`, 'utf8')
+        if (!source.includes('filesContaining(')) continue
+        expect([file, source.includes('override supports(name: string)')]).toEqual([
+          file,
+          guard.test(source),
+        ])
+      }
+    }
+    const limited = { apiKey: 'k', apiToken: 't' }
+    expect(new TrelloVFS({ ...limited, fullScanLimit: -1 }).supports('files_containing')).toBe(
+      false,
+    )
+    expect(new TrelloVFS(limited).supports('files_containing')).toBe(true)
   })
 })

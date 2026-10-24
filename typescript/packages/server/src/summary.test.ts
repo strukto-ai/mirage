@@ -64,28 +64,28 @@ describe('summary', () => {
 
 const ASTRAL = '\u{10400}'
 
-// `RAMVFS.prompt` is inferred as its own string literal, so a subclass
-// cannot widen it; the description only ever reads the field.
-function promptVfs(prompt: string): BaseVFS {
-  return Object.assign(new RAMVFS(), { prompt })
+function describedVfs(text: string): BaseVFS {
+  const vfs = new RAMVFS()
+  vfs.vfsMd = text
+  return vfs
 }
 
 describe('describeVfs', () => {
-  it('returns a short prompt whole', () => {
-    expect(describeVfs(promptVfs('hello'))).toBe('hello')
-    expect(describeVfs(promptVfs(''))).toBe('')
+  it('returns a short vfsMd whole', () => {
+    expect(describeVfs(describedVfs('hello'))).toBe('hello')
+    expect(describeVfs(describedVfs(''))).toBe('')
   })
 
   it('measures the budget in code points, matching python', () => {
     // 40 ascii plus 45 Deseret letters is 85 code points and 130 UTF-16
-    // units, so measuring `String.length` ellipsized a prompt python leaves
+    // units, so measuring `String.length` ellipsized a text python leaves
     // whole -- and the cut landed inside the 40th surrogate pair.
-    const prompt = 'a'.repeat(40) + ASTRAL.repeat(45)
-    expect(describeVfs(promptVfs(prompt))).toBe(prompt)
+    const text = 'a'.repeat(40) + ASTRAL.repeat(45)
+    expect(describeVfs(describedVfs(text))).toBe(text)
   })
 
   it('ellipsizes on a code-point boundary', () => {
-    const out = describeVfs(promptVfs(ASTRAL.repeat(130)))
+    const out = describeVfs(describedVfs(ASTRAL.repeat(130)))
     expect(out).toBe(ASTRAL.repeat(119) + '\u2026')
     expect(Array.from(out)).toHaveLength(120)
     // A half pair is a legal `String` value and only becomes U+FFFD once the
@@ -94,7 +94,7 @@ describe('describeVfs', () => {
   })
 
   it('drops trailing whitespace before the ellipsis', () => {
-    const prompt = 'x'.repeat(118) + '  ' + 'y'.repeat(10)
-    expect(describeVfs(promptVfs(prompt))).toBe('x'.repeat(118) + '\u2026')
+    const text = 'x'.repeat(118) + '  ' + 'y'.repeat(10)
+    expect(describeVfs(describedVfs(text))).toBe('x'.repeat(118) + '\u2026')
   })
 })

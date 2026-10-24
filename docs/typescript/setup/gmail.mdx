@@ -65,7 +65,7 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfsMd()` answers with Gmail mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfsMd()` answers with Gmail mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md gmail start */}
 ````markdown
@@ -76,11 +76,9 @@ description: The virtual filesystem layout of this workspace.
 
 # Virtual Filesystem
 
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
-
 | Path | Description |
 | --- | --- |
-| `/<path>` | `gmail`, write |
+| `/<path>` | `gmail`, read |
 
 ## `/<path>` layout
 
@@ -143,16 +141,6 @@ You work in a terminal over a virtual filesystem. Read files with shell commands
 
   To act on messages (read by id, triage, raw API calls), use the gws
   CLI if installed: gws gmail --help
-
-  Sending mail goes through the gws CLI if installed:
-    gws gmail send --to "to@email.com" --subject "Hi" --body "..."
-
-  Body gotcha: bash double-quoted "...\n..." is NOT a newline.
-  Use $'line1\nline2' (ANSI-C quoting) or "$(printf '...\n...')"
-  if you need real newlines in the body.
-
-  Trashing a message goes through gws too:
-    gws gmail users messages trash --params '{"userId": "me", "id": "<message-id>"}'
 ```
 
 ## Supported Unix Commands for VFS
@@ -169,7 +157,7 @@ Where a path differs from a local filesystem:
 
 | Path | Limitations |
 | --- | --- |
-| `/<path>` | No command changes files. `gmail` search covers only `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+| `/<path>` | Read only: no command changes files. `gmail` search covers only `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
 Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
 ````

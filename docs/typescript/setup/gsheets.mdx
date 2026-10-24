@@ -67,7 +67,7 @@ For the layout and sheet/tab structure see the [Python Sheets docs](/python/vfs/
 
 ## VFS.md
 
-What `ws.vfsMd()` answers with Google Sheets mounted writable, at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+What `ws.vfsMd()` answers with Google Sheets mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md gsheets start */}
 ````markdown
@@ -77,8 +77,6 @@ description: The virtual filesystem layout of this workspace.
 ---
 
 # Virtual Filesystem
-
-You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
 
 | Path | Description |
 | --- | --- |
@@ -139,12 +137,6 @@ You work in a terminal over a virtual filesystem. Read files with shell commands
 
   For range-scoped reads and writes, use the gws CLI if installed:
     gws sheets read --spreadsheet <id> --range Sheet1!A1:C10
-
-  Writes go through the gws CLI if installed:
-    gws sheets write --spreadsheet <id> --range Sheet1!A1:B2 \
-      --json-values '[["Name", "Score"], ["Alice", 42]]'
-    gws sheets append --spreadsheet <id> --values "Bob,37"
-    See gws sheets --help for the raw API passthroughs.
 
   Delete:
     rm /<path>/owned/<file>.gsheet.json     # permanent delete from Drive

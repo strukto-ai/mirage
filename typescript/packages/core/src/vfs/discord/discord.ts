@@ -26,6 +26,34 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `{prefix}
+  <guild-name>__<guild-id>/
+    channels/
+      <channel-name>__<channel-id>/
+        <yyyy-mm-dd>/
+          chat.jsonl              # messages for that date
+          files/                  # attachments shared that day (may be empty)
+            <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
+    members/
+      <username>__<user-id>.json  # member profile
+  Naming: guild, channel, member, attachment names are \`<display-name>__<id>\`.
+  The display name keeps the original spelling from Discord (spaces,
+  apostrophes, emoji); only \`/\` is replaced with \`∕\` (U+2215) so paths
+  don't break. Quote names containing spaces in shell commands. Always
+  ls the parent dir first to discover exact entry names (they include
+  IDs).
+  Without time bounds, bare channel listings show the latest 30 days
+  ending at the newest message. Date globs can discover earlier days.
+  With start_time/end_time, listings cover that scope; messages and their
+  attachments outside it are absent, including through direct paths.
+  Users and channel metadata remain available as context.
+  grep and rg read the files they reach, so grep needs -r to search a
+  directory; under a channel that reads every listed day, attachments
+  included (downloaded from the CDN; binary ones such as JPG or PDF
+  produce noise).
+  Messages are JSONL; use jq to extract fields like .content, .author.username,
+  .attachments.`
+
 /**
  * Discord's functions over its accessor, which the node and browser
  * packages build over their own transport.

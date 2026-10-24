@@ -39,7 +39,7 @@ def _is_auto_prefix(prefix: str) -> bool:
 
 
 def _mount_description(vfs: BaseVFS) -> str:
-    raw = vfs.prompt
+    raw = vfs.vfs_md
     if len(raw) <= _DESCRIPTION_MAX:
         return raw
     return raw[: _DESCRIPTION_MAX - 1].rstrip() + "\u2026"

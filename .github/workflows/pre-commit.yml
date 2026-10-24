@@ -182,8 +182,8 @@ jobs:
         working-directory: typescript
         run: pnpm --filter @struktoai/mirage-examples exec tsx --test notifications/poll/dropbox.test.ts notifications/poll/shutdown.test.ts
 
-      - name: VFS prompt parity
-        run: ./python/.venv/bin/python scripts/check_prompt_parity.py --selftest
+      - name: VFS.md parity
+        run: ./python/.venv/bin/python scripts/check_vfs_md_parity.py --selftest
 
       # One snake_case config block through both registries' entry points. The
       # shell-line battery never crosses them: its runners construct every
