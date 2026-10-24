@@ -801,6 +801,7 @@ impl Machine {
                     break;
                 }
                 Poll::Ready(Err(failure)) => {
+                    self.snapshotted -= lines.iter().map(Vec::len).sum::<usize>();
                     self.snapshots[index] = Some(if failure.unopened() {
                         Lines::Empty
                     } else {

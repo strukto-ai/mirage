@@ -839,6 +839,23 @@ fn every_way_a_space_grows_meets_the_cap() {
     let files = [("/r", short.as_str()), ("/in", "a\n")];
     let run = files_run("R /r", &["/in"], &files, json!({"separate": true}));
     assert_eq!((run.err.as_str(), run.status), exhausted);
+    let half = "abcdefg\n".repeat(max / 16 + 1);
+    let mut host = Host::with(&[("/a", &short), ("/b", &half), ("/in", "a\n")], "");
+    host.faults.insert(
+        "/a".into(),
+        Fault {
+            after: max / 4 * 3,
+            errno: "EIO",
+            text: "Input/output error",
+        },
+    );
+    let config = json!({
+        "pieces": expressions(&["/x/R /a\nR /b"]),
+        "inputs": ["/in"],
+        "separate": true,
+    });
+    let run = run_host(config, host);
+    assert_eq!((run.out.as_str(), run.status), ("a\nabcdefg\n", 0));
 }
 
 #[test]
