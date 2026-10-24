@@ -37,67 +37,127 @@ Fields marked secret are redacted in snapshots.
 What `ws.vfs_md()` answers with Notion mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md notion start */}
-````markdown
----
-name: workspace-filesystem
-description: The virtual filesystem layout of this workspace.
----
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
 
-# Virtual Filesystem
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `notion`, read |
 
-| Path | Description |
-| --- | --- |
-| `/<path>` | `notion`, read |
+    #### `/<path>` layout
 
-## `/<path>` layout
+    ```text
+    /<path>
+      pages/
+        <page-title>__<page-id>/
+          page.json
+          <child-page-title>__<child-id>/
+            page.json
+      databases/
+        <database-title>__<database-id>/
+          database.json
+          <data-source-title>__<data-source-id>/
+            data_source.json
+            rows.jsonl
+      Hierarchical page tree plus shared databases. cat page.json shows
+      metadata, the page body rendered as markdown, and raw blocks (nested
+      blocks under "children"). A database is a container plus one or more
+      data sources: database.json holds the container's identity and its
+      data_sources stubs, data_source.json holds the typed property schema,
+      and rows.jsonl holds the rows, one JSON line each: the row page's
+      page.json without the body, plus "path", that page.json's path below
+      the data source dir. Row dirs are not listed; open one by its path.
 
-```text
-/<path>
-  pages/
-    <page-title>__<page-id>/
-      page.json
-      <child-page-title>__<child-id>/
-        page.json
-  databases/
-    <database-title>__<database-id>/
-      database.json
-      <data-source-title>__<data-source-id>/
-        data_source.json
-        rows.jsonl
-  Hierarchical page tree plus shared databases. cat page.json shows
-  metadata, the page body rendered as markdown, and raw blocks (nested
-  blocks under "children"). A database is a container plus one or more
-  data sources: database.json holds the container's identity and its
-  data_sources stubs, data_source.json holds the typed property schema,
-  and rows.jsonl holds the rows, one JSON line each: the row page's
-  page.json without the body, plus "path", that page.json's path below
-  the data source dir. Row dirs are not listed; open one by its path.
+      Titles are sanitized; don't construct paths: ls the parent dir, or
+      take a row's "path" from rows.jsonl.
+      ntn takes ids as positional operands, not flags: ntn pages get
+      <page-id>, ntn datasources query <data-source-id>, ntn datasources
+      resolve <database-id>.
+    ```
 
-  Titles are sanitized; don't construct paths: ls the parent dir, or
-  take a row's "path" from rows.jsonl.
-  ntn takes ids as positional operands, not flags: ntn pages get
-  <page-id>, ntn datasources query <data-source-id>, ntn datasources
-  resolve <database-id>.
-```
+    #### Supported Unix Commands for VFS
 
-## Supported Unix Commands for VFS
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
-Unix commands work on each path as on a local filesystem, as far as the path supports them:
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` asks `notion` instead of reading a file. |
 
-| Path | Supported |
-| --- | --- |
-| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` asks `notion` instead of reading a file. |
+    #### Limitations of Unix Commands for VFS
 
-## Limitations of Unix Commands for VFS
+    Where a path differs from a local filesystem:
 
-Where a path differs from a local filesystem:
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
-| Path | Limitations |
-| --- | --- |
-| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
 
-Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
-````
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `notion`, read |
+
+    ## `/<path>` layout
+
+    ```text
+    /<path>
+      pages/
+        <page-title>__<page-id>/
+          page.json
+          <child-page-title>__<child-id>/
+            page.json
+      databases/
+        <database-title>__<database-id>/
+          database.json
+          <data-source-title>__<data-source-id>/
+            data_source.json
+            rows.jsonl
+      Hierarchical page tree plus shared databases. cat page.json shows
+      metadata, the page body rendered as markdown, and raw blocks (nested
+      blocks under "children"). A database is a container plus one or more
+      data sources: database.json holds the container's identity and its
+      data_sources stubs, data_source.json holds the typed property schema,
+      and rows.jsonl holds the rows, one JSON line each: the row page's
+      page.json without the body, plus "path", that page.json's path below
+      the data source dir. Row dirs are not listed; open one by its path.
+
+      Titles are sanitized; don't construct paths: ls the parent dir, or
+      take a row's "path" from rows.jsonl.
+      ntn takes ids as positional operands, not flags: ntn pages get
+      <page-id>, ntn datasources query <data-source-id>, ntn datasources
+      resolve <database-id>.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `head` asks `notion` instead of reading a file. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
 {/* generated: vfs-md notion end */}
 
 ```text

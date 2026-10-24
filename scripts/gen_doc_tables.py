@@ -19,6 +19,7 @@ import difflib
 import inspect
 import re
 import sys
+import textwrap
 import typing
 from collections.abc import Callable
 from enum import Enum
@@ -53,6 +54,8 @@ TOKEN = re.compile(
     r"(?: omit=[\w,]+)? (?P<edge>start|end) \*/\}"
 )
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
+FRONTMATTER = re.compile(r"\A---\n.*?\n---\n+", re.S)
+FENCE = re.compile(r"^`{3,}")
 # The path a docs page mounts its VFS at: a mount goes wherever its
 # workspace puts it.
 PLACEHOLDER = "/<path>"
@@ -472,13 +475,51 @@ async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
         await ws.close()
 
 
+def rendered(markdown: str) -> str:
+    """``markdown`` as a docs page shows it: no frontmatter, and every
+    heading two levels down, below the page's own.
+
+    Args:
+        markdown (str): A VFS.md.
+    """
+    lines: list[str] = []
+    fence = 0
+    for line in FRONTMATTER.sub("", markdown).split("\n"):
+        run = FENCE.match(line)
+        bare = line.strip()
+        if not fence and run:
+            fence = len(run[0])
+        elif fence and set(bare) == {"`"} and len(bare) >= fence:
+            fence = 0
+        elif not fence and line.startswith("#"):
+            line = f"##{line}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def tabs(markdown: str) -> str:
+    """``markdown`` rendered in one tab and as its source in another.
+
+    Args:
+        markdown (str): A VFS.md.
+    """
+    shown = textwrap.indent(rendered(markdown), "    ")
+    raw = textwrap.indent(fenced(markdown, "markdown"), "    ")
+    return (
+        '<Tabs>\n  <Tab title="Rendered">\n'
+        f"{shown}\n  </Tab>\n"
+        '  <Tab title="Raw">\n'
+        f"{raw}\n  </Tab>\n</Tabs>"
+    )
+
+
 def vfs_md(
     name: str,
     model: type[BaseModel] | None,
     omit: frozenset[str] = frozenset(),
 ) -> Rendered:
     """Render the VFS.md a workspace with ``name`` mounted writable at
-    ``PLACEHOLDER`` answers, as one Markdown code block.
+    ``PLACEHOLDER`` answers, rendered and raw, one tab each.
 
     Args:
         name (str): The registry name.
@@ -486,9 +527,7 @@ def vfs_md(
         omit (frozenset[str]): Nothing can be left out of a document.
     """
     markdown = asyncio.run(_vfs_md(name, sample_config(name, model)))
-    return Rendered(
-        fenced(markdown.rstrip("\n"), "markdown"), [], sorted(omit)
-    )
+    return Rendered(tabs(markdown.rstrip("\n")), [], sorted(omit))
 
 
 def renderers() -> dict[str, dict[str, Renderer]]:
@@ -534,7 +573,8 @@ def markers_paired(text: str) -> bool:
 
 
 def selftest() -> None:
-    """Prove the marker check refuses every unpaired shape."""
+    """Prove the marker check refuses every unpaired shape, and the
+    rendered VFS.md moves headings but never code."""
     start = "{/* generated: exports x start */}"
     end = "{/* generated: exports x end */}"
     table = "| a |\n| --- |"
@@ -551,6 +591,9 @@ def selftest() -> None:
         f"{start} {table} {end}\n",
     ):
         assert not markers_paired(broken), broken
+    document = "---\nname: x\n---\n\n# T\n\n```text\n# kept\n```\n\n## S"
+    assert rendered(document) == "### T\n\n```text\n# kept\n```\n\n#### S"
+    assert tabs(document).count("    # kept") == 2
     print("gen_doc_tables selftest: ok")
 
 

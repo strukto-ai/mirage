@@ -43,128 +43,249 @@ Fields marked secret are redacted in snapshots.
 What `ws.vfs_md()` answers with Google Docs mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
 
 {/* generated: vfs-md gdocs start */}
-````markdown
----
-name: workspace-filesystem
-description: The virtual filesystem layout of this workspace.
----
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
 
-# Virtual Filesystem
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gdocs`, write |
 
-| Path | Description |
-| --- | --- |
-| `/<path>` | `gdocs`, write |
+    #### `/<path>` layout
 
-## `/<path>` layout
+    ```text
+    /<path>
+      owned/
+        <date>_<title>__<doc-id>.gdoc.json
+      shared/
+        <date>_<title>__<doc-id>.gdoc.json
 
-```text
-/<path>
-  owned/
-    <date>_<title>__<doc-id>.gdoc.json
-  shared/
-    <date>_<title>__<doc-id>.gdoc.json
+      Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+        <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
+        <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+        <doc-id>      Google Docs document ID
 
-  Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
-    <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
-    <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-    <doc-id>      Google Docs document ID
+      Buckets:
+        owned/   docs you created
+        shared/  docs shared with you by others
+                 - does NOT include docs you own and shared with others;
+                   those are still in owned/.
 
-  Buckets:
-    owned/   docs you created
-    shared/  docs shared with you by others
-             - does NOT include docs you own and shared with others;
-               those are still in owned/.
-
-  gdoc.json structure (the Google Docs API documents.get response, read
-  with includeTabsContent=true so every tab is present):
-    {
-      "documentId": "...",
-      "title": "...",
-      "tabs": [                          # one entry per top-level tab
+      gdoc.json structure (the Google Docs API documents.get response, read
+      with includeTabsContent=true so every tab is present):
         {
-          "tabProperties": {
-            "tabId": "t.0",              # names a tab for gws docs write
-            "title": "Tab 1",
-            "index": 0
-          },
-          "documentTab": {
-            "body": {
-              "content": [
-                {                          # one element per block
-                  "paragraph": {
-                    "elements": [
-                      { "textRun": { "content": "the actual text\n",
-                                     "textStyle": {...} } }
-                    ],
-                    "paragraphStyle": {...}
-                  }
+          "documentId": "...",
+          "title": "...",
+          "tabs": [                          # one entry per top-level tab
+            {
+              "tabProperties": {
+                "tabId": "t.0",              # names a tab for gws docs write
+                "title": "Tab 1",
+                "index": 0
+              },
+              "documentTab": {
+                "body": {
+                  "content": [
+                    {                          # one element per block
+                      "paragraph": {
+                        "elements": [
+                          { "textRun": { "content": "the actual text\n",
+                                         "textStyle": {...} } }
+                        ],
+                        "paragraphStyle": {...}
+                      }
+                    },
+                    { "table": {...} },
+                    { "sectionBreak": {...} }
+                  ]
                 },
-                { "table": {...} },
-                { "sectionBreak": {...} }
-              ]
-            },
-            "documentStyle": {...},
-            "namedStyles": {...}
-          },
-          "childTabs": [ { ...same shape, nested to any depth... } ]
-                                       # a NESTED tab additionally carries
-                                       # parentTabId and nestingLevel; a
-                                       # root tab carries neither
+                "documentStyle": {...},
+                "namedStyles": {...}
+              },
+              "childTabs": [ { ...same shape, nested to any depth... } ]
+                                           # a NESTED tab additionally carries
+                                           # parentTabId and nestingLevel; a
+                                           # root tab carries neither
+            }
+          ],
+          "revisionId": "..."
         }
-      ],
-      "revisionId": "..."
-    }
 
-  There is no top-level .body. A tab-aware response leaves the singleton
-  fields (.body, .documentStyle, .namedStyles) empty and hangs every
-  tab's content off .tabs[].documentTab instead. Tabs also nest, so text
-  can sit at any depth under .childTabs; the recursive recipes below read
-  a one-tab and a fifty-tab document alike.
+      There is no top-level .body. A tab-aware response leaves the singleton
+      fields (.body, .documentStyle, .namedStyles) empty and hangs every
+      tab's content off .tabs[].documentTab instead. Tabs also nest, so text
+      can sit at any depth under .childTabs; the recursive recipes below read
+      a one-tab and a fifty-tab document alike.
 
-  Useful jq paths:
-    .title
-    [.. | .tabProperties? // empty | .title]             # every tab name
-    [.. | .textRun? // empty | .content] | add           # all text, any depth
-    [.. | .tabProperties? // empty] | length             # tab count
-    [.tabs[0].documentTab.body.content[]
-      | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-    .revisionId
+      Useful jq paths:
+        .title
+        [.. | .tabProperties? // empty | .title]             # every tab name
+        [.. | .textRun? // empty | .content] | add           # all text, any depth
+        [.. | .tabProperties? // empty] | length             # tab count
+        [.tabs[0].documentTab.body.content[]
+          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+        .revisionId
 
-  The first block of a body is always a sectionBreak, which carries no
-  .paragraph, so a path through .paragraph needs the `?` or it fails with
-  "Cannot iterate over null".
+      The first block of a body is always a sectionBreak, which carries no
+      .paragraph, so a path through .paragraph needs the `?` or it fails with
+      "Cannot iterate over null".
 
-  Delete, on a `write` path:
-    rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
-    rm -f <path>                            # ignore if missing
-    Only operates on .gdoc.json files; owned/ and shared/ themselves
-    cannot be removed.
+      Delete, on a `write` path:
+        rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
+        rm -f <path>                            # ignore if missing
+        Only operates on .gdoc.json files; owned/ and shared/ themselves
+        cannot be removed.
 
-  Rename to a new title, on a `write` path:
-    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
-       /<path>/owned/<date>_<new>__<id>.gdoc.json
-    Keep the folder, the date and the id, and spell the title the way
-    the listing does (spaces->_); any other name is refused.
-```
+      Rename to a new title, on a `write` path:
+        mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
+           /<path>/owned/<date>_<new>__<id>.gdoc.json
+        Keep the folder, the date and the id, and spell the title the way
+        the listing does (spaces->_); any other name is refused.
+    ```
 
-## Supported Unix Commands for VFS
+    #### Supported Unix Commands for VFS
 
-Unix commands work on each path as on a local filesystem, as far as the path supports them:
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
-| Path | Supported |
-| --- | --- |
-| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gdocs` search. |
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gdocs` search. |
 
-## Limitations of Unix Commands for VFS
+    #### Limitations of Unix Commands for VFS
 
-Where a path differs from a local filesystem:
+    Where a path differs from a local filesystem:
 
-| Path | Limitations |
-| --- | --- |
-| `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
-Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
-````
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gdocs`, write |
+
+    ## `/<path>` layout
+
+    ```text
+    /<path>
+      owned/
+        <date>_<title>__<doc-id>.gdoc.json
+      shared/
+        <date>_<title>__<doc-id>.gdoc.json
+
+      Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+        <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
+        <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+        <doc-id>      Google Docs document ID
+
+      Buckets:
+        owned/   docs you created
+        shared/  docs shared with you by others
+                 - does NOT include docs you own and shared with others;
+                   those are still in owned/.
+
+      gdoc.json structure (the Google Docs API documents.get response, read
+      with includeTabsContent=true so every tab is present):
+        {
+          "documentId": "...",
+          "title": "...",
+          "tabs": [                          # one entry per top-level tab
+            {
+              "tabProperties": {
+                "tabId": "t.0",              # names a tab for gws docs write
+                "title": "Tab 1",
+                "index": 0
+              },
+              "documentTab": {
+                "body": {
+                  "content": [
+                    {                          # one element per block
+                      "paragraph": {
+                        "elements": [
+                          { "textRun": { "content": "the actual text\n",
+                                         "textStyle": {...} } }
+                        ],
+                        "paragraphStyle": {...}
+                      }
+                    },
+                    { "table": {...} },
+                    { "sectionBreak": {...} }
+                  ]
+                },
+                "documentStyle": {...},
+                "namedStyles": {...}
+              },
+              "childTabs": [ { ...same shape, nested to any depth... } ]
+                                           # a NESTED tab additionally carries
+                                           # parentTabId and nestingLevel; a
+                                           # root tab carries neither
+            }
+          ],
+          "revisionId": "..."
+        }
+
+      There is no top-level .body. A tab-aware response leaves the singleton
+      fields (.body, .documentStyle, .namedStyles) empty and hangs every
+      tab's content off .tabs[].documentTab instead. Tabs also nest, so text
+      can sit at any depth under .childTabs; the recursive recipes below read
+      a one-tab and a fifty-tab document alike.
+
+      Useful jq paths:
+        .title
+        [.. | .tabProperties? // empty | .title]             # every tab name
+        [.. | .textRun? // empty | .content] | add           # all text, any depth
+        [.. | .tabProperties? // empty] | length             # tab count
+        [.tabs[0].documentTab.body.content[]
+          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+        .revisionId
+
+      The first block of a body is always a sectionBreak, which carries no
+      .paragraph, so a path through .paragraph needs the `?` or it fails with
+      "Cannot iterate over null".
+
+      Delete, on a `write` path:
+        rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
+        rm -f <path>                            # ignore if missing
+        Only operates on .gdoc.json files; owned/ and shared/ themselves
+        cannot be removed.
+
+      Rename to a new title, on a `write` path:
+        mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
+           /<path>/owned/<date>_<new>__<id>.gdoc.json
+        Keep the folder, the date and the id, and spell the title the way
+        the listing does (spaces->_); any other name is refused.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gdocs` search. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
 {/* generated: vfs-md gdocs end */}
 
 ```text
