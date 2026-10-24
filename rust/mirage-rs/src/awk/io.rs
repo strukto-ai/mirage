@@ -9,11 +9,12 @@ use super::text::{Regexes, take_record};
 /// to the host.
 pub(super) const LIMIT: usize = 64 * 1024;
 
-/// Byte strings keyed by name in the order they were first inserted, as
-/// awk's arrays iterate and its outputs flush.
+/// Values keyed by byte strings, in the order the keys were first
+/// inserted, as awk's arrays iterate and its outputs flush. Each key is
+/// held once, in the index; a value's slot keeps the insertion order.
 pub(super) struct Ordered<T> {
     index: HashMap<Vec<u8>, usize>,
-    slots: Vec<Option<(Vec<u8>, T)>>,
+    slots: Vec<Option<T>>,
 }
 
 impl<T> Default for Ordered<T> {
@@ -39,50 +40,50 @@ impl<T> Ordered<T> {
     }
 
     pub(super) fn get(&self, key: &[u8]) -> Option<&T> {
-        let at = *self.index.get(key)?;
-        self.slots[at].as_ref().map(|(_, value)| value)
+        self.slots[*self.index.get(key)?].as_ref()
     }
 
     pub(super) fn get_mut(&mut self, key: &[u8]) -> Option<&mut T> {
-        let at = *self.index.get(key)?;
-        self.slots[at].as_mut().map(|(_, value)| value)
+        self.slots[*self.index.get(key)?].as_mut()
     }
 
     pub(super) fn entry(&mut self, key: &[u8], make: impl FnOnce() -> T) -> &mut T {
         let at = match self.index.get(key) {
             Some(&at) => at,
             None => {
-                self.slots.push(Some((key.to_vec(), make())));
+                self.slots.push(Some(make()));
                 self.index.insert(key.to_vec(), self.slots.len() - 1);
                 self.slots.len() - 1
             }
         };
-        &mut self.slots[at].as_mut().expect("indexed slots are live").1
+        self.slots[at].as_mut().expect("indexed slots are live")
     }
 
     pub(super) fn insert(&mut self, key: Vec<u8>, value: T) {
         match self.index.get(&key) {
-            Some(&at) => {
-                if let Some((_, slot)) = &mut self.slots[at] {
-                    *slot = value;
-                }
-            }
+            Some(&at) => self.slots[at] = Some(value),
             None => {
-                self.index.insert(key.clone(), self.slots.len());
-                self.slots.push(Some((key, value)));
+                self.index.insert(key, self.slots.len());
+                self.slots.push(Some(value));
             }
         }
     }
 
     pub(super) fn remove(&mut self, key: &[u8]) -> Option<T> {
         let at = self.index.remove(key)?;
-        let removed = self.slots[at].take().map(|(_, value)| value);
+        let removed = self.slots[at].take();
         if self.slots.len() > 32 && self.index.len() * 2 < self.slots.len() {
-            self.slots.retain(Option::is_some);
+            let mut moved = vec![0; self.slots.len()];
+            let mut next = 0;
             for (at, slot) in self.slots.iter().enumerate() {
-                if let Some((key, _)) = slot {
-                    self.index.insert(key.clone(), at);
+                if slot.is_some() {
+                    moved[at] = next;
+                    next += 1;
                 }
+            }
+            self.slots.retain(Option::is_some);
+            for at in self.index.values_mut() {
+                *at = moved[*at];
             }
         }
         removed
@@ -94,32 +95,35 @@ impl<T> Ordered<T> {
     }
 
     pub(super) fn keys(&self) -> Vec<Vec<u8>> {
-        self.iter().map(|(key, _)| key.to_vec()).collect()
-    }
-
-    pub(super) fn iter(&self) -> impl Iterator<Item = (&[u8], &T)> {
-        self.slots
-            .iter()
+        slot_keys(&self.index, self.slots.len())
+            .into_iter()
             .flatten()
-            .map(|(key, value)| (key.as_slice(), value))
+            .map(<[u8]>::to_vec)
+            .collect()
     }
 
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (&[u8], &mut T)> {
+        let keys = slot_keys(&self.index, self.slots.len());
         self.slots
             .iter_mut()
-            .flatten()
-            .map(|(key, value)| (key.as_slice(), value))
+            .zip(keys)
+            .filter_map(|(slot, key)| Some((key?, slot.as_mut()?)))
     }
 
     pub(super) fn pop_last(&mut self) -> Option<(Vec<u8>, T)> {
-        while let Some(slot) = self.slots.pop() {
-            if let Some((key, value)) = slot {
-                self.index.remove(&key);
-                return Some((key, value));
-            }
-        }
-        None
+        let at = self.slots.iter().rposition(Option::is_some)?;
+        let key = slot_keys(&self.index, self.slots.len())[at]?.to_vec();
+        self.remove(&key).map(|value| (key, value))
     }
+}
+
+/// Each slot's key, in slot order.
+fn slot_keys(index: &HashMap<Vec<u8>, usize>, len: usize) -> Vec<Option<&[u8]>> {
+    let mut keys = vec![None; len];
+    for (key, &at) in index {
+        keys[at] = Some(key.as_slice());
+    }
+    keys
 }
 
 /// What the host is asked to do, in the order the run asks.
