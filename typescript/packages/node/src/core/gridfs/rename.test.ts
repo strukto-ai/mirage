@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FileStat } from '@struktoai/mirage-core/types'
 import type * as ClientModule from './client.ts'
 import {
   FakeStore,
@@ -99,7 +100,9 @@ describe('gridfs rename', () => {
     await rename(accessor, spec('a.txt'), spec('b.txt'))
     expect(store.ids('b.txt')).toEqual([fresh])
     expect(store.ids('/trash/a.txt')).toHaveLength(1)
-    expect((await readdir(accessor, spec(''))).map((row) => row.name)).toEqual(['b.txt'])
+    expect(((await readdir(accessor, spec(''))) as FileStat[]).map((row) => row.name)).toEqual([
+      'b.txt',
+    ])
   })
 
   // A $ name is a literal, not a field path, and the cut counts code points

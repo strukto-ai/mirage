@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FileStat } from '@struktoai/mirage-core/types'
 import type * as ClientModule from './client.ts'
 import {
   FakeStore,
@@ -117,7 +118,9 @@ describe('gridfs unlink', () => {
     const accessor = makeAccessor(store)
     await write(accessor, A_TXT, ENC.encode('v3'))
     expect(DEC.decode(await read(accessor, A_TXT))).toBe('v3')
-    expect((await readdir(accessor, ROOT)).map((row) => row.name)).toEqual(['a.txt'])
+    expect(((await readdir(accessor, ROOT)) as FileStat[]).map((row) => row.name)).toEqual([
+      'a.txt',
+    ])
     const [fresh] = store.ids('a.txt')
     expect(old).not.toContain(fresh)
     expect((await stat(accessor, A_TXT)).fingerprint).toBe(fresh)
