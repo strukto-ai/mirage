@@ -2722,11 +2722,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf '%3000000s|' x | wc -c; printf '%3000000s|' x | tail -c 2; echo; printf '%30000000s' x | head -c 3 | tr ' ' _; echo",
+      "command": "printf '%3000000s|' x | wc -c; printf '%3000000s|' x | tail -c 2; echo; printf '%30000000s' x | head -c 3 | tr ' ' _; echo; printf '%d' bad | head -c 1; echo \" ${PIPESTATUS[*]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "3000001\nx|\n___\n",
-        "stderr": ""
+        "stdout": "3000001\nx|\n___\n0 1 0\n",
+        "stderr": "bash: printf: bad: invalid number\n"
       }
     }
   ]

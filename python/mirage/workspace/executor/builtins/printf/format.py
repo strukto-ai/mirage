@@ -33,10 +33,10 @@ async def printf_output(
 
     The output comes out as the engine drains it, one bounded step at a
     time, so a wide field or a long reuse of the format is never held
-    whole, and a reader that stops early stops the engine. Each step's
-    stderr is added to ``io`` as it comes, after what is there, so an
-    output limit's notice stays; the status settles once the output
-    ends.
+    whole, and a reader that stops early stops the engine. The status and
+    stderr settle on ``io`` as the output ends, or as its reader stops:
+    the status the format reached, unless an output limit set one first,
+    and the stderr ahead of that limit's notice.
 
     Args:
         fmt (str): Format text, including shell byte escapes.
@@ -56,6 +56,7 @@ async def printf_output(
         },
     )
     budget = YieldBudget()
+    errors: list[bytes] = []
     try:
         for index, text in enumerate([fmt, *args]):
             for at in range(0, len(text), 4096):
@@ -64,23 +65,22 @@ async def printf_output(
             stream.end_input(index)
             await budget.run()
         output = stream.finish()
-        _add_stderr(io, stream.take_stderr())
+        errors.append(stream.take_stderr())
         if output:
             yield output
         while stream.busy():
             output = stream.drain()
-            _add_stderr(io, stream.take_stderr())
+            errors.append(stream.take_stderr())
             if output:
                 yield output
             await budget.run()
-        io.exit_code = stream.status()
     finally:
+        if not io.exit_code:
+            io.exit_code = stream.status()
+        if err := b"".join(errors):
+            later = io.stderr if isinstance(io.stderr, bytes) else b""
+            io.stderr = err + later
         await close_stream(stream)
-
-
-def _add_stderr(io: IOResult, err: bytes) -> None:
-    if err:
-        io.stderr = (io.stderr if isinstance(io.stderr, bytes) else b"") + err
 
 
 async def run_printf(

@@ -489,3 +489,16 @@ async def test_output_limit_applies_after_formatting(prefix):
         assert b"output truncated" in io.stderr
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_printf_keeps_its_status_when_its_reader_stops_early():
+    ws = Workspace({"/data": RAMVFS()})
+    try:
+        io = await ws.shell(
+            "printf '%d' bad | head -c 1; echo \" ${PIPESTATUS[*]}\""
+        )
+        assert io.stdout == b"0 1 0\n"
+        assert io.stderr == b"bash: printf: bad: invalid number\n"
+    finally:
+        await ws.close()

@@ -22,9 +22,10 @@ import { concat } from '../../../../utils/bytes.ts'
  * Format raw shell arguments through the shared bounded engine. The output
  * comes out as the engine drains it, one bounded step at a time, so a wide
  * field or a long reuse of the format is never held whole, and a reader that
- * stops early stops the engine. Each step's stderr is added to `io` as it
- * comes, after what is there, so an output limit's notice stays; the status
- * settles once the output ends. Mirrors Python's printf_output.
+ * stops early stops the engine. The status and stderr settle on `io` as the
+ * output ends, or as its reader stops: the status the format reached, unless
+ * an output limit set one first, and the stderr ahead of that limit's notice.
+ * Mirrors Python's printf_output.
  */
 export async function* printfOutput(
   fmt: string,
@@ -42,6 +43,7 @@ export async function* printfOutput(
     utf8,
   })
   const budget = new YieldBudget(signal)
+  const errors: Uint8Array[] = []
   try {
     for (const [index, text] of [fmt, ...args].entries()) {
       for (let at = 0; at < text.length;) {
@@ -56,23 +58,24 @@ export async function* printfOutput(
       await budget.run()
     }
     const output = stream.finish()
-    addStderr(io, stream.takeStderr())
+    errors.push(stream.takeStderr())
     if (output.byteLength > 0) yield output
     while (stream.busy()) {
       const part = stream.drain()
-      addStderr(io, stream.takeStderr())
+      errors.push(stream.takeStderr())
       if (part.byteLength > 0) yield part
       await budget.run()
     }
-    io.exitCode = stream.status()
   } finally {
+    if (stream.live) {
+      if (io.exitCode === 0) io.exitCode = stream.status()
+      const err = concat(errors)
+      if (err.byteLength > 0) {
+        io.stderr = io.stderr instanceof Uint8Array ? concat([err, io.stderr]) : err
+      }
+    }
     await closeStream(stream)
   }
-}
-
-function addStderr(io: IOResult, err: Uint8Array): void {
-  if (err.byteLength === 0) return
-  io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, err]) : err
 }
 
 /** `printfOutput` collected whole, for `printf -v`. Mirrors Python's run_printf. */

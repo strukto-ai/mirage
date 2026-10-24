@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { chunks } from '../../io/cooperative.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { FileDescription } from '../../shell/descriptors.ts'
@@ -119,5 +120,70 @@ describe('writeDescription', () => {
     await writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte())
     expect(calls).toEqual(ops)
     expect(file.offset).toBe(MEMORY_LIMIT + 1)
+  })
+
+  it('sends a second first write meanwhile through the windows', async () => {
+    const ops: string[] = []
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const dispatch: DispatchFn = async (op, _path, args) => {
+      ops.push(op)
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size: 0, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') {
+        await released
+        await materialize((args as [ByteSource])[0])
+      }
+      return [null, new IOResult()]
+    }
+    const first = new FileDescription(SCOPE)
+    first.opened = true
+    const second = new FileDescription(SCOPE)
+    second.opened = true
+    const session = new SessionState({ sessionId: 's' })
+    const writing = writeDescription(dispatch, session, first, aBlockThenAByte())
+    while (!ops.includes('write')) await Promise.resolve()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error('second write waited on the first'))
+      }, 5000)
+    })
+    try {
+      await Promise.race([
+        writeDescription(dispatch, session, second, new Uint8Array([0x61, 0x62])),
+        timeout,
+      ])
+    } finally {
+      clearTimeout(timer)
+      release()
+    }
+    await writing
+    expect(ops).toEqual(['stat', 'write', 'pwrite'])
+    expect([first.offset, second.offset]).toEqual([MEMORY_LIMIT + 1, 2])
+  })
+
+  it('leaves the offset at what landed when a first write fails', async () => {
+    let landed = 0
+    const dispatch: DispatchFn = async (op, _path, args) => {
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size: landed, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') {
+        for await (const part of chunks((args as [ByteSource])[0])) {
+          landed += part.byteLength
+          throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+        }
+      }
+      return [null, new IOResult()]
+    }
+    const file = new FileDescription(SCOPE)
+    file.opened = true
+    await expect(
+      writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte()),
+    ).rejects.toThrow('ENOSPC')
+    expect(landed).toBeGreaterThan(0)
+    expect(file.offset).toBe(landed)
   })
 })

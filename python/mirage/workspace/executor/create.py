@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -27,6 +28,8 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
+
+_streaming: dict[tuple[int, str], object] = {}
 
 
 async def create_file(
@@ -129,10 +132,8 @@ async def write_description(
     A write-only description lands at its offset with ``pwrite``, so it
     needs no read of the file, as a write to a write-only descriptor
     needs none (``exec 3>f; echo a >&3``). Its first write into a file
-    still empty lands as one stream instead, as the same bytes from
-    offset 0 would: ``pwrite`` windows cost a copy of the file each on a
-    store whose ``pwrite`` rewrites it, so ``cmd > f`` would move the
-    file's size squared. A read-write one (``<>``) still reads it: that
+    still empty lands as one stream instead (``_first_write``). A
+    read-write one (``<>``) still reads it: that
     description was opened to read, and its own reader resumes over what
     the write left. Writes through one description take turns, the first
     one (which opens the file) included, as the kernel orders writes to
@@ -156,17 +157,18 @@ async def write_description(
         return
     async with file.writing:
         if file.source is None and (
-            not file.opened
-            or file.append
-            or (
-                not file.offset
-                and (replace or await _still_empty(dispatch, file.scope))
-            )
+            not file.opened or file.append or (replace and not file.offset)
         ):
             file.offset += await create_counted(
                 dispatch, session, file.scope, data, append=file.append
             )
             file.opened = True
+            return
+        if (
+            file.source is None
+            and not file.offset
+            and await _first_write(dispatch, session, file, data)
+        ):
             return
         if not file.opened:
             await create_file(
@@ -195,8 +197,51 @@ async def write_description(
                     )
 
 
-async def _still_empty(dispatch: DispatchFn, scope: PathSpec) -> bool:
-    """Whether the file a description opened holds no bytes yet.
+async def _first_write(
+    dispatch: DispatchFn,
+    session: SessionState,
+    file: FileDescription,
+    data: ByteSource,
+) -> bool:
+    """Land an opened description's first write into a file still empty
+    as one stream, and answer whether it did.
+
+    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
+    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
+    would move the file's size squared. The path is claimed before the
+    stat and kept until the stream ends, so another description of the
+    file writing meanwhile takes the windows, which interleave as two
+    descriptors do, instead of replacing what this one wrote. A stream
+    that fails leaves the offset at what landed.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        session (SessionState): file creation mode.
+        file (FileDescription): the description, at offset 0.
+        data (ByteSource): bytes emitted by the command, untouched when
+            this answers False.
+    """
+    key = (id(asyncio.get_running_loop()), file.scope.virtual)
+    claim = object()
+    if _streaming.setdefault(key, claim) is not claim:
+        return False
+    try:
+        if await _size(dispatch, file.scope) != 0:
+            return False
+        try:
+            file.offset = await create_counted(
+                dispatch, session, file.scope, data
+            )
+        except BaseException:
+            file.offset = await _size(dispatch, file.scope) or 0
+            raise
+        return True
+    finally:
+        del _streaming[key]
+
+
+async def _size(dispatch: DispatchFn, scope: PathSpec) -> int | None:
+    """The size of the file a description opened, None when unknown.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -206,8 +251,8 @@ async def _still_empty(dispatch: DispatchFn, scope: PathSpec) -> bool:
         stat, _ = await dispatch("stat", scope)
     except FS_ERRORS as exc:
         logger.debug("write target %s has no stat: %s", scope.raw_path, exc)
-        return False
-    return isinstance(stat, FileStat) and stat.size == 0
+        return None
+    return stat.size if isinstance(stat, FileStat) else None
 
 
 async def create_counted(

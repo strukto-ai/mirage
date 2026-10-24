@@ -125,3 +125,18 @@ it.each(['', 'env '])(
     }
   },
 )
+
+describe('printf in a pipeline', () => {
+  it('keeps its status when its reader stops early', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const io = await ws.shell(`printf '%d' bad | head -c 1; echo " \${PIPESTATUS[*]}"`)
+    expect([io.stdoutText, io.stderrText]).toEqual([
+      '0 1 0\n',
+      'bash: printf: bad: invalid number\n',
+    ])
+    await ws.close()
+  })
+})

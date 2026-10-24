@@ -18,6 +18,8 @@ gets is decided once: 0666 masked by the session's umask, and left alone
 under the default mask because a fresh file already renders as 644.
 """
 
+import asyncio
+
 import pytest
 
 from mirage.io.spool import MEMORY_LIMIT
@@ -134,3 +136,59 @@ async def test_a_first_write_into_an_empty_file_lands_as_one_stream(size, ops):
     )
     assert calls == ops
     assert file.offset == MEMORY_LIMIT + 1
+
+
+@pytest.mark.asyncio
+async def test_a_second_first_write_meanwhile_takes_the_windows():
+    ops: list[str] = []
+    release = asyncio.Event()
+
+    async def dispatch(op: str, scope: PathSpec, **kwargs):
+        ops.append(op)
+        if op == "stat":
+            return FileStat(name="f", size=0, type=FileType.FILE), None
+        if op == "write":
+            await release.wait()
+            await materialize(kwargs["data"])
+        return None, None
+
+    first = FileDescription(_to_scope("/data/f"), opened=True)
+    second = FileDescription(_to_scope("/data/f"), opened=True)
+    writing = asyncio.create_task(
+        write_description(
+            dispatch, SessionState("s"), first, _a_block_then_a_byte()
+        )
+    )
+    while "write" not in ops:
+        await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(
+            write_description(dispatch, SessionState("s"), second, b"ab"), 5
+        )
+    finally:
+        release.set()
+    await writing
+    assert ops == ["stat", "write", "pwrite"]
+    assert (first.offset, second.offset) == (MEMORY_LIMIT + 1, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_first_write_leaves_the_offset_at_what_landed():
+    landed = 0
+
+    async def dispatch(op: str, scope: PathSpec, **kwargs):
+        nonlocal landed
+        if op == "stat":
+            return FileStat(name="f", size=landed, type=FileType.FILE), None
+        if op == "write":
+            async for part in kwargs["data"]:
+                landed += len(part)
+                raise OSError(28, "No space left on device")
+        return None, None
+
+    file = FileDescription(_to_scope("/data/f"), opened=True)
+    with pytest.raises(OSError):
+        await write_description(
+            dispatch, SessionState("s"), file, _a_block_then_a_byte()
+        )
+    assert 0 < file.offset == landed
