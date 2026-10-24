@@ -200,6 +200,14 @@ describe('vfsMd', () => {
     expect(markdown).not.toContain('<date>_<title>')
   })
 
+  it('fences a layout past a spaced fence inside it', async () => {
+    const docs = gdocs()
+    docs.vfsMd = 'Run:\n  ```sh\n  ls {prefix}\n  ```  \nDone.'
+    const ws = new Workspace({ '/docs': [docs, MountMode.READ] })
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('````text\nRun:\n  ```sh\n  ls /docs\n  ```  \nDone.\n````')
+  })
+
   it('names each search command the profile allows', async () => {
     const ws = new Workspace(
       { '/docs': [gdocs(), MountMode.WRITE] },
@@ -561,5 +569,13 @@ describe('skillMd', () => {
     const markdown = await ws.vfsMd()
     expect(row(markdown, SUPPORTED, '/m')).toContain('`tee -a`')
     expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`\. /)
+  })
+
+  it('counts rm -r on a file where only unlink works', async () => {
+    const ws = await seeded(['write', 'append', 'rmdir', 'rm_r'], new RAMVFS(), {
+      commands: { allow: ['cat', 'rm -r'] },
+    })
+    expect(row(await ws.vfsMd(), '', '/m')).toMatch(/, write$/)
+    expect((await ws.shell('rm -r /m/f')).exitCode).toBe(0)
   })
 })

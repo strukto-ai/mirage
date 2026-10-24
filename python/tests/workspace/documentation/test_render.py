@@ -168,6 +168,17 @@ async def test_vfs_md_shows_the_users_own_text():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_fences_a_layout_past_a_spaced_fence_inside_it():
+    slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
+    slack.vfs_md = "Run:\n  ```sh\n  ls {prefix}\n  ```  \nDone."
+    ws = Workspace({"/slack": (slack, MountMode.READ)})
+    markdown = await ws.vfs_md()
+    assert "````text\nRun:\n  ```sh\n  ls /slack\n  ```  \nDone.\n````" in (
+        markdown
+    )
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_substitutes_prefix():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     gdocs = GDocsVFS(config=cfg)
@@ -664,3 +675,13 @@ async def test_vfs_md_judges_tee_a_by_its_own_ops():
     assert row(
         markdown, "## Limitations of Unix Commands for VFS", "/m"
     ).startswith("Not supported: `>`. ")
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_counts_rm_r_on_a_file_where_only_unlink_works():
+    ws = await seeded(
+        ("write", "append", "rmdir", "rm_r"),
+        profile={"commands": {"allow": ["cat", "rm -r"]}},
+    )
+    assert row(await ws.vfs_md(), "", "/m").endswith(", write")
+    assert (await ws.shell("rm -r /m/f")).exit_code == 0

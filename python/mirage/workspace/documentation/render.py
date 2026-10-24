@@ -165,8 +165,9 @@ def admitted(
     session: SessionState, mount: MountEntry, path: str, change: Change
 ) -> bool:
     """Whether the profile lets ``change`` run at ``path``. A longer form
-    another change names (``tee -a`` for ``tee``) counts for that change
-    alone, since it runs on that change's ops.
+    another change names counts for that change alone where it runs on
+    other ops (``tee -a`` appends where ``tee`` writes); one running on
+    more ops (``rm -r``) does this change's work on a file too.
 
     Args:
         session (SessionState): the session the document is for.
@@ -178,7 +179,12 @@ def admitted(
     claimed = [
         other.command
         for other in CHANGES
-        if len(other.command) > size and other.command[:size] == change.command
+        if len(other.command) > size
+        and other.command[:size] == change.command
+        and not all(
+            any(set(ops) <= set(more) for more in other.needs)
+            for ops in change.needs
+        )
     ]
     return runnable(session, mount, path, change.command, claimed)
 
@@ -250,19 +256,17 @@ def agree(items: Sequence[str], verb: str) -> str:
 
 
 def fenced(text: str, info: str) -> str:
-    """``text`` in a code fence longer than any fence line inside it.
+    """``text`` in a code fence longer than any fence line inside it,
+    spaces around one included.
 
     Args:
         text (str): the block's content.
         info (str): the fence's info string.
     """
+    lines = (s.strip() for s in text.split("\n"))
     fence = "`" * max(
         3,
-        max(
-            (len(s) for s in text.split("\n") if s and set(s) == {"`"}),
-            default=0,
-        )
-        + 1,
+        max((len(s) for s in lines if s and set(s) == {"`"}), default=0) + 1,
     )
     return f"{fence}{info}\n{text}\n{fence}"
 

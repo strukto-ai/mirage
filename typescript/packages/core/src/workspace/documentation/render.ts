@@ -132,14 +132,19 @@ function runnable(
 
 /**
  * Whether the profile lets `change` run at `path`. A longer form another
- * change names (`tee -a` for `tee`) counts for that change alone, since it
- * runs on that change's ops.
+ * change names counts for that change alone where it runs on other ops
+ * (`tee -a` appends where `tee` writes); one running on more ops (`rm -r`)
+ * does this change's work on a file too.
  */
 function admitted(session: SessionState, mount: MountEntry, path: string, change: Change): boolean {
   const size = change.command.length
   const claimed = CHANGES.filter(
     (other) =>
-      other.command.length > size && change.command.every((w, i) => other.command[i] === w),
+      other.command.length > size &&
+      change.command.every((w, i) => other.command[i] === w) &&
+      !change.needs.every((ops) =>
+        other.needs.some((more) => ops.every((op) => more.includes(op))),
+      ),
   ).map((other) => other.command)
   return runnable(session, mount, path, change.command, claimed)
 }
@@ -198,13 +203,14 @@ function agree(items: readonly string[], verb: string): string {
   return items.length > 1 ? verb : verb + 's'
 }
 
-/** `text` in a code fence longer than any fence line inside it. */
+/** `text` in a code fence longer than any fence line inside it, spaces around one included. */
 function fenced(text: string, info: string): string {
   const fence = '`'.repeat(
     Math.max(
       3,
       ...text
         .split('\n')
+        .map((s) => s.trim())
         .filter((s) => /^`+$/.test(s))
         .map((s) => s.length + 1),
     ),
