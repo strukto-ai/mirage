@@ -68,10 +68,10 @@ describe('BytePipe', () => {
     await refused
   })
 
-  it('keeps a sealed write no larger than its capacity as written', async () => {
+  it('keeps a sealed write up to twice its capacity as written', async () => {
     for (const [size, kept] of [
-      [CHUNK_SIZE + 1, true],
-      [CAPACITY + 1, false],
+      [CAPACITY + 1, true],
+      [2 * CAPACITY + 1, false],
     ] as const) {
       const pipe = new BytePipe()
       const data = new Uint8Array(size)

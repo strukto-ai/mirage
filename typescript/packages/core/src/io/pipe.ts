@@ -6,10 +6,9 @@ export const CAPACITY = 4 * CHUNK_SIZE
 
 /**
  * Buffers their producer never writes again, such as mirage-rs output copied
- * out of linear memory. A pipe keeps a chunk of one no larger than its
- * capacity as written, so a reader holding a few bytes pins no more than the
- * pipe may buffer; it copies a chunk of any other buffer, in case the writer
- * reuses it.
+ * out of linear memory. A pipe keeps a chunk of one up to twice its capacity
+ * as written, so a reader holding a few bytes never pins a much larger
+ * buffer; it copies a chunk of any other buffer, in case the writer reuses it.
  */
 export const SEALED = new WeakSet<ArrayBufferLike>()
 
@@ -68,7 +67,7 @@ export class BytePipe {
       if (signal?.aborted === true) throw makeAbortError(signal)
       if (this.readerClosed || this.ended) throw new PipeClosed()
       const piece = data.subarray(start, start + length)
-      const lent = SEALED.has(data.buffer) && data.buffer.byteLength <= this.capacity
+      const lent = SEALED.has(data.buffer) && data.buffer.byteLength <= 2 * this.capacity
       const chunk = lent ? piece : new Uint8Array(piece)
       this.chunks.push(chunk)
       this.bytes += length
