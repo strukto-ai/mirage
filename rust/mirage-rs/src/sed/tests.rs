@@ -835,6 +835,10 @@ fn every_way_a_space_grows_meets_the_cap() {
     );
     let run = sed("$!d", &format!("{}\nb\n", "a".repeat(max)));
     assert_eq!((run.out.as_str(), run.status), ("b\n", 0));
+    let short = "abcdefg\n".repeat(max / 8 + 1);
+    let files = [("/r", short.as_str()), ("/in", "a\n")];
+    let run = files_run("R /r", &["/in"], &files, json!({"separate": true}));
+    assert_eq!((run.err.as_str(), run.status), exhausted);
 }
 
 #[test]

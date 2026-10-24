@@ -76,11 +76,12 @@ struct Emit {
     failed: Option<Failure>,
 }
 
-/// An `R` file's lines: read whole when the run starts (-s and -i),
-/// streamed otherwise.
+/// An `R` file's lines: read whole when the run starts (-s and -i) and
+/// then read from where each input's reader is, streamed otherwise.
 enum Lines {
-    Whole(VecDeque<Vec<u8>>),
-    Stream(LineReader),
+    Whole(Vec<Vec<u8>>),
+    At(usize),
+    Stream(Box<LineReader>),
     Empty,
     Failed(Vec<u8>),
 }
@@ -190,7 +191,9 @@ pub(super) struct Machine {
     emit: Option<Emit>,
     readers: HashMap<usize, Lines>,
     snapshots: Vec<Option<Lines>>,
-    snapshot_reader: Option<(LineReader, VecDeque<Vec<u8>>)>,
+    snapshot_reader: Option<(LineReader, Vec<Vec<u8>>)>,
+    /// What the snapshots hold, in bytes.
+    snapshotted: usize,
     replaced: bool,
     source: Option<usize>,
     last_regex: Option<usize>,
@@ -542,6 +545,7 @@ impl Machine {
             readers: HashMap::new(),
             snapshots,
             snapshot_reader: None,
+            snapshotted: 0,
             replaced: false,
             source: None,
             last_regex: None,
@@ -775,7 +779,7 @@ impl Machine {
                     self.reader_files[index].clone(),
                     Opening::File,
                 ),
-                VecDeque::new(),
+                Vec::new(),
             ),
         };
         loop {
@@ -788,7 +792,9 @@ impl Machine {
                     if newline {
                         text.push(b'\n');
                     }
-                    lines.push_back(text);
+                    room(self.snapshotted, text.len())?;
+                    self.snapshotted += text.len();
+                    lines.push(text);
                 }
                 Poll::Ready(Ok(None)) => {
                     self.snapshots[index] = Some(Lines::Whole(lines));
@@ -1201,21 +1207,28 @@ impl Machine {
     fn reader_line(&mut self, index: usize) -> Result<Poll<Option<Vec<u8>>>, Refusal> {
         if !self.readers.contains_key(&index) {
             let lines = match self.snapshots[index].as_ref() {
-                Some(Lines::Whole(lines)) => Lines::Whole(lines.clone()),
+                Some(Lines::Whole(_)) => Lines::At(0),
                 Some(Lines::Failed(message)) => return Err(Refusal::new(message.clone(), 4)),
                 Some(_) => Lines::Empty,
                 None if self.opts.separate => Lines::Empty,
-                None => Lines::Stream(LineReader::new(
+                None => Lines::Stream(Box::new(LineReader::new(
                     &mut self.io,
                     self.reader_files[index].clone(),
                     Opening::File,
-                )),
+                ))),
             };
             self.readers.insert(index, lines);
         }
         let lines = self.readers.get_mut(&index).expect("inserted above");
         let reader = match lines {
-            Lines::Whole(lines) => return Ok(Poll::Ready(lines.pop_front())),
+            Lines::At(at) => {
+                let line = match &self.snapshots[index] {
+                    Some(Lines::Whole(whole)) => whole.get(*at).cloned(),
+                    _ => None,
+                };
+                *at += 1;
+                return Ok(Poll::Ready(line));
+            }
             Lines::Stream(reader) => reader,
             _ => return Ok(Poll::Ready(None)),
         };
