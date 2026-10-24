@@ -13,14 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
-from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.routing.types import RouteDecision
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.utils.quote import shell_quote
 from mirage.workspace.lookup.constants import (
     CAPTURABLE_BUILTINS,
@@ -63,7 +62,7 @@ def runtime_refused(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime[Any]] | None = None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> bool:
     """Whether routing explicitly refused the external runtime for ``name``."""
     if routing is None:
@@ -77,7 +76,7 @@ def runtime_refused(
     )
 
 
-def _is_native(runtime: Runtime[Any] | None, name: str) -> bool:
+def _is_native(runtime: RuntimeIdentity | None, name: str) -> bool:
     """Whether the runtime runs the name as a native program.
 
     A language runtime that also runs processes (local) still
@@ -99,7 +98,7 @@ def _layers(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime[Any]] | None = None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Iterator[Consumer]:
     """Yield every layer holding the name, most-preferred first.
 
@@ -118,7 +117,7 @@ def _layers(
             outside a line, where the static bindings answer.
     """
     found = False
-    bindings: Mapping[str, Runtime[Any] | None] = (
+    bindings: Mapping[str, RuntimeIdentity | None] = (
         routing.bindings if routing is not None else registry.runtime_bindings
     )
     bound = bindings.get(name)
@@ -166,7 +165,7 @@ def lookup(
     name: str,
     session: SessionState,
     registry: "MountRegistry",
-    routing: RouteDecision[Runtime[Any]] | None = None,
+    routing: RouteDecision[RuntimeIdentity] | None = None,
 ) -> Consumer:
     """Route a command name to the layer that consumes it.
 

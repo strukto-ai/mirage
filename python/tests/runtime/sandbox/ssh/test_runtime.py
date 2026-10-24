@@ -20,6 +20,7 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import wrap_line
@@ -277,7 +278,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
         _, _, code = await runtime._ssh("sleep 30", None, tagged=tagged)
         return code
 
-    runner = ProcessSupervisor().start(
+    runner = ProcessSupervisor(bind=run_with_execution).start(
         session_id="s",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),

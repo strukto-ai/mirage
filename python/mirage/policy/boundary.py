@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
-from mirage.context import Caller
+from mirage.context.session_context import Caller
 from mirage.policy.policies import Policies, post_vfs_gate, pre_vfs_gate
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.types import VfsCall

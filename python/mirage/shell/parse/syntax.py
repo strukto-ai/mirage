@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable, Iterable
 from typing import NoReturn
 
-from mirage.io import IOResult
+from mirage.io.types import IOResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.parse import constants
 from mirage.shell.parse.errors import ReaderRefusal, TestFailure

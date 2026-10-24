@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type LostPaths, lineVersion } from '../../observe/context.ts'
+import { lineVersion } from '../../observe/context.ts'
 import {
+  type LostPaths,
   RecordIndex,
   type OpRecord,
   READ_FINGERPRINT_OPS,

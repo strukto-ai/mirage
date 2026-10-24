@@ -13,12 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from mirage.policy.profile import ProfilePolicy
 from mirage.policy.types import RouteContext
-from mirage.runtime.types import RuntimeIdentity
 
 # What a route policy callable answers: a runtime name places the line,
 # None leaves each command to its first capturer. Refusing a line is a
@@ -45,29 +43,3 @@ RoutePolicy = (
     | ProfilePolicy
     | Mapping[str, Any]
 )
-
-
-_R = TypeVar("_R", bound=RuntimeIdentity)
-
-
-@dataclass(frozen=True, slots=True)
-class RouteDecision(Generic[_R]):
-    """The one-line placement decision the dispatcher consults.
-
-    Both fields hold runtimes: the decision IS "which runtime runs
-    which command". The workspace runtime is a legal value in either; a
-    command placed on it is served by the workspace executor itself.
-
-    Args:
-        bindings (dict[str, _R | None]): every command some entry
-            captures, resolved for this line: the runtime it runs on,
-            or None when a route to the workspace keeps the line off
-            its only capturer, a ``*`` line executor (exit 126, never a
-            silent fallback to the workspace).
-        fallback (_R | None): where commands no entry captures run:
-            the catch-all workspace runtime, or None when the workspace
-            runtime declares captures; unbound commands then exit 126.
-    """
-
-    bindings: dict[str, _R | None] = field(default_factory=dict)
-    fallback: _R | None = None

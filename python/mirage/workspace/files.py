@@ -30,16 +30,15 @@ from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
-from mirage.observe import OpRecord
 from mirage.observe.context import (
     OpTimer,
-    Recorder,
     active_recorder,
     command_records,
     fresh_recorder,
     record,
     start_op,
 )
+from mirage.observe.record import OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.path import owner_prefix

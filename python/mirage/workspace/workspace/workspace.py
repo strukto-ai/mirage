@@ -60,6 +60,7 @@ from mirage.context import (
     set_program_invocation,
     set_refusal_sink,
 )
+from mirage.context.session_context import run_with_execution
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
@@ -100,8 +101,9 @@ from mirage.runtime.binding import (
     restricted_mounts_for,
 )
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.routing import RouteDecision, RoutePolicy
+from mirage.runtime.routing import RoutePolicy
 from mirage.runtime.table import whole_line_runtime
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -324,7 +326,7 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.processes = ProcessSupervisor(self._ids)
+        self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
         self.job_table = JobTable(console_factory, self.processes)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: set[ShellExecution] = set()
@@ -2658,7 +2660,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2679,7 +2681,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2700,7 +2702,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2720,7 +2722,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2871,7 +2873,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,

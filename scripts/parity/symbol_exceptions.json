@@ -706,6 +706,7 @@
     "fresh_recorder": "Python's recorder is a frozen Recorder that carries the line's lost paths and version index, built in one place for a line and for a file call outside one; TypeScript's recording is a plain records array and mount id, made where it is needed."
    },
    "typescript_only": {
+    "lostPaths": "TypeScript retrieves a line's lost paths by its records array after its recording scope ends; Python reads the current Recorder through active_lost. This function was previously folded with the LostPaths class, now moved to observe/record on both hosts.",
     "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
     "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
     "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
@@ -947,11 +948,6 @@
   "io/stream": {
    "python_only": {
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
-   }
-  },
-  "process/handle": {
-   "typescript_only": {
-    "ExecutionBind": "TypeScript's process layer sits below the session the caller carries, so importing the caller's runWithExecution would close a type cycle; the workspace hands the supervisor the binder. Python's process handle imports run_with_execution directly."
    }
   }
  }

@@ -16,8 +16,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.io import IOResult
-from mirage.observe import OpRecord
+from mirage.io.types import IOResult
+from mirage.observe.record import OpRecord
 from mirage.types import MountMode, PathSpec
 
 # Runs one text line in a session (`execute_fn(line, session_id=...)`):

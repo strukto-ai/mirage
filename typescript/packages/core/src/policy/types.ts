@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { SessionAccess } from '../view/types.ts'
+import type { FileView, SessionAccess } from '../view/types.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { ScriptSource } from '../runtime/types.ts'
 import type { Limit, MountMode, PathSpec, Producer, Refusal } from '../types.ts'
@@ -343,6 +343,11 @@ export interface HandOff {
   readonly origin: Occurrence | null
 }
 
+/** The ledger owning a hand-off, compared only by identity. */
+export abstract class DecisionOwner {
+  declare protected readonly decisionOwner: undefined
+}
+
 /**
  * Who reads the ledger: one command of one line. A judging pass and the
  * gate that runs the line name themselves the same way, so a grant the
@@ -540,11 +545,17 @@ export interface PolicyCaller {
   readonly session: CallerSession | null
 }
 
+/** The session identity a policy may read, without owning its state. */
+export interface CallerSessionQuery {
+  readonly sessionId: string
+  readonly cwd: string
+}
+
 /**
  * `session` as a method's `ctx.caller` reads it. Mirrors Python's
  * `policy_caller`.
  */
-export function policyCaller(session: { sessionId: string; cwd: string } | null): PolicyCaller {
+export function policyCaller(session: CallerSessionQuery | null): PolicyCaller {
   return Object.freeze({
     session:
       session === null ? null : Object.freeze({ sessionId: session.sessionId, cwd: session.cwd }),
@@ -553,6 +564,8 @@ export function policyCaller(session: { sessionId: string; cwd: string } | null)
 
 /** Facts about one classified command, as preCommand methods see it. */
 export interface CommandContext {
+  /** The session's files; policy writes are refused by the dispatcher. */
+  vfs?: FileView
   /**
    * The line the command was parsed from: the line the agent typed, or
    * for a command a line runs in turn (`eval`, `$( )`, a function body)
@@ -642,6 +655,8 @@ export interface CommandContext {
  * ```
  */
 export interface RouteContext {
+  /** The session's files; policy writes are refused by the dispatcher. */
+  vfs?: FileView
   line: string
   commands: readonly CommandContext[]
   sessionId: string
@@ -667,6 +682,8 @@ export interface RouteContext {
  * python marks the same read with a task-local ContextVar, which a
  * browser has no twin of. */
 export interface VfsContext {
+  /** The session's files; policy writes are refused by the dispatcher. */
+  vfs?: FileView
   access?: SessionAccess
   /** The rule gate of the command that issued the op, when the op carries
    * one; the bound admission answers otherwise. */
@@ -742,6 +759,8 @@ export interface ExecuteResultContext extends RouteContext {
  * rule to one agent (deny `set` for session X).
  */
 export interface SessionContext {
+  /** The session's files; policy writes are refused by the dispatcher. */
+  vfs?: FileView
   verb: string
   key: string
   value: string | null

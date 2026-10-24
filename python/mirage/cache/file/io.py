@@ -18,10 +18,11 @@ from typing import Callable
 from weakref import WeakKeyDictionary
 
 from mirage.cache.file.mixin import FileCacheMixin
-from mirage.observe.context import LostPaths, line_version
+from mirage.observe.context import line_version
 from mirage.observe.record import (
     READ_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
+    LostPaths,
     OpRecord,
     RecordIndex,
 )

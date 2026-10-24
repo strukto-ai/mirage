@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
 
+from mirage.io.types import ByteSource, IOResult
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import FileStat, MountMode, PathSpec, Visibility
 
@@ -369,3 +370,212 @@ class SessionAccess:
     umask: int
     shopts: Mapping[str, bool]
     mount_modes: Mapping[str, MountMode] | None
+
+
+class FileView(Protocol):
+    """The public file operations a consumer uses, independent of the dispatcher.
+
+    ``Files`` implements this shape. Policy and command types depend on the
+    capability, so the dispatcher can apply those policies without importing
+    its own concrete facade through their context types.
+    """
+
+    @property
+    def session_id(self) -> str | None: ...
+
+    def mount_prefixes(self) -> list[str]: ...
+
+    def mount_of(self, path: str | PathSpec) -> str | None: ...
+
+    def is_mount(self, path: str | PathSpec) -> bool: ...
+
+    def submounts(self, path: str | PathSpec) -> list[str]: ...
+
+    async def dispatch(
+        self, name: str, path: PathSpec, /, **kwargs: Any
+    ) -> tuple[Any, IOResult]: ...
+
+    @overload
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: Literal[False] = False,
+        session_id: str | None = None,
+    ) -> bytes: ...
+
+    @overload
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: Literal[True],
+        session_id: str | None = None,
+    ) -> AsyncIterator[bytes]: ...
+
+    @overload
+    async def read(
+        self,
+        path: str | PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
+        *,
+        stream: bool,
+        session_id: str | None = None,
+    ) -> bytes | AsyncIterator[bytes]: ...
+
+    async def write(
+        self,
+        path: str | PathSpec,
+        data: ByteSource,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def append(
+        self,
+        path: str | PathSpec,
+        data: ByteSource,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def pwrite(
+        self,
+        path: str | PathSpec,
+        data: bytes,
+        offset: int,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def stat(
+        self,
+        path: str | PathSpec,
+        *,
+        nofollow: bool = False,
+        fresh: bool = False,
+        session_id: str | None = None,
+    ) -> FileStat: ...
+
+    async def readdir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> list[str]: ...
+
+    async def exists(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> bool: ...
+
+    async def is_dir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> bool: ...
+
+    async def is_file(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> bool: ...
+
+    async def list_files(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> list[str]: ...
+
+    async def mkdir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None: ...
+
+    async def unlink(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None: ...
+
+    async def rmdir(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None: ...
+
+    async def rename(
+        self,
+        src: str | PathSpec,
+        dst: str | PathSpec,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def create(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> None: ...
+
+    async def symlink(
+        self,
+        path: str | PathSpec,
+        target: str,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def readlink(
+        self, path: str | PathSpec, *, session_id: str | None = None
+    ) -> str: ...
+
+    async def setattr(
+        self,
+        path: str | PathSpec,
+        *,
+        mode: int | None = None,
+        uid: int | str | None = None,
+        gid: int | str | None = None,
+        atime: str | None = None,
+        mtime: str | None = None,
+        nofollow: bool = False,
+        session_id: str | None = None,
+    ) -> dict[str, int | str]: ...
+
+    async def getxattr(
+        self,
+        path: str | PathSpec,
+        name: str,
+        *,
+        nofollow: bool = False,
+        session_id: str | None = None,
+    ) -> bytes: ...
+
+    async def listxattr(
+        self,
+        path: str | PathSpec,
+        *,
+        nofollow: bool = False,
+        session_id: str | None = None,
+    ) -> list[str]: ...
+
+    async def setxattr(
+        self,
+        path: str | PathSpec,
+        name: str,
+        value: bytes,
+        *,
+        create: bool = False,
+        replace: bool = False,
+        nofollow: bool = False,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def removexattr(
+        self,
+        path: str | PathSpec,
+        name: str,
+        *,
+        nofollow: bool = False,
+        session_id: str | None = None,
+    ) -> None: ...
+
+    async def truncate(
+        self,
+        path: str | PathSpec,
+        length: int,
+        *,
+        session_id: str | None = None,
+    ) -> None: ...

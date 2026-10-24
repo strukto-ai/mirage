@@ -35,6 +35,7 @@ from mirage.policy.types import (
     CommandContext,
     CommandRule,
     Decision,
+    DecisionOwner,
     Deny,
     DryRun,
     ExecuteResultContext,
@@ -262,7 +263,7 @@ def op_question(
     return asked, keyed
 
 
-class Decisions:
+class Decisions(DecisionOwner):
     """The workspace's decision ledger: turns an Ask into run, refuse or
     pending, and is the host's handle on every question raised and every
     answer given.

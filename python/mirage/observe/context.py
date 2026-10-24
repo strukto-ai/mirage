@@ -15,7 +15,7 @@
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 
 from mirage.context.session_context import (
     CallerToken,
@@ -24,96 +24,14 @@ from mirage.context.session_context import (
     current_execution_id,
     reset_caller,
 )
-from mirage.observe.record import STAMP_FINGERPRINT_OPS, OpRecord, RecordIndex
+from mirage.observe.record import (
+    STAMP_FINGERPRINT_OPS,
+    LostPaths,
+    OpRecord,
+    Recorder,
+    RecordIndex,
+)
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import under_path
-
-
-@dataclass(frozen=True, slots=True)
-class LostMark:
-    """One lost path's mark.
-
-    Args:
-        at (int): where in the line's records it was lost.
-        order (int): its place among the line's marks, from 1.
-        version (str | None): the version its write lost on, if any.
-    """
-
-    at: int
-    order: int
-    version: str | None
-
-
-@dataclass
-class LostPaths:
-    """The paths whose conditional write lost on this line.
-
-    A lost path's cached copy was dropped; nothing the line read of it
-    before the loss may be cached again. The version the write lost on is
-    the one a retry sends, so it is refused again until a read. A read or
-    write of the path after the loss names the bytes now there, and lifts
-    the mark, as does removing or moving it away.
-
-    Args:
-        sink (list[OpRecord]): the line's records, shared with its frames.
-        marks (dict[str, LostMark]): each lost path's mark.
-        count (int): the marks made so far.
-    """
-
-    sink: list[OpRecord]
-    marks: dict[str, LostMark] = field(default_factory=dict)
-    count: int = 0
-
-    def mark(self, key: str, version: str | None = None) -> None:
-        """Record that a conditional write to ``key`` lost.
-
-        Args:
-            key (str): the virtual path.
-            version (str | None): the version it lost on, if any.
-        """
-        self.count += 1
-        self.marks[key] = LostMark(len(self.sink), self.count, version or None)
-
-    def lift(self, key: str, upto: int, subtree: bool = False) -> None:
-        """Lift the marks a removal or move of ``key`` made stale.
-
-        Only marks made by the time it began: a refusal another command of
-        the line made while it ran is newer than it, and stays.
-
-        Args:
-            key (str): the virtual path removed or moved.
-            upto (int): ``count`` when the removal or move began.
-            subtree (bool): the paths below it went too.
-        """
-        for marked in [
-            k
-            for k, m in self.marks.items()
-            if (k == key or subtree and under_path(k, key)) and m.order <= upto
-        ]:
-            del self.marks[marked]
-
-    def version(self, key: str) -> str | None:
-        """The version a write to ``key`` lost on, while it is still lost.
-
-        Args:
-            key (str): the virtual path.
-        """
-        mark = self.marks.get(key)
-        return mark.version if mark is not None and self.holds(key) else None
-
-    def holds(self, key: str) -> bool:
-        """Whether ``key`` is lost and nothing since has read or written it.
-
-        Args:
-            key (str): the virtual path.
-        """
-        mark = self.marks.get(key)
-        if mark is None:
-            return False
-        return not any(
-            rec.path == key and rec.op in STAMP_FINGERPRINT_OPS
-            for rec in self.sink[mark.at :]
-        )
 
 
 def line_version(
@@ -141,34 +59,6 @@ def line_version(
     if rec.op in STAMP_FINGERPRINT_OPS:
         return True, rec.fingerprint or None
     return True, None
-
-
-@dataclass(frozen=True)
-class Recorder:
-    """Active recording state for a session.
-
-    Bundles the sink (shared by reference across all push frames) with
-    the mount_id for the current async frame. Frozen so each push is
-    task-isolated: ``push_mount_context`` creates a new Recorder for
-    the calling task via ``_recorder.set``, never mutates the parent.
-    The sink list is the one piece that's intentionally shared, so
-    records emitted from any frame land in the same collection.
-
-    Args:
-        sink (list[OpRecord]): Where new records are appended.
-        lost (LostPaths): The line's lost paths.
-        index (RecordIndex): The line's version index over ``sink``.
-        mount_id (str | None): Identity of the mounted instance serving reads.
-        ledger (list[OpRecord] | None): the workspace ledger a line hands
-            its records to when it ends; None for a file call's own
-            recorder, which no other call joins.
-    """
-
-    sink: list[OpRecord]
-    lost: LostPaths
-    index: RecordIndex
-    mount_id: str | None = None
-    ledger: list[OpRecord] | None = None
 
 
 def fresh_recorder(ledger: list[OpRecord] | None = None) -> Recorder:

@@ -14,9 +14,8 @@
 
 from enum import Enum
 
-from mirage.io import IOResult
 from mirage.io.stream import discard_io, discard_streams, drain, materialize
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, IOResult
 
 
 class BarrierPolicy(Enum):

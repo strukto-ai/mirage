@@ -15,6 +15,7 @@
 import asyncio
 import logging
 
+from mirage.context.session_context import run_with_execution
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
@@ -201,7 +202,9 @@ class JobTable:
                 bash's does; its ``wait`` and ``kill`` reach none of them.
         """
         self.parent = parent
-        self.processes = processes or ProcessSupervisor()
+        self.processes = processes or ProcessSupervisor(
+            bind=run_with_execution
+        )
         self._jobs: dict[str, dict[int, Job]] = {}
         self._next_ids: dict[str, int] = {}
         self._console_factory = console_factory

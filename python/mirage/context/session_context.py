@@ -49,13 +49,16 @@ from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
 
 if TYPE_CHECKING:
-    from mirage.cache.context import CacheInvalidator
-    from mirage.cache.types import OwnRead, WriteContext
+    from mirage.cache.types import CacheInvalidator, OwnRead, WriteContext
     from mirage.io.types import ByteSource, IOResult
-    from mirage.observe.context import Recorder
-    from mirage.observe.record import OpRecord
-    from mirage.policy.decisions import Decisions, HandOff
-    from mirage.policy.types import DryRun, EntryGate, VfsExplanation
+    from mirage.observe.record import OpRecord, Recorder
+    from mirage.policy.types import (
+        DecisionOwner,
+        DryRun,
+        EntryGate,
+        HandOff,
+        VfsExplanation,
+    )
     from mirage.process.handle import ProcessHandle
     from mirage.shell.console import JobConsole
     from mirage.shell.types import Redirect
@@ -133,7 +136,7 @@ class Caller:
             targets, keyed by its command node.
         program (SessionState | None): the session a program line (find
             -exec) runs in.
-        call (tuple[Decisions, HandOff, str] | None): the call an
+        call (tuple[DecisionOwner, HandOff, str] | None): the call an
             op-level answer covers: its ledger, hand-off and session.
         policy_read (bool): whether the call is a policy program's own
             read.
@@ -184,7 +187,7 @@ class Caller:
         | None
     ) = None
     program: SessionState | None = None
-    call: tuple[Decisions, HandOff, str] | None = None
+    call: tuple[DecisionOwner, HandOff, str] | None = None
     policy_read: bool = False
     stop: asyncio.Event | None = None
     write_held: bool = False

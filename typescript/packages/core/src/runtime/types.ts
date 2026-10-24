@@ -22,6 +22,29 @@ export interface RuntimeIdentity {
 }
 
 /**
+ * The one-line placement decision the dispatcher consults.
+ *
+ * Both fields hold runtimes: the decision IS "which runtime runs which
+ * command". The workspace runtime is a legal value in either; a command
+ * placed on it is served by the workspace executor itself.
+ */
+export interface RouteDecision<R extends RuntimeIdentity> {
+  /**
+   * Every command some entry captures, resolved for this line: the
+   * runtime it runs on, or null when a route to the workspace keeps the
+   * line off its only capturer, a `*` line executor (exit 126, never a
+   * silent fallback to the workspace).
+   */
+  readonly bindings: Readonly<Record<string, R | null>>
+  /**
+   * Where commands no entry captures run: the catch-all workspace runtime,
+   * or null when the workspace runtime declares captures; unbound commands
+   * then exit 126.
+   */
+  readonly fallback: R | null
+}
+
+/**
  * Where an interpreter command (python3, js) runs its code, as the line
  * placed it, and what policy lets that code start and load. Mirrors Python's
  * `CommandRuntime`, less its `unavailable`: TypeScript refuses a missing

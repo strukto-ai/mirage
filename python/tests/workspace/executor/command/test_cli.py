@@ -34,8 +34,12 @@ from mirage.policy.types import SessionContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.routing import RouteDecision
-from mirage.runtime.types import Program, RunResult, ScriptSource
+from mirage.runtime.types import (
+    Program,
+    RouteDecision,
+    RunResult,
+    ScriptSource,
+)
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.variable import VarAttr
 from mirage.types import Limit, MountMode, PathSpec
