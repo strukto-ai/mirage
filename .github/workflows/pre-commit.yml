@@ -21,7 +21,7 @@ env:
   # Whole-repo checks a shorter file list cannot speed up, each already
   # run by a Test workflow. Un-skipping integ-typecheck means restoring
   # `pnpm run prisma:clients` with it, or every integ fake is TS2307.
-  SKIP: no-commit-to-branch,py-mypy,integ-typecheck,ts-knip
+  SKIP: no-commit-to-branch,py-mypy,py-mypy-overrides,integ-typecheck,ts-knip
 
 jobs:
   pre-commit:
