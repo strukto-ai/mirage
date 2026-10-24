@@ -117,6 +117,28 @@ impl Stream {
         self.inner.take_stderr(&mut err);
         PyBytes::new(py, &err)
     }
+
+    /// The host operation the stream waits on, as its JSON header and the
+    /// bytes it carries, or None while it waits on none.
+    fn request<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> Option<(Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+        let mut data = Vec::new();
+        let header = self.inner.request(&mut data)?;
+        Some((PyBytes::new(py, &header), PyBytes::new(py, &data)))
+    }
+
+    /// Answer the request taken last with a JSON reply and its bytes.
+    fn respond<'py>(
+        &mut self,
+        py: Python<'py>,
+        reply: &[u8],
+        data: &[u8],
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let result = self.inner.respond(reply, data, &mut self.out);
+        self.deliver(py, result)
+    }
 }
 
 /// An NFSv3 server with no I/O of its own: the host feeds it each

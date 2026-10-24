@@ -16,6 +16,7 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.find_parse import find_expr_tail
+from mirage.commands.builtin.generic.awk import is_assignment
 from mirage.commands.builtin.generic.grep import directories_action
 from mirage.commands.builtin.generic.program import FILE_KEYS
 from mirage.commands.cli.types import CLI
@@ -30,7 +31,6 @@ from mirage.commands.spec.constants import (
 )
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec, WordKind
-from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.policy.types import CommandWord
 from mirage.types import PathSpec
@@ -322,7 +322,7 @@ def routable_scopes(cmd_name: str, scopes: list[PathSpec]) -> list[PathSpec]:
         ]
     if cmd_name != "awk":
         return scopes
-    return [s for s in scopes if split_assignment(s.raw_path) is None]
+    return [s for s in scopes if not is_assignment(s.raw_path)]
 
 
 def merge_scopes(

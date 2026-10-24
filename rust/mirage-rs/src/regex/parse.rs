@@ -295,6 +295,11 @@ pub(crate) enum Dialect {
     /// What expr, nl, bash's `=~` and git read: a basic expression refuses
     /// nothing grep reads as text and takes an inverted range as empty.
     Posix,
+    /// awk's dynamic and literal expressions: an escape spells a byte as
+    /// in a string (`\n`, octal, `\x`), inside a bracket expression too;
+    /// `\y` is a word boundary, `\d` a digit, `\A` and `\Z` the subject's
+    /// edges; a malformed interval is text, an unmatched `)` refused.
+    Awk,
 }
 
 // The refusals, worded as GNU grep prints them after `grep: `.
@@ -469,7 +474,9 @@ impl<'a> Parser<'a> {
     fn at_close(&self) -> bool {
         if self.depth == 0 {
             // sed alone refuses an extended `)` that closes nothing.
-            return self.extended && self.dialect == Dialect::Sed && self.is(self.pos, b')');
+            return self.extended
+                && matches!(self.dialect, Dialect::Sed | Dialect::Awk)
+                && self.is(self.pos, b')');
         }
         if self.extended {
             self.is(self.pos, b')')
@@ -583,6 +590,12 @@ impl<'a> Parser<'a> {
             }
             return Ok(false);
         }
+        if self.dialect == Dialect::Awk
+            && unit.is(b'{')
+            && matches!(self.extended_interval(self.pos)?, Interval::Literal)
+        {
+            return Ok(false);
+        }
         if self.dialect != Dialect::Grep {
             return match unit.ascii() {
                 Some(b'*' | b'+' | b'?' | b'{') => Err(INVALID_PRECEDING),
@@ -670,6 +683,57 @@ impl<'a> Parser<'a> {
         if c == b'(' && !self.extended {
             return self.group();
         }
+        if self.dialect == Dialect::Awk {
+            if let Some(byte) = self.awk_byte(c) {
+                return Ok((Ast::Unit(Unit::Byte(byte)), 1));
+            }
+            let ast = match c {
+                b'y' => Ast::Look(Look::Word),
+                b'd' | b'D' => Ast::Set(Set {
+                    negated: c == b'D',
+                    items: vec![Item::Class(Class::Digit)],
+                    bracket: false,
+                }),
+                b'A' => Ast::Look(Look::SubjectStart),
+                b'Z' => Ast::Look(Look::SubjectEnd),
+                b'8' | b'9' => Ast::Unit(unit),
+                _ => return self.gnu_escape(unit, c, bare),
+            };
+            return Ok((ast, 1));
+        }
+        self.gnu_escape(unit, c, bare)
+    }
+
+    /// The byte an awk escape spells, the escape's letter or first digit
+    /// already read: a C control escape, one to three octal digits, or
+    /// `\x` and one or two hex digits.
+    fn awk_byte(&mut self, c: u8) -> Option<u8> {
+        let digit = |unit: Option<Unit>, radix: u32| {
+            unit.and_then(Unit::ascii)
+                .and_then(|d| char::from(d).to_digit(radix))
+        };
+        let (radix, mut value, most) = match c {
+            b'a' => return Some(7),
+            b'f' => return Some(12),
+            b'n' => return Some(b'\n'),
+            b'r' => return Some(b'\r'),
+            b't' => return Some(b'\t'),
+            b'v' => return Some(11),
+            b'0'..=b'7' => (8, u32::from(c - b'0'), 2),
+            b'x' if digit(self.peek(self.pos), 16).is_some() => (16, 0, 2),
+            _ => return None,
+        };
+        for _ in 0..most {
+            let Some(d) = digit(self.peek(self.pos), radix) else {
+                break;
+            };
+            value = value * radix + d;
+            self.pos += 1;
+        }
+        u8::try_from(value & 0xFF).ok()
+    }
+
+    fn gnu_escape(&mut self, unit: Unit, c: u8, bare: bool) -> Result<(Ast, usize), &'static str> {
         Ok((
             match c {
                 // Basic operators with nothing to repeat are their literals.
@@ -778,7 +842,7 @@ impl<'a> Parser<'a> {
     /// malformed one), or a refusal.
     fn extended_interval(&self, at: usize) -> Result<Interval, &'static str> {
         let start = at + 1;
-        if self.dialect != Dialect::Grep {
+        if !matches!(self.dialect, Dialect::Grep | Dialect::Awk) {
             return self.strict_interval(start);
         }
         match self.peek(start).and_then(Unit::ascii) {
@@ -895,7 +959,7 @@ impl<'a> Parser<'a> {
             }
         }
         let body = &self.units[content..self.pos];
-        if self.dialect != Dialect::Posix
+        if !matches!(self.dialect, Dialect::Posix | Dialect::Awk)
             && body.len() >= 2
             && body[0].is(b':')
             && body[body.len() - 1].is(b':')
@@ -917,6 +981,13 @@ impl<'a> Parser<'a> {
         let Some(unit) = self.peek(self.pos) else {
             return Err(UNMATCHED_BRACKET);
         };
+        if self.dialect == Dialect::Awk && unit.is(b'\\') {
+            if let Some(next) = self.peek(self.pos + 1) {
+                self.pos += 2;
+                let byte = next.ascii().and_then(|c| self.awk_byte(c));
+                return Ok((Item::Unit(byte.map_or(next, Unit::Byte)), true));
+            }
+        }
         if unit.is(b'[') {
             if let Some(kind) = self.peek(self.pos + 1).and_then(Unit::ascii) {
                 if matches!(kind, b':' | b'=' | b'.') {

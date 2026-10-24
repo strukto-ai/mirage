@@ -180,6 +180,12 @@ impl Posix {
         Some(spans)
     }
 
+    /// Where the leftmost-longest match at or after `at` lies, its groups
+    /// left unplaced.
+    pub(crate) fn find(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
+        self.extent(hay, at)
+    }
+
     /// Whether the pattern matches anywhere in `hay`, as sed's addresses
     /// ask.
     pub(crate) fn test(&mut self, hay: &[u8]) -> bool {
