@@ -1,4 +1,4 @@
-mod number;
+pub(crate) mod number;
 mod scan;
 #[cfg(test)]
 mod tests;

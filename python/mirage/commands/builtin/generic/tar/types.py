@@ -8,7 +8,6 @@ from mirage.types import PathSpec
 from mirage.utils.compress import GzipDataError
 
 CompressionSuffix: TypeAlias = Literal["", ":gz", ":bz2", ":xz"]
-ReadMode: TypeAlias = Literal["r", "r:", "r:gz", "r:bz2", "r:xz"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "numfmt_field_selects_fields_and_ranges",
+      "seq": 15500101,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '1000 2000 3000\\n' | numfmt --to=si --field=2; printf '1000 2000 3000\\n' | numfmt --to=si --field=-2; printf '1000 2000 3000\\n' | numfmt --to=si --field=1,3; printf '1000 2000 3000\\n' | numfmt --to=si --field=-; printf '1000 2000\\n' | numfmt --to=si --field=5",
+      "expect": {
+        "exit": 0,
+        "stdout": "1000 2.0k 3000\n1.0k 2.0k 3000\n1.0k 2000 3.0k\n1.0k 2.0k 3.0k\n1000 2000\n",
+        "stderr": ""
+      },
+      "flags": [
+        "field"
+      ]
+    },
+    {
+      "id": "numfmt_field_refuses_bad_lists",
+      "seq": 15500102,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "numfmt --field=0 1; echo rc=$?; numfmt --field=3-2 1; echo rc=$?; numfmt --field=a 1; echo rc=$?; numfmt --field=1 --field=2 1; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "numfmt: fields are numbered from 1\nTry 'numfmt --help' for more information.\nnumfmt: invalid decreasing range\nTry 'numfmt --help' for more information.\nnumfmt: invalid field value 'a'\nTry 'numfmt --help' for more information.\nnumfmt: multiple field specifications\n"
+      },
+      "flags": [
+        "field"
+      ]
+    },
+    {
+      "id": "numfmt_aligns_a_converted_field_to_its_blanks",
+      "seq": 15500103,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '  1000   2000\\n' | numfmt --to=si --field=-; printf '1000\\t\\t2000\\n' | numfmt --to=si --field=2; printf '1000\\t\\t2000\\n' | numfmt --to=si; printf '   123456789 x\\n' | numfmt --to=si; numfmt --to=si ' 1000' '1000  '",
+      "expect": {
+        "exit": 0,
+        "stdout": "  1.0k   2.0k\n1000  2.0k\n1.0k \t2000\n        124M x\n 1.0k\n1.0k  \n",
+        "stderr": ""
+      },
+      "flags": [
+        "field",
+        "to"
+      ]
+    },
+    {
+      "id": "numfmt_refuses_an_empty_field_and_keeps_an_open_last_line",
+      "seq": 15500104,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '100\\n\\n200\\n' | numfmt; echo rc=$?; printf '1  2  \\n' | numfmt --field=-; echo rc=$?; printf '1000\\n2000' | numfmt --to=si; echo; numfmt ''; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "100\nrc=2\n1  2 rc=2\n1.0k\n2.0k\nrc=2\n",
+        "stderr": "numfmt: invalid number: ''\nnumfmt: invalid number: ''\nnumfmt: invalid number: ''\n"
+      },
+      "flags": [
+        "field"
+      ]
+    },
+    {
+      "id": "numfmt_delimiter_cuts_at_one_byte",
+      "seq": 15500105,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf ' 1000, 2000\\n' | numfmt -d, --to=si --field=-; printf '1000,2000\\n' | numfmt --delimiter=, --to=si --field=2; numfmt -d ab 1; echo rc=$?; printf '1000, 2000 \\n' | numfmt -d, --to=si --field=2; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1.0k,2.0k\n1000,2.0k\nrc=1\n1000,rc=2\n",
+        "stderr": "numfmt: the delimiter must be a single character\nnumfmt: rejecting suffix in input: '2000 ' (consider using --from)\n"
+      },
+      "flags": [
+        "d",
+        "delimiter",
+        "field"
+      ]
+    },
+    {
+      "id": "numfmt_header_and_zero_terminated_records",
+      "seq": 15500106,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'h1 h2\\n1000 2000\\n' | numfmt --header --to=si; printf 'h1\\nh2\\n1000\\n' | numfmt --header=2 --to=si; numfmt --header=0 1; echo rc=$?; printf '1000\\n2000\\0' | numfmt -z --to=si | tr '\\0' @; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "h1 h2\n1.0k 2000\nh1\nh2\n1.0k\nrc=1\n1.0k 2000@\n",
+        "stderr": "numfmt: invalid header value '0'\n"
+      },
+      "flags": [
+        "header",
+        "z"
+      ]
+    }
+  ]
+}

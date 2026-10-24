@@ -1,0 +1,66 @@
+{
+  "cases": [
+    {
+      "id": "xm_b2sum_both_mounts",
+      "seq": 9900032,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf abc > /data/xm_b2sum && printf xyz > /data2/xm_b2sum && b2sum /data/xm_b2sum /data2/xm_b2sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923  /data/xm_b2sum\n6e592853e98577163d504bc63c1ab4cb6136ef9f577f90d2d402ee172d5b1a503fd10d0de9e6ac9b66f888b5329a1bfe68c865dd213564347874064ef9c43306  /data2/xm_b2sum\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "xm_b2sum_continues_after_missing",
+      "seq": 9900033,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum /data/xm_b2sum_missing /data2/xm_b2sum",
+      "expect": {
+        "exit": 1,
+        "stdout": "6e592853e98577163d504bc63c1ab4cb6136ef9f577f90d2d402ee172d5b1a503fd10d0de9e6ac9b66f888b5329a1bfe68c865dd213564347874064ef9c43306  /data2/xm_b2sum\n",
+        "stderr": "b2sum: /data/xm_b2sum_missing: No such file or directory\n"
+      }
+    }
+  ]
+}

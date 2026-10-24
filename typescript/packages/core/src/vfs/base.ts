@@ -414,8 +414,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * file. Answer only a digest of exactly the bytes a read gives, in
    * lowercase hex: a stored value that can be anything else (a multipart or
    * encrypted object's ETag) is null. `algorithm` is the hashlib name, `md5`,
-   * `sha1`, `sha256`, `sha384` or `sha512`. A file the read cache holds is
-   * read instead. Resolves null to have the file read and hashed; rejects
+   * `sha1`, `sha224`, `sha256`, `sha384`, `sha512` or `blake2b`, or
+   * `blake2b-N` for BLAKE2b at N bits. A file the read cache holds is read
+   * instead. Resolves null to have the file read and hashed; rejects
    * with the file's read error otherwise.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })

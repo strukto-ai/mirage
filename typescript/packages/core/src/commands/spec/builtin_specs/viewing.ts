@@ -132,7 +132,7 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   unexpand: new CommandSpec({
     arguments: [
-      new Argument(['-t', '--tabs']),
+      new Argument(['-t', '--tabs'], { action: 'append' }),
       new Argument(['-a', '--all'], { action: 'store_true' }),
       new Argument('--first-only', { action: 'store_true' }),
       PATHS_OPERAND,

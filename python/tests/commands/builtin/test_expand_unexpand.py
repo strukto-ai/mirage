@@ -17,7 +17,6 @@ import pytest
 
 from mirage.commands.builtin.generic.expand import (
     TabStops,
-    next_tab_stop,
     parse_flags,
     read_tab_stops,
 )
@@ -446,34 +445,6 @@ def test_expand_resets_the_column_on_a_newline_alone(argv, stdin, rendered):
     stdout, io = _run_raw(ws, argv, stdin=stdin)
     assert io.exit_code == 0
     assert _bytes(stdout) == rendered
-
-
-@pytest.mark.parametrize(
-    "tabs,column,expected",
-    [
-        (TabStops(), 0, 8),
-        (TabStops(), 3, 8),
-        (TabStops(), 8, 16),
-        (TabStops(stops=(3,)), 0, 3),
-        (TabStops(stops=(3,)), 3, 6),
-        (TabStops(stops=(5, 9)), 0, 5),
-        (TabStops(stops=(5, 9)), 5, 9),
-        (TabStops(stops=(5, 9)), 9, 10),
-        (TabStops(stops=(5, 9)), 20, 21),
-        (TabStops(extend=4), 0, 4),
-        (TabStops(extend=4), 4, 8),
-        (TabStops(increment=4), 0, 4),
-        (TabStops(increment=4), 5, 8),
-        (TabStops(stops=(2,), extend=4), 3, 4),
-        (TabStops(stops=(2,), extend=4), 5, 8),
-        (TabStops(stops=(2,), increment=4), 3, 6),
-        (TabStops(stops=(2,), increment=4), 7, 10),
-    ],
-)
-def test_expand_next_tab_stop_is_always_strictly_greater(
-    tabs, column, expected
-):
-    assert next_tab_stop(tabs, column) == expected
 
 
 @pytest.mark.parametrize(

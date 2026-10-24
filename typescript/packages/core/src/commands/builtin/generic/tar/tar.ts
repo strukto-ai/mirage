@@ -16,12 +16,16 @@ import { CHUNK_SIZE, chunks } from '../../../../io/cooperative.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
-import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { ByteSpool } from '../../../../io/spool.ts'
 import { OutputStream, asyncChain, primeStream, closeQuietly } from '../../../../io/stream.ts'
-import { gzipCompressStream, gunzipStream } from '../../../../utils/compress.ts'
+import {
+  compressStream,
+  decompressStream,
+  gunzipStream,
+  gzipCompressStream,
+} from '../../../../utils/compress.ts'
 import { FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { gzip, getCompressionCodec } from '../../../../utils/compress.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import {
   readTarSpool,
@@ -250,41 +254,6 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
   }
 }
 
-function compressArchive(
-  raw: AsyncIterable<Uint8Array>,
-  kind: Exclude<Compression, null>,
-): AsyncIterable<Uint8Array> {
-  const codec = getCompressionCodec(kind)
-  if (codec?.compressStream !== undefined) return codec.compressStream(raw)
-  return bufferedCompress(raw, kind)
-}
-
-async function* bufferedCompress(
-  raw: AsyncIterable<Uint8Array>,
-  kind: Compression,
-): AsyncGenerator<Uint8Array> {
-  yield await compress(await materialize(raw), kind)
-}
-
-async function compress(raw: Uint8Array, kind: Compression): Promise<Uint8Array> {
-  if (kind === null) return raw
-  if (kind === 'gzip') return gzip(raw)
-  const codec = getCompressionCodec(kind)
-  if (codec?.compress === undefined) throw new Error(`tar: ${kind} not supported`)
-  return codec.compress(raw)
-}
-
-// gzip is built in; bzip2 (-j) / xz (-J) need a codec registered by the
-// runtime package, and a codec may be decompress-only (bzip2 is), which only
-// rules out creating an archive. Answers the kind that cannot be served, so
-// the caller names it.
-function unsupportedKind(compression: Compression, create: boolean): CompressionKind | null {
-  if (compression !== 'bzip2' && compression !== 'xz') return null
-  const codec = getCompressionCodec(compression)
-  if (codec === undefined) return compression
-  return create && codec.compress === undefined ? compression : null
-}
-
 /**
  * Read tar entries while retaining a failed gzip child's diagnostic.
  *
@@ -318,9 +287,13 @@ async function readArchive(
     }
     const detected = kind ?? detectCompression(first)
     let failure: GzipDataError | null = null
-    if (detected === 'gzip') {
+    if (detected !== null) {
       try {
-        await decoded.fill(gunzipStream(raw.stream()))
+        await decoded.fill(
+          detected === 'gzip'
+            ? gunzipStream(raw.stream())
+            : decompressStream(raw.stream(), detected),
+        )
       } catch (error) {
         if (!(error instanceof GzipDataError)) throw error
         failure = error
@@ -328,16 +301,6 @@ async function readArchive(
       data = decoded
       if (failure !== null && data.size === 0)
         return { entries: [], failure, notices: [], cut: null }
-    } else if (detected !== null) {
-      const codec = getCompressionCodec(detected)
-      if (codec !== undefined) {
-        await decoded.fill(
-          codec.decompressStream === undefined
-            ? await codec.decompress(await raw.read(0, raw.size))
-            : codec.decompressStream(raw.stream()),
-        )
-        data = decoded
-      }
     }
     try {
       const entries = await readTarSpool(data, contents)
@@ -530,7 +493,7 @@ async function writeArchive(
       ? gzipCompressStream(raw)
       : compression === null
         ? raw
-        : compressArchive(raw, compression)
+        : compressStream(raw, compression)
   if (archivePath.rawPath === '-') return [archive, result]
   try {
     await deps.write(archivePath, archive)
@@ -575,13 +538,6 @@ export async function tarGeneric(
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   const { create, extract, list, compression, verbose } = parsed
-  const missing = unsupportedKind(compression, create)
-  if (missing !== null) {
-    return [
-      null,
-      new IOResult({ exitCode: 1, stderr: ENC.encode(`tar: ${missing} not supported\n`) }),
-    ]
-  }
   const archiveOperand = parsed.archive
   const COperands = parsed.directories
   // Only the last -C is a destination; create checks every one.

@@ -19,6 +19,7 @@
 // spelled by their own name rather than gzip's. A command absent here renders
 // the synopsis synthesized from its slots.
 export const SYNOPSES: Readonly<Record<string, string>> = {
+  b2sum: 'b2sum [OPTION]... [FILE]...',
   base64: 'base64 [OPTION]... [FILE]',
   basename: 'basename NAME [SUFFIX]',
   cat: 'cat [OPTION]... [FILE]...',
@@ -69,6 +70,7 @@ export const SYNOPSES: Readonly<Record<string, string>> = {
   seq: 'seq [OPTION]... LAST',
   setfattr: 'setfattr {-n name} [-v value] [-h] file...',
   sha1sum: 'sha1sum [OPTION]... [FILE]...',
+  sha224sum: 'sha224sum [OPTION]... [FILE]...',
   sha256sum: 'sha256sum [OPTION]... [FILE]...',
   sha384sum: 'sha384sum [OPTION]... [FILE]...',
   sha512sum: 'sha512sum [OPTION]... [FILE]...',

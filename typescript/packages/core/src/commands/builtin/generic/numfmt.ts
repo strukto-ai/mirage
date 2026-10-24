@@ -1,225 +1,45 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { quoteText } from '../../quote.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { openStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import type { JsonValue } from '../../../types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
-const SUFFIXES = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y', 'R', 'Q'] as const
-// SI spells kilo lowercase; every larger unit and all of IEC stay uppercase.
-const SI_DISPLAY: readonly string[] = ['', 'k', ...SUFFIXES.slice(2)]
-// Only kilo has a lowercase spelling; every larger unit is uppercase-only.
-const UNIT_EXPONENTS: Readonly<Record<string, number>> = Object.freeze({
-  K: 1,
-  k: 1,
-  M: 2,
-  G: 3,
-  T: 4,
-  P: 5,
-  E: 6,
-  Z: 7,
-  Y: 8,
-  R: 9,
-  Q: 10,
-})
-// GNU accepts no leading '+' and no bare trailing '.', and it reads no
-// exponent: `1e3` is a number followed by the unknown suffix 'e3'.
-const NUMBER_RE = /^(-?(?:[0-9]*\.[0-9]+|[0-9]+))([\s\S]*)$/
 
-// A value carried exactly, as digits / 10**scale, so that `--to=none` can
-// print every digit of `1Y` rather than the `1e+24` a double renders.
-interface Parsed {
-  digits: bigint
-  scale: number
-  decimals: number
-}
-
-// GNU's two shapes of suffix complaint, exit 2 either way. An unusable
-// first character quotes only the whole field; a usable unit followed by
-// junk quotes the field and then the junk (pinned against coreutils 9.7).
-function suffixError(value: string, junk: string): UsageError {
-  if (junk === '') {
-    return new UsageError(`numfmt: invalid suffix in input: '${quoteText(value)}'`, 2)
-  }
-  return new UsageError(
-    `numfmt: invalid suffix in input '${quoteText(value)}': '${quoteText(junk)}'`,
-    2,
-  )
-}
-
-// GNU's --from=iec-i complaint that the `i` is absent, exit 2. It answers
-// for every field whose unit letter is not followed by an `i`: `1K`, `1Kx`,
-// `1KB` and `1KII` all get this clause, while `1Kii` and `1KiB` consume the
-// `i` and report their leftover as an invalid suffix instead, `1i` never
-// reaches it because `i` is not a unit letter, and a field with no unit at
-// all is read as it stands (coreutils 9.7; 9.4 refused that one too).
-function missingISuffixError(value: string): UsageError {
-  return new UsageError(
-    `numfmt: missing 'i' suffix in input: '${quoteText(value)}' (e.g Ki/Mi/Gi)`,
-    2,
-  )
-}
-
-// Each --from mode spells the same units differently: si and iec take the
-// bare letter, iec-i requires the trailing 'i', and auto takes either and
-// lets the 'i' pick base 1024. Nothing may follow (pinned against coreutils
-// 9.7), which is why `1KiB` is refused everywhere -- it used to be read as
-// a kilobyte in both languages. Under iec-i a tail that does not START with
-// the 'i' is the missing-'i' clause rather than an invalid suffix: `1Ké` and
-// `1Kx` both name the whole field (coreutils 9.4).
-function scaleOf(value: string, suffix: string, fromMode: string): [number, number] {
-  const exponent = UNIT_EXPONENTS[suffix[0] ?? '']
-  if (exponent === undefined) throw suffixError(value, '')
-  const tail = suffix.slice(1)
-  if (fromMode === 'iec-i') {
-    if (!tail.startsWith('i')) throw missingISuffixError(value)
-    if (tail.length > 1) throw suffixError(value, tail.slice(1))
-    return [1024, exponent]
-  }
-  if (fromMode === 'auto') {
-    const base = tail.startsWith('i') ? 1024 : 1000
-    const rest = base === 1024 ? tail.slice(1) : tail
-    if (rest !== '') throw suffixError(value, rest)
-    return [base, exponent]
-  }
-  if (tail !== '') throw suffixError(value, tail)
-  return [fromMode === 'si' ? 1000 : 1024, exponent]
-}
-
-// GNU prints an unscaled value back at the precision it was typed with
-// (`1.000` stays `1.000`) and a scaled one as a whole number rounded away
-// from zero (`1.0005K` is `1001`), so the decimal count travels with the
-// value. A unit that is spelled correctly but unusable because no --from
-// was given is reported as such, which is why the unit letter is checked
-// before the mode is. Deliberate divergence: GNU calls a second decimal
-// point an invalid suffix in some spellings and an invalid number in
-// others (`1.5.5` against `1..5`); mirage calls every trailing decimal
-// point an invalid number.
-function parseNumber(value: string, fromMode: string): Parsed {
-  const match = NUMBER_RE.exec(value)
-  const head = match?.[1] ?? ''
-  const rest = match?.[2] ?? ''
-  if (match === null || (rest.startsWith('.') && !head.includes('.'))) {
-    throw new UsageError(`numfmt: invalid number: '${quoteText(value)}'`, 2)
-  }
-  const dot = head.indexOf('.')
-  const fraction = dot < 0 ? '' : head.slice(dot + 1)
-  const digits = BigInt(dot < 0 ? head : head.slice(0, dot) + fraction)
-  if (rest === '') return { digits, scale: fraction.length, decimals: fraction.length }
-  if (UNIT_EXPONENTS[rest[0] ?? ''] === undefined) throw suffixError(value, '')
-  if (fromMode === 'none') {
-    throw new UsageError(
-      `numfmt: rejecting suffix in input: '${quoteText(value)}' (consider using --from)`,
-      2,
-    )
-  }
-  const [base, exponent] = scaleOf(value, rest, fromMode)
-  return {
-    digits: digits * BigInt(base) ** BigInt(exponent),
-    scale: fraction.length,
-    decimals: 0,
+// A refusal stops the conversion after the records before it, exit 2.
+async function* converted(
+  stream: OpenStream,
+  source: ByteSource,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  try {
+    yield* streamOutputChunks(stream, source, signal)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    io.exitCode = 2
+    io.stderr = ENC.encode(`${err.message}\n`)
+    if (err.output.byteLength > 0) yield err.output
   }
 }
 
-// Round digits/10**scale away from zero at `places` decimals, returning the
-// result scaled by 10**places. BigInt division truncates toward zero, so a
-// non-zero remainder is what pushes the magnitude up.
-function roundAway(digits: bigint, scale: number, places: number): bigint {
-  if (scale <= places) return digits * 10n ** BigInt(places - scale)
-  const divisor = 10n ** BigInt(scale - places)
-  const quotient = digits / divisor
-  if (digits % divisor === 0n) return quotient
-  return digits < 0n ? quotient - 1n : quotient + 1n
+// Every typed value of an option, a bare --header counting one record.
+function typed(fl: FlagView, name: string): string[] {
+  return fl.occurrences(name).map(([, value]) => byteView(value === true ? '1' : String(value)))
 }
 
-function fixed(scaled: bigint, places: number): string {
-  const negative = scaled < 0n
-  const text = (negative ? -scaled : scaled).toString().padStart(places + 1, '0')
-  const whole = text.slice(0, text.length - places)
-  const fraction = places > 0 ? `.${text.slice(text.length - places)}` : ''
-  return (negative ? '-' : '') + whole + fraction
-}
-
-// Round away from zero at `places` decimals. Snapping to 15 significant digits
-// first drops the sub-ulp binary noise a bare ceil can trip over, without the
-// blind spot of a fixed absolute epsilon: subtracting 1e-9 before ceil also
-// erases a genuine offset smaller than that, so 1000.00000001 collapses to
-// 1.0k, while GNU and the Decimal path in Python both keep it at 1.1k.
-function roundAwayFromZero(value: number, places: number): number {
-  const factor = 10 ** places
-  const scaled = Number((Math.abs(value) * factor).toPrecision(15))
-  return Math.sign(value) * (Math.ceil(scaled) / factor)
-}
-
-// printf("%.*f") rounds half to even, which is why an unscaled 2.5 prints 2.
-function toFixedHalfEven(value: number, places: number): string {
-  const factor = 10 ** places
-  const scaled = value * factor
-  const floor = Math.floor(scaled)
-  const diff = scaled - floor
-  let unit: number
-  if (diff > 0.5 + 1e-9) unit = floor + 1
-  else if (diff < 0.5 - 1e-9) unit = floor
-  else unit = floor % 2 === 0 ? floor : floor + 1
-  return (unit / factor).toFixed(places)
-}
-
-// GNU rounds away from zero, keeping one decimal only while the scaled value
-// is below 10. That rounding can push a value back over the base
-// (999.4 -> 1000 -> 1.0k), so the unit is re-checked afterwards. --to=none
-// instead keeps the precision the value was parsed with and rounds away
-// from zero there, always in fixed notation -- `1Y` is a twenty-five digit
-// number, never `1e+24`. Deliberate divergence: GNU reads the input into a
-// long double first, so a value it cannot hold exactly rounds up on the way
-// out (`1.10` prints as `1.11` while `1.20` and `1.30` do not); mirage
-// keeps the value exact, as it already does for printf.
-function formatNumber(parsed: Parsed, toMode: string): string {
-  if (toMode === 'none') {
-    return fixed(roundAway(parsed.digits, parsed.scale, parsed.decimals), parsed.decimals)
-  }
-  const base = toMode === 'si' ? 1000 : 1024
-  const display = toMode === 'si' ? SI_DISPLAY : SUFFIXES
-  let number = Number(parsed.digits) / 10 ** parsed.scale
-  let power = 0
-  while (Math.abs(number) >= base && power < display.length - 1) {
-    number /= base
-    power += 1
-  }
-  number = roundAwayFromZero(number, Math.abs(number) < 10 ? 1 : 0)
-  if (Math.abs(number) >= base && power < display.length - 1) {
-    number /= base
-    power += 1
-  }
-  const places = power > 0 && Math.abs(number) < 10 ? 1 : 0
-  const suffix = `${display[power] ?? ''}${toMode === 'iec-i' && power > 0 ? 'i' : ''}`
-  return toFixedHalfEven(number, places) + suffix
-}
-
-function convertField(value: string, toMode: string, fromMode: string, suffix: string): string {
-  const stripped = suffix !== '' && value.endsWith(suffix) ? value.slice(0, -suffix.length) : value
-  return formatNumber(parseNumber(stripped, fromMode), toMode) + suffix
-}
-
-// GNU numfmt converts only --field (1 by default) and copies the remaining
-// fields and the blanks (space, tab) between them untouched.
-function convertLine(line: string, toMode: string, fromMode: string, suffix: string): string {
-  const match = /^([ \t]*)([^ \t]+)([\s\S]*)$/.exec(line)
-  if (match === null) return line
-  const [, lead = '', field = '', rest = ''] = match
-  return lead + convertField(field, toMode, fromMode, suffix) + rest
-}
-
-export function numfmtGeneric(texts: readonly string[], ctx: Context): CommandFnResult {
+export async function numfmtGeneric(
+  texts: readonly string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('numfmt'))
-  const toMode = fl.asStr('to') ?? 'none'
-  const fromMode = fl.asStr('from') ?? 'none'
-  const suffix = fl.asStr('suffix') ?? ''
+  const to = fl.asStr('to') ?? 'none'
   // mirage's one locale is C, whose thousands separator is empty, so
   // --grouping groups nothing; GNU still refuses it beside a --to scale.
-  if (fl.asBool('grouping') && toMode !== 'none') {
+  if (fl.asBool('grouping') && to !== 'none') {
     return [
       null,
       new IOResult({
@@ -228,24 +48,24 @@ export function numfmtGeneric(texts: readonly string[], ctx: Context): CommandFn
       }),
     ]
   }
-  const io = new IOResult()
-  async function* output(): AsyncIterable<Uint8Array> {
-    const reader = texts.length > 0 ? null : new AsyncLineIterator(ctx.stdin ?? new Uint8Array())
-    try {
-      if (reader === null) {
-        for (const value of texts)
-          yield ENC.encode(convertField(value, toMode, fromMode, suffix) + '\n')
-      } else {
-        for await (const raw of reader)
-          yield ENC.encode(convertLine(DEC.decode(raw), toMode, fromMode, suffix) + '\n')
-      }
-    } catch (err) {
-      if (!(err instanceof UsageError)) throw err
-      io.exitCode = err.exitCode
-      io.stderr = ENC.encode(err.message + '\n')
-    } finally {
-      await reader?.discard()
-    }
+  const config: Readonly<Record<string, JsonValue>> = {
+    to,
+    from: fl.asStr('from') ?? 'none',
+    suffix: byteView(fl.asStr('suffix') ?? ''),
+    operands: texts.map((text) => byteView(text)),
+    fields: typed(fl, 'field'),
+    delimiters: typed(fl, 'delimiter'),
+    headers: typed(fl, 'header'),
+    zero_terminated: fl.asBool('zero_terminated'),
   }
-  return [output(), io]
+  let stream: OpenStream
+  try {
+    stream = await openStream('numfmt', config)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) })]
+  }
+  const io = new IOResult()
+  const source = texts.length > 0 ? new Uint8Array(0) : (ctx.stdin ?? new Uint8Array(0))
+  return [converted(stream, source, io, ctx.signal), io]
 }

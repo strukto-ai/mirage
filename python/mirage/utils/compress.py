@@ -14,6 +14,7 @@
 
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Mapping
 from contextlib import aclosing
+from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict
 
@@ -81,6 +82,8 @@ class GzipDataError(ValueError):
 
 
 GZIP_MAGIC = b"\x1f\x8b"
+
+Codec: TypeAlias = Literal["bzip2", "xz"]
 
 
 class GzipFailure(BaseModel):
@@ -232,3 +235,40 @@ async def inflate_raw_stream(
         async with aclosing(result):
             async for part in result:
                 yield part
+
+
+async def compress_stream(
+    source: AsyncIterator[bytes], codec: Codec
+) -> AsyncGenerator[bytes, None]:
+    """Encode one bzip2 or xz stream at its program's default level.
+
+    Args:
+        source (AsyncIterator[bytes]): uncompressed chunks.
+        codec (Codec): the format to write.
+    """
+    async with aclosing(chunks(source)) as bounded:
+        result = _codec_stream(
+            bounded, {"operation": "encode", "format": codec}
+        )
+        async with aclosing(result):
+            async for part in result:
+                yield part
+
+
+async def decompress_stream(
+    source: AsyncIterator[bytes], codec: Codec
+) -> AsyncGenerator[bytes, None]:
+    """Decode concatenated bzip2 or xz streams, failing in that program's
+    words as ``gunzip_stream`` fails in gzip's.
+
+    Args:
+        source (AsyncIterator[bytes]): compressed chunks.
+        codec (Codec): the format to read.
+    """
+    result = _codec_stream(source, {"operation": "decode", "format": codec})
+    try:
+        async with aclosing(result):
+            async for part in result:
+                yield part
+    finally:
+        await close_quietly(source)

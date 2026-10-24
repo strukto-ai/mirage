@@ -70,6 +70,7 @@ export const STDIN_SCRIPT_COMMANDS: ReadonlySet<string> = new Set([
 // working directory, and explicit `./-` always is.
 export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'awk',
+  'b2sum',
   'base64',
   'cat',
   'cmp',
@@ -92,6 +93,7 @@ export const STDIN_DASH_COMMANDS: ReadonlySet<string> = new Set([
   'rg',
   'sed',
   'sha1sum',
+  'sha224sum',
   'sha256sum',
   'sha384sum',
   'sha512sum',

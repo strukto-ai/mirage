@@ -23,11 +23,6 @@
 export const STRTOD =
   /^[ \t\n\v\f\r]*([+-]?)(?:(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))/
 
-// The binary128 long double strtold rounds to: a value from 2**16384 -
-// 2**16270 up (LDBL_MAX plus half its ulp, a tie rounding to the even
-// infinity) overflows.
-export const LONG_DOUBLE_OVERFLOW = ((1n << 114n) - 1n) << 16270n
-
 // A STRTOD match spanning the whole word, as xstrtod demands, or null.
 // Mirrors Python's strtod_whole.
 export function strtodWhole(text: string): RegExpExecArray | null {

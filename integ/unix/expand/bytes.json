@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "expand_counts_bytes_not_characters",
+      "seq": 9100105,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\303\\251\\tx\\n\\344\\270\\255\\tx\\n' | expand | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": " 303 251                           x  \\n 344 270 255            \n           x  \\n\n",
+        "stderr": ""
+      },
+      "flags": []
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { usageExitCode, usageHint } from '../../spec/usage.ts'
+import { quoteText } from '../../quote.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -41,6 +42,7 @@ export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
 interface ChecksumFlags {
+  readonly algorithm: string
   readonly check: boolean
   readonly binary: boolean
   readonly tag: boolean
@@ -52,9 +54,27 @@ interface ChecksumFlags {
   readonly warn: boolean
 }
 
+const BLAKE2B = 'blake2b'
+
+// The *sum command that computes `algorithm`, a hashlib name or `blake2b-N`
+// for BLAKE2b at N bits.
+function prog(algorithm: string): string {
+  return algorithm.startsWith(BLAKE2B) ? 'b2sum' : `${algorithm}sum`
+}
+
+// The digest's BSD-style name, as --tag prints it and -c reads it: `SHA256`,
+// `BLAKE2b`, `BLAKE2b-256`.
+function tag(algorithm: string): string {
+  return algorithm.startsWith(BLAKE2B)
+    ? `BLAKE2b${algorithm.slice(BLAKE2B.length)}`
+    : algorithm.toUpperCase()
+}
+
 async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
   const parts: Uint8Array[] = []
-  for await (const part of runStream('digest', { algorithm }, source)) parts.push(part)
+  const [family = algorithm, bits] = algorithm.split('-')
+  const config = bits === undefined ? { algorithm } : { algorithm: family, length: Number(bits) }
+  for await (const part of runStream('digest', config, source)) parts.push(part)
   return DEC.decode(concat(parts))
 }
 
@@ -107,10 +127,6 @@ export async function hashOperands(
   return [output(), io]
 }
 
-function algorithmName(name: string): string {
-  return name.slice(0, -3).toUpperCase()
-}
-
 // The last of -b, -t and --tag (which reads in binary mode), as GNU's option
 // loop leaves its one mode.
 function readMode(fl: FlagView): string | undefined {
@@ -149,13 +165,28 @@ function refuseConflicts(fl: FlagView, name: string): void {
   }
 }
 
-// Parse the shared `*sum` flag set against one command's spec; all five
-// declare the same set.
+// b2sum's digest for its -l, read as GNU reads it in the option loop: a
+// decimal count of bits, 0 or past 512 meaning 512 (coreutils 9.7).
+function blake2b(fl: FlagView, name: string): string {
+  const value = fl.asStr('length')
+  if (value === undefined) return BLAKE2B
+  const match = /^\s*\+?([0-9]+)$/.exec(value)
+  const refusal = `${name}: invalid length: '${quoteText(value)}'`
+  if (match === null) throw new UsageError(refusal, 1)
+  const bits = Number(match[1])
+  if (bits % 8 !== 0) throw new UsageError(`${refusal}\n${name}: length is not a multiple of 8`, 1)
+  return bits === 0 || bits >= 512 ? BLAKE2B : `${BLAKE2B}-${String(bits)}`
+}
+
+// Parse the shared `*sum` flag set against one command's spec; b2sum adds -l
+// to the set.
 function parseFlags(bag: Record<string, FlagValue>, name: string): ChecksumFlags {
   const fl = new FlagView(bag, specOf(name))
+  const algorithm = name === 'b2sum' ? blake2b(fl, name) : name.slice(0, -3)
   refuseConflicts(fl, name)
   const mode = readMode(fl)
   return {
+    algorithm,
     check: fl.asBool('check'),
     binary: mode === 'binary' || mode === 'tag',
     tag: fl.asBool('tag'),
@@ -168,10 +199,10 @@ function parseFlags(bag: Record<string, FlagValue>, name: string): ChecksumFlags
   }
 }
 
-function hashLine(digest: string, label: string, name: string, flags: ChecksumFlags): string {
+function hashLine(digest: string, label: string, flags: ChecksumFlags): string {
   const terminator = flags.zero ? '\0' : '\n'
   if (flags.tag) {
-    return `${algorithmName(name)} (${label}) = ${digest}${terminator}`
+    return `${tag(flags.algorithm)} (${label}) = ${digest}${terminator}`
   }
   const marker = flags.binary ? '*' : ' '
   return `${digest} ${marker}${label}${terminator}`
@@ -211,10 +242,10 @@ async function checkFile(
   stream: Stream,
   p: PathSpec,
   algorithm: string,
-  name: string,
   ctx: Context,
   flags: ChecksumFlags,
 ): Promise<[string, string, number]> {
+  const name = prog(algorithm)
   const data = DEC.decode(await materialize(stream(p)))
   const listed = ctx.vfs !== undefined ? dispatchedReader(ctx.vfs.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
@@ -233,25 +264,22 @@ async function checkFile(
   for (const line of data.split('\n')) {
     lineno += 1
     if (line.trim() === '') continue
-    const parsed = parseCheckLine(line, name)
+    const parsed = parseCheckLine(line, algorithm)
     if (parsed === null) {
       malformed += 1
       if (flags.warn) {
         errors.push(
           `${name}: ${checkLabel}: ${String(lineno)}: improperly formatted ` +
-            `${algorithmName(name)} checksum line`,
+            `${tag(algorithm)} checksum line`,
         )
       }
       continue
     }
     parsedAny = true
-    const [expected, filename] = parsed
+    const [expected, filename, named] = parsed
     let digest: string
     try {
-      digest = await hashSource(
-        listed(checkTarget(filename, ctx.cwd.virtual, mountPrefix)),
-        algorithm,
-      )
+      digest = await hashSource(listed(checkTarget(filename, ctx.cwd.virtual, mountPrefix)), named)
     } catch (error) {
       if (!isWalkError(error)) throw error
       // GNU --ignore-missing skips only absence; a permission or
@@ -310,22 +338,44 @@ async function checkFile(
 }
 
 // GNU reads a check line as properly formatted only when its digest has the
-// algorithm's full length in hex.
+// algorithm's full length in hex; b2sum's length is the line's own.
 const HEX_DIGITS: Readonly<Record<string, number>> = {
-  MD5: 32,
-  SHA1: 40,
-  SHA256: 64,
-  SHA384: 96,
-  SHA512: 128,
+  md5: 32,
+  sha1: 40,
+  sha224: 56,
+  sha256: 64,
+  sha384: 96,
+  sha512: 128,
 }
 
-function parseCheckLine(line: string, name: string): [string, string] | null {
-  const tagged = new RegExp(`^${algorithmName(name)} \\((.*)\\) = ([0-9a-fA-F]+)$`).exec(line)
-  const match = tagged ?? /^([0-9a-fA-F]+) [ *](.*)$/.exec(line)
-  if (match === null) return null
-  const [digest = '', file = ''] = tagged !== null ? [tagged[2], tagged[1]] : [match[1], match[2]]
-  if (digest.length !== (HEX_DIGITS[algorithmName(name)] ?? digest.length)) return null
-  return [digest.toLowerCase(), file]
+// A check line's [digest, filename], in the GNU default format (`<hex>  NAME`
+// / `<hex> *NAME`) or the BSD/--tag one (`TAG (NAME) = <hex>`), matching what
+// GNU `*sum --check` auto-detects. `tagPattern` is a regex.
+function splitLine(line: string, tagPattern: string): [string, string] | null {
+  const tagged = new RegExp(`^${tagPattern} \\((.*)\\) = ([0-9a-fA-F]+)$`).exec(line)
+  if (tagged !== null) return [tagged[2] ?? '', tagged[1] ?? '']
+  const plain = /^([0-9a-fA-F]+) [ *](.*)$/.exec(line)
+  return plain === null ? null : [plain[1] ?? '', plain[2] ?? '']
+}
+
+// Split a checksum-file line into [expected, filename, algorithm]. A digest
+// must have its algorithm's full length in hex. A BLAKE2b line names its own
+// length, in its tag (`BLAKE2b-256`) or by its digest's width, a multiple of
+// 8 bits up to 512. Mirrors Python's _parse_check_line.
+function parseCheckLine(line: string, algorithm: string): [string, string, string] | null {
+  if (algorithm !== BLAKE2B) {
+    const split = splitLine(line, algorithm.toUpperCase())
+    if (split === null || split[0].length !== HEX_DIGITS[algorithm]) return null
+    return [split[0].toLowerCase(), split[1], algorithm]
+  }
+  const split = splitLine(line, 'BLAKE2b(?:-[0-9]+)?')
+  if (split === null) return null
+  const [digest, name] = split
+  const bits = digest.length * 4
+  const named = /^BLAKE2b(?:-([0-9]+))? \(/.exec(line)
+  if (named !== null && bits !== Number(named[1] ?? 512)) return null
+  if (bits % 8 !== 0 || bits > 512) return null
+  return [digest.toLowerCase(), name, bits === 512 ? BLAKE2B : `${BLAKE2B}-${String(bits)}`]
 }
 
 /**
@@ -343,7 +393,6 @@ export async function checksumGeneric(
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags, name)
-  const algorithm = name.slice(0, -3)
   const stream = stdinStream(read, ctx.stdin)
   if (parsed.check) {
     let output = ''
@@ -356,7 +405,7 @@ export async function checksumGeneric(
     for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
       let checked: [string, string, number]
       try {
-        checked = await checkFile(stream, p, algorithm, name, ctx, parsed)
+        checked = await checkFile(stream, p, parsed.algorithm.split('-')[0] ?? '', ctx, parsed)
       } catch (error) {
         if (!isWalkError(error)) throw error
         const label = p.rawPath !== '' ? p.rawPath : p.virtual
@@ -379,9 +428,9 @@ export async function checksumGeneric(
   return hashOperands(
     paths.length > 0 ? paths : [STDIN_OPERAND],
     stream,
-    algorithm,
+    parsed.algorithm,
     name,
-    (digest, label) => hashLine(digest, label, name, parsed),
+    (digest, label) => hashLine(digest, label, parsed),
     stat,
     stored,
   )

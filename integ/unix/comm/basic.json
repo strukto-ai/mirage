@@ -33,6 +33,40 @@
         "stdout": "apple\n\t\tbanana\ncherry\n\tdate\n\telder\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "comm_compares_and_writes_bytes",
+      "seq": 4500,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "comm <(printf 'a\\n\\377\\n') <(printf '\\376\\n') | od -An -tx1; printf '\\376\\n' | comm --output-delimiter=$'\\377' <(printf 'a\\n\\377\\n') - | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 0a 09 fe 0a ff 0a\n 61 0a ff fe 0a ff 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }

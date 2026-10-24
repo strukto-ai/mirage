@@ -12,18 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The plain (-p) reader follows xxd 2024-12-07 from vim, under its
-// X11-MIT option (see licenses/third_party/xxd.txt).
-
 import { closeQuietly, primeStream } from '../../../io/stream.ts'
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import type { ByteSource } from '../../../io/types.ts'
+import { materialize, type ByteSource } from '../../../io/types.ts'
 import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -31,13 +27,14 @@ import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
-import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
+import { isStdin, resolveSource, stdinStream, streamOutput } from '../utils/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { openStream, runStream, streamOutputChunks } from '../../../rs/stream.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 // xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 // where -s says, and for a dump that seeks backwards on a stream (vim's xxd
@@ -50,221 +47,47 @@ const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
 // refusal of a -c past that or under 1.
 const COLS_MAX = 256
 const COLS_REFUSAL = `xxd: invalid number of columns (max. ${String(COLS_MAX)}).`
-// The most NUL bytes one chunk carries when a dump's offset skips ahead.
-const GAP_CHUNK = 65536
-// What a plain dump's bytes decode to, and the ones it skips.
-const HEX_DIGITS = Int8Array.from({ length: 256 }, (_, c) =>
-  /[0-9a-fA-F]/.test(String.fromCharCode(c)) ? Number.parseInt(String.fromCharCode(c), 16) : -1,
-)
-const PLAIN_BLANKS: ReadonlySet<number> = new Set([0x20, 0x09, 0x0d, 0x0a])
 
-function padLeft(s: string, width: number, ch = ' '): string {
-  return s.length >= width ? s : ch.repeat(width - s.length) + s
-}
-
-function padRight(s: string, width: number, ch = ' '): string {
-  return s.length >= width ? s : s + ch.repeat(width - s.length)
-}
-
-function hexByte(b: number, uppercase: boolean): string {
-  const h = b.toString(16).padStart(2, '0')
-  return uppercase ? h.toUpperCase() : h
-}
-
-function hexOffset(offset: number, uppercase: boolean): string {
-  const h = offset.toString(16).padStart(8, '0')
-  return uppercase ? h.toUpperCase() : h
-}
-
-async function* xxdDumpStream(
+function dumpStream(
   source: AsyncIterable<Uint8Array>,
   cols: number,
   group: number,
   uppercase: boolean,
-  base = 0,
-): AsyncIterable<Uint8Array> {
-  let offset = base
-  let leftover = new Uint8Array(0)
-  // The hex column holds every group a full line has, the last one short when
-  // `group` does not divide `cols`, one blank between each.
-  const hexColumnWidth = cols * 2 + Math.ceil(cols / group) - 1
-  const emitRow = (row: Uint8Array): Uint8Array => {
-    const hexParts: string[] = []
-    for (let g = 0; g < row.byteLength; g += group) {
-      let seg = ''
-      const end = Math.min(g + group, row.byteLength)
-      for (let k = g; k < end; k++) seg += hexByte(row[k] ?? 0, uppercase)
-      hexParts.push(seg)
-    }
-    const hexPart = hexParts.join(' ')
-    let asciiPart = ''
-    for (const b of row) asciiPart += b >= 32 && b < 127 ? String.fromCharCode(b) : '.'
-    const line = `${hexOffset(offset, uppercase)}: ${padRight(hexPart, hexColumnWidth)}  ${asciiPart}\n`
-    return ENC.encode(line)
-  }
-  for await (const chunk of source) {
-    const merged = new Uint8Array(leftover.byteLength + chunk.byteLength)
-    merged.set(leftover, 0)
-    merged.set(chunk, leftover.byteLength)
-    let i = 0
-    while (i + cols <= merged.byteLength) {
-      yield emitRow(merged.subarray(i, i + cols))
-      offset += cols
-      i += cols
-    }
-    leftover = merged.subarray(i)
-  }
-  if (leftover.byteLength > 0) {
-    yield emitRow(leftover)
-  }
+  base: number,
+): Promise<AsyncIterable<Uint8Array>> {
+  return openStream('xxd', { mode: 'dump', cols, group, uppercase, base }).then((stream) =>
+    streamOutput(stream, source),
+  )
 }
 
-async function* xxdPlainStream(
+function plainStream(
   source: AsyncIterable<Uint8Array>,
   uppercase: boolean,
-): AsyncIterable<Uint8Array> {
-  for await (const chunk of source) {
-    let hex = ''
-    for (const b of chunk) hex += hexByte(b, uppercase)
-    yield ENC.encode(hex)
-  }
-  yield ENC.encode('\n')
+): Promise<AsyncIterable<Uint8Array>> {
+  return openStream('xxd', { mode: 'plain', uppercase }).then((stream) =>
+    streamOutput(stream, source),
+  )
 }
 
 /**
- * The bytes the hex digit pairs at the start of `digits` spell: xxd stops at
- * the first character that is not a hex digit and drops a digit left without
- * its pair. Mirrors Python's _unhex.
- */
-function unhex(digits: string): Uint8Array {
-  const run = /^[0-9A-Fa-f]*/.exec(digits)?.[0] ?? ''
-  const out = new Uint8Array(Math.floor(run.length / 2))
-  for (let i = 0; i < out.byteLength; i++) out[i] = Number.parseInt(run.slice(i * 2, i * 2 + 2), 16)
-  return out
-}
-
-/**
- * One hexdump line as the offset its bytes go to and the bytes. A line
- * without an offset continues where the last one ended (null); a line whose
- * offset is not hex decodes to nothing, as xxd skips it. Mirrors Python's
- * _reverse_line.
- */
-function reverseLine(raw: string): [number | null, Uint8Array] {
-  let line = raw
-  let offset: number | null = null
-  const colon = line.indexOf(':')
-  if (colon !== -1) {
-    const head = line.slice(0, colon).trim()
-    if (!/^[0-9a-fA-F]+$/.test(head)) return [null, new Uint8Array(0)]
-    offset = Number.parseInt(head, 16)
-    line = line.slice(colon + 1)
-  }
-  const twoSpace = line.search(/ {2,}/)
-  return [offset, unhex((twoSpace === -1 ? line : line.slice(0, twoSpace)).replace(/ /g, ''))]
-}
-
-/**
- * Decode a hexdump into runs of bytes and the offsets they go to. Mirrors
- * Python's _reverse_runs.
- */
-async function* reverseRuns(
-  source: AsyncIterable<Uint8Array>,
-): AsyncIterable<[number | null, Uint8Array]> {
-  const reader = new AsyncLineIterator(source)
-  let first = true
-  try {
-    for (;;) {
-      const [raw, ended] = await reader.readUntil(0x0a)
-      if (raw.length === 0 && !ended) return
-      const line = DEC.decode(raw)
-      if (first && line !== '' && !line.includes(':')) {
-        const lines = [line]
-        let more = ended
-        while (more) {
-          const [rest, next] = await reader.readUntil(0x0a)
-          lines.push(DEC.decode(rest))
-          more = next
-        }
-        if (lines.some((row) => row.includes(':'))) {
-          for (const row of lines) if (row !== '') yield reverseLine(row)
-        } else {
-          const digits = lines.map((row) => /^[0-9A-Fa-f\s]*/.exec(row)?.[0] ?? '').join('')
-          yield [null, unhex(digits.replace(/\s+/g, ''))]
-        }
-        return
-      }
-      if (line !== '') {
-        first = false
-        yield reverseLine(line)
-      }
-    }
-  } finally {
-    await reader.discard()
-  }
-}
-
-/**
- * Decode a plain (-p) hexdump as it arrives, as xxd 2024-12-07 does. Space,
- * tab, CR and LF never count, so two digits make a byte across them and
- * across lines. Any other byte is ignored before the first digit and after a
- * skipped line; past that it drops a digit left without its pair, and a run
- * of them skips the rest of the line. Mirrors Python's _plain_runs.
- */
-async function* plainRuns(
-  source: AsyncIterable<Uint8Array>,
-): AsyncIterable<[number | null, Uint8Array]> {
-  let [high, low, lead, skip] = [0, -1, true, false]
-  for await (const part of chunks(source)) {
-    const out: number[] = []
-    for (const c of part) {
-      if (skip) {
-        if (c === 0x0a) [skip, lead] = [false, true]
-        continue
-      }
-      if (PLAIN_BLANKS.has(c)) continue
-      const before = high
-      high = low
-      low = HEX_DIGITS[c] ?? -1
-      if (low < 0 && lead) continue
-      lead = false
-      if (high >= 0 && low >= 0) {
-        out.push((high << 4) | low)
-        low = -1
-      } else if (low < 0 && high < 0 && before < 0) skip = true
-    }
-    if (out.length > 0) yield [null, Uint8Array.from(out)]
-  }
-}
-
-/**
- * Revert a hexdump onto a stream, which can only move forward. An offset
- * past the bytes written so far is reached with NUL bytes; one before them
- * cannot be, so the stream stops there with xxd's refusal. Deliberate
+ * Revert a hexdump onto a stream, which can only move forward. Deliberate
  * divergence: stdout is a stream here even when the line redirects it to a
- * file, which xxd would seek. Mirrors Python's _xxd_reverse_stream.
+ * file, which xxd would seek, so an offset before the bytes written stops the
+ * dump with xxd's refusal. Mirrors Python's _xxd_reverse_stream.
  */
 async function* xxdReverseStream(
   source: AsyncIterable<Uint8Array>,
-  io: IOResult | null = null,
-  plain = false,
+  io: IOResult,
+  plain: boolean,
 ): AsyncIterable<Uint8Array> {
-  let position = 0
-  for await (const [offset, data] of (plain ? plainRuns : reverseRuns)(source)) {
-    if (data.byteLength === 0) continue
-    if (offset !== null && offset < position) {
-      if (io !== null) {
-        io.exitCode = SEEK_BACK_EXIT
-        io.stderr = ENC.encode('xxd: Sorry, cannot seek backwards.\n')
-      }
-      return
-    }
-    while (offset !== null && position < offset) {
-      const gap = Math.min(offset - position, GAP_CHUNK)
-      yield new Uint8Array(gap)
-      position += gap
-    }
-    yield data
-    position += data.byteLength
+  const stream = await openStream('xxd', { mode: 'reverse', plain, segments: false })
+  try {
+    yield* streamOutputChunks(stream, source)
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    if (error.output.byteLength > 0) yield error.output
+    io.exitCode = SEEK_BACK_EXIT
+    io.stderr = ENC.encode(`${error.message}\n`)
   }
 }
 
@@ -278,19 +101,23 @@ async function reverseSegments(
   source: AsyncIterable<Uint8Array>,
   plain: boolean,
 ): Promise<[number, Uint8Array][]> {
+  const raw = await materialize(
+    runStream('xxd', { mode: 'reverse', plain, segments: true }, source),
+  )
+  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength)
   const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
-  let position = 0
-  for await (const [offset, data] of (plain ? plainRuns : reverseRuns)(source)) {
-    if (data.byteLength === 0) continue
-    if (offset !== null) position = offset
+  for (let at = 0; at < raw.byteLength;) {
+    const start = Number(view.getBigUint64(at, true))
+    const size = Number(view.getBigUint64(at + 8, true))
+    const data = raw.subarray(at + 16, at + 16 + size)
+    at += 16 + size
     const last = segments.at(-1)
-    if (last?.end === position) {
+    if (last?.end === start) {
       last.parts.push(data)
-      last.end += data.byteLength
+      last.end += size
     } else {
-      segments.push({ start: position, end: position + data.byteLength, parts: [data] })
+      segments.push({ start, end: start + size, parts: [data] })
     }
-    position += data.byteLength
   }
   return segments.map(({ start, parts }): [number, Uint8Array] => [start, concat(parts)])
 }
@@ -313,8 +140,6 @@ function patched(existing: Uint8Array, segments: [number, Uint8Array][]): Uint8A
   }
   return buf
 }
-
-void padLeft
 
 /** `-s` as xxd reads it: `[+][-]offset`. `relative` (`+`) seeks from where
  * INFILE stands, which is its start here; `back` (`-`) seeks back from its
@@ -437,7 +262,7 @@ async function writeOutput(
   readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
-  render: () => AsyncIterable<Uint8Array> | null,
+  render: () => Promise<AsyncIterable<Uint8Array> | null>,
   plain: boolean,
 ): Promise<[ByteSource | null, IOResult]> {
   const [input, target] = paths
@@ -446,7 +271,7 @@ async function writeOutput(
     null,
     new IOResult({ stderr: ENC.encode(fsErrorLine('xxd', p, err)), exitCode }),
   ]
-  const dump = render()
+  const dump = await render()
   let segments: [number, Uint8Array][] = []
   let data: ByteSource = new Uint8Array(0)
   const reading = { failed: false }
@@ -602,15 +427,15 @@ export async function xxdGeneric(
     }
     ;[source, base] = found
   }
-  const render = (): AsyncIterable<Uint8Array> | null => {
+  const render = async (): Promise<AsyncIterable<Uint8Array> | null> => {
     if (parsed.reverse) return null
-    if (parsed.plain) return xxdPlainStream(source, uppercase)
-    return xxdDumpStream(source, parsed.cols, parsed.group, uppercase, base)
+    if (parsed.plain) return plainStream(source, uppercase)
+    return dumpStream(source, parsed.cols, parsed.group, uppercase, base)
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
     return writeOutput(paths, source, readBytes, writeBytes, pwriteBytes, render, plain)
   }
   const io = new IOResult()
-  return [render() ?? xxdReverseStream(source, io, plain), io]
+  return [(await render()) ?? xxdReverseStream(source, io, plain), io]
 }

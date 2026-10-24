@@ -21,6 +21,7 @@ import { joinRoot } from './utils.ts'
 export const SUMS: Readonly<Record<string, readonly [string, number]>> = {
   md5: ['md5sum', 32],
   sha1: ['sha1sum', 40],
+  sha224: ['sha224sum', 56],
   sha256: ['sha256sum', 64],
   sha384: ['sha384sum', 96],
   sha512: ['sha512sum', 128],

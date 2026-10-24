@@ -23,6 +23,7 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
+from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -42,6 +43,7 @@ from mirage.utils.path import resolve_path
 
 @dataclass(frozen=True, slots=True)
 class ChecksumFlags:
+    algorithm: str = "md5"
     check: bool = False
     binary: bool = False
     tag: bool = False
@@ -117,20 +119,75 @@ def _refuse_conflicts(fl: FlagView, name: str) -> None:
             )
 
 
+BLAKE2B = "blake2b"
+
+
+def _prog(algorithm: str) -> str:
+    """The *sum command that computes ``algorithm``.
+
+    Args:
+        algorithm (str): a hashlib name, or ``blake2b-N`` for BLAKE2b at N
+            bits.
+    """
+    return "b2sum" if algorithm.startswith(BLAKE2B) else f"{algorithm}sum"
+
+
+def _tag(algorithm: str) -> str:
+    """The digest's BSD-style name, as --tag prints it and -c reads it:
+    ``SHA256``, ``BLAKE2b``, ``BLAKE2b-256``.
+
+    Args:
+        algorithm (str): a hashlib name, or ``blake2b-N``.
+    """
+    if algorithm.startswith(BLAKE2B):
+        return "BLAKE2b" + algorithm.removeprefix(BLAKE2B)
+    return algorithm.upper()
+
+
+def _blake2b(fl: FlagView, name: str) -> str:
+    """b2sum's digest for its -l, read as GNU reads it in the option loop:
+    a decimal count of bits, 0 or past 512 meaning 512 (coreutils 9.7).
+
+    Args:
+        fl (FlagView): The command's flags.
+        name (str): The invoked command.
+
+    Raises:
+        UsageError: a length that is no count or no multiple of 8.
+    """
+    value = fl.as_str("length")
+    if value is None:
+        return BLAKE2B
+    match = re.fullmatch(r"\s*\+?([0-9]+)", value)
+    refusal = f"{name}: invalid length: '{quote_text(value)}'"
+    if match is None:
+        raise UsageError(refusal, 1)
+    bits = int(match.group(1))
+    if bits % 8:
+        raise UsageError(
+            f"{refusal}\n{name}: length is not a multiple of 8", 1
+        )
+    return BLAKE2B if bits == 0 or bits >= 512 else f"{BLAKE2B}-{bits}"
+
+
 def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
     """Parse the shared ``*sum`` flag set against one command's spec.
 
     Args:
         flags (Mapping[str, FlagValue]): The raw flag bag.
-        name (str): The invoked command (md5sum, sha256sum, ...), whose
-            spec validates the names; all five declare the same set.
+        name (str): The invoked command (md5sum, sha256sum, b2sum, ...),
+            whose spec validates the names; b2sum adds -l to the set.
 
     Raises:
         UsageError: a combination GNU refuses.
     """
     fl = FlagView(flags, spec=SPECS[name])
+    algorithm = (
+        _blake2b(fl, name) if name == "b2sum" else name.removesuffix("sum")
+    )
     _refuse_conflicts(fl, name)
     return ChecksumFlags(
+        algorithm=algorithm,
         check=fl.as_bool("check"),
         binary=_read_mode(fl) in ("binary", "tag"),
         tag=fl.as_bool("tag"),
@@ -152,9 +209,13 @@ async def hash_source(source: ByteSource, algorithm: str) -> str:
 
     Args:
         source (ByteSource): bytes or a producer consumed through EOF.
-        algorithm (str): the digest name, e.g. ``"sha256"``.
+        algorithm (str): the digest name, e.g. ``"sha256"``, or
+            ``blake2b-N`` for BLAKE2b at N bits.
     """
-    config: dict[str, JsonValue] = {"algorithm": algorithm}
+    family, _, bits = algorithm.partition("-")
+    config: dict[str, JsonValue] = {"algorithm": family}
+    if bits:
+        config["length"] = int(bits)
     async with aclosing(run_stream("digest", config, source)) as parts:
         hexdigest = b"".join([part async for part in parts])
     return hexdigest.decode()
@@ -229,7 +290,7 @@ def _hash_line(
 ) -> bytes:
     ending = "\0" if zero else "\n"
     if tag:
-        return f"{algorithm.upper()} ({label}) = {digest}{ending}".encode()
+        return f"{_tag(algorithm)} ({label}) = {digest}{ending}".encode()
     marker = "*" if binary else " "
     return f"{digest} {marker}{label}{ending}".encode()
 
@@ -237,36 +298,68 @@ def _hash_line(
 _PLAIN_LINE = re.compile(r"^([0-9a-fA-F]+) [ *](.*)$")
 
 # GNU reads a check line as properly formatted only when its digest has
-# the algorithm's full length in hex.
-HEX_DIGITS = {"md5": 32, "sha1": 40, "sha256": 64, "sha384": 96, "sha512": 128}
+# the algorithm's full length in hex; b2sum's length is the line's own.
+HEX_DIGITS = {
+    "md5": 32,
+    "sha1": 40,
+    "sha224": 56,
+    "sha256": 64,
+    "sha384": 96,
+    "sha512": 128,
+}
 
 
-def _parse_check_line(line: str, algorithm: str) -> tuple[str, str] | None:
-    """Split a checksum-file line into ``(expected_hash, filename)``.
-
-    Accepts both the GNU default format (``<hex>  NAME`` / ``<hex> *NAME``)
-    and the BSD/``--tag`` format (``ALGO (NAME) = <hex>``), matching what
-    GNU ``*sum --check`` auto-detects.
+def _split_line(line: str, tag: str) -> tuple[str, str] | None:
+    """A check line's ``(digest, filename)``, in the GNU default format
+    (``<hex>  NAME`` / ``<hex> *NAME``) or the BSD/``--tag`` one
+    (``TAG (NAME) = <hex>``), matching what GNU ``*sum --check``
+    auto-detects.
 
     Args:
         line (str): One non-blank line from the checksum file.
-        algorithm (str): Digest name, e.g. ``"md5"`` or ``"sha256"``.
+        tag (str): The tag a BSD line opens with, a regex.
     """
-    tagged = re.match(
-        rf"^{re.escape(algorithm.upper())} \((.*)\) = "
-        r"([0-9a-fA-F]+)$",
-        line,
-    )
+    tagged = re.match(rf"^{tag} \((.*)\) = ([0-9a-fA-F]+)$", line)
     if tagged is not None:
-        digest, name = tagged.group(2), tagged.group(1)
-    else:
-        plain = _PLAIN_LINE.match(line)
-        if plain is None:
+        return tagged.group(2), tagged.group(1)
+    plain = _PLAIN_LINE.match(line)
+    return None if plain is None else (plain.group(1), plain.group(2))
+
+
+def _parse_check_line(
+    line: str, algorithm: str
+) -> tuple[str, str, str] | None:
+    """Split a checksum-file line into ``(expected_hash, filename,
+    algorithm)``.
+
+    A digest must have its algorithm's full length in hex. A BLAKE2b line
+    names its own length, in its tag (``BLAKE2b-256``) or by its digest's
+    width, a multiple of 8 bits up to 512.
+
+    Args:
+        line (str): One non-blank line from the checksum file.
+        algorithm (str): Digest name, e.g. ``"md5"`` or ``"blake2b"``.
+    """
+    if algorithm != BLAKE2B:
+        split = _split_line(line, re.escape(algorithm.upper()))
+        if split is None or len(split[0]) != HEX_DIGITS[algorithm]:
             return None
-        digest, name = plain.group(1), plain.group(2)
-    if len(digest) != HEX_DIGITS.get(algorithm, len(digest)):
+        return split[0].lower(), split[1], algorithm
+    split = _split_line(line, "BLAKE2b(?:-[0-9]+)?")
+    if split is None:
         return None
-    return digest.lower(), name
+    digest, name = split
+    bits = len(digest) * 4
+    named = re.match(r"BLAKE2b(?:-([0-9]+))? \(", line)
+    if named is not None and bits != int(named.group(1) or 512):
+        return None
+    if bits % 8 or bits > 512:
+        return None
+    return (
+        digest.lower(),
+        name,
+        BLAKE2B if bits == 512 else f"{BLAKE2B}-{bits}",
+    )
 
 
 def _check_target(filename: str, cwd: str, mount_prefix: str) -> PathSpec:
@@ -336,7 +429,7 @@ def _check_list_error(
         if isinstance(exc, IsADirectoryError)
         else (fs_strerror(exc) or str(exc))
     )
-    return f"{algorithm}sum: {label}: {detail}\n".encode()
+    return f"{_prog(algorithm)}: {label}: {detail}\n".encode()
 
 
 async def _hash_check(
@@ -352,7 +445,7 @@ async def _hash_check(
     quiet: bool,
     warn: bool,
 ) -> tuple[bytes, bytes | None, int]:
-    prog = f"{algorithm}sum"
+    prog = _prog(algorithm)
     data = (await read_bytes(path)).decode(errors="replace")
     # A list read from stdin names files on the mount the command runs on.
     mount_prefix = (
@@ -382,14 +475,14 @@ async def _hash_check(
             if warn:
                 stderr_lines.append(
                     f"{prog}: {check_label}: {lineno}: improperly formatted "
-                    f"{algorithm.upper()} checksum line"
+                    f"{_tag(algorithm)} checksum line"
                 )
             continue
         parsed_lines += 1
-        expected_hash, filename = parsed
+        expected_hash, filename, named = parsed
         target = _check_target(filename, cwd, mount_prefix)
         try:
-            digest = await hash_source(read_stream(target), algorithm)
+            digest = await hash_source(read_stream(target), named)
         except WALK_ERRORS as exc:
             # GNU --ignore-missing skips only absence; a permission or
             # transport-shaped failure still reports and fails the check.
@@ -542,7 +635,7 @@ async def checksum(
         paths or [STDIN_OPERAND],
         read_stream,
         algorithm,
-        f"{algorithm}sum",
+        _prog(algorithm),
         partial(
             _hash_line, algorithm=algorithm, binary=binary, tag=tag, zero=zero
         ),
@@ -575,19 +668,19 @@ async def checksum_generic(
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
         name (str): The invoked command name (``md5sum``, ...), for its
-            spec and stderr; its digest is the name without ``sum``.
+            spec and stderr; its digest is the name without ``sum``, or
+            BLAKE2b for b2sum.
         stored (StoredDigest | None): the mount's ``checksum``, the
             digest it keeps, asked before an operand is read.
     """
     parsed = parse_flags(ctx.flags, name)
-    algorithm = name.removesuffix("sum")
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
     if parsed.check:
         # With no operand the checksum list is stdin.
         return await checksum(
             paths or [STDIN_OPERAND],
-            algorithm=algorithm,
+            algorithm=parsed.algorithm.partition("-")[0],
             read_bytes=materialized_read(stream),
             read_stream=(
                 dispatched_reader(ctx.vfs.dispatch, normalized_read(stream))
@@ -608,7 +701,7 @@ async def checksum_generic(
     return await merge_split_errors(
         await checksum(
             readable,
-            algorithm=algorithm,
+            algorithm=parsed.algorithm,
             read_bytes=materialized_read(stream),
             read_stream=normalized_read(stream),
             binary=parsed.binary,

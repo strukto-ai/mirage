@@ -1,7 +1,6 @@
-The plain (-p) hexdump reader in python/mirage/commands/builtin/generic/xxd.py
-(_plain_runs) and typescript/packages/core/src/commands/builtin/generic/xxd.ts
-(plainRuns) follows xxd 2024-12-07 (src/xxd/xxd.c of vim 9.1.1230,
-https://github.com/vim/vim). xxd.c carries this notice:
+The plain (-p) hexdump reader in rust/mirage-rs/src/xxd.rs (Pairs) follows
+xxd 2024-12-07 (src/xxd/xxd.c of vim 9.1.1230, https://github.com/vim/vim).
+xxd.c carries this notice:
 
 (c) 1990-1998 by Juergen Weigert (jnweiger@gmail.com)
 

@@ -9,7 +9,6 @@ from collections.abc import (
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import NoReturn
 
 from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import (
@@ -34,18 +33,14 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import encode_text
+from mirage.rs.stream import OpenStream, merge_output, open_stream
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import PathSpec, PolymorphicReadFn
 
 # The largest field number join keeps; GNU 9.7 reads any larger one as
 # this one, so `-1 99999999999999999999 -1 1` is refused as
 # "incompatible join fields 9223372036854775806, 0".
 LARGEST_FIELD = 2**63 - 1
-# Without -t a field is a run of bytes other than space and tab, and
-# under -z a newline parts fields too (`printf '1\na\0'` is `1` and `a`).
-# Every other byte, \v, \f and \r included, belongs to a field.
-BLANK_SPLIT = re.compile(rb"[^ \t]+")
-BLANK_SPLIT_NUL = re.compile(rb"[^ \t\n]+")
 # The -t value that keeps each record whole: both `-t ''` and `-t $'\n'`
 # select it, under -z as well, and they never conflict with each other.
 WHOLE_RECORD = b"\n"
@@ -53,8 +48,6 @@ WHOLE_RECORD = b"\n"
 COLUMN_BREAK = re.compile(r"[, \t]")
 # The -o column standing for the join field.
 JOIN_COLUMN = (0, 0)
-# Output is handed on in pieces of about this size.
-CHUNK = 1 << 16
 OPTION_DESTS = (
     "a",
     "v",
@@ -428,410 +421,6 @@ def parse_flags(
     return reading.finish(argv)
 
 
-class _Halt(Exception):
-    """The run stops here; what it printed so far still goes out."""
-
-
-@dataclass
-class _Line:
-    """One record of an input, split into fields.
-
-    Attributes:
-        text (bytes): the record without its terminator.
-        fields (list[bytes]): its fields; an empty record has none.
-        key (bytes): its join field, empty when the record is short.
-        rank (bytes): what it sorts by: the key, upper-cased in ASCII
-            under ``-i`` (so `_` sorts after `A`).
-    """
-
-    text: bytes
-    fields: list[bytes]
-    key: bytes
-    rank: bytes
-
-
-@dataclass
-class _Input:
-    """One of the two files and how far its order check has come.
-
-    Attributes:
-        name (bytes): the operand as typed, for diagnostics.
-        path (PathSpec): the operand.
-        reader (AsyncLineIterator): its records.
-        key (int): its join field.
-        shown (bool): whether its unpairable lines print.
-        count (int): records read so far, the header included.
-        last (bytes | None): the rank of the record before, None while
-            nothing is there to compare with.
-        reported (bool): its disorder has been reported.
-        line (_Line | None): the record in hand, None past the end.
-        chunk (bytes): the reader's latest chunk.
-        start (int): where the next record begins in ``chunk``.
-        cut (int): where it ends, -1 while its terminator has not come.
-        held (list[bytes]): the start of a record that began in earlier
-            chunks, kept as it came so a long record is copied once.
-        drained (bool): the reader has nothing more to give.
-    """
-
-    name: bytes
-    path: PathSpec
-    reader: AsyncLineIterator
-    key: int
-    shown: bool
-    count: int = 0
-    last: bytes | None = None
-    reported: bool = False
-    line: _Line | None = None
-    chunk: bytes = b""
-    start: int = 0
-    cut: int = -1
-    held: list[bytes] = field(default_factory=list)
-    drained: bool = False
-
-
-class _Join:
-    """Walk two sorted inputs side by side and print what pairs up.
-
-    Args:
-        flags (JoinFlags): the options.
-        names (tuple[bytes, bytes]): each operand as typed.
-        readers (tuple[AsyncLineIterator, AsyncLineIterator]): the inputs.
-        paths (tuple[PathSpec, PathSpec]): the operands.
-    """
-
-    def __init__(
-        self,
-        flags: JoinFlags,
-        names: tuple[bytes, bytes],
-        readers: tuple[AsyncLineIterator, AsyncLineIterator],
-        paths: tuple[PathSpec, PathSpec],
-    ) -> None:
-        self.flags = flags
-        self.inputs = readers
-        self.sides = tuple(
-            _Input(names[n], paths[n], readers[n], flags.keys[n], shown)
-            for n, shown in enumerate(flags.unpaired)
-        )
-        self._blanks = (
-            BLANK_SPLIT_NUL if flags.terminator == b"\0" else BLANK_SPLIT
-        )
-        self._layout: list[tuple[int, int]] | None = (
-            list(flags.columns) if flags.columns else None
-        )
-        self._out = bytearray()
-        self._errors = bytearray()
-        self._status = 0
-        # Whether a line has gone unpaired yet; the default order check
-        # stays quiet until then.
-        self._lone_seen = False
-
-    def outcome(self) -> tuple[int, bytes]:
-        return self._status, bytes(self._errors)
-
-    def _take(self) -> bytes:
-        data = bytes(self._out)
-        self._out.clear()
-        return data
-
-    async def run(self) -> AsyncGenerator[bytes, None]:
-        # Every record is taken through _in_hand, and when one is not,
-        # _refill hands on what is printed before it waits for input.
-        try:
-            first, second = self.sides
-            await self._open()
-            for side in self.sides:
-                if not self._in_hand(side):
-                    async for chunk in self._refill(side):
-                        yield chunk
-                self._advance(side)
-            if self.flags.header and (first.line or second.line):
-                # The header lines are printed even under -v, the lone one
-                # when the other file is empty, and nothing after them is
-                # compared with them.
-                self._settle_layout(first.line, second.line)
-                self._print_header(first.line, second.line)
-                first.last = second.last = None
-                for side in self.sides:
-                    if not self._in_hand(side):
-                        async for chunk in self._refill(side):
-                            yield chunk
-                    self._advance(side)
-            else:
-                self._settle_layout(first.line, second.line)
-            while first.line is not None and second.line is not None:
-                if first.line.rank != second.line.rank:
-                    # The next line is read, and its order checked, before
-                    # this one counts as unpaired: in `join a b` over
-                    # `a 1/c 2/b 3` and `a x/z q`, `b 3` follows the first
-                    # unpaired line and goes unreported (GNU 9.7).
-                    index = 0 if first.line.rank < second.line.rank else 1
-                    side = self.sides[index]
-                    if side.shown and side.line is not None:
-                        self._print_alone(index, side.line)
-                    if not self._in_hand(side):
-                        async for chunk in self._refill(side):
-                            yield chunk
-                    self._advance(side)
-                    self._lone_seen = True
-                else:
-                    groups: list[list[_Line]] = []
-                    for side in self.sides:
-                        head = side.line
-                        if head is None:
-                            break
-                        group = [head]
-                        while True:
-                            if not self._in_hand(side):
-                                async for chunk in self._refill(side):
-                                    yield chunk
-                            self._advance(side)
-                            if (
-                                side.line is None
-                                or side.line.rank != head.rank
-                            ):
-                                break
-                            group.append(side.line)
-                        groups.append(group)
-                    # Two groups of n equal keys make n * n lines, so the
-                    # output goes on as it fills rather than per group.
-                    if self.flags.paired and len(groups) == 2:
-                        for one in groups[0]:
-                            for other in groups[1]:
-                                self._print_pair(one, other)
-                                if len(self._out) >= CHUNK:
-                                    yield self._take()
-                if len(self._out) >= CHUNK:
-                    yield self._take()
-            # Once the other file has ended no line counts as unpaired:
-            # `join a b` over `a 1` and `a x/c y/b z/a w` reports nothing.
-            for index, side in enumerate(self.sides):
-                while side.line is not None and self._still_reading(index):
-                    if side.shown:
-                        self._print_alone(index, side.line)
-                    if not self._in_hand(side):
-                        async for chunk in self._refill(side):
-                            yield chunk
-                    self._advance(side)
-                    if len(self._out) >= CHUNK:
-                        yield self._take()
-            if self.flags.order is OrderCheck.WARN and any(
-                side.reported for side in self.sides
-            ):
-                self._errors += b"join: input is not in sorted order\n"
-        except _Halt:
-            pass
-        if self._out:
-            yield self._take()
-
-    async def _open(self) -> None:
-        # GNU opens both files before it reads either: a missing FILE2 is
-        # reported over a FILE1 that cannot be read (`join dir missing`).
-        # Stdin is already open, so it is never read here: `join dir -`
-        # reports the directory without waiting on input.
-        unreadable: tuple[_Input, BaseException] | None = None
-        for side in self.sides:
-            if is_stdin(side.path):
-                continue
-            try:
-                await side.reader.peek()
-            except FS_ERRORS as exc:
-                if never_opened(side.reader, side.path, exc):
-                    self._fail(side, exc)
-                unreadable = unreadable or (side, exc)
-        if unreadable is not None:
-            self._fail(*unreadable)
-
-    def _fail(self, side: _Input, exc: BaseException) -> NoReturn:
-        if never_opened(side.reader, side.path, exc):
-            line = fs_error_line(CommandName.JOIN, side.path, exc)
-        else:
-            line = f"join: read error: {fs_strerror(exc) or exc}\n"
-        self._errors += encode_text(line)
-        self._status = 1
-        raise _Halt
-
-    def _still_reading(self, index: int) -> bool:
-        # Past the other file's end a line is read only to print it or to
-        # look at its order.
-        side = self.sides[index]
-        order = self.flags.order
-        return (
-            side.shown
-            or order is OrderCheck.FAIL
-            or (order is OrderCheck.WARN and not side.reported)
-        )
-
-    def _in_hand(self, side: _Input) -> bool:
-        """Whether the next record can be taken without waiting for input.
-
-        Only the latest chunk is searched: what ``held`` keeps has no
-        terminator in it.
-
-        Args:
-            side (_Input): the input.
-        """
-        side.cut = side.chunk.find(self.flags.terminator, side.start)
-        return side.cut >= 0 or side.drained
-
-    async def _refill(self, side: _Input) -> AsyncGenerator[bytes, None]:
-        """Read on until a record is in hand, handing on what is printed
-        before each read that may wait: under `join -a1 - empty` a line
-        reaches a reader before the next one is typed.
-
-        Args:
-            side (_Input): the input, with no record in hand.
-        """
-        while True:
-            if self._out:
-                yield self._take()
-            # The unread tail is kept before the next read, and a chunk that
-            # is not bytes (a view of a buffer its source fills again) is
-            # copied as it comes, so later reads never change what is kept.
-            if side.start < len(side.chunk):
-                side.held.append(side.chunk[side.start :])
-            side.chunk, side.start = b"", 0
-            try:
-                chunk = await side.reader.read_chunk()
-            except FS_ERRORS as exc:
-                self._fail(side, exc)
-            if chunk is None:
-                side.drained = True
-                return
-            side.chunk = chunk if isinstance(chunk, bytes) else bytes(chunk)
-            if self._in_hand(side):
-                return
-
-    def _advance(self, side: _Input) -> None:
-        """Take the record ``_in_hand`` found as the input's current one,
-        and check its order.
-
-        Args:
-            side (_Input): the input.
-        """
-        if side.cut >= 0:
-            tail = side.chunk[side.start : side.cut]
-            side.start = side.cut + 1
-        elif side.held or side.start < len(side.chunk):
-            # The last record, with no terminator after it.
-            tail = side.chunk[side.start :]
-            side.start = len(side.chunk)
-        else:
-            side.line = None
-            return
-        if side.held:
-            side.held.append(tail)
-            text = b"".join(side.held)
-            side.held = []
-        else:
-            text = tail
-        side.cut = -1
-        side.count += 1
-        line = self._split(side, text)
-        if (
-            side.last is not None
-            and line.rank < side.last
-            and self.flags.order is not OrderCheck.OFF
-        ):
-            self._out_of_order(side, line)
-        side.last = line.rank
-        side.line = line
-
-    def _out_of_order(self, side: _Input, line: _Line) -> None:
-        if self.flags.order is OrderCheck.WARN and (
-            side.reported or not self._lone_seen
-        ):
-            return
-        # The line is named up to its first NUL, as GNU 9.7 prints it.
-        shown = line.text.split(b"\0", 1)[0]
-        self._errors += b"join: %s:%d: is not sorted: %s\n" % (
-            side.name,
-            side.count,
-            shown,
-        )
-        self._status = 1
-        side.reported = True
-        if self.flags.order is OrderCheck.FAIL:
-            raise _Halt
-
-    def _split(self, side: _Input, text: bytes) -> _Line:
-        delimiter = self.flags.delimiter
-        if not text:
-            fields: list[bytes] = []
-        elif delimiter is None:
-            fields = self._blanks.findall(text)
-        elif delimiter == WHOLE_RECORD:
-            fields = [text]
-        else:
-            fields = text.split(delimiter)
-        key = fields[side.key] if side.key < len(fields) else b""
-        return _Line(
-            text, fields, key, key.upper() if self.flags.fold_case else key
-        )
-
-    def _settle_layout(self, left: _Line | None, right: _Line | None) -> None:
-        # -o auto takes each file's field count from its first line, the
-        # header when there is one; an empty file counts none.
-        if self._layout is not None or not self.flags.auto_columns:
-            return
-        layout = [JOIN_COLUMN]
-        for number, line in ((1, left), (2, right)):
-            skip = self.flags.keys[number - 1]
-            count = len(line.fields) if line is not None else 0
-            layout.extend((number, i) for i in range(count) if i != skip)
-        self._layout = layout
-
-    def _print_header(self, left: _Line | None, right: _Line | None) -> None:
-        if left is not None and right is not None:
-            self._print_pair(left, right)
-        elif left is not None:
-            self._print_alone(0, left)
-        elif right is not None:
-            self._print_alone(1, right)
-
-    def _print(self, values: list[bytes]) -> None:
-        filler = self.flags.filler
-        if filler is not None:
-            values = [value or filler for value in values]
-        self._out += self.flags.separator.join(values)
-        self._out += self.flags.terminator
-
-    def _others(self, line: _Line, index: int) -> list[bytes]:
-        skip = self.flags.keys[index]
-        return [value for i, value in enumerate(line.fields) if i != skip]
-
-    def _pick(
-        self,
-        column: tuple[int, int],
-        lines: tuple[_Line | None, _Line | None],
-        key: bytes,
-    ) -> bytes:
-        number, index = column
-        if number == 0:
-            return key
-        line = lines[number - 1]
-        if line is None or index >= len(line.fields):
-            return b""
-        return line.fields[index]
-
-    def _print_pair(self, left: _Line, right: _Line) -> None:
-        # A joined line shows FILE1's spelling of the key, as -i joins
-        # `a` with `A`.
-        if self._layout is None:
-            self._print(
-                [left.key, *self._others(left, 0), *self._others(right, 1)]
-            )
-        else:
-            lines = (left, right)
-            self._print([self._pick(c, lines, left.key) for c in self._layout])
-
-    def _print_alone(self, index: int, line: _Line) -> None:
-        if self._layout is None:
-            self._print([line.key, *self._others(line, index)])
-        else:
-            lines = (line, None) if index == 0 else (None, line)
-            self._print([self._pick(c, lines, line.key) for c in self._layout])
-
-
 def _operand_word(path: PathSpec) -> str:
     return path.raw_path
 
@@ -863,26 +452,117 @@ async def join(
         )
     read = stdin_stream(read_stream, stdin)
     readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))
-    merge = _Join(
-        flags,
-        (encode_text(_operand_word(file1)), encode_text(_operand_word(file2))),
-        readers,
-        (file1, file2),
+    names = (_operand_word(file1), _operand_word(file2))
+    stream = open_stream(
+        "join",
+        {
+            "keys": list(flags.keys),
+            "unpaired": list(flags.unpaired),
+            "paired": flags.paired,
+            "filler": None
+            if flags.filler is None
+            else byte_view(flags.filler),
+            "columns": [list(column) for column in flags.columns],
+            "auto_columns": flags.auto_columns,
+            "delimiter": (
+                None if flags.delimiter is None else byte_view(flags.delimiter)
+            ),
+            "separator": byte_view(flags.separator),
+            "fold_case": flags.fold_case,
+            "zero_terminated": flags.terminator == b"\0",
+            "order": flags.order.value,
+            "header": flags.header,
+            "names": [byte_view(name) for name in names],
+        },
     )
     io = IOResult()
-    return _join_stream(merge, io), io
+    return _join_stream(stream, readers, (file1, file2), io), io
+
+
+def _failure(
+    reader: AsyncLineIterator, path: PathSpec, exc: BaseException
+) -> bytes:
+    """join's line for an operand it cannot read: named as a missing one
+    when it never opened, else as a read error.
+
+    Args:
+        reader (AsyncLineIterator): the operand's reader.
+        path (PathSpec): the operand.
+        exc (BaseException): what the read raised.
+    """
+    if never_opened(reader, path, exc):
+        return encode_text(fs_error_line(CommandName.JOIN, path, exc))
+    return encode_text(f"join: read error: {fs_strerror(exc) or exc}\n")
+
+
+async def _open_inputs(
+    readers: tuple[AsyncLineIterator, AsyncLineIterator],
+    paths: tuple[PathSpec, PathSpec],
+) -> bytes:
+    """Open both files before reading either, as GNU does: a missing FILE2
+    is reported over a FILE1 that cannot be read (`join dir missing`).
+    Stdin is already open, so it is never read here: `join dir -` reports
+    the directory without waiting on input.
+
+    Args:
+        readers (tuple[AsyncLineIterator, AsyncLineIterator]): the inputs.
+        paths (tuple[PathSpec, PathSpec]): the operands.
+    """
+    unreadable: tuple[int, BaseException] | None = None
+    for side in (0, 1):
+        if is_stdin(paths[side]):
+            continue
+        try:
+            await readers[side].peek()
+        except FS_ERRORS as exc:
+            if never_opened(readers[side], paths[side], exc):
+                return _failure(readers[side], paths[side], exc)
+            unreadable = unreadable or (side, exc)
+    if unreadable is None:
+        return b""
+    side, error = unreadable
+    return _failure(readers[side], paths[side], error)
 
 
 async def _join_stream(
-    merge: _Join, io: IOResult
+    stream: OpenStream,
+    readers: tuple[AsyncLineIterator, AsyncLineIterator],
+    paths: tuple[PathSpec, PathSpec],
+    io: IOResult,
 ) -> AsyncGenerator[bytes, None]:
+    """Walk the two inputs through the ``join`` engine; a failed read ends
+    the run after what join already printed.
+
+    Args:
+        stream (OpenStream): the ``join`` engine.
+        readers (tuple[AsyncLineIterator, AsyncLineIterator]): the inputs.
+        paths (tuple[PathSpec, PathSpec]): the operands.
+        io (IOResult): where the diagnostics and the status land.
+    """
+    failed: list[int] = []
+
+    async def pull(side: int) -> bytes | None:
+        try:
+            return await readers[side].read_chunk()
+        except FS_ERRORS:
+            failed.append(side)
+            raise
+
+    error = b""
     try:
-        async with aclosing(merge.run()) as source:
-            async for chunk in source:
-                yield chunk
+        try:
+            error = await _open_inputs(readers, paths)
+            if not error:
+                async with aclosing(merge_output(stream, pull)) as output:
+                    async for chunk in output:
+                        yield chunk
+        except FS_ERRORS as exc:
+            side = failed[-1]
+            error = _failure(readers[side], paths[side], exc)
     finally:
-        io.exit_code, io.stderr = merge.outcome()
-        for reader in merge.inputs:
+        io.stderr = stream.take_stderr() + error
+        io.exit_code = 1 if error else stream.status()
+        for reader in readers:
             await reader.discard()
 
 

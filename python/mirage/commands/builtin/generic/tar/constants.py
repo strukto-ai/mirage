@@ -1,14 +1,7 @@
-from mirage.commands.builtin.generic.tar.types import (
-    CompressionSuffix,
-    ReadMode,
-)
+from mirage.commands.builtin.generic.tar.types import CompressionSuffix
+from mirage.utils.compress import Codec
 
-READ_MODES: dict[CompressionSuffix, ReadMode] = {
-    "": "r",
-    ":gz": "r:gz",
-    ":bz2": "r:bz2",
-    ":xz": "r:xz",
-}
+CODECS: dict[CompressionSuffix, Codec] = {":bz2": "bzip2", ":xz": "xz"}
 
 # Every diagnostic below is GNU tar 1.35's own wording, pinned on
 # debian:stable-slim; only the hint line is mirage's, for the reason
@@ -54,7 +47,7 @@ EMPTY_PIPE = {
 # whether an empty input is refused the same way (bzip2 1.0.8 answers an
 # empty or cut input with a paragraph of recovery advice mirage does not
 # reproduce; xz 5.8.1 refuses an empty one in these words).
-FOREIGN_INPUT = {
+FOREIGN_INPUT: dict[CompressionSuffix, tuple[bytes, str, int, bool]] = {
     ":bz2": (b"BZh", "bzip2: (stdin) is not a bzip2 file.", 2, False),
     ":xz": (
         b"\xfd7zXZ\x00",

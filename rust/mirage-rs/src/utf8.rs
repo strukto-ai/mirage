@@ -31,19 +31,12 @@ impl Decoder {
         while i < bytes.len() {
             let byte = bytes[i];
             if self.needed == 0 {
-                match byte {
-                    0x00..=0x7F => emit(u32::from(byte)),
-                    0xC2..=0xDF => self.start(1, byte & 0x1F, 0x80, 0xBF),
-                    0xE0 => self.start(2, byte & 0x0F, 0xA0, 0xBF),
-                    0xED => self.start(2, byte & 0x0F, 0x80, 0x9F),
-                    0xE1..=0xEF => self.start(2, byte & 0x0F, 0x80, 0xBF),
-                    0xF0 => self.start(3, byte & 0x07, 0x90, 0xBF),
-                    0xF1..=0xF7 => self.start(3, byte & 0x07, 0x80, 0xBF),
-                    0xF8 => self.start(4, byte & 0x03, 0x88, 0xBF),
-                    0xF9..=0xFB => self.start(4, byte & 0x03, 0x80, 0xBF),
-                    0xFC => self.start(5, byte & 0x01, 0x84, 0xBF),
-                    0xFD => self.start(5, byte & 0x01, 0x80, 0xBF),
-                    _ => emit(INVALID),
+                match lead(byte) {
+                    Some(Lead::Ascii) => emit(u32::from(byte)),
+                    Some(Lead::Sequence(needed, bits, lower, upper)) => {
+                        self.start(needed, bits, lower, upper)
+                    }
+                    None => emit(INVALID),
                 }
                 i += 1;
                 continue;
@@ -89,6 +82,62 @@ impl Decoder {
         self.lower = 0x80;
         self.upper = 0xBF;
     }
+}
+
+enum Lead {
+    Ascii,
+    /// Continuation bytes still to come, the lead's payload bits, and the
+    /// range the first continuation byte must fall in.
+    Sequence(u8, u8, u8, u8),
+}
+
+fn lead(byte: u8) -> Option<Lead> {
+    Some(match byte {
+        0x00..=0x7F => Lead::Ascii,
+        0xC2..=0xDF => Lead::Sequence(1, byte & 0x1F, 0x80, 0xBF),
+        0xE0 => Lead::Sequence(2, byte & 0x0F, 0xA0, 0xBF),
+        0xED => Lead::Sequence(2, byte & 0x0F, 0x80, 0x9F),
+        0xE1..=0xEF => Lead::Sequence(2, byte & 0x0F, 0x80, 0xBF),
+        0xF0 => Lead::Sequence(3, byte & 0x07, 0x90, 0xBF),
+        0xF1..=0xF7 => Lead::Sequence(3, byte & 0x07, 0x80, 0xBF),
+        0xF8 => Lead::Sequence(4, byte & 0x03, 0x88, 0xBF),
+        0xF9..=0xFB => Lead::Sequence(4, byte & 0x03, 0x80, 0xBF),
+        0xFC => Lead::Sequence(5, byte & 0x01, 0x84, 0xBF),
+        0xFD => Lead::Sequence(5, byte & 0x01, 0x80, 0xBF),
+        _ => return None,
+    })
+}
+
+/// What opens a run of bytes, read as `Decoder` reads a character.
+pub(crate) enum Char {
+    /// A character, its length in bytes and its code point.
+    Whole(usize, u32),
+    /// The start of a character the bytes seen so far do not finish.
+    Partial,
+    /// A byte that starts no character; a column counter takes it alone,
+    /// as glibc's `mbrtowc` does.
+    Invalid,
+}
+
+/// The character that opens `bytes`, which must not be empty.
+pub(crate) fn char_at(bytes: &[u8]) -> Char {
+    let (needed, bits, mut lower, mut upper) = match lead(bytes[0]) {
+        Some(Lead::Ascii) => return Char::Whole(1, u32::from(bytes[0])),
+        Some(Lead::Sequence(needed, bits, lower, upper)) => (needed, bits, lower, upper),
+        None => return Char::Invalid,
+    };
+    let mut cp = u32::from(bits);
+    for at in 1..=usize::from(needed) {
+        let Some(&byte) = bytes.get(at) else {
+            return Char::Partial;
+        };
+        if byte < lower || byte > upper {
+            return Char::Invalid;
+        }
+        (lower, upper) = (0x80, 0xBF);
+        cp = (cp << 6) | u32::from(byte & 0x3F);
+    }
+    Char::Whole(usize::from(needed) + 1, cp)
 }
 
 #[cfg(test)]

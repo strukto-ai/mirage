@@ -66,6 +66,7 @@ STDIN_SCRIPT_COMMANDS = frozenset({"python", "python3", "js", "node"})
 STDIN_DASH_COMMANDS = frozenset(
     {
         "awk",
+        "b2sum",
         "base64",
         "cat",
         "cmp",
@@ -88,6 +89,7 @@ STDIN_DASH_COMMANDS = frozenset(
         "rg",
         "sed",
         "sha1sum",
+        "sha224sum",
         "sha256sum",
         "sha384sum",
         "sha512sum",

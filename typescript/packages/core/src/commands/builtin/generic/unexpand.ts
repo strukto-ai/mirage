@@ -21,61 +21,28 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
-import { mapStream } from '../utils/lines.ts'
-import { TAB_WIDTH } from '../../../utils/width.ts'
+import { runStream } from '../../../rs/stream.ts'
+import { readTabStops, tabConfig, type TabStops } from './expand.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
-
-function unexpandLine(line: string, tabsize: number, allSpaces: boolean): string {
-  if (allSpaces) {
-    const result: string[] = []
-    let i = 0
-    while (i < line.length) {
-      let count = 0
-      while (i + count < line.length && line[i + count] === ' ') count += 1
-      if (count >= tabsize) {
-        const tabs = Math.floor(count / tabsize)
-        const remainder = count % tabsize
-        result.push('\t'.repeat(tabs) + ' '.repeat(remainder))
-        i += count
-      } else if (count > 0) {
-        result.push(' '.repeat(count))
-        i += count
-      } else {
-        result.push(line[i] ?? '')
-        i += 1
-      }
-    }
-    return result.join('')
-  }
-  let leading = 0
-  while (leading < line.length && line[leading] === ' ') leading += 1
-  if (leading >= tabsize) {
-    const tabs = Math.floor(leading / tabsize)
-    const remainder = leading % tabsize
-    return '\t'.repeat(tabs) + ' '.repeat(remainder) + line.slice(leading)
-  }
-  return line
-}
 
 interface UnexpandFlags {
-  readonly tabsize: number
+  readonly tabs: TabStops
   readonly allSpaces: boolean
-  readonly firstOnly: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
+// Read unexpand's flags once, refusing a tab list GNU refuses: the stderr text
+// in its place. A tab list implies -a, and --first-only overrides both (GNU
+// 9.7). Mirrors Python's parse_flags.
+function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags | string {
   const fl = new FlagView(bag, specOf('unexpand'))
+  const lists = fl.asList('tabs')
+  const tabs = readTabStops(lists, 'unexpand')
+  if (typeof tabs === 'string') return tabs
   return {
-    tabsize: Number.parseInt(fl.asNonEmpty('tabs', String(TAB_WIDTH)), 10),
-    allSpaces: fl.asBool('all'),
-    firstOnly: fl.asBool('first_only'),
+    tabs,
+    allSpaces: (fl.asBool('all') || lists.length > 0) && !fl.asBool('first_only'),
   }
-}
-
-function unexpandRecord(line: Uint8Array, tabsize: number, allSpaces: boolean): Uint8Array {
-  return ENC.encode(unexpandLine(DEC.decode(line), tabsize, allSpaces))
 }
 
 export function unexpandGeneric(
@@ -85,14 +52,12 @@ export function unexpandGeneric(
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin)
   const parsed = parseFlags(ctx.flags)
-  const tabsize = parsed.tabsize
-  const allSpaces = parsed.allSpaces && !parsed.firstOnly
+  if (typeof parsed === 'string') {
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  }
   const io = new IOResult()
   const sources = paths.map((p) => reportedStream(stream(p), io, p, 'unexpand'))
-  const transform = (line: Uint8Array): Uint8Array => unexpandRecord(line, tabsize, allSpaces)
-  const output = mapStream(
-    paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array()),
-    transform,
-  )
-  return [output, io]
+  const config = { tabs: tabConfig(parsed.tabs), all: parsed.allSpaces }
+  const source = paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array())
+  return [runStream('unexpand', config, source, ctx.signal), io]
 }

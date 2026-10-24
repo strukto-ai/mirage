@@ -19,7 +19,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
-import { expandGeneric, nextTabStop, readTabStops, type TabStops } from './expand.ts'
+import { expandGeneric, readTabStops, type TabStops } from './expand.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -353,30 +353,6 @@ describe('expand parses the / and + specifiers', () => {
     ['+/4', { stops: [], extend: 4, increment: 0 }],
   ])('-t %s', (list, expected) => {
     expect(stops(list)).toEqual(expected)
-  })
-})
-
-describe('expand next tab stop is always strictly greater', () => {
-  it.each([
-    [{ stops: [], extend: 0, increment: 0 }, 0, 8],
-    [{ stops: [], extend: 0, increment: 0 }, 3, 8],
-    [{ stops: [], extend: 0, increment: 0 }, 8, 16],
-    [{ stops: [3], extend: 0, increment: 0 }, 0, 3],
-    [{ stops: [3], extend: 0, increment: 0 }, 3, 6],
-    [{ stops: [5, 9], extend: 0, increment: 0 }, 0, 5],
-    [{ stops: [5, 9], extend: 0, increment: 0 }, 5, 9],
-    [{ stops: [5, 9], extend: 0, increment: 0 }, 9, 10],
-    [{ stops: [5, 9], extend: 0, increment: 0 }, 20, 21],
-    [{ stops: [], extend: 4, increment: 0 }, 0, 4],
-    [{ stops: [], extend: 4, increment: 0 }, 4, 8],
-    [{ stops: [], extend: 0, increment: 4 }, 0, 4],
-    [{ stops: [], extend: 0, increment: 4 }, 5, 8],
-    [{ stops: [2], extend: 4, increment: 0 }, 3, 4],
-    [{ stops: [2], extend: 4, increment: 0 }, 5, 8],
-    [{ stops: [2], extend: 0, increment: 4 }, 3, 6],
-    [{ stops: [2], extend: 0, increment: 4 }, 7, 10],
-  ])('%j at column %i', (tabs, column, expected) => {
-    expect(nextTabStop(tabs, column)).toBe(expected)
   })
 })
 

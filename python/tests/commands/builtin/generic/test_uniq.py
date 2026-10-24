@@ -141,9 +141,9 @@ def test_group_still_refuses_an_unmatched_word():
         ({"count": True}, b"a\na\nb\n", b"      2 a\n"),
         ({"repeated": True}, b"a\na\n", b"a\n"),
         ({"unique": True}, b"a\nb\n", b"a\n"),
-        ({"D": True}, b"a\na\n", b"a\n"),
-        ({"group": "prepend"}, b"a\n", b"\n"),
-        ({"all_repeated": "prepend"}, b"a\na\n", b"\n"),
+        ({"D": True}, b"a\na\n", b"a\na\n"),
+        ({"group": "prepend"}, b"a\n", b"\na\n"),
+        ({"all_repeated": "prepend"}, b"a\na\n", b"\na\na\n"),
         ({"zero_terminated": True}, b"a\0", b"a\0"),
     ],
 )

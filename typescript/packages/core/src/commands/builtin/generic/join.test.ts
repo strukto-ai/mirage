@@ -19,7 +19,7 @@ import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fi
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'
-import { CHUNK, OrderCheck, join, parseFlags, type JoinFlags } from './join.ts'
+import { OrderCheck, join, parseFlags, type JoinFlags } from './join.ts'
 
 type Row = [string, string, string, string, string, number, string, string]
 
@@ -186,7 +186,7 @@ describe('join over two large groups of one key', () => {
     const first = await chunks.next()
     await chunks.return?.()
     expect(view(first.value as Uint8Array).startsWith('k a0 b0\nk a0 b1\n')).toBe(true)
-    expect((first.value as Uint8Array).length).toBeLessThan(2 * CHUNK)
+    expect((first.value as Uint8Array).length).toBeLessThan(2 << 16)
   })
 })
 

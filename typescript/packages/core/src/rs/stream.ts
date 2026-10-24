@@ -329,6 +329,33 @@ export async function* runStream(
   yield* streamOutputChunks(stream, source, signal)
 }
 
+/**
+ * Feed a multi-input stream the input its `wants` names until it wants none,
+ * handing on its output a bounded call at a time. Mirrors Python's
+ * merge_output.
+ */
+export async function* mergeOutput(
+  stream: OpenStream,
+  read: (index: number) => Promise<Uint8Array | null>,
+): AsyncGenerator<Uint8Array> {
+  const budget = new YieldBudget()
+  for (;;) {
+    while (stream.busy()) {
+      await budget.run()
+      const output = stream.drain()
+      if (output.byteLength > 0) yield output
+    }
+    const index = stream.wants()
+    if (index === null) break
+    await budget.run()
+    const chunk = await read(index)
+    const output = chunk === null ? stream.endInput(index) : stream.feedInput(index, chunk)
+    if (output.byteLength > 0) yield output
+  }
+  const tail = stream.finish()
+  if (tail.byteLength > 0) yield tail
+}
+
 export async function* streamOutputChunks(
   stream: OpenStream,
   source: Uint8Array | AsyncIterable<Uint8Array>,

@@ -26,6 +26,27 @@ impl Rendered {
             self.prefix.len() as u64 + self.body.len() as u64 + self.suffix.len() as u64,
         )
     }
+
+    /// The field padded to `width` as printf pads it: on the right for
+    /// `-`, with zeros after the sign or `0x` for `0`, else with blanks.
+    pub(crate) fn write_padded(&self, width: u64, flags: &[u8], out: &mut Vec<u8>) {
+        let pad = width.saturating_sub(self.byte_len()) as usize;
+        let left = flag(flags, b'-');
+        let zero = self.allow_zero && flag(flags, b'0') && !left;
+        if !left && !zero {
+            out.resize(out.len() + pad, b' ');
+        }
+        out.extend_from_slice(&self.prefix);
+        if zero {
+            out.resize(out.len() + pad, b'0');
+        }
+        out.extend_from_slice(&self.body);
+        out.resize(out.len() + self.zero_tail as usize, b'0');
+        out.extend_from_slice(&self.suffix);
+        if left {
+            out.resize(out.len() + pad, b' ');
+        }
+    }
 }
 
 fn space(byte: u8) -> bool {
@@ -42,22 +63,25 @@ fn digit(byte: u8, base: u32) -> Option<u32> {
     (n < base).then_some(n)
 }
 
-#[derive(Clone, Copy)]
-enum FloatKind {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FloatKind {
     Decimal,
     Hex,
     Infinity,
     Nan,
 }
 
-struct FloatToken {
-    kind: FloatKind,
-    negative: bool,
-    start: usize,
-    mantissa_end: usize,
-    end: usize,
-    fraction: usize,
-    exponent: i64,
+/// One C-locale strtod number at the front of a word: `start` is where
+/// its digits begin (past `0x` for a hex float) and `fraction` counts the
+/// digits after its point.
+pub(crate) struct FloatToken {
+    pub(crate) kind: FloatKind,
+    pub(crate) negative: bool,
+    pub(crate) start: usize,
+    pub(crate) mantissa_end: usize,
+    pub(crate) end: usize,
+    pub(crate) fraction: usize,
+    pub(crate) exponent: i64,
 }
 
 fn case_prefix(raw: &[u8], word: &[u8]) -> bool {
@@ -83,7 +107,7 @@ fn exponent(raw: &[u8], marker: usize) -> (usize, i64) {
     (at, if negative { -value } else { value })
 }
 
-fn scan_float(raw: &[u8]) -> Option<FloatToken> {
+pub(crate) fn scan_float(raw: &[u8]) -> Option<FloatToken> {
     let mut at = 0;
     while raw.get(at).copied().is_some_and(space) {
         at += 1;
@@ -393,8 +417,8 @@ fn flag(flags: &[u8], value: u8) -> bool {
     flags.contains(&value)
 }
 
-fn sign(value: f64, flags: &[u8]) -> Vec<u8> {
-    if value.is_sign_negative() {
+fn sign(negative: bool, flags: &[u8]) -> Vec<u8> {
+    if negative {
         vec![b'-']
     } else if flag(flags, b'+') {
         vec![b'+']
@@ -444,9 +468,33 @@ pub fn render_integer(value: i128, conv: u8, flags: &[u8], precision: Option<u64
     }
 }
 
-struct Decimal {
+/// A finite magnitude's decimal digits, the first of them at `10**point`.
+pub(crate) struct Decimal {
     digits: Vec<u8>,
     point: i32,
+}
+
+impl Decimal {
+    /// `units / 10**scale`, exactly.
+    pub(crate) fn scaled(units: &BigUint, scale: usize) -> Self {
+        let digits = units.to_str_radix(10).into_bytes();
+        let point = if units.is_zero() {
+            0
+        } else {
+            digits.len() as i32 - 1 - scale as i32
+        };
+        Self { digits, point }
+    }
+
+    // Past printf's 1100 places a double has no digit left, but an exact
+    // value can, so the cap follows the digits.
+    fn places_cap(&self) -> u64 {
+        (self.digits.len() as i64 - 1 - i64::from(self.point)).max(1100) as u64
+    }
+
+    fn digits_cap(&self) -> u64 {
+        (self.digits.len() as u64).max(1100)
+    }
 }
 
 fn exact_decimal(value: f64) -> Decimal {
@@ -549,9 +597,9 @@ fn exponent_suffix(exponent: i32, upper: bool, hex: bool) -> Vec<u8> {
     suffix
 }
 
-fn render_fixed(value: f64, flags: &[u8], precision: u64) -> Rendered {
-    let p = precision.min(1100) as usize;
-    let (mut integer, mut fraction) = fixed_parts(exact_decimal(value));
+fn render_fixed(negative: bool, decimal: Decimal, flags: &[u8], precision: u64) -> Rendered {
+    let p = precision.min(decimal.places_cap()) as usize;
+    let (mut integer, mut fraction) = fixed_parts(decimal);
     if fraction.len() > p {
         let previous = if p == 0 {
             *integer.last().unwrap()
@@ -573,23 +621,29 @@ fn render_fixed(value: f64, flags: &[u8], precision: u64) -> Rendered {
         integer.extend_from_slice(&fraction);
     }
     Rendered::finite(
-        sign(value, flags),
+        sign(negative, flags),
         integer,
         precision - p as u64,
         Vec::new(),
     )
 }
 
-fn render_exponential(value: f64, flags: &[u8], precision: u64, upper: bool) -> Rendered {
-    let p = precision.min(1100) as usize;
-    let decimal = rounded_significant(exact_decimal(value), p + 1);
+fn render_exponential(
+    negative: bool,
+    decimal: Decimal,
+    flags: &[u8],
+    precision: u64,
+    upper: bool,
+) -> Rendered {
+    let p = precision.min(decimal.digits_cap()) as usize;
+    let decimal = rounded_significant(decimal, p + 1);
     let mut body = vec![decimal.digits[0]];
     if precision != 0 || flag(flags, b'#') {
         body.push(b'.');
         body.extend_from_slice(&decimal.digits[1..]);
     }
     Rendered::finite(
-        sign(value, flags),
+        sign(negative, flags),
         body,
         precision - p as u64,
         exponent_suffix(decimal.point, upper, false),
@@ -602,10 +656,16 @@ fn trim_zeroes(digits: &mut Vec<u8>) {
     }
 }
 
-fn render_general(value: f64, flags: &[u8], precision: u64, upper: bool) -> Rendered {
+fn render_general(
+    negative: bool,
+    decimal: Decimal,
+    flags: &[u8],
+    precision: u64,
+    upper: bool,
+) -> Rendered {
     let p = precision.max(1);
-    let count = p.min(1100) as usize;
-    let mut decimal = rounded_significant(exact_decimal(value), count);
+    let count = p.min(decimal.digits_cap()) as usize;
+    let mut decimal = rounded_significant(decimal, count);
     let alternate = flag(flags, b'#');
     if decimal.point < -4 || decimal.point >= 0 && decimal.point as u64 >= p {
         if !alternate {
@@ -617,7 +677,7 @@ fn render_general(value: f64, flags: &[u8], precision: u64, upper: bool) -> Rend
             body.extend_from_slice(&decimal.digits[1..]);
         }
         return Rendered::finite(
-            sign(value, flags),
+            sign(negative, flags),
             body,
             if alternate { p - count as u64 } else { 0 },
             exponent_suffix(decimal.point, upper, false),
@@ -635,47 +695,44 @@ fn render_general(value: f64, flags: &[u8], precision: u64, upper: bool) -> Rend
         integer.push(b'.');
         integer.extend_from_slice(&fraction);
     }
-    Rendered::finite(sign(value, flags), integer, zero_tail, Vec::new())
+    Rendered::finite(sign(negative, flags), integer, zero_tail, Vec::new())
 }
 
-fn render_hex(value: f64, flags: &[u8], precision: Option<u64>, upper: bool) -> Rendered {
-    let bits = value.to_bits() & !(1_u64 << 63);
-    let field = ((bits >> 52) & 0x7ff) as i32;
-    let fraction = bits & ((1_u64 << 52) - 1);
-    let mut exponent = 0;
-    let mut mantissa = 0;
-    if bits != 0 {
-        let (m, e) = if field == 0 {
-            (fraction, -1074)
-        } else {
-            (fraction | (1_u64 << 52), field - 1075)
-        };
-        let significant_bits = 64 - m.leading_zeros();
-        exponent = e + significant_bits as i32 - 1;
-        mantissa = m << (53 - significant_bits);
-    }
-    let p = precision.unwrap_or(13).min(13) as usize;
-    let drop = 52 - p * 4;
+/// A hex float as glibc's `%a` writes it: `mantissa` holds the lead digit
+/// over `fraction_bits` bits (a multiple of four), and the digits round
+/// half to even at the precision without renormalizing.
+pub(crate) fn render_hex(
+    negative: bool,
+    mantissa: u128,
+    fraction_bits: u32,
+    exponent: i32,
+    flags: &[u8],
+    precision: Option<u64>,
+    upper: bool,
+) -> Rendered {
+    let places = u64::from(fraction_bits / 4);
+    let p = precision.unwrap_or(places).min(places) as u32;
+    let drop = fraction_bits - p * 4;
     let mut kept = mantissa >> drop;
     if drop != 0 {
-        let rest = mantissa & ((1_u64 << drop) - 1);
-        let half = 1_u64 << (drop - 1);
+        let rest = mantissa & ((1_u128 << drop) - 1);
+        let half = 1_u128 << (drop - 1);
         if rest > half || rest == half && kept % 2 == 1 {
             kept += 1;
         }
     }
     let lead = b'0' + (kept >> (p * 4)) as u8;
-    let mask = (1_u64 << (p * 4)) - 1;
+    let mask = (1_u128 << (p * 4)) - 1;
     let mut fractional = if p == 0 {
         Vec::new()
     } else {
-        format!("{:0width$x}", kept & mask, width = p).into_bytes()
+        format!("{:0width$x}", kept & mask, width = p as usize).into_bytes()
     };
     if precision.is_none() {
         trim_zeroes(&mut fractional);
     }
-    let zero_tail = precision.map_or(0, |n| n.saturating_sub(p as u64));
-    let mut prefix = sign(value, flags);
+    let zero_tail = precision.map_or(0, |n| n.saturating_sub(u64::from(p)));
+    let mut prefix = sign(negative, flags);
     prefix.extend_from_slice(if upper { b"0X" } else { b"0x" });
     let mut body = vec![lead];
     if !fractional.is_empty() || zero_tail != 0 || flag(flags, b'#') {
@@ -693,30 +750,79 @@ fn render_hex(value: f64, flags: &[u8], precision: Option<u64>, upper: bool) -> 
     )
 }
 
+fn double_hex(value: f64, flags: &[u8], precision: Option<u64>, upper: bool) -> Rendered {
+    let bits = value.to_bits() & !(1_u64 << 63);
+    let field = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1_u64 << 52) - 1);
+    let mut exponent = 0;
+    let mut mantissa = 0;
+    if bits != 0 {
+        let (m, e) = if field == 0 {
+            (fraction, -1074)
+        } else {
+            (fraction | (1_u64 << 52), field - 1075)
+        };
+        let significant_bits = 64 - m.leading_zeros();
+        exponent = e + significant_bits as i32 - 1;
+        mantissa = m << (53 - significant_bits);
+    }
+    render_hex(
+        value.is_sign_negative(),
+        u128::from(mantissa),
+        52,
+        exponent,
+        flags,
+        precision,
+        upper,
+    )
+}
+
+/// An infinity or a NaN, which takes a sign but never zero padding.
+pub(crate) fn render_special(negative: bool, nan: bool, upper: bool, flags: &[u8]) -> Rendered {
+    let body: &[u8] = match (nan, upper) {
+        (true, true) => b"NAN",
+        (true, false) => b"nan",
+        (false, true) => b"INF",
+        (false, false) => b"inf",
+    };
+    Rendered {
+        prefix: sign(negative, flags),
+        body: body.to_vec(),
+        zero_tail: 0,
+        suffix: Vec::new(),
+        allow_zero: false,
+    }
+}
+
+/// An exact finite value through `%e`, `%f` or `%g` (either case).
+pub(crate) fn render_decimal(
+    negative: bool,
+    decimal: Decimal,
+    conv: u8,
+    flags: &[u8],
+    precision: Option<u64>,
+) -> Rendered {
+    let upper = conv.is_ascii_uppercase();
+    let precision = precision.unwrap_or(6);
+    match conv.to_ascii_lowercase() {
+        b'f' => render_fixed(negative, decimal, flags, precision),
+        b'e' => render_exponential(negative, decimal, flags, precision, upper),
+        _ => render_general(negative, decimal, flags, precision, upper),
+    }
+}
+
 /// Render binary64 values with explicit signs, notation and ties-to-even rounding.
 pub fn render_float(value: f64, conv: u8, flags: &[u8], precision: Option<u64>) -> Rendered {
     let upper = conv.is_ascii_uppercase();
+    let negative = value.is_sign_negative();
     if !value.is_finite() {
-        let body = if value.is_nan() {
-            if upper { b"NAN" } else { b"nan" }
-        } else if upper {
-            b"INF"
-        } else {
-            b"inf"
-        };
-        return Rendered {
-            prefix: sign(value, flags),
-            body: body.to_vec(),
-            zero_tail: 0,
-            suffix: Vec::new(),
-            allow_zero: false,
-        };
+        return render_special(negative, value.is_nan(), upper, flags);
     }
     match conv.to_ascii_lowercase() {
-        b'f' => render_fixed(value, flags, precision.unwrap_or(6)),
-        b'e' => render_exponential(value, flags, precision.unwrap_or(6), upper),
-        b'g' => render_general(value, flags, precision.unwrap_or(6), upper),
-        b'a' => render_hex(value, flags, precision, upper),
+        b'a' => double_hex(value, flags, precision, upper),
+        b'e' | b'f' | b'g' => {
+            render_decimal(negative, exact_decimal(value), conv, flags, precision)
+        }
         _ => unreachable!("float conversion was validated by the format scanner"),
     }
 }

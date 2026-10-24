@@ -30,6 +30,10 @@ const CHECKSUM = new CommandSpec({
   ],
 })
 
+const B2SUM = new CommandSpec({
+  arguments: [new Argument(['-l', '--length']), ...CHECKSUM.arguments],
+})
+
 export const SPECS: Record<string, CommandSpec> = {
   base64: new CommandSpec({
     arguments: [
@@ -88,6 +92,7 @@ export const SPECS: Record<string, CommandSpec> = {
     arguments: [PATHS_OPERAND],
   }),
   md5sum: CHECKSUM,
+  b2sum: B2SUM,
   patch: new CommandSpec({
     arguments: [
       new Argument('-p'),
@@ -99,6 +104,7 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
   }),
   sha1sum: CHECKSUM,
+  sha224sum: CHECKSUM,
   sha256sum: CHECKSUM,
   sha384sum: CHECKSUM,
   sha512sum: CHECKSUM,

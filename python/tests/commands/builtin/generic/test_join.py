@@ -5,7 +5,6 @@ from contextlib import aclosing
 import pytest
 
 from mirage.commands.builtin.generic.join import (
-    CHUNK,
     JoinFlags,
     OrderCheck,
     join,
@@ -174,7 +173,7 @@ async def test_join_hands_on_output_while_pairing_two_large_groups():
     async with aclosing(source) as chunks:
         first = await anext(chunks)
     assert first.startswith(b"k a0 b0\nk a0 b1\n")
-    assert len(first) < 2 * CHUNK
+    assert len(first) < 2 << 16
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,45 @@
       "flags": [
         "i"
       ]
+    },
+    {
+      "id": "uniq_folds_ascii_and_counts_bytes",
+      "seq": 601151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box",
+        "databricks",
+        "databricks-prefix",
+        "sharepoint-prefix"
+      ],
+      "command": "printf 'é\\nÉ\\nA\\na\\n' | uniq -i; printf 'éa\\nèa\\n' | uniq -s 1; printf 'éa\\néb\\n' | uniq -w 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "é\nÉ\nA\néa\nèa\néa\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "s",
+        "w"
+      ]
     }
   ]
 }

@@ -1,8 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from functools import partial
 
-from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     reported_stream,
@@ -22,8 +20,8 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
-from mirage.utils.width import TAB_WIDTH
+from mirage.rs.stream import run_stream
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 
 # A tab stop's digits are ASCII only: GNU reports U+0663 and the other
 # non-ASCII digits as invalid characters, which a unicode-aware test
@@ -81,21 +79,23 @@ class _TabList:
     `_read_tab_list`).
 
     Args:
+        prog (str): the command the diagnostics name.
         stops (list[int]): the explicit stops, in typed order.
         extend (int): ``/N``'s size, 0 when unset.
         increment (int): ``+N``'s size, 0 when unset.
         problems (list[str]): the diagnostic lines so far.
     """
 
+    prog: str
     stops: list[int] = field(default_factory=list)
     extend: int = 0
     increment: int = 0
     problems: list[str] = field(default_factory=list)
 
 
-def _invalid(rest: str) -> str:
+def _invalid(prog: str, rest: str) -> str:
     return (
-        f"expand: tab size contains invalid character(s): '{quote_text(rest)}'"
+        f"{prog}: tab size contains invalid character(s): '{quote_text(rest)}'"
     )
 
 
@@ -134,7 +134,8 @@ def _give_value(
     if not waiting:
         if given:
             tabs.problems.append(
-                f"expand: '{given}' specifier only allowed with the last value"
+                f"{tabs.prog}: '{given}' specifier only allowed with the last"
+                " value"
             )
             return None
         tabs.stops.append(value)
@@ -142,14 +143,14 @@ def _give_value(
     size = "/" if "/" in waiting else "+"
     if (tabs.extend if size == "/" else tabs.increment) != 0:
         tabs.problems.append(
-            f"expand: '{size}' specifier only allowed with the last value"
+            f"{tabs.prog}: '{size}' specifier only allowed with the last value"
         )
         return None
     if not value:
         return given
     if (tabs.increment if size == "/" else tabs.extend) != 0:
         tabs.problems.append(
-            "expand: '/' specifier is mutually exclusive with '+'"
+            f"{tabs.prog}: '/' specifier is mutually exclusive with '+'"
         )
         return None
     if size == "/":
@@ -184,21 +185,22 @@ def _read_number(
         char = raw[at]
         if char in _SPECIFIERS:
             tabs.problems.append(
-                f"expand: '{char}' specifier not at start of number:"
+                f"{tabs.prog}: '{char}' specifier not at start of number:"
                 f" '{quote_text(raw[at:])}'"
             )
             misplaced.append(char)
             at += 1
             continue
         if char not in _DIGITS:
-            tabs.problems.append(_invalid(raw[at:]))
+            tabs.problems.append(_invalid(tabs.prog, raw[at:]))
             return None
         run = at
         while at < len(raw) and raw[at] in _DIGITS:
             at += 1
         if bounded_decimal(raw[run:at], _TOO_LARGE) is None:
             tabs.problems.append(
-                f"expand: tab stop is too large '{quote_text(raw[run:at])}'"
+                f"{tabs.prog}: tab stop is too large"
+                f" '{quote_text(raw[run:at])}'"
             )
             oversized = True
         digits += raw[run:at]
@@ -239,7 +241,7 @@ def _read_tab_list(raw: str, tabs: _TabList) -> bool:
             at += 1
             continue
         if char not in _DIGITS:
-            tabs.problems.append(_invalid(raw[at:]))
+            tabs.problems.append(_invalid(tabs.prog, raw[at:]))
             return False
         number = _read_number(raw, at, tabs)
         if number is None:
@@ -254,7 +256,7 @@ def _read_tab_list(raw: str, tabs: _TabList) -> bool:
     return True
 
 
-def _refused_order(stops: list[int]) -> str | None:
+def _refused_order(prog: str, stops: list[int]) -> str | None:
     """GNU's walk over the explicit stops, once every value has scanned.
 
     Each stop is tested for zero before it is tested against the one
@@ -262,6 +264,7 @@ def _refused_order(stops: list[int]) -> str | None:
     ascending.
 
     Args:
+        prog (str): the command the diagnostic names.
         stops (list[int]): the stops in typed order.
 
     Returns:
@@ -270,14 +273,14 @@ def _refused_order(stops: list[int]) -> str | None:
     previous = 0
     for stop in stops:
         if stop == 0:
-            return "expand: tab size cannot be 0"
+            return f"{prog}: tab size cannot be 0"
         if stop <= previous:
-            return "expand: tab sizes must be ascending"
+            return f"{prog}: tab sizes must be ascending"
         previous = stop
     return None
 
 
-def read_tab_stops(occurrences: list[str]) -> TabStops:
+def read_tab_stops(occurrences: list[str], prog: str = "expand") -> TabStops:
     """Every ``-t``/``--tabs`` value one line carried, as one tab list.
 
     GNU takes a LIST of tab stops, not a single size, and ``-t``
@@ -286,8 +289,11 @@ def read_tab_stops(occurrences: list[str]) -> TabStops:
     that leaves any problem ends the parse there: `-t 4+ -t x` reports
     only the '+'.
 
+    unexpand reads its list the same way, in its own name.
+
     Args:
         occurrences (list[str]): the raw values, in typed order.
+        prog (str): the command the diagnostics name.
 
     Returns:
         TabStops: the resolved stops, all-empty for the default 8.
@@ -296,11 +302,11 @@ def read_tab_stops(occurrences: list[str]) -> TabStops:
         ValueError: the stderr text to print, newline-separated with no
             trailing newline, exit 1.
     """
-    tabs = _TabList()
+    tabs = _TabList(prog)
     for raw in occurrences:
         if not _read_tab_list(raw, tabs) or tabs.problems:
             raise ValueError("\n".join(tabs.problems))
-    refused = _refused_order(tabs.stops)
+    refused = _refused_order(prog, tabs.stops)
     if refused is not None:
         raise ValueError(refused)
     return TabStops(tuple(tabs.stops), tabs.extend, tabs.increment)
@@ -325,137 +331,17 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ExpandFlags:
     )
 
 
-def next_tab_stop(tabs: TabStops, column: int) -> int:
-    """The column a TAB in ``column`` pads to.
-
-    The chosen stop is the first one STRICTLY greater than the current
-    column, so a TAB sitting exactly on a stop takes the next one
-    (``expand -t 2,5`` turns ``ab\\tc`` into ``ab`` and three blanks).
-    Past the last explicit stop GNU has four different answers and they
-    are all observable:
-
-    * ``/N`` rounds up to a strictly greater multiple of N.
-    * ``+N`` adds N to the last explicit stop, repeatedly.
-    * ONE explicit stop repeats as a tab SIZE, which is what makes
-      ``-t 3`` mean 3, 6, 9 and not "one stop at 3".
-    * SEVERAL explicit stops give exactly one blank, forever, so
-      ``-t 5,9`` pads column 10 by one where ``-t 5`` pads it by five.
-
-    No stops and neither specifier is the default size 8.
+def tab_config(tabs: TabStops) -> dict[str, JsonValue]:
+    """The tab list as the expand and unexpand streams take it.
 
     Args:
         tabs (TabStops): the resolved tab list.
-        column (int): the current output column, counting from 0.
-
-    Returns:
-        int: the column to pad to, always greater than ``column``.
     """
-    for stop in tabs.stops:
-        if stop > column:
-            return stop
-    if tabs.extend:
-        return column + tabs.extend - column % tabs.extend
-    if tabs.increment:
-        last = tabs.stops[-1] if tabs.stops else 0
-        return last + tabs.increment * ((column - last) // tabs.increment + 1)
-    if len(tabs.stops) == 1:
-        size = tabs.stops[0]
-        return column + size - column % size
-    if tabs.stops:
-        return column + 1
-    return column + TAB_WIDTH - column % TAB_WIDTH
-
-
-def _expand_text(text: str, tabs: TabStops) -> str:
-    """Replace every TAB with blanks up to its tab stop.
-
-    Only a NEWLINE resets the column, and only a BACKSPACE moves it
-    left. A carriage return does neither:
-    ``printf 'a\\r\\tb\\n' | expand`` pads by six, not eight, because the
-    ``\\r`` advanced the column to 2 like any other character. Python's
-    ``str.expandtabs`` treats ``\\r`` as a line break and so cannot be
-    used here (it also disagrees with the TypeScript twin, which never
-    reset on one).
-
-    Backspace decrements, floored at 0, so ``printf 'a\\bb\\tX\\n'`` pads
-    by seven (column 1, 0, 1) while ``printf '\\b\\tX\\n'`` pads by eight
-    -- three leading backspaces still leave column 0. It composes with
-    the tab-stop list like any other column, which is why it is one
-    branch here and not a special case: under ``-t 1,3`` the same input
-    pads by two, the first stop past column 1. ``\\v`` and ``\\f`` are
-    ordinary and advance. Measured, ground truth NL3-E.
-
-    Args:
-        text (str): the decoded input.
-        tabs (TabStops): the resolved tab list.
-    """
-    out: list[str] = []
-    column = 0
-    for char in text:
-        if char == "\t":
-            target = next_tab_stop(tabs, column)
-            out.append(" " * (target - column))
-            column = target
-        elif char == "\n":
-            out.append(char)
-            column = 0
-        elif char == "\b":
-            out.append(char)
-            column = max(column - 1, 0)
-        else:
-            out.append(char)
-            column += 1
-    return "".join(out)
-
-
-def _expand_leading_tabs(text: str, tabs: TabStops) -> str:
-    """``-i``: expand only the blanks before a line's first other byte.
-
-    Args:
-        text (str): the decoded input.
-        tabs (TabStops): the resolved tab list.
-    """
-    out: list[str] = []
-    for line in text.split("\n"):
-        index = 0
-        while index < len(line) and line[index] in _BLANKS:
-            index += 1
-        if index == 0:
-            out.append(line)
-        else:
-            out.append(_expand_text(line[:index], tabs) + line[index:])
-    return "\n".join(out)
-
-
-def apply_expand(text: str, tabs: TabStops, initial_only: bool) -> str:
-    if initial_only:
-        return _expand_leading_tabs(text, tabs)
-    return _expand_text(text, tabs)
-
-
-def _expand_record(line: bytes, tabs: TabStops, initial_only: bool) -> bytes:
-    return apply_expand(
-        line.decode(errors="replace"), tabs, initial_only
-    ).encode()
-
-
-async def expand(
-    paths: list[PathSpec],
-    *,
-    read_stream: PolymorphicReadFn,
-    stdin: ByteSource | None = None,
-    tabs: TabStops | None = None,
-    initial_only: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    io = IOResult()
-    read = stdin_stream(read_stream, stdin)
-    sources = [reported_stream(read(p), io, p, "expand") for p in paths]
-    transform = partial(
-        _expand_record, tabs=tabs or TabStops(), initial_only=initial_only
-    )
-    source = async_chain(sources) if paths else resolve_source(stdin)
-    output = map_stream(source, transform)
-    return output, io
+    return {
+        "stops": list(tabs.stops),
+        "extend": tabs.extend,
+        "increment": tabs.increment,
+    }
 
 
 async def expand_generic(
@@ -483,25 +369,23 @@ async def expand_generic(
     readable, err = await split_readable(paths, stat, "expand")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await expand(
-            readable,
-            read_stream=stream,
-            stdin=ctx.stdin,
-            tabs=parsed.tabs,
-            initial_only=parsed.initial_only,
-        ),
-        err,
-    )
+    io = IOResult()
+    read = stdin_stream(stream, ctx.stdin)
+    sources = [reported_stream(read(p), io, p, "expand") for p in readable]
+    source = async_chain(sources) if readable else resolve_source(ctx.stdin)
+    config: dict[str, JsonValue] = {
+        "tabs": tab_config(parsed.tabs),
+        "initial_only": parsed.initial_only,
+    }
+    output = run_stream("expand", config, source)
+    return await merge_split_errors((output, io), err)
 
 
 __all__ = [
     "ExpandFlags",
     "TabStops",
-    "apply_expand",
-    "expand",
     "expand_generic",
-    "next_tab_stop",
     "parse_flags",
     "read_tab_stops",
+    "tab_config",
 ]

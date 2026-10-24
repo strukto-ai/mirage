@@ -14,6 +14,7 @@
 
 # isort: skip_file
 from mirage.commands.builtin.generic_bind.builders import awk
+from mirage.commands.builtin.generic_bind.builders import b2sum
 from mirage.commands.builtin.generic_bind.builders import base64
 from mirage.commands.builtin.generic_bind.builders import basename
 from mirage.commands.builtin.generic_bind.builders import cat
@@ -58,6 +59,7 @@ from mirage.commands.builtin.generic_bind.builders import rm
 from mirage.commands.builtin.generic_bind.builders import rmdir
 from mirage.commands.builtin.generic_bind.builders import sed
 from mirage.commands.builtin.generic_bind.builders import sha1sum
+from mirage.commands.builtin.generic_bind.builders import sha224sum
 from mirage.commands.builtin.generic_bind.builders import sha256sum
 from mirage.commands.builtin.generic_bind.builders import sha384sum
 from mirage.commands.builtin.generic_bind.builders import sha512sum
@@ -87,6 +89,7 @@ from mirage.commands.builtin.generic_bind.builders import zip_cmd
 
 BUILDERS = (
     awk.BUILDER,
+    b2sum.BUILDER,
     base64.BUILDER,
     basename.BUILDER,
     cat.BUILDER,
@@ -131,6 +134,7 @@ BUILDERS = (
     rmdir.BUILDER,
     sed.BUILDER,
     sha1sum.BUILDER,
+    sha224sum.BUILDER,
     sha256sum.BUILDER,
     sha384sum.BUILDER,
     sha512sum.BUILDER,

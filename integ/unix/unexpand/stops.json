@@ -1,0 +1,115 @@
+{
+  "cases": [
+    {
+      "id": "unexpand_t_accumulates_and_implies_a",
+      "seq": 9100106,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a       b       c\\n' | unexpand -t 4 -t 8 | od -An -c; printf 'a       b       c\\n' | unexpand -t 2,4 -t 6 | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a  \\t  \\t   b                               c  \\n\n   a  \\t  \\t  \\t           b                               c  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "unexpand_a_keeps_a_lone_space_before_a_stop",
+      "seq": 9100107,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abcdefg x\\nabcdefg  x\\n        a        b\\n' | unexpand -a | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a   b   c   d   e   f   g       x  \\n   a   b   c   d   e   f\n   g  \\t       x  \\n  \\t   a  \\t       b  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "a"
+      ]
+    },
+    {
+      "id": "unexpand_t_refuses_what_expand_refuses",
+      "seq": 9100108,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk",
+        "redis",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for t in x 0 3,1 4+ +4,2; do printf 'a b\\n' | unexpand -t \"$t\"; echo rc=$?; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "unexpand: tab size contains invalid character(s): 'x'\nunexpand: tab size cannot be 0\nunexpand: tab sizes must be ascending\nunexpand: '+' specifier not at start of number: '+'\nunexpand: '+' specifier only allowed with the last value\n"
+      },
+      "flags": [
+        "t"
+      ]
+    }
+  ]
+}

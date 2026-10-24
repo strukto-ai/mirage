@@ -1,0 +1,228 @@
+{
+  "cases": [
+    {
+      "id": "b2sum_prints_the_512_bit_digest",
+      "seq": 15310011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "0178208b332f78e61cb9d3a0e0a61f6f24882dec253b35d1a4f6316b915587b288f2a7a3e604fac71928f584c98cba4f5b1d29308d0b6212f4cb6110848fcb03  /data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": []
+    },
+    {
+      "id": "b2sum_l_sets_the_length_and_the_tag",
+      "seq": 15310012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum -l 256 /data/a.txt; b2sum --tag -l 128 /data/b.txt; b2sum -l 0 --tag /data/b.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "66b890fca68b68799ff4ac7233c1bcae41cf26f09002ea4736dc38c478128089  /data/a.txt\nBLAKE2b-128 (/data/b.txt) = d4f907c6711dcfc0b9c0ad9b89f6582d\nBLAKE2b (/data/b.txt) = f6115213ecbf3b428f8455a03ef459887fdb109bdabf3d4d3e8eee77f6ee81b652bccf9558b5976119a6bee268fdc6395f82132bacf9972ad60a2ea3e9be188c\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "tag"
+      ]
+    },
+    {
+      "id": "b2sum_l_refuses_a_length_not_a_multiple_of_8",
+      "seq": 15310013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum -l 7 /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "b2sum: invalid length: '7'\nb2sum: length is not a multiple of 8\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "b2sum_l_refuses_what_is_no_count",
+      "seq": 15310014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum -l abc /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "b2sum: invalid length: 'abc'\n"
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "b2sum_c_reads_each_lines_own_length",
+      "seq": 15310015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ b2sum /data/a.txt; b2sum -l 256 /data/a.txt; b2sum --tag -l 128 /data/b.txt; } | b2sum -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/a.txt: OK\n/data/a.txt: OK\n/data/b.txt: OK\n",
+        "stderr": ""
+      },
+      "flags": [
+        "c",
+        "l",
+        "tag"
+      ]
+    },
+    {
+      "id": "b2sum_c_refuses_a_tag_length_not_a_multiple_of_8",
+      "seq": 15310016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'BLAKE2b-7 (x) = 00\\n' | b2sum -c -w",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "b2sum: 'standard input': 1: improperly formatted BLAKE2b checksum line\nb2sum: 'standard input': no properly formatted checksum lines found\n"
+      },
+      "flags": [
+        "c",
+        "w"
+      ]
+    }
+  ]
+}

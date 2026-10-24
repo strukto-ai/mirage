@@ -14,6 +14,7 @@
 
 import type { GenericCommand } from '../adapter.ts'
 import * as awk from './awk.ts'
+import * as b2sum from './b2sum.ts'
 import * as base64 from './base64.ts'
 import * as basename from './basename.ts'
 import * as cat from './cat.ts'
@@ -58,6 +59,7 @@ import * as rm from './rm.ts'
 import * as rmdir from './rmdir.ts'
 import * as sed from './sed.ts'
 import * as sha1sum from './sha1sum.ts'
+import * as sha224sum from './sha224sum.ts'
 import * as sha256sum from './sha256sum.ts'
 import * as sha384sum from './sha384sum.ts'
 import * as sha512sum from './sha512sum.ts'
@@ -87,6 +89,7 @@ import * as zipCmd from './zip_cmd.ts'
 
 export const BUILDERS: readonly GenericCommand[] = [
   awk.BUILDER,
+  b2sum.BUILDER,
   base64.BUILDER,
   basename.BUILDER,
   cat.BUILDER,
@@ -131,6 +134,7 @@ export const BUILDERS: readonly GenericCommand[] = [
   rmdir.BUILDER,
   sed.BUILDER,
   sha1sum.BUILDER,
+  sha224sum.BUILDER,
   sha256sum.BUILDER,
   sha384sum.BUILDER,
   sha512sum.BUILDER,

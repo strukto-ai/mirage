@@ -24,6 +24,13 @@ async def numfmt(
         from_mode=fl.as_str("from") or "none",
         suffix=fl.as_str("suffix") or "",
         grouping=fl.as_bool("grouping"),
+        fields=[str(value) for _, value in fl.occurrences("field")],
+        delimiters=[str(value) for _, value in fl.occurrences("delimiter")],
+        headers=[
+            "1" if value is True else str(value)
+            for _, value in fl.occurrences("header")
+        ],
+        zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 

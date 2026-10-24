@@ -277,6 +277,10 @@ SPECS: dict[str, CommandSpec] = {
             ),
             Argument("--suffix"),
             Argument("--grouping", action="store_true"),
+            Argument("-d", "--delimiter"),
+            Argument("--field"),
+            Argument("--header", nargs="?", attached_only=True),
+            Argument("-z", "--zero-terminated", action="store_true"),
             TEXTS_OPERAND,
         )
     ),

@@ -1,13 +1,13 @@
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
-from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -15,9 +15,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, StatFn
 
 # The --all-repeated and --group words, in the order GNU lists each
@@ -35,8 +35,8 @@ GROUP_ARGS = ("prepend", "append", "separate", "both")
 @dataclass(frozen=True, slots=True)
 class UniqFlags:
     count: bool = False
-    duplicates_only: bool = False
-    unique_only: bool = False
+    repeated: bool = False
+    unique: bool = False
     skip_fields: int = 0
     skip_chars: int = 0
     ignore_case: bool = False
@@ -95,10 +95,10 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
     if group is not None:
         group = _method_word("--group", str(group), GROUP_ARGS)
     count = fl.as_bool("count")
-    duplicates_only = fl.as_bool("repeated")
-    unique_only = fl.as_bool("unique")
+    repeated = fl.as_bool("repeated")
+    unique = fl.as_bool("unique")
     if group is not None and (
-        count or duplicates_only or unique_only or all_repeated is not None
+        count or repeated or unique or all_repeated is not None
     ):
         raise ValueError(
             "uniq: --group is mutually exclusive with -c/-d/-D/-u"
@@ -110,8 +110,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
         )
     return UniqFlags(
         count=count,
-        duplicates_only=duplicates_only,
-        unique_only=unique_only,
+        repeated=repeated,
+        unique=unique,
         skip_fields=_parse_count(fl.as_str("skip_fields"), SKIP_FIELDS) or 0,
         skip_chars=_parse_count(fl.as_str("skip_chars"), SKIP_CHARS) or 0,
         ignore_case=fl.as_bool("ignore_case"),
@@ -120,98 +120,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
         group=group,
         zero_terminated=fl.as_bool("zero_terminated"),
     )
-
-
-def _skip_fields(text: str, count: int) -> str:
-    index = 0
-    for _ in range(count):
-        if index >= len(text):
-            break
-        while index < len(text) and text[index] in " \t":
-            index += 1
-        while index < len(text) and text[index] not in " \t":
-            index += 1
-    return text[index:]
-
-
-def _comparison_key(line: bytes, flags: UniqFlags) -> str:
-    text = _skip_fields(decode_text(line), flags.skip_fields)
-    if flags.skip_chars > 0:
-        text = text[flags.skip_chars :]
-    if flags.check_chars is not None:
-        text = text[: flags.check_chars]
-    if flags.ignore_case:
-        text = text.lower()
-    return text
-
-
-def _format_record(
-    line: bytes, count: int, flags: UniqFlags, separator: bytes
-) -> bytes:
-    if flags.count:
-        return encode_text(f"{count:>7} ") + line + separator
-    return line + separator
-
-
-def _group_separator_before(index: int, method: str) -> bool:
-    if method in ("prepend", "both"):
-        return True
-    return method in ("separate", "append") and index > 0
-
-
-async def _uniq_stream(
-    source: AsyncIterator[bytes], flags: UniqFlags
-) -> AsyncIterator[bytes]:
-    separator = record_separator(flags.zero_terminated)
-    reader = AsyncLineIterator(source)
-    first: bytes | None = None
-    current_key: str | None = None
-    count = 0
-    group_index = -1
-    repeated_groups = 0
-    try:
-        while True:
-            line = await reader.readline(separator)
-            key = None if line is None else _comparison_key(line, flags)
-            if line is None or first is None or key != current_key:
-                if (
-                    first is not None
-                    and flags.all_repeated is None
-                    and (flags.count or flags.unique_only)
-                ):
-                    if not (flags.duplicates_only and count == 1) and not (
-                        flags.unique_only and count > 1
-                    ):
-                        yield _format_record(first, count, flags, separator)
-                if line is None:
-                    break
-                first, current_key, count = line, key, 0
-                group_index += 1
-            count += 1
-            if flags.group is not None:
-                if count == 1 and _group_separator_before(
-                    group_index, flags.group
-                ):
-                    yield separator
-                yield line + separator
-            elif flags.all_repeated is not None:
-                if count == 2:
-                    if flags.all_repeated == "prepend" or (
-                        flags.all_repeated == "separate"
-                        and repeated_groups > 0
-                    ):
-                        yield separator
-                    yield first + separator
-                    repeated_groups += 1
-                if count >= 2:
-                    yield line + separator
-            elif not (flags.count or flags.unique_only):
-                if count == (2 if flags.duplicates_only else 1):
-                    yield first + separator
-        if first is not None and flags.group in ("append", "both"):
-            yield separator
-    finally:
-        await reader.discard()
 
 
 async def uniq_generic(
@@ -240,8 +148,8 @@ async def uniq_generic(
             if flags is not None
             else UniqFlags(
                 count=count,
-                duplicates_only=duplicates_only,
-                unique_only=unique_only,
+                repeated=duplicates_only,
+                unique=unique_only,
                 skip_fields=_parse_count(skip_fields, SKIP_FIELDS) or 0,
                 skip_chars=_parse_count(skip_chars, SKIP_CHARS) or 0,
                 ignore_case=ignore_case,
@@ -266,7 +174,9 @@ async def uniq_generic(
         source = read_stream(paths[0])
     else:
         source = resolve_source(stdin)
-    output: ByteSource = _uniq_stream(source, parsed)
+    output: ByteSource = stream_output(
+        open_stream("uniq", asdict(parsed)), source
+    )
     if len(paths) == 2 and paths[1].raw_path != "-":
         if write_bytes is None:
             return None, IOResult(

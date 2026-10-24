@@ -16,7 +16,7 @@
 // Mirrors python/tests/commands/builtin/generic/test_cmp.py.
 
 import { describe, expect, it } from 'vitest'
-import { cmpGeneric, parseCount, parseSkip, visible } from './cmp.ts'
+import { cmpGeneric, parseCount, parseSkip } from './cmp.ts'
 import { UsageError } from '../../errors.ts'
 import { PathSpec } from '../../../types.ts'
 import { materialize } from '../../../io/types.ts'
@@ -121,20 +121,6 @@ describe('parseSkip', () => {
   it('takes a colon pair for one each', () => {
     expect(parseSkip('0:3')).toEqual([0, 3])
     expect(parseSkip('1K:2')).toEqual([1024, 2])
-  })
-})
-
-describe('visible', () => {
-  it.each([
-    ['b'.charCodeAt(0), 'b'],
-    [9, '^I'],
-    [1, '^A'],
-    [127, '^?'],
-    [0xc3, 'M-C'],
-    [0xa9, 'M-)'],
-    [0x80, 'M-^@'],
-  ])('renders %i the cat -v way', (byte, rendered) => {
-    expect(visible(byte)).toBe(rendered)
   })
 })
 

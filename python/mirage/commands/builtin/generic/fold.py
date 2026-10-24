@@ -1,8 +1,8 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
+from typing import Literal
 
-from mirage.commands.builtin.utils.lines import map_stream
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     per_operand,
@@ -20,13 +20,16 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.rs.stream import run_stream
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 
 # GNU fold's line width when -w names none.
 WIDTH = 80
 # GNU 9.7 takes -w as a decimal from 1 to 2**64 - 10, so 0 and anything
 # past this are out of range.
 WIDTH_MAX = ULONG_MAX - 9
+
+Count = Literal["columns", "characters", "bytes"]
 
 
 def _width_refusal(text: str, value: int | None) -> str:
@@ -44,7 +47,7 @@ def _width_refusal(text: str, value: int | None) -> str:
 class FoldFlags:
     width: int = WIDTH
     break_spaces: bool = False
-    count_bytes: bool = False
+    count: Count = "columns"
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags:
@@ -52,65 +55,15 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags:
     width = fl.as_number(
         "width", unsigned_decimal, _width_refusal, low=1, high=WIDTH_MAX
     )
+    # The later of -b and -c wins, as in GNU 9.10.
+    count: Count = "columns"
+    for name in fl.typed_order("bytes", "characters"):
+        count = "bytes" if name == "bytes" else "characters"
     return FoldFlags(
         width=WIDTH if width is None else width,
         break_spaces=fl.as_bool("spaces"),
-        count_bytes=fl.as_bool("bytes"),
+        count=count,
     )
-
-
-def _fold_line(line: str, width: int, break_spaces: bool) -> str:
-    if len(line) <= width:
-        return line
-    parts: list[str] = []
-    while len(line) > width:
-        if break_spaces:
-            idx = line.rfind(" ", 0, width)
-            if idx > 0:
-                parts.append(line[: idx + 1])
-                line = line[idx + 1 :]
-            else:
-                parts.append(line[:width])
-                line = line[width:]
-        else:
-            parts.append(line[:width])
-            line = line[width:]
-    if line:
-        parts.append(line)
-    return "\n".join(parts)
-
-
-def _fold_record(
-    line: bytes, width: int, break_spaces: bool, count_bytes: bool
-) -> bytes:
-    if count_bytes:
-        return b"\n".join(
-            line[i : i + width] for i in range(0, len(line), width)
-        )
-    return _fold_line(
-        line.decode(errors="replace"), width, break_spaces
-    ).encode()
-
-
-async def fold(
-    paths: list[PathSpec],
-    *,
-    read_stream: PolymorphicReadFn,
-    stdin: ByteSource | None = None,
-    width: int = WIDTH,
-    break_spaces: bool = False,
-    count_bytes: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    io = IOResult()
-    read = stdin_stream(read_stream, stdin)
-    transform = partial(
-        _fold_record,
-        width=width,
-        break_spaces=break_spaces,
-        count_bytes=count_bytes,
-    )
-    each = partial(map_stream, transform=transform)
-    return per_operand(paths, read, stdin, io, "fold", each), io
 
 
 async def fold_generic(
@@ -121,6 +74,8 @@ async def fold_generic(
     stream: PolymorphicReadFn,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run fold over resolved operands, GNU semantics; mirrors foldGeneric.
+
+    Each operand is folded on its own, from column 0.
 
     Args:
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
@@ -135,17 +90,16 @@ async def fold_generic(
     readable, err = await split_readable(paths, stat, "fold")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
-    return await merge_split_errors(
-        await fold(
-            readable,
-            read_stream=stream,
-            stdin=ctx.stdin,
-            width=parsed.width,
-            break_spaces=parsed.break_spaces,
-            count_bytes=parsed.count_bytes,
-        ),
-        err,
-    )
+    config: dict[str, JsonValue] = {
+        "width": parsed.width,
+        "spaces": parsed.break_spaces,
+        "count": parsed.count,
+    }
+    io = IOResult()
+    read = stdin_stream(stream, ctx.stdin)
+    each = partial(run_stream, "fold", config)
+    output = per_operand(readable, read, ctx.stdin, io, "fold", each)
+    return await merge_split_errors((output, io), err)
 
 
-__all__ = ["fold", "fold_generic"]
+__all__ = ["fold_generic"]

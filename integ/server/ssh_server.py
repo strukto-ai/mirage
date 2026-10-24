@@ -55,6 +55,7 @@ COPIED = ["&&", "echo", "copied"]
 SUMS = {
     "md5sum": "md5",
     "sha1sum": "sha1",
+    "sha224sum": "sha224",
     "sha256sum": "sha256",
     "sha384sum": "sha384",
     "sha512sum": "sha512",
