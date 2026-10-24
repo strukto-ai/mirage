@@ -14,6 +14,7 @@
 import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { command } from '../../../commands/config.ts'
+import { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import { CommandSpec, type FlagValue, Argument } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
@@ -29,6 +30,117 @@ import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+
+function treeFallbackRegistry(): MountRegistry {
+  const registry = new MountRegistry(
+    { '/longer': new RAMVFS(), '/short': new RAMVFS() },
+    MountMode.WRITE,
+  )
+  for (const prefix of ['/longer', '/short']) {
+    const answer = (): [Uint8Array, IOResult] => [
+      new TextEncoder().encode(`${prefix}\n`),
+      new IOResult(),
+    ]
+    registry.mountForPrefix(prefix).registerCommands([
+      new CLI({
+        spec: new CommandSpec({
+          name: 'remote',
+          subcommands: [new CommandSpec({ name: 'get' }), new CommandSpec({ name: 'put' })],
+        }),
+        handlers: {
+          get: new CLIHandler({ fn: answer }),
+          put: new CLIHandler({ fn: answer, write: true }),
+        },
+      }),
+    ])
+  }
+  return registry
+}
+
+describe('handleCommand — mount tree fallback', () => {
+  it('runs a selected tree even when discovery found a flat reader first', async () => {
+    const registry = treeFallbackRegistry()
+    registry.mountForPrefix('/longer').registerCommands(
+      command({
+        name: 'remote',
+        vfs: 'ram',
+        spec: new CommandSpec({ arguments: [new Argument('args', { nargs: '*' })] }),
+        fn: () => [null, new IOResult()],
+      }),
+    )
+    const [stdout, io] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', 'put'],
+      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(decode(await materialize(stdout))).toBe('/short\n')
+  })
+
+  it.each([
+    ['get', '/longer/'],
+    ['put', '/short/'],
+  ])('routes the %s leaf by its own write declaration', async (verb, prefix) => {
+    const registry = treeFallbackRegistry()
+    registry.mountForPrefix('/longer').mode = MountMode.READ
+    const [stdout, io] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', verb],
+      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(decode(await materialize(stdout))).toBe(`${prefix.slice(0, -1)}\n`)
+  })
+
+  it.each([['--help'], ['put', '--help'], ['put', '-h'], ['unknown']])(
+    'answers tree help or usage before ambiguous write selection: %s',
+    async (...argv) => {
+      const registry = treeFallbackRegistry()
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', ...argv],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(decode(io.stderr as Uint8Array)).not.toContain('ambiguous')
+      expect(decode(await materialize(stdout)) + decode(io.stderr as Uint8Array)).toContain(
+        argv[0] === 'unknown' ? "'unknown' is not a remote command" : 'usage:',
+      )
+    },
+  )
+
+  it('refuses two writable trees and keeps cwd selection authoritative', async () => {
+    const registry = treeFallbackRegistry()
+    const session = new SessionState({ sessionId: 'test' })
+    const [, refused] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', 'put'],
+      routed(new EvaluationContext(session)),
+    )
+    expect(refused.exitCode).toBe(1)
+    expect(decode(refused.stderr as Uint8Array)).toBe(
+      'remote: ambiguous, registered on 2 writable mounts:\n' +
+        '  /longer\n  /short\ncd into the target mount or pass its path to disambiguate.\n',
+    )
+    session.cwd = '/short'
+    const [stdout, io] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', 'put'],
+      routed(new EvaluationContext(session)),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(decode(await materialize(stdout))).toBe('/short\n')
+  })
+})
 
 class StubVFS extends BaseVFS {
   constructor(override readonly name: string) {

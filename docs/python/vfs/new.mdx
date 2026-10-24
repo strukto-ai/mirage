@@ -518,6 +518,13 @@ The generic commands are registered once per workspace, and every mount falls ba
 - Declare `write=True` on a user command that writes. Policy reads it as `CommandContext.write`, and the mount drops its cached listings and bodies after the command runs, since no per-path invalidation saw the write.
 - A program whose verbs work on the backend's files can be one command tree: hand the VFS a `CLI` in `commands=[...]`, and the mount serves its verbs under the root's name on its own accessor ([Serve a CLI on a mount](/python/cli/custom#serve-a-cli-on-a-mount)).
 
+For a flat mount command, an explicit path or the working directory selects
+the target before fallback. Without either, a write selects the only writable
+matching mount and refuses multiple writable matches. Read fallback stays
+deterministic: root first, then longest prefix, with registration order breaking
+ties; multiple read matches produce a debug log. Hidden mounts do not participate,
+and the session's permissions can narrow which mounts are writable.
+
 Export the final list as `COMMANDS` from `commands/builtin/<name>/__init__.py`, and map the VFS class's name to that module in `workspace/mount/backends.py`. The mount imports it on first use, and a subclass serves its base's commands.
 
 ## 5. VFS Class

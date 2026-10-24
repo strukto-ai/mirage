@@ -23,6 +23,7 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { Files } from '../../files.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
+import { MountCommandAmbiguous } from '../../mount/errors.ts'
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
@@ -166,9 +167,16 @@ export async function runOnMount(
   if (mount === null) {
     const resolvePaths = hint !== null ? [hint] : paths
     try {
-      mount = await registry.resolveMount(cmdName, resolvePaths, session.cwd)
+      mount = await registry.resolveMount(
+        cmdName,
+        resolvePaths,
+        session.cwd,
+        opts.argv,
+        envSnapshot(session),
+        sessionAccess(session),
+      )
     } catch (err) {
-      if (err instanceof MountCommandUnsupported) {
+      if (err instanceof MountCommandUnsupported || err instanceof MountCommandAmbiguous) {
         const errBytes = encodeText(`${err.message}\n`)
         return [null, new IOResult({ exitCode: 1, stderr: errBytes })]
       }

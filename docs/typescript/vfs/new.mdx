@@ -499,6 +499,13 @@ The generic commands are registered once per workspace, and every mount falls ba
 - Declare `write: true` on a user command that writes. Policy reads it as `CommandContext.write`, and the mount drops its cached listings and bodies after the command runs, since no per-path invalidation saw the write.
 - A program whose verbs work on the backend's files can be one command tree: hand the VFS a `CLI` in `commands`, and the mount serves its verbs under the root's name on its own accessor ([Serve a CLI on a mount](/typescript/cli/custom#serve-a-cli-on-a-mount)).
 
+For a flat mount command, an explicit path or the working directory selects
+the target before fallback. Without either, a write selects the only writable
+matching mount and refuses multiple writable matches. Read fallback stays
+deterministic: root first, then longest prefix, with registration order breaking
+ties; multiple read matches produce a debug log. Hidden mounts do not participate,
+and the session's permissions can narrow which mounts are writable.
+
 ## 5. VFS Class
 
 Extend `BaseVFS`, declare the facts as members, and define the functions over the core. Core functions stay independent of the VFS class:

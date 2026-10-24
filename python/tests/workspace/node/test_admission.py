@@ -779,6 +779,50 @@ class NoWrites(Policy):
 
 
 @pytest.mark.asyncio
+async def test_fallback_admission_reads_each_candidate_leaf():
+    policy = NoWrites()
+    ws = Workspace(
+        {"/longer": RAMVFS(), "/b": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[policy],
+    )
+    ws.mount("/longer").register_commands(
+        [
+            command(
+                "tool",
+                vfs=None,
+                spec=CommandSpec(arguments=(Argument("args", nargs="*"),)),
+            )(_noop),
+        ]
+    )
+    ws.mount("/b").register_commands(
+        [
+            CLI(
+                spec=CommandSpec(
+                    name="tool",
+                    subcommands=(
+                        CommandSpec(name="peek"),
+                        CommandSpec(name="send"),
+                    ),
+                ),
+                handlers={
+                    "peek": CLIHandler(_noop),
+                    "send": CLIHandler(_noop, write=True),
+                },
+            ),
+        ]
+    )
+    try:
+        read = await ws.shell("tool peek")
+        assert read.exit_code == 0
+        write = await ws.shell("tool send")
+        assert write.exit_code == 126
+        assert policy.seen == {"tool peek": False, "tool send": True}
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_command_reads_as_writing_when_its_handler_says_so():
     policy = NoWrites()
     ws = Workspace(

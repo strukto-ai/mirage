@@ -20,6 +20,7 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.types import CommandSpec, FlagValue
 from mirage.commands.spec.usage import read_fail_exit_code
+from mirage.context.session_context import session_access
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -44,6 +45,7 @@ from mirage.workspace.mount import (
     MountEntry,
     MountRegistry,
 )
+from mirage.workspace.mount.errors import MountCommandAmbiguous
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
@@ -215,9 +217,14 @@ async def run_on_mount(
         resolve_paths = [resolve_hint] if resolve_hint else paths
         try:
             mount = await registry.resolve_mount(
-                cmd_name, resolve_paths, session.cwd
+                cmd_name,
+                resolve_paths,
+                session.cwd,
+                argv,
+                env_snapshot(session),
+                session_access(session),
             )
-        except MountCommandUnsupported as exc:
+        except (MountCommandUnsupported, MountCommandAmbiguous) as exc:
             return None, IOResult(exit_code=1, stderr=encode_text(f"{exc}\n"))
         if mount is None:
             return None, IOResult(

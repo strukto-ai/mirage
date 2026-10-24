@@ -678,6 +678,95 @@ describe('what the handler a command resolves to declares', () => {
     expect(paths['notes show -C /other note']).toEqual(['/other', '/other/note'])
     expect(paths['scan /other/s']).toEqual(['/other/s'])
   })
+
+  it.each(['flat', 'tree'])(
+    'admits a %s fallback using every candidate write declaration',
+    async (shape) => {
+      const calls: string[] = []
+      const w = new Workspace(
+        { '/reader': new RAMVFS(), '/write': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          shellParser: await getTestParser(),
+          policies: [
+            {
+              preCommand: (ctx): Action | null =>
+                ctx.write === true ? { kind: 'deny', reason: 'no writes' } : null,
+            },
+          ],
+        },
+      )
+      open.push(w)
+      w.mount('/reader').registerCommands(
+        command({
+          name: 'remote',
+          vfs: null,
+          spec: new CommandSpec({ arguments: [new Argument('args', { nargs: '*' })] }),
+          fn: () => {
+            calls.push('read')
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      const write: CommandFn = () => {
+        calls.push('write')
+        return [null, new IOResult()]
+      }
+      w.mount('/write').registerCommands(
+        shape === 'flat'
+          ? command({ name: 'remote', vfs: null, spec: new CommandSpec(), fn: write, write: true })
+          : [
+              new CLI({
+                spec: new CommandSpec({
+                  name: 'remote',
+                  subcommands: [new CommandSpec({ name: 'put' })],
+                }),
+                handlers: { put: new CLIHandler({ fn: write, write: true }) },
+              }),
+            ],
+      )
+      const result = await w.shell(shape === 'flat' ? 'remote' : 'remote put')
+      expect(result.exitCode).toBe(126)
+      expect(result.stderrText).toContain('Permission denied')
+      expect(calls).toEqual([])
+    },
+  )
+
+  it('keeps an explicitly bound flat reader independent of a writing fallback tree', async () => {
+    const w = new Workspace(
+      { '/reader': new RAMVFS(), '/write': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        policies: [
+          {
+            preCommand: (ctx): Action | null =>
+              ctx.write === true ? { kind: 'deny', reason: 'no writes' } : null,
+          },
+        ],
+      },
+    )
+    open.push(w)
+    w.mount('/reader').registerCommands(
+      command({
+        name: 'remote',
+        vfs: null,
+        spec: new CommandSpec({ arguments: [new Argument('path', { type: 'path' })] }),
+        fn: () => [new TextEncoder().encode('read\n'), new IOResult()],
+      }),
+    )
+    w.mount('/write').registerCommands([
+      new CLI({
+        spec: new CommandSpec({
+          name: 'remote',
+          arguments: [new Argument('args', { nargs: '*' })],
+        }),
+        handlers: { '': new CLIHandler({ fn: noop, write: true }) },
+      }),
+    ])
+    const result = await w.shell('remote /reader/item')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, 'read\n', ''])
+  })
 })
 
 // One test in the spelling a name gives it: `test e`, `[ e ]` or `[[ e ]]`.

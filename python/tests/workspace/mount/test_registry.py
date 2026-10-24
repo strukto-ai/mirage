@@ -27,11 +27,22 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
-from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
+from mirage.types import (
+    HiddenPaths,
+    MountMode,
+    PathSpec,
+    ReadPolicy,
+    ReadSpec,
+    ShowEntry,
+    ShownPaths,
+    Visibility,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ssh import SSHVFS, SSHConfig
+from mirage.view.types import SessionAccess
 from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
+from mirage.workspace.mount.errors import MountCommandAmbiguous
 
 # ── mount_for ──────────────────────────────────
 
@@ -77,8 +88,8 @@ def test_nested_prefix_outer(nested_registry):
 # ── nested command name resolution ─────────────
 
 
-def _register_cmd(mount, name):
-    @command(name, vfs="ram", spec=CommandSpec())
+def _register_cmd(mount, name, *, write=False):
+    @command(name, vfs="ram", spec=CommandSpec(), write=write)
     async def _fn(accessor, paths, *texts, **flags):
         return None, IOResult()
 
@@ -314,6 +325,129 @@ def test_mount_for_command_nonexistent(registry):
 def test_mount_for_command_grep(multi_registry):
     mount = multi_registry.mount_for_command("grep")
     assert mount is not None
+
+
+@pytest.mark.parametrize("left_mode", [MountMode.READ, MountMode.WRITE])
+def test_fallback_write_selects_one_writable_mount_or_refuses(left_mode):
+    reg = MountRegistry()
+    left = reg.mount("/longer", RAMVFS(), left_mode)
+    right = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    for mount in (left, right):
+        _register_cmd(mount, "stamp", write=True)
+    assert reg.command_mount("stamp", [], "/") is left
+    if left_mode is MountMode.READ:
+        assert reg.execution_mount("stamp", [], "/") is right
+    else:
+        with pytest.raises(MountCommandAmbiguous) as exc:
+            reg.execution_mount("stamp", [], "/")
+        assert str(exc.value) == (
+            "stamp: ambiguous, registered on 2 writable mounts:\n"
+            "  /longer\n  /b\n"
+            "cd into the target mount or pass its path to disambiguate."
+        )
+    assert reg.execution_mount("stamp", [], "/b") is right
+    assert (
+        reg.execution_mount(
+            "stamp",
+            [PathSpec(virtual="/longer/x", directory="/longer", vfs_path="x")],
+            "/b",
+        )
+        is left
+    )
+
+
+def test_fallback_read_keeps_order_and_logs(caplog):
+    reg = MountRegistry()
+    first = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    second = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    for mount in (first, second):
+        _register_cmd(mount, "peek")
+    with caplog.at_level("DEBUG", logger="mirage.workspace.mount.registry"):
+        assert reg.execution_mount("peek", [], "/") is first
+    assert "multiple read mounts" in caplog.text
+    assert "/longer/" in caplog.text
+    assert "/b/" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "name,argv", [("gzip", ["-c"]), ("tar", ["-t"]), ("sort", [])]
+)
+def test_fallback_builtin_read_forms_do_not_count_as_writes(name, argv):
+    reg = MountRegistry()
+    first = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    assert reg.execution_mount(name, [], "/", argv) is first
+
+
+def test_fallback_uses_session_modes_and_visibility():
+    reg = MountRegistry()
+    first = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    second = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    for mount in (first, second):
+        _register_cmd(mount, "stamp", write=True)
+    narrowed = SessionAccess(
+        session_id="narrowed",
+        visibility=None,
+        umask=0o22,
+        shopts={},
+        mount_modes={"/longer": MountMode.READ, "/b": MountMode.WRITE},
+    )
+    assert reg.execution_mount("stamp", [], "/", access=narrowed) is second
+    hidden = SessionAccess(
+        session_id="hidden",
+        visibility=Visibility(paths=HiddenPaths(paths=("/longer",))),
+        umask=0o22,
+        shopts={},
+        mount_modes=None,
+    )
+    assert reg.command_candidates("stamp", [], "/", hidden) == [second]
+    assert reg.execution_mount("stamp", [], "/", access=hidden) is second
+    shown = SessionAccess(
+        session_id="shown",
+        visibility=Visibility(
+            paths=HiddenPaths(paths=("/longer",)),
+            shown=ShownPaths(
+                entries=(ShowEntry("/longer/public", MountMode.WRITE),)
+            ),
+        ),
+        umask=0o22,
+        shopts={},
+        mount_modes={"/longer": MountMode.READ, "/b": MountMode.READ},
+    )
+    assert reg.execution_mount("stamp", [], "/", access=shown) is first
+
+
+def test_fallback_tree_uses_leaf_write_contract():
+    reg = MountRegistry()
+    first = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    second = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    cli = CLI(
+        spec=CommandSpec(
+            name="tool",
+            subcommands=(CommandSpec(name="peek"), CommandSpec(name="stamp")),
+        ),
+        handlers={
+            "peek": CLIHandler(_noop_cli),
+            "stamp": CLIHandler(_noop_cli, write=True),
+        },
+    )
+    for mount in (first, second):
+        mount.register_commands([cli])
+    assert reg.execution_mount("tool", [], "/", ["peek"]) is first
+    with pytest.raises(MountCommandAmbiguous):
+        reg.execution_mount("tool", [], "/", ["stamp"])
+
+
+def test_fallback_filters_session_private_mounts_before_binding():
+    reg = MountRegistry()
+    private = reg.mount("/private", RAMVFS(), MountMode.WRITE)
+    shared = reg.mount("/shared", RAMVFS(), MountMode.WRITE)
+    for mount in (private, shared):
+        _register_cmd(mount, "stamp", write=True)
+    private.visible = lambda session_id: session_id == "owner"
+    other = SessionAccess("other", None, 0o22, {}, None)
+    assert reg.command_candidates("stamp", [], "/private", other) == [shared]
+    assert reg.execution_mount("stamp", [], "/private", access=other) is shared
 
 
 # ── resolve_mount cache redirect ───────────────

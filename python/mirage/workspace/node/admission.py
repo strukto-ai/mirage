@@ -20,6 +20,7 @@ from typing import Any
 
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec.types import ValueType
+from mirage.context.session_context import session_access
 from mirage.io.types import ByteSource
 from mirage.policy import (
     Abandoned,
@@ -429,13 +430,32 @@ def _writes(
         return False
     tree = command_tree(registry, name, session.cwd)
     if tree is not None:
-        result = walk(
-            name, tree.spec, args, session.cwd, env_snapshot(session)
-        )
-        return (
-            result.leaf is not None
-            and tree.handlers[" ".join(result.path)].write
-        )
+        trees = [tree]
+        if consumer is Consumer.MOUNT:
+            candidates = registry.command_candidates(
+                name, [], session.cwd, session_access(session)
+            )
+            trees = []
+            for mount in candidates:
+                candidate_tree = mount.cli_for(name)
+                if candidate_tree is not None:
+                    trees.append(candidate_tree)
+                elif mount.may_write(name):
+                    return True
+        for candidate_tree in trees:
+            result = walk(
+                name,
+                candidate_tree.spec,
+                args,
+                session.cwd,
+                env_snapshot(session),
+            )
+            if (
+                result.leaf is not None
+                and candidate_tree.handlers[" ".join(result.path)].write
+            ):
+                return True
+        return False
     runs = runs_as(name, registry)
     # The words that route the run, picked as execution picks them: a
     # stdin `-` and an assignment route nowhere, and a path-valued option,
@@ -470,8 +490,9 @@ def _writes(
             if isinstance(p, PathSpec) and p.virtual not in typed
         ]
     scopes = named or ([implied] if implied is not None else [])
-    first = registry.command_mount(runs, scopes[:1], session.cwd)
-    reached = [first] if first is not None else []
+    reached = registry.command_candidates(
+        runs, scopes[:1], session.cwd, session_access(session)
+    )
     for scope in scopes:
         owner = registry.try_mount_for(scope.virtual)
         below = scope.virtual.rstrip("/") + "/"
@@ -482,11 +503,27 @@ def _writes(
         ]
     extensions = {get_extension(p.virtual) for p in named} or {None}
     builtins = changes_files(runs, [runs, *operands])
-    return any(
-        m.may_write(runs, extension, builtins)
-        for m in reached
-        for extension in extensions
-    )
+    for mount in reached:
+        candidate_tree = mount.cli_for(runs)
+        if candidate_tree is not None:
+            result = walk(
+                runs,
+                candidate_tree.spec,
+                args,
+                session.cwd,
+                env_snapshot(session),
+            )
+            if (
+                result.leaf is not None
+                and candidate_tree.handlers[" ".join(result.path)].write
+            ):
+                return True
+        elif any(
+            mount.may_write(runs, extension, builtins)
+            for extension in extensions
+        ):
+            return True
+    return False
 
 
 async def gate(

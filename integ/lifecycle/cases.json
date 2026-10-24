@@ -6899,6 +6899,248 @@
           }
         }
       ]
+    },
+    {
+      "id": "ambiguous-write-fallback-requires-a-target",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/longer": {
+            "vfs": "ram",
+            "config": {}
+          },
+          "/b": {
+            "vfs": "ram",
+            "config": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "register_command",
+          "path": "/longer",
+          "name": "stamp",
+          "write": true,
+          "stdout": "longer\n"
+        },
+        {
+          "op": "register_command",
+          "path": "/longer",
+          "name": "probe",
+          "write": false,
+          "stdout": "longer\n"
+        },
+        {
+          "op": "register_command",
+          "path": "/b",
+          "name": "stamp",
+          "write": true,
+          "stdout": "b\n"
+        },
+        {
+          "op": "register_command",
+          "path": "/b",
+          "name": "probe",
+          "write": false,
+          "stdout": "b\n"
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: ambiguous, registered on 2 writable mounts:\n  /longer\n  /b\ncd into the target mount or pass its path to disambiguate.\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "probe",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "longer\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "type -t stamp",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "file\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "(cd /b && stamp)",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "stamp /b",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "set_mode",
+          "path": "/longer",
+          "mode": "read"
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "stamp /longer",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: read-only mount at /longer/\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "(cd /longer && stamp)",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: read-only mount at /longer/\n"
+            }
+          }
+        },
+        {
+          "op": "set_mode",
+          "path": "/b",
+          "mode": "read"
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: read-only mount at /longer/\n"
+            }
+          }
+        },
+        {
+          "op": "set_mode",
+          "path": "/longer",
+          "mode": "write"
+        },
+        {
+          "op": "set_mode",
+          "path": "/b",
+          "mode": "write"
+        },
+        {
+          "op": "set_profile",
+          "profile": {
+            "paths": {
+              "hide": [
+                "/longer"
+              ]
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "probe",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": {
+            "mounts": {
+              "/longer": "read"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "b\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "stamp /longer",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: read-only mount at /longer/\n"
+            }
+          }
+        },
+        {
+          "op": "set_profile",
+          "profile": {}
+        },
+        {
+          "op": "exec",
+          "command": "stamp",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "stamp: ambiguous, registered on 2 writable mounts:\n  /longer\n  /b\ncd into the target mount or pass its path to disambiguate.\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -46,8 +46,16 @@ import {
   WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
-import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
+import { changesFiles } from '../lookup/constants.ts'
+import {
+  effectivePathMode,
+  sessionVisibility,
+  strongestModeUnder,
+} from '../../context/session_context.ts'
+import { walk } from '../../commands/cli/walk.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { MountEntry, type MountInit } from './mount.ts'
+import { MountCommandAmbiguous } from './errors.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -66,6 +74,7 @@ interface ReadReconciler {
 }
 
 export const DEV_PREFIX = '/dev/'
+export const logger: { debug?: (message: string) => void } = {}
 
 // Raised when a path-bound command is unsupported by its backend.
 // Rendered in the GNU shape `<cmd>: <operand>: <reason>` with the
@@ -667,18 +676,24 @@ export class MountRegistry {
     return effectivePathMode(virtual, m.prefix, m.mode, access) === MountMode.EXEC
   }
 
-  mountForCommand(cmdName: string): MountEntry | null {
-    if (this.rootRef !== null) {
-      const cmd = this.rootRef.resolveCommand(cmdName)
-      if (cmd !== null) return this.rootRef
-    }
-    for (const m of this.visibleMounts()) {
-      if (m.prefix === DEV_PREFIX) continue
-      const cmd = m.resolveCommand(cmdName)
-      if (cmd === null) continue
-      return m
-    }
-    return null
+  private fallbackCandidates(cmdName: string, access?: SessionAccess): MountEntry[] {
+    const visible = this.visibleMounts(access?.sessionId)
+    const ordered =
+      this.rootRef === null
+        ? visible
+        : [this.rootRef, ...visible.filter((mount) => mount !== this.rootRef)]
+    const visibility = sessionVisibility(access)
+    return ordered.filter(
+      (mount) =>
+        visible.includes(mount) &&
+        mount.prefix !== DEV_PREFIX &&
+        pathVisible(visibility, mount.prefix) &&
+        mount.resolveCommand(cmdName) !== null,
+    )
+  }
+
+  mountForCommand(cmdName: string, access?: SessionAccess): MountEntry | null {
+    return this.fallbackCandidates(cmdName, access)[0] ?? null
   }
 
   /**
@@ -705,26 +720,86 @@ export class MountRegistry {
   }
 
   /**
-   * The mount a command runs on, as `resolveMount` picks it, without readying
-   * it: the mount of the first path operand, else of the working directory,
-   * when it registers the command; else the first mount that does. Null
-   * where none does, or where the first operand's mount lacks it, a line
-   * `resolveMount` refuses. Mirrors Python's `MountRegistry.command_mount`.
+   * Candidates for discovery and admission, without readying a backend.
+   * A path or working directory that owns the command selects it; fallback
+   * retains root-first, then longest-prefix registration order.
    */
-  commandMount(cmdName: string, pathScopes: readonly PathSpec[], cwd: string): MountEntry | null {
+  commandCandidates(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    access?: SessionAccess,
+  ): MountEntry[] {
     const first = pathScopes[0]
-    const mount = this.tryMountFor(first?.virtual ?? cwd)
-    if (mount !== null && mount.resolveCommand(cmdName) !== null) return mount
-    if (mount !== null && first !== undefined) return null
-    return this.mountForCommand(cmdName)
+    const visible = this.visibleMounts(access?.sessionId)
+    const owner = ownerPrefix(
+      visible.map((mount) => mount.prefix),
+      first?.virtual ?? cwd,
+    )
+    const mount = visible.find((candidate) => candidate.prefix === owner)
+    if (mount !== undefined && mount.resolveCommand(cmdName) !== null) {
+      return pathVisible(sessionVisibility(access), mount.prefix) ? [mount] : []
+    }
+    if (mount !== undefined && first !== undefined) return []
+    return this.fallbackCandidates(cmdName, access)
+  }
+
+  /** The first discovery candidate; selecting execution may refuse ambiguity. */
+  commandMount(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    access?: SessionAccess,
+  ): MountEntry | null {
+    return this.commandCandidates(cmdName, pathScopes, cwd, access)[0] ?? null
+  }
+
+  /** Select an unambiguous write target without starting a backend. */
+  executionMount(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    env: Readonly<Record<string, string>> = {},
+    access?: SessionAccess,
+  ): MountEntry | null {
+    const candidates = this.commandCandidates(cmdName, pathScopes, cwd, access)
+    const first = candidates[0] ?? null
+    if (candidates.length < 2 || first === null) return first
+    const builtins = changesFiles(cmdName, [cmdName, ...argv])
+    const writing = candidates.filter((mount) => {
+      const tree = mount.cliFor(cmdName)
+      if (tree === null) return mount.mayWrite(cmdName, null, builtins)
+      const result = walk(cmdName, tree.spec, argv, cwd, env)
+      return result.leaf !== null && tree.handlers[result.path.join(' ')]?.write === true
+    })
+    if (writing.length === 0) {
+      logger.debug?.(
+        `${cmdName}: using ${first.prefix} from ${String(candidates.length)} readable mounts`,
+      )
+      return first
+    }
+    const writable = writing.filter(
+      (mount) => strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ,
+    )
+    if (writable.length > 1) {
+      throw new MountCommandAmbiguous(
+        cmdName,
+        writable.map((mount) => mount.prefix),
+      )
+    }
+    return writable[0] ?? first
   }
 
   async resolveMount(
     cmdName: string,
     pathScopes: readonly PathSpec[],
     cwd: string,
+    argv: readonly string[] = [],
+    env: Readonly<Record<string, string>> = {},
+    access?: SessionAccess,
   ): Promise<MountEntry | null> {
-    const mount = this.commandMount(cmdName, pathScopes, cwd)
+    const mount = this.executionMount(cmdName, pathScopes, cwd, argv, env, access)
     const first = pathScopes[0]
     if (mount === null && first !== undefined) {
       const owner = this.tryMountFor(first.virtual)

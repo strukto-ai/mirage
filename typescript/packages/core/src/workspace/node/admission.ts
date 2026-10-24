@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { pathVisible } from '../../utils/hidden.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   Outcome,
@@ -52,7 +53,6 @@ import { TEST_NAMES, fileOperands } from '../executor/builtins/condition/operand
 import { CondRefused } from '../executor/builtins/condition/types.ts'
 import {
   CWD_DEFAULT_RAW,
-  commandTree,
   defaultCwdOperand,
   mergeScopes,
   pathFlagScopes,
@@ -430,10 +430,19 @@ function writes(
   )
     return true
   if (consumer !== Consumer.CLI && consumer !== Consumer.MOUNT) return false
-  const tree = commandTree(registry, name, session.cwd)
+  const tree = registry.clis.get(name)?.cli ?? null
   if (tree !== null) {
     const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
     return result.leaf !== null && tree.handlers[result.path.join(' ')]?.write === true
+  }
+  const candidates = registry.commandCandidates(name, [], session.cwd, sessionAccess(session))
+  if ((candidates[0]?.cliFor(name) ?? null) !== null) {
+    return candidates.some((mount) => {
+      const cli = mount.cliFor(name)
+      if (cli === null) return mount.mayWrite(name)
+      const result = walk(name, cli.spec, args, session.cwd, envSnapshot(session))
+      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.write === true
+    })
   }
   const runs = runsAs(name, registry)
   // The words that route the run, picked as execution picks them: a stdin `-`
@@ -465,8 +474,12 @@ function writes(
     }
   }
   const scopes = named.length > 0 ? named : implied !== null ? [implied] : []
-  const first = registry.commandMount(runs, scopes.slice(0, 1), session.cwd)
-  const reached = first !== null ? [first] : []
+  const reached = registry.commandCandidates(
+    runs,
+    scopes.slice(0, 1),
+    session.cwd,
+    sessionAccess(session),
+  )
   for (const scope of scopes) {
     const owner = registry.tryMountFor(scope.virtual)
     const below = `${rstripSlash(scope.virtual)}/`
@@ -474,9 +487,14 @@ function writes(
   }
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
   const builtins = changesFiles(runs, [runs, ...operands])
-  return reached.some((m) =>
-    [...extensions].some((extension) => m.mayWrite(runs, extension, builtins)),
-  )
+  return reached.some((mount) => {
+    const cli = mount.cliFor(runs)
+    if (cli !== null) {
+      const result = walk(runs, cli.spec, args, session.cwd, envSnapshot(session))
+      return result.leaf !== null && cli.handlers[result.path.join(' ')]?.write === true
+    }
+    return [...extensions].some((extension) => mount.mayWrite(runs, extension, builtins))
+  })
 }
 
 export async function gate(
