@@ -38,6 +38,10 @@ interface GridFSModule {
 // ObjectIds are monotonic within a process.
 const LATEST_SORT: Record<string, -1> = { uploadDate: -1, _id: -1 }
 
+// Each filename's revisions together, newest first, the order prune keeps
+// them in.
+const PRUNE_SORT: Record<string, -1> = { filename: -1, uploadDate: -1, _id: -1 }
+
 const BATCH = 1000
 
 let cachedModule: Promise<GridFSModule> | null = null
@@ -196,17 +200,33 @@ export async function prune(
 ): Promise<void> {
   const keep = accessor.config.keepRevisions
   if (keep === undefined) return
+  // Streamed newest first within each filename and deleted in batches, so no
+  // history, however long, is ever held in one document or one array.
   const files = await filesColl(accessor)
-  const pipeline: Document[] = [
-    { $match: query },
-    { $sort: { filename: 1, uploadDate: -1, _id: -1 } },
-    { $group: { _id: '$filename', ids: { $push: '$_id' } } },
-  ]
-  const ids: ObjectId[] = []
-  for await (const doc of files.aggregate(pipeline)) {
-    for (const id of (doc.ids as ObjectId[]).slice(keep)) ids.push(id)
+  const cursor = files.find(query, {
+    projection: { _id: 1, filename: 1 },
+    sort: PRUNE_SORT,
+    allowDiskUse: true,
+  })
+  let name: string | null = null
+  let kept = 0
+  let stale: ObjectId[] = []
+  for await (const doc of cursor) {
+    if (doc.filename !== name) {
+      name = doc.filename as string
+      kept = 0
+    }
+    if (kept < keep) {
+      kept += 1
+      continue
+    }
+    stale.push(doc._id)
+    if (stale.length >= BATCH) {
+      await deleteIds(accessor, stale)
+      stale = []
+    }
   }
-  await deleteIds(accessor, ids)
+  await deleteIds(accessor, stale)
 }
 
 /** Delete revisions (file doc + chunks) by `_id`. */

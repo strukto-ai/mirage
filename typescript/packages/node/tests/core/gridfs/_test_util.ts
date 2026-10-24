@@ -141,8 +141,16 @@ export class FakeStore {
 
   // The files collection.
 
-  find(query: Query): AsyncIterable<FakeDoc> {
-    return Readable.from(this.match(query).map((doc) => ({ ...doc })))
+  find(query: Query, options: { sort?: Record<string, 1 | -1> } = {}): AsyncIterable<FakeDoc> {
+    const found = this.match(query)
+    for (const [field, direction] of Object.entries(options.sort ?? {}).reverse()) {
+      found.sort((a, b) => {
+        const [x, y] = [a[field as keyof FakeDoc], b[field as keyof FakeDoc]]
+        const order = x < y ? -1 : x > y ? 1 : 0
+        return order * direction
+      })
+    }
+    return Readable.from(found.map((doc) => ({ ...doc })))
   }
 
   findOne(query: Query, options: { sort?: unknown } = {}): Promise<FakeDoc | null> {

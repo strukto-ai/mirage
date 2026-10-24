@@ -153,8 +153,17 @@ class FakeStore:
         for doc in docs:
             yield dict(doc)
 
-    def find(self, query: dict[str, Any], projection: Any = None) -> Any:
-        return self._iter(self._match(query))
+    def find(
+        self,
+        query: dict[str, Any],
+        projection: Any = None,
+        sort: list[tuple[str, int]] | None = None,
+        allow_disk_use: bool = False,
+    ) -> Any:
+        found = self._match(query)
+        for field, direction in reversed(sort or []):
+            found.sort(key=lambda d: d[field], reverse=direction < 0)
+        return self._iter(found)
 
     async def find_one(
         self, query: dict[str, Any], sort: Any = None, projection: Any = None

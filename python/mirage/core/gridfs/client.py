@@ -29,6 +29,10 @@ from mirage.vfs.gridfs.config import GridFSConfig
 # ObjectIds are monotonic within a process.
 LATEST_SORT = [("uploadDate", -1), ("_id", -1)]
 
+# Each filename's revisions together, newest first, the order prune keeps
+# them in.
+PRUNE_SORT = [("filename", -1), ("uploadDate", -1), ("_id", -1)]
+
 _BATCH = 1000
 
 
@@ -181,16 +185,28 @@ async def prune(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
     keep = accessor.config.keep_revisions
     if keep is None:
         return
-    pipeline: list[dict[str, Any]] = [
-        {"$match": query},
-        {"$sort": {"filename": 1, "uploadDate": -1, "_id": -1}},
-        {"$group": {"_id": "$filename", "ids": {"$push": "$_id"}}},
-    ]
-    ids: list[Any] = []
-    cursor = await files_coll(accessor).aggregate(pipeline)
+    # Streamed newest first within each filename and deleted in batches, so
+    # no history, however long, is ever held in one document or one list.
+    cursor = files_coll(accessor).find(
+        query,
+        projection={"_id": 1, "filename": 1},
+        sort=PRUNE_SORT,
+        allow_disk_use=True,
+    )
+    name: str | None = None
+    kept = 0
+    stale: list[Any] = []
     async for doc in cursor:
-        ids.extend(doc["ids"][keep:])
-    await delete_ids(accessor, ids)
+        if doc["filename"] != name:
+            name, kept = doc["filename"], 0
+        if kept < keep:
+            kept += 1
+            continue
+        stale.append(doc["_id"])
+        if len(stale) >= _BATCH:
+            await delete_ids(accessor, stale)
+            stale = []
+    await delete_ids(accessor, stale)
 
 
 async def delete_ids(accessor: GridFSAccessor, ids: list[Any]) -> None:
