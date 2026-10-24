@@ -426,27 +426,32 @@ async def test_walk_goes_breadth_first_within_its_limits(ssh):
 
 
 @pytest.mark.asyncio
-async def test_walk_stops_at_the_mounts_full_scan_limit(tmp_path):
+async def test_walk_stops_at_the_limit_of_the_mount_it_lists(tmp_path):
     harness = await start_harness(
         tmp_path,
-        Workspace({"/": (RAMVFS(full_scan_limit=2), MountMode.WRITE)}),
+        Workspace(
+            {
+                "/": (RAMVFS(full_scan_limit=-1), MountMode.WRITE),
+                "/w/": (RAMVFS(full_scan_limit=2), MountMode.WRITE),
+            }
+        ),
     )
     try:
         async with codex(harness) as client:
             await client.run(
                 "seed",
-                "mkdir /w && echo > /w/a.txt && echo > /w/b.txt && "
-                "echo > /w/c.txt",
+                "echo > /w/a.txt && echo > /w/b.txt && echo > /w/c.txt && "
+                "ln -s /w /alias",
             )
             walked = await client.result(
-                "fs/walk", {"path": "file:///w", "options": WALK}
+                "fs/walk", {"path": "file:///alias", "options": WALK}
             )
     finally:
         await stop_harness(harness)
     assert walked == {
         "entries": [
-            {"path": "file:///w/a.txt", "kind": "file"},
-            {"path": "file:///w/b.txt", "kind": "file"},
+            {"path": "file:///alias/a.txt", "kind": "file"},
+            {"path": "file:///alias/b.txt", "kind": "file"},
         ],
         "errors": [],
         "truncated": True,

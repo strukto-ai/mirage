@@ -368,7 +368,8 @@ async def add(
         tracked,
         UNTRACKED_ALL,
         roots=pattern_roots(
-            repo_relative(location, start, text) for text in texts
+            (repo_relative(location, start, text) for text in texts),
+            literal=True,
         ),
     )
     ignores = await load_ignores(vfs, location.commondir, location.worktree)

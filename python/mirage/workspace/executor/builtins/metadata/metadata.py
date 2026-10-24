@@ -33,7 +33,7 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
-from mirage.view.types import NamespaceLinks
+from mirage.view.types import MountView, NamespaceLinks
 from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
@@ -364,6 +364,32 @@ async def apply_attrs(
 WalkEntry = tuple[PathSpec, FileStat, PermissionError | None]
 
 
+async def before_recursive_change(
+    mounts: MountView,
+    dispatch: DispatchFn,
+    root: PathSpec,
+    cmd: str,
+) -> None:
+    """Ask the mount of ``root``, and every mount below it, before ``-R``
+    changes anything, as for rm -r: a change cut short would leave a
+    tree that looks done. The walk crosses into each mount below, so
+    each one may refuse.
+
+    Args:
+        mounts (MountView): the mount boundaries (``mounts(False)`` of
+            the session's link table).
+        dispatch (DispatchFn): op dispatcher.
+        root (PathSpec): subtree root (already link-resolved).
+        cmd (str): command name for the refusal.
+
+    Raises:
+        UsageError: a mount refused the walk.
+    """
+    below = mounts.visible_descendants(root.virtual)
+    for virtual in [root.virtual, *below]:
+        await before_full_scan(dispatch, PathSpec.from_str_path(virtual), cmd)
+
+
 async def walk_stats(
     links: NamespaceLinks,
     dispatch: DispatchFn,
@@ -622,10 +648,10 @@ async def change_owner(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            # The mount is asked before anything changes, as for rm -r:
-            # a change cut short would leave a tree that looks done.
             try:
-                await before_full_scan(dispatch, resolved, cmd)
+                await before_recursive_change(
+                    links.mounts(False), dispatch, resolved, cmd
+                )
             except UsageError as exc:
                 errors.append(f"{exc}\n")
                 continue

@@ -6659,6 +6659,17 @@
           "/out": {
             "vfs": "ram",
             "config": {}
+          },
+          "/out/n": {
+            "vfs": "limited-ram",
+            "config": {
+              "full_scan_limit": 2,
+              "files": {
+                "/a.txt": "alpha\n",
+                "/b.txt": "beta\n",
+                "/c.txt": "gamma\n"
+              }
+            }
           }
         },
         "clis": {
@@ -6813,7 +6824,7 @@
         },
         {
           "op": "exec",
-          "command": "chmod -R 700 /data/d; echo $?; chown -R 7 /data/d; echo $?; chgrp -R 7 /data/d; echo $?",
+          "command": "chmod -R 700 /out; echo $?; chown -R 7 /out; echo $?; chgrp -R 7 /data/d; echo $?",
           "expect": {
             "value": {
               "exit_code": 0,
@@ -6824,12 +6835,12 @@
         },
         {
           "op": "exec",
-          "command": "getfattr -R /data/d",
+          "command": "getfattr -R /data/d; ln -s /data/d /out/l && getfattr -R /out/l",
           "expect": {
             "value": {
               "exit_code": 1,
               "stdout": "",
-              "stderr": "getfattr: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "getfattr: /data/d: stopped after 2 files (full_scan_limit); narrow the path\ngetfattr: /out/l: stopped after 2 files (full_scan_limit); narrow the path\n"
             }
           }
         },

@@ -32,7 +32,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.status import WS_1011_INTERNAL_ERROR
 
 from mirage import Workspace
-from mirage.commands.builtin.utils.links import mount_view
+from mirage.commands.builtin.utils.links import link_view, mount_view
 from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.errors import FsCondition, classify
 from mirage.errors.classify import failure_text
@@ -352,8 +352,8 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
 
     Depth 0 is the root's own entries. A directory that cannot be read
     is reported under ``errors`` and the walk goes on. Each mount lists
-    at most its ``full_scan_limit`` entries, as a shell walk does, and
-    the walk is truncated there.
+    at most its ``full_scan_limit`` entries, counted where a link
+    leads, as a shell walk does, and the walk is truncated there.
 
     Args:
         core (MountCore): the channel's mount core.
@@ -379,6 +379,7 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
         PathSpec.from_str_path(core.resolve(root)),
         mount_view(core.files, crossing=True),
     )
+    links = link_view(core.files)
     pending = deque([(root, 0)])
     read = 0
     while pending:
@@ -387,6 +388,10 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
         path, depth = pending.popleft()
         read += 1
         directory = core.resolve(path)
+        if links is not None:
+            directory = links.resolve(directory)
+        if not budget.opens(directory):
+            return {**result, "truncated": True}
         try:
             names = sorted(await children(core, path))
         except Exception as err:

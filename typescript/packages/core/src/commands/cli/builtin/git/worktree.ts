@@ -137,6 +137,7 @@ class Scanner {
       const info = await this.entryStat(child)
       if (info === null) continue
       const directory = info.type === FileType.DIRECTORY
+      if (!directory) this.count(child)
       if (!includeIgnored && rules.isIgnored(child, directory)) continue
       if (!directory) return true
       if (await this.holdsAFile(child, rules, includeIgnored)) return true

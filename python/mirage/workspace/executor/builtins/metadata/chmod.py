@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.utils.formatting import ls_mode_string
-from mirage.commands.builtin.utils.tree import before_full_scan
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
@@ -23,6 +22,7 @@ from mirage.utils.mode import DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parse_chmod
 from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.metadata.metadata import (
     apply_attrs,
+    before_recursive_change,
     resolve_operand,
     unread_error,
     verbosity,
@@ -112,10 +112,10 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
-            # The mount is asked before anything changes, as for rm -r:
-            # a change cut short would leave a tree that looks done.
             try:
-                await before_full_scan(dispatch, resolved, "chmod")
+                await before_recursive_change(
+                    links.mounts(False), dispatch, resolved, "chmod"
+                )
             except UsageError as exc:
                 errors.append(f"{exc}\n")
                 continue

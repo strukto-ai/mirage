@@ -359,31 +359,32 @@ describe('status under a hide', () => {
 // Twin of test_a_work_tree_past_the_full_scan_limit_fails_unless_named.
 describe('a work tree past the full_scan_limit', () => {
   it.each([
-    ['status', true],
-    ['add -A', true],
-    ['diff', true],
-    ['reset', true],
-    ['add sub', true],
-    ['add fresh.txt', false],
-    ['diff -- a.txt', false],
-    ['rm -q --cached b.txt', false],
-  ])('git %s refused: %s', async (line, refused) => {
+    ['status', 2, true],
+    ['add -A', 2, true],
+    ['diff', 1, true],
+    ['reset', 1, true],
+    ['add sub', 2, true],
+    ['add sub/x.txt', 2, false],
+    ["add 'sub/[id].tsx'", 2, false],
+    ['diff -- a.txt', 1, false],
+    ['rm -q --cached b.txt', 1, false],
+  ] as [string, number, boolean][])('git %s at %i refused: %s', async (line, limit, refused) => {
     const ws = new Workspace(
-      { '/repo': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/repo': new RAMVFS({ fullScanLimit: limit }) },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     ws.registerCli('git', GIT)
     try {
       await ws.shell(
-        'git init -q /repo && touch /repo/a.txt /repo/b.txt && git -C /repo add -A && ' +
-          'mkdir /repo/sub && touch /repo/fresh.txt /repo/sub/x /repo/sub/y /repo/sub/z',
+        'git init -q /repo && touch /repo/a.txt /repo/b.txt && git -C /repo add a.txt b.txt && ' +
+          "mkdir /repo/sub && touch /repo/sub/x.txt /repo/sub/y.txt '/repo/sub/[id].tsx'",
       )
       const result = await ws.shell(`git -C /repo ${line} >/dev/null; echo $?`)
       const outcome = [DEC.decode(result.stdout), DEC.decode(result.stderr)]
       if (refused) {
         expect(outcome).toEqual([
           '128\n',
-          'fatal: more than 2 files in the work tree (full_scan_limit)\n',
+          `fatal: more than ${String(limit)} files in the work tree (full_scan_limit)\n`,
         ])
         expect((await ws.shell('git -C /repo ls-files')).stdoutText).toBe('a.txt\nb.txt\n')
       } else {

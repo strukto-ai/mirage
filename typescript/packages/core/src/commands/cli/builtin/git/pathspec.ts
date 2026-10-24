@@ -141,13 +141,17 @@ export function pathspecSelects(
  * Where a walk has to go to see every path some patterns name: each
  * pattern's leading literal part, the path it spells or the directory above
  * its first wildcard. Null when one of them names the whole tree (`.`,
- * `*.c`), or when there are none. Mirrors Python's `pattern_roots`.
+ * `*.c`), or when there are none. `literal` says the operands are paths, as
+ * `git add` and `git rm` take them, so a wildcard is part of a name. Mirrors
+ * Python's `pattern_roots`.
  */
-export function patternRoots(patterns: Iterable<string>): string[] | null {
+export function patternRoots(patterns: Iterable<string>, literal = false): string[] | null {
   const roots: string[] = []
   for (const pattern of patterns) {
     let stem = pattern.endsWith(SLASH) ? pattern.slice(0, -1) : pattern
-    const wild = ['*', '?', '[', '\\'].map((mark) => stem.indexOf(mark)).filter((at) => at >= 0)
+    const wild = literal
+      ? []
+      : ['*', '?', '[', '\\'].map((mark) => stem.indexOf(mark)).filter((at) => at >= 0)
     if (wild.length > 0) {
       const literal = stem.slice(0, Math.min(...wild))
       stem = literal.slice(0, Math.max(literal.lastIndexOf(SLASH), 0))

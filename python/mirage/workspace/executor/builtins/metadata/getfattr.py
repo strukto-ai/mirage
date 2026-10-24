@@ -23,6 +23,7 @@ from mirage.errors import FsCondition, classify
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, word_text
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.metadata.xattr import (
     GETFATTR_USAGE,
     attr_error,
@@ -73,6 +74,7 @@ def encode_value(value: bytes, encoding: str | None) -> bytes:
 
 async def _walk(
     dispatch: DispatchFn,
+    links: NamespaceLinks,
     path: PathSpec,
     shown: str,
     logical: bool,
@@ -87,6 +89,8 @@ async def _walk(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
+        links (NamespaceLinks): the session's link table, which names
+            the directory a listing comes from.
         path (PathSpec): the entry to report and maybe descend into.
         shown (str): its spelling in the ``# file:`` header.
         logical (bool): ``-L``, which descends every link below.
@@ -100,16 +104,20 @@ async def _walk(
             stat, _ = await dispatch("stat", path)
     except (FileNotFoundError, NotADirectoryError):
         return entries
-    if stat.type != FileType.DIRECTORY or not budget.opens(path.virtual):
+    if stat.type != FileType.DIRECTORY:
+        return entries
+    here = links.follow(path.virtual)
+    if not budget.opens(here):
         return entries
     children, _ = await dispatch("readdir", path)
     for child in children:
-        if not budget.spend(path.virtual):
+        if not budget.spend(here):
             break
         name = child.rstrip("/").rsplit("/", 1)[-1]
         entries.extend(
             await _walk(
                 dispatch,
+                links,
                 PathSpec.from_str_path(child.rstrip("/")),
                 f"{shown.rstrip('/')}/{name}",
                 logical,
@@ -175,7 +183,8 @@ async def handle_getfattr(
     errors: list[str] = []
     failed = False
     warned = False
-    mounts = namespace.session_links(session).mounts(True)
+    links = namespace.session_links(session)
+    mounts = links.mounts(True)
     for target in targets:
         typed = target.raw_path or target.virtual
         entries = [(target, typed)]
@@ -183,6 +192,7 @@ async def handle_getfattr(
         if fl.as_bool("recursive"):
             entries = await _walk(
                 dispatch,
+                links,
                 target,
                 typed,
                 fl.as_bool("logical"),

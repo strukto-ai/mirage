@@ -168,6 +168,8 @@ class Scanner:
             if info is None:
                 continue
             directory = info.type is FileType.DIRECTORY
+            if not directory:
+                self._count(child)
             if not include_ignored and rules.is_ignored(child, directory):
                 continue
             if not directory:

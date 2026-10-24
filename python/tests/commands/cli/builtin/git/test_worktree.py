@@ -182,27 +182,28 @@ async def test_a_symlink_to_a_directory_is_not_descended(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line, refused",
+    "line, limit, refused",
     [
-        ("status", True),
-        ("add -A", True),
-        ("diff", True),
-        ("reset", True),
-        ("add sub", True),
-        ("add fresh.txt", False),
-        ("diff -- a.txt", False),
-        ("rm -q --cached b.txt", False),
+        ("status", 2, True),
+        ("add -A", 2, True),
+        ("diff", 1, True),
+        ("reset", 1, True),
+        ("add sub", 2, True),
+        ("add sub/x.txt", 2, False),
+        ("add 'sub/[id].tsx'", 2, False),
+        ("diff -- a.txt", 1, False),
+        ("rm -q --cached b.txt", 1, False),
     ],
 )
 async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
-    repo_path: Path, line: str, refused: bool
+    repo_path: Path, line: str, limit: int, refused: bool
 ):
     (repo_path / "sub").mkdir()
-    for name in ("fresh.txt", "sub/x.txt", "sub/y.txt", "sub/z.txt"):
-        (repo_path / name).write_text("x\n", encoding="utf-8")
+    for name in ("x.txt", "y.txt", "[id].tsx"):
+        (repo_path / "sub" / name).write_text("x\n", encoding="utf-8")
     index = (repo_path / ".git" / "index").read_bytes()
     with Workspace(
-        {MOUNT: DiskVFS(root=str(repo_path), full_scan_limit=2)},
+        {MOUNT: DiskVFS(root=str(repo_path), full_scan_limit=limit)},
         mode=MountMode.WRITE,
     ) as ws:
         ws.register_cli("git", GIT)
@@ -211,7 +212,8 @@ async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
     if refused:
         assert outcome == (
             "128\n",
-            "fatal: more than 2 files in the work tree (full_scan_limit)\n",
+            f"fatal: more than {limit} files in the work tree "
+            "(full_scan_limit)\n",
         )
         assert (repo_path / ".git" / "index").read_bytes() == index
     else:

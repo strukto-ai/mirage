@@ -277,7 +277,10 @@ export async function add(
   const state = await readIndex(repo, vfs)
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
   const start = startPoint(fl).virtual
-  const roots = patternRoots(texts.map((text) => repoRelative(repo.location, start, text)))
+  const roots = patternRoots(
+    texts.map((text) => repoRelative(repo.location, start, text)),
+    true,
+  )
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, false, roots)
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
   const present = new Set(found.files.keys())

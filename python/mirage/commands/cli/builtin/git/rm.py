@@ -318,7 +318,8 @@ async def rm(
             tracked,
             UNTRACKED_NO,
             roots=pattern_roots(
-                repo_relative(location, start, text) for text in texts
+                (repo_relative(location, start, text) for text in texts),
+                literal=True,
             ),
         )
         tree = await asyncio.to_thread(head_entries, repo) or {}

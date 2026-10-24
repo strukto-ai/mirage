@@ -15,7 +15,7 @@
 import { Buffer } from 'node:buffer'
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
-import { mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
+import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { ScanBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
@@ -315,8 +315,8 @@ async function walkKind(core: MountCore, path: string, follow: boolean): Promise
  * `fs/walk`: the tree breadth first, each directory's entries in name
  * order, within the request's limits. Depth 0 is the root's own entries.
  * A directory that cannot be read is reported under `errors` and the walk
- * goes on. Each mount lists at most its `fullScanLimit` entries, as a shell
- * walk does, and the walk is truncated there.
+ * goes on. Each mount lists at most its `fullScanLimit` entries, counted
+ * where a link leads, as a shell walk does, and the walk is truncated there.
  */
 async function walk(core: MountCore, root: string, options: Message): Promise<Message> {
   const maxDepth = arg(options, 'maxDepth', 'number')
@@ -334,13 +334,16 @@ async function walk(core: MountCore, root: string, options: Message): Promise<Me
     PathSpec.fromStrPath(core.resolve(root)),
     mountView(core.files, true) ?? null,
   )
+  const links = linkView(core.files)
   const pending: [string, number][] = [[root, 0]]
   let read = 0
   for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
     if (read >= maxDirectories) return result(true)
     const [path, depth] = next
     read += 1
-    const directory = core.resolve(path)
+    let directory = core.resolve(path)
+    if (links !== undefined) directory = links.resolve(directory)
+    if (!budget.opens(directory)) return result(true)
     let names: string[]
     try {
       names = (await children(core, path)).sort(compareCodePoints)

@@ -17,7 +17,7 @@ import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { FileType, PathSpec } from '../../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { NamespaceLinks } from '../../../../view/types.ts'
+import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
@@ -235,6 +235,21 @@ export async function resolveOperand(
   }
 }
 
+// Ask the mount of `root`, and every mount below it, before -R changes
+// anything, as for rm -r: a change cut short would leave a tree that looks
+// done. The walk crosses into each mount below, so each one may refuse.
+// Mirrors Python's before_recursive_change.
+export async function beforeRecursiveChange(
+  mounts: MountView,
+  dispatch: DispatchFn,
+  root: PathSpec,
+  cmd: string,
+): Promise<void> {
+  for (const virtual of [root.virtual, ...mounts.visibleDescendants(root.virtual)]) {
+    await beforeFullScan(dispatch, PathSpec.fromStrPath(virtual), cmd)
+  }
+}
+
 // One entry of a walked subtree: its path, its stat, and the refusal its
 // listing met (null for a file, or a directory that listed).
 export type WalkEntry = [PathSpec, FileStat, unknown]
@@ -435,10 +450,8 @@ export async function changeOwner(
     }
     const [resolved, stat] = found
     if (fl.asBool('recursive')) {
-      // The mount is asked before anything changes, as for rm -r: a
-      // change cut short would leave a tree that looks done.
       try {
-        await beforeFullScan(dispatch, resolved, cmd)
+        await beforeRecursiveChange(links.mounts(false), dispatch, resolved, cmd)
       } catch (err) {
         if (!(err instanceof UsageError)) throw err
         errors.push(`${err.message}\n`)
