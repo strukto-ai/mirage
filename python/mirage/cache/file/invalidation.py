@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from typing import TypeAlias
 
 from mirage.utils.key_prefix import under_path
@@ -27,16 +29,13 @@ class Invalidation:
     writer was granted its turn after it. The writer takes a stamp before
     it waits and compares it before it installs.
 
-    The window is open only where the writer actually suspends in
-    between, and that differs by host. On TypeScript it always does:
-    ``KeyLock.withLock`` awaits an already-resolved promise, which is a
-    microtask yield, and the redis store additionally awaits its client.
-    On python it currently never does -- ``asyncio.Lock.acquire`` returns
-    without suspending when the lock is free, and neither store holds it
-    across an await -- so the check here is dormant rather than dead: it
-    is the contract both hosts share, and the guard that keeps a future
-    await from silently reopening the window. A test stages it by taking
-    the key's lock itself, which forces the writer to park.
+    The RAM store holds a per-key lock only for its in-memory install,
+    never across hashing or backend I/O. A free lock admits its writer
+    without suspending on both hosts; a queued writer checks its stamp
+    after acquiring the lock. Redis holds no client-side key lock: it
+    sends atomic writes to the server and checks after acquiring its
+    client (an await on TypeScript, synchronous on Python). The guard
+    tracks local invalidations, not writes by other Redis clients.
 
     Two counters, because invalidations have different reaches. The
     store-wide epoch answers ``clear``. The per-key counter answers a
@@ -115,3 +114,28 @@ class Invalidation:
     def invalidate_all(self) -> None:
         """Record an invalidation whose victims cannot be enumerated."""
         self._epoch += 1
+
+
+@contextmanager
+def with_fill_guard(
+    invalidation: Invalidation, keys: Iterable[str]
+) -> Iterator[Callable[[str], bool]]:
+    """Track a fill's keys until it completes, fails or is cancelled.
+
+    Enter before any lock/client wait, then call the yielded predicate
+    immediately before each install or retry. Unknown keys are not live.
+
+    Args:
+        invalidation (Invalidation): the store's local invalidations.
+        keys (Iterable[str]): keys the fill may install; duplicates count once.
+    """
+    stamps = {key: invalidation.enter(key) for key in dict.fromkeys(keys)}
+
+    def is_live(key: str) -> bool:
+        return key in stamps and not invalidation.stale(key, stamps[key])
+
+    try:
+        yield is_live
+    finally:
+        for key in stamps:
+            invalidation.leave(key)

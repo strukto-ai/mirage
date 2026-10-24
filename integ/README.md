@@ -64,6 +64,10 @@ adds named compression, archive updates, descriptor reuse and deferred
 script output round trips. Spool spill/cleanup and upload protocol failures
 are covered by mirrored unit tests.
 
+File-cache fill guards and their invalidation tests live under `cache/file`
+on both hosts. The existing whole-host core and TypeScript filters cover
+them, including the Node Redis store.
+
 The streamed read probes in `vfs/ranges/stream.json` accept
 `max_chunk_size` to bound every returned chunk and `take_bytes` to close
 after a prefix. The lifecycle corpus also uses a tracked source that fails
