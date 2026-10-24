@@ -7,6 +7,13 @@ use crate::request::{Reply, Request, bytes};
 /// host.
 pub(super) const LIMIT: usize = 64 * 1024;
 
+/// The longest line, pattern space or hold space sed holds: past it the
+/// run ends as GNU's does once memory runs out.
+#[cfg(not(test))]
+pub(super) const MAX_LEN: usize = 1 << 30;
+#[cfg(test)]
+pub(super) const MAX_LEN: usize = 1 << 18;
+
 /// The failures of opening an input, which sed reports and reads on past;
 /// any other is a read error that stops it.
 const OPEN_FAILURES: [&str; 6] = ["ENOENT", "EACCES", "EPERM", "EROFS", "ENOTDIR", "ELOOP"];
@@ -158,6 +165,13 @@ impl LineReader {
         }
         if let Some(failure) = self.failed.take() {
             return Poll::Ready(Err(failure));
+        }
+        if self.buf.len() - self.start > MAX_LEN {
+            return Poll::Ready(Err(Failure::from(Reply {
+                error: Some("Cannot allocate memory".into()),
+                errno: Some("ENOMEM".into()),
+                ..Reply::default()
+            })));
         }
         self.pull(io);
         Poll::Pending

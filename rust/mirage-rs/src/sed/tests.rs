@@ -746,3 +746,52 @@ fn a_failed_edit_stops_the_run() {
     assert_eq!(run.files["/g"], b"a\n");
     assert_eq!(run.files["/o"], b"");
 }
+
+#[test]
+fn a_space_past_the_longest_ends_the_run_as_memory_running_out() {
+    for script in [":a;h;G;ba", ":a;s/x/xxxxxxxxxx/g;ba", "H;$!d;x"] {
+        let lines = "x\n".repeat(150_000);
+        let run = sed(script, &lines);
+        assert_eq!(
+            (run.err.as_str(), run.status),
+            ("sed: memory exhausted\n", 1),
+            "{script}"
+        );
+    }
+    for script in [":a;N;ba", ":a;a x\nba"] {
+        let run = sed(script, &"x\n".repeat(150_000));
+        assert_eq!(
+            (run.err.as_str(), run.status),
+            ("sed: memory exhausted\n", 1),
+            "{script}"
+        );
+    }
+    // A loop that writes stderr and never ends its cycle hands it on.
+    let config = json!({"pieces": expressions(&[":a;w /dev/stderr\nba"])});
+    let mut stream = super::open(config.to_string().as_bytes()).expect("opens");
+    let mut host = Host::with(&[], "x\n");
+    let mut err = Vec::new();
+    for _ in 0..200 {
+        while stream.busy() && err.len() < 2 * super::io::LIMIT {
+            stream.drain(&mut host.out).expect("drains");
+            stream.take_stderr(&mut err);
+        }
+        let mut data = Vec::new();
+        let Some(header) = stream.request(&mut data) else {
+            break;
+        };
+        let (reply, data) = host.serve(&header, data);
+        stream
+            .respond(reply.to_string().as_bytes(), &data, &mut host.out)
+            .expect("answers");
+    }
+    assert!(err.len() >= 2 * super::io::LIMIT);
+    assert!(err.starts_with(b"x\nx\n"));
+    let run = sed("p", &"a".repeat(super::io::MAX_LEN + 10));
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: read error on stdin: Cannot allocate memory\n", 4)
+    );
+    assert_eq!(out("s/x*/-/g", "abc\n"), "-a-b-c-\n");
+    assert_eq!(out("s/b/X/3", "abbbb\n"), "abbXb\n");
+}

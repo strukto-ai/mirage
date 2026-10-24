@@ -4,7 +4,7 @@ use std::task::Poll;
 use crate::regex::posix::{Posix, Spans};
 use crate::request::{Reply, Request, WriteMode, bytes};
 
-use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, Notes, read_error};
+use super::io::{Failure, Feed, Input, Io, LIMIT, Line, LineReader, MAX_LEN, Notes, read_error};
 use super::script::{Address, Command, Part, Program, Subst, Translit};
 use super::text::{Refusal, convert, list, resolve, unit};
 
@@ -186,6 +186,8 @@ pub(super) struct Machine {
     /// Line-number ranges that have started, which never start again.
     begun: HashSet<usize>,
     queue: Vec<Append>,
+    /// What the queue holds, in bytes.
+    queued: usize,
     emitting: VecDeque<Append>,
     emit: Option<Emit>,
     readers: HashMap<usize, Lines>,
@@ -308,26 +310,52 @@ fn expand(parts: &[Part], ps: &[u8], groups: &Spans, utf8: bool, out: &mut Vec<u
 }
 
 /// The pattern space after `s`, None when nothing was replaced.
-fn substitute(regex: &mut Posix, subst: &Subst, ps: &[u8], utf8: bool) -> Option<Vec<u8>> {
-    let found = if subst.global || subst.occurrence > 1 {
-        regex.all(ps)
-    } else {
-        regex.search(ps, 0).into_iter().collect()
-    };
+fn exhausted() -> Refusal {
+    Refusal::new(b"sed: memory exhausted\n".to_vec(), 1)
+}
+
+/// Whether a space of `len` bytes may take `more`.
+fn room(len: usize, more: usize) -> Result<(), Refusal> {
+    if len.saturating_add(more) > MAX_LEN {
+        return Err(exhausted());
+    }
+    Ok(())
+}
+
+/// The pattern space after `s`, None when nothing was replaced. Each
+/// match is replaced as it is found, so no list of them is held.
+fn substitute(
+    regex: &mut Posix,
+    subst: &Subst,
+    ps: &[u8],
+    utf8: bool,
+) -> Result<Option<Vec<u8>>, Refusal> {
     let skip = usize::try_from(subst.occurrence - 1).unwrap_or(usize::MAX);
-    let take = if subst.global { usize::MAX } else { 1 };
-    let mut chosen = found.iter().skip(skip).take(take).peekable();
-    chosen.peek()?;
+    let (mut seen, mut at, mut replaced) = (0usize, 0, false);
     let mut out = Vec::with_capacity(ps.len());
-    let mut at = 0;
-    for groups in chosen {
+    let mut visit = |groups: Spans| {
+        seen += 1;
+        if seen <= skip {
+            return true;
+        }
         let (start, end) = groups[0].unwrap_or((at, at));
         out.extend_from_slice(&ps[at..start]);
-        expand(&subst.parts, ps, groups, utf8, &mut out);
+        expand(&subst.parts, ps, &groups, utf8, &mut out);
         at = end;
+        replaced = true;
+        subst.global && out.len() <= MAX_LEN
+    };
+    if subst.global || subst.occurrence > 1 {
+        regex.each(ps, &mut visit);
+    } else if let Some(groups) = regex.search(ps, 0) {
+        visit(groups);
     }
+    if !replaced {
+        return Ok(None);
+    }
+    room(out.len(), ps.len() - at)?;
     out.extend_from_slice(&ps[at..]);
-    Some(out)
+    Ok(Some(out))
 }
 
 fn translate(table: &Translit, ps: &mut Vec<u8>, utf8: bool) {
@@ -480,6 +508,7 @@ impl Machine {
             ranges: HashMap::new(),
             begun: HashSet::new(),
             queue: Vec::new(),
+            queued: 0,
             emitting: VecDeque::new(),
             emit: None,
             readers: HashMap::new(),
@@ -1009,10 +1038,17 @@ impl Machine {
         self.main_missing = missing;
     }
 
-    fn write_line(&mut self, target: usize, text: &[u8], newline: bool) {
+    fn write_line(&mut self, target: usize, text: &[u8], newline: bool) -> Result<(), Refusal> {
         match self.targets[target] {
             Target::Stdout => put_line(&mut self.out, &mut self.stdout_missing, text, newline),
-            Target::Stderr => put_line(&mut self.err_out, &mut self.err_missing, text, newline),
+            Target::Stderr => {
+                room(self.notes.stderr.len() + self.err_out.len(), text.len() + 1)?;
+                put_line(&mut self.err_out, &mut self.err_missing, text, newline);
+                // A loop that never ends its cycle still hands stderr on.
+                if self.err_out.len() >= LIMIT {
+                    self.boundary();
+                }
+            }
             Target::File(file) => {
                 let out = &mut self.files[file];
                 put_line(&mut out.buf, &mut out.missing, text, newline);
@@ -1021,6 +1057,20 @@ impl Machine {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Queue an append, as long as the queue fits.
+    fn enqueue(&mut self, entry: Append) -> Result<(), Refusal> {
+        let len = std::mem::size_of::<Append>()
+            + match &entry {
+                Append::Text(text) => text.len(),
+                Append::File(_) => 0,
+            };
+        room(self.queued, len)?;
+        self.queued += len;
+        self.queue.push(entry);
+        Ok(())
     }
 
     /// Hand on what a `w` file holds: dropped once the file failed or -i
@@ -1167,6 +1217,7 @@ impl Machine {
 
     /// Queue what the cycle appended for the output.
     fn dump(&mut self) {
+        self.queued = 0;
         self.emitting.extend(self.queue.drain(..));
     }
 
@@ -1301,7 +1352,7 @@ impl Machine {
                         ));
                     }
                 }
-                if let Some(result) = substitute(regex, subst, &self.ps, self.opts.utf8) {
+                if let Some(result) = substitute(regex, subst, &self.ps, self.opts.utf8)? {
                     let (print, wfile) = (subst.print, subst.wfile);
                     self.ps = result;
                     self.replaced = true;
@@ -1309,10 +1360,12 @@ impl Machine {
                     if print {
                         self.print_line(&ps, self.newline);
                     }
-                    if let Some(wfile) = wfile {
-                        self.write_line(wfile, &ps, self.newline);
-                    }
+                    let written = match wfile {
+                        Some(wfile) => self.write_line(wfile, &ps, self.newline),
+                        None => Ok(()),
+                    };
                     self.ps = ps;
+                    written?;
                 }
             }
             b'd' => self.end_cycle(false),
@@ -1369,7 +1422,8 @@ impl Machine {
             }
             b'a' => {
                 if let Some(text) = &self.commands[pc].text {
-                    self.queue.push(Append::Text(text.clone()));
+                    let text = text.clone();
+                    self.enqueue(Append::Text(text))?;
                 }
             }
             b'i' => {
@@ -1414,13 +1468,15 @@ impl Machine {
             }
             b'Q' => {
                 self.queue.clear();
+                self.queued = 0;
                 self.quit = Some(quit_code(self.commands[pc].number));
                 self.end_cycle(true);
             }
             b'r' => {
                 let cmd = &self.commands[pc];
                 if !cmd.zero_line() {
-                    self.queue.push(Append::File(cmd.file));
+                    let file = cmd.file;
+                    self.enqueue(Append::File(file))?;
                 } else if self.stage == 0 {
                     // `0r` writes its file where it runs, ahead of the line.
                     self.emitting.push_back(Append::File(cmd.file));
@@ -1431,29 +1487,33 @@ impl Machine {
             b'R' => {
                 let file = self.commands[pc].file;
                 if let Some(text) = wait!(self.reader_line(file)?) {
-                    self.queue.push(Append::Text(text));
+                    self.enqueue(Append::Text(text))?;
                 }
             }
             b'w' => {
                 let ps = std::mem::take(&mut self.ps);
-                self.write_line(self.commands[pc].file, &ps, self.newline);
+                let written = self.write_line(self.commands[pc].file, &ps, self.newline);
                 self.ps = ps;
+                written?;
             }
             b'W' | b'P' => {
                 let (cut, newline) = self.first_line();
                 let ps = std::mem::take(&mut self.ps);
-                if name == b'W' {
-                    self.write_line(self.commands[pc].file, &ps[..cut], newline);
+                let written = if name == b'W' {
+                    self.write_line(self.commands[pc].file, &ps[..cut], newline)
                 } else {
                     self.print_line(&ps[..cut], newline);
-                }
+                    Ok(())
+                };
                 self.ps = ps;
+                written?;
             }
             b'h' => {
                 self.hold.clone_from(&self.ps);
                 self.hold_newline = self.newline;
             }
             b'H' => {
+                room(self.hold.len(), 1 + self.ps.len())?;
                 self.hold.push(b'\n');
                 self.hold.extend_from_slice(&self.ps);
                 self.hold_newline = self.newline;
@@ -1463,6 +1523,7 @@ impl Machine {
                 self.newline = self.hold_newline;
             }
             b'G' => {
+                room(self.ps.len(), 1 + self.hold.len())?;
                 self.ps.push(b'\n');
                 self.ps.extend_from_slice(&self.hold);
                 self.newline = self.hold_newline;
@@ -1506,6 +1567,7 @@ impl Machine {
             return Ok(Poll::Ready(false));
         };
         if append {
+            room(self.ps.len(), 1 + text.len())?;
             self.ps.push(b'\n');
             self.ps.extend_from_slice(&text);
         } else {
