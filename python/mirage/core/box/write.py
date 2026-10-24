@@ -69,7 +69,7 @@ async def _upload_new(
 async def write(
     accessor: BoxAccessor,
     path: PathSpec,
-    data: bytes | ByteSpool,
+    data: ByteSource | ByteSpool,
     entry: FileStat | None = None,
     parent: FileStat | None = None,
 ) -> FileStat | None:
@@ -80,7 +80,8 @@ async def write(
     Args:
         accessor (BoxAccessor): Box accessor.
         path (PathSpec): target path.
-        data (bytes): file content.
+        data (ByteSource | ByteSpool): file content; a stream is spooled
+            first, as an upload sends its length.
         entry (FileStat | None): what is at the path.
         parent (FileStat | None): what is at its parent path.
 
@@ -88,6 +89,10 @@ async def write(
         FileStat | None: the stored file's stat, None for a reply that
             names none.
     """
+    if not isinstance(data, (bytes, ByteSpool)):
+        async with ByteSpool() as spool:
+            await spool.fill(data)
+            return await write(accessor, path, spool, entry, parent)
     parts = path_parts(path)
     if not parts or (entry is not None and entry.type is FileType.DIRECTORY):
         raise eisdir(path.virtual)
@@ -133,15 +138,3 @@ async def write(
         fingerprint=token,
     )
     return stored
-
-
-async def write_stream(
-    accessor: BoxAccessor,
-    path: PathSpec,
-    data: ByteSource,
-    entry: FileStat | None = None,
-    parent: FileStat | None = None,
-) -> FileStat | None:
-    async with ByteSpool() as spool:
-        await spool.fill(data)
-        return await write(accessor, path, spool, entry, parent)

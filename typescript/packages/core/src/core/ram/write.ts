@@ -25,39 +25,18 @@ import { norm } from '../../utils/path.ts'
 
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
-export async function write(
-  accessor: RAMAccessor,
-  path: PathSpec,
-  data: Uint8Array,
-  signal?: AbortSignal,
-): Promise<void> {
-  const timer = startOp()
-  const p = norm(path.mountPath)
-  const pipe = activePipe(accessor, p)
-  if (pipe !== null) {
-    await pipe.write(data, path, signal)
-    record('write', path.virtual, VFSName.RAM, data.byteLength, timer)
-    return
-  }
-  checkDestParents(accessor, path, p)
-  checkWriteTarget(accessor, path, p)
-  accessor.store.files.set(p, data)
-  accessor.store.modified.set(p, nowIso())
-  record('write', path.virtual, VFSName.RAM, data.byteLength, timer)
-  return Promise.resolve()
-}
-
 /**
- * Write bytes as they arrive, so a reader watches the file grow. What has
- * arrived lands within `STREAM_PUBLISH_SECONDS`, a writer gone quiet
- * included, and at the end: a replacement at its own position, as an open
- * file's offset keeps it, an append at the file's end then, so another
- * appender's bytes stay. An append that brings nothing leaves an existing
- * file as it was (`true >> f`).
- * `atomic` stages the replacement until it ends. Mirrors Python's
- * `write_stream`.
+ * Replace a file's bytes, or add them to its end. Bytes land at once, as does
+ * a stream under `atomic`, staged until it ends. Any other stream lands as it
+ * arrives, so a reader watches the file grow: what has arrived lands within
+ * `STREAM_PUBLISH_SECONDS`, a writer gone quiet included, and at the end, a
+ * replacement at its own position, as an open file's offset keeps it, an
+ * append at the file's end then, so another appender's bytes stay. Appending
+ * nothing opens the file (`true >> f`): it creates a missing one and leaves an
+ * existing one as it was, modification time included. Mirrors Python's
+ * `write`.
  */
-export async function writeStream(
+export async function write(
   accessor: RAMAccessor,
   path: PathSpec,
   data: ByteSource,
@@ -81,9 +60,11 @@ export async function writeStream(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   const { files, modified } = accessor.store
-  if (atomic) {
+  if (data instanceof Uint8Array || atomic) {
     const whole = await materialize(data)
-    files.set(p, whole)
+    const current = append ? files.get(p) : undefined
+    if (current !== undefined && whole.byteLength === 0) return
+    files.set(p, current === undefined ? whole : concat([current, whole]))
     modified.set(p, nowIso())
     record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
     return

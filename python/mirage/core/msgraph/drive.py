@@ -385,41 +385,41 @@ async def upload_session_write(
         raise
 
 
-async def write_item_stream(
+async def write_item(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     data: ByteSource,
 ) -> int:
-    async with ByteSpool() as spool:
-        await spool.fill(data)
-        if spool.size <= SIMPLE_UPLOAD_MAX:
-            await write_item(accessor, loc, await spool.read(0, spool.size))
-        else:
-            await upload_session_write(
-                accessor, loc.item("/createUploadSession"), spool
-            )
-        return spool.size
-
-
-async def write_item(
-    accessor: OneDriveAccessor | SharePointAccessor, loc: DriveLoc, data: bytes
-) -> None:
     """Replace a drive item's content, creating it and its parents.
 
     A small body is one ``PUT``; anything past the simple-upload limit
-    goes through an upload session.
+    goes through an upload session. A stream is spooled first, so its
+    size picks between the two.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the item to write.
-        data (bytes): its new content.
+        data (ByteSource): its new content, consumed once.
+
+    Returns:
+        int: how many bytes were written.
     """
+    if not isinstance(data, bytes):
+        async with ByteSpool() as spool:
+            await spool.fill(data)
+            if spool.size > SIMPLE_UPLOAD_MAX:
+                await upload_session_write(
+                    accessor, loc.item("/createUploadSession"), spool
+                )
+                return spool.size
+            data = await spool.read(0, spool.size)
     if len(data) <= SIMPLE_UPLOAD_MAX:
         await graph_put_bytes(accessor, loc.item("/content"), data)
     else:
         await upload_session_write(
             accessor, loc.item("/createUploadSession"), data
         )
+    return len(data)
 
 
 def folder_child_count(item: dict[str, Any]) -> int | None:

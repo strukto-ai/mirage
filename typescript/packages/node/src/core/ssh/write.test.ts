@@ -17,7 +17,7 @@ import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
-import { write, writeStream } from './write.ts'
+import { write } from './write.ts'
 
 function spec(p: string): PathSpec {
   return PathSpec.fromStrPath(p)
@@ -108,7 +108,7 @@ it.each([false, true])('commits an atomic streamed SSH write only after EOF: %s'
       closed = true
     }
   }
-  const result = writeStream(accessor, spec('/data/a'), source(), undefined, true)
+  const result = write(accessor, spec('/data/a'), source(), undefined, true)
   if (fail) await expect(result).rejects.toThrow('producer failed')
   else await result
   expect([...files.keys()]).toEqual(['/data/a'])

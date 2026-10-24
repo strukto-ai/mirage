@@ -31,8 +31,7 @@ import { stat as diskStat } from '../../core/disk/stat.ts'
 import { readStream as diskStream } from '../../core/disk/stream.ts'
 import { exists as diskExists } from '../../core/disk/exists.ts'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { write as diskWrite, writeStream as diskWriteStream } from '../../core/disk/write.ts'
-import { appendBytes as diskAppend } from '../../core/disk/append.ts'
+import { write as diskWrite } from '../../core/disk/write.ts'
 import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
 import { create as diskCreate } from '../../core/disk/create.ts'
 import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
@@ -170,8 +169,7 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return diskWrite(this.accessor, path, data)
-    return diskWriteStream(this.accessor, path, data, false, signal, atomic)
+    return diskWrite(this.accessor, path, data, false, signal, atomic)
   }
 
   override append(
@@ -180,8 +178,7 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return diskAppend(this.accessor, path, data)
-    return diskWriteStream(this.accessor, path, data, true, signal)
+    return diskWrite(this.accessor, path, data, true, signal)
   }
 
   override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {

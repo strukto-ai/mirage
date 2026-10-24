@@ -30,7 +30,7 @@ from mirage.utils.upload import upload_token
 async def write(
     accessor: GDriveAccessor,
     path: PathSpec,
-    data: bytes | ByteSpool,
+    data: ByteSource | ByteSpool,
     entry: FileStat | None = None,
     parent: FileStat | None = None,
 ) -> FileStat | None:
@@ -39,7 +39,8 @@ async def write(
     Args:
         accessor (GDriveAccessor): Drive accessor.
         path (PathSpec): target path.
-        data (bytes): file content.
+        data (ByteSource | ByteSpool): file content; a stream is spooled
+            first, as an upload sends its length.
         entry (FileStat | None): what is at the path.
         parent (FileStat | None): what is at its parent path.
 
@@ -47,6 +48,10 @@ async def write(
         FileStat | None: the stored file's stat, None for a reply that
             names none.
     """
+    if not isinstance(data, (bytes, ByteSpool)):
+        async with ByteSpool() as spool:
+            await spool.fill(data)
+            return await write(accessor, path, spool, entry, parent)
     virtual = path.virtual
     key = path.vfs_path
     if not key:
@@ -80,15 +85,3 @@ async def write(
         fingerprint=token,
     )
     return stat_from_item(reply) if isinstance(reply, dict) else None
-
-
-async def write_stream(
-    accessor: GDriveAccessor,
-    path: PathSpec,
-    data: ByteSource,
-    entry: FileStat | None = None,
-    parent: FileStat | None = None,
-) -> FileStat | None:
-    async with ByteSpool() as spool:
-        await spool.fill(data)
-        return await write(accessor, path, spool, entry, parent)

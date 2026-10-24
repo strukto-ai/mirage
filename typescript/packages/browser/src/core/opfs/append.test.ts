@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
-import { appendBytes } from './append.ts'
+import { append } from './append.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
 import { write } from './write.ts'
@@ -23,19 +23,19 @@ describe('opfs/append', () => {
   it('appends to existing file', async () => {
     const accessor = makeMockAccessor()
     await write(accessor, spec('/x'), new TextEncoder().encode('A'))
-    await appendBytes(accessor, spec('/x'), new TextEncoder().encode('B'))
+    await append(accessor, spec('/x'), new TextEncoder().encode('B'))
     expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('AB')
   })
   it('creates the file if missing', async () => {
     const accessor = makeMockAccessor()
-    await appendBytes(accessor, spec('/new'), new TextEncoder().encode('hi'))
+    await append(accessor, spec('/new'), new TextEncoder().encode('hi'))
     expect(new TextDecoder().decode(await read(accessor, spec('/new')))).toBe('hi')
   })
   it('a target that is a directory is EISDIR', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/a'), true)
     await expect(
-      appendBytes(accessor, spec('/a'), new TextEncoder().encode('x')),
+      append(accessor, spec('/a'), new TextEncoder().encode('x')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

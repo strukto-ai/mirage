@@ -12,7 +12,7 @@ from mirage.core.msgraph.drive import (
     copy_tree,
     iter_tree,
     rename_replace,
-    write_item_stream,
+    write_item,
 )
 from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
@@ -690,14 +690,10 @@ async def test_stream_upload_has_bounded_parts_and_cancels_failed_session(
         m.delete(upload, status=204)
         if fail:
             with pytest.raises(GraphError):
-                await write_item_stream(
-                    _accessor(), _loc("d1", "file"), b"x" * total
-                )
+                await write_item(_accessor(), _loc("d1", "file"), b"x" * total)
         else:
             assert (
-                await write_item_stream(
-                    _accessor(), _loc("d1", "file"), b"x" * total
-                )
+                await write_item(_accessor(), _loc("d1", "file"), b"x" * total)
                 == total
             )
         calls = m.requests[("PUT", URL(upload))]
@@ -717,5 +713,5 @@ async def test_stream_upload_source_failure_never_starts_upload():
 
     with aioresponses() as m:
         with pytest.raises(OSError, match="source failed"):
-            await write_item_stream(_accessor(), _loc("d1", "file"), broken())
+            await write_item(_accessor(), _loc("d1", "file"), broken())
         assert not m.requests

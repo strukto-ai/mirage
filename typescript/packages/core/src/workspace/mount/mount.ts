@@ -49,7 +49,7 @@ import {
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
 import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
-import { FOLDED_METHODS, WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
@@ -451,13 +451,6 @@ export class MountEntry {
       if (typeof (init.vfs as unknown as Record<string, unknown>)[renderer] !== 'function') {
         throw new TypeError(
           `${init.vfs.constructor.name}.renderers maps '${filetype}' to '${renderer}', which is not a method`,
-        )
-      }
-    }
-    for (const [name, into] of Object.entries(FOLDED_METHODS)) {
-      if (name in init.vfs) {
-        throw new TypeError(
-          `${init.vfs.constructor.name}.${name}: define ${into} instead, which answers or takes bytes or a stream`,
         )
       }
     }
@@ -872,14 +865,12 @@ export class MountEntry {
           this.truncateByRewrite(scope, lengthArg(args[0]), kw.no_create === true, kw.index),
       ]
     }
-    if ((name === 'append' || name === 'pwrite') && !vfs.supports(name)) {
+    if (name === 'pwrite' && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
-      return name === 'append'
-        ? [(scope, args, kw) => this.appendByRewrite(scope, writeData(args), kw.index)]
-        : [
-            (scope, args, kw) =>
-              this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
-          ]
+      return [
+        (scope, args, kw) =>
+          this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+      ]
     }
     if (declared(vfs.constructor, name) === null) return []
     if (!vfs.supports(name)) return []
@@ -888,14 +879,6 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.readdir(scope, handedOf(kw))]
       case 'stat':
         return [(scope, _args, kw) => vfs.stat(scope, handedOf(kw))]
-      case 'write':
-        return [
-          (scope, args, kw) => vfs.write(scope, writeData(args), callerSignal(), handedOf(kw)),
-        ]
-      case 'append':
-        return [
-          (scope, args, kw) => vfs.append(scope, writeData(args), handedOf(kw), callerSignal()),
-        ]
       case 'pwrite':
         return [
           (scope, args, kw) =>
@@ -1268,8 +1251,7 @@ export class MountEntry {
 
   /** A stat of `path` on this mount, as `callKeyed` answers one. Mirrors Python's `_stat`. */
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
-    const key = indexKey(this.prefix, path)
-    const stored = key === this.rootKey ? null : await this.storedRow(index, key)
+    const stored = (await this.stored('stat', path, index)) as FileStat | null
     if (stored !== null) return stored
     return this.vfs.stat(path, await this.handedFor('stat', path, null, index))
   }

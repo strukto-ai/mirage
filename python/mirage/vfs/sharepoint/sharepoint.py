@@ -20,7 +20,6 @@ from mirage.core.sharepoint.stream import read_stream as _read_stream
 from mirage.core.sharepoint.truncate import truncate as _truncate
 from mirage.core.sharepoint.unlink import unlink as _unlink
 from mirage.core.sharepoint.write import write as _write
-from mirage.core.sharepoint.write import write_stream as _write_stream
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
@@ -80,10 +79,7 @@ class SharePointVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data)
+        await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

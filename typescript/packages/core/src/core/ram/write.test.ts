@@ -17,11 +17,10 @@ import { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMStore } from '../../vfs/ram/store.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { appendBytes } from './append.ts'
 import { create } from './create.ts'
 import { mkdir } from './mkdir.ts'
 import { truncate } from './truncate.ts'
-import { write, writeStream } from './write.ts'
+import { write } from './write.ts'
 import { STREAM_PUBLISH_SECONDS } from './constants.ts'
 
 const ENC = new TextEncoder()
@@ -106,9 +105,9 @@ describe('core/ram write target is a directory', () => {
     expect(acc.store.dirs.has('/d')).toBe(true)
   })
 
-  it('appendBytes onto a directory is EISDIR', async () => {
+  it('an append onto a directory is EISDIR', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => appendBytes(acc, mkPath('/d'), ENC.encode('hi')))).toBe('EISDIR')
+    expect(await codeOf(() => write(acc, mkPath('/d'), ENC.encode('hi'), true))).toBe('EISDIR')
     expect(acc.store.files.has('/d')).toBe(false)
   })
 
@@ -138,10 +137,10 @@ describe('core/ram create destination parents', () => {
   })
 })
 
-describe('core/ram appendBytes destination parents', () => {
+describe('core/ram append destination parents', () => {
   it('a missing parent is ENOENT and leaves no orphan', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => appendBytes(acc, mkPath('/missing/f.txt'), ENC.encode('hi')))).toBe(
+    expect(await codeOf(() => write(acc, mkPath('/missing/f.txt'), ENC.encode('hi'), true))).toBe(
       'ENOENT',
     )
     expect(acc.store.files.has('/missing/f.txt')).toBe(false)
@@ -149,15 +148,15 @@ describe('core/ram appendBytes destination parents', () => {
 
   it('a parent that is a plain file is ENOTDIR', async () => {
     const acc = mkAccessor()
-    expect(await codeOf(() => appendBytes(acc, mkPath('/plain/f.txt'), ENC.encode('hi')))).toBe(
+    expect(await codeOf(() => write(acc, mkPath('/plain/f.txt'), ENC.encode('hi'), true))).toBe(
       'ENOTDIR',
     )
   })
 
   it('appends into an existing directory', async () => {
     const acc = mkAccessor()
-    await appendBytes(acc, mkPath('/d/f.txt'), ENC.encode('a'))
-    await appendBytes(acc, mkPath('/d/f.txt'), ENC.encode('b'))
+    await write(acc, mkPath('/d/f.txt'), ENC.encode('a'), true)
+    await write(acc, mkPath('/d/f.txt'), ENC.encode('b'), true)
     expect(new TextDecoder().decode(acc.store.files.get('/d/f.txt'))).toBe('ab')
   })
 })
@@ -210,14 +209,14 @@ async function* broken(): AsyncIterable<Uint8Array> {
   throw new Error('source gone')
 }
 
-describe('writeStream', () => {
+describe('streamed write', () => {
   // A writer that goes quiet still shows what it wrote within the publish
   // interval, so a reader watches a slow program's log grow.
   it("shows a quiet writer's bytes", async () => {
     const accessor = mkAccessor()
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))
-    const writing = writeStream(accessor, mkPath('/log'), quiet(['a\n', 'b\n'], hold))
+    const writing = write(accessor, mkPath('/log'), quiet(['a\n', 'b\n'], hold))
     await settle()
     expect(DEC.decode(accessor.store.files.get('/log'))).toBe('a\nb\n')
     release()
@@ -231,9 +230,9 @@ describe('writeStream', () => {
     accessor.store.files.set('/log', ENC.encode('start\n'))
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))
-    const writing = writeStream(accessor, mkPath('/log'), quiet(['mine\n'], hold), true)
+    const writing = write(accessor, mkPath('/log'), quiet(['mine\n'], hold), true)
     await settle()
-    await appendBytes(accessor, mkPath('/log'), ENC.encode('theirs\n'))
+    await write(accessor, mkPath('/log'), ENC.encode('theirs\n'), true)
     release()
     await writing
     expect(DEC.decode(accessor.store.files.get('/log'))).toBe('start\nmine\ntheirs\n')
@@ -245,7 +244,7 @@ describe('writeStream', () => {
     accessor.store.files.set('/f', ENC.encode('old'))
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))
-    const writing = writeStream(
+    const writing = write(
       accessor,
       mkPath('/f'),
       quiet(['new'], hold),
@@ -271,7 +270,7 @@ describe('writeStream', () => {
       await second
       yield ENC.encode('b\n')
     }
-    const writing = writeStream(accessor, mkPath('/f'), source())
+    const writing = write(accessor, mkPath('/f'), source())
     await settle()
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('a\n')
     accessor.store.files.set('/f', new Uint8Array())
@@ -286,17 +285,17 @@ describe('writeStream', () => {
     const accessor = mkAccessor()
     accessor.store.files.set('/f', ENC.encode('kept'))
     accessor.store.modified.set('/f', '2020-01-01T00:00:00Z')
-    await writeStream(accessor, mkPath('/f'), chunksOf(), true)
+    await write(accessor, mkPath('/f'), chunksOf(), true)
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept')
     expect(accessor.store.modified.get('/f')).toBe('2020-01-01T00:00:00Z')
-    await writeStream(accessor, mkPath('/new'), chunksOf(), true)
+    await write(accessor, mkPath('/new'), chunksOf(), true)
     expect(accessor.store.files.get('/new')?.byteLength).toBe(0)
   })
 
   // A stream that fails keeps what it had delivered, as a disk file does.
   it('keeps what arrived before the stream failed', async () => {
     const accessor = mkAccessor()
-    await expect(writeStream(accessor, mkPath('/f'), broken())).rejects.toThrow('source gone')
+    await expect(write(accessor, mkPath('/f'), broken())).rejects.toThrow('source gone')
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('kept\n')
   })
 })

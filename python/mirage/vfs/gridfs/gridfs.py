@@ -31,7 +31,6 @@ from mirage.core.gridfs.stream import read_stream as _read_stream
 from mirage.core.gridfs.truncate import truncate as _truncate
 from mirage.core.gridfs.unlink import unlink as _unlink
 from mirage.core.gridfs.write import write as _write
-from mirage.core.gridfs.write import write_stream as _write_stream
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
@@ -81,9 +80,7 @@ class GridFSVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> FileStat | None:
-        if isinstance(data, bytes):
-            return await _write(self.accessor, path, data)
-        return await _write_stream(self.accessor, path, data)
+        return await _write(self.accessor, path, data)
 
     async def append(
         self, path: PathSpec, data: ByteSource

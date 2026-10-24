@@ -27,7 +27,7 @@ from mirage.utils.upload import upload_stat
 
 
 async def write(
-    accessor: DropboxAccessor, path: PathSpec, data: bytes | ByteSpool
+    accessor: DropboxAccessor, path: PathSpec, data: ByteSource | ByteSpool
 ) -> FileStat | None:
     """Upload a body, using sessions for large spooled inputs.
 
@@ -37,12 +37,17 @@ async def write(
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path (PathSpec): target path.
-        data (bytes): file content.
+        data (ByteSource | ByteSpool): file content; a stream is spooled
+            first, as its size picks the upload.
 
     Returns:
         FileStat | None: the stored file's stat, None for a reply that
             names none.
     """
+    if not isinstance(data, (bytes, ByteSpool)):
+        async with ByteSpool() as spool:
+            await spool.fill(data)
+            return await write(accessor, path, spool)
     tm = accessor.token_manager
     api_path = dropbox_path_of(accessor, path)
     cond = await write_condition(path, "put")
@@ -65,11 +70,3 @@ async def write(
         fingerprint=None if stored is None else stored.fingerprint,
     )
     return stored
-
-
-async def write_stream(
-    accessor: DropboxAccessor, path: PathSpec, data: ByteSource
-) -> FileStat | None:
-    async with ByteSpool() as spool:
-        await spool.fill(data)
-        return await write(accessor, path, spool)

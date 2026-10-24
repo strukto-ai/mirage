@@ -19,7 +19,6 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.append import append_bytes
 from mirage.core.redis.copy import copy
 from mirage.core.redis.exists import exists
 from mirage.core.redis.rename import rename
@@ -27,6 +26,7 @@ from mirage.core.redis.rm import rm_r
 from mirage.core.redis.rmdir import rmdir
 from mirage.core.redis.truncate import truncate
 from mirage.core.redis.unlink import unlink
+from mirage.core.redis.write import write
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -241,12 +241,13 @@ async def test_truncate_to_zero(accessor):
 
 @pytest.mark.asyncio
 async def test_append_to_existing(accessor):
-    await append_bytes(
+    await write(
         accessor,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
         ),
         b" world",
+        append=True,
     )
     assert await accessor.store.get_file("/file.txt") == b"hello world"
 
@@ -254,10 +255,11 @@ async def test_append_to_existing(accessor):
 @pytest.mark.asyncio
 async def test_append_to_new(mk_store):
     a = await mk_store("test:fops:ap:")
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="new.txt", virtual="/new.txt", directory="/new.txt"),
         b"data",
+        append=True,
     )
     assert await a.store.get_file("/new.txt") == b"data"
 
@@ -267,7 +269,7 @@ async def test_append_into_missing_parent_leaves_no_orphan(mk_store):
     # `>>` is not `mkdir -p` either: GNU reports ENOENT on the operand.
     a = await mk_store("test:fops:ap:orphan:")
     with pytest.raises(FileNotFoundError):
-        await append_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="missing/new.txt",
@@ -275,6 +277,7 @@ async def test_append_into_missing_parent_leaves_no_orphan(mk_store):
                 directory="/missing/new.txt",
             ),
             b"data",
+            append=True,
         )
     assert not await a.store.has_file("/missing/new.txt")
 
@@ -284,7 +287,7 @@ async def test_append_under_a_plain_file_is_not_a_directory(mk_store):
     a = await mk_store("test:fops:ap:notdir:")
     await a.store.set_file("/plain", b"x")
     with pytest.raises(NotADirectoryError):
-        await append_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/new.txt",
@@ -292,6 +295,7 @@ async def test_append_under_a_plain_file_is_not_a_directory(mk_store):
                 directory="/plain/new.txt",
             ),
             b"data",
+            append=True,
         )
     assert not await a.store.has_file("/plain/new.txt")
 
@@ -299,20 +303,23 @@ async def test_append_under_a_plain_file_is_not_a_directory(mk_store):
 @pytest.mark.asyncio
 async def test_append_multiple(mk_store):
     a = await mk_store("test:fops:ap2:")
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"a",
+        append=True,
     )
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"b",
+        append=True,
     )
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"c",
+        append=True,
     )
     assert await a.store.get_file("/f.txt") == b"abc"
 

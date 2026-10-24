@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.write import write, write_stream
+from mirage.core.disk.write import write
 from mirage.types import PathSpec
 
 
@@ -148,7 +148,7 @@ async def test_stream_failure_closes_source_and_preserves_staged_target(
             closed.append(True)
 
     with pytest.raises(OSError, match="read failed"):
-        await write_stream(
+        await write(
             DiskAccessor(tmp_path),
             PathSpec.from_str_path("/file", vfs_path="file"),
             source(),
@@ -171,8 +171,8 @@ async def test_stream_append_and_atomic_mode(tmp_path):
         yield target.read_bytes()
         yield b"new"
 
-    await write_stream(accessor, path, source(), atomic=True)
+    await write(accessor, path, source(), atomic=True)
     assert target.read_bytes() == b"oldnew"
     assert target.stat().st_mode & 0o777 == 0o640
-    await write_stream(accessor, path, b"!", append=True)
+    await write(accessor, path, b"!", append=True)
     assert target.read_bytes() == b"oldnew!"

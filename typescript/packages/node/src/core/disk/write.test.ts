@@ -17,7 +17,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
-import { write, writeStream } from './write.ts'
+import { write } from './write.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -84,7 +84,7 @@ describe('streamed disk output', () => {
         }
       }
       await expect(
-        writeStream(accessor, spec('/file'), source(), false, undefined, atomic),
+        write(accessor, spec('/file'), source(), false, undefined, atomic),
       ).rejects.toBe(error)
       expect(closed).toBe(true)
       expect(await readFile(target, 'utf8')).toBe(atomic ? 'original' : 'partial')
@@ -101,10 +101,40 @@ describe('streamed disk output', () => {
       yield await readFile(target)
       yield new TextEncoder().encode('new')
     }
-    await writeStream(accessor, spec('/file'), source(), false, undefined, true)
+    await write(accessor, spec('/file'), source(), false, undefined, true)
     expect(await readFile(target, 'utf8')).toBe('oldnew')
     expect((await stat(target)).mode & 0o777).toBe(0o640)
-    await writeStream(accessor, spec('/file'), new TextEncoder().encode('!'), true)
+    await write(accessor, spec('/file'), new TextEncoder().encode('!'), true)
     expect(await readFile(target, 'utf8')).toBe('oldnew!')
+  })
+})
+
+describe('core/disk/write appending', () => {
+  it('appends to an existing file', async () => {
+    await write(accessor, spec('/x'), new TextEncoder().encode('A'))
+    await write(accessor, spec('/x'), new TextEncoder().encode('B'), true)
+    expect(await readFile(join(root, 'x'), 'utf-8')).toBe('AB')
+  })
+
+  it('creates the file if missing', async () => {
+    await write(accessor, spec('/new'), new TextEncoder().encode('hi'), true)
+    expect(await readFile(join(root, 'new'), 'utf-8')).toBe('hi')
+  })
+
+  it('does not create parent dirs', async () => {
+    // `>>` is not `mkdir -p`: GNU reports ENOENT on a missing parent.
+    await expect(
+      write(accessor, spec('/d/x'), new TextEncoder().encode('z'), true),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reports the virtual path, never the host path', async () => {
+    try {
+      await write(accessor, spec('/d/x'), new TextEncoder().encode('z'), true)
+      expect.unreachable()
+    } catch (err) {
+      expect((err as Error).message).not.toContain(root)
+      expect((err as { virtualPath?: string }).virtualPath).toBe('/d/x')
+    }
   })
 })

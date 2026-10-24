@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
@@ -26,15 +27,26 @@ import { eaccesOnDenied, parentFolder } from './resolve.ts'
 
 /**
  * Upload a new file, or new content for an existing one, handed what is at
- * `path` and at its parent. Answers the stored file's stat, null for a reply
+ * `path` and at its parent. A stream is spooled first, as an upload sends its
+ * length; `signal` stops it. Answers the stored file's stat, null for a reply
  * that names none. Mirrors Python's `write`.
  */
 async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
-  data: Uint8Array | ByteSpool,
+  data: ByteSource | ByteSpool,
   handed: Handed = {},
+  signal?: AbortSignal,
 ): Promise<FileStat | null> {
+  if (!(data instanceof Uint8Array) && !(data instanceof ByteSpool)) {
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(chunks(data, signal))
+      return await writeImpl(accessor, path, spool, handed)
+    } finally {
+      await spool.close()
+    }
+  }
   const key = path.vfsPath
   if (key === '') throw eisdir(path)
   const timer = startOp()
@@ -67,18 +79,3 @@ async function writeImpl(
 }
 
 export const write = eaccesOnDenied(writeImpl)
-
-export async function writeStream(
-  accessor: GDriveAccessor,
-  path: PathSpec,
-  data: ByteSource,
-  handed: Handed = {},
-): Promise<FileStat | null> {
-  const spool = new ByteSpool()
-  try {
-    await spool.fill(data)
-    return await write(accessor, path, spool, handed)
-  } finally {
-    await spool.close()
-  }
-}

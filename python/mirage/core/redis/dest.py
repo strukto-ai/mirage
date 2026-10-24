@@ -38,10 +38,9 @@ async def check_dest_parents(
     and its real parent unlistable.
 
     Shared by every op that places a key at a caller-supplied path
-    (``rename``, ``copy``, ``create``, ``write_bytes``, ``append_bytes``,
-    ``mkdir``): none of them creates parents (that is ``mkdir -p``), so all
-    owe the destination the same probe. The real-filesystem backends get
-    this from the kernel.
+    (``rename``, ``copy``, ``create``, ``write``, ``mkdir``): none of them
+    creates parents (that is ``mkdir -p``), so all owe the destination the
+    same probe. The real-filesystem backends get this from the kernel.
 
     Components are probed one at a time rather than by pulling the whole
     directory set: this runs on every write, so a set membership test per

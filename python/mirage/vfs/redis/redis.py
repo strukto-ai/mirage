@@ -14,7 +14,6 @@
 
 from typing import Any, cast
 
-from mirage.core.redis.append import append_bytes as _append
 from mirage.core.redis.capacity import capacity as _capacity
 from mirage.core.redis.copy import copy as _copy
 from mirage.core.redis.create import create as _create
@@ -32,7 +31,6 @@ from mirage.core.redis.stream import read_stream as _read_stream
 from mirage.core.redis.truncate import truncate as _truncate
 from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
-from mirage.core.redis.write import write_stream as _write_stream
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec
 
@@ -122,16 +120,10 @@ class RedisVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, atomic=atomic)
+        await _write(self.accessor, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        if isinstance(data, bytes):
-            await _append(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, append=True)
+        await _write(self.accessor, path, data, append=True)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

@@ -21,15 +21,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { joinRoot, openForWrite } from './utils.ts'
 
-export async function appendBytes(
-  accessor: SSHAccessor,
-  p: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
-  await appendStream(accessor, p, data)
-}
-
-export async function appendStream(
+export async function append(
   accessor: SSHAccessor,
   p: PathSpec,
   data: ByteSource,

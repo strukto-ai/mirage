@@ -121,7 +121,7 @@ from mirage.utils.path import norm
 from mirage.utils.ranges import is_unsatisfiable_range, slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared, declared_calls
-from mirage.vfs.constants import FOLDED_METHODS, WRITE_EFFECTS
+from mirage.vfs.constants import WRITE_EFFECTS
 from mirage.vfs.types import Effect
 from mirage.view.types import StatPath
 from mirage.workspace.dispatcher.constants import CALLS
@@ -515,12 +515,6 @@ class MountEntry:
                 raise TypeError(
                     f"{type(vfs).__name__}.renderers maps {filetype!r} to "
                     f"{renderer!r}, which is not a method"
-                )
-        for name, into in FOLDED_METHODS.items():
-            if hasattr(vfs, name):
-                raise TypeError(
-                    f"{type(vfs).__name__}.{name}: define {into} instead, "
-                    "which answers or takes bytes or a stream"
                 )
         self.visible: Callable[[str | None], bool] | None = None
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
@@ -1547,7 +1541,7 @@ class MountEntry:
             vfs.supports("append") or vfs.supports("write")
         ):
             return [self._append_op]
-        if name in ("append", "pwrite", "truncate") and not vfs.supports(name):
+        if name in ("pwrite", "truncate") and not vfs.supports(name):
             return (
                 [getattr(self, f"_{name}_by_rewrite")]
                 if vfs.supports("write")
@@ -1991,14 +1985,9 @@ class MountEntry:
             path (PathSpec): the path, keyed below the mount.
         """
         stat: Callable[..., Awaitable[FileStat]] = self.vfs.stat
-        key = index_key(self.prefix, path)
         if not self._lists:
             return await stat(path, **_handed_on(stat, index))
-        stored = (
-            None
-            if key == self._root_key
-            else await self._stored_row(index, key)
-        )
+        stored = await self._stored("stat", path, index)
         if stored is not None:
             return stored
         handed = await self._handed(stat, path, {}, index)

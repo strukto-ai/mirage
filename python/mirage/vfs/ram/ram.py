@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.append import append_bytes as _append
 from mirage.core.ram.copy import copy as _copy
 from mirage.core.ram.create import create as _create
 from mirage.core.ram.exists import exists as _exists
@@ -33,7 +32,6 @@ from mirage.core.ram.stat import stat as _stat
 from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
 from mirage.core.ram.write import write as _write
-from mirage.core.ram.write import write_stream as _write_stream
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
@@ -94,16 +92,10 @@ class RAMVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, atomic=atomic)
+        await _write(self.accessor, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        if isinstance(data, bytes):
-            await _append(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, append=True)
+        await _write(self.accessor, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         await _pwrite(self.accessor, path, data, offset)

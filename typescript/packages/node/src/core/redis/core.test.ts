@@ -18,7 +18,6 @@ import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { RedisStore } from '../../vfs/redis/store.ts'
-import { appendBytes } from '@struktoai/mirage-core/core/redis/append'
 import { copy } from '@struktoai/mirage-core/core/redis/copy'
 import { create } from '@struktoai/mirage-core/core/redis/create'
 import { exists } from '@struktoai/mirage-core/core/redis/exists'
@@ -32,7 +31,7 @@ import { stat } from '@struktoai/mirage-core/core/redis/stat'
 import { readStream } from '@struktoai/mirage-core/core/redis/stream'
 import { truncate } from '@struktoai/mirage-core/core/redis/truncate'
 import { unlink } from '@struktoai/mirage-core/core/redis/unlink'
-import { write, writeStream } from '@struktoai/mirage-core/core/redis/write'
+import { write } from '@struktoai/mirage-core/core/redis/write'
 
 async function listed(accessor: RedisAccessor, path: PathSpec): Promise<string[]> {
   const rows = await readdir(accessor, path)
@@ -84,7 +83,7 @@ describe.skipIf(skip)('core/redis ops', () => {
   // Each chunk is appended where it lands, so a reader watches a slow
   // program's log grow; another appender's bytes stay; an atomic write
   // shows nothing until it ends whole.
-  it('writeStream shows each chunk as it arrives and keeps other appends', async () => {
+  it('a streamed write shows each chunk as it arrives and keeps other appends', async () => {
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))
     async function* quiet(): AsyncIterable<Uint8Array> {
@@ -92,7 +91,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await hold
     }
     await write(acc, spec('/log'), ENC.encode('start\n'))
-    const writing = writeStream(acc, spec('/log'), quiet(), true)
+    const writing = write(acc, spec('/log'), quiet(), true)
     let seen: Uint8Array | null = null
     for (let i = 0; i < 100; i++) {
       seen = await store.getFile('/log')
@@ -100,7 +99,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await new Promise((r) => setTimeout(r, 10))
     }
     expect(DEC.decode(seen ?? new Uint8Array())).toBe('start\nmine\n')
-    await appendBytes(acc, spec('/log'), ENC.encode('theirs\n'))
+    await write(acc, spec('/log'), ENC.encode('theirs\n'), true)
     release()
     await writing
     expect(DEC.decode((await store.getFile('/log')) ?? new Uint8Array())).toBe(
@@ -115,7 +114,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await store.appendFile(path, ENC.encode('theirs\n'))
       return false
     }
-    await writeStream(acc, spec('/log'), chunksOf('mine\n'), true)
+    await write(acc, spec('/log'), chunksOf('mine\n'), true)
     expect(DEC.decode((await store.getFile('/log')) ?? new Uint8Array())).toBe('theirs\nmine\n')
   })
 
@@ -129,7 +128,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await second
       yield ENC.encode('b\n')
     }
-    const writing = writeStream(acc, spec('/f'), source())
+    const writing = write(acc, spec('/f'), source())
     for (let i = 0; i < 100; i++) {
       const seen = await store.getFile('/f')
       if (seen !== null && DEC.decode(seen) === 'a\n') break
@@ -146,10 +145,10 @@ describe.skipIf(skip)('core/redis ops', () => {
   it('writeStream leaves a file alone for an empty append', async () => {
     await store.setFile('/f', ENC.encode('kept'))
     await store.setModified('/f', '2020-01-01T00:00:00Z')
-    await writeStream(acc, spec('/f'), chunksOf(), true)
+    await write(acc, spec('/f'), chunksOf(), true)
     expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('kept')
     expect(await store.getModified('/f')).toBe('2020-01-01T00:00:00Z')
-    await writeStream(acc, spec('/new'), chunksOf(), true)
+    await write(acc, spec('/new'), chunksOf(), true)
     expect((await store.getFile('/new'))?.byteLength).toBe(0)
   })
 
@@ -161,7 +160,7 @@ describe.skipIf(skip)('core/redis ops', () => {
       await hold
     }
     await write(acc, spec('/f'), ENC.encode('old'))
-    const writing = writeStream(acc, spec('/f'), quiet(), false, true)
+    const writing = write(acc, spec('/f'), quiet(), false, true)
     await new Promise((r) => setTimeout(r, 50))
     expect(DEC.decode((await store.getFile('/f')) ?? new Uint8Array())).toBe('old')
     release()
@@ -179,8 +178,8 @@ describe.skipIf(skip)('core/redis ops', () => {
   })
 
   it('appendBytes creates then extends', async () => {
-    await appendBytes(acc, spec('/a.txt'), ENC.encode('foo'))
-    await appendBytes(acc, spec('/a.txt'), ENC.encode('bar'))
+    await write(acc, spec('/a.txt'), ENC.encode('foo'), true)
+    await write(acc, spec('/a.txt'), ENC.encode('bar'), true)
     expect(DEC.decode(await read(acc, spec('/a.txt')))).toBe('foobar')
   })
 

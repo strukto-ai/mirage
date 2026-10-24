@@ -17,7 +17,6 @@ import errno
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.append import append_bytes
 from mirage.core.ram.copy import copy
 from mirage.core.ram.exists import exists
 from mirage.core.ram.rename import rename
@@ -25,6 +24,7 @@ from mirage.core.ram.rm import rm_r
 from mirage.core.ram.rmdir import rmdir
 from mirage.core.ram.truncate import truncate
 from mirage.core.ram.unlink import unlink
+from mirage.core.ram.write import write
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
 
@@ -224,12 +224,13 @@ async def test_truncate_to_zero(store):
 
 @pytest.mark.asyncio
 async def test_append_to_existing(store):
-    await append_bytes(
+    await write(
         store,
         PathSpec(
             vfs_path="file.txt", virtual="/file.txt", directory="/file.txt"
         ),
         b" world",
+        append=True,
     )
     assert store.store.files["/file.txt"] == b"hello world"
 
@@ -239,10 +240,11 @@ async def test_append_to_new():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="new.txt", virtual="/new.txt", directory="/new.txt"),
         b"data",
+        append=True,
     )
     assert s.files["/new.txt"] == b"data"
 
@@ -254,7 +256,7 @@ async def test_append_into_missing_parent_leaves_no_orphan():
 
     a = RAMAccessor(s)
     with pytest.raises(FileNotFoundError):
-        await append_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="missing/new.txt",
@@ -262,6 +264,7 @@ async def test_append_into_missing_parent_leaves_no_orphan():
                 directory="/missing/new.txt",
             ),
             b"data",
+            append=True,
         )
     assert "/missing/new.txt" not in s.files
 
@@ -273,7 +276,7 @@ async def test_append_under_a_plain_file_is_not_a_directory():
 
     a = RAMAccessor(s)
     with pytest.raises(NotADirectoryError):
-        await append_bytes(
+        await write(
             a,
             PathSpec(
                 vfs_path="plain/new.txt",
@@ -281,6 +284,7 @@ async def test_append_under_a_plain_file_is_not_a_directory():
                 directory="/plain/new.txt",
             ),
             b"data",
+            append=True,
         )
     assert "/plain/new.txt" not in s.files
 
@@ -290,20 +294,23 @@ async def test_append_multiple():
     s = RAMStore()
 
     a = RAMAccessor(s)
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"a",
+        append=True,
     )
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"b",
+        append=True,
     )
-    await append_bytes(
+    await write(
         a,
         PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/f.txt"),
         b"c",
+        append=True,
     )
     assert s.files["/f.txt"] == b"abc"
 

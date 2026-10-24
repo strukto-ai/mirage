@@ -20,18 +20,11 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
 import { openError, resolveFileHandle, toWritableChunk } from './utils.ts'
 
-export async function appendBytes(
-  accessor: OPFSAccessor,
-  p: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
-  await appendStream(accessor, p, data)
-}
-
-export async function appendStream(
+export async function append(
   accessor: OPFSAccessor,
   p: PathSpec,
   data: ByteSource,
+  signal?: AbortSignal,
 ): Promise<void> {
   const root = await accessor.root()
   const timer = startOp()
@@ -42,7 +35,7 @@ export async function appendStream(
   } catch (err) {
     throw await openError(root, key, err, p)
   }
-  const source = chunks(data)[Symbol.asyncIterator]()
+  const source = chunks(data, signal)[Symbol.asyncIterator]()
   let writable: FileSystemWritableFileStream | null = null
   let size = 0
   try {

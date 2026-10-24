@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
@@ -25,14 +26,25 @@ import { dropboxUpload } from './client.ts'
 import { dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './readdir.ts'
 
-// Large spooled inputs use upload sessions. A held version costs one
+// Large spooled inputs use upload sessions, and a stream is spooled first, as
+// its size picks the upload; `signal` stops it. A held version costs one
 // get_metadata and goes out as the file's rev in `update` mode. Answers the
 // stored file's stat, null for a reply that names none.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
-  data: Uint8Array | ByteSpool,
+  data: ByteSource | ByteSpool,
+  signal?: AbortSignal,
 ): Promise<FileStat | null> {
+  if (!(data instanceof Uint8Array) && !(data instanceof ByteSpool)) {
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(chunks(data, signal))
+      return await write(accessor, path, spool)
+    } finally {
+      await spool.close()
+    }
+  }
   const tm = accessor.tokenManager
   const apiPath = dropboxPathOf(accessor, path)
   const cond = await writeCondition(path, 'put')
@@ -59,18 +71,4 @@ export async function write(
     },
   )
   return stored
-}
-
-export async function writeStream(
-  accessor: DropboxAccessor,
-  path: PathSpec,
-  data: ByteSource,
-): Promise<FileStat | null> {
-  const spool = new ByteSpool()
-  try {
-    await spool.fill(data)
-    return await write(accessor, path, spool)
-  } finally {
-    await spool.close()
-  }
 }

@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
 import { mkdir } from './mkdir.ts'
 import { read } from './read.ts'
-import { write, writeStream } from './write.ts'
+import { write } from './write.ts'
 
 let accessor: ReturnType<typeof makeMockAccessor>
 beforeEach(() => {
@@ -67,8 +67,8 @@ it('commits all chunks and aborts a failed source without replacing the original
     if (fail) throw new Error('producer failed')
     yield new TextEncoder().encode('last')
   }
-  await expect(writeStream(accessor, spec('/x'), source(true))).rejects.toThrow('producer failed')
+  await expect(write(accessor, spec('/x'), source(true))).rejects.toThrow('producer failed')
   expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('old')
-  await writeStream(accessor, spec('/x'), source(false))
+  await write(accessor, spec('/x'), source(false))
   expect(new TextDecoder().decode(await read(accessor, spec('/x')))).toBe('firstlast')
 })

@@ -17,8 +17,7 @@ import { stat } from '../../core/sharepoint/stat.ts'
 import { readStream } from '../../core/sharepoint/stream.ts'
 import { exists } from '../../core/sharepoint/exists.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { chunks } from '../../io/cooperative.ts'
-import { write, writeStream } from '../../core/sharepoint/write.ts'
+import { write } from '../../core/sharepoint/write.ts'
 import { create } from '../../core/sharepoint/create.ts'
 import { mkdir } from '../../core/sharepoint/mkdir.ts'
 import { unlink } from '../../core/sharepoint/unlink.ts'
@@ -89,8 +88,7 @@ export class SharePointVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
-    if (data instanceof Uint8Array) return write(this.accessor, path, data)
-    return writeStream(this.accessor, path, chunks(data, signal))
+    return write(this.accessor, path, data, signal)
   }
 
   override create(path: PathSpec): Promise<void> {

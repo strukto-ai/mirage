@@ -30,12 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 async def write(
-    accessor: SSHAccessor, path_spec: PathSpec, data: bytes
-) -> None:
-    await write_stream(accessor, path_spec, data)
-
-
-async def write_stream(
     accessor: SSHAccessor,
     path_spec: PathSpec,
     data: ByteSource,
