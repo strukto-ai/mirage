@@ -6,6 +6,17 @@
 </p>
 
 <p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS : l'interface de système de fichiers virtuel ouverte et neutre pour les agents IA" />
+    </picture>
+  </a>
+</p>
+
+<p align="center">
     <a href="https://docs.mirage.strukto.ai" alt="Documentation">
         <img src="https://img.shields.io/badge/mirage-documentation-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://www.strukto.ai" alt="Site web">
@@ -38,17 +49,6 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
-</p>
-
-<p align="center">
-  <a href="https://agentvfs.org">
-    <picture>
-      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
-      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
-      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
-      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS : l'interface de système de fichiers virtuel ouverte et neutre pour les agents IA" />
-    </picture>
-  </a>
 </p>
 
 Mirage est **un terminal virtuel pour les agents IA**. Le système de fichiers virtuel apporte un large contexte de données, les CLI virtualisées donnent à l'agent plus de souplesse dans l'usage des outils, les runtimes dynamiques réduisent le coût de l'infrastructure sous-jacente et consomment moins de tokens, et un contrôle fin sur les actions de l'agent et jusque sur ce qu'il peut voir apporte la meilleure sécurité. Ensemble, ces éléments forment un seul terminal virtualisé, offrant les meilleures performances d'agent, la meilleure efficacité de coût et la meilleure sécurité.
