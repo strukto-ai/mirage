@@ -15,12 +15,7 @@
 import { chunks } from '../../io/cooperative.ts'
 import { OpReport, type ByteSource } from '../../io/types.ts'
 import type { FileDescription } from '../../shell/descriptors.ts'
-import {
-  DEFAULT_UMASK,
-  currentCaller,
-  getCurrentEvaluation,
-  type SessionOwner,
-} from '../../context/session_context.ts'
+import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_context.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -167,18 +162,19 @@ export async function writeDescription(
   }
 }
 
-const streaming = new Map<SessionOwner | null, Set<string>>()
+const streaming = new Set<string>()
 
 /**
  * Land an opened description's first write into a file still empty as one
  * stream, and answer whether it did. The same bytes from offset 0 in `pwrite`
  * windows cost a copy of the file each on a store whose `pwrite` rewrites it,
- * so `cmd > f` would move the file's size squared. The path is claimed in the
- * caller's workspace before the stat and kept until the stream ends, so
- * another description of the file writing meanwhile takes the windows, which
- * interleave as two descriptors do, instead of replacing what this one wrote;
- * another workspace's claims never touch it. A stream that fails leaves the
- * offset at what landed. `data` is untouched when this answers false. Mirrors
+ * so `cmd > f` would move the file's size squared. The backing file (the store
+ * and its key, alike for every workspace mounting that store) is claimed
+ * before the size is read and kept until the stream ends, so another
+ * description of it writing meanwhile takes the windows, which interleave as
+ * two descriptors do, instead of replacing what this one wrote; a file in
+ * another store never contends. A stream that fails leaves the offset at what
+ * landed. `data` is untouched when this answers false. Mirrors
  * Python's _first_write.
  */
 async function firstWrite(
@@ -187,15 +183,17 @@ async function firstWrite(
   file: FileDescription,
   data: ByteSource,
 ): Promise<boolean> {
-  const owner = currentCaller().owner
-  let held = streaming.get(owner)
-  if (held === undefined) {
-    held = new Set()
-    streaming.set(owner, held)
+  const report = new OpReport()
+  try {
+    await dispatch('stat', file.scope, [], { admit_only: true }, report)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`write target ${file.scope.rawPath} has no store: ${String(err)}`)
+    return false
   }
-  const path = file.scope.virtual
-  if (held.has(path)) return false
-  held.add(path)
+  const store = report.store ?? file.scope.virtual
+  if (streaming.has(store)) return false
+  streaming.add(store)
   try {
     if ((await sizeOf(dispatch, file.scope)) !== 0) return false
     try {
@@ -206,8 +204,7 @@ async function firstWrite(
     }
     return true
   } finally {
-    held.delete(path)
-    if (held.size === 0) streaming.delete(owner)
+    streaming.delete(store)
   }
 }
 

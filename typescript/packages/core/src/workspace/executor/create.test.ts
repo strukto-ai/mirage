@@ -83,7 +83,8 @@ async function* aBlockThenAByte(): AsyncGenerator<Uint8Array> {
 describe('writeDescription', () => {
   it('leaves the offset after what landed when a later write fails', async () => {
     const landed: [number, number][] = []
-    const dispatch: DispatchFn = async (op, _path, args) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
       await Promise.resolve()
       if (op === 'pwrite') {
         if (landed.length > 0) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
@@ -107,7 +108,8 @@ describe('writeDescription', () => {
     [5, ['stat', 'pwrite', 'pwrite']],
   ])('lands a first write into a file of %i bytes as %j', async (size, ops) => {
     const calls: string[] = []
-    const dispatch: DispatchFn = async (op, _path, args) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
       calls.push(op)
       if (op === 'stat') {
         return [new FileStat({ name: 'f', size, type: FileType.FILE }), new IOResult()]
@@ -126,7 +128,8 @@ describe('writeDescription', () => {
     const ops: string[] = []
     let release = (): void => undefined
     const released = new Promise<void>((resolve) => (release = resolve))
-    const dispatch: DispatchFn = async (op, _path, args) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
       ops.push(op)
       if (op === 'stat') {
         return [new FileStat({ name: 'f', size: 0, type: FileType.FILE }), new IOResult()]
@@ -166,7 +169,8 @@ describe('writeDescription', () => {
 
   it('leaves the offset at what landed when a first write fails', async () => {
     let landed = 0
-    const dispatch: DispatchFn = async (op, _path, args) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
       if (op === 'stat') {
         return [new FileStat({ name: 'f', size: landed, type: FileType.FILE }), new IOResult()]
       }

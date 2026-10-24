@@ -1185,3 +1185,39 @@ async def test_a_redirect_streams_while_another_workspace_streams_its_path():
         await held
         await first.close()
         await second.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_takes_the_windows_while_its_store_streams_elsewhere():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Held(RAMVFS):
+        async def write(self, path, data, *, atomic=False):
+            if data != b"":
+                entered.set()
+                await release.wait()
+            await super().write(path, data, atomic=atomic)
+
+    shared = Held()
+    first = Workspace(
+        {"/data": (shared, MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    second = Workspace(
+        {"/data": (shared, MountMode.WRITE)}, mode=MountMode.WRITE
+    )
+    held = asyncio.create_task(
+        first.shell("seq 1 5 > /data/out", record=False)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        io = await asyncio.wait_for(
+            second.shell("seq 7 8 > /data/out; cat /data/out", record=False),
+            5,
+        )
+        assert (io.exit_code, io.stdout) == (0, b"7\n8\n")
+    finally:
+        release.set()
+        await held
+        await first.close()
+        await second.close()

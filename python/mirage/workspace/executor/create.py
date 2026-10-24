@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.context import DEFAULT_UMASK
-from mirage.context.session_context import SessionOwner, current_caller
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
 from mirage.io.spool import MEMORY_LIMIT
@@ -29,7 +28,7 @@ from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
-_streaming: dict[SessionOwner | None, set[str]] = {}
+_streaming: dict[str, int] = {}
 
 
 async def create_file(
@@ -208,12 +207,13 @@ async def _first_write(
 
     The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
     file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
-    would move the file's size squared. The path is claimed in the
-    caller's workspace before the stat and kept until the stream ends, so
-    another description of the file writing meanwhile takes the windows,
-    which interleave as two descriptors do, instead of replacing what this
-    one wrote; another workspace's claims never touch it. A stream that
-    fails leaves the offset at what landed.
+    would move the file's size squared. The backing file (the store and
+    its key, alike for every workspace mounting that store) is claimed
+    before the size is read and kept until the stream ends, so another
+    description of it writing meanwhile takes the windows, which
+    interleave as two descriptors do, instead of replacing what this one
+    wrote; a file in another store never contends. A stream that fails
+    leaves the offset at what landed.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -222,12 +222,17 @@ async def _first_write(
         data (ByteSource): bytes emitted by the command, untouched when
             this answers False.
     """
-    owner = current_caller().owner
-    held = _streaming.setdefault(owner, set())
-    path = file.scope.virtual
-    if path in held:
+    report = OpReport()
+    try:
+        await dispatch("stat", file.scope, admit_only=True, report=report)
+    except FS_ERRORS as exc:
+        logger.debug(
+            "write target %s has no store: %s", file.scope.raw_path, exc
+        )
         return False
-    held.add(path)
+    store = report.store or file.scope.virtual
+    if _streaming.setdefault(store, id(file)) != id(file):
+        return False
     try:
         if await _size_of(dispatch, file.scope) != 0:
             return False
@@ -240,9 +245,7 @@ async def _first_write(
             raise
         return True
     finally:
-        held.discard(path)
-        if not held:
-            _streaming.pop(owner, None)
+        del _streaming[store]
 
 
 async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:

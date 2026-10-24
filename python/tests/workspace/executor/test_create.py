@@ -100,6 +100,8 @@ async def test_a_failed_write_leaves_the_offset_after_what_landed():
     landed: list[tuple[int, int]] = []
 
     async def dispatch(op: str, scope: PathSpec, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         if op == "pwrite":
             if landed:
                 raise OSError(28, "No space left on device")
@@ -123,6 +125,8 @@ async def test_a_first_write_into_an_empty_file_lands_as_one_stream(size, ops):
     calls: list[str] = []
 
     async def dispatch(op: str, scope: PathSpec, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         calls.append(op)
         if op == "stat":
             return FileStat(name="f", size=size, type=FileType.FILE), None
@@ -144,6 +148,8 @@ async def test_a_second_first_write_meanwhile_takes_the_windows():
     release = asyncio.Event()
 
     async def dispatch(op: str, scope: PathSpec, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         ops.append(op)
         if op == "stat":
             return FileStat(name="f", size=0, type=FileType.FILE), None
@@ -177,6 +183,8 @@ async def test_a_failed_first_write_leaves_the_offset_at_what_landed():
     landed = 0
 
     async def dispatch(op: str, scope: PathSpec, **kwargs):
+        if kwargs.get("admit_only"):
+            return None, None
         nonlocal landed
         if op == "stat":
             return FileStat(name="f", size=landed, type=FileType.FILE), None
