@@ -20,12 +20,14 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 _INTEG_DIR = str(Path(__file__).resolve().parent)
 _INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
 _ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
 sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
 
+from pydantic import SecretStr  # noqa: E402
 from pymongo import AsyncMongoClient  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
@@ -48,7 +50,7 @@ async def shell(ws: Workspace, line: str) -> dict[str, str | int]:
 
 async def restored_reads(
     snap: Path, config: GridFSConfig
-) -> dict[str, str | bool]:
+) -> dict[str, str | int | bool]:
     """What a workspace restored from ``snap`` reads at ``/data/f.txt``,
     past the restored cache, so the pinned stat and read reach the trashed
     revision itself.
@@ -118,11 +120,11 @@ async def probe(config: GridFSConfig) -> dict[str, str | int | bool]:
 
 async def main() -> None:
     database = f"mirage_integ_trash_{uuid.uuid4().hex[:8]}"
-    config = GridFSConfig(uri=URI, database=database, bucket="data")
+    config = GridFSConfig(uri=SecretStr(URI), database=database, bucket="data")
     try:
         result = await probe(config)
     finally:
-        client: AsyncMongoClient = AsyncMongoClient(URI)
+        client: AsyncMongoClient[dict[str, Any]] = AsyncMongoClient(URI)
         try:
             await client.drop_database(database)
         finally:
