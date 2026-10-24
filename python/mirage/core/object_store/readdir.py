@@ -81,6 +81,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                         cut = True
                         break
                     if key not in names:
+                        cut = True
                         continue
                 names.add(key)
                 if child.kind == "d":

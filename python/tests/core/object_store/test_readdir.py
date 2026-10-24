@@ -146,6 +146,13 @@ def test_a_cut_listing_stops_at_a_kept_directorys_next_row(accessor):
     assert pulled == ["a", "b", "b"]
 
 
+def test_a_listing_that_skips_a_name_past_its_limit_is_partial(accessor):
+    store = FakeStore({k: b"x" for k in ("a", "b", "b.conf")})
+    out = asyncio.run(make_readdir(make_driver(store))(accessor, spec("/"), 2))
+    assert isinstance(out, DirListing) and out.partial
+    assert [row.name for row in out.entries] == ["a", "b"]
+
+
 def test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory(
     accessor,
 ):

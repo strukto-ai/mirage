@@ -163,6 +163,14 @@ it("stops a cut listing at a kept directory's next row", async () => {
   expect(pulled).toEqual(['a', 'b', 'b'])
 })
 
+// Twin of test_a_listing_that_skips_a_name_past_its_limit_is_partial.
+it('marks a listing that skips a name past its limit partial', async () => {
+  const store = new FakeStore(Object.fromEntries(['a', 'b', 'b.conf'].map((k) => [k, 'x'])))
+  const out = await makeReaddir(makeDriver(store))(accessor, spec('/'), 2)
+  expect(out instanceof DirListing && out.partial).toBe(true)
+  expect((out as DirListing).entries.map((row) => row.name)).toEqual(['a', 'b'])
+})
+
 // Twin of test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory.
 it('reads a cut listing on until a kept file proves a directory', async () => {
   const store = new FakeStore(Object.fromEntries(['a', 'b', 'b/x', 'c'].map((k) => [k, 'x'])))

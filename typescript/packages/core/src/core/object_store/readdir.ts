@@ -71,7 +71,10 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
             cut = true
             break
           }
-          if (!names.has(key)) continue
+          if (!names.has(key)) {
+            cut = true
+            continue
+          }
         }
         names.add(key)
         if (child.kind === 'd') {
