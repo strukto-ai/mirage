@@ -175,6 +175,60 @@ it('the final record does not wait for stdin to end', async () => {
   await table.close()
 })
 
+it('a hang-up after the final record ends the body', async () => {
+  const hangUp = gate()
+  const table = new ExecutionTable()
+  const job = table.submit(
+    'workspace',
+    'true',
+    async (_signal, scope) => {
+      await scope.start()
+      return { exit_code: 0 }
+    },
+    'session',
+  )
+  await table.wait(job.id)
+  const raw = new EventEmitter()
+  const log = { error: vi.fn(), debug: vi.fn() }
+  let source: Readable | undefined
+  const reply = {
+    raw,
+    log,
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  const failed = hangUp.wait.then(() => new Error('aborted'))
+  shellResponse(new ShellOutput(), table, job, reply, failed, new UploadStdin())
+  if (source === undefined) throw new Error('response did not send a stream')
+  const body = source
+  const records: string[] = []
+  let ended = false
+  const reading = (async () => {
+    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    ended = true
+  })()
+  for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
+  expect(records.join('')).toContain('"status":"done"')
+  expect(ended).toBe(false)
+  raw.emit('close')
+  hangUp.release()
+  await reading
+  expect(
+    records
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => (JSON.parse(line) as { status: string }).status),
+  ).toEqual(['done'])
+  expect(log.error).not.toHaveBeenCalled()
+  expect(table.get(job.id)?.status).toBe(ExecutionStatus.DONE)
+  await table.close()
+})
+
 it('an upload that failed first fails the final record', async () => {
   const table = new ExecutionTable()
   const job = table.submit(

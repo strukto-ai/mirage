@@ -17,6 +17,10 @@ def record(**fields):
     return (json.dumps(fields) + "\n").encode()
 
 
+async def ignore(data):
+    pass
+
+
 async def test_split_records_preserve_binary_channels_and_exit_status():
     out = bytearray()
     err = bytearray()
@@ -77,11 +81,8 @@ async def test_the_completion_record_ends_the_read():
         pulled.append("past the completion")
         await asyncio.Event().wait()
 
-    async def write(data):
-        pass
-
     terminal = await asyncio.wait_for(
-        consume_stream(source(), write, write), 1
+        consume_stream(source(), ignore, ignore), 1
     )
     assert terminal["status"] == "done"
     assert pulled == []
