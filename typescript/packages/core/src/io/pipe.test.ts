@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { PipeClosed } from './errors.ts'
-import { CAPACITY, BytePipe } from './pipe.ts'
+import { CAPACITY, BytePipe, SEALED } from './pipe.ts'
 import { concat } from '../utils/bytes.ts'
 
 describe('BytePipe', () => {
@@ -66,6 +66,24 @@ describe('BytePipe', () => {
     expect(first.value.byteLength).toBe(CHUNK_SIZE)
     await source.return(undefined)
     await refused
+  })
+
+  it('keeps a sealed write up to twice its capacity as written', async () => {
+    for (const [size, kept] of [
+      [CAPACITY + 1, true],
+      [2 * CAPACITY + 1, false],
+    ] as const) {
+      const pipe = new BytePipe()
+      const data = new Uint8Array(size)
+      SEALED.add(data.buffer)
+      const written = pipe.write(data).then(() => {
+        pipe.end()
+      })
+      const parts: Uint8Array[] = []
+      for await (const part of pipe.stream()) parts.push(part)
+      await written
+      expect(parts.map((part) => part.buffer === data.buffer)).toEqual(parts.map(() => kept))
+    }
   })
 
   it('owns buffered bytes after accepting a mutable write', async () => {

@@ -950,6 +950,11 @@
     "owned": "Wasm streams require explicit handle disposal after final progress; Python releases native state with object ownership."
    }
   },
+  "io/pipe": {
+   "typescript_only": {
+    "SEALED": "Marks buffers a producer never writes again, so the pipe keeps them instead of copying; Python pipes hold immutable bytes and never copy."
+   }
+  },
   "io/stream": {
    "python_only": {
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
