@@ -22,6 +22,7 @@ from mirage.policy.errors import PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.schemas import CancelLinesResponse, KillJobsResponse
+from mirage.workspace.session import SessionState
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/sessions")
 
@@ -51,15 +52,22 @@ async def create_session(
 ) -> SessionResponse:
     entry = require_entry(request, workspace_id)
     sid = req.session_id or f"sess_{secrets.token_hex(6)}"
-    await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
-    if any(s.session_id == sid for s in entry.runner.ws.list_sessions()):
-        raise HTTPException(
-            status_code=409, detail=f"session id already exists: {sid!r}"
-        )
-    try:
-        sess = entry.runner.ws.create_session(
+    ws = entry.runner.ws
+    await entry.runner.call(ws.ensure_sessions_loaded())
+
+    # On the workspace's own loop, as every change to its session table
+    # is: its thread iterates the table, which must not grow under it.
+    async def create() -> SessionState:
+        if any(s.session_id == sid for s in ws.list_sessions()):
+            raise HTTPException(
+                status_code=409, detail=f"session id already exists: {sid!r}"
+            )
+        return ws.create_session(
             sid, mounts=req.mounts or None, profile=req.profile
         )
+
+    try:
+        sess = await entry.runner.call(create())
     except (ValueError, PolicyError) as exc:
         # An unknown profile name and a refused inline document are
         # both the caller's mistake, and PolicyError is not a
