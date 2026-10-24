@@ -50,6 +50,11 @@ function eventTimestamp(e: EventDict): number {
   return typeof e.timestamp === 'number' ? e.timestamp : 0
 }
 
+/** The latest timestamp among `events`, 0 when none carries one. */
+function newestStamp(events: readonly EventDict[]): number {
+  return events.reduce((newest, e) => Math.max(newest, Math.floor(eventTimestamp(e))), 0)
+}
+
 /**
  * Persists LogEntry records to an ObserverStore as JSONL files.
  *
@@ -61,11 +66,16 @@ function eventTimestamp(e: EventDict): number {
  *
  * Every entry is stamped, and filed under its day, on `clock`: the
  * workspace's, which also stamps the op records the entries carry, so a
- * workspace on a manual clock keeps one time domain in its history.
+ * workspace on a manual clock keeps one time domain in its history. No
+ * entry is stamped before the newest one the store holds: a clock that
+ * restarts behind stored history (a fresh `ManualClock` over a restored or
+ * persisted log) would otherwise file a clear or delete ahead of the
+ * commands it acts on.
  */
 export class Observer {
   private readonly _store: ObserverStore
   private readonly clock: Clock
+  private newestMs: number | null = null
 
   constructor(store?: ObserverStore, clock: Clock = new SystemClock()) {
     this._store = store ?? new RAMObserverStore()
@@ -81,9 +91,29 @@ export class Observer {
     return this._store
   }
 
+  /**
+   * The newest stamp the store holds, read from it once; an entry stamped
+   * while the store is read is newer still and is kept.
+   */
+  private async newest(): Promise<number> {
+    if (this.newestMs !== null) return this.newestMs
+    return this.raiseNewest(newestStamp(parseFiles(await this._store.readAll())))
+  }
+
+  private raiseNewest(stamp: number): number {
+    this.newestMs = Math.max(stamp, this.newestMs ?? 0)
+    return this.newestMs
+  }
+
   private async log(entry: LogEntry): Promise<void> {
-    const line = new TextEncoder().encode(entry.toJsonLine() + '\n')
-    await this._store.append(`/${utcDateFolder(this.nowMs())}/${entry.session}.jsonl`, line)
+    const newest = await this.newest()
+    const stamped =
+      entry.timestamp < newest
+        ? Object.assign(Object.create(LogEntry.prototype) as LogEntry, entry, { timestamp: newest })
+        : entry
+    this.newestMs = stamped.timestamp
+    const line = new TextEncoder().encode(stamped.toJsonLine() + '\n')
+    await this._store.append(`/${utcDateFolder(stamped.timestamp)}/${stamped.session}.jsonl`, line)
   }
 
   async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
@@ -198,7 +228,11 @@ export class Observer {
    */
   async loadEvents(events: EventDict[]): Promise<void> {
     await this._store.clear()
-    const day = utcDateFolder(this.nowMs())
+    this.newestMs = Math.max(
+      this.nowMs(),
+      newestStamp(events.filter((e) => KNOWN_EVENTS.has(e.type as string))),
+    )
+    const day = utcDateFolder(this.newestMs)
     const bySession = new Map<string, string[]>()
     for (const e of events) {
       if (!KNOWN_EVENTS.has(e.type as string)) continue

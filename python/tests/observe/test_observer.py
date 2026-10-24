@@ -33,7 +33,7 @@ def test_log_op_writes_jsonl():
         path="/data/f.csv",
         source="s3",
         bytes=100,
-        timestamp=1000,
+        timestamp=int(NEW_YEAR * 1000),
         duration_ms=5,
     )
     asyncio.run(obs.log_op(rec, session="sess-1"))
@@ -68,7 +68,7 @@ def test_multiple_entries_appended():
             path=f"/f{i}",
             source="s3",
             bytes=i,
-            timestamp=1000 + i,
+            timestamp=int(NEW_YEAR * 1000) + i,
             duration_ms=1,
         )
         asyncio.run(obs.log_op(rec, session="s"))
@@ -228,3 +228,43 @@ def test_load_events_skips_foreign_format_entries():
     asyncio.run(obs.load_events([foreign, native]))
     events = asyncio.run(obs.command_events())
     assert [e["command"] for e in events] == ["echo hi"]
+
+
+def test_a_clock_behind_stored_history_does_not_reorder_it():
+    store = RAMObserverStore()
+    first = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    asyncio.run(first.log_command_text("a", session="s"))
+    asyncio.run(first.log_command_text("b", session="s"))
+    reopened = Observer(store=store, clock=ManualClock())
+    asyncio.run(reopened.log_delete("s", 1))
+    shown = asyncio.run(reopened.session_command_events("s"))
+    assert [e["command"] for e in shown] == ["b"]
+    asyncio.run(reopened.log_clear("s"))
+    asyncio.run(reopened.log_command_text("c", session="s"))
+    shown = asyncio.run(reopened.session_command_events("s"))
+    assert [e["command"] for e in shown] == ["c"]
+    events = asyncio.run(reopened.events())
+    assert [e["type"] for e in events] == [
+        "command",
+        "command",
+        "delete",
+        "clear",
+        "command",
+    ]
+    assert list(store.files) == ["/2021-01-01/s.jsonl"]
+
+
+def test_a_clock_behind_restored_history_does_not_reorder_it():
+    snapshot = [
+        {
+            "type": "command",
+            "session": "s",
+            "timestamp": int(NEW_YEAR * 1000),
+            "command": "a",
+            "exit_code": 0,
+        }
+    ]
+    restored = Observer(clock=ManualClock())
+    asyncio.run(restored.load_events(snapshot))
+    asyncio.run(restored.log_clear("s"))
+    assert asyncio.run(restored.session_command_events("s")) == []

@@ -52,7 +52,7 @@ describe('Observer', () => {
       path: '/data/f.csv',
       source: 's3',
       bytes: 100,
-      timestamp: 1000,
+      timestamp: NEW_YEAR * 1000,
       durationMs: 5,
     })
     await o.logOp(rec, 'sess-1')
@@ -91,7 +91,7 @@ describe('Observer', () => {
         path: `/f${String(i)}`,
         source: 's3',
         bytes: i,
-        timestamp: 1000 + i,
+        timestamp: NEW_YEAR * 1000 + i,
         durationMs: 1,
       })
       await o.logOp(rec, 's')
@@ -232,5 +232,37 @@ describe('Observer', () => {
     const native = { type: EVENT_COMMAND, session: 's1', command: 'echo hi' }
     await o.loadEvents([foreign, native])
     expect((await o.commandEvents()).map((e) => e.command)).toEqual(['echo hi'])
+  })
+})
+
+describe('a clock behind stored history', () => {
+  it('does not reorder a stored log', async () => {
+    const store = new RAMObserverStore()
+    const first = new Observer(store, new ManualClock(NEW_YEAR))
+    await first.logCommandText('a', 's')
+    await first.logCommandText('b', 's')
+    const reopened = new Observer(store, new ManualClock())
+    await reopened.logDelete('s', 1)
+    expect((await reopened.sessionCommandEvents('s')).map((e) => e.command)).toEqual(['b'])
+    await reopened.logClear('s')
+    await reopened.logCommandText('c', 's')
+    expect((await reopened.sessionCommandEvents('s')).map((e) => e.command)).toEqual(['c'])
+    expect((await reopened.events()).map((e) => e.type)).toEqual([
+      'command',
+      'command',
+      'delete',
+      'clear',
+      'command',
+    ])
+    expect([...store.files.keys()]).toEqual(['/2021-01-01/s.jsonl'])
+  })
+
+  it('does not reorder a restored log', async () => {
+    const restored = new Observer(undefined, new ManualClock())
+    await restored.loadEvents([
+      { type: 'command', session: 's', timestamp: NEW_YEAR * 1000, command: 'a', exit_code: 0 },
+    ])
+    await restored.logClear('s')
+    expect(await restored.sessionCommandEvents('s')).toEqual([])
   })
 })
