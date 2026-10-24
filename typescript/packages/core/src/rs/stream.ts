@@ -416,8 +416,9 @@ export async function* runStream(
 export async function* mergeOutput(
   stream: OpenStream,
   read: (index: number) => Promise<Uint8Array | null>,
+  signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
-  const budget = new YieldBudget()
+  const budget = new YieldBudget(signal)
   for (;;) {
     while (stream.busy()) {
       await budget.run()
@@ -446,10 +447,14 @@ export async function* chainOutput(
 ): AsyncGenerator<Uint8Array> {
   const inputs = sources.map((source) => chunks(source, signal))
   try {
-    yield* mergeOutput(stream, async (index) => {
-      const next = await inputs[index]?.next()
-      return next === undefined || next.done === true ? null : next.value
-    })
+    yield* mergeOutput(
+      stream,
+      async (index) => {
+        const next = await inputs[index]?.next()
+        return next === undefined || next.done === true ? null : next.value
+      },
+      signal,
+    )
   } finally {
     for (const [index, input] of inputs.entries()) {
       await input.return?.(undefined)

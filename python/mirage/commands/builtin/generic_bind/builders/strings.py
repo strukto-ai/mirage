@@ -33,7 +33,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream, run_stream
-from mirage.shell.bytes import byte_view
+from mirage.shell.bytes import byte_view, from_byte_view
 from mirage.types import JsonValue, PathSpec
 
 
@@ -50,7 +50,7 @@ async def strings(
         open_stream("strings", config)
     except StreamRefusal as refusal:
         return None, IOResult(
-            exit_code=1, stderr=f"{refusal.message}\n".encode()
+            exit_code=1, stderr=from_byte_view(f"{refusal.message}\n")
         )
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)

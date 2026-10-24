@@ -74,6 +74,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     Ok(Box::new(Tac {
         separator,
         before: config.before,
+        utf8: config.utf8,
         start: 0,
         held: Vec::new(),
         end: 0,
@@ -101,6 +102,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 struct Tac {
     separator: Separator,
     before: bool,
+    utf8: bool,
     /// Where in the input `held` starts.
     start: u64,
     held: Vec<u8>,
@@ -155,8 +157,14 @@ impl Tac {
                 Ok(memchr::memmem::rfind(hay, text).map(|at| span(at, text.len())))
             }
             Separator::Regex(posix) => {
-                // A place is tried with the byte before it held.
-                let low = start + u64::from(start > 0);
+                // A place is tried with the character before it held: a
+                // byte, or under UTF-8 as many as one may take.
+                let context = match (start, self.utf8) {
+                    (0, _) => 0,
+                    (_, false) => 1,
+                    (_, true) => 4,
+                };
+                let low = start + context;
                 if self.tried <= low {
                     return Ok(None);
                 }
@@ -335,5 +343,33 @@ mod tests {
         }
         assert!(calls > 1, "{calls}");
         assert_eq!(out, [&input[1..], b"x"].concat());
+    }
+
+    #[test]
+    fn a_place_waits_for_the_whole_character_before_it() {
+        let config = br#"{"separator":"\\<a","before":false,"regex":true,"utf8":true}"#;
+        let mut stream = open(config).expect("opens");
+        let input = ["éa".as_bytes(), &[b'!'; 65_534]].concat();
+        let size = format!(r#"{{"size":{}}}"#, input.len());
+        stream.begin(size.as_bytes()).expect("begins");
+        let mut out = Vec::new();
+        loop {
+            while stream.busy() {
+                stream.drain(&mut out).expect("drains");
+            }
+            let Some(header) = stream.request(&mut Vec::new()) else {
+                break;
+            };
+            let ask: serde_json::Value = serde_json::from_slice(&header).expect("json");
+            let offset = ask["offset"].as_u64().expect("offset") as usize;
+            let window = &input[offset..offset + ask["size"].as_u64().expect("size") as usize];
+            if ask["op"] == "emit" {
+                out.extend_from_slice(window);
+                stream.respond(b"{}", b"", &mut out).expect("emits");
+            } else {
+                stream.respond(b"{}", window, &mut out).expect("reads");
+            }
+        }
+        assert_eq!(out, input);
     }
 }

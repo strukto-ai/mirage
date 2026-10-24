@@ -24,9 +24,10 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 }
 
 /// `-n` as binutils 2.44 reads it, C's strtoul at base 0 over every byte,
-/// refused in its words in the order it tests them.
+/// refused in its words in the order it tests them; a refusal names the
+/// value one character per byte, which the host writes back as bytes.
 fn min_length(text: &[u8]) -> Result<u64, String> {
-    let shown = String::from_utf8_lossy(text);
+    let shown: String = text.iter().copied().map(char::from).collect();
     let start = text
         .iter()
         .position(|&b| !matches!(b, b' ' | b'\t'..=b'\r'))

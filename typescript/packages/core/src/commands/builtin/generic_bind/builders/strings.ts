@@ -20,11 +20,9 @@ import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import { openStream, runStream } from '../../../../rs/stream.ts'
-import { byteView } from '../../../../shell/bytes.ts'
+import { byteView, fromByteView } from '../../../../shell/bytes.ts'
 import { stdinStream } from '../../utils/stream.ts'
 import { perOperand } from '../../utils/operands.ts'
-
-const ENC = new TextEncoder()
 
 const strings: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const minLen = new FlagView(ctx.flags, specOf('strings')).asText('n')
@@ -35,7 +33,7 @@ const strings: CommandFn = async (_accessor, paths, _texts, ctx) => {
     probe.close()
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) })]
+    return [null, new IOResult({ exitCode: 1, stderr: fromByteView(`${err.message}\n`) })]
   }
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
