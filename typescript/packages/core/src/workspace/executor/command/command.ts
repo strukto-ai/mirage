@@ -87,7 +87,7 @@ import { findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './
 import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
-import { envSnapshot, sessionView } from '../../session/state.ts'
+import { sessionView } from '../../session/state.ts'
 import { optionError, parseFlags } from './flags.ts'
 import type { HandOff } from '../../../policy/types.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
@@ -223,7 +223,15 @@ export async function fillTreeEnv(
   skip: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   if (registry.fillEnv === undefined || registry.clis.get(name) !== null) return false
-  const tree = registry.commandMount(name, [], session.cwd)?.cliFor(name) ?? null
+  const candidates = registry.invocationCandidates(
+    name,
+    [],
+    session.cwd,
+    args,
+    sessionAccess(session),
+  )
+  if (candidates.length !== 1) return false
+  const tree = candidates[0]?.cliFor(name) ?? null
   if (tree === null || lookup(name, session, registry) !== Consumer.MOUNT) return false
   const verbs = new Set(args.filter((w) => !w.startsWith('-')))
   const supplied = suppliedEnvNames(tree.spec, [...args])
@@ -433,19 +441,24 @@ export async function handleCommand(
   // installed CLI: its walk, not a spec parse, reads the words, so it sits
   // ahead of the help, cross-mount and flag-parsing branches below, and of
   // the operand a bare ls, du, tree, find or grep implies.
-  let treeMount = registry.commandMount(cmdName, [], session.cwd, sessionAccess(session))
+  let treeMount = registry.invocationMount(
+    cmdName,
+    [],
+    session.cwd,
+    spelledWords(parts).slice(1),
+    sessionAccess(session),
+  )
   const tree = treeMount?.cliFor(cmdName) ?? null
   if (treeMount !== null && tree !== null) {
     const discovered = treeMount
     const walked = await walkLeaf(cmdName, tree, parts, session, files)
-    if (Array.isArray(walked)) return walked
+    if (Array.isArray(walked) && walked[1].exitCode === 0) return walked
     try {
       treeMount = registry.executionMount(
         cmdName,
         [],
         session.cwd,
         spelledWords(parts).slice(1),
-        envSnapshot(session),
         sessionAccess(session),
       )
     } catch (err) {
@@ -457,6 +470,7 @@ export async function handleCommand(
         new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
       ]
     }
+    if (Array.isArray(walked)) return walked
     const selectedTree = treeMount?.cliFor(cmdName) ?? null
     if (treeMount !== null && selectedTree !== null) {
       return runTree(treeMount, selectedTree, treeMount === discovered ? walked : undefined)
@@ -472,7 +486,13 @@ export async function handleCommand(
   const operands = operandPaths(cmdName, parts.slice(1), session.cwd).filter(
     (s) => s.walkError !== 'ENOENT',
   )
-  const ownMount = registry.commandMount(cmdName, operands, session.cwd)
+  const ownMount = registry.invocationMount(
+    cmdName,
+    operands,
+    session.cwd,
+    spelledWords(parts).slice(1),
+    sessionAccess(session),
+  )
   const ownSpec = ownMount?.specFor(cmdName) ?? null
   const borrowed =
     SPECS[cmdName] !== undefined && ownSpec !== null && !isBuiltinGrammar(cmdName, ownSpec)
@@ -843,7 +863,6 @@ export async function handleCommand(
       routingScopes,
       session.cwd,
       rawArgv,
-      envSnapshot(session),
       sessionAccess(session),
     )
   } catch (err) {

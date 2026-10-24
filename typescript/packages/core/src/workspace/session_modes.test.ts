@@ -24,6 +24,10 @@ import {
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { command, type CommandFn } from '../commands/config.ts'
+import { Argument, CommandSpec } from '../commands/spec/types.ts'
+import { IOResult } from '../io/types.ts'
 
 const ENC = new TextEncoder()
 
@@ -166,8 +170,53 @@ describe('per-session mount grants', () => {
     expect(stderrStr(denied)).toBe('cat: /b/secret.txt: No such file or directory\n')
     expect(stdoutStr(denied)).not.toContain('SECRET')
 
+    const hiddenListing = await ws.shell('ls /b', { sessionId: 'agent' })
+    expect(hiddenListing.exitCode).toBe(2)
+    expect(stderrStr(hiddenListing)).toBe("ls: cannot access '/b': No such file or directory\n")
+
     const listed = await ws.shell('ls /', { sessionId: 'agent' })
     expect(stdoutStr(listed).split(/\s+/)).not.toContain('b')
+  })
+
+  it.each(['flat', 'tree'])('never invokes a %s handler bound to a hidden mount', async (shape) => {
+    const { ws } = await makeGrantsWorkspace()
+    const calls: string[] = []
+    const leaf = new CommandSpec({
+      arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+    })
+    for (const prefix of ['/a', '/b']) {
+      const run: CommandFn = () => {
+        calls.push(prefix)
+        return [null, new IOResult()]
+      }
+      ws.mount(prefix).registerCommands(
+        shape === 'flat'
+          ? command({ name: 'remote', vfs: null, spec: leaf, fn: run })
+          : [
+              new CLI({
+                spec: new CommandSpec({
+                  name: 'remote',
+                  subcommands: [new CommandSpec({ name: 'get', arguments: leaf.arguments })],
+                }),
+                handlers: { get: new CLIHandler({ fn: run }) },
+              }),
+            ],
+      )
+    }
+    ws.createSession('agent', { profile: { paths: { hide: ['/b'] } } })
+    const prog = shape === 'flat' ? 'remote' : 'remote get'
+    const visible = await ws.shell(prog, { sessionId: 'agent' })
+    expect(visible.exitCode).toBe(0)
+    expect(calls).toEqual(['/a'])
+    calls.length = 0
+    const session = ws.getSession('agent')
+    for (const operand of ['/b/secret.txt', '']) {
+      session.cwd = shape === 'tree' || operand === '' ? '/b' : '/'
+      const refused = await ws.shell(`${prog} ${operand}`, { sessionId: 'agent' })
+      expect(refused.exitCode).toBe(127)
+      expect(stderrStr(refused)).toBe(`${prog}: command not found\n`)
+      expect(calls).toEqual([])
+    }
   })
 
   it('a user-defined root mount is governed like any other', async () => {

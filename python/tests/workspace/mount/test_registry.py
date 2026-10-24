@@ -23,7 +23,7 @@ from mirage.accessor.responses import ResponseCache
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.errors.fs import ebusy
 from mirage.errors.types import NoMountError
 from mirage.io.types import IOResult
@@ -343,7 +343,7 @@ def test_fallback_write_selects_one_writable_mount_or_refuses(left_mode):
         assert str(exc.value) == (
             "stamp: ambiguous, registered on 2 writable mounts:\n"
             "  /longer\n  /b\n"
-            "cd into the target mount or pass its path to disambiguate."
+            "cd into the target mount to disambiguate."
         )
     assert reg.execution_mount("stamp", [], "/b") is right
     assert (
@@ -364,7 +364,7 @@ def test_fallback_read_keeps_order_and_logs(caplog):
         _register_cmd(mount, "peek")
     with caplog.at_level("DEBUG", logger="mirage.workspace.mount.registry"):
         assert reg.execution_mount("peek", [], "/") is first
-    assert "multiple read mounts" in caplog.text
+    assert "multiple mounts" in caplog.text
     assert "/longer/" in caplog.text
     assert "/b/" in caplog.text
 
@@ -402,6 +402,14 @@ def test_fallback_uses_session_modes_and_visibility():
     )
     assert reg.command_candidates("stamp", [], "/", hidden) == [second]
     assert reg.execution_mount("stamp", [], "/", access=hidden) is second
+    named = PathSpec(
+        directory="/longer",
+        vfs_path="secret.txt",
+        virtual="/longer/secret.txt",
+    )
+    assert reg.command_candidates("stamp", [named], "/", hidden) == [first]
+    assert reg.execution_mount("stamp", [named], "/", access=hidden) is first
+    assert reg.execution_mount("stamp", [], "/longer", access=hidden) is first
     shown = SessionAccess(
         session_id="shown",
         visibility=Visibility(
@@ -448,6 +456,29 @@ def test_fallback_filters_session_private_mounts_before_binding():
     other = SessionAccess("other", None, 0o22, {}, None)
     assert reg.command_candidates("stamp", [], "/private", other) == [shared]
     assert reg.execution_mount("stamp", [], "/private", access=other) is shared
+
+
+def test_stdin_operand_does_not_bind_fallback_to_its_resolved_path():
+    reg = MountRegistry()
+    reg.mount("/", RAMVFS(), MountMode.WRITE)
+    reader = reg.mount("/longer", RAMVFS(), MountMode.READ)
+    writer = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    stream = command(
+        "stream",
+        vfs="ram",
+        spec=CommandSpec(
+            arguments=(Argument("paths", type="path", nargs="*"),)
+        ),
+        write=True,
+    )(_noop_cli)
+    for mount in (reader, writer):
+        mount.register_commands([stream])
+    assert reg.invocation_mount("stream", [], "/", ["-"]) is writer
+    assert (
+        reg.invocation_mount("stream", [], "/", ["-", "/longer/item"])
+        is reader
+    )
+    assert reg.invocation_mount("stream", [], "/", ["/-"]) is None
 
 
 # ── resolve_mount cache redirect ───────────────

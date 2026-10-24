@@ -74,6 +74,7 @@ from mirage.context import (
     effective_mount_mode,
     require_paths_writable,
     reset_caller,
+    session_visibility,
     strongest_mode_under,
 )
 from mirage.context.session_context import with_caller
@@ -115,6 +116,7 @@ from mirage.types import (
 )
 from mirage.utils.activity import Activity
 from mirage.utils.filetype import get_extension
+from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import norm
@@ -1074,7 +1076,7 @@ class MountEntry:
                         if user
                         else virtual_flags(flag_kwargs)
                     )
-                    refusal = self._read_only_refusal(cmd_name, cmd, flags)
+                    refusal = self._command_refusal(cmd_name, cmd, flags)
                     if refusal is not None:
                         return None, refusal
                     result = await self._run_one(
@@ -1284,14 +1286,14 @@ class MountEntry:
         finally:
             reset_caller(token)
 
-    def _read_only_refusal(
+    def _command_refusal(
         self,
         cmd_name: str,
         cmd: Command,
         flags: dict[str, FlagValue],
         served: Command | None = None,
     ) -> IOResult | None:
-        """Refuse a user write command on a read-only mount.
+        """Refuse user handlers on hidden mounts or read-only writes.
 
         Mirage's own commands are refused where they write, by the
         dispatcher, because only the write knows whether a line writes:
@@ -1315,12 +1317,18 @@ class MountEntry:
                 under, which says whether it is a user command: a tree's
                 root for one of its leaves; None for ``cmd`` itself.
         """
+        user = self._is_user_command(served or cmd)
+        if user and not path_visible(session_visibility(), self.prefix):
+            return IOResult(
+                exit_code=127,
+                stderr=encode_text(f"{cmd_name}: command not found\n"),
+            )
         info_only = (
             flags.get("help") is True and has_injected_help(cmd.spec)
         ) or (flags.get("version") is True and has_injected_version(cmd.spec))
         if (
             cmd.write
-            and self._is_user_command(served or cmd)
+            and user
             and not info_only
             and strongest_mode_under(self.prefix, self.mode) == MountMode.READ
         ):
@@ -1440,7 +1448,7 @@ class MountEntry:
             with self._command_scope(run_ctx):
                 # No flag here is answered for the leaf: walk_leaf answered
                 # the tree's own help, and the leaf is handed the rest.
-                refusal = self._read_only_refusal(prog, leaf, {}, root)
+                refusal = self._command_refusal(prog, leaf, {}, root)
                 if refusal is not None:
                     return None, refusal
                 with host_io():

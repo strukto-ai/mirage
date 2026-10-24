@@ -58,6 +58,40 @@ function treeFallbackRegistry(): MountRegistry {
 }
 
 describe('handleCommand — mount tree fallback', () => {
+  it.each([false, true])(
+    'selects a later tree that recognizes the verb (writes=%s)',
+    async (write) => {
+      const registry = treeFallbackRegistry()
+      for (const [prefix, verb] of [
+        ['/longer', 'peek'],
+        ['/short', 'send'],
+      ] as const) {
+        registry.mountForPrefix(prefix).registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: 'remote',
+              subcommands: [new CommandSpec({ name: verb })],
+            }),
+            handlers: {
+              [verb]: new CLIHandler({
+                write,
+                fn: () => [new TextEncoder().encode(`${prefix}\n`), new IOResult()],
+              }),
+            },
+          }),
+        ])
+      }
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', 'send'],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(decode(await materialize(stdout))).toBe('/short\n')
+    },
+  )
   it('runs a selected tree even when discovery found a flat reader first', async () => {
     const registry = treeFallbackRegistry()
     registry.mountForPrefix('/longer').registerCommands(
@@ -127,7 +161,7 @@ describe('handleCommand — mount tree fallback', () => {
     expect(refused.exitCode).toBe(1)
     expect(decode(refused.stderr as Uint8Array)).toBe(
       'remote: ambiguous, registered on 2 writable mounts:\n' +
-        '  /longer\n  /short\ncd into the target mount or pass its path to disambiguate.\n',
+        '  /longer\n  /short\ncd into the target mount to disambiguate.\n',
     )
     session.cwd = '/short'
     const [stdout, io] = await handleCommand(

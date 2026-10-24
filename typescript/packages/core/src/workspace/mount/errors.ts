@@ -26,7 +26,7 @@ export class MountCommandAmbiguous extends Error {
     const mounts = prefixes.map((prefix) => `  ${prefix.replace(/\/$/, '') || '/'}`).join('\n')
     super(
       `${cmdName}: ambiguous, registered on ${String(prefixes.length)} writable mounts:\n${mounts}\n` +
-        'cd into the target mount or pass its path to disambiguate.',
+        'cd into the target mount to disambiguate.',
     )
     this.name = 'MountCommandAmbiguous'
   }

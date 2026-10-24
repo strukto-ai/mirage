@@ -16,6 +16,7 @@ import asyncio
 import struct
 import subprocess
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 import pytest
@@ -160,18 +161,17 @@ async def client(
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> AsyncIterator[Client]:
     backend = RAMVFS() if request.param == "ram" else DiskVFS(str(tmp_path))
-    ws = Workspace({"/": backend}, mode=MountMode.WRITE)
-    await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
-    server = MirageNFSServer(MountCore(ws.vfs), secure=False)
-    port = await server.start()
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    try:
+    async with AsyncExitStack() as cleanup:
+        ws = Workspace({"/": backend}, mode=MountMode.WRITE)
+        cleanup.push_async_callback(ws.close)
+        await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
+        server = MirageNFSServer(MountCore(ws.vfs), secure=False)
+        cleanup.push_async_callback(server.close)
+        port = await server.start()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        cleanup.push_async_callback(writer.wait_closed)
+        cleanup.callback(writer.close)
         yield Client(reader, writer)
-    finally:
-        writer.close()
-        await writer.wait_closed()
-        await server.close()
-        await ws.close()
 
 
 @pytest.mark.asyncio

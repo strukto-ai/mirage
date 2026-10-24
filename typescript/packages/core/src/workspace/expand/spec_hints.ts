@@ -20,6 +20,7 @@ import type { ValueType } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
 import { unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionAccess } from '../../view/types.ts'
 import { commandTree } from '../executor/command/routing.ts'
 
 // Find the spec that classifies a mount command's words. A command tree
@@ -34,8 +35,10 @@ export function specForCommand(
   name: string,
   registry: MountRegistry,
   cwd: string,
+  argv?: readonly string[],
+  access?: SessionAccess,
 ): CommandSpec | null {
-  const tree = commandTree(registry, name, cwd)
+  const tree = commandTree(registry, name, cwd, argv, access)
   if (tree !== null) return tree.spec
   const spec = registry.mountFor(cwd).specFor(name)
   if (spec !== null) return spec

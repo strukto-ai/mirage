@@ -172,7 +172,6 @@ export async function runOnMount(
         resolvePaths,
         session.cwd,
         opts.argv,
-        envSnapshot(session),
         sessionAccess(session),
       )
     } catch (err) {

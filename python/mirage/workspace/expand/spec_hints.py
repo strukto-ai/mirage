@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.find_parse import exec_spans
 from mirage.commands.cli.walk import walk
@@ -28,6 +28,7 @@ def spec_for_command(
     name: str,
     registry: MountRegistry,
     cwd: str,
+    argv: Sequence[str] | None = None,
 ) -> CommandSpec | None:
     """Find the spec that classifies a mount command's words.
 
@@ -43,8 +44,9 @@ def spec_for_command(
         name (str): expanded command name.
         registry (MountRegistry): mount registry.
         cwd (str): current working directory.
+        argv (Sequence[str] | None): actual invocation words, None for discovery.
     """
-    tree = command_tree(registry, name, cwd)
+    tree = command_tree(registry, name, cwd, argv)
     if tree is not None:
         return tree.spec
     spec = registry.mount_for(cwd).spec_for(name)

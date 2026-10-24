@@ -17,7 +17,7 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { CLI } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { MountMode, PathSpec, ReadPolicy } from '../../types.ts'
@@ -353,7 +353,9 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
     logger.debug = debug
     try {
       expect(registry.executionMount('remote', [], '/')?.prefix).toBe('/longer/')
-      expect(debug).toHaveBeenCalledWith('remote: using /longer/ from 2 readable mounts')
+      expect(debug).toHaveBeenCalledWith(
+        'remote: multiple mounts /longer/, /short/; using /longer/',
+      )
     } finally {
       delete logger.debug
     }
@@ -382,9 +384,9 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
       ]),
       visibility: { shown: { entries: [{ path: '/short/open', mode: MountMode.WRITE }] } },
     })
-    expect(registry.executionMount('remote', [], '/', [], {}, access)?.prefix).toBe('/short/')
+    expect(registry.executionMount('remote', [], '/', [], access)?.prefix).toBe('/short/')
     registry.mountForPrefix('/short').mode = MountMode.READ
-    expect(registry.executionMount('remote', [], '/', [], {}, access)?.prefix).toBe('/longer/')
+    expect(registry.executionMount('remote', [], '/', [], access)?.prefix).toBe('/longer/')
   })
 
   it('excludes hidden and session-private targets from execution and discovery', () => {
@@ -393,10 +395,25 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
       sessionId: 'limited',
       visibility: { paths: classifyPaths(['/longer']) },
     })
-    expect(registry.executionMount('remote', [], '/', [], {}, access)?.prefix).toBe('/short/')
+    expect(registry.executionMount('remote', [], '/', [], access)?.prefix).toBe('/short/')
     expect(registry.mountForCommand('remote', access)?.prefix).toBe('/short/')
     registry.mountForPrefix('/short').visible = (sessionId) => sessionId === 'owner'
-    expect(registry.executionMount('remote', [], '/', [], {}, access)).toBeNull()
+    expect(registry.executionMount('remote', [], '/', [], access)).toBeNull()
+  })
+
+  it('keeps a hidden bound owner while excluding it from unbound fallback', async () => {
+    const registry = fallbackRegistry()
+    const owner = registry.mountForPrefix('/longer')
+    const access = new SessionState({
+      sessionId: 'limited',
+      visibility: { paths: classifyPaths(['/longer']) },
+    })
+    const path = PathSpec.fromStrPath('/longer/item')
+    expect(await registry.resolveMount('remote', [path], '/', [], access)).toBe(owner)
+    expect(await registry.resolveMount('remote', [], '/longer', [], access)).toBe(owner)
+    expect(await registry.resolveMount('remote', [], '/', [], access)).toBe(
+      registry.mountForPrefix('/short'),
+    )
   })
 
   it('keeps the route to a shown writable descendant eligible', () => {
@@ -409,7 +426,7 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
         shown: { entries: [{ path: '/longer/open', mode: MountMode.WRITE }] },
       },
     })
-    expect(registry.executionMount('remote', [], '/', [], {}, access)?.prefix).toBe('/longer/')
+    expect(registry.executionMount('remote', [], '/', [], access)?.prefix).toBe('/longer/')
   })
 
   it.each([
@@ -418,6 +435,27 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
   ])('does not treat %s read-only options as a writing fallback', (name, argv) => {
     const registry = fallbackRegistry()
     expect(registry.executionMount(name, [], '/', argv)?.prefix).toBe('/longer/')
+  })
+
+  it('keeps stdin out of inferred mount selection without discarding a literal dash path', () => {
+    const registry = new MountRegistry(
+      { '/': new RAMStubVFS(), '/longer': new RAMStubVFS(), '/b': new RAMStubVFS() },
+      MountMode.WRITE,
+      { '/longer': MountMode.READ },
+    )
+    const spec = new CommandSpec({
+      arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+    })
+    for (const prefix of ['/longer', '/b']) {
+      registry
+        .mountForPrefix(prefix)
+        .registerCommands(command({ name: 'stream', vfs: 'ram', spec, fn: NOOP_CMD, write: true }))
+    }
+    expect(registry.invocationMount('stream', [], '/', ['-'])?.prefix).toBe('/b/')
+    expect(registry.invocationMount('stream', [], '/', ['-', '/longer/item'])?.prefix).toBe(
+      '/longer/',
+    )
+    expect(registry.invocationMount('stream', [], '/', ['/-'])).toBeNull()
   })
 })
 

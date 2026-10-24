@@ -428,12 +428,12 @@ def _writes(
         return True
     if consumer is not Consumer.CLI and consumer is not Consumer.MOUNT:
         return False
-    tree = command_tree(registry, name, session.cwd)
+    tree = command_tree(registry, name, session.cwd, args)
     if tree is not None:
         trees = [tree]
         if consumer is Consumer.MOUNT:
-            candidates = registry.command_candidates(
-                name, [], session.cwd, session_access(session)
+            candidates = registry.invocation_candidates(
+                name, [], session.cwd, args, session_access(session)
             )
             trees = []
             for mount in candidates:
@@ -490,8 +490,8 @@ def _writes(
             if isinstance(p, PathSpec) and p.virtual not in typed
         ]
     scopes = named or ([implied] if implied is not None else [])
-    reached = registry.command_candidates(
-        runs, scopes[:1], session.cwd, session_access(session)
+    reached = registry.invocation_candidates(
+        runs, scopes[:1], session.cwd, args, session_access(session)
     )
     for scope in scopes:
         owner = registry.try_mount_for(scope.virtual)
@@ -868,7 +868,7 @@ def _word_hints(
         return None, None
     # A wrapper's words are the program's it runs.
     runs = runs_as(joined, registry)
-    spec = spec_for_command(runs, registry, session.cwd)
+    spec = spec_for_command(runs, registry, session.cwd, line[consumed:])
     if not spec:
         return None, None
     extra: list[ValueType | None] = ["str"] * (consumed - 1)

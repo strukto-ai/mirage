@@ -435,7 +435,13 @@ function writes(
     const result = walk(name, tree.spec, [...args], session.cwd, envSnapshot(session))
     return result.leaf !== null && tree.handlers[result.path.join(' ')]?.write === true
   }
-  const candidates = registry.commandCandidates(name, [], session.cwd, sessionAccess(session))
+  const candidates = registry.invocationCandidates(
+    name,
+    [],
+    session.cwd,
+    args,
+    sessionAccess(session),
+  )
   if ((candidates[0]?.cliFor(name) ?? null) !== null) {
     return candidates.some((mount) => {
       const cli = mount.cliFor(name)
@@ -474,10 +480,11 @@ function writes(
     }
   }
   const scopes = named.length > 0 ? named : implied !== null ? [implied] : []
-  const reached = registry.commandCandidates(
+  const reached = registry.invocationCandidates(
     runs,
     scopes.slice(0, 1),
     session.cwd,
+    args,
     sessionAccess(session),
   )
   for (const scope of scopes) {
@@ -514,7 +521,14 @@ export async function gate(
 ): Promise<[CommandContext, Deny | Ask | null, (Deny | Ask)[]]> {
   const tool = intrinsic || isTool(name, session)
   const env = envSnapshot(session)
-  const [tokens, program] = programTokens(registry, name, [...args], session.cwd, env)
+  const [tokens, program] = programTokens(
+    registry,
+    name,
+    [...args],
+    session.cwd,
+    env,
+    sessionAccess(session),
+  )
   const implied =
     name in CWD_DEFAULT_RAW
       ? defaultCwdOperand([name, ...operands], name, registry, session.cwd, stdin)
@@ -532,13 +546,22 @@ export async function gate(
         session.cwd,
         implied,
         redirects,
-        treePathScopes(registry, name, args, session.cwd, env),
+        treePathScopes(registry, name, args, session.cwd, env, sessionAccess(session)),
       ),
       unread,
     ),
     words: seenWords(
       session,
-      commandWords(registry, name, args, operands, redirects, session.cwd, env),
+      commandWords(
+        registry,
+        name,
+        args,
+        operands,
+        redirects,
+        session.cwd,
+        env,
+        sessionAccess(session),
+      ),
       unread,
     ),
     argv: [...args],
@@ -726,7 +749,13 @@ function wordHints(
   }
   // A wrapper's words are the program's it runs.
   const runs = runsAs(joined, registry)
-  const spec = specForCommand(runs, registry, session.cwd)
+  const spec = specForCommand(
+    runs,
+    registry,
+    session.cwd,
+    line.slice(consumed),
+    sessionAccess(session),
+  )
   if (spec === null) return [null, null]
   const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
   const wordKinds = [

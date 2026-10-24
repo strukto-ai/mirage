@@ -107,6 +107,46 @@ async def test_fallback_executes_the_selected_registration_shape(tree_first):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("write", [False, True])
+async def test_fallback_selects_the_tree_that_recognizes_the_verb(write):
+    calls = []
+
+    async def peek(accessor, paths, texts, ctx):
+        calls.append("peek")
+        return b"peek\n", IOResult()
+
+    async def send(accessor, paths, texts, ctx):
+        calls.append("send")
+        return b"send\n", IOResult()
+
+    ws = Workspace({"/longer": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        for prefix, verb, handler in (
+            ("/longer", "peek", peek),
+            ("/b", "send", send),
+        ):
+            ws.mount(prefix).register_commands(
+                [
+                    CLI(
+                        spec=CommandSpec(
+                            name="tool", subcommands=(CommandSpec(name=verb),)
+                        ),
+                        handlers={verb: CLIHandler(handler, write=write)},
+                    )
+                ]
+            )
+        result = await ws.shell("tool send")
+        assert (result.exit_code, result.stdout, result.stderr or b"") == (
+            0,
+            b"send\n",
+            b"",
+        )
+        assert calls == ["send"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_the_empty_name_routes_nowhere():
     # Its `virtual` is the working directory, here the root mount, which
     # used to make the line span mounts it never names.

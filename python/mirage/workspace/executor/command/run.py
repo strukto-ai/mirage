@@ -221,7 +221,6 @@ async def run_on_mount(
                 resolve_paths,
                 session.cwd,
                 argv,
-                env_snapshot(session),
                 session_access(session),
             )
         except (MountCommandUnsupported, MountCommandAmbiguous) as exc:

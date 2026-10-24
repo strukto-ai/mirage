@@ -24,10 +24,12 @@ import {
   effectiveMountMode,
   requirePathsWritable,
   runWithCaller,
+  sessionVisibility,
   strongestModeUnder,
   withCaller,
 } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { coerceReadPolicy } from './read_policy.ts'
 import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -1624,7 +1626,7 @@ export class MountEntry {
           const runCtx = user
             ? this.commandCtx(this.keyedFlags(flags), ctx, this.prefix)
             : this.commandCtx(virtualFlags(flags), ctx, '')
-          const refusal = this.readOnlyRefusal(cmdName, cmd, flags, access)
+          const refusal = this.commandRefusal(cmdName, cmd, flags, access)
           if (refusal !== null) return [null, refusal]
           const result = await this.runOne(
             cmdName,
@@ -1800,7 +1802,11 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a user command that writes, on a read-only mount.
+   * Refuse a user handler on a hidden mount, or a writer on a read-only one.
+   *
+   * A user handler can reach its accessor directly, so a hidden mount's
+   * handler must never run, even when an explicit operand or cwd selected it.
+   * It answers an unknown command without revealing the hidden mount's name.
    *
    * Mirage's own commands write through the dispatcher, which refuses each
    * write in the command's own GNU voice, because only the write knows
@@ -1816,15 +1822,21 @@ export class MountEntry {
    * the command this mount serves `cmd` under, which says whether it is a
    * user command: a tree's root for one of its leaves, which is built for its
    * one run and never registered. Mirrors Python's
-   * MountEntry._read_only_refusal.
+   * MountEntry._command_refusal.
    */
-  private readOnlyRefusal(
+  private commandRefusal(
     cmdName: string,
     cmd: Command,
     flags: Record<string, FlagValue>,
     access?: SessionAccess,
     served?: Command,
   ): IOResult | null {
+    if (this.isUserCommand(served ?? cmd) && !pathVisible(sessionVisibility(access), this.prefix)) {
+      return new IOResult({
+        exitCode: 127,
+        stderr: encodeText(`${cmdName}: command not found\n`),
+      })
+    }
     const infoOnly =
       (flags.help === true && hasInjectedHelp(cmd.spec)) ||
       (flags.version === true && hasInjectedVersion(cmd.spec))
@@ -1939,7 +1951,7 @@ export class MountEntry {
       return this.inCommandScope(probe, async (): Promise<CommandFnResult> => {
         // No flag here is answered for the leaf: walkLeaf answered the
         // tree's own help, and the leaf is handed the rest.
-        const refusal = this.readOnlyRefusal(prog, leaf, {}, access, root)
+        const refusal = this.commandRefusal(prog, leaf, {}, access, root)
         if (refusal !== null) return [null, refusal]
         const accessor = this.viewFor(access).accessor
         return this.runIn(

@@ -823,6 +823,93 @@ async def test_fallback_admission_reads_each_candidate_leaf():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+async def test_fallback_tree_policy_matches_the_verb_after_group_options(
+    decision,
+):
+    calls = []
+
+    @command(
+        "remote",
+        vfs=None,
+        spec=CommandSpec(arguments=(Argument("args", nargs="*"),)),
+    )
+    async def reader(accessor, paths, texts, ctx):
+        calls.append("reader")
+        return None, IOResult()
+
+    async def writer(accessor, paths, texts, ctx):
+        calls.append("writer")
+        return None, IOResult()
+
+    ws = Workspace(
+        {"/reader": RAMVFS(), "/write": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {decision: ["remote send"]}}},
+    )
+    try:
+        ws.mount("/reader").register_commands([reader])
+        ws.mount("/write").register_commands(
+            [
+                CLI(
+                    spec=CommandSpec(
+                        name="remote",
+                        arguments=(Argument("--account"),),
+                        subcommands=(
+                            CommandSpec(name="send", aliases=("deliver",)),
+                        ),
+                    ),
+                    handlers={"send": CLIHandler(writer, write=True)},
+                )
+            ]
+        )
+        result = await ws.shell("remote --account team deliver")
+        assert result.exit_code != 0
+        assert result.refusal is not None
+        assert calls == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_fallback_read_ignores_an_unselectable_read_only_writer():
+    policy = NoWrites()
+    calls = []
+
+    @command("remote", vfs=None, spec=CommandSpec())
+    async def reader(accessor, paths, texts, ctx):
+        calls.append("reader")
+        return b"reader\n", IOResult()
+
+    @command("remote", vfs=None, spec=CommandSpec(), write=True)
+    async def writer(accessor, paths, texts, ctx):
+        calls.append("writer")
+        return None, IOResult()
+
+    ws = Workspace(
+        {
+            "/reader": RAMVFS(),
+            "/write": (RAMVFS(), MountMode.READ),
+        },
+        mode=MountMode.WRITE,
+        policies=[policy],
+    )
+    try:
+        ws.mount("/reader").register_commands([reader])
+        ws.mount("/write").register_commands([writer])
+        result = await ws.shell("remote")
+        assert (result.exit_code, result.stdout, result.stderr or b"") == (
+            0,
+            b"reader\n",
+            b"",
+        )
+        assert policy.seen == {"remote": False}
+        assert calls == ["reader"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_command_reads_as_writing_when_its_handler_says_so():
     policy = NoWrites()
     ws = Workspace(

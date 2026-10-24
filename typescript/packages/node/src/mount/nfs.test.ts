@@ -225,28 +225,39 @@ async function serveAs(ws: Workspace): Promise<[MirageNFSServer, Socket, Client]
 
 describe.each(['ram', 'disk'])('MirageNFSServer (%s)', (backend) => {
   let directory: string | undefined
-  let ws: Workspace
-  let server: MirageNFSServer
-  let socket: Socket
+  let ws: Workspace | undefined
+  let server: MirageNFSServer | undefined
+  let socket: Socket | undefined
   let client: Client
 
   beforeEach(async () => {
+    directory = undefined
+    ws = undefined
+    server = undefined
+    socket = undefined
     directory = backend === 'disk' ? await mkdtemp(join(tmpdir(), 'mirage-nfs-')) : undefined
     const vfs = directory === undefined ? new RAMVFS() : new DiskVFS({ root: directory })
     ws = new Workspace({ '/': vfs }, { mode: MountMode.WRITE })
     await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
     server = new MirageNFSServer(new MountCore(ws.vfs), '/', false)
     const port = await server.start()
-    socket = connect(port, '127.0.0.1')
-    await new Promise<void>((resolve) => socket.once('connect', resolve))
-    client = new Client(socket)
+    const connected = connect(port, '127.0.0.1')
+    socket = connected
+    await new Promise<void>((resolve) => connected.once('connect', resolve))
+    client = new Client(connected)
   })
 
   afterEach(async () => {
-    socket.destroy()
-    await server.close()
-    await ws.close()
-    if (directory !== undefined) await rm(directory, { recursive: true, force: true })
+    try {
+      socket?.destroy()
+      await server?.close()
+    } finally {
+      try {
+        await ws?.close()
+      } finally {
+        if (directory !== undefined) await rm(directory, { recursive: true, force: true })
+      }
+    }
   })
 
   it('answers getattr of the mounted root as a directory', async () => {

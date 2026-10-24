@@ -182,7 +182,8 @@ async def expand_argv(
     # installed as a CLI does: no backend takes its patterns.
     tree = (
         consumer is Consumer.MOUNT
-        and command_tree(registry, name, session.cwd) is not None
+        and command_tree(registry, name, session.cwd, expanded[consumed:])
+        is not None
     )
     program = native or in_process or tree
     spec: CommandSpec | None = None
@@ -197,7 +198,9 @@ async def expand_argv(
     ):
         # A wrapper's words are the program's it runs.
         runs = runs_as(name, registry)
-        spec = spec_for_command(runs, registry, session.cwd)
+        spec = spec_for_command(
+            runs, registry, session.cwd, expanded[consumed:]
+        )
         if spec:
             # Before anything reads the line: an option carrying a
             # program hands the words after it to that program, and

@@ -767,6 +767,88 @@ describe('what the handler a command resolves to declares', () => {
     const result = await w.shell('remote /reader/item')
     expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, 'read\n', ''])
   })
+
+  it.each(['deny', 'ask'] as const)(
+    'applies %s to a selected tree verb after its group options',
+    async (decision) => {
+      const calls: string[] = []
+      const w = new Workspace(
+        { '/reader': new RAMVFS(), '/write': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          shellParser: await getTestParser(),
+          profiles: { default: parseSessionProfile({ commands: { [decision]: ['remote send'] } }) },
+        },
+      )
+      open.push(w)
+      w.mount('/reader').registerCommands(
+        command({
+          name: 'remote',
+          vfs: null,
+          spec: new CommandSpec({ arguments: [new Argument('args', { nargs: '*' })] }),
+          fn: () => {
+            calls.push('reader')
+            return [null, new IOResult()]
+          },
+        }),
+      )
+      w.mount('/write').registerCommands([
+        new CLI({
+          spec: new CommandSpec({
+            name: 'remote',
+            arguments: [new Argument('--account')],
+            subcommands: [new CommandSpec({ name: 'send', aliases: ['deliver'] })],
+          }),
+          handlers: {
+            send: new CLIHandler({
+              write: true,
+              fn: () => {
+                calls.push('writer')
+                return [null, new IOResult()]
+              },
+            }),
+          },
+        }),
+      ])
+      const result = await w.shell('remote --account team deliver')
+      expect(result.exitCode).not.toBe(0)
+      expect(result.refusal).not.toBeNull()
+      expect(calls).toEqual([])
+    },
+  )
+
+  it('does not classify an unreachable read-only writer as the selected reader', async () => {
+    const w = new Workspace(
+      { '/reader': new RAMVFS(), '/write': [new RAMVFS(), MountMode.READ] },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        policies: [
+          {
+            preCommand: (ctx): Action | null =>
+              ctx.write ? { kind: 'deny', reason: 'no writes' } : null,
+          },
+        ],
+      },
+    )
+    open.push(w)
+    for (const [prefix, write] of [
+      ['/reader', false],
+      ['/write', true],
+    ] as const) {
+      w.mount(prefix).registerCommands(
+        command({
+          name: 'remote',
+          vfs: null,
+          spec: new CommandSpec(),
+          write,
+          fn: () => [new TextEncoder().encode(`${prefix}\n`), new IOResult()],
+        }),
+      )
+    }
+    const result = await w.shell('remote')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, '/reader\n', ''])
+  })
 })
 
 // One test in the spelling a name gives it: `test e`, `[ e ]` or `[[ e ]]`.

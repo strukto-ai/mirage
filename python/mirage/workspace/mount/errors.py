@@ -25,5 +25,5 @@ class MountCommandAmbiguous(ValueError):
         super().__init__(
             f"{cmd_name}: ambiguous, registered on {len(prefixes)} writable mounts:\n"
             f"{candidates}\n"
-            "cd into the target mount or pass its path to disambiguate."
+            "cd into the target mount to disambiguate."
         )
