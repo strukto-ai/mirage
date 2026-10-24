@@ -36,7 +36,7 @@ from mirage.core.google.client import (
     drive_base,
     google_delete,
     google_get,
-    google_get_bytes,
+    google_get_stream,
     google_patch,
     google_post,
 )
@@ -261,9 +261,7 @@ async def run_gws_method(
     url = SERVICE_BASES[method.service](token_manager) + path
     query_params = _query_str(query)
     if method.raw_bytes:
-        data = await google_get_bytes(
-            token_manager, _with_query(url, query_params)
-        )
+        data = google_get_stream(token_manager, _with_query(url, query_params))
         return data, IOResult()
     if method.http == "GET":
         # Deliberate divergence from the official gws CLI, which stops

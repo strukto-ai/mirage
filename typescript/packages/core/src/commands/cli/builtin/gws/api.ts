@@ -20,7 +20,7 @@ import {
   driveBase,
   googleDelete,
   googleGet,
-  googleGetBytes,
+  googleGetStream,
   googlePatch,
   googlePost,
 } from '../../../../core/google/client.ts'
@@ -226,7 +226,7 @@ export async function runGwsMethod(
   const url = SERVICE_BASES[method.service](tm) + path
   const queryParams = queryStr(query)
   if (method.rawBytes === true) {
-    const data = await googleGetBytes(tm, withQuery(url, queryParams))
+    const data = googleGetStream(tm, withQuery(url, queryParams))
     return [data, new IOResult()]
   }
   if (method.http === 'GET') {

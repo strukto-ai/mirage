@@ -23,6 +23,7 @@ from mirage.commands.cli.builtin.gws.methods import GWS_METHODS
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.core.google.config import GoogleConfig
+from mirage.io.cooperative import read_prefix
 from mirage.io.stream import materialize
 
 METHODS = {(m.service, m.resource, m.method): m for m in GWS_METHODS}
@@ -200,14 +201,24 @@ async def test_permissions_create_posts_body():
 
 
 @pytest.mark.asyncio
-async def test_files_export_returns_raw_bytes():
+@pytest.mark.parametrize("count", [None, 4])
+async def test_files_export_streams_and_closes(count):
     method = METHODS[("drive", "files", "export")]
+    events = []
+
+    async def exported():
+        try:
+            for part in (b"%PDF", b"-1.4"):
+                events.append("pull")
+                yield part
+        finally:
+            events.append("close")
+
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_get_bytes",
-        new_callable=AsyncMock,
-        return_value=b"%PDF-1.4",
-    ) as get_bytes:
-        out, _io = await run_gws_method(
+        "mirage.commands.cli.builtin.gws.api.google_get_stream",
+        return_value=exported(),
+    ) as get_stream:
+        out, io = await run_gws_method(
             method,
             GOOGLE,
             [],
@@ -218,10 +229,18 @@ async def test_files_export_returns_raw_bytes():
                 }
             ),
         )
-    assert await materialize(out) == b"%PDF-1.4"
+    assert io.exit_code == 0
+    assert events == []
+    assert out is not None
+    if count is None:
+        assert await materialize(out) == b"%PDF-1.4"
+        assert events == ["pull", "pull", "close"]
+    else:
+        assert await read_prefix(out, count) == b"%PDF"
+        assert events == ["pull", "close"]
     assert (
         "/files/f1/export?mimeType=application/pdf"
-        in get_bytes.await_args.args[1]
+        in get_stream.call_args.args[1]
     )
 
 

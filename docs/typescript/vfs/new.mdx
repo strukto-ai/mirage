@@ -429,6 +429,8 @@ Most of a backend is already written as a kit. Reach for one before writing a la
 | Object store | `core/object_store/` | a flat key space (S3-style buckets, GridFS) |
 | Render | `core/render/json.ts` (`jsonBytes`, `jsonlBytes`) | records rendered as the bytes the tree's files hold |
 
+Successful `apiRequest` reads in `bytes` or `bytes_response` mode retain at most **64 MiB** by default. Set `maxBodyBytes` to a finite, non-negative integer to choose another per-call limit. The client counts decoded bytes as they arrive and raises `ResponseTooLargeError` on overflow without retrying or returning a truncated body. A finite byte window skips an ignored `Range` prefix incrementally and stops at the requested end; a `206` response larger than the requested window is rejected. Use `apiStream` for large whole-file downloads. This binary limit does not cap JSON, text, or HTTP error bodies.
+
 Two builtins are the references. Trello is the hierarchy kit end to end: a scope table, listers and id-addressed readers, with its id-addressed verbs in the `trello` CLI. Jaeger is the client shape to copy: every call takes the mount's transport, the one handle the accessor owns.
 
 ## File Structure

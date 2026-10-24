@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sleep } from '../../utils/abort.ts'
-import { type ByteWindow, rangeHeader, windowOf } from '../../utils/ranges.ts'
+import { type ByteWindow, rangeHeader } from '../../utils/ranges.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { chunks } from '../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
+import { ResponseTooLargeError } from './errors.ts'
+
+export const MAX_BODY_BYTES = 64 * 1024 * 1024
 
 // How a >= 400 API response and its body text become the backend's own
 // error; the engine here calls it, each backend supplies one.
@@ -241,6 +244,10 @@ export interface ApiRequestOptions {
   /** The byte range to request; the Range header and the trim-if-unranged
    * guard both come from it. */
   window?: ByteWindow | undefined
+  /** Maximum decoded bytes retained by successful bytes/bytes_response reads.
+   * Defaults to 64 MiB; use a stream for larger downloads. Ignored Range
+   * prefixes do not count, and overflow fails rather than truncates. */
+  maxBodyBytes?: number | undefined
   /** Per-attempt timeout; absent leaves the platform default. */
   timeoutSeconds?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
@@ -308,6 +315,42 @@ function retryDelay(response: Response, text: string, attempt: number, retry: Re
   return flooredDelay(delay, response.status, retry)
 }
 
+/** Collect a bounded byte response, discarding an ignored Range prefix. */
+export async function readBytes(
+  response: Pick<Response, 'body' | 'status'>,
+  window: ByteWindow | undefined,
+  maxBodyBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (response.body === null) return new Uint8Array()
+  const ranged = response.status === 206
+  let skip = ranged ? 0 : (window?.offset ?? 0)
+  const size = window?.size
+  const limit = size === undefined || size === null ? maxBodyBytes : Math.min(size, maxBodyBytes)
+  let data = new Uint8Array()
+  let length = 0
+  for await (const chunk of bodyChunks(response.body)) {
+    const skipped = Math.min(skip, chunk.length)
+    skip -= skipped
+    const available = chunk.subarray(skipped)
+    const take =
+      !ranged && size != null ? Math.min(available.length, size - length) : available.length
+    if (length + take > limit) throw new ResponseTooLargeError(limit)
+    if (take > 0) {
+      const needed = length + take
+      if (needed > data.length) {
+        const capacity = Math.min(limit, Math.max(CHUNK_SIZE, needed, data.length * 2))
+        const grown = new Uint8Array(capacity)
+        grown.set(data)
+        data = grown
+      }
+      data.set(available.subarray(0, take), length)
+      length = needed
+    }
+    if (!ranged && size != null && length === size) break
+  }
+  return data.slice(0, length)
+}
+
 /**
  * One round-trip against an HTTP API, with retry and error mapping.
  * Returns the reply per `options.read`, defaulting to the parsed JSON
@@ -318,6 +361,10 @@ export async function apiRequest(
   url: string,
   options: ApiRequestOptions,
 ): Promise<unknown> {
+  const { maxBodyBytes = MAX_BODY_BYTES } = options
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) {
+    throw new RangeError('max_body_bytes must be a non-negative safe integer')
+  }
   const doFetch = options.fetchFn ?? fetch
   const target = new URL(url)
   for (const [name, value] of Object.entries(options.params ?? {})) {
@@ -331,12 +378,8 @@ export async function apiRequest(
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000))
   const read = options.read ?? 'json'
-  // Every mode but these reads the body as text. The byte modes, and the
-  // ones that do not consume the body, still have to release it, or
-  // Node/undici holds the connection until GC; python's api_request drains
-  // it the same way when its `async with` response context exits.
-  const asBytes =
-    read === 'none' || read === 'location' || read === 'bytes' || read === 'bytes_response'
+  const asBytes = read === 'bytes' || read === 'bytes_response'
+  const discard = read === 'none' || read === 'location'
   let attempt = 0
   for (;;) {
     const init: RequestInit = { method, headers: { ...headers } }
@@ -364,9 +407,11 @@ export async function apiRequest(
     // must never repeat rides a policy without it. Nothing past this block
     // touches the network.
     try {
-      if (response.status >= 400 || !asBytes) text = await response.text()
-      else data = new Uint8Array(await response.arrayBuffer())
+      if (response.status >= 400 || (!asBytes && !discard)) text = await response.text()
+      else if (discard) await response.body?.cancel()
+      else data = await readBytes(response, options.window, maxBodyBytes)
     } catch (err) {
+      if (err instanceof ResponseTooLargeError) throw err
       if (retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1
@@ -387,10 +432,10 @@ export async function apiRequest(
     if (response.status >= 400) throw options.errorOf(response, text)
     if (read === 'none') return null
     if (read === 'location') return response.headers.get('Location')
-    if (read === 'bytes') return windowOf(data, response.status, options.window)
+    if (read === 'bytes') return data
     if (read === 'bytes_response') {
       return {
-        data: windowOf(data, response.status, options.window),
+        data,
         status: response.status,
         headers: loweredHeaders(response.headers),
       } satisfies ApiResponse
