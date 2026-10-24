@@ -17,6 +17,7 @@ import re
 from mirage.core.gridfs.client import (
     _key,
     prefix_query,
+    trashed,
 )
 from mirage.vfs.gridfs.config import GridFSConfig
 
@@ -40,8 +41,21 @@ def test_key_with_prefix():
     assert _key("/a.txt", config) == "team/reports/a.txt"
 
 
-def test_prefix_query_empty_matches_everything():
-    assert prefix_query("") == {}
+def test_prefix_query_empty_matches_everything_but_the_trash():
+    pattern = prefix_query("")["filename"]["$regex"]
+    assert re.match(pattern, "a.txt")
+    assert re.match(pattern, "team/a.txt")
+    assert not re.match(pattern, trashed("a.txt"))
+
+
+def test_prefix_query_on_a_prefix_cannot_reach_the_trash():
+    # No mount key starts with a slash, so a scoped query never does.
+    pattern = prefix_query("team/")["filename"]["$regex"]
+    assert not re.match(pattern, trashed("team/a.txt"))
+
+
+def test_trashed_keeps_the_whole_key():
+    assert trashed("team/reports/a.txt") == "/trash/team/reports/a.txt"
 
 
 def test_prefix_query_escapes_regex_metachars():

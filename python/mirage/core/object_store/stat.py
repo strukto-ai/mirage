@@ -14,6 +14,7 @@
 
 from mirage.core.object_store.driver import A, C, ObjectStoreDriver, StatFn
 from mirage.errors.fs import enoent
+from mirage.observe.context import revision_for
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.filetype import content_type_for_path
@@ -50,7 +51,11 @@ def make_stat(driver: ObjectStoreDriver[A, C]) -> StatFn[A]:
             # hints a directory (trailing slash), so a coexisting object
             # of the same name does not shadow the prefix.
             if not hints_directory:
-                meta = await driver.head(conn, key)
+                pinned = revision_for(virtual)
+                if pinned is not None and driver.head_revision is not None:
+                    meta = await driver.head_revision(conn, key, pinned)
+                else:
+                    meta = await driver.head(conn, key)
                 if meta is not None:
                     return FileStat(
                         name=path.rstrip("/").rsplit("/", 1)[-1],

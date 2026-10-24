@@ -26,6 +26,35 @@
       }
     },
     {
+      "id": "g_retry_read_429_on_manual_clock",
+      "seq": 943210,
+      "targets": [
+        "gdrive-manual-clock"
+      ],
+      "clear_cache": true,
+      "faults": [
+        {
+          "method": "GET",
+          "route": "/drive/v3/files",
+          "times": 2,
+          "status": 429,
+          "headers": {
+            "Retry-After": "30"
+          }
+        }
+      ],
+      "command": "cat /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stderr": "",
+        "elapsed": {
+          "min": 0,
+          "max": 10
+        }
+      }
+    },
+    {
       "id": "g_retry_403_rate_limit",
       "seq": 943201,
       "targets": [

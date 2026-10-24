@@ -715,6 +715,24 @@ const ARITY_TREE = new CommandSpec({
   ],
 })
 
+it('defers only absent environment-backed required options during structural selection', () => {
+  const leaf = new CommandSpec({ name: 'send' })
+  const spec = new CommandSpec({
+    name: 'tool',
+    arguments: [
+      new Argument('--token', { env: 'TOKEN', required: true, choices: ['good'] }),
+      new Argument('--region', { required: true }),
+    ],
+    subcommands: [leaf],
+  })
+  expect(walk('tool', spec, ['--region', 'west', 'send']).leaf).toBeNull()
+  expect(walk('tool', spec, ['--region', 'west', 'send'], '/', null, true).leaf).toBe(leaf)
+  expect(walk('tool', spec, ['send'], '/', null, true).leaf).toBeNull()
+  expect(
+    walk('tool', spec, ['--token', 'bad', '--region', 'west', 'send'], '/', null, true).leaf,
+  ).toBeNull()
+})
+
 it.each([
   ['--pair', 'a', 'b'],
   ['-p', 'a', 'b'],

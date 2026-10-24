@@ -1485,7 +1485,10 @@ class Dispatcher:
             batches.setdefault(mount.prefix, (mount, manager, []))[2].append(
                 call.path
             )
-        scope = RecordingScope(active=active_recorder() is None)
+        scope = RecordingScope(
+            active=active_recorder() is None,
+            clock=self._namespace.registry.clock,
+        )
         try:
             for mount, manager, paths in batches.values():
                 await mount.ensure_ready()
@@ -2138,6 +2141,13 @@ class Dispatcher:
             Any: the op's answer (each op has its own shape).
         """
         kwargs = call.kwargs
+        # A listing cut at a walk's limit is filtered after the backend
+        # answers, so under a hide it could come back short of the limit
+        # and read as the whole folder: the walk then lists in full.
+        if call.name in DIRECTORY_OPEN_OPS and hidden_under(
+            call.vis, call.path.virtual
+        ):
+            kwargs.pop("limit", None)
         # Every path argument beside the path (a rename's destination, a
         # custom function's other paths) is addressed against the same
         # mount, so the backend sees a mount-relative path.
@@ -2154,7 +2164,8 @@ class Dispatcher:
         # read outside a line (FUSE, ws.vfs) records into a scope of its
         # own for that.
         scope = RecordingScope(
-            active=filler is not None and active_recorder() is None
+            active=filler is not None and active_recorder() is None,
+            clock=self._namespace.registry.clock,
         )
         try:
             if call.name == "setattr":
@@ -2295,7 +2306,11 @@ class Dispatcher:
         a mount with a ``walk_limit`` is walked listing by listing,
         hidden entries skipped, until one file past the limit; a folder
         below the path it cannot open counts nothing, as the command
-        reports it itself. None otherwise.
+        reports it itself. None otherwise. Each read is handed the
+        ``limit`` it can still use, so a large folder costs the backend
+        no more than the count needs: a listing that may have been cut
+        is listed in full only once what lies below it left the count
+        short.
 
         Args:
             mount (MountEntry): the mount serving the path.
@@ -2317,9 +2332,14 @@ class Dispatcher:
                 virtual.rstrip("/") + "/"
             ).startswith(covered)
 
+        limit = mount.vfs.walk_limit
         if mount.vfs.supports("read_tree"):
             try:
-                found = await mount.call("read_tree", root)
+                found = await mount.call(
+                    "read_tree",
+                    root,
+                    **({} if limit < 0 else {"limit": limit + 1}),
+                )
             except OSError as exc:
                 logger.debug("walk count of %s lists instead: %s", root, exc)
                 found = None
@@ -2330,22 +2350,35 @@ class Dispatcher:
                     for key, st in found.items()
                     if counted(f"{base}/{key}")
                 )
-        limit = mount.vfs.walk_limit
         if limit < 0:
             return None
         count = 0
-        pending = [root]
+        pending: list[tuple[str, bool]] = [(root, False)]
+        seen: dict[str, set[str]] = {}
         while pending and count <= limit:
-            directory = pending.pop()
+            directory, whole = pending.pop()
+            asked = None if whole else limit - count + 1
             try:
-                entries = await mount.call("readdir", directory)
+                entries = await mount.call(
+                    "readdir",
+                    directory,
+                    **({} if asked is None else {"limit": asked}),
+                )
             except OSError as exc:
                 if directory == root:
                     raise
                 logger.debug("walk count skips %s: %s", directory, exc)
                 continue
+            if asked is not None and len(entries) >= asked:
+                # Maybe cut: listed in full once what is below it is
+                # counted, if the count is still short then.
+                pending.append((directory, True))
+            known = seen.setdefault(directory, set())
             for entry in entries:
                 child = entry.rstrip("/")
+                if child in known:
+                    continue
+                known.add(child)
                 if not counted(child):
                     continue
                 try:
@@ -2354,7 +2387,7 @@ class Dispatcher:
                     logger.debug("walk count skips %s: %s", child, exc)
                     continue
                 if row.type is FileType.DIRECTORY:
-                    pending.append(child)
+                    pending.append((child, False))
                 elif row.type is FileType.FILE:
                     count += 1
                     if count > limit:
@@ -2468,7 +2501,10 @@ class Dispatcher:
             if payload is not None:
                 await self._invalidate_stream(mount, call.path)
                 kwargs = {**kwargs, "data": payload.chunks()}
-            scope = RecordingScope(active=active_recorder() is None)
+            scope = RecordingScope(
+                active=active_recorder() is None,
+                clock=self._namespace.registry.clock,
+            )
             try:
                 with command_records() as mine:
                     result = await mount.call(
@@ -2744,7 +2780,8 @@ class Dispatcher:
         No backend stores a link, so a walk that reads the subtree in one
         call meets them only here, as a listing meets them in ``readdir``;
         a link that leads where the session cannot see is left out, as a
-        listing leaves it out.
+        listing leaves it out. A link shadows what the backend holds at
+        its name and below it, as a stat of the name answers the link.
 
         Args:
             path (PathSpec): the directory the read answered for.
@@ -2761,7 +2798,15 @@ class Dispatcher:
                 virtual
             ) is not owner or leads_hidden(vis, virtual, links):
                 continue
-            merged.setdefault(virtual[len(base) + 1 :], row)
+            rel = virtual[len(base) + 1 :]
+            if rel in merged:
+                below = rel + "/"
+                merged = {
+                    key: st
+                    for key, st in merged.items()
+                    if not key.startswith(below)
+                }
+            merged[rel] = row
         return merged
 
     def _overlaid(

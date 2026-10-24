@@ -1266,13 +1266,13 @@ def parse_posix_time(
         return None
 
 
-def utc_date_folder(ts: float | None = None) -> str:
-    t = (
-        datetime.now(timezone.utc)
-        if ts is None
-        else datetime.fromtimestamp(ts, timezone.utc)
-    )
-    return t.strftime("%Y-%m-%d")
+def utc_date_folder(ts: float) -> str:
+    """The UTC day ``ts`` falls on, as ``YYYY-MM-DD``.
+
+    Args:
+        ts (float): seconds since the unix epoch.
+    """
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
 
 
 def iso_timestamp(value: str | None) -> float | None:

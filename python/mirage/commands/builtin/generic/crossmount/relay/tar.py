@@ -24,7 +24,9 @@ from mirage.commands.builtin.generic_bind.archive_io import (
     relay_is_dir_of,
     relay_walk_of,
 )
+from mirage.commands.builtin.generic_bind.files import dispatched_read_tree
 from mirage.commands.builtin.utils.links import (
+    link_location,
     link_view,
     mount_view,
     owed_names,
@@ -64,6 +66,17 @@ async def run_tar(
     """
     parsed = parse_flags(flag_kwargs)
     prim = transfer_primitives(dispatch)
+    links = link_view(vfs)
+    tree = (
+        None
+        if vfs is None
+        else dispatched_read_tree(
+            dispatch,
+            mount_view(vfs),
+            None if links is None else functools.partial(link_location, links),
+            crossing=True,
+        )
+    )
     archive = parsed.archive
     directories = list(parsed.directories)
     operands = scopes if parsed.create and archive else []
@@ -74,7 +87,10 @@ async def run_tar(
         mkdir_fn=prim["mkdir"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, functools.partial(owed_names, vfs), "tar"
+            dispatch,
+            functools.partial(owed_names, vfs),
+            "tar",
+            tree,
         ),
         is_dir=relay_is_dir_of(dispatch),
         selectors=list(text_args),
@@ -92,7 +108,7 @@ async def run_tar(
         strip_components=parsed.strip_components,
         exclude=parsed.exclude,
         one_file_system=parsed.one_file_system,
-        links=link_view(vfs),
+        links=links,
         mounts=mount_view(vfs),
         relay=True,
         stdin=stdin,

@@ -1567,6 +1567,54 @@ describe('fillEnv through execute', () => {
     }
   })
 
+  it('fetches only the selected fallback tree environment before admission', async () => {
+    const { calls, fetch } = countingSource({ TOKEN: 't0' })
+    registerSecrets('fake-tree-fallback', FakeConfig, fetch)
+    const writes: string[] = []
+    const ws = new Workspace(
+      { '/reader': new RAMVFS(), '/write': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        env: {
+          TOKEN: { from: 'fake-tree-fallback', ref: 'selected' },
+          UNUSED: { from: 'fake-tree-fallback', ref: 'must-not-fetch' },
+        },
+      },
+    )
+    try {
+      for (const [prefix, variable, write] of [
+        ['/reader', 'UNUSED', false],
+        ['/write', 'TOKEN', true],
+      ] as const) {
+        ws.mount(prefix).registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: 'remote',
+              arguments: [new Argument('--token', { env: variable, required: true })],
+              subcommands: [new CommandSpec({ name: 'send' })],
+            }),
+            handlers: {
+              send: new CLIHandler({
+                write,
+                fn: () => {
+                  writes.push(prefix)
+                  return [null, new IOResult()]
+                },
+              }),
+            },
+          }),
+        ])
+      }
+      const result = await ws.shell('remote send')
+      expect([result.exitCode, stderrStr(result)]).toEqual([0, ''])
+      expect(calls).toEqual(['selected'])
+      expect(writes).toEqual(['/write'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // --token is required and comes from the managed TOKEN, so the gate's walk
   // reaches a leaf (its write, its files) only once TOKEN is fetched; a TOKEN
   // the line assigns is the invocation's and fetches nothing.

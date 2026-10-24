@@ -813,7 +813,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     // A read is handed the row its parent's listing names, as the mount
     // hands it; Dropbox stats by path.
     const handed = async (p: PathSpec): Promise<Handed> => ({
-      entry: await entryAt(dropboxReaddir, accessor, p),
+      entry: await entryAt((a, at) => dropboxReaddir(a, at), accessor, p),
     })
     return {
       vfs,

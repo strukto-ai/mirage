@@ -84,7 +84,7 @@ import { BoxVFS } from '../../vfs/box/box.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { BoxApiError, type BoxTokenManager } from './client.ts'
+import { BoxApiError, BoxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { copy } from './copy.ts'
 import { mkdir } from './mkdir.ts'
@@ -94,7 +94,7 @@ import { rmR, rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
 
-const STUB_TM = {} as BoxTokenManager
+const STUB_TM = new BoxTokenManager({ accessToken: 't' })
 
 function makeAccessor(): BoxAccessor {
   return new BoxAccessor({ tokenManager: STUB_TM })

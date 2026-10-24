@@ -139,16 +139,18 @@ export function listFiles(
 /**
  * The untrashed children of several folders of one corpus, from one query
  * (`'a' in parents or 'b' in parents`), in the order a listing of each folder
- * returns them. Mirrors Python's `list_children`.
+ * returns them, stopping once `limit` files are in hand. Mirrors Python's
+ * `list_children`.
  */
 export function listChildren(
   tm: TokenManager,
   folderIds: readonly string[],
   driveId: string | null = null,
   pageSize = 1000,
+  limit?: number,
 ): Promise<DriveFile[]> {
   const parents = folderIds.map((id) => `'${escapeQueryValue(id)}' in parents`).join(' or ')
-  return queryFiles(tm, `(${parents}) and trashed=false`, driveId, pageSize)
+  return queryFiles(tm, `(${parents}) and trashed=false`, driveId, pageSize, limit)
 }
 
 /**

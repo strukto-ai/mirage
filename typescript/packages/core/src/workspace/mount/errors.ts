@@ -19,3 +19,15 @@ export class WritePolicyError extends Error {
     this.name = 'WritePolicyError'
   }
 }
+
+/** A pathless write could reach more than one writable mount. */
+export class MountCommandAmbiguous extends Error {
+  constructor(cmdName: string, prefixes: readonly string[]) {
+    const mounts = prefixes.map((prefix) => `  ${prefix.replace(/\/$/, '') || '/'}`).join('\n')
+    super(
+      `${cmdName}: ambiguous, registered on ${String(prefixes.length)} writable mounts:\n${mounts}\n` +
+        'cd into the target mount to disambiguate.',
+    )
+    this.name = 'MountCommandAmbiguous'
+  }
+}

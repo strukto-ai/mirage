@@ -26,23 +26,27 @@ import type {
 } from '@struktoai/mirage-core/core/object_store/driver'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { toIsoZ } from '@struktoai/mirage-core/utils/dates'
-import type { ObjectId } from 'mongodb'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import {
   bucket,
-  deleteAll,
   escapeRegex,
+  fileById,
   filesColl,
+  type GridFSFileDoc,
   iterLatest,
   latestFile,
+  loadGridFSModule,
   prefixQuery,
+  prune,
+  retag,
+  trashed,
 } from './client.ts'
-import { SCOPE_ERROR } from './constants.ts'
+import { SCOPE_ERROR, TRASH_PREFIX } from './constants.ts'
 import { isNoFileError } from './read.ts'
 
 /** Match the file at `stem` plus everything beneath it. */
 function subtreeQuery(stem: string): Record<string, unknown> {
-  if (stem === '') return {}
+  if (stem === '') return prefixQuery('')
   return {
     $or: [{ filename: stem }, { filename: { $regex: `^${escapeRegex(stem + '/')}` } }],
   }
@@ -89,7 +93,20 @@ async function* listSubtree(conn: GridFSAccessor, stem: string): AsyncIterable<T
 }
 
 async function head(conn: GridFSAccessor, key: string): Promise<ObjectMeta | null> {
-  const doc = await latestFile(conn, key)
+  return metaOf(await latestFile(conn, key))
+}
+
+async function headRevision(
+  conn: GridFSAccessor,
+  _key: string,
+  revision: string,
+): Promise<ObjectMeta | null> {
+  // A pinned stat: the revision by its _id, wherever rm or mv moved it.
+  const mod = await loadGridFSModule()
+  return metaOf(await fileById(conn, new mod.ObjectId(revision)))
+}
+
+function metaOf(doc: GridFSFileDoc | null): ObjectMeta | null {
   if (doc === null) return null
   const revision = doc._id.toString()
   return {
@@ -113,59 +130,74 @@ async function get(conn: GridFSAccessor, key: string): Promise<Uint8Array | null
   return concat(chunks)
 }
 
-async function put(
+/**
+ * Upload one new revision of `key`, then prune past retention. Every op
+ * that adds a revision goes through here, so none can skip
+ * `keepRevisions`. Older revisions stay in fs.files, so reads pinned to an
+ * old `_id` keep working, and the new `_id` wins both keys of the
+ * latest-first sort, so it is what `head` answers next, spelled the same
+ * way.
+ */
+async function upload(
   conn: GridFSAccessor,
   key: string,
-  data: Uint8Array,
-): Promise<ObjectMeta | null> {
-  // Uploads a new revision; older revisions stay in fs.files, so reads
-  // pinned to an old revision _id keep working (GridFS-native
-  // versioning). The new _id wins both keys of the latest-first sort, so
-  // it is what `head` answers next, spelled the same way.
-  const b = await bucket(conn)
-  const upload = b.openUploadStream(key)
-  await new Promise<void>((resolve, reject) => {
-    upload.on('error', reject)
-    upload.on('finish', () => {
-      resolve()
-    })
-    upload.end(data)
-  })
-  const revision = upload.id.toString()
-  return { size: data.byteLength, fingerprint: revision, revision }
-}
-
-async function putStream(conn: GridFSAccessor, key: string, data: ByteSource): Promise<ObjectMeta> {
-  const upload = (await bucket(conn)).openUploadStream(key)
+  source: AsyncIterable<Uint8Array>,
+): Promise<ObjectMeta> {
+  const stream = (await bucket(conn)).openUploadStream(key)
   let size = 0
   async function* counted(): AsyncGenerator<Uint8Array> {
-    for await (const part of chunks(data)) {
-      size += part.length
+    for await (const part of source) {
+      size += part.byteLength
       yield part
     }
   }
   try {
-    await pipeline(Readable.from(counted()), upload)
+    await pipeline(Readable.from(counted()), stream)
   } catch (error) {
     try {
-      await upload.abort()
+      await stream.abort()
     } catch (cleanup) {
       console.debug('Could not abort GridFS upload', cleanup)
     }
     throw error
   }
-  const revision = upload.id.toString()
+  // A key's revisions, live and trashed, each counted per filename.
+  await prune(conn, { filename: { $in: [key, trashed(key)] } })
+  const revision = stream.id.toString()
   return { size, fingerprint: revision, revision }
 }
 
+/**
+ * Move every revision of `key` (or under it, for a `subtree` prefix) to the
+ * trash, then prune the trash past retention. Every op that takes a name
+ * away goes through here, so none deletes a revision outright or skips
+ * `keepRevisions`. The revisions keep their `_id`, so a snapshot pinned to
+ * one still reads it.
+ */
+async function remove(conn: GridFSAccessor, key: string, subtree: boolean): Promise<void> {
+  const [live, gone] = subtree
+    ? [prefixQuery(key), prefixQuery(trashed(key))]
+    : [{ filename: key }, { filename: trashed(key) }]
+  await retag(conn, live, TRASH_PREFIX)
+  await prune(conn, gone)
+}
+
+function put(conn: GridFSAccessor, key: string, data: Uint8Array): Promise<ObjectMeta | null> {
+  return upload(conn, key, chunks(data))
+}
+
+function putStream(conn: GridFSAccessor, key: string, data: ByteSource): Promise<ObjectMeta> {
+  return upload(conn, key, chunks(data))
+}
+
 async function deleteFile(conn: GridFSAccessor, key: string): Promise<void> {
-  // Removes every revision of the filename (rm semantics; mirrors S3's
-  // DeleteObject, which also succeeds silently on a missing key).
-  await deleteAll(conn, { filename: key })
+  // rm semantics: silent on a missing key, like S3's DeleteObject, and no
+  // more destructive than its delete marker.
+  await remove(conn, key, false)
 }
 
 async function deletePrefix(conn: GridFSAccessor, pfx: string): Promise<void> {
-  await deleteAll(conn, prefixQuery(pfx))
+  await remove(conn, pfx, true)
 }
 
 async function copyFile(conn: GridFSAccessor, srcKey: string, dstKey: string): Promise<boolean> {
@@ -173,17 +205,8 @@ async function copyFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
   // large files never buffer fully in memory.
   const doc = await latestFile(conn, srcKey)
   if (doc === null) return false
-  const b = await bucket(conn)
-  const readable = b.openDownloadStream(doc._id)
-  const upload = b.openUploadStream(dstKey)
-  await new Promise<void>((resolve, reject) => {
-    upload.on('error', reject)
-    readable.on('error', reject)
-    upload.on('finish', () => {
-      resolve()
-    })
-    readable.pipe(upload)
-  })
+  const readable = (await bucket(conn)).openDownloadStream(doc._id)
+  await upload(conn, dstKey, readable as AsyncIterable<Uint8Array>)
   return true
 }
 
@@ -191,11 +214,8 @@ async function moveFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
   // Server-side: retag every revision's filename instead of copying
   // bytes, so the whole revision history moves with the file.
   if ((await latestFile(conn, srcKey)) === null) return false
-  if (dstKey !== srcKey) {
-    await deleteAll(conn, { filename: dstKey })
-  }
-  const files = await filesColl(conn)
-  await files.updateMany({ filename: srcKey }, { $set: { filename: dstKey } })
+  if (dstKey !== srcKey) await remove(conn, dstKey, false)
+  await retag(conn, { filename: srcKey }, dstKey, srcKey)
   return true
 }
 
@@ -208,27 +228,12 @@ async function moveFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
  * was found under the source prefix.
  */
 async function movePrefix(conn: GridFSAccessor, srcPfx: string, dstPfx: string): Promise<boolean> {
-  const files = await filesColl(conn)
-  const docs: { _id: ObjectId; filename: string }[] = []
-  for await (const doc of files.find(prefixQuery(srcPfx), {
-    projection: { _id: 1, filename: 1 },
-  })) {
-    docs.push({ _id: doc._id, filename: doc.filename as string })
-  }
-  if (docs.length === 0) return false
   if (dstPfx !== srcPfx) {
-    // Read the source docs before clearing the destination: on a
-    // self-directed move the two queries select the same revisions, and
-    // deleting first would drop what the retag is about to move.
-    await deleteAll(conn, prefixQuery(dstPfx))
+    if (!(await probePrefix(conn, srcPfx))) return false
+    await remove(conn, dstPfx, true)
   }
-  for (const doc of docs) {
-    await files.updateOne(
-      { _id: doc._id },
-      { $set: { filename: `${dstPfx}${doc.filename.slice(srcPfx.length)}` } },
-    )
-  }
-  return true
+  const moved = await retag(conn, prefixQuery(srcPfx), dstPfx, srcPfx)
+  return moved > 0
 }
 
 async function probePrefix(conn: GridFSAccessor, pfx: string): Promise<boolean> {
@@ -245,6 +250,7 @@ export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   listChildren,
   listSubtree,
   head,
+  headRevision,
   get,
   put,
   putStream,

@@ -27,7 +27,7 @@ vi.mock('./client.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { ContentType, FileType, PathSpec } from '../../types.ts'
+import { ContentType, type FileStat, FileType, PathSpec } from '../../types.ts'
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import type { DropboxEntry } from './api.ts'
@@ -244,7 +244,7 @@ describe('dropbox stat', () => {
     while (stack.length > 0) {
       const current = stack.pop()
       if (current === undefined) break
-      const listing = await readdir(accessor, PathSpec.fromStrPath(current))
+      const listing = (await readdir(accessor, PathSpec.fromStrPath(current))) as FileStat[]
       for (const child of listing) {
         const trimmed = `${current.replace(/\/$/, '')}/${child.name}`
         const spec = PathSpec.fromStrPath(trimmed)
@@ -254,7 +254,7 @@ describe('dropbox stat', () => {
           continue
         }
         expect(info.size).not.toBeNull()
-        const handed = await handedAt(readdir, accessor, spec)
+        const handed = await handedAt((a, p) => readdir(a, p), accessor, spec)
         const bytes = await read(accessor, spec, undefined, handed.entry)
         expect(info.size).toBe(bytes.length)
         files.push(trimmed)

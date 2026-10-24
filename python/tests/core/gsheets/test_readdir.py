@@ -21,13 +21,13 @@ from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
 def accessor():
-    return GSheetsAccessor(config=None, token_manager=None)
+    return GSheetsAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.fixture

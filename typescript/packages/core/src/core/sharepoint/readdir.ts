@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { type DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { batchTree, directoryPath, readdirItems } from '../msgraph/drive.ts'
 import { driveLoc, listDrives, listSites, resolve } from './resolve.ts'
@@ -26,7 +26,11 @@ function folders(names: readonly string[]): FileStat[] {
     .map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
 }
 
-export async function readdir(accessor: SharePointAccessor, path: PathSpec): Promise<FileStat[]> {
+export async function readdir(
+  accessor: SharePointAccessor,
+  path: PathSpec,
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   const target = directoryPath(path)
   const resolved = await resolve(accessor, target)
   if (resolved.level === 'root') return folders(await listSites(accessor))
@@ -34,7 +38,12 @@ export async function readdir(accessor: SharePointAccessor, path: PathSpec): Pro
     return folders(await listDrives(accessor, resolved.siteId))
   }
   if (resolved.driveId === null) return []
-  return readdirItems(accessor.config, driveLoc(accessor.config, resolved, target.vfsPath), target)
+  return readdirItems(
+    accessor.config,
+    driveLoc(accessor.config, resolved, target.vfsPath),
+    target,
+    limit,
+  )
 }
 
 /**
@@ -48,10 +57,11 @@ export async function readdir(accessor: SharePointAccessor, path: PathSpec): Pro
 export async function tree(
   accessor: SharePointAccessor,
   path: PathSpec,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const resolved = await resolve(accessor, path)
   if (resolved.level === 'root' || resolved.level === 'site' || resolved.driveId === null) {
     return null
   }
-  return batchTree(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path)
+  return batchTree(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), path, limit)
 }

@@ -21,9 +21,9 @@ import {
   type Zone,
 } from './timezone.ts'
 
-export function utcDateFolder(ts?: number): string {
-  const d = ts === undefined ? new Date() : new Date(ts)
-  return d.toISOString().slice(0, 10)
+/** The UTC day `ts` (epoch milliseconds) falls on, as `YYYY-MM-DD`. */
+export function utcDateFolder(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10)
 }
 
 /** UTC ISO text: whole seconds, or six fraction digits, matching Python to_iso_z. */

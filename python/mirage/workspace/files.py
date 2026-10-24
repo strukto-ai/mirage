@@ -36,11 +36,11 @@ from mirage.observe.context import (
     command_records,
     fresh_recorder,
     record,
-    start_op,
 )
 from mirage.observe.record import OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.path import owner_prefix
 from mirage.view.types import FollowOperands, SessionBind
 from mirage.workspace.dispatcher.reader import NamespaceReader
@@ -127,7 +127,9 @@ class Files:
         records: list[OpRecord] | None = None,
         follow: FollowOperands | None = None,
         ledger: bool = True,
+        clock: Clock | None = None,
     ) -> None:
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._namespace = namespace
         self._observer = observer
         self._session_id = session_id
@@ -164,6 +166,7 @@ class Files:
             session_id=session_id,
             bind=self._bind,
             records=self._records,
+            clock=self._clock,
         )
 
     def _over(self, dispatch: DispatchFn) -> "Files":
@@ -376,7 +379,7 @@ class Files:
         if not self._ledger:
             answer, _ = await self._dispatch(op, typed, **kwargs)
             return answer
-        timer = start_op()
+        timer = OpTimer(self._clock)
         report = OpReport()
         seen: list[str] = []
         # Only a line this workspace runs is joined: another workspace's
@@ -386,7 +389,7 @@ class Files:
         own = (
             None
             if line is not None and line.ledger is self._records
-            else fresh_recorder()
+            else fresh_recorder(clock=self._clock)
         )
         token = (
             None

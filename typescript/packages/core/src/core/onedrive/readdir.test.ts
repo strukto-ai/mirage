@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 
 const NOT_FOUND = (): Response =>
@@ -50,7 +50,7 @@ describe('OneDrive readdir', () => {
     vi.stubGlobal('fetch', fetchMock)
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
     const folder = PathSpec.fromStrPath('/od/folder', 'folder')
-    const rows = await readdir(accessor, folder)
+    const rows = (await readdir(accessor, folder)) as FileStat[]
     expect(rows.map((row) => row.name)).toEqual(['a.txt'])
     expect(rows[0]).toMatchObject({ size: 3, fingerprint: 'ctag-1' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -94,7 +94,7 @@ describe('OneDrive readdir', () => {
       ),
     )
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const rows = await readdir(accessor, PathSpec.fromStrPath('/od', ''))
+    const rows = (await readdir(accessor, PathSpec.fromStrPath('/od', ''))) as FileStat[]
     expect(rows.map((row) => row.name)).toEqual(['\uE000.txt', '\u{1F600}.txt'])
   })
 })

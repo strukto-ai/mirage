@@ -188,8 +188,12 @@ ws.mount('/notes/').registerCommands([NOTES])
 ```
 
 `notes tag /notes/a.md draft` walks, helps and refuses like an installed
-CLI's line, and runs on the mount that serves `notes`: the working
-directory's, else the first. A VFS hands the same tree to every mount of it
+CLI's line, and runs on the working directory's mount when it serves
+`notes`. Otherwise a writing leaf selects the only writable matching mount;
+several writable matches produce an ambiguity error. Use `cd` to select
+the target. Read-only leaves keep the first matching mount, with a debug
+log when several match. Help remains available without selecting a write
+destination. A VFS hands the same tree to every mount of it
 through its `commands` option. Its leaves reach the backend past the
 dispatcher, so the tree follows the rules for a
 [user command](/typescript/vfs/new#4-commands).

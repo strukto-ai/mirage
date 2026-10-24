@@ -450,7 +450,7 @@ export class Workspace {
       const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
-    this.observer = new Observer(stores.observe)
+    this.observer = new Observer(stores.observe, this.clock)
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
     // Explicit at the construction site: the history view does not cache
@@ -533,6 +533,7 @@ export class Workspace {
         await this.observer.logOp(rec, sessionId)
       },
       {
+        clock: this.clock,
         bind: (sessionId, run) => this.bindSession(sessionId, run),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
@@ -684,6 +685,8 @@ export class Workspace {
           vfs: new Files(
             dispatcher.dispatch,
             this.namespace.readers(() => session.visibility),
+            null,
+            { clock: this.clock },
           ),
           session: sessionView(session, this.policies),
           processes: this.processView(session),

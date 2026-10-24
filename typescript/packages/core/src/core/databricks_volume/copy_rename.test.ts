@@ -20,7 +20,7 @@ import { rename } from './rename.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { readdir as dbxReaddir } from './readdir.ts'
 import { stat as dbxStat } from './stat.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import {
   jsonResponse,
   makeAccessor,
@@ -34,7 +34,7 @@ import {
 // The glob walk takes child paths; this backend lists rows.
 async function listedPaths(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<string[]> {
   const base = path.virtual.replace(/\/$/, '')
-  return (await dbxReaddir(accessor, path)).map((row) => `${base}/${row.name}`)
+  return ((await dbxReaddir(accessor, path)) as FileStat[]).map((row) => `${base}/${row.name}`)
 }
 
 const resolveGlob = (accessor: DatabricksVolumeAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>

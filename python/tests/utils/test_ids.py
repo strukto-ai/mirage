@@ -12,11 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import ast
+import functools
+import importlib.util
+import re
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 
+import mirage
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import (
     IdSource,
@@ -38,6 +44,81 @@ SEED_7_IDS = [
     "018bcfe5-6800-70e7-86ef-ef930baa6e99",
     "018bcfe5-6801-70f9-94f4-c83f9b431a91",
 ]
+
+MIRAGE_DIR = Path(mirage.__file__).parent
+
+# The packages whose ids and draws come from the workspace IdSource.
+SEAMED_PACKAGES = ("commands", "core", "execution", "process", "workspace")
+
+DIRECT_DRAWS = frozenset(
+    {
+        "uuid.uuid1",
+        "uuid.uuid4",
+        "uuid.uuid6",
+        "uuid.uuid7",
+        "uuid.uuid8",
+        "os.urandom",
+        "os.getrandom",
+        "tempfile.mkstemp",
+        "tempfile.mkdtemp",
+        "tempfile.mktemp",
+        "tempfile.TemporaryFile",
+        "tempfile.NamedTemporaryFile",
+        "tempfile.SpooledTemporaryFile",
+        "tempfile.TemporaryDirectory",
+        "mirage.uuid7",
+        "mirage.new_session_id",
+        "mirage.new_workspace_id",
+        "mirage.utils.ids.uuid7",
+        "mirage.utils.ids.new_session_id",
+        "mirage.utils.ids.new_workspace_id",
+    }
+)
+
+DRAWING_MODULES = frozenset({"random", "secrets"})
+
+NON_DRAWING_MEMBERS = frozenset({"secrets.compare_digest"})
+
+# Every draw names one of these in its import, so a module that names
+# none of them is not parsed.
+DRAW_HINT = re.compile(
+    r"uuid|random|secrets|tempfile|new_session_id|new_workspace_id"
+)
+
+KEPT_ON_PROCESS_RANDOMNESS = {
+    ("core/jq/eval.py", "uuid.uuid4"): (
+        "the prelude's key token is drawn once per process and never "
+        "reaches output; it only has to be one no program can spell"
+    ),
+    ("core/ssh/write.py", "uuid.uuid4"): (
+        "the atomic upload's temp name lives on the remote host, so a "
+        "seeded name would collide with an earlier run's leftover"
+    ),
+    ("core/disk/write.py", "tempfile.mkstemp"): (
+        "the atomic write stages beside its target on the host disk, so a "
+        "seeded name would collide with an earlier run's leftover"
+    ),
+    ("workspace/fuse.py", "uuid.uuid4"): (
+        "the FSKit mountpoint is a host directory under /Volumes, shared "
+        "with every other process, not a name inside the workspace"
+    ),
+    ("workspace/fuse.py", "tempfile.mkdtemp"): (
+        "the default FUSE mountpoint is a host directory, not a name "
+        "inside the workspace"
+    ),
+    ("workspace/nfs.py", "tempfile.mkdtemp"): (
+        "the default NFS mountpoint is a host directory, not a name "
+        "inside the workspace"
+    ),
+    ("workspace/snapshot/state.py", "tempfile.mkdtemp"): (
+        "a restored disk mount with no override gets a fresh host root, "
+        "which must not collide with another restore's"
+    ),
+    ("workspace/workspace/workspace.py", "tempfile.mkdtemp"): (
+        "a restore stages disk mount files in a host directory it removes "
+        "once the mounts have copied them in"
+    ),
+}
 
 
 def test_uuid7_is_canonical_and_version_7():
@@ -180,3 +261,182 @@ def test_shuffle_replays_a_permutation():
     items = list(range(10))
     shuffle(SeededIdSource(3), items)
     assert items == [6, 2, 3, 8, 9, 0, 1, 5, 7, 4]
+
+
+def _bindings(tree: ast.Module, package: str) -> dict[str, str]:
+    """Each name an import binds, mapped to the dotted name it stands for.
+
+    Args:
+        tree (ast.Module): a parsed module.
+        package (str): the module's package, which relative imports
+            resolve against.
+    """
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".")[0]
+                bound[alias.asname or top] = (
+                    alias.name if alias.asname else top
+                )
+        elif isinstance(node, ast.ImportFrom):
+            module = importlib.util.resolve_name(
+                "." * node.level + (node.module or ""), package
+            )
+            for alias in node.names:
+                bound[alias.asname or alias.name] = f"{module}.{alias.name}"
+    return bound
+
+
+def _dotted(node: ast.expr, bound: dict[str, str]) -> str | None:
+    """The dotted name ``node`` refers to through the imports, if any.
+
+    Args:
+        node (ast.expr): a name, attribute or call.
+        bound (dict[str, str]): the module's import bindings.
+    """
+    if isinstance(node, ast.Name):
+        return bound.get(node.id)
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value, bound)
+        return None if base is None else f"{base}.{node.attr}"
+    if isinstance(node, ast.Call):
+        func = _dotted(node.func, bound)
+        return None if func is None else f"{func}()"
+    return None
+
+
+def _draw(name: str) -> str | None:
+    """The direct draw ``name`` makes, if it makes one.
+
+    Anything the ``random`` or ``secrets`` module holds counts, except
+    a member that draws nothing, and is reported by the module member
+    it goes through.
+
+    Args:
+        name (str): a dotted name an import resolves to.
+    """
+    if name in DIRECT_DRAWS:
+        return name
+    module, _, rest = name.partition(".")
+    if module not in DRAWING_MODULES or not rest:
+        return None
+    member = f"{module}.{rest.split('.')[0].removesuffix('()')}"
+    return None if member in NON_DRAWING_MEMBERS else member
+
+
+def direct_draws(source: str, package: str) -> set[str]:
+    """Every draw ``source`` makes past the IdSource.
+
+    Args:
+        source (str): a module's Python source.
+        package (str): the module's package, which relative imports
+            resolve against.
+    """
+    if not DRAW_HINT.search(source):
+        return set()
+    tree = ast.parse(source)
+    bound = _bindings(tree, package)
+    named = set(bound.values()) | {
+        name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Name, ast.Attribute))
+        and (name := _dotted(node, bound))
+    }
+    return {draw for name in named if (draw := _draw(name))}
+
+
+@functools.cache
+def _seamed_draws() -> frozenset[tuple[str, str]]:
+    return frozenset(
+        (path.relative_to(MIRAGE_DIR).as_posix(), draw)
+        for package in SEAMED_PACKAGES
+        for path in (MIRAGE_DIR / package).rglob("*.py")
+        for draw in direct_draws(
+            path.read_text(),
+            ".".join(
+                (mirage.__name__, *path.relative_to(MIRAGE_DIR).parent.parts)
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("import uuid\nuuid.uuid4()", {"uuid.uuid4"}),
+        ("import uuid as u\nu.uuid1().hex", {"uuid.uuid1"}),
+        ("from uuid import uuid4", {"uuid.uuid4"}),
+        ("from uuid import uuid4 as fresh\nfresh()", {"uuid.uuid4"}),
+        ("import uuid\nfield(default_factory=uuid.uuid4)", {"uuid.uuid4"}),
+        ("import random\nrandom.random()", {"random.random"}),
+        ("import random as r\nr.getrandbits(32)", {"random.getrandbits"}),
+        ("from random import shuffle", {"random.shuffle"}),
+        ("import random\nrandom.Random().choice(xs)", {"random.Random"}),
+        ("import random\nrandom.Random(7)", {"random.Random"}),
+        ("from random import SystemRandom as S\nS()", {"random.SystemRandom"}),
+        ("import secrets\nsecrets.token_hex(6)", {"secrets.token_hex"}),
+        ("from secrets import randbits", {"secrets.randbits"}),
+        ("import os\nos.urandom(16)", {"os.urandom"}),
+        ("from os import urandom as u\nu(4)", {"os.urandom"}),
+        ("import tempfile\ntempfile.mkdtemp()", {"tempfile.mkdtemp"}),
+        (
+            "from tempfile import NamedTemporaryFile as T",
+            {"tempfile.NamedTemporaryFile"},
+        ),
+        (
+            "from mirage.utils.ids import uuid7\nuuid7()",
+            {"mirage.utils.ids.uuid7"},
+        ),
+        (
+            "from mirage.utils.ids import new_session_id as mint\nmint()",
+            {"mirage.utils.ids.new_session_id"},
+        ),
+        (
+            "from ...utils.ids import uuid7\nuuid7()",
+            {"mirage.utils.ids.uuid7"},
+        ),
+        (
+            "from ...utils import ids\nids.new_workspace_id()",
+            {"mirage.utils.ids.new_workspace_id"},
+        ),
+        ("import mirage\nmirage.uuid7()", {"mirage.uuid7"}),
+        ("from mirage import uuid7", {"mirage.uuid7"}),
+    ],
+)
+def test_the_detector_catches_a_planted_draw(source, expected):
+    assert direct_draws(source, "mirage.core.jq") == expected
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        "self._ids.uuid7()",
+        "ctx.ids.random_u32()",
+        "from mirage.utils.ids import IdSource, SystemIdSource",
+        "from mirage.utils.ids import random_below, shuffle\n"
+        "shuffle(ids, items)",
+        "from ...utils.ids import random_below\nrandom_below(ids, 10)",
+        "import uuid\nuuid.UUID(text)",
+        "import uuid\nuuid.uuid5(uuid.NAMESPACE_URL, name)",
+        "import random",
+        "from secrets import compare_digest\ncompare_digest(a, b)",
+        "import tempfile\ntempfile.gettempdir()",
+        "import os\nos.environ.get('HOME')",
+        "from mirage.secrets.config import EnvVar",
+        "from ...secrets.registry import fetch_secret",
+        "from mirage.vfs.secrets import reveal_secret",
+        "uuid7()",
+        "random.random()",
+    ],
+)
+def test_the_detector_leaves_what_draws_from_the_id_source(allowed):
+    assert direct_draws(allowed, "mirage.core.jq") == set()
+
+
+def test_no_seamed_module_draws_past_the_id_source():
+    assert _seamed_draws() - set(KEPT_ON_PROCESS_RANDOMNESS) == set()
+
+
+def test_every_kept_process_draw_is_still_made():
+    assert set(KEPT_ON_PROCESS_RANDOMNESS) - _seamed_draws() == set()

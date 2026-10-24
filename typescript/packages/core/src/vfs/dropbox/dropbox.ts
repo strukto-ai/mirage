@@ -19,7 +19,7 @@ import { VFSName } from '../../types.ts'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/events.ts'
 import { type DeltaHook } from '../../events/index.ts'
-import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
 import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
 import type { Handed } from '../types.ts'
 import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
@@ -89,8 +89,8 @@ export class DropboxVFS extends BaseVFS {
     return dropboxTree(this.accessor, path)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return dropboxReaddir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return dropboxReaddir(this.accessor, path, handed?.limit)
   }
 
   override read(

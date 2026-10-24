@@ -22,7 +22,7 @@ vi.mock('./api.ts', async () => {
 })
 
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { FileType, PathSpec } from '../../types.ts'
+import { type FileStat, FileType, PathSpec } from '../../types.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import * as api from './api.ts'
 import { readdir } from './readdir.ts'
@@ -53,7 +53,10 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const out = await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }))
+    const out = (await readdir(
+      accessor,
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
+    )) as FileStat[]
     expect(out.map((row) => [row.name, row.type])).toEqual([
       ['docs', FileType.DIRECTORY],
       ['notes.txt', FileType.FILE],
@@ -83,10 +86,10 @@ describe('dropbox readdir', () => {
     })
 
     const accessor = makeAccessor()
-    const out = await readdir(
+    const out = (await readdir(
       accessor,
       new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-    )
+    )) as FileStat[]
     expect(out.map((row) => row.name)).toEqual(['note.md'])
   })
 
@@ -112,15 +115,15 @@ describe('dropbox readdir', () => {
     })
 
     const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: '/Team/data' })
-    const root = await readdir(
+    const root = (await readdir(
       accessor,
       new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
-    )
+    )) as FileStat[]
     expect(root.map((row) => row.name)).toEqual(['docs'])
-    const nested = await readdir(
+    const nested = (await readdir(
       accessor,
       new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
-    )
+    )) as FileStat[]
     expect(nested.map((row) => row.name)).toEqual(['note.md'])
   })
 
@@ -130,14 +133,14 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const out = await readdir(
+    const out = (await readdir(
       accessor,
       new PathSpec({
         virtual: '/dropbox',
         directory: '/dropbox',
         vfsPath: mountKey('/dropbox', '/dropbox'),
       }),
-    )
+    )) as FileStat[]
     expect(out.map((row) => row.name)).toEqual(['a.txt'])
   })
 
@@ -186,7 +189,10 @@ describe('dropbox readdir', () => {
     ])
 
     const accessor = makeAccessor()
-    const out = await readdir(accessor, new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }))
+    const out = (await readdir(
+      accessor,
+      new PathSpec({ vfsPath: '', virtual: '/', directory: '/' }),
+    )) as FileStat[]
     expect(out.map((row) => [row.name, row.size])).toEqual([['empty.txt', 0]])
   })
 })

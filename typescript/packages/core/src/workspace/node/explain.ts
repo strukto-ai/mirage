@@ -53,6 +53,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { envSnapshot } from '../session/state.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import {
   classifiedWords,
   gate,
@@ -486,6 +487,7 @@ async function* judgeWords(
     redirects,
     session.cwd,
     envSnapshot(session),
+    sessionAccess(session),
   )
   const [ctx, asked, answers] = await gate(
     name,

@@ -108,6 +108,7 @@ import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/con
 import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'
@@ -205,7 +206,11 @@ function isMountPair(
  * through one would invalidate the other's — which is exactly the thing the
  * scenario is there to observe.
  */
-function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWorkspaces {
+function openWorkspaces(
+  build: () => MountMap,
+  options?: OpenOptions,
+  manualClock = false,
+): OpenedWorkspaces {
   const opened: Workspace[] = []
   const write = options?.write
   const make = (read?: ReadSpec, mountRead?: Record<string, ReadSpec>): ExecWorkspace => {
@@ -214,6 +219,7 @@ function openWorkspaces(build: () => MountMap, options?: OpenOptions): OpenedWor
       mode: MountMode.WRITE,
       ...(read !== undefined ? { read } : {}),
       ...(write !== undefined ? { write } : {}),
+      ...(manualClock ? { clock: new ManualClock() } : {}),
     })
     opened.push(ws)
     return ws as unknown as ExecWorkspace
@@ -1964,7 +1970,7 @@ async function openGws(target: Target, options?: OpenOptions): Promise<Open> {
   const mail = gwsManifest<MailEntry[]>(target.mail)
   if (mail !== undefined) await seedGwsMail(base, mail)
   if (calendar !== undefined) await seedGwsCalendar(base, calendar.events)
-  const opened = openWorkspaces(build, options)
+  const opened = openWorkspaces(build, options, target.clock === 'manual')
   // A target may scope the gws install to one mount's folder, the
   // configuration where the CLI and the mount are the same folder. The shadow
   // gets it too, so a scenario can edit a file the way another client would.

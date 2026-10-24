@@ -118,6 +118,12 @@ Return a `DirListing` when one fetch proves more: `seeds` for the descendant
 listings it also names, `partial: true` for a filtered or truncated view, and
 `window: true` for a capped one that proves nothing absent.
 
+On a walk, `readdir` is handed `handed.limit`, how many entries the walk can
+still use; it may stop paging there and return what it holds with
+`partial: true`. A glob hands the word it matches as `path.pattern`
+(`*.json`); a `readdir` that lists only what matches returns `partial: true`
+too.
+
 A function that needs what a listing already holds declares it in `handed`,
 keyed by function name (`override readonly handed = { stat: ['entry'] } as const`), and
 receives it in its `Handed` argument: `entry` (the row at the path) and
@@ -137,6 +143,8 @@ Every other function is optional, and each stands alone:
 | `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
 | `copyFrom` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
+| `readMany` | Optional: read several small files in one request. |
+| `deltaHook` | Optional: read the service's change feed ([Notifications](/home/notifications/support)). |
 | `search`, `searchMany` | Optional resource search. |
 | `filesContaining`, `linesContaining`, `beforeFullWalk` | Optional: let grep and rg skip what your search rules out, and refuse a walk of every file. |
 
@@ -145,6 +153,16 @@ path there. Reject EXDEV when the store cannot make the copy (another kind of
 store, other credentials, a refusal), and `cp` reads the file and writes it
 instead. S3 and the S3-compatible stores copy between two buckets that one
 set of credentials reaches.
+
+`readMany(paths, limit)` reads several whole files in one request. When a
+command reads its operands in turn (`cat a b c`), the next few go to it as one
+batch and land in the read cache. Resolve the bytes keyed by each path's
+`virtual`; leave out a file larger than `limit` bytes or one the request could
+not read, and its own `read` answers it.
+
+`deltaHook()` returns the hook a poll loop or webhook receiver calls to read
+the service's changes since a checkpoint. Leave it out when the service has no
+change feed.
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
@@ -498,6 +516,13 @@ The generic commands are registered once per workspace, and every mount falls ba
 - A command that prints paths from its own data (an index, a listing it fetched) hands its output over as rows on `IOResult.rows` rather than as stdout. The workspace drops the rows the session hides and renders the rest, so no line, count or total stands for a hidden path ([rows](/typescript/cli/custom#use-workspace-files)).
 - Declare `write: true` on a user command that writes. Policy reads it as `CommandContext.write`, and the mount drops its cached listings and bodies after the command runs, since no per-path invalidation saw the write.
 - A program whose verbs work on the backend's files can be one command tree: hand the VFS a `CLI` in `commands`, and the mount serves its verbs under the root's name on its own accessor ([Serve a CLI on a mount](/typescript/cli/custom#serve-a-cli-on-a-mount)).
+
+For a flat mount command, an explicit path or the working directory selects
+the target before fallback. Without either, a write selects the only writable
+matching mount and refuses multiple writable matches. Read fallback stays
+deterministic: root first, then longest prefix, with registration order breaking
+ties; multiple read matches produce a debug log. Hidden mounts do not participate,
+and the session's permissions can narrow which mounts are writable.
 
 ## 5. VFS Class
 

@@ -24,7 +24,7 @@ from mirage.types import FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs.doc_entry import make_filename
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 
 ROOT = PathSpec(
     vfs_path=mount_key("/gdocs", "/gdocs"),
@@ -59,7 +59,9 @@ def doc(
 @pytest.mark.asyncio
 async def test_changes_place_each_doc_where_the_app_lists_it():
     hook = app_delta_hook(
-        GDocsAccessor(config=None, token_manager=None), MIME, make_filename
+        GDocsAccessor(config=None, token_manager=offline_token_manager()),
+        MIME,
+        make_filename,
     )
     with (
         serve(

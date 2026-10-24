@@ -27,7 +27,7 @@ from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.stat import modified_to_iso
 from mirage.core.databricks_volume.types import FileMetadata
 from mirage.errors.fs import listing_error
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
@@ -60,13 +60,17 @@ async def _is_dir(accessor: DatabricksVolumeAccessor, key: str) -> bool:
 
 
 async def readdir(
-    accessor: DatabricksVolumeAccessor, path: PathSpec
-) -> list[FileStat]:
-    """A folder's rows, as the Files API lists them.
+    accessor: DatabricksVolumeAccessor,
+    path: PathSpec,
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """A folder's rows, as the Files API lists them; past a walk's
+    ``limit`` the API is paged no further, and the listing is partial.
 
     Args:
         accessor (DatabricksVolumeAccessor): Databricks accessor.
         path (PathSpec): the folder, or a glob word in it.
+        limit (int | None): the most entries a walk can still keep.
 
     Raises:
         FileNotFoundError: nothing is at the path.
@@ -75,7 +79,11 @@ async def readdir(
     list_path = path.dir if path.pattern else path
     remote_path = backend_path(accessor.config, list_path)
     try:
-        entries = await list_directory_contents(accessor, remote_path)
+        entries = await (
+            list_directory_contents(accessor, remote_path)
+            if limit is None
+            else list_directory_contents(accessor, remote_path, limit)
+        )
     except Exception as exc:
         # The Files API answers 404 for a missing path and for a path under
         # a file alike, so the errno comes from walking the ancestors: one
@@ -117,4 +125,6 @@ async def readdir(
                 content=content_type_for_path(name),
             )
         )
+    if limit is not None and len(entries) >= limit:
+        return DirListing(rows, partial=True)
     return rows

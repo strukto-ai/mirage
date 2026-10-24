@@ -34,6 +34,7 @@ export class UploadStdin implements AsyncIterable<Uint8Array> {
   private discarding = false
   private wake: (() => void) | undefined
   private received = 0
+  error: unknown
 
   constructor(
     private readonly capacity = CAPACITY,
@@ -80,6 +81,12 @@ export class UploadStdin implements AsyncIterable<Uint8Array> {
   close(): void {
     this.ended = true
     this.wake?.()
+  }
+
+  /** Record why the upload failed, then drop unread bytes. */
+  async fail(error: unknown): Promise<void> {
+    this.error = error
+    await this.discard()
   }
 
   async discard(): Promise<void> {

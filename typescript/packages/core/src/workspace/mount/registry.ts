@@ -46,8 +46,17 @@ import {
   WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
-import { effectivePathMode, strongestModeUnder } from '../../context/session_context.ts'
+import { changesFiles } from '../lookup/constants.ts'
+import {
+  effectivePathMode,
+  sessionVisibility,
+  strongestModeUnder,
+} from '../../context/session_context.ts'
+import { walk } from '../../commands/cli/walk.ts'
+import { parseCommand } from '../../commands/spec/parser.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { MountEntry, type MountInit } from './mount.ts'
+import { MountCommandAmbiguous } from './errors.ts'
 import type { IndexConfig } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -66,6 +75,7 @@ interface ReadReconciler {
 }
 
 export const DEV_PREFIX = '/dev/'
+export const logger: { debug?: (message: string) => void } = {}
 
 // Raised when a path-bound command is unsupported by its backend.
 // Rendered in the GNU shape `<cmd>: <operand>: <reason>` with the
@@ -156,7 +166,7 @@ export class MountRegistry {
   // mounts (a CLI exists because it was installed, never because
   // storage was mounted). The registry object is just the vehicle that
   // already reaches every dispatch site, same as the runtime fields.
-  readonly clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor))
+  readonly clis: CLIRegistry
 
   /**
    * Drop what a write past the dispatcher may have made stale.
@@ -309,9 +319,10 @@ export class MountRegistry {
     readOverrides: Record<string, ReadSpec> = {},
     placements: RegistryPlacements = {},
     readonly io: IOConfig = new IOConfig(),
-    private readonly clock: Clock = new SystemClock(),
+    readonly clock: Clock = new SystemClock(),
     readonly ids: IdSource = new SystemIdSource(),
   ) {
+    this.clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor), clock)
     this.indexConfig = placements.index
     this.workspaceId = placements.workspaceId
     const list: MountEntry[] = []
@@ -341,6 +352,7 @@ export class MountRegistry {
           ids: this.ids,
         },
         list,
+        this.clock,
       ),
     )
     seen.add(DEV_PREFIX)
@@ -369,6 +381,7 @@ export class MountRegistry {
             ids: this.ids,
           },
           list,
+          this.clock,
         ),
       )
     }
@@ -386,7 +399,8 @@ export class MountRegistry {
    * built it. Mirrors the Python registry, whose constructor mounts
    * through `mount()` as well.
    */
-  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
+  private static place(init: MountInit, siblings: readonly MountEntry[], clock: Clock): MountEntry {
+    init.vfs.accessor.bindClock?.(clock)
     const alias = siblings.find((existing) => existing.vfs === init.vfs)
     const m = new MountEntry(
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
@@ -475,6 +489,7 @@ export class MountRegistry {
         ids: this.ids,
       },
       this.mountList,
+      this.clock,
     )
     this.attachManager(m)
     this.mountList.push(m)
@@ -667,18 +682,24 @@ export class MountRegistry {
     return effectivePathMode(virtual, m.prefix, m.mode, access) === MountMode.EXEC
   }
 
-  mountForCommand(cmdName: string): MountEntry | null {
-    if (this.rootRef !== null) {
-      const cmd = this.rootRef.resolveCommand(cmdName)
-      if (cmd !== null) return this.rootRef
-    }
-    for (const m of this.visibleMounts()) {
-      if (m.prefix === DEV_PREFIX) continue
-      const cmd = m.resolveCommand(cmdName)
-      if (cmd === null) continue
-      return m
-    }
-    return null
+  private fallbackCandidates(cmdName: string, access?: SessionAccess): MountEntry[] {
+    const visible = this.visibleMounts(access?.sessionId)
+    const ordered =
+      this.rootRef === null
+        ? visible
+        : [this.rootRef, ...visible.filter((mount) => mount !== this.rootRef)]
+    const visibility = sessionVisibility(access)
+    return ordered.filter(
+      (mount) =>
+        visible.includes(mount) &&
+        mount.prefix !== DEV_PREFIX &&
+        pathVisible(visibility, mount.prefix) &&
+        mount.resolveCommand(cmdName) !== null,
+    )
+  }
+
+  mountForCommand(cmdName: string, access?: SessionAccess): MountEntry | null {
+    return this.fallbackCandidates(cmdName, access)[0] ?? null
   }
 
   /**
@@ -705,26 +726,150 @@ export class MountRegistry {
   }
 
   /**
-   * The mount a command runs on, as `resolveMount` picks it, without readying
-   * it: the mount of the first path operand, else of the working directory,
-   * when it registers the command; else the first mount that does. Null
-   * where none does, or where the first operand's mount lacks it, a line
-   * `resolveMount` refuses. Mirrors Python's `MountRegistry.command_mount`.
+   * Candidates for discovery and admission, without readying a backend.
+   * A path or working directory that owns the command selects it; fallback
+   * retains root-first, then longest-prefix registration order. A bound
+   * mount stays authoritative so the dispatcher owns visibility refusals.
    */
-  commandMount(cmdName: string, pathScopes: readonly PathSpec[], cwd: string): MountEntry | null {
+  commandCandidates(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    access?: SessionAccess,
+  ): MountEntry[] {
     const first = pathScopes[0]
-    const mount = this.tryMountFor(first?.virtual ?? cwd)
-    if (mount !== null && mount.resolveCommand(cmdName) !== null) return mount
-    if (mount !== null && first !== undefined) return null
-    return this.mountForCommand(cmdName)
+    const visible = this.visibleMounts(access?.sessionId)
+    const owner = ownerPrefix(
+      visible.map((mount) => mount.prefix),
+      first?.virtual ?? cwd,
+    )
+    const mount = visible.find((candidate) => candidate.prefix === owner)
+    if (mount !== undefined && mount.resolveCommand(cmdName) !== null) {
+      return [mount]
+    }
+    if (mount !== undefined && first !== undefined) return []
+    return this.fallbackCandidates(cmdName, access)
+  }
+
+  /** The first discovery candidate; selecting execution may refuse ambiguity. */
+  commandMount(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    access?: SessionAccess,
+  ): MountEntry | null {
+    return this.commandCandidates(cmdName, pathScopes, cwd, access)[0] ?? null
+  }
+
+  /** The ordered execution candidates and grammar for the same invocation. */
+  private invocationChoices(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
+  ): [MountEntry[], MountEntry | null] {
+    const candidates = this.commandCandidates(cmdName, pathScopes, cwd, access)
+    const first = candidates[0] ?? null
+    if (candidates.length < 2 || first === null) return [candidates, first]
+    const builtins = changesFiles(cmdName, [cmdName, ...argv])
+    const readers: MountEntry[] = []
+    const writable: MountEntry[] = []
+    const subcommands = new Set<MountEntry>()
+    for (const mount of candidates) {
+      const tree = mount.cliFor(cmdName)
+      let writes: boolean
+      if (tree === null) {
+        writes = mount.mayWrite(cmdName, null, builtins)
+      } else {
+        const result = walk(cmdName, tree.spec, argv, cwd, undefined, true)
+        if (result.leaf === null) continue
+        if (result.path.length > 0) subcommands.add(mount)
+        writes = tree.handlers[result.path.join(' ')]?.write === true
+      }
+      if (!writes) readers.push(mount)
+      else if (strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ)
+        writable.push(mount)
+    }
+    const reader = readers[0]
+    const selected = writable.length > 0 ? writable : [reader ?? first]
+    const grammar = selected.find((mount) => subcommands.has(mount)) ?? selected[0] ?? first
+    // A selected tree's named verb owns its words. A root-only leaf has no
+    // verb to distinguish it from a flat command's explicit path operands.
+    if (pathScopes.length === 0 && first.cliFor(cmdName) === null && !subcommands.has(grammar)) {
+      const spec = (grammar.cliFor(cmdName) === null ? grammar : first).specFor(cmdName)
+      if (spec !== null) {
+        const parsed = parseCommand(spec, [...argv], cwd, cmdName)
+        const operands = parsed.args
+          .filter(([, kind], index) => kind === 'path' && parsed.rawOperands[index]?.[0] !== '-')
+          .map(([path]) => path)
+        const inferred = [...operands, ...parsed.pathFlagValues]
+          .filter((path) => path !== '-')
+          .map((path) => PathSpec.fromStrPath(path, undefined, cwd))
+        if (inferred.length > 0) {
+          const bound = this.commandCandidates(cmdName, inferred, cwd, access)
+          if (bound.length < 2) return [bound, bound[0] ?? null]
+        }
+      }
+    }
+    return [selected, grammar]
+  }
+
+  /** The targets this invocation can run, before fetching its environment. */
+  invocationCandidates(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
+  ): MountEntry[] {
+    return this.invocationChoices(cmdName, pathScopes, cwd, argv, access)[0]
+  }
+
+  /** The grammar used to classify this invocation, without refusing ambiguity. */
+  invocationMount(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
+  ): MountEntry | null {
+    return this.invocationChoices(cmdName, pathScopes, cwd, argv, access)[1]
+  }
+
+  /** Select an unambiguous write target without starting a backend. */
+  executionMount(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
+  ): MountEntry | null {
+    const candidates = this.invocationCandidates(cmdName, pathScopes, cwd, argv, access)
+    if (candidates.length > 1) {
+      throw new MountCommandAmbiguous(
+        cmdName,
+        candidates.map((mount) => mount.prefix),
+      )
+    }
+    const selected = candidates[0] ?? null
+    const original = this.commandCandidates(cmdName, pathScopes, cwd, access)
+    if (selected !== null && original.length > 1) {
+      logger.debug?.(
+        `${cmdName}: multiple mounts ${original.map((mount) => mount.prefix).join(', ')}; using ${selected.prefix}`,
+      )
+    }
+    return selected
   }
 
   async resolveMount(
     cmdName: string,
     pathScopes: readonly PathSpec[],
     cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
   ): Promise<MountEntry | null> {
-    const mount = this.commandMount(cmdName, pathScopes, cwd)
+    const mount = this.executionMount(cmdName, pathScopes, cwd, argv, access)
     const first = pathScopes[0]
     if (mount === null && first !== undefined) {
       const owner = this.tryMountFor(first.virtual)

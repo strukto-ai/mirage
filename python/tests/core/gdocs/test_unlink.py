@@ -21,12 +21,12 @@ from mirage.core.gdocs.unlink import unlink
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 
 
 @pytest.fixture
 def accessor():
-    return GDocsAccessor(config=None, token_manager=None)
+    return GDocsAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.mark.asyncio

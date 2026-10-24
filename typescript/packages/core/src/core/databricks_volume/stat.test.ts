@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FileType } from '../../types.ts'
+import { type FileStat, FileType } from '../../types.ts'
 import { exists } from './exists.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
@@ -49,7 +49,7 @@ describe('a listed row', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const [row] = await readdir(makeAccessor(), spec('/volume/reports'))
+    const [row] = (await readdir(makeAccessor(), spec('/volume/reports'))) as FileStat[]
     expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/a.txt')))
   })
 
@@ -66,7 +66,7 @@ describe('a listed row', () => {
       return new Response(null, { status: 200 })
     })
     vi.stubGlobal('fetch', fetch)
-    const [row] = await readdir(makeAccessor(), spec('/volume/reports'))
+    const [row] = (await readdir(makeAccessor(), spec('/volume/reports'))) as FileStat[]
     expect(row?.type).toBe(FileType.DIRECTORY)
     expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/sub')))
   })

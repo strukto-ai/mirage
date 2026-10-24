@@ -16,11 +16,21 @@ import functools
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes
-from mirage.commands.builtin.generic.ls import Stat, ls_options
 from mirage.commands.builtin.generic.ls import ls as generic_ls
-from mirage.commands.builtin.generic_bind.files import dispatched_call
+from mirage.commands.builtin.generic.ls import ls_options
+from mirage.commands.builtin.generic_bind.files import (
+    dispatched_call,
+    dispatched_read_tree,
+)
 from mirage.commands.builtin.utils.identity import identity_from
-from mirage.commands.builtin.utils.links import link_view, mount_view
+from mirage.commands.builtin.utils.links import (
+    link_location,
+    link_view,
+    mount_view,
+)
+from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, PathSpec
@@ -29,7 +39,12 @@ from mirage.view.types import SessionView
 from mirage.workspace.files import Files
 
 
-async def relayed_readdir(dispatch: DispatchFn, path: PathSpec) -> list[str]:
+async def relayed_readdir(
+    dispatch: DispatchFn,
+    path: PathSpec,
+    nofollow: bool = False,
+    limit: int | None = None,
+) -> list[str]:
     """Read one directory on the mount that owns it, which consults its
     own index. The dispatcher's listing names the links among the
     entries.
@@ -37,8 +52,15 @@ async def relayed_readdir(dispatch: DispatchFn, path: PathSpec) -> list[str]:
     Args:
         dispatch (DispatchFn): Workspace operation dispatcher.
         path (PathSpec): Directory addressed by its full virtual path.
+        nofollow (bool): unused; a walk's readdir takes it.
+        limit (int | None): a walk's ``limit`` for the backend.
     """
-    names: list[str] = await dispatched_call(dispatch, "readdir", path)
+    names: list[str] = await dispatched_call(
+        dispatch,
+        "readdir",
+        path,
+        **({} if limit is None else {"limit": limit}),
+    )
     return names
 
 
@@ -98,11 +120,26 @@ async def run_ls(
             for the profile the group column renders.
     """
     p = functools.partial
-    stat_fn: Stat = p(relayed_stat, dispatch)
     links = link_view(vfs)
+    readdir: WalkCall = p(relayed_readdir, dispatch)
+    stat_fn: WalkCall = p(relayed_stat, dispatch)
+    # Only -R walks; a plain listing reads one directory.
+    if FlagView(flag_kwargs, spec=SPECS["ls"]).as_bool("recursive"):
+        readdir, stat_fn = tree_walk(
+            None
+            if vfs is None
+            else dispatched_read_tree(
+                dispatch,
+                mount_view(vfs),
+                None if links is None else p(link_location, links),
+                crossing=True,
+            ),
+            readdir,
+            stat_fn,
+        )
     return await generic_ls(
         flat_scopes(scopes),
-        readdir=p(relayed_readdir, dispatch),
+        readdir=readdir,
         stat=stat_fn,
         links=links,
         mounts=mount_view(vfs, crossing=True),

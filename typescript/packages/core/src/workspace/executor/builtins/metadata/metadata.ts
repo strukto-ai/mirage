@@ -21,7 +21,10 @@ import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { beforeFullWalk } from '../../../../commands/builtin/utils/tree.ts'
+import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
+import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
+import { beforeFullWalk, treeWalk } from '../../../../commands/builtin/utils/tree.ts'
+import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
 import {
@@ -260,18 +263,24 @@ export async function beforeRecursiveChange(
 // listing met (null for a file, or a directory that listed).
 export type WalkEntry = [PathSpec, FileStat, unknown]
 
-// A subtree as [path, stat, unread] triples, in fts's pre-order. `links`
+// A subtree as [path, stat, unread] triples, in fts's pre-order, each stat
+// read off the mount's `readTree` where one answers for the subtree. `links`
 // is the session's link table (`Namespace.sessionLinks`). `unread` is the
 // refusal a directory's listing met (a rule that denies the directory lets
 // its stat through): fts's unreadable directory, which the caller reports
 // after the directory's own change, and whose subtree is not walked.
 // Mirrors Python's walk_stats.
 export async function walkStats(
-  links: NamespaceLinks,
+  links: NamespaceReader,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,
 ): Promise<WalkEntry[]> {
+  const [readdir, statOf] = treeWalk<string[], FileStat>(
+    dispatchedReadTree(dispatch, links.mounts(false), null, true),
+    readdirOp(dispatch),
+    async (path) => (await dispatch('stat', path))[0] as FileStat,
+  )
   const entries: WalkEntry[] = []
   // An explicit stack, so a deep tree costs no recursion: a directory's
   // children go on in reverse and come off in listing order.
@@ -282,9 +291,9 @@ export async function walkStats(
       entries.push([path, stat, null])
       continue
     }
-    let children: unknown
+    let children: string[]
     try {
-      ;[children] = await dispatch('readdir', path)
+      children = await readdir(path)
     } catch (err) {
       if (!isRefusal(err)) throw err
       entries.push([path, stat, err])
@@ -292,13 +301,12 @@ export async function walkStats(
     }
     entries.push([path, stat, null])
     const found: [PathSpec, FileStat][] = []
-    for (const listed of children as string[]) {
+    for (const listed of children) {
       // A folder-backed readdir spells a directory child with its slash.
       const childVirtual = rstripSlash(listed)
       if (links.isLink(childVirtual)) continue
       const child = PathSpec.fromStrPath(childVirtual)
-      const [childStat] = await dispatch('stat', child)
-      found.push([child, childStat as FileStat])
+      found.push([child, await statOf(child)])
     }
     for (const entry of found.reverse()) stack.push(entry)
   }
@@ -312,7 +320,7 @@ export async function walkStats(
 // table (`Namespace.sessionLinks`), but for those under a directory whose
 // listing was refused, which the walk does not descend.
 export async function walkOwned(
-  links: NamespaceLinks,
+  links: NamespaceReader,
   dispatch: DispatchFn,
   root: PathSpec,
   rootStat: FileStat,

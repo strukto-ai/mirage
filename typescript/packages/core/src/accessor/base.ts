@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ReadSpec } from '../types.ts'
+import type { Clock } from '../utils/clock.ts'
 import type { ResponseCache } from './responses.ts'
 
 export class Accessor {
@@ -42,6 +43,12 @@ export class Accessor {
   forget?(): void {
     for (const cache of this.caches?.() ?? []) cache.clear()
   }
+
+  /**
+   * Read time and wait on the clock of the workspace it serves; one that
+   * does not say reads none.
+   */
+  bindClock?(clock: Clock): void
 }
 
 /** The accessor of a mount or CLI with no client of its own. */

@@ -45,7 +45,12 @@ DELEGATIONS = [
         ("f1",),
         {"drive_id": "d1", "limit": 1},
     ),
-    Delegation("list_children", (["f1"], "d1"), (["f1"], "d1")),
+    Delegation(
+        "list_children",
+        (["f1"], "d1", 1),
+        (["f1"], "d1"),
+        {"limit": 1},
+    ),
     Delegation("list_shared_drives", (), ()),
     Delegation(
         "list_all_files",

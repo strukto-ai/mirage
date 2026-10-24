@@ -17,15 +17,20 @@ import type { Accessor } from '../../accessor/base.ts'
 import { dropCached, stale } from '../../cache/context.ts'
 import { type KnownVersions, OwnRead, type WriteCondition } from '../../cache/types.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { ConditionLostError } from './errors.ts'
 
-export type ReaddirFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<FileStat[]>
+export type ReaddirFn<A extends Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  limit?: number,
+) => Promise<FileStat[] | DirListing>
 
 export type TreeFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
+  limit?: number,
 ) => Promise<Map<string, FileStat> | null>
 
 export type StatFn<A extends Accessor> = (accessor: A, path: PathSpec) => Promise<FileStat>
@@ -206,6 +211,12 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * copy stays unwired then.
    */
   copyFile?: (conn: C, srcKey: string, dstKey: string) => Promise<boolean>
+  /**
+   * Point lookup of one revision of a key by the token `head` spells, null
+   * when it is gone. A stat pinned by a snapshot asks this, so a revision
+   * the store still holds under another name (a trash, a version) answers.
+   */
+  headRevision?: (conn: C, key: string, revision: string) => Promise<ObjectMeta | null>
   /**
    * Whether the store accepts the zero-byte `key/` marker object;
    * absent means true. False when the store refuses one client-side

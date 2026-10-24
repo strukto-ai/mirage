@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -32,6 +31,9 @@ from mirage.observe.record import (
     RecordIndex,
 )
 from mirage.types import PathSpec
+from mirage.utils.clock import Clock, SystemClock
+
+SYSTEM_CLOCK = SystemClock()
 
 
 def line_version(
@@ -61,16 +63,24 @@ def line_version(
     return True, None
 
 
-def fresh_recorder(ledger: list[OpRecord] | None = None) -> Recorder:
+def fresh_recorder(
+    ledger: list[OpRecord] | None = None, clock: Clock | None = None
+) -> Recorder:
     """An empty recorder, for a line or a call outside one.
 
     Args:
         ledger (list[OpRecord] | None): the workspace ledger a line hands
             its records to, None for a file call's own.
+        clock (Clock | None): the workspace clock its ops are timed and
+            stamped on; None is the system clock.
     """
     sink: list[OpRecord] = []
     return Recorder(
-        sink=sink, lost=LostPaths(sink), index=RecordIndex(sink), ledger=ledger
+        sink=sink,
+        lost=LostPaths(sink),
+        index=RecordIndex(sink),
+        ledger=ledger,
+        clock=clock if clock is not None else SYSTEM_CLOCK,
     )
 
 
@@ -94,15 +104,20 @@ class RecordingScope:
         ledger (list[OpRecord] | None): the workspace ledger the line
             hands its records to, which a file call of that workspace
             made on the line joins.
+        clock (Clock | None): the workspace clock the line's ops are
+            timed and stamped on; None is the system clock.
     """
 
     def __init__(
-        self, active: bool = True, ledger: list[OpRecord] | None = None
+        self,
+        active: bool = True,
+        ledger: list[OpRecord] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self.records: list[OpRecord] = []
         self._token = None
         if active:
-            rec = fresh_recorder(ledger)
+            rec = fresh_recorder(ledger, clock)
             self.records = rec.sink
             self._token = _set_recorder(rec)
 
@@ -235,7 +250,11 @@ def push_mount_context(mount_id: str | None) -> CallerToken:
         None
         if rec is None
         else Recorder(
-            sink=rec.sink, mount_id=mount_id, lost=rec.lost, index=rec.index
+            sink=rec.sink,
+            mount_id=mount_id,
+            lost=rec.lost,
+            index=rec.index,
+            clock=rec.clock,
         )
     )
 
@@ -285,28 +304,38 @@ class OpTimer:
     Opened where the backend work begins and read once when the op
     finishes, so an op module hands this around instead of reading a
     clock of its own. The wall-clock stamp the record carries is taken
-    at finish time, not here.
+    at finish time, not here, on the same clock.
+
+    Args:
+        clock (Clock): the clock the op is timed and stamped on.
     """
 
-    __slots__ = ("_start_ms",)
+    __slots__ = ("_start_ms", "clock")
 
-    def __init__(self) -> None:
-        self._start_ms = int(time.monotonic() * 1000)
+    def __init__(self, clock: Clock) -> None:
+        self.clock = clock
+        self._start_ms = int(clock.monotonic() * 1000)
 
     @property
     def elapsed_ms(self) -> int:
         """Milliseconds elapsed since the timer was opened."""
-        return int(time.monotonic() * 1000) - self._start_ms
+        return int(self.clock.monotonic() * 1000) - self._start_ms
 
 
 def start_op() -> OpTimer:
     """Open the record path's stopwatch for one op.
 
+    The timer runs on the clock of the line recording the op, so an op
+    of a workspace on a manual clock takes the time that clock says.
+    Outside a recording nothing keeps the record, and the system clock
+    times it.
+
     Returns:
         OpTimer: a running timer, to hand to :func:`record` or
         :func:`finish_record` when the op completes.
     """
-    return OpTimer()
+    rec = current_caller().recorder
+    return OpTimer(rec.clock if rec is not None else SYSTEM_CLOCK)
 
 
 def finish_record(
@@ -320,7 +349,8 @@ def finish_record(
 ) -> OpRecord:
     """Close ``timer`` and build the finished record.
 
-    The one place an op's duration and wall-clock stamp are read.
+    The one place an op's duration and wall-clock stamp are read, both
+    on the timer's clock.
 
     Args:
         op (str): Operation name ("read", "write").
@@ -340,7 +370,7 @@ def finish_record(
         path=path,
         source=source,
         bytes=nbytes,
-        timestamp=int(time.time() * 1000),
+        timestamp=int(timer.clock.now() * 1000),
         duration_ms=elapsed,
         fingerprint=fingerprint,
         revision=revision,
@@ -436,7 +466,7 @@ def record_stream(
         path=path,
         source=source,
         bytes=0,
-        timestamp=int(time.time() * 1000),
+        timestamp=int(rec.clock.now() * 1000),
         duration_ms=0,
         fingerprint=fingerprint,
         revision=revision,

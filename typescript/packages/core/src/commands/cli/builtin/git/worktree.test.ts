@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { MountMode } from '../../../../types.ts'
+import { type FileStat, MountMode, type PathSpec } from '../../../../types.ts'
+import type { Handed } from '../../../../vfs/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
@@ -59,4 +60,53 @@ describe('a work tree past the walk_limit', () => {
       await ws.close()
     }
   })
+})
+
+// A RAM work tree held to ten files, noting each subtree read and the limit
+// it was handed. Twin of Python's TreeRAM.
+class TreeRAM extends RAMVFS {
+  readonly trees: [string, number | undefined][] = []
+
+  constructor() {
+    super({ walkLimit: 10 })
+  }
+
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    this.trees.push([path.virtual, handed?.limit])
+    return super.readTree(path)
+  }
+}
+
+async function scanned(setup: string, line: string): Promise<[string, TreeRAM['trees']]> {
+  const vfs = new TreeRAM()
+  const ws = new Workspace(
+    { '/repo': vfs },
+    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+  )
+  ws.registerCli('git', GIT)
+  try {
+    await ws.shell(`git init -q /repo && ${setup}`)
+    vfs.trees.length = 0
+    const out = await ws.shell(`git -C /repo ${line}`)
+    return [DEC.decode(out.stdout), vfs.trees]
+  } finally {
+    await ws.close()
+  }
+}
+
+// Twin of test_a_first_file_probe_lists_rather_than_reading_a_subtree.
+it('a first-file probe lists rather than reading a subtree', async () => {
+  expect(
+    await scanned('mkdir -p /repo/new/deep && touch /repo/new/deep/b.txt', 'status --porcelain'),
+  ).toEqual(['?? new/\n', []])
+})
+
+// Twin of test_a_full_walk_hands_a_subtree_read_what_it_may_still_count.
+it('a full walk hands a subtree read what it may still count', async () => {
+  expect(
+    await scanned(
+      'mkdir /repo/new && touch /repo/a.txt /repo/new/b.txt',
+      'status --porcelain -uall',
+    ),
+  ).toEqual(['?? a.txt\n?? new/b.txt\n', [['/repo/new', 10]]])
 })

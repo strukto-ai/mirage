@@ -181,13 +181,25 @@ async def graph_list(
     accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     params: dict[str, Any] | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
+    """Every item a Graph collection answers, a page at a time; no page
+    past the one that brings ``limit`` items.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        url (str): the collection.
+        params (dict[str, Any] | None): the first page's query.
+        limit (int | None): stop once this many items are in hand.
+    """
     items: list[dict[str, Any]] = []
     next_url: str | None = url
     next_params = params
     while next_url:
         data = await _request(accessor, "GET", next_url, params=next_params)
         items.extend(data.get("value", []))
+        if limit is not None and len(items) >= limit:
+            break
         next_url = data.get("@odata.nextLink")
         next_params = None
     return items

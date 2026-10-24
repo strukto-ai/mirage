@@ -20,6 +20,7 @@ from mirage.accessor.gdocs import GDocsAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
+from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
 
@@ -33,7 +34,7 @@ def _scope(path: str, prefix: str = "/gdocs") -> PathSpec:
 
 @pytest.fixture
 def accessor():
-    return GDocsAccessor(config=None, token_manager=None)
+    return GDocsAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.mark.asyncio

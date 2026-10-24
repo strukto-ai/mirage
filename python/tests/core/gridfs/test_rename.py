@@ -12,135 +12,98 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-from typing import Any
-
 import pytest
 
-from mirage.accessor.gridfs import GridFSAccessor
-from mirage.core.gridfs import driver as gridfs_driver
+from mirage.core.gridfs.readdir import readdir
 from mirage.core.gridfs.rename import rename
+from mirage.core.gridfs.unlink import unlink
+from mirage.core.gridfs.write import write
 from mirage.types import PathSpec
-from mirage.vfs.gridfs.config import GridFSConfig
-
-
-class _FakeFiles:
-    def __init__(self, docs: dict[str, str]) -> None:
-        self.docs = docs
-
-    def _match(self, query: dict[str, Any]) -> list[str]:
-        spec = query.get("filename")
-        if isinstance(spec, dict):
-            pattern = re.compile(spec["$regex"])
-            return [i for i, name in self.docs.items() if pattern.match(name)]
-        if spec is None:
-            return list(self.docs)
-        return [i for i, name in self.docs.items() if name == spec]
-
-    async def _iter(self, ids: list[str]) -> Any:
-        for doc_id in ids:
-            yield {"_id": doc_id, "filename": self.docs[doc_id]}
-
-    def find(self, query: dict[str, Any], projection: Any = None) -> Any:
-        return self._iter(self._match(query))
-
-    async def update_one(
-        self, query: dict[str, Any], update: dict[str, Any]
-    ) -> None:
-        self.docs[query["_id"]] = update["$set"]["filename"]
-
-    async def update_many(
-        self, query: dict[str, Any], update: dict[str, Any]
-    ) -> None:
-        for doc_id in self._match(query):
-            self.docs[doc_id] = update["$set"]["filename"]
-
-
-def _accessor() -> GridFSAccessor:
-    return GridFSAccessor(
-        GridFSConfig(uri="mongodb://localhost:27017", database="db")
-    )
+from tests.fixtures.gridfs_store import FakeStore, make_accessor
 
 
 def _spec(key: str) -> PathSpec:
     return PathSpec(vfs_path=key, virtual=f"/mnt/{key}", directory="/mnt")
 
 
-def _install(monkeypatch, files: _FakeFiles) -> None:
-    globs = vars(gridfs_driver)
-    monkeypatch.setitem(globs, "files_coll", lambda accessor: files)
-    monkeypatch.setitem(globs, "latest_file", _latest_of(files))
-    monkeypatch.setitem(globs, "delete_all", _delete_of(files))
-
-
-def _latest_of(files: _FakeFiles):
-    async def latest_file(
-        accessor: GridFSAccessor, key: str
-    ) -> dict[str, Any] | None:
-        for doc_id, name in files.docs.items():
-            if name == key:
-                return {"_id": doc_id, "filename": name}
-        return None
-
-    return latest_file
-
-
-def _delete_of(files: _FakeFiles):
-    async def delete_all(
-        accessor: GridFSAccessor, query: dict[str, Any]
-    ) -> None:
-        for doc_id in files._match(query):
-            files.docs.pop(doc_id, None)
-
-    return delete_all
-
-
 @pytest.mark.asyncio
-async def test_rename_moves_a_whole_directory_prefix(monkeypatch):
+async def test_rename_moves_a_whole_directory_prefix(store: FakeStore):
     """A directory owns no revision, so the prefix retag has to carry it.
 
     Before this, a directory operand fell straight through to ENOENT and
     ``mv`` reported "No such file or directory" for a directory that
     ``ls`` had just listed.
     """
-    files = _FakeFiles(
-        {
-            "1": "d/",
-            "2": "d/f.txt",
-            "3": "d/sub/g.txt",
-            "4": "keep.txt",
-        }
-    )
-    _install(monkeypatch, files)
-    await rename(_accessor(), _spec("d"), _spec("e"))
-    assert files.docs == {
-        "1": "e/",
-        "2": "e/f.txt",
-        "3": "e/sub/g.txt",
-        "4": "keep.txt",
-    }
+    for name in ("d/", "d/f.txt", "d/sub/g.txt", "keep.txt"):
+        store.upload(name, b"")
+    await rename(make_accessor(), _spec("d"), _spec("e"))
+    assert store.names() == ["e/", "e/f.txt", "e/sub/g.txt", "keep.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rename_directory_replaces_an_empty_destination(monkeypatch):
-    files = _FakeFiles({"1": "src/", "2": "src/f.txt", "3": "dst/"})
-    _install(monkeypatch, files)
-    await rename(_accessor(), _spec("src"), _spec("dst"))
-    assert sorted(files.docs.values()) == ["dst/", "dst/f.txt"]
+async def test_rename_directory_replaces_an_empty_destination(
+    store: FakeStore,
+):
+    for name in ("src/", "src/f.txt", "dst/"):
+        store.upload(name, b"")
+    await rename(make_accessor(), _spec("src"), _spec("dst"))
+    assert sorted(store.names()) == ["/trash/dst/", "dst/", "dst/f.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rename_keeps_moving_a_plain_file(monkeypatch):
-    files = _FakeFiles({"1": "a.txt"})
-    _install(monkeypatch, files)
-    await rename(_accessor(), _spec("a.txt"), _spec("b.txt"))
-    assert files.docs == {"1": "b.txt"}
+async def test_rename_keeps_moving_a_plain_file(store: FakeStore):
+    store.upload("a.txt", b"")
+    await rename(make_accessor(), _spec("a.txt"), _spec("b.txt"))
+    assert store.names() == ["b.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rename_missing_source_raises_enoent(monkeypatch):
-    files = _FakeFiles({"1": "other.txt"})
-    _install(monkeypatch, files)
+async def test_rename_missing_source_raises_enoent(store: FakeStore):
+    store.upload("other.txt", b"")
     with pytest.raises(FileNotFoundError):
-        await rename(_accessor(), _spec("ghost"), _spec("e"))
-    assert files.docs == {"1": "other.txt"}
+        await rename(make_accessor(), _spec("ghost"), _spec("e"))
+    assert store.names() == ["other.txt"]
+
+
+@pytest.mark.asyncio
+async def test_rename_over_a_file_trashes_its_revisions(store: FakeStore):
+    # An overwriting mv destroys no more than rm does: the destination's
+    # revisions go to the trash, where a pinned read still finds them.
+    for name, data in (("a.txt", b"a"), ("b.txt", b"b1"), ("b.txt", b"b2")):
+        store.upload(name, data)
+    old = store.ids("b.txt")
+    await rename(make_accessor(), _spec("a.txt"), _spec("b.txt"))
+    assert sorted(store.names()) == ["/trash/b.txt", "/trash/b.txt", "b.txt"]
+    assert store.ids("/trash/b.txt") == old
+
+
+@pytest.mark.asyncio
+async def test_rename_does_not_resurrect_trashed_revisions(store: FakeStore):
+    accessor = make_accessor()
+    await write(accessor, _spec("a.txt"), b"old")
+    await unlink(accessor, _spec("a.txt"))
+    await write(accessor, _spec("a.txt"), b"new")
+    (fresh,) = store.ids("a.txt")
+    await rename(accessor, _spec("a.txt"), _spec("b.txt"))
+    assert store.ids("b.txt") == [fresh]
+    assert len(store.ids("/trash/a.txt")) == 1
+    rows = await readdir(accessor, _spec(""))
+    assert [row.name for row in rows] == ["b.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("src", "dst"),
+    [("src", "$dst"), ("\U0001f600", "dst"), ("d\u00e9j\u00e0", "\U0001f600")],
+)
+async def test_rename_directory_keeps_every_child_name(
+    store: FakeStore, src: str, dst: str
+):
+    # A $ name is a literal, not a field path, and the cut counts code
+    # points the way $substrCP does, so no child name is lost or clipped.
+    for name in (f"{src}/", f"{src}/file.txt", f"{src}/sub/g.txt"):
+        store.upload(name, b"")
+    await rename(make_accessor(), _spec(src), _spec(dst))
+    assert sorted(store.names()) == sorted(
+        [f"{dst}/", f"{dst}/file.txt", f"{dst}/sub/g.txt"]
+    )

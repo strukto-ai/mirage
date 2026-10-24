@@ -15,12 +15,199 @@
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
+from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec import SPECS
+from mirage.commands.spec import SPECS, Argument, CommandSpec
 from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+
+
+@pytest.mark.asyncio
+async def test_fallback_tree_reads_and_help_do_not_select_a_write_target():
+    calls = []
+
+    async def peek(accessor, paths, texts, ctx):
+        calls.append("peek")
+        return b"peek\n", IOResult()
+
+    async def stamp(accessor, paths, texts, ctx):
+        calls.append("stamp")
+        return b"stamp\n", IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(
+            name="tool",
+            subcommands=(CommandSpec(name="peek"), CommandSpec(name="stamp")),
+        ),
+        handlers={
+            "peek": CLIHandler(peek),
+            "stamp": CLIHandler(stamp, write=True),
+        },
+    )
+    ws = Workspace(
+        {
+            "/longer": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE),
+        }
+    )
+    for prefix in ("/longer", "/b"):
+        ws.mount(prefix).register_commands([tree])
+    read = await ws.shell("tool peek")
+    assert (read.exit_code, read.stdout) == (0, b"peek\n")
+    help_result = await ws.shell("tool stamp --help")
+    assert help_result.exit_code == 0
+    assert b"usage: tool stamp" in help_result.stdout
+    write = await ws.shell("tool stamp")
+    assert write.exit_code == 1
+    assert b"ambiguous, registered on 2 writable mounts" in write.stderr
+    assert calls == ["peek"]
+    selected = await ws.shell("cd /b && tool stamp")
+    assert (selected.exit_code, selected.stdout) == (0, b"stamp\n")
+    assert calls == ["peek", "stamp"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tree_first", [False, True])
+async def test_fallback_executes_the_selected_registration_shape(tree_first):
+    calls = []
+
+    @command(
+        "tool",
+        vfs="ram",
+        spec=CommandSpec(arguments=(Argument("args", nargs="*"),)),
+        write=tree_first,
+    )
+    async def flat(accessor, paths, texts, ctx):
+        calls.append("flat")
+        return b"flat\n", IOResult()
+
+    async def send(accessor, paths, texts, ctx):
+        calls.append("tree")
+        return b"tree\n", IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(name="tool", subcommands=(CommandSpec(name="send"),)),
+        handlers={"send": CLIHandler(send, write=not tree_first)},
+    )
+    ws = Workspace(
+        {
+            "/longer": (RAMVFS(), MountMode.WRITE),
+            "/b": (RAMVFS(), MountMode.WRITE),
+        }
+    )
+    ws.mount("/longer").register_commands([tree if tree_first else flat])
+    ws.mount("/b").register_commands([flat if tree_first else tree])
+    result = await ws.shell("tool send")
+    expected = "flat" if tree_first else "tree"
+    assert result.exit_code == 0
+    assert result.stdout == f"{expected}\n".encode()
+    assert calls == [expected]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("write", [False, True])
+async def test_fallback_selects_the_tree_that_recognizes_the_verb(write):
+    calls = []
+
+    async def peek(accessor, paths, texts, ctx):
+        calls.append("peek")
+        return b"peek\n", IOResult()
+
+    async def send(accessor, paths, texts, ctx):
+        calls.append("send")
+        return b"send\n", IOResult()
+
+    ws = Workspace({"/longer": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        for prefix, verb, handler in (
+            ("/longer", "peek", peek),
+            ("/b", "send", send),
+        ):
+            ws.mount(prefix).register_commands(
+                [
+                    CLI(
+                        spec=CommandSpec(
+                            name="tool", subcommands=(CommandSpec(name=verb),)
+                        ),
+                        handlers={verb: CLIHandler(handler, write=write)},
+                    )
+                ]
+            )
+        result = await ws.shell("tool send")
+        assert (result.exit_code, result.stdout, result.stderr or b"") == (
+            0,
+            b"send\n",
+            b"",
+        )
+        assert calls == ["send"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flat_write", [False, True])
+async def test_named_tree_grammar_precedes_fallback_flat_path_inference(
+    flat_write,
+):
+    calls = []
+
+    @command(
+        "tool",
+        vfs="ram",
+        spec=CommandSpec(
+            arguments=(Argument("paths", type="path", nargs="*"),)
+        ),
+        write=flat_write,
+    )
+    async def flat(accessor, paths, texts, ctx):
+        calls.append("flat")
+        return b"flat\n", IOResult()
+
+    async def send(accessor, paths, texts, ctx):
+        calls.append("tree")
+        return b"tree\n", IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(
+            name="tool",
+            arguments=(Argument("--account"),),
+            subcommands=(CommandSpec(name="send"),),
+        ),
+        handlers={"send": CLIHandler(send, write=True)},
+    )
+    ws = Workspace({"/longer": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    ws.mount("/longer").register_commands([flat])
+    ws.mount("/b").register_commands([tree])
+    try:
+        for line in ("tool send", "tool --account /longer send"):
+            result = await ws.shell(line)
+            if flat_write:
+                assert result.exit_code == 1
+                assert result.stderr == (
+                    b"tool: ambiguous, registered on 2 writable mounts:\n"
+                    b"  /longer\n  /b\n"
+                    b"cd into the target mount to disambiguate.\n"
+                )
+                assert calls == []
+            else:
+                assert (result.exit_code, result.stdout) == (0, b"tree\n")
+        for line, output in (
+            ("tool /longer/item", b"flat\n"),
+            ("cd /longer && tool send", b"flat\n"),
+        ):
+            result = await ws.shell(line)
+            assert (result.exit_code, result.stdout, result.stderr or b"") == (
+                0,
+                output,
+                b"",
+            )
+        assert calls == (
+            ["flat", "flat"] if flat_write else ["tree"] * 2 + ["flat"] * 2
+        )
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

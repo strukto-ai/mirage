@@ -21,6 +21,7 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.api import SheetsApi, SheetsClient
 from mirage.core.gslides.api import SlidesApi, SlidesClient
+from mirage.utils.clock import Clock
 
 
 class GoogleApiAccessor(Accessor):
@@ -63,3 +64,11 @@ class GoogleApiAccessor(Accessor):
     async def close(self) -> None:
         """Drain the token manager's connection pool. Idempotent."""
         await self.token_manager.close()
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Read token expiry and retry waits on the workspace's clock.
+
+        Args:
+            clock (Clock): the workspace's clock.
+        """
+        self.token_manager.bind_clock(clock)

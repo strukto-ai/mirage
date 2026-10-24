@@ -34,6 +34,7 @@ from mirage.observe.context import (
     with_mount_context,
 )
 from mirage.types import PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
@@ -286,6 +287,30 @@ def test_record_stream_assignable_after_open():
     scope.close()
     assert records[0].fingerprint == "abc"
     assert records[0].revision == "v2"
+
+
+def test_a_recorded_op_is_timed_and_stamped_on_the_line_clock():
+    clock = ManualClock(start=1_000.0)
+    scope = RecordingScope(clock=clock)
+    timer = start_op()
+    clock.advance(2.5)
+    record("read", "/s3/a", "s3", 1, timer)
+    token = push_mount_context("mount-a")
+    try:
+        clock.advance(1)
+        stream = record_stream("read", "/s3/b", "s3")
+    finally:
+        reset_active_recorder(token)
+    scope.close()
+    assert stream is not None
+    assert [(r.timestamp, r.duration_ms) for r in scope.records] == [
+        (1_002_500, 2_500),
+        (1_003_500, 0),
+    ]
+
+
+def test_an_op_outside_a_recording_is_timed_on_the_system_clock():
+    assert start_op().clock is observe_context.SYSTEM_CLOCK
 
 
 def test_revision_for_no_context():

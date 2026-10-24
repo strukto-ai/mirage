@@ -18,9 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from mirage.commands.config import Context
 from mirage.io import IOResult
-from mirage.io.config import IOConfig
 from mirage.io.stream import materialize
-from mirage.policy import Policies
 from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell import parse
@@ -28,9 +26,10 @@ from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
 from mirage.shell.job_table import JobTable
 from mirage.types import MountMode, PathSpec
-from mirage.workspace.cli.registry import CLIRegistry
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.execute_node import execute_node as _execute_node
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
@@ -88,28 +87,11 @@ async def _no_match_resolve_glob(scopes, prefix=""):
 
 
 def _mock_registry():
-    mount = MagicMock()
-    mount.prefix = "/data/"
-    mount.ensure_ready = AsyncMock()
-    mount.mode = MountMode.EXEC
+    reg = MountRegistry()
+    mount = reg.mount("/", RAMVFS(), MountMode.EXEC)
     mount.run_command = AsyncMock(return_value=(b"ok\n", IOResult()))
-    mount.vfs = MagicMock()
     mount.vfs.resolve_glob = _no_match_resolve_glob
     mount.spec_for = MagicMock(return_value=None)
-
-    reg = MagicMock()
-    reg.file_cache = None
-    reg.io = IOConfig()
-    reg.mount_for = MagicMock(return_value=mount)
-    reg.try_mount_for = MagicMock(return_value=mount)
-    reg.command_mount = MagicMock(return_value=mount)
-    reg.resolve_mount = AsyncMock(return_value=mount)
-    # A bare MagicMock policies answers wants() truthy and then fails the
-    # await inside the gates; an empty Policies is what production carries.
-    reg.policies = Policies()
-    # A bare MagicMock answers clis.get() with a truthy mock, which
-    # would spuriously dispatch every command as an installed CLI.
-    reg.clis = CLIRegistry()
     return reg, mount
 
 

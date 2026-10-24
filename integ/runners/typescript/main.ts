@@ -213,6 +213,10 @@ export async function runTarget(
   if (target.secrets !== undefined && target.mounts[0].vfs !== 'ram') {
     throw new Error(`target ${target.id}: secrets targets ride ram mounts`)
   }
+  // A manual clock is wired into the gws opener alone, for the same reason.
+  if (target.clock !== undefined && target.service !== 'gws') {
+    throw new Error(`target ${target.id}: clock targets ride the gws fake`)
+  }
   // Profiles reach the workspace only through the openers that pass them
   // on, for the same reason: a target that declares one on an opener
   // that drops it would run unbound and read as covered. Python needs no

@@ -49,6 +49,7 @@ from mirage.core.google.constants import (
 )
 from mirage.io.spool import ByteSpool
 from mirage.types import JsonValue
+from mirage.utils.clock import Clock
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.secrets import reveal_secret
 
@@ -236,28 +237,24 @@ class TokenManager(OAuthTokenManager):
 
     Args:
         config (GoogleConfig): OAuth2 credentials and API base.
-        sleep (Callable[[float], Awaitable[None]] | None): the wait
-            between retries of every call made with this manager,
-            injectable so a test spends no real time; None is
-            ``asyncio.sleep``.
+        clock (Clock | None): the clock token expiry and the waits
+            between retries of every call made with this manager are
+            read on; None is the system clock.
     """
 
     def __init__(
-        self,
-        config: GoogleConfig,
-        sleep: Callable[[float], Awaitable[None]] | None = None,
+        self, config: GoogleConfig, clock: Clock | None = None
     ) -> None:
-        super().__init__(TOKEN_BUFFER_SECONDS)
+        super().__init__(TOKEN_BUFFER_SECONDS, clock)
         # aiohttp replays an idempotent request whose connection dropped,
         # PUT and DELETE included, beneath any policy; READ_RETRY and
         # WRITE_RETRY decide alone, so an upload chunk or a values update
         # is never sent twice.
         self.pool = SessionPool(retry_connection=False)
         self.config = config
-        self.sleep = sleep
 
     async def refresh_pair(self) -> tuple[str, int]:
-        return await refresh_access_token(self.config, self.sleep)
+        return await refresh_access_token(self.config, self.clock.sleep)
 
     async def get_token(self) -> str:
         # A supplied token short-circuits the grant entirely, and is read
@@ -297,7 +294,7 @@ async def google_request(
 ) -> Any:
     """One Google API call: the door every request but a stream takes.
 
-    It signs the call, rides the manager's pool and sleep, and picks the
+    It signs the call, rides the manager's pool and clock, and picks the
     retry policy from the method, so a new call site cannot forget any of
     them: GET and HEAD read, everything else writes. A write that is safe
     to repeat (the start of a resumable upload) passes READ_RETRY.
@@ -331,7 +328,7 @@ async def google_request(
         window=window,
         retry=retry,
         session=token_manager.pool,
-        sleep=token_manager.sleep,
+        sleep=token_manager.clock.sleep,
     )
 
 
@@ -439,7 +436,7 @@ async def google_get_stream(
         headers=await google_headers(token_manager),
         session=token_manager.pool,
         retry=READ_RETRY,
-        sleep=token_manager.sleep,
+        sleep=token_manager.clock.sleep,
     )
     async with aclosing(source):
         async for chunk in source:

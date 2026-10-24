@@ -16,12 +16,17 @@ import { BUILDER } from './du.ts'
 import { describe, expect, it } from 'vitest'
 import { runWithMountGate } from '../../../../context/session_context.ts'
 import { materialize } from '../../../../io/types.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
+import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces, enoent, enotsup, walkDeclined } from '../../../../errors/fs.ts'
 import type { Accessor } from '../../../../accessor/base.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { NamespaceLinks } from '../../../../view/types.ts'
 import { answeringFiles } from '../../../../test-utils.ts'
+import { BaseVFS } from '../../../../vfs/base.ts'
+import type { Handed } from '../../../../vfs/types.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 
@@ -383,4 +388,47 @@ describe('du -L through a directory it may not list', () => {
       "du: cannot read directory '/db/private': Permission denied\n",
     ])
   })
+})
+
+// A RAM mount held to two files, with no tree read, whose listing stops at
+// a walk's limit. Twin of Python's CutRAM.
+class CutRAM extends RAMVFS {
+  constructor() {
+    super({ walkLimit: 2 })
+  }
+}
+// RAMVFS narrows readdir to a plain array, so the cut listing goes on the
+// prototype.
+Object.defineProperties(CutRAM.prototype, {
+  readTree: { value: (BaseVFS.prototype as unknown as Record<string, unknown>).readTree },
+  readdir: {
+    value: async function (this: CutRAM, path: PathSpec, handed?: Handed) {
+      const rows = await RAMVFS.prototype.readdir.call(this, path)
+      const limit = handed?.limit
+      if (limit === undefined || rows.length < limit) return rows
+      return new DirListing({ entries: rows.slice(0, limit), partial: true })
+    },
+  },
+})
+
+// Twin of test_du_x_counts_a_file_listed_past_the_mounts_below.
+it('du -x counts a file listed past the mounts below', async () => {
+  const vfs = new CutRAM()
+  for (const dir of ['/d', '/d/m1', '/d/m2', '/d/m3']) vfs.store.dirs.add(dir)
+  vfs.store.files.set('/d/z', new TextEncoder().encode('zz'))
+  const ws = new Workspace(
+    {
+      '/ram': vfs,
+      '/ram/d/m1': new RAMVFS(),
+      '/ram/d/m2': new RAMVFS(),
+      '/ram/d/m3': new RAMVFS(),
+    },
+    { shellParser: await getTestParser() },
+  )
+  try {
+    const out = await ws.shell('du -x -a /ram/d')
+    expect(DEC.decode(out.stdout)).toBe('2\t/ram/d/z\n2\t/ram/d\n')
+  } finally {
+    await ws.close()
+  }
 })

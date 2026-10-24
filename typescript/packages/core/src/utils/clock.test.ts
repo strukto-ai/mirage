@@ -12,21 +12,46 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { type Clock, ManualClock, SystemClock } from './clock.ts'
 
-const CACHE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'cache')
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// Every module that reads time and waits through the workspace Clock. A
+// package is scanned whole.
+const SEAMED = [
+  'cache',
+  'observe',
+  'accessor/base.ts',
+  'accessor/box.ts',
+  'accessor/dropbox.ts',
+  'accessor/google_api.ts',
+  'core/api/oauth.ts',
+  'core/box/client.ts',
+  'core/dropbox/client.ts',
+  'core/google/client.ts',
+  'workspace/files.ts',
+  'workspace/mount/mount.ts',
+  'workspace/mount/registry.ts',
+]
 
 const CLOCK_OWNERS = new Set(['Date', 'performance'])
 
-const DATES_CLOCK_READS = new Set(['nowIso', 'utcDateFolder'])
+const TIMERS = new Set(['setTimeout', 'setInterval'])
+
+// What a module may import by name from a core module that reads the clock
+// or waits on it: the dates module's `nowIso`, the abort module's `sleep`.
+const CLOCK_IMPORTS: Record<string, ReadonlySet<string>> = {
+  dates: new Set(['nowIso']),
+  abort: new Set(['sleep']),
+}
 
 const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
-  'index/listing_memo.ts performance.now':
+  'cache/index/listing_memo.ts performance.now':
     'the trust window and row-write times are counted per key prefix across every ' +
     'store sharing it, and those stores may hold different clocks, so they stay on ' +
     'the process monotonic clock; listing expiry already reads the store clock',
@@ -51,6 +76,12 @@ describe('SystemClock', () => {
     const clock = new SystemClock()
     const readings = Array.from({ length: 50 }, () => clock.monotonic())
     expect(readings).toEqual([...readings].sort((a, b) => a - b))
+  })
+
+  it('sleep waits real time', async () => {
+    const started = performance.now()
+    await new SystemClock().sleep(0.02)
+    expect(performance.now() - started).toBeGreaterThanOrEqual(15)
   })
 })
 
@@ -99,66 +130,94 @@ describe('ManualClock', () => {
       new ManualClock().advance(-1)
     }).toThrow(RangeError)
   })
+
+  it('sleep advances without waiting', async () => {
+    const clock = new ManualClock(10)
+    const started = performance.now()
+    await clock.sleep(30)
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(clock.now()).toBe(40)
+    expect(clock.monotonic()).toBe(30)
+  })
+
+  it.each([0, -1, Number.NaN])('sleep of %s advances nothing', async (seconds) => {
+    const clock = new ManualClock(10)
+    await clock.sleep(seconds)
+    expect(clock.now()).toBe(10)
+    expect(clock.monotonic()).toBe(0)
+  })
 })
 
-function clockOwner(node: ts.Expression): string | undefined {
-  if (ts.isIdentifier(node)) return CLOCK_OWNERS.has(node.text) ? node.text : undefined
+function globalName(node: ts.Expression): string | undefined {
+  if (ts.isIdentifier(node)) return node.text
   if (
     ts.isPropertyAccessExpression(node) &&
     ts.isIdentifier(node.expression) &&
     node.expression.text === 'globalThis'
   ) {
-    return CLOCK_OWNERS.has(node.name.text) ? node.name.text : undefined
+    return node.name.text
   }
   return undefined
 }
 
+function clockOwner(node: ts.Expression): string | undefined {
+  const name = globalName(node)
+  return name !== undefined && CLOCK_OWNERS.has(name) ? name : undefined
+}
+
 /**
- * The clock-reading helpers `file` imports from the core dates module by name, and the
- * local names it binds that module to as a namespace.
+ * The clock-reading and waiting helpers `file` imports by name from the core
+ * dates and abort modules, and the local names it binds those modules to as
+ * a namespace, each with the helpers it reaches.
  *
  * @param file a parsed module.
  */
-function datesImports(file: ts.SourceFile): { reads: Set<string>; namespaces: Set<string> } {
+function clockImports(file: ts.SourceFile): {
+  reads: Set<string>
+  namespaces: Map<string, ReadonlySet<string>>
+} {
   const reads = new Set<string>()
-  const namespaces = new Set<string>()
+  const namespaces = new Map<string, ReadonlySet<string>>()
   for (const statement of file.statements) {
-    if (
-      !ts.isImportDeclaration(statement) ||
-      !ts.isStringLiteral(statement.moduleSpecifier) ||
-      !/utils\/dates\.[jt]s$/.test(statement.moduleSpecifier.text)
-    ) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
       continue
     }
+    const match = /utils\/(dates|abort)(\.[jt]s)?$/.exec(statement.moduleSpecifier.text)
+    const helpers = match === null ? undefined : CLOCK_IMPORTS[match[1] ?? '']
     const named = statement.importClause?.namedBindings
-    if (named === undefined) continue
+    if (helpers === undefined || named === undefined) continue
     if (ts.isNamespaceImport(named)) {
-      namespaces.add(named.name.text)
+      namespaces.set(named.name.text, helpers)
       continue
     }
     for (const element of named.elements) {
       const imported = (element.propertyName ?? element.name).text
-      if (DATES_CLOCK_READS.has(imported)) reads.add(imported)
+      if (helpers.has(imported)) reads.add(imported)
     }
   }
   return { reads, namespaces }
 }
 
-/** Every system-clock read `source` imports, calls or references. */
+/** Every system-clock read or wait `source` imports, calls or references. */
 function clockReads(source: string): Set<string> {
-  const file = ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest)
-  const { reads: found, namespaces } = datesImports(file)
+  const file = ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest, true)
+  const { reads: found, namespaces } = clockImports(file)
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyAccessExpression(node)) {
       const owner = clockOwner(node.expression)
       if (owner !== undefined && node.name.text === 'now') found.add(`${owner}.now`)
-      if (
-        ts.isIdentifier(node.expression) &&
-        namespaces.has(node.expression.text) &&
-        DATES_CLOCK_READS.has(node.name.text)
-      ) {
-        found.add(node.name.text)
+      if (globalName(node.expression) === 'AbortSignal' && node.name.text === 'timeout') {
+        found.add('AbortSignal.timeout')
       }
+      const helpers = ts.isIdentifier(node.expression)
+        ? namespaces.get(node.expression.text)
+        : undefined
+      if (helpers?.has(node.name.text) === true) found.add(node.name.text)
+    }
+    if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) {
+      const name = globalName(node)
+      const named = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node
+      if (name !== undefined && TIMERS.has(name) && !named) found.add(name)
     }
     if (
       ts.isNewExpression(node) &&
@@ -174,19 +233,26 @@ function clockReads(source: string): Set<string> {
   return found
 }
 
-function cacheClockReads(): Set<string> {
-  return new Set(
-    readdirSync(CACHE_DIR, { recursive: true, encoding: 'utf8' })
-      .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
-      .flatMap((name) => {
-        const module = name.split(sep).join('/')
-        const reads = clockReads(readFileSync(join(CACHE_DIR, name), 'utf8'))
-        return [...reads].map((read) => `${module} ${read}`)
-      }),
+function seamedModules(): string[] {
+  return SEAMED.flatMap((seamed) =>
+    seamed.endsWith('.ts')
+      ? [seamed]
+      : readdirSync(join(SRC_DIR, seamed), { recursive: true, encoding: 'utf8' })
+          .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+          .map((name) => `${seamed}/${name.split(sep).join('/')}`),
   )
 }
 
-describe('the cache clock seam', () => {
+function seamedClockReads(): Set<string> {
+  return new Set(
+    seamedModules().flatMap((module) => {
+      const reads = clockReads(readFileSync(join(SRC_DIR, module), 'utf8'))
+      return [...reads].map((read) => `${module} ${read}`)
+    }),
+  )
+}
+
+describe('the clock seam', () => {
   it.each([
     ['Date.now()', 'Date.now'],
     ['performance.now()', 'performance.now'],
@@ -198,7 +264,17 @@ describe('the cache clock seam', () => {
     ['Date()', 'Date()'],
     ['globalThis.Date()', 'Date()'],
     ["import { nowIso } from '../utils/dates.ts'\nnowIso()", 'nowIso'],
-    ["import { utcDateFolder as folder } from '../../utils/dates.js'\nfolder()", 'utcDateFolder'],
+    ["import { nowIso as stamp } from '../../utils/dates.js'\nstamp()", 'nowIso'],
+    ['setTimeout(resolve, 10)', 'setTimeout'],
+    ['globalThis.setTimeout(resolve, 10)', 'setTimeout'],
+    ['const tick = setInterval', 'setInterval'],
+    ["import { sleep } from '../../utils/abort.ts'\nawait sleep(10)", 'sleep'],
+    ["import { sleep as wait } from '../utils/abort.js'\nawait wait(10)", 'sleep'],
+    ["import * as abort from '../../utils/abort.ts'\nawait abort.sleep(10)", 'sleep'],
+    ["import { sleep } from '../../utils/abort'\nawait sleep(10)", 'sleep'],
+    ["import { nowIso } from '../utils/dates'\nnowIso()", 'nowIso'],
+    ['AbortSignal.timeout(10)', 'AbortSignal.timeout'],
+    ['globalThis.AbortSignal.timeout(10)', 'AbortSignal.timeout'],
     ["import { nowIso } from '../../utils/dates.ts'\nconst read = nowIso\nread()", 'nowIso'],
     ["import * as dates from '../../utils/dates.ts'\ndates.nowIso()", 'nowIso'],
   ])('flags %j as %j', (source, expected) => {
@@ -215,18 +291,28 @@ describe('the cache clock seam', () => {
     "import * as dates from '../utils/dates.ts'\ndates.isoToEpoch(text)",
     "import { nowIso } from './other.ts'\nnowIso()",
     'nowIso()',
+    'await this.clock.sleep(1)',
+    'await tm.clock.sleep(delay)',
+    "import { utcDateFolder } from '../utils/dates.ts'\nutcDateFolder(this.nowMs())",
+    "import { abortable } from '../../utils/abort.ts'\nabortable(work, signal)",
+    "import * as abort from '../../utils/abort.ts'\nabort.abortable(work, signal)",
+    'timers.setTimeout',
   ])('allows %j', (source) => {
     expect(clockReads(source)).toEqual(new Set())
   })
 
-  it('no cache module reads the system clock past the injected Clock', () => {
-    const offenders = [...cacheClockReads()].filter((read) => !(read in KEPT_ON_SYSTEM_CLOCK))
+  it('no seamed module reads or waits on the system clock past the injected Clock', () => {
+    const offenders = [...seamedClockReads()].filter((read) => !(read in KEPT_ON_SYSTEM_CLOCK))
     expect(offenders).toEqual([])
   })
 
   it('every kept system-clock read is still made', () => {
-    const reads = cacheClockReads()
+    const reads = seamedClockReads()
     const stale = Object.keys(KEPT_ON_SYSTEM_CLOCK).filter((read) => !reads.has(read))
     expect(stale).toEqual([])
+  })
+
+  it('every seamed path exists', () => {
+    expect(SEAMED.filter((seamed) => !existsSync(join(SRC_DIR, seamed)))).toEqual([])
   })
 })

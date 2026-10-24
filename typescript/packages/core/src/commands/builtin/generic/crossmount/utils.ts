@@ -142,9 +142,12 @@ export function statOp(dispatch: DispatchFn): (p: PathSpec) => Promise<FileStat>
 
 export function readdirOp(
   dispatch: DispatchFn,
-): (p: PathSpec, nofollow?: boolean) => Promise<string[]> {
-  return async (p: PathSpec, nofollow?: boolean) => {
-    const [entries] = await dispatch('readdir', p, [], nofollow === true ? { nofollow } : {})
+): (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]> {
+  return async (p: PathSpec, nofollow?: boolean, limit?: number) => {
+    const [entries] = await dispatch('readdir', p, [], {
+      ...(nofollow === true ? { nofollow } : {}),
+      ...(limit === undefined ? {} : { limit }),
+    })
     return (entries as string[] | null) ?? []
   }
 }

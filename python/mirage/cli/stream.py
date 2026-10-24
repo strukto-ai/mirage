@@ -88,7 +88,10 @@ async def consume_stream(
     stdout: Callable[[bytes], Awaitable[None]],
     stderr: Callable[[bytes], Awaitable[None]],
 ) -> dict[str, Any]:
-    """Decode bounded NDJSON records and await each output write.
+    """Decode bounded NDJSON records and await each output write, up to
+    the completion record. Nothing after it is read: the daemon keeps the
+    body open until a stdin upload still running ends, and the caller
+    ends that upload once the line has.
 
     Args:
         source (AsyncIterable[bytes]): The daemon's response body.
@@ -96,7 +99,6 @@ async def consume_stream(
         stderr (Callable): The asynchronous stderr writer.
     """
     pending = bytearray()
-    terminal: dict[str, Any] | None = None
     async for chunk in source:
         pending.extend(chunk)
         while b"\n" in pending:
@@ -105,7 +107,7 @@ async def consume_stream(
             if len(line) > MAX_RECORD_BYTES:
                 raise ValueError("daemon stream record is too large")
             record = json.loads(line)
-            if not isinstance(record, dict) or terminal is not None:
+            if not isinstance(record, dict):
                 raise ValueError("invalid daemon stream record")
             stream = record.get("stream")
             if stream in ("stdout", "stderr"):
@@ -127,14 +129,12 @@ async def consume_stream(
                     record["error"], str
                 ):
                     raise ValueError("invalid daemon stream completion")
-                terminal = record
+                return record
             else:
                 raise ValueError("invalid daemon stream record")
         if len(pending) > MAX_RECORD_BYTES:
             raise ValueError("daemon stream record is too large")
-    if pending or terminal is None:
-        raise ValueError("daemon stream ended without a completion record")
-    return terminal
+    raise ValueError("daemon stream ended without a completion record")
 
 
 def refusal_of(result: dict[str, Any] | None) -> Refusal | None:

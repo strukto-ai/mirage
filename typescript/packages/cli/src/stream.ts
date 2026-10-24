@@ -28,14 +28,18 @@ async function write(output: Writable, data: Uint8Array, signal: AbortSignal): P
   })
 }
 
-/** Decode bounded NDJSON records and await each output write. */
+/**
+ * Decode bounded NDJSON records and await each output write, up to the
+ * completion record. Nothing after it is read: the daemon keeps the body
+ * open until a stdin upload still running ends, and the caller ends that
+ * upload once the line has.
+ */
 export async function consumeStream(
   source: AsyncIterable<Uint8Array>,
   stdout: (data: Uint8Array) => Promise<void>,
   stderr: (data: Uint8Array) => Promise<void>,
 ): Promise<Completion> {
   let pending = Buffer.alloc(0)
-  let terminal: Completion | undefined
   for await (const chunk of source) {
     pending = Buffer.concat([pending, chunk])
     let newline: number
@@ -44,12 +48,7 @@ export async function consumeStream(
       pending = pending.subarray(newline + 1)
       if (line.length > MAX_RECORD_BYTES) throw new Error('daemon stream record is too large')
       const record: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(line))
-      if (
-        typeof record !== 'object' ||
-        record === null ||
-        Array.isArray(record) ||
-        terminal !== undefined
-      )
+      if (typeof record !== 'object' || record === null || Array.isArray(record))
         throw new Error('invalid daemon stream record')
       const value = record as Record<string, unknown>
       if (value.stream === 'stdout' || value.stream === 'stderr') {
@@ -68,14 +67,12 @@ export async function consumeStream(
           (value.error !== null && typeof value.error !== 'string')
         )
           throw new Error('invalid daemon stream completion')
-        terminal = value as unknown as Completion
+        return value as unknown as Completion
       } else throw new Error('invalid daemon stream record')
     }
     if (pending.length > MAX_RECORD_BYTES) throw new Error('daemon stream record is too large')
   }
-  if (pending.length !== 0 || terminal === undefined)
-    throw new Error('daemon stream ended without a completion record')
-  return terminal
+  throw new Error('daemon stream ended without a completion record')
 }
 
 /** The refusal record off a completion's result, in core's shape. */
