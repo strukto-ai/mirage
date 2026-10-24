@@ -51,7 +51,53 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 | <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 {/* generated: config-table chroma end */}
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with Chroma mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md chroma start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `chroma`, read |
+
+## `/<path>` layout
+
+```text
+Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
+collection.
+
+Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
+indexed documents. Paths are document slugs from the collection path tree.
+Writes are not supported.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `chroma` search. Also `chroma-query`. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md chroma end */}
 
 Chroma paths come from the path tree document stored in the collection with ID
 `__path_tree__`. The document body must be a JSON object whose keys are virtual

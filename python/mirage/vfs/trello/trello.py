@@ -21,17 +21,40 @@ from mirage.core.trello.readdir import readdir as _readdir
 from mirage.core.trello.search import files_containing as _files_containing
 from mirage.core.trello.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.trello.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  workspaces/
+    <workspace-name>__<workspace-id>/
+      workspace.json
+      boards/
+        <board-name>__<board-id>/
+          board.json
+          members/
+            <full-name>__<member-id>.json
+          labels/
+            <label-name>__<label-id>.json
+          lists/
+            <list-name>__<list-id>/
+              list.json
+              cards/
+                <card-name>__<card-id>/
+                  card.json
+                  comments.jsonl
+  Always ls directories first to discover exact names.
+
+  To act on boards and cards (list boards, members, lists, labels,
+  cards and comments; create, update, move, assign, label and comment
+  on cards), use the trello CLI if installed: trello --help"""
 
 
 class TrelloVFS(BaseVFS):
     accessor: TrelloAccessor
     name: str = VFSName.TRELLO
     caches_reads: bool = True
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
+    whole_word_search: bool = True
     # Trello's search answers for cards; comments and the board's other
     # files are always read.
     searchable = ("workspaces/*/boards/*/lists/*/cards/*/card.json",)
@@ -41,6 +64,17 @@ class TrelloVFS(BaseVFS):
         self.config = config
         self.walk_limit = config.walk_limit
         self.accessor = TrelloAccessor(self.config)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,
@@ -60,14 +94,9 @@ class TrelloVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return await _read(self.accessor, path, None, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

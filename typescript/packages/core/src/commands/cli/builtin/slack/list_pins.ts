@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function listPins(
   accessor: SlackAccessor,
@@ -29,6 +28,6 @@ export async function listPins(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const items = await listPinsCore(accessor, fl.asStr('channel') ?? '')
-  const out: ByteSource = ENC.encode(JSON.stringify(items))
+  const out: ByteSource = compactJsonBytes(items)
   return [out, new IOResult()]
 }

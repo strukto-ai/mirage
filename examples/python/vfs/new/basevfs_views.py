@@ -48,7 +48,7 @@ class NotesVFS(BaseVFS):
         super().__init__(
             name="notes",
             accessor=NotesAccessor(pages),
-            prompt="Read-only notes rendered as UTF-8 text files.",
+            vfs_md="Read-only notes rendered as UTF-8 text files.",
             sizes_always_known=True,
         )
 
@@ -66,12 +66,7 @@ class NotesVFS(BaseVFS):
             for name, page in sorted(self.accessor.pages.items())
         ]
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
+    async def read(self, path: PathSpec) -> bytes:
         self.accessor.read_calls += 1
         return page_bytes(self.accessor, path)
 

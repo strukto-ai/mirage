@@ -17,20 +17,9 @@ import { getSelf } from '../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { notionTransport, prettyJson, type NtnAccessor } from './util.ts'
+import { asObject, notionTransport, prettyJson, strOf, type NtnAccessor } from './util.ts'
 
 const ENC = new TextEncoder()
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
-function strOf(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 // Nine columns, pinned against the upstream binary: identity, then the
 // workspace the token belongs to, then the bot's owner. A bot owned by the

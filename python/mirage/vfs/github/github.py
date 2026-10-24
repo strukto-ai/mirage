@@ -18,7 +18,6 @@ from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA
-from mirage.core.github.read import read as _read
 from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.search import files_containing as _files_containing
@@ -33,9 +32,7 @@ from mirage.types import (
     PathSpec,
     VFSName,
 )
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.github.prompt import PROMPT
 
 
 def _pin_of(ref: str | None) -> str | None:
@@ -77,7 +74,7 @@ class GitHubVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
+    whole_word_search: bool = True
 
     def __init__(
         self,
@@ -159,16 +156,9 @@ class GitHubVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, entry)
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, entry)
 
     async def stat(
         self,
@@ -180,6 +170,17 @@ class GitHubVFS(BaseVFS):
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

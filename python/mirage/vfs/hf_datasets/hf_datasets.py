@@ -15,14 +15,12 @@
 from mirage.accessor.hf_hub import HfDatasetsAccessor
 from mirage.types import VFSName
 from mirage.vfs.hf_datasets.config import HfDatasetsConfig
-from mirage.vfs.hf_datasets.prompt import PROMPT
 from mirage.vfs.hf_hub.base import HfHubVFS
 
 
 class HfDatasetsVFS(HfHubVFS[HfDatasetsAccessor]):
     ACCESSOR = HfDatasetsAccessor
     name: str = VFSName.HF_DATASETS
-    prompt: str = PROMPT
 
     def __init__(self, config: HfDatasetsConfig) -> None:
         super().__init__(config)

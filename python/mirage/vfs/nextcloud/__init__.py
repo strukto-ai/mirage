@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.nextcloud.config import NextcloudConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["NextcloudConfig", "NextcloudVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.nextcloud.nextcloud": ("NextcloudVFS",),
+}
 
-def __getattr__(name: str) -> "type[NextcloudVFS]":
-    if name == "NextcloudVFS":
-        from mirage.vfs.nextcloud.nextcloud import NextcloudVFS
-
-        return NextcloudVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -16,7 +16,6 @@ export * from '@struktoai/mirage-core'
 export { Workspace, type NodeWorkspaceOptions } from './workspace.ts'
 export { Mount, type MountSpecOptions } from '@struktoai/mirage-core/workspace/mount/spec'
 export { DiskVFS, type DiskVFSOptions, type DiskVFSState } from './vfs/disk/disk.ts'
-export { PROMPT as DISK_PROMPT } from './vfs/disk/prompt.ts'
 export { DiskObserverStore } from './observe/disk_store.ts'
 export { RedisObserverStore, type RedisObserverStoreOptions } from './observe/redis_store.ts'
 export { RedisConsoleStore, type RedisConsoleStoreOptions } from './shell/console/redis/index.ts'
@@ -41,7 +40,6 @@ export {
 } from './workspace/store/redis.ts'
 export { patchNodeFs } from './runtime/js/host/fs.ts'
 export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/redis.ts'
-export { PROMPT as REDIS_PROMPT } from '@struktoai/mirage-core/vfs/redis/prompt'
 export { RedisStore, type RedisStoreOptions } from './vfs/redis/store.ts'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
@@ -92,13 +90,10 @@ export {
   type GCSConfig,
   type GCSConfigRedacted,
 } from './vfs/gcs/config.ts'
-export { PROMPT as GCS_PROMPT } from './vfs/gcs/prompt.ts'
 export { OCIVFS, type OCIVFSState } from './vfs/oci/oci.ts'
 export { redactOciConfig, type OCIConfig, type OCIConfigRedacted } from './vfs/oci/config.ts'
-export { PROMPT as OCI_PROMPT } from './vfs/oci/prompt.ts'
 export { R2VFS, type R2VFSState } from './vfs/r2/r2.ts'
 export { redactR2Config, type R2Config, type R2ConfigRedacted } from './vfs/r2/config.ts'
-export { PROMPT as R2_PROMPT } from './vfs/r2/prompt.ts'
 export { SupabaseVFS, type SupabaseVFSState } from './vfs/supabase/supabase.ts'
 export {
   redactSupabaseConfig,
@@ -106,7 +101,6 @@ export {
   type SupabaseConfig,
   type SupabaseConfigRedacted,
 } from './vfs/supabase/config.ts'
-export { PROMPT as SUPABASE_PROMPT } from './vfs/supabase/prompt.ts'
 export { HfBucketsAccessor } from './accessor/hf_buckets.ts'
 export { HfBucketsVFS, type HfBucketsVFSState } from './vfs/hf_buckets/hf_buckets.ts'
 export {
@@ -121,7 +115,6 @@ export {
   type HfRepoConfig,
   type HfRepoConfigRedacted,
 } from './vfs/hf_buckets/config.ts'
-export { PROMPT as HF_BUCKETS_PROMPT } from './vfs/hf_buckets/prompt.ts'
 export { HfDatasetsVFS, type HfDatasetsVFSState } from './vfs/hf_datasets/hf_datasets.ts'
 export {
   normalizeHfDatasetsConfig,
@@ -129,7 +122,6 @@ export {
   type HfDatasetsConfig,
   type HfDatasetsConfigRedacted,
 } from './vfs/hf_datasets/config.ts'
-export { PROMPT as HF_DATASETS_PROMPT } from './vfs/hf_datasets/prompt.ts'
 export { HfModelsVFS, type HfModelsVFSState } from './vfs/hf_models/hf_models.ts'
 export {
   normalizeHfModelsConfig,
@@ -137,7 +129,6 @@ export {
   type HfModelsConfig,
   type HfModelsConfigRedacted,
 } from './vfs/hf_models/config.ts'
-export { PROMPT as HF_MODELS_PROMPT } from './vfs/hf_models/prompt.ts'
 export { HfSpacesVFS, type HfSpacesVFSState } from './vfs/hf_spaces/hf_spaces.ts'
 export {
   normalizeHfSpacesConfig,
@@ -145,24 +136,20 @@ export {
   type HfSpacesConfig,
   type HfSpacesConfigRedacted,
 } from './vfs/hf_spaces/config.ts'
-export { PROMPT as HF_SPACES_PROMPT } from './vfs/hf_spaces/prompt.ts'
 export { MinIOVFS, type MinIOVFSState } from './vfs/minio/minio.ts'
 export {
   redactMinIOConfig,
   type MinIOConfig,
   type MinIOConfigRedacted,
 } from './vfs/minio/config.ts'
-export { PROMPT as MINIO_PROMPT } from './vfs/minio/prompt.ts'
 export { SeaweedFSVFS, type SeaweedFSVFSState } from './vfs/seaweedfs/seaweedfs.ts'
 export {
   redactSeaweedFSConfig,
   type SeaweedFSConfig,
   type SeaweedFSConfigRedacted,
 } from './vfs/seaweedfs/config.ts'
-export { PROMPT as SEAWEEDFS_PROMPT } from './vfs/seaweedfs/prompt.ts'
 export { CephVFS, type CephVFSState } from './vfs/ceph/ceph.ts'
 export { redactCephConfig, type CephConfig, type CephConfigRedacted } from './vfs/ceph/config.ts'
-export { PROMPT as CEPH_PROMPT } from './vfs/ceph/prompt.ts'
 export { WasabiVFS, type WasabiVFSState } from './vfs/wasabi/wasabi.ts'
 export {
   redactWasabiConfig,
@@ -170,7 +157,6 @@ export {
   type WasabiConfig,
   type WasabiConfigRedacted,
 } from './vfs/wasabi/config.ts'
-export { PROMPT as WASABI_PROMPT } from './vfs/wasabi/prompt.ts'
 export { BackblazeVFS, type BackblazeVFSState } from './vfs/backblaze/backblaze.ts'
 export {
   redactBackblazeConfig,
@@ -178,7 +164,6 @@ export {
   type BackblazeConfig,
   type BackblazeConfigRedacted,
 } from './vfs/backblaze/config.ts'
-export { PROMPT as BACKBLAZE_PROMPT } from './vfs/backblaze/prompt.ts'
 export { DigitalOceanVFS, type DigitalOceanVFSState } from './vfs/digitalocean/digitalocean.ts'
 export {
   redactDigitalOceanConfig,
@@ -186,7 +171,6 @@ export {
   type DigitalOceanConfig,
   type DigitalOceanConfigRedacted,
 } from './vfs/digitalocean/config.ts'
-export { PROMPT as DIGITALOCEAN_PROMPT } from './vfs/digitalocean/prompt.ts'
 export { TencentVFS, type TencentVFSState } from './vfs/tencent/tencent.ts'
 export {
   redactTencentConfig,
@@ -194,7 +178,6 @@ export {
   type TencentConfig,
   type TencentConfigRedacted,
 } from './vfs/tencent/config.ts'
-export { PROMPT as TENCENT_PROMPT } from './vfs/tencent/prompt.ts'
 export { AliyunVFS, type AliyunVFSState } from './vfs/aliyun/aliyun.ts'
 export {
   redactAliyunConfig,
@@ -202,7 +185,6 @@ export {
   type AliyunConfig,
   type AliyunConfigRedacted,
 } from './vfs/aliyun/config.ts'
-export { PROMPT as ALIYUN_PROMPT } from './vfs/aliyun/prompt.ts'
 export { ScalewayVFS, type ScalewayVFSState } from './vfs/scaleway/scaleway.ts'
 export {
   redactScalewayConfig,
@@ -210,7 +192,6 @@ export {
   type ScalewayConfig,
   type ScalewayConfigRedacted,
 } from './vfs/scaleway/config.ts'
-export { PROMPT as SCALEWAY_PROMPT } from './vfs/scaleway/prompt.ts'
 export { QingStorVFS, type QingStorVFSState } from './vfs/qingstor/qingstor.ts'
 export {
   redactQingStorConfig,
@@ -218,7 +199,6 @@ export {
   type QingStorConfig,
   type QingStorConfigRedacted,
 } from './vfs/qingstor/config.ts'
-export { PROMPT as QINGSTOR_PROMPT } from './vfs/qingstor/prompt.ts'
 export { PostgresVFS, type PostgresVFSOptions } from './vfs/postgres/postgres.ts'
 export { PostgresStore } from './vfs/postgres/store.ts'
 export { MongoDBVFS, type MongoDBVFSOptions } from './vfs/mongodb/mongodb.ts'
@@ -236,7 +216,6 @@ export {
   type SSHConfigRedacted,
 } from './vfs/ssh/config.ts'
 export { SSHAccessor } from './accessor/ssh.ts'
-export { PROMPT as SSH_PROMPT } from './vfs/ssh/prompt.ts'
 export { NextcloudAccessor } from './accessor/nextcloud.ts'
 export { NextcloudVFS, type NextcloudVFSState } from './vfs/nextcloud/nextcloud.ts'
 export {
@@ -245,7 +224,6 @@ export {
   type NextcloudConfig,
   type NextcloudConfigRedacted,
 } from './vfs/nextcloud/config.ts'
-export { PROMPT as NEXTCLOUD_PROMPT } from './vfs/nextcloud/prompt.ts'
 export { NextcloudEventHook } from './core/nextcloud/events.ts'
 export { DiscordVFS, type DiscordVFSState } from './vfs/discord/discord.ts'
 export {
@@ -369,8 +347,6 @@ export {
   type EmailConfig,
   type EmailConfigInput,
   type EmailConfigRedacted,
-  EMAIL_PROMPT,
-  EMAIL_WRITE_PROMPT,
 } from './vfs/email/index.ts'
 export { EmailAccessor } from './accessor/email.ts'
 export { HF } from './commands/cli/builtin/hf/index.ts'

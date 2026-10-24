@@ -17,8 +17,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function serverInfo(
   accessor: DiscordAccessor,
@@ -29,6 +28,6 @@ export async function serverInfo(
   const fl = new FlagView(ctx.flags, ctx.spec)
   const guild = fl.asStr('guild') ?? ''
   const result = await accessor.transport.call('GET', `/guilds/${guild}`)
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult()]
 }

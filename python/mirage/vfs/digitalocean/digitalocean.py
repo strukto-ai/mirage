@@ -14,13 +14,11 @@
 
 from mirage.types import VFSName
 from mirage.vfs.digitalocean.config import DigitalOceanConfig
-from mirage.vfs.digitalocean.prompt import PROMPT
 from mirage.vfs.s3_alias import S3AliasVFS
 
 
 class DigitalOceanVFS(S3AliasVFS):
     name: str = VFSName.DIGITALOCEAN
-    prompt: str = PROMPT
 
     def __init__(self, config: DigitalOceanConfig) -> None:
         super().__init__(config)

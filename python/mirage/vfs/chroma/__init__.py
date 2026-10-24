@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.chroma.config import ChromaConfig
 
 if TYPE_CHECKING:
@@ -7,10 +8,8 @@ if TYPE_CHECKING:
 
 __all__ = ["ChromaConfig", "ChromaVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.chroma.chroma": ("ChromaVFS",),
+}
 
-def __getattr__(name: str) -> "type[ChromaVFS]":
-    if name == "ChromaVFS":
-        from mirage.vfs.chroma.chroma import ChromaVFS
-
-        return ChromaVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

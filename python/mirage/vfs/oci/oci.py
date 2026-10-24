@@ -14,13 +14,11 @@
 
 from mirage.types import VFSName
 from mirage.vfs.oci.config import OCIConfig
-from mirage.vfs.oci.prompt import PROMPT
 from mirage.vfs.s3_alias import S3AliasVFS
 
 
 class OCIVFS(S3AliasVFS):
     name: str = VFSName.OCI
-    prompt: str = PROMPT
 
     def __init__(self, config: OCIConfig) -> None:
         super().__init__(config)

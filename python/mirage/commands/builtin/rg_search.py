@@ -27,6 +27,7 @@ from mirage.commands.builtin.utils.pcre import (
     user_groups,
 )
 from mirage.concurrency.worker import Worker
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import close_quietly, discard_streams
 from mirage.io.yield_budget import YieldBudget
@@ -930,10 +931,7 @@ def json_line(message: JsonValue) -> bytes:
     Args:
         message (JsonValue): the record.
     """
-    return (
-        json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode()
-        + b"\n"
-    )
+    return compact_json_bytes(message) + b"\n"
 
 
 def tally_line(tally: Tally, pat: Pattern, text: str, f: RgFlags) -> None:

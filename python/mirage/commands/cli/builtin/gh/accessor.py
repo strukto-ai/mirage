@@ -37,6 +37,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
+from mirage.core.render.json import compact_json_text
 from mirage.errors.fs import fs_strerror
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
@@ -126,7 +127,7 @@ def _go_json(value: JsonValue) -> str:
     Args:
         value (JsonValue): the value to print.
     """
-    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    text = compact_json_text(value)
     return _SEPARATORS.sub(lambda match: f"\\u{ord(match.group()):04x}", text)
 
 

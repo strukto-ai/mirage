@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.shell.job_table.constants import KILLED_EXIT_CODE
@@ -37,9 +38,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     ),
     "mirage.shell.job_table.waits": ("JobWaits",),
 }
-_MODULE_OF = {
-    name: module for module, names in _EXPORTS.items() for name in names
-}
 
 __all__ = [
     "KILLED_EXIT_CODE",
@@ -52,11 +50,4 @@ __all__ = [
     "cancel_job",
 ]
 
-
-def __getattr__(name: str) -> Any:
-    module = _MODULE_OF.get(name)
-    if module is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(importlib.import_module(module), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

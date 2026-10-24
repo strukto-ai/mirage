@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import posixpath
 from email.policy import SMTP
 
@@ -30,6 +29,7 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
     save_sent_copy,
 )
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -137,16 +137,14 @@ async def route(
         # a refused APPEND means nothing happened at all and may fail
         # loudly: there is no delivered message a retry could duplicate.
         folder = await save_sent_copy(accessor, raw, save)
-        out = json.dumps(
+        out = compact_json_bytes(
             {
                 "status": "saved",
                 "mailbox": folder,
                 "to": message["To"],
                 "subject": message["Subject"],
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode()
+            }
+        )
         return out, IOResult()
     _, warning = await deliver(accessor, raw, save)
     result = {
@@ -154,7 +152,5 @@ async def route(
         "to": message["To"],
         "subject": message["Subject"],
     }
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult(stderr=warning.encode() if warning else None)

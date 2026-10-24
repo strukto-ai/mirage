@@ -24,7 +24,6 @@ import {
   type HfBucketsConfigRedacted,
   redactHfBucketsConfig,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
@@ -48,7 +47,6 @@ export interface HfBucketsVFSState {
 
 export class HfBucketsVFS extends BaseVFS {
   override readonly name: string = VFSName.HF_BUCKETS
-  override readonly prompt: string = PROMPT
   override readonly cachesReads: boolean = true
   // The Hub tree API reports each file's exact byte size (the LFS
   // object size for LFS files); readdir backfills any lister-omitted

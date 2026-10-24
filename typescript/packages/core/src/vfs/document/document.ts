@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DocumentAccessor } from '../../accessor/document.ts'
-import type { Handed } from '../types.ts'
 import { read } from '../../core/document/read.ts'
 import { readdir } from '../../core/document/readdir.ts'
 import { stat } from '../../core/document/stat.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 
 export class DocumentVFS extends BaseVFS<DocumentAccessor> {
@@ -40,14 +38,8 @@ export class DocumentVFS extends BaseVFS<DocumentAccessor> {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return read(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

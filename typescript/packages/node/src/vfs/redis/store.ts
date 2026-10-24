@@ -193,6 +193,7 @@ export class RedisStore implements RedisStoreLike {
   }
 
   async hasDir(path: string): Promise<boolean> {
+    if (path === '/') return true
     const c = await this.client()
     return (await c.sIsMember(this.dk(), path)) === 1
   }
@@ -210,7 +211,7 @@ export class RedisStore implements RedisStoreLike {
   async listDirs(): Promise<Set<string>> {
     const c = await this.client()
     const members = await c.sMembers(this.dk())
-    return new Set(members)
+    return new Set(['/', ...members])
   }
 
   async getModified(path: string): Promise<string | null> {

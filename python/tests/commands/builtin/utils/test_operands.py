@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import gc
 from unittest.mock import AsyncMock
 
 import pytest
@@ -90,6 +91,21 @@ async def test_split_readable_keeps_order_and_reports_missing():
         b"cat: /m1.txt: No such file or directory\n"
         b"cat: /m2.txt: No such file or directory\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_split_readable_frees_a_failure_without_the_collector():
+    gc.collect()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        await split_readable(
+            [PathSpec.from_str_path("/m.txt")], _stat_over({}), "cat"
+        )
+        gc.collect()
+        assert [e for e in gc.garbage if isinstance(e, OSError)] == []
+    finally:
+        gc.set_debug(0)
+        gc.garbage.clear()
 
 
 @pytest.mark.asyncio

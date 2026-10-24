@@ -184,7 +184,7 @@ class WikiVFS extends PagesVFS {
     super({
       name: "wiki",
       accessor: wiki,
-      prompt: "A team wiki rendered as markdown files.",
+      vfsMd: "A team wiki rendered as markdown files.",
       commands: wikiTitles,
       supportsSnapshot: true,
     });
@@ -253,7 +253,7 @@ class FeedVFS extends PagesVFS {
     super({
       name: "feed",
       accessor: new WikiAccessor(FEED, false),
-      prompt: "A status feed rendered as markdown.",
+      vfsMd: "A status feed rendered as markdown.",
       supportsSnapshot: true,
     });
   }

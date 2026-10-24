@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.users import list_users, search_users
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -34,5 +33,5 @@ async def list_members(
         users = await search_users(accessor, query)
     else:
         users = await list_users(accessor)
-    out = json.dumps(users, ensure_ascii=False, separators=(",", ":")).encode()
+    out = compact_json_bytes(users)
     return out, IOResult()

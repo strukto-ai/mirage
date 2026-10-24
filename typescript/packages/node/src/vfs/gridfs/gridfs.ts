@@ -18,7 +18,6 @@ import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
@@ -54,7 +53,6 @@ export class GridFSVFS extends BaseVFS {
   // stat and read both stamp str(file_id), so the gate compares like
   // with like.
   override readonly readRevalidatable: boolean = true
-  override readonly prompt: string = PROMPT
   readonly config: GridFSConfig
   override readonly accessor: GridFSAccessor
 

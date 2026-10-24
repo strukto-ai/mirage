@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.jaeger.config import JaegerConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["JaegerConfig", "JaegerVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.jaeger.jaeger": ("JaegerVFS",),
+}
 
-def __getattr__(name: str) -> "type[JaegerVFS]":
-    if name == "JaegerVFS":
-        from mirage.vfs.jaeger.jaeger import JaegerVFS
-
-        return JaegerVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -40,7 +40,7 @@ def _is_auto_prefix(prefix: str) -> bool:
 
 
 def _mount_description(vfs: BaseVFS) -> str:
-    raw = vfs.prompt
+    raw = vfs.vfs_md
     if len(raw) <= _DESCRIPTION_MAX:
         return raw
     return raw[: _DESCRIPTION_MAX - 1].rstrip() + "\u2026"
@@ -77,28 +77,42 @@ def make_brief(entry: WorkspaceEntry) -> WorkspaceBrief:
 async def make_detail(
     entry: WorkspaceEntry, verbose: bool = False
 ) -> WorkspaceDetail:
+    """The workspace's detail, read on its own loop.
+
+    Its mounts, sessions and job table belong to the workspace's thread,
+    and its history is read through its own dispatcher, so the whole read
+    runs there rather than on the caller's loop.
+
+    Args:
+        entry (WorkspaceEntry): the workspace.
+        verbose (bool): include cache, history and job counts.
+    """
     ws = entry.runner.ws
-    user_mounts = _user_mounts(ws)
-    workspace_mode = user_mounts[0].mode.value if user_mounts else "read"
-    mounts = [
-        MountSummary(
-            prefix=m.prefix,
-            vfs=m.vfs.name,
-            mode=m.mode.value,
-            description=_mount_description(m.vfs),
+
+    async def detail() -> WorkspaceDetail:
+        user_mounts = _user_mounts(ws)
+        workspace_mode = user_mounts[0].mode.value if user_mounts else "read"
+        mounts = [
+            MountSummary(
+                prefix=m.prefix,
+                vfs=m.vfs.name,
+                mode=m.mode.value,
+                description=_mount_description(m.vfs),
+            )
+            for m in user_mounts
+        ]
+        sessions = [
+            SessionSummary(session_id=s.session_id, cwd=s.cwd)
+            for s in ws.list_sessions()
+        ]
+        return WorkspaceDetail(
+            id=entry.id,
+            mode=workspace_mode,
+            created_at=entry.created_at,
+            fuse_mountpoints=ws.fuse_mountpoints,
+            mounts=mounts,
+            sessions=sessions,
+            internals=await _build_internals(ws) if verbose else None,
         )
-        for m in user_mounts
-    ]
-    sessions = [
-        SessionSummary(session_id=s.session_id, cwd=s.cwd)
-        for s in ws.list_sessions()
-    ]
-    return WorkspaceDetail(
-        id=entry.id,
-        mode=workspace_mode,
-        created_at=entry.created_at,
-        fuse_mountpoints=ws.fuse_mountpoints,
-        mounts=mounts,
-        sessions=sessions,
-        internals=await _build_internals(ws) if verbose else None,
-    )
+
+    return await entry.runner.call(detail())

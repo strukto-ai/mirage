@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.qdrant.config import QdrantConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["QdrantConfig", "QdrantVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.qdrant.qdrant": ("QdrantVFS",),
+}
 
-def __getattr__(name: str) -> "type[QdrantVFS]":
-    if name == "QdrantVFS":
-        from mirage.vfs.qdrant.qdrant import QdrantVFS
-
-        return QdrantVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

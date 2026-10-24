@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 
 import { HttpTrelloTransport } from '../../core/trello/client.ts'
-
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import {
@@ -27,12 +25,35 @@ import {
   type TrelloConfigRedacted,
 } from '../../core/trello/config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
 import { stat as trelloStat } from '../../core/trello/stat.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  workspaces/
+    <workspace-name>__<workspace-id>/
+      workspace.json
+      boards/
+        <board-name>__<board-id>/
+          board.json
+          members/
+            <full-name>__<member-id>.json
+          labels/
+            <label-name>__<label-id>.json
+          lists/
+            <list-name>__<list-id>/
+              list.json
+              cards/
+                <card-name>__<card-id>/
+                  card.json
+                  comments.jsonl
+  Always ls directories first to discover exact names.
+
+  To act on boards and cards (list boards, members, lists, labels,
+  cards and comments; create, update, move, assign, label and comment
+  on cards), use the trello CLI if installed: trello --help`
 
 export interface TrelloVFSState {
   type: string
@@ -48,8 +69,8 @@ export class TrelloVFS extends BaseVFS {
 
   override readonly name: string = VFSName.TRELLO
   override readonly cachesReads: boolean = true
-  override readonly prompt: string = PROMPT
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string = VFS_MD
+  override readonly wholeWordSearch: boolean = true
   readonly config: TrelloConfig
   override readonly accessor: TrelloAccessor
   // Trello's search answers for cards; comments and the board's other files
@@ -80,6 +101,15 @@ export class TrelloVFS extends BaseVFS {
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
 
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
+  }
+
   override filesContaining(
     path: PathSpec,
     text: string,
@@ -93,14 +123,8 @@ export class TrelloVFS extends BaseVFS {
     return trelloReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await trelloRead(this.accessor, path, null, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return trelloRead(this.accessor, path, null, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

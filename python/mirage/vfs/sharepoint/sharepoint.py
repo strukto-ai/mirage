@@ -24,7 +24,17 @@ from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.sharepoint.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
+  Unscoped mounts use: /{site_name}/{library_name}/{path_to_file}
+  Unscoped level 0 (ls /): lists all accessible SharePoint sites.
+  Unscoped level 1 (ls /site/): lists document libraries (drives) in that site.
+  Unscoped level 2+ (ls /site/lib/...): lists files and folders in the drive.
+  IMPORTANT: This is a remote mount. Prefer targeted reads (grep, head) \
+over full scans. Avoid cat on large files without piping to head/tail.
+  File versions are retained, snapshots pin and read prior versions."""
 
 
 class SharePointVFS(BaseVFS):
@@ -39,7 +49,8 @@ class SharePointVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
+    whole_word_search: bool = True
     supports_snapshot: bool = True
     # stat and every read that can fill the cache stamp the item's cTag,
     # the read taking it before the bytes, so the gate compares like with
@@ -109,6 +120,17 @@ class SharePointVFS(BaseVFS):
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
         await _truncate(self.accessor, path, length, no_create)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

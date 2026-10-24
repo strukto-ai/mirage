@@ -16,15 +16,40 @@ import { type ByteSource } from '../../io/types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import {
   firstLines as notionFirstLines,
-  read as notionRead,
   readStream as notionStream,
 } from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
+
+export const VFS_MD = `{prefix}
+  pages/
+    <page-title>__<page-id>/
+      page.json
+      <child-page-title>__<child-id>/
+        page.json
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <data-source-title>__<data-source-id>/
+        data_source.json
+        rows.jsonl
+  Hierarchical page tree plus shared databases. cat page.json shows
+  metadata, the page body rendered as markdown, and raw blocks (nested
+  blocks under "children"). A database is a container plus one or more
+  data sources: database.json holds the container's identity and its
+  data_sources stubs, data_source.json holds the typed property schema,
+  and rows.jsonl holds the rows, one JSON line each: the row page's
+  page.json without the body, plus "path", that page.json's path below
+  the data source dir. Row dirs are not listed; open one by its path.
+
+  Titles are sanitized; don't construct paths: ls the parent dir, or
+  take a row's "path" from rows.jsonl.
+  ntn takes ids as positional operands, not flags: ntn pages get
+  <page-id>, ntn datasources query <data-source-id>, ntn datasources
+  resolve <database-id>.`
 
 /**
  * Notion's functions over its accessor, which the node and browser
@@ -42,15 +67,9 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
     return notionReaddir(this.accessor, path, handed?.entry, handed?.parent)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return notionStream(this.accessor, path, handed?.parent)
-    const data = await notionRead(this.accessor, path, null, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return notionStream(this.accessor, path, handed?.parent)
   }
 
   override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {

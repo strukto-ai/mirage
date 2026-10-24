@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function react(
   accessor: DiscordAccessor,
@@ -34,6 +33,6 @@ export async function react(
     fl.asStr('message') ?? '',
     fl.asStr('emoji') ?? '',
   )
-  const out: ByteSource = ENC.encode(JSON.stringify({ ok: true }))
+  const out: ByteSource = compactJsonBytes({ ok: true })
   return [out, new IOResult()]
 }

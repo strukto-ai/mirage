@@ -160,18 +160,15 @@ async def split_readable(
     readable: list[PathSpec] = []
     err = b""
     for p in paths:
-        failure: BaseException | None = None
         try:
             st = await stat(p)
         except FS_ERRORS as exc:
-            failure = exc
-        else:
-            if getattr(st, "type", None) == FileType.DIRECTORY:
-                failure = eisdir(p)
-        if failure is None:
-            readable.append(p)
+            err += encode_text(fs_error_line(cmd_name, p, exc))
             continue
-        err += encode_text(fs_error_line(cmd_name, p, failure))
+        if getattr(st, "type", None) == FileType.DIRECTORY:
+            err += encode_text(fs_error_line(cmd_name, p, eisdir(p)))
+            continue
+        readable.append(p)
     return readable, err
 
 
@@ -203,19 +200,17 @@ async def split_opened(
     unread: set[str] = set()
     err = b""
     for p in paths:
-        failure: BaseException | None = None
         try:
             st = await stat(p)
         except FS_ERRORS as exc:
-            failure = exc
-        else:
-            if getattr(st, "type", None) == FileType.DIRECTORY:
-                failure = eisdir(p)
-        if failure is not None:
-            err += encode_text(fs_error_line(cmd_name, p, failure))
-            if not isinstance(failure, READ_FAILURES):
+            err += encode_text(fs_error_line(cmd_name, p, exc))
+            if not isinstance(exc, READ_FAILURES):
                 continue
             unread.add(p.virtual)
+        else:
+            if getattr(st, "type", None) == FileType.DIRECTORY:
+                err += encode_text(fs_error_line(cmd_name, p, eisdir(p)))
+                unread.add(p.virtual)
         opened.append(p)
     return opened, frozenset(unread), err
 

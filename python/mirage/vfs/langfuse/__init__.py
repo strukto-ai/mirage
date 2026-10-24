@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.langfuse.config import LangfuseConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["LangfuseConfig", "LangfuseVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.langfuse.langfuse": ("LangfuseVFS",),
+}
 
-def __getattr__(name: str) -> "type[LangfuseVFS]":
-    if name == "LangfuseVFS":
-        from mirage.vfs.langfuse.langfuse import LangfuseVFS
-
-        return LangfuseVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

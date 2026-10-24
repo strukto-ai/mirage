@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.s3.config import S3Config
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["S3Config", "S3VFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.s3.s3": ("S3VFS",),
+}
 
-def __getattr__(name: str) -> "type[S3VFS]":
-    if name == "S3VFS":
-        from mirage.vfs.s3.s3 import S3VFS
-
-        return S3VFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -18,7 +18,6 @@ import {
   follow as postgresFollow,
   lastLines as postgresLastLines,
   lineCount as postgresLineCount,
-  read as postgresRead,
   readStream as postgresReadStream,
 } from '../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
@@ -26,9 +25,27 @@ import { linesContaining as postgresLinesContaining } from '../../core/postgres/
 import { stat as postgresStat } from '../../core/postgres/stat.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
+
+export const VFS_MD = `{prefix}
+  database.json                  cross-schema graph + sizes
+  <schema>/                      Postgres schema (namespace)
+    tables/<table>/
+      schema.json                column types, PK/FK, indexes
+      semantic.json              descriptions, roles, sample values
+      rows.jsonl                 data (size-guarded)
+    views/<view>/
+      schema.json
+      semantic.json
+      rows.jsonl
+  Read semantic.json to learn what a table means: it splits columns into
+  dimensions (group by), time_dimensions and facts (aggregate), and
+  carries COMMENTs, enum domains and example values.
+  Read database.json first to plan joins. Reading rows.jsonl is refused
+  for tables above the configured row/byte threshold; use head, tail or
+  wc, which ask SQL for only what they need, or grep, which fetches only
+  the matching rows when SQL can find every match.`
 
 /**
  * Postgres's functions over its accessor, which the node and browser
@@ -44,16 +61,9 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     return postgresReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null)
-      return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
-    const data = await postgresRead(this.accessor, path, null, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

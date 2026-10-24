@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.agents.claude_managed_agents.tools import mirage_tools
@@ -21,17 +22,7 @@ if TYPE_CHECKING:
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.agents.claude_managed_agents.tools": ("mirage_tools",),
 }
-_MODULE_OF = {
-    name: module for module, names in _EXPORTS.items() for name in names
-}
 
 __all__ = ["mirage_tools"]
 
-
-def __getattr__(name: str) -> Any:
-    module = _MODULE_OF.get(name)
-    if module is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(importlib.import_module(module), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

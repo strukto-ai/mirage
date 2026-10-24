@@ -53,8 +53,7 @@ describe('DiscordVFS (node)', () => {
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'bot-test' })
-    expect(typeof r.prompt).toBe('string')
-    expect(typeof r.writePrompt).toBe('string')
+    expect(typeof r.vfsMd).toBe('string')
   })
 
   it('serves only the generic commands', () => {

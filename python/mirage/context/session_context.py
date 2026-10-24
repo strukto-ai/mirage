@@ -24,7 +24,7 @@ from collections.abc import (
     Sequence,
 )
 from contextvars import ContextVar
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
@@ -209,21 +209,44 @@ class Caller:
         """What the caller's session sees, None when unrestricted."""
         return self.session.visibility if self.session is not None else None
 
+    def changed(self, changes: Mapping[str, Any]) -> Caller:
+        """This caller with ``changes`` set, the rest kept.
+
+        What ``dataclasses.replace`` returns, built by copying the slots:
+        a command binds and resets its caller several times, and
+        ``replace`` reads every field through ``fields()`` and runs the
+        frozen ``__init__`` each time. A name that is not a field still
+        fails, as no slot takes it.
+
+        Args:
+            changes (Mapping[str, Any]): the fields to set.
+        """
+        new = object.__new__(Caller)
+        for name in Caller.__slots__:
+            object.__setattr__(new, name, getattr(self, name))
+        for name, value in changes.items():
+            object.__setattr__(new, name, value)
+        return new
+
 
 @dataclass(frozen=True, slots=True)
 class CallerToken:
     """What one binding changed, for its reset to put back.
 
     A reset restores only the fields its binding set, so bindings undone
-    out of order leave each other's fields alone.
+    out of order leave each other's fields alone. Undone in order, the
+    caller is still the one the binding made, and ``before`` is the
+    answer as it stands.
 
     Args:
         names (tuple[str, ...]): the fields the binding set.
         before (Caller): the caller the binding replaced.
+        after (Caller): the caller the binding made.
     """
 
     names: tuple[str, ...]
     before: Caller
+    after: Caller
 
 
 _caller: ContextVar[Caller] = ContextVar("mirage_caller", default=Caller())
@@ -245,15 +268,23 @@ def bind_caller(caller: Caller) -> CallerToken:
     before = _caller.get()
     _caller.set(caller)
     names = tuple(
-        f.name
-        for f in fields(Caller)
-        if getattr(caller, f.name) is not getattr(before, f.name)
+        name
+        for name in Caller.__slots__
+        if getattr(caller, name) is not getattr(before, name)
     )
-    return CallerToken(names, before)
+    return CallerToken(names, before, caller)
 
 
 def _bind(**changes: Any) -> CallerToken:
-    return bind_caller(replace(_caller.get(), **changes))
+    before = _caller.get()
+    after = before.changed(changes)
+    _caller.set(after)
+    names = tuple(
+        name
+        for name, value in changes.items()
+        if value is not getattr(before, name)
+    )
+    return CallerToken(names, before, after)
 
 
 def reset_caller(token: CallerToken) -> None:
@@ -262,8 +293,12 @@ def reset_caller(token: CallerToken) -> None:
     Args:
         token (CallerToken): the binding's token.
     """
+    current = _caller.get()
+    if current is token.after:
+        _caller.set(token.before)
+        return
     restored = {name: getattr(token.before, name) for name in token.names}
-    _caller.set(replace(_caller.get(), **restored))
+    _caller.set(current.changed(restored))
 
 
 def current_execution_id() -> str | None:

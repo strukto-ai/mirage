@@ -73,8 +73,7 @@ class BaseVFS:
 
     name: str = "base"
     accessor: Accessor = Accessor()
-    prompt: str = ""
-    write_prompt: str = ""
+    vfs_md: str = ""
 
     # How long the mount's index keeps a listing or a stat, in seconds,
     # when no index config says otherwise.
@@ -166,6 +165,10 @@ class BaseVFS:
     # file whatever the answer, as a full scan would.
     searchable: tuple[str, ...] | None = None
 
+    # ``files_containing`` answers only a whole-word search (grep -w,
+    # rg -w); any other pattern reads every file.
+    whole_word_search: bool = False
+
     # The most files one command walks under a directory of this mount:
     # grep -r, rg and git grep stop reading there, find, ls -R, tree, du
     # and getfattr -R stop listing, git status and the other verbs that
@@ -189,8 +192,7 @@ class BaseVFS:
         *,
         name: str | None = None,
         accessor: Accessor | None = None,
-        prompt: str | None = None,
-        write_prompt: str | None = None,
+        vfs_md: str | None = None,
         commands: list[Any] | None = None,
         caches_reads: bool | None = None,
         sizes_always_known: bool | None = None,
@@ -208,8 +210,9 @@ class BaseVFS:
                 ``register_vfs`` or a ``mirage.vfs`` entry point. None
                 keeps the class attribute.
             accessor (Accessor | None): backend handle the functions use.
-            prompt (str | None): LLM-facing description of the layout.
-            write_prompt (str | None): appended when mounted writable.
+            vfs_md (str | None): this VFS's part of VFS.md: its layout
+                and file formats, ``{prefix}`` standing for the mount
+                path. None keeps the class attribute.
             commands (list[Any] | None): extra ``@command`` functions,
                 ``Command`` values or ``CLI`` trees: bespoke verbs, a
                 program's verbs as one command tree under its root's
@@ -238,10 +241,8 @@ class BaseVFS:
             self.name = name
         if accessor is not None:
             self.accessor = accessor
-        if prompt is not None:
-            self.prompt = prompt
-        if write_prompt is not None:
-            self.write_prompt = write_prompt
+        if vfs_md is not None:
+            self.vfs_md = vfs_md
         if caches_reads is not None:
             self.caches_reads = caches_reads
         if sizes_always_known is not None:
@@ -282,26 +283,21 @@ class BaseVFS:
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     def read(
-        self,
-        path: PathSpec,
-        *,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec
     ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
-        """Read a file's bytes, or a window of them.
+        """Read a file's bytes.
 
         Answer with the bytes, or with an async iterator that hands them
         out as the caller pulls, so a large file never sits in memory: an
         ``async def`` that returns either, or one that yields chunks.
         Mirage collects a stream for a caller that needs the bytes whole
-        and hands bytes to a streaming caller as one chunk. A window
-        reaches this only when ``reads_ranges`` is set: the caller
-        otherwise reads the whole file and slices it.
+        and hands bytes to a streaming caller as one chunk. A VFS that
+        sets ``reads_ranges`` also takes ``offset`` (the window's first
+        byte) and ``size`` (its length, None through the end) keywords;
+        the caller reads every other file whole and slices it.
 
         Args:
             path (PathSpec): the file.
-            offset (int): the first byte of the window.
-            size (int | None): the window's length, None through the end.
         """
         raise enotsup(self.name, "read", path)
 

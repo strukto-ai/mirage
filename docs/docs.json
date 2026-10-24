@@ -98,6 +98,7 @@
             "pages": [
               "home/setup/vfs",
               "home/setup/custom-vfs",
+              "home/setup/vfs-md",
               {
                 "group": "Local & Infrastructure",
                 "icon": "server",

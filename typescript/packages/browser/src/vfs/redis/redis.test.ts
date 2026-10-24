@@ -165,7 +165,6 @@ describe('RedisVFS over the Upstash REST api', () => {
   it('is exported from the package barrel with its core pieces', () => {
     expect(browserPkg.RedisVFS).toBe(RedisVFS)
     expect(browserPkg.UpstashRedisStore).toBe(UpstashRedisStore)
-    expect(typeof browserPkg.REDIS_PROMPT).toBe('string')
     expect(typeof browserPkg.RedisAccessor).toBe('function')
   })
 })

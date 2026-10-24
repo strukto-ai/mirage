@@ -337,7 +337,7 @@ def run_session_probe(result: dict[str, ProbeValue]) -> None:
             )
         with open(f"{mountpoint}/SKILL.md", "rb") as skill:
             result["document_kernel_skill"] = skill.read().startswith(
-                b"---\nname: mirage\n"
+                b"---\nname: workspace-commands\n"
             )
         try:
             with open(document_path, "wb") as document:

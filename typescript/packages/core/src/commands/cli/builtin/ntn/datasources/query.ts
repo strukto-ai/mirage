@@ -25,11 +25,13 @@ import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
 import {
+  asObject,
   firstText,
   notionTransport,
   parseJsonText,
   prettyJson,
   propertyCell,
+  strOf,
   usageError,
   type NtnAccessor,
 } from '../util.ts'
@@ -47,17 +49,6 @@ const DIRECTIONS: Record<string, string> = {
   ascending: 'ascending',
   desc: 'descending',
   descending: 'descending',
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
-function strOf(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
 }
 
 // A data source operand may be an id or a full Notion URL.

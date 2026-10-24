@@ -18,7 +18,7 @@ import pytest
 
 from mirage.types import VFSName
 from mirage.vfs.gdrive.config import GoogleDriveConfig
-from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
+from mirage.vfs.gdrive.gdrive import VFS_MD, GoogleDriveVFS
 from tests.fixtures.mount_commands import mount_commands
 
 
@@ -56,3 +56,16 @@ def test_vfs_commands_registered(config):
     ):
         vfs = GoogleDriveVFS(config)
         assert len(mount_commands(vfs)) >= 50
+
+
+def test_vfs_md_cross_references_per_service_shapes():
+    rendered = VFS_MD.replace("{prefix}", "/gdrive")
+    assert ".gdoc.json" in rendered
+    assert ".gsheet.json" in rendered
+    assert ".gslide.json" in rendered
+    assert "/gdocs layout" in rendered
+    assert "/gsheets layout" in rendered
+    assert "/gslides layout" in rendered
+    assert "remote mount" in rendered
+    assert "modifiedTime range" in rendered
+    assert "No owned/ vs shared/" in rendered

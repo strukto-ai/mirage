@@ -251,6 +251,43 @@ In YAML-based configs the snake-case spelling `key_prefix` is also accepted and 
 For `mirage-browser`'s `S3VFS` (which uses `presignedUrlProvider`), `keyPrefix` flows through the same core code path, but a client-controlled prefix is not a security boundary — a malicious client can ignore or alter it before signing. For real isolation, enforce the prefix inside your server-side `presignedUrlProvider` implementation (and in the IAM/STS session policy backing those credentials). Treat the client-side `keyPrefix` as ergonomics only.
 </Warning>
 
+## VFS.md
+
+What `ws.vfsMd()` answers with S3 mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md s3 start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `s3`, write |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md s3 end */}
+
 ## Integration
 
 What S3 answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.

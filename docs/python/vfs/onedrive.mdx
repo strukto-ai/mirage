@@ -88,7 +88,42 @@ documentation for your tenant.
 Because the root is read from the config rather than a module constant, two
 mounts in one process can address different deployments.
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with OneDrive mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md onedrive start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `onedrive`, write |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. `grep -r` and `rg` with `-w` use `onedrive` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md onedrive end */}
 
 The OneDrive VFS maps Graph driveItems (path-addressed) to virtual paths
 under the mount prefix. Folders are real driveItems, so the tree matches what

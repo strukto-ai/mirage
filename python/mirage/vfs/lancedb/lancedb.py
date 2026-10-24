@@ -18,10 +18,18 @@ from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.search import files_containing as _files_containing
 from mirage.core.lancedb.tree import SEARCH, read, readdir, stat
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.lancedb.config import LanceDBConfig
-from mirage.vfs.lancedb.prompt import PROMPT
+
+VFS_MD = """\
+This mount is a LanceDB table exposed as a filesystem.
+
+Directories are the configured group-by columns; descending narrows a filter.
+Each matching row is a <id>.md card plus a <id>.<ext> blob file. For semantic
+search use the search command, which returns ranked rows as canonical file
+paths with a score, e.g. search "red running shoes" /mount then cat one of the
+returned <path>.md files. Use ls/cd/cat/tree/find/wc as usual; grep/rg stay
+lexical. Quote queries that contain spaces."""
 
 _REMOTE_SCHEMES = ("s3://", "gs://", "az://", "hf://", "db://")
 
@@ -35,7 +43,7 @@ class LanceDBVFS(BaseVFS):
     # A live store: every readdir must hit the backend, so the index is
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: LanceDBConfig) -> None:
         super().__init__()
@@ -50,11 +58,8 @@ class LanceDBVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         return await readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        data = await read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> bytes:
+        return await read(self.accessor, path)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await stat(self.accessor, path)

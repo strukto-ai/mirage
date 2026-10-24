@@ -25,35 +25,35 @@ from mirage.workspace import Workspace
 ASTRAL = "\U00010400"
 
 
-class _PromptVFS(RAMVFS):
-    def __init__(self, prompt: str) -> None:
+class _DescribedVFS(RAMVFS):
+    def __init__(self, text: str) -> None:
         super().__init__()
-        self.prompt = prompt
+        self.vfs_md = text
 
 
-def test_short_prompt_is_returned_whole():
-    assert _mount_description(_PromptVFS("hello")) == "hello"
-    assert _mount_description(_PromptVFS("")) == ""
+def test_short_vfs_md_is_returned_whole():
+    assert _mount_description(_DescribedVFS("hello")) == "hello"
+    assert _mount_description(_DescribedVFS("")) == ""
 
 
 def test_budget_counts_code_points():
     # 40 ascii plus 45 Deseret letters is 85 code points and 130 UTF-16
-    # units, so the typescript twin ellipsized a prompt this side leaves
+    # units, so the typescript twin ellipsized a text this side leaves
     # whole -- and its cut landed inside the 40th surrogate pair.
-    prompt = "a" * 40 + ASTRAL * 45
-    assert _mount_description(_PromptVFS(prompt)) == prompt
+    text = "a" * 40 + ASTRAL * 45
+    assert _mount_description(_DescribedVFS(text)) == text
 
 
 def test_ellipsizes_on_a_code_point_boundary():
-    result = _mount_description(_PromptVFS(ASTRAL * 130))
+    result = _mount_description(_DescribedVFS(ASTRAL * 130))
     assert result == ASTRAL * 119 + "…"
     assert len(result) == 120
     assert "�" not in result
 
 
 def test_trailing_whitespace_is_dropped_before_the_ellipsis():
-    prompt = "x" * 118 + "  " + "y" * 10
-    assert _mount_description(_PromptVFS(prompt)) == "x" * 118 + "…"
+    text = "x" * 118 + "  " + "y" * 10
+    assert _mount_description(_DescribedVFS(text)) == "x" * 118 + "…"
 
 
 @pytest.mark.asyncio
@@ -68,5 +68,25 @@ async def test_in_flight_jobs_counts_only_running_jobs():
         detail = await make_detail(entry, verbose=True)
         assert detail.internals is not None
         assert detail.internals.in_flight_jobs == 1
+    finally:
+        await registry.remove(entry.id)
+
+
+@pytest.mark.asyncio
+async def test_the_detail_is_read_on_the_workspace_loop(monkeypatch):
+    registry = WorkspaceRegistry()
+    entry = registry.add(Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE))
+    runner = entry.runner
+    history = runner.ws.history
+    loops = []
+
+    async def recording():
+        loops.append(asyncio.get_running_loop())
+        return await history()
+
+    monkeypatch.setattr(runner.ws, "history", recording)
+    try:
+        await make_detail(entry, verbose=True)
+        assert loops == [runner.loop]
     finally:
         await registry.remove(entry.id)

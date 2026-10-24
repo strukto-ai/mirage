@@ -15,7 +15,6 @@
 import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { DropboxTokenManager } from '../../core/dropbox/client.ts'
-import { PROMPT } from './prompt.ts'
 import { VFSName } from '../../types.ts'
 import { redactDropboxConfig, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/dropbox/events.ts'
@@ -67,7 +66,7 @@ export class DropboxVFS extends BaseVFS {
     read: ['entry'],
     truncate: ['entry'],
   } as const
-  override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   readonly config: DropboxConfig
   override readonly accessor: DropboxAccessor
 
@@ -171,6 +170,15 @@ export class DropboxVFS extends BaseVFS {
 
   override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
     return dropboxDirCopy(this.accessor, src, dst)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

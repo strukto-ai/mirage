@@ -888,6 +888,8 @@ def _selftest_cycles() -> int:
     for exports in (
         "_EXPORTS = {'mirage.planted.b': ('B',)}",
         "_EXPORTS = {'B': 'mirage.planted.b'}",
+        "_EXPORTS = {'mirage.planted.b': ('B',)}\n"
+        "__getattr__ = lazy_exports(__name__, _EXPORTS)",
         "if TYPE_CHECKING:\n    from .b import B as Exported\n"
         "def __getattr__(name):\n    return B",
         "def __getattr__(name):\n    from .b import B\n    return B",

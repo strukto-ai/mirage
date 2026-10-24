@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.linear.config import LinearConfig
 from mirage.types import VFSName
-from mirage.vfs.linear.linear import LinearVFS
+from mirage.vfs.linear.linear import VFS_MD, LinearVFS
 from tests.fixtures.mount_commands import mount_commands
 
 
@@ -44,3 +44,18 @@ def test_vfs_accessor(config):
 def test_vfs_commands_registered(config):
     vfs = LinearVFS(config)
     assert len(mount_commands(vfs)) >= 10
+
+
+def test_vfs_md_includes_path_anatomy_and_normalized_shapes():
+    rendered = VFS_MD.replace("{prefix}", "/linear")
+    assert "team.json:" in rendered
+    assert "issue.json:" in rendered
+    assert "comments.jsonl:" in rendered
+    assert "project.json:" in rendered
+    assert "cycle.json:" in rendered
+    assert "user.json:" in rendered
+    assert "document.json:" in rendered
+    assert "mirage-normalized" in rendered
+    assert ".issue_key" in rendered
+    assert ".label_names[]" in rendered
+    assert "linear --help" in rendered

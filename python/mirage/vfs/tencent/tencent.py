@@ -15,12 +15,10 @@
 from mirage.types import VFSName
 from mirage.vfs.s3_alias import S3AliasVFS
 from mirage.vfs.tencent.config import TencentConfig
-from mirage.vfs.tencent.prompt import PROMPT
 
 
 class TencentVFS(S3AliasVFS):
     name: str = VFSName.TENCENT
-    prompt: str = PROMPT
 
     def __init__(self, config: TencentConfig) -> None:
         super().__init__(config)

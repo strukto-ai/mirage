@@ -198,9 +198,9 @@ export class UpstashRedisStore implements RedisStoreLike {
   }
 
   // The root directory marker goes out before the first request, once.
-  // Python's store writes it in its constructor and the node store on
-  // connect; a page has neither a sync client nor a connection, so the
-  // first request is the moment.
+  // The node store writes it on connect and Python's store answers the
+  // root without it; a page has no connection, so the first request is
+  // the moment.
   private async request(
     path: string,
     body: BodyInit,

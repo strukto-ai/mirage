@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
@@ -24,12 +23,24 @@ import {
   type QdrantConfig,
   type QdrantConfigResolved,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
 import { filesContaining } from '../../core/qdrant/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `This mount is a Qdrant vector database exposed as a filesystem.
+
+At the root each directory is a collection (unless a single collection is pinned
+in config). Inside a collection, directories are the configured group-by payload
+fields; descending narrows a filter. Each matching point appears as files named
+by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
+when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
+field is configured, where <id> is the Qdrant point id. The embedding vector is
+never shown. For semantic search use the search command, which returns ranked
+points as their content file paths with a similarity score, e.g.
+search "red running shoes" /mount then cat one of the returned files.
+Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
+contain spaces.`
 
 export interface QdrantVFSOptions {
   config: QdrantConfig
@@ -47,7 +58,7 @@ export class QdrantVFS extends BaseVFS {
   // falls back to rendering the row itself, so sizes are exact either way.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = false
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   readonly config: QdrantConfigResolved
   override readonly accessor: QdrantAccessor
 
@@ -77,14 +88,8 @@ export class QdrantVFS extends BaseVFS {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return read(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

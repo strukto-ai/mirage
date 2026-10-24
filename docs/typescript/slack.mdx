@@ -144,7 +144,79 @@ console.log(res.stdoutText)
 Calling `https://slack.com/api/*` directly from a browser fails CORS. The proxy is mandatory, Slack does not set permissive CORS headers.
 </Warning>
 
-## Filesystem layout
+## VFS.md
+
+What `ws.vfsMd()` answers with Slack mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md slack start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `slack`, read |
+
+## `/<path>` layout
+
+```text
+/<path>
+  channels/
+    <channel-name>__<channel-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl                # messages for that date
+        files/                    # attachments shared that day (may be empty)
+          <name>__<F-id>.<ext>    # cat to download bytes
+  dms/
+    <user-name>__<dm-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
+  users/
+    <username>__<user-id>.json    # user profile
+  Naming: channel/DM/user directory names are `<display-name>__<id>`.
+  The display name keeps the original spelling from Slack; only `/` is
+  replaced with `∕` (U+2215) so paths don't break. Quote names
+  containing spaces in shell commands. Always ls the parent dir first
+  to discover exact entry names (they include IDs).
+  Without time bounds, bare channel listings show the latest 90 days
+  ending at the newest message. Date globs can discover earlier days.
+  With start_time/end_time, listings cover that scope; messages and their
+  attachments outside it are absent, including through direct paths.
+  Users and channel metadata remain available as context.
+  On a time-scoped mount grep and rg see only the in-scope files.
+  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
+  .user is a user ID (U…), not a username; resolve it through
+  users/<username>__<user-id>.json and filter messages by the ID.
+  Unless walk_limit is -1, grep -rw and rg -w read only the channel
+  and DM days Slack search names; attachments under files/ are always read.
+  Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` use `slack` search. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Read only: no command changes files. Without `-w`, `grep -r` and `rg` read every file. `slack` search covers only `channels/*/*/chat.jsonl` and `dms/*/*/chat.jsonl`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md slack end */}
 
 ```text
 /slack/

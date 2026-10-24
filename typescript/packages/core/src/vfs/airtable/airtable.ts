@@ -21,13 +21,10 @@ import {
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
 import {
   firstLines as airtableFirstLines,
-  read as airtableRead,
   readStream as airtableStream,
 } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
@@ -36,6 +33,33 @@ import type { DeltaHook } from '../../events/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  bases/
+    <base-name>__<base-id>/
+      base.json                    base id, name, permission, table list
+      <table-name>__<table-id>/
+        table.json                 typed fields (with options) and views
+        records.jsonl              one record per line
+        views/
+          <view-name>__<view-id>.jsonl   records the view shows, in its order
+  Always ls directories first to discover exact names: the name part of
+  a segment is sanitized, the id after the LAST "__" is exact.
+
+  A records.jsonl line is a mirage-normalized record:
+    record_id, created_time, and fields (keyed by field NAME, values as
+    Airtable returns them). Read table.json for each field's type.
+  Airtable omits empty cells, so a missing key means empty (checkbox
+  false included). A link field is a list of record ids; an attachment
+  url expires two hours after it was read.
+  records.jsonl lists in the API's own order; a view file applies the
+  view's filter and sort. A file over max_read_records records stops
+  with File too large after that many, while head -n N fetches just N
+  records:
+    head -n 20 {prefix}/bases/<base>/<table>/records.jsonl | jq .fields
+  The airtable CLI, if installed, reaches what a file cannot: server-side
+  filters (airtable record list --formula or --view), one record by id
+  (airtable record get), and comments (airtable comment list).`
 
 export interface AirtableVFSState {
   type: string
@@ -55,8 +79,7 @@ export class AirtableVFS extends BaseVFS {
   // unknown until the bytes exist.
   override readonly sizesAlwaysKnown: boolean = false
   override readonly supportsSnapshot: boolean = false
-  override readonly prompt: string = PROMPT
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string = VFS_MD
   override readonly accessor: AirtableAccessor
   override readonly handed = {
     readdir: ['entry'],
@@ -80,16 +103,9 @@ export class AirtableVFS extends BaseVFS {
     return airtableReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null)
-      return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
-    const data = await airtableRead(this.accessor, path, handed?.entry, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

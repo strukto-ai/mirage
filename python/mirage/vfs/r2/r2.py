@@ -14,13 +14,11 @@
 
 from mirage.types import VFSName
 from mirage.vfs.r2.config import R2Config
-from mirage.vfs.r2.prompt import PROMPT
 from mirage.vfs.s3_alias import S3AliasVFS
 
 
 class R2VFS(S3AliasVFS):
     name: str = VFSName.R2
-    prompt: str = PROMPT
 
     def __init__(self, config: R2Config) -> None:
         super().__init__(config)

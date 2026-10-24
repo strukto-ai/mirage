@@ -20,7 +20,6 @@ from mirage.core.postgres.read import first_lines as _first_lines
 from mirage.core.postgres.read import follow as _follow
 from mirage.core.postgres.read import last_lines as _last_lines
 from mirage.core.postgres.read import line_count as _line_count
-from mirage.core.postgres.read import read as _read
 from mirage.core.postgres.read import read_stream as _read_stream
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.search import (
@@ -29,10 +28,28 @@ from mirage.core.postgres.search import (
 from mirage.core.postgres.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.postgres.config import PostgresConfig
-from mirage.vfs.postgres.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  database.json                  cross-schema graph + sizes
+  <schema>/                      Postgres schema (namespace)
+    tables/<table>/
+      schema.json                column types, PK/FK, indexes
+      semantic.json              descriptions, roles, sample values
+      rows.jsonl                 data (size-guarded)
+    views/<view>/
+      schema.json
+      semantic.json
+      rows.jsonl
+  Read semantic.json to learn what a table means: it splits columns into
+  dimensions (group by), time_dimensions and facts (aggregate), and
+  carries COMMENTs, enum domains and example values.
+  Read database.json first to plan joins. Reading rows.jsonl is refused
+  for tables above the configured row/byte threshold; use head, tail or
+  wc, which ask SQL for only what they need, or grep, which fetches only
+  the matching rows when SQL can find every match."""
 
 
 class PostgresVFS(BaseVFS):
@@ -42,7 +59,7 @@ class PostgresVFS(BaseVFS):
     # A live store: every readdir must hit the backend, so the index is
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: PostgresConfig) -> None:
         super().__init__()
@@ -54,16 +71,9 @@ class PostgresVFS(BaseVFS):
         return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, parent)
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

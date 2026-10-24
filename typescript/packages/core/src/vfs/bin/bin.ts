@@ -16,8 +16,6 @@ import { BinAccessor } from '../../accessor/bin.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
 import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as binReaddir } from '../../core/bin/readdir.ts'
 import { read as binRead } from '../../core/bin/read.ts'
 import { refuse } from '../../core/bin/refuse.ts'
@@ -44,14 +42,8 @@ export class BinViewVFS extends BaseVFS {
     return binReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await binRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return binRead(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

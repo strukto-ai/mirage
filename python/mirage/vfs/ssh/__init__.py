@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.ssh.config import SSHConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["SSHConfig", "SSHVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.ssh.ssh": ("SSHVFS",),
+}
 
-def __getattr__(name: str) -> "type[SSHVFS]":
-    if name == "SSHVFS":
-        from mirage.vfs.ssh.ssh import SSHVFS
-
-        return SSHVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function members(
   accessor: DiscordAccessor,
@@ -34,6 +33,6 @@ export async function members(
     query !== undefined && query !== ''
       ? await searchMembers(accessor, guild, query)
       : await listMembers(accessor, guild)
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult()]
 }

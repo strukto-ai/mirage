@@ -18,8 +18,7 @@ import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../../core/render/json.ts'
 
 export async function forward(
   accessor: GoogleApiAccessor,
@@ -33,6 +32,6 @@ export async function forward(
     fl.asStr('message_id') ?? '',
     fl.asStr('to') ?? '',
   )
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult()]
 }

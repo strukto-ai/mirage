@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function sendMessage(
   accessor: SlackAccessor,
@@ -35,6 +34,6 @@ export async function sendMessage(
     threadTs !== undefined && threadTs !== ''
       ? await replyToThread(accessor, channel, threadTs, text)
       : await postMessage(accessor, channel, text)
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult()]
 }

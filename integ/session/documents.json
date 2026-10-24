@@ -29,7 +29,7 @@
         "redis",
         "opfs"
       ],
-      "command": "grep -c '^# Virtual filesystem' /VFS.md; test ! -e /SKILL.md && echo independent; grep -c '/data2' /VFS.md",
+      "command": "grep -c '^# Virtual Filesystem' /VFS.md; test ! -e /SKILL.md && echo independent; grep -c '/data2' /VFS.md",
       "expect": {
         "exit": 1,
         "stdout": "1\nindependent\n0\n",
@@ -84,7 +84,7 @@
         "redis",
         "opfs"
       ],
-      "command": "grep -c '^## `/data2`' /VFS.md",
+      "command": "grep -cE '^\\| `/data2` \\| `[a-z0-9_]+`, (read|write|exec) \\|$' /VFS.md",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -109,10 +109,10 @@
         "redis",
         "opfs"
       ],
-      "command": "head -n 3 /SKILL.md; grep -c '/data2' /VFS.md; if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; head -n 1 /VFS.md; test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact; cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md && echo copied",
+      "command": "head -n 3 /SKILL.md; grep -c '/data2' /VFS.md; if { echo overwrite > /VFS.md; } 2>/dev/null; then echo wrote; else echo readonly; fi; grep -m 1 '^# ' /VFS.md; test \"$(stat -c %s /VFS.md)\" -eq \"$(cat /VFS.md | wc -c)\" && echo exact; cat /VFS.md > /data/copied-vfs.md; cmp /VFS.md /data/copied-vfs.md && echo copied",
       "expect": {
         "exit": 0,
-        "stdout": "---\nname: mirage\ndescription: Work with data and registered commands inside a MIRAGE workspace.\n0\nreadonly\n# Virtual filesystem\nexact\ncopied\n",
+        "stdout": "---\nname: workspace-commands\ndescription: The CLIs registered in this workspace and how to call them.\n0\nreadonly\n# Virtual Filesystem\nexact\ncopied\n",
         "stderr": ""
       },
       "session": "docs-a",
@@ -163,10 +163,10 @@
         "redis",
         "opfs"
       ],
-      "command": "head -n 1 /data/mirage-guides/VFS.md; ls /data/mirage-guides",
+      "command": "grep -m 1 '^# ' /data/mirage-guides/VFS.md; ls /data/mirage-guides",
       "expect": {
         "exit": 0,
-        "stdout": "# Virtual filesystem\nVFS.md\n",
+        "stdout": "# Virtual Filesystem\nVFS.md\n",
         "stderr": ""
       },
       "documents": [
@@ -200,7 +200,7 @@
           }
         }
       },
-      "command": "grep -F -c -- '- `/data/mirage-guides`: read-only.' /VFS.md",
+      "command": "grep -c '^| `/data/mirage-guides` | `[a-z0-9_]*`, read |$' /VFS.md",
       "expect": {
         "exit": 0,
         "stdout": "1\n",

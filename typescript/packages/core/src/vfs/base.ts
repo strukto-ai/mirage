@@ -85,10 +85,11 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   name?: string
   /** Backend handle the functions use. */
   accessor?: A
-  /** LLM-facing description of the mounted layout. */
-  prompt?: string
-  /** Appended to `prompt` when the mount is writable. */
-  writePrompt?: string
+  /**
+   * This VFS's part of VFS.md: its layout and file formats, `{prefix}`
+   * standing for the mount path.
+   */
+  vfsMd?: string
   /**
    * Extra commands, from `command({...})`, or `CLI` trees: bespoke verbs, a
    * program's verbs as one command tree under its root's name, or
@@ -146,8 +147,7 @@ export interface VFSOptions<A extends Accessor = Accessor> {
 export class BaseVFS<A extends Accessor = Accessor> {
   readonly [VFS_BRAND] = true as const
   readonly name: string = 'base'
-  readonly prompt: string = ''
-  readonly writePrompt: string = ''
+  vfsMd = ''
   readonly indexTtl: number = 600
   /**
    * Whether reads of this VFS may be served from / written to the
@@ -257,6 +257,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly searchable: readonly string[] | null = null
   /**
+   * `filesContaining` answers only a whole-word search (grep -w, rg -w);
+   * any other pattern reads every file.
+   */
+  readonly wholeWordSearch: boolean = false
+  /**
    * The most files one command walks under a directory of this mount: grep
    * -r, rg and git grep stop reading there, find, ls -R, tree, du and
    * getfattr -R stop listing, git status and the other verbs that walk a
@@ -292,8 +297,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
       this.name = options.name
     }
     if (options.accessor !== undefined) this.accessor = options.accessor
-    if (options.prompt !== undefined) this.prompt = options.prompt
-    if (options.writePrompt !== undefined) this.writePrompt = options.writePrompt
+    if (options.vfsMd !== undefined) this.vfsMd = options.vfsMd
     if (options.cachesReads !== undefined) this.cachesReads = options.cachesReads
     if (options.sizesAlwaysKnown !== undefined) this.sizesAlwaysKnown = options.sizesAlwaysKnown
     if (options.supportsSnapshot !== undefined) this.supportsSnapshot = options.supportsSnapshot

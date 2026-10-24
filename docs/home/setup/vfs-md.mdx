@@ -1,0 +1,95 @@
+---
+title: VFS.md and SKILL.md
+description: Two Markdown files that tell an agent what each path holds and which commands work there.
+icon: file-lines
+---
+
+A workspace describes itself to an agent in two Markdown files, in the
+[VFS.md](https://agentvfs.org/vfs) format:
+
+- **VFS.md** covers the virtual filesystem: every path with its backend and
+  mode, the layout and file formats of each path that has one, which Unix
+  commands each path supports, and where it differs from a local filesystem.
+- **SKILL.md** covers the registered CLIs, with each one's help.
+
+Both are built from the live workspace and follow a
+[profile](/home/policy/overview): a session's files follow its profile, a
+named profile previews that one, and with neither the workspace's default
+profile applies. A command the profile denies is never named, and neither is
+a path it hides. A command its allow list names only in a longer form, such
+as `rm -f`, still counts, unless that form only asks for `--help` or
+`--version`. Each VFS page shows its VFS.md, such as
+[Gmail](/python/vfs/gmail).
+
+## Get them
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    vfs_md = await ws.vfs_md()
+    skill_md = await ws.skill_md(session_id="agent")
+    preview = await ws.vfs_md(profile="reader")
+    await ws.vfs_md("/VFS.md")
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    const vfsMd = await ws.vfsMd()
+    const skillMd = await ws.skillMd(undefined, { sessionId: 'agent' })
+    const preview = await ws.vfsMd(undefined, { profile: 'reader' })
+    await ws.vfsMd('/VFS.md')
+    ```
+  </Tab>
+  <Tab title="HTTP" icon="globe">
+    ```bash
+    curl http://127.0.0.1:8765/v1/workspaces/demo/vfs-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+
+    curl http://127.0.0.1:8765/v1/workspaces/demo/sessions/agent/skill-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+
+    curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/vfs-md \
+      -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d '{"path":"/VFS.md"}'
+    ```
+  </Tab>
+  <Tab title="CLI" icon="terminal">
+    ```bash
+    mirage workspace vfs-md demo
+    mirage workspace skill-md demo --session agent
+    mirage workspace vfs-md demo --path /VFS.md
+    ```
+  </Tab>
+</Tabs>
+
+A path exposes the file inside the workspace as a live, read-only file, so an
+agent finds it with `cat /VFS.md`, rendered for whichever session reads it.
+See [HTTP](/home/access/http) and [CLI](/home/access/cli) for every option.
+
+## What VFS.md says about a path
+
+The file commands (`ls`, `cat`, `grep`, `find`, `jq` and the rest) read every
+path. What changes files depends on what the path's VFS can do:
+
+| Command | Works where the VFS has |
+| --- | --- |
+| `>`, `tee`, `touch` of a new file, `sed -i` | `write` |
+| `>>`, `tee -a` | `append`, or `write` |
+| `cp` | `write`, or `copy` |
+| `cp -r` | `mkdir`, and `write` or `copy`; or `copy` and `dir_copy` |
+| `mkdir` | `mkdir` |
+| `mv` | `rename` |
+| `rm`, `unlink` | `unlink` |
+| `rm -r` | `rm_r`, or `unlink` and `rmdir` |
+| `rmdir` | `rmdir` |
+| `truncate` | `truncate`, or `write` |
+
+A path where none of them works, and none of its VFS's own commands writes,
+reads `read`, whatever mode it is mounted with. A path's layout is its VFS's [`vfs_md`](/home/setup/custom-vfs#attributes).
+
+A path the VFS answers a search for says so: `grep -r` and `rg` use the
+service's search, some only with `-w`, and only over the files the VFS names
+in `searchable`. A path's own commands, such as `search` on a vector store,
+are listed beside it, and so is its
+[`walk_limit`](/home/integration/search#walk_limit).

@@ -357,11 +357,11 @@ def _capabilities() -> dict[str, dict[str, Any]]:
     mongodb where typescript pins 0, so an ``ls`` of a live schema could
     be ten minutes stale. ``storage_location`` and ``capacity`` are reported as
     "does this class override the base" rather than by value, because the
-    base answers are per-instance identity and UNKNOWN. ``has_prompt`` and
-    ``has_write_prompt`` say whether the mount describes itself to an
-    agent; the text is prose each side words for itself, but its absence is
-    not: node's GitHubVFS carried no prompt, so its file prompt left every
-    GitHub mount out while python and the browser described theirs.
+    base answers are per-instance identity and UNKNOWN. ``has_vfs_md``
+    says whether the mount describes its layout in VFS.md; the text's
+    parity is gated on its own, but its absence belongs here: node's
+    GitHubVFS once carried none, so VFS.md left every GitHub layout out
+    while python and the browser described theirs.
     ``functions`` lists the ``BaseVFS`` functions the class overrides: a
     backend that drops ``read_tree`` quietly falls back to the capped
     readdir walk while its twin lists the subtree in one call, and the
@@ -380,8 +380,7 @@ def _capabilities() -> dict[str, dict[str, Any]]:
             "storage_location": cls.storage_location
             is not BaseVFS.storage_location,
             "capacity": cls.capacity is not BaseVFS.capacity,
-            "has_prompt": bool(cls.prompt),
-            "has_write_prompt": bool(cls.write_prompt),
+            "has_vfs_md": bool(cls.vfs_md),
             "functions": [
                 fn
                 for fn in sorted(VFS_FUNCTIONS)
@@ -389,6 +388,7 @@ def _capabilities() -> dict[str, dict[str, Any]]:
             ],
             "reads_ranges": cls.reads_ranges,
             "local": cls.local,
+            "whole_word_search": cls.whole_word_search,
         }
     return out
 

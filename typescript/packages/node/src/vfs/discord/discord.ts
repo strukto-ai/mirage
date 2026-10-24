@@ -22,7 +22,7 @@ import type {
   DiscordConfigRedacted,
 } from '@struktoai/mirage-core/vfs/discord/config'
 
-import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/discord/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/discord/discord'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
@@ -38,8 +38,7 @@ export class DiscordVFS extends DiscordVFSBase {
   // are rendered at readdir from payloads the listing already fetched, and
   // attachments carry Discord's CDN byte count.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly prompt: string
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string
   readonly config: DiscordConfig
   override readonly accessor: DiscordAccessor
 
@@ -52,7 +51,7 @@ export class DiscordVFS extends DiscordVFSBase {
       new NodeDiscordTransport(config.token, config.baseUrl),
       config,
     )
-    this.prompt = PROMPT + this.accessor.timeRange.prompt()
+    this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()
   }
 
   override getState(): Promise<DiscordVFSState> {

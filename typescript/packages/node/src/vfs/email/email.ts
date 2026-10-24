@@ -23,14 +23,25 @@ import {
   type EmailConfig,
   type EmailConfigRedacted,
 } from '../../core/email/config.ts'
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
+
+export const VFS_MD = `{prefix}
+  <folder>/
+    <yyyy-mm-dd>/
+      <subject>__<uid>.email.json
+      <subject>__<uid>/           # if attachments exist
+        <attachment-filename>
+  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
+
+  <subject> is sanitized (don't construct it; ls the date dir).
+
+  To act on mail (list/search/read/compose/reply/forward), use the
+  himalaya CLI if installed: himalaya --help`
 
 export interface EmailVFSState {
   type: string
@@ -45,8 +56,7 @@ export class EmailVFS extends BaseVFS {
   // attachment's size is its decoded payload length.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 86_400
-  override readonly prompt: string = PROMPT
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string = VFS_MD
   // IMAP search names messages; an attachment is read as usual.
   override readonly searchable: readonly string[] = ['*/*/*.email.json']
   override readonly handed = {
@@ -76,14 +86,8 @@ export class EmailVFS extends BaseVFS {
     return emailReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await emailRead(this.accessor, path, handed?.entry)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return emailRead(this.accessor, path, handed?.entry)
   }
 
   override readMany(
@@ -96,6 +100,15 @@ export class EmailVFS extends BaseVFS {
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return emailStat(this.accessor, path, handed?.entry)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

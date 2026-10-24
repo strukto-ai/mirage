@@ -49,7 +49,42 @@ Fields marked secret are redacted in snapshots.
 The `host` field matches entries in `~/.ssh/config`, so existing SSH
 configurations are automatically picked up.
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with SSH mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md ssh start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `ssh`, write |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. `grep -r` and `rg` use `ssh` search. `wc -l` asks `ssh` instead of reading a file. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md ssh end */}
 
 ```text
 /remote/

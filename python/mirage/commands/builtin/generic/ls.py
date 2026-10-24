@@ -1153,11 +1153,11 @@ async def probe_operand(
                 )
             )
             return Operand(path, None, []), warnings
-        refused: OSError | None = None
+        refused: str | None = None
         try:
             row = await _file_entry(path, own_stat)
         except OSError as stat_exc:
-            row, refused = None, stat_exc
+            row, refused = None, fs_strerror(stat_exc) or str(stat_exc)
         if row is not None:
             return Operand(path, row, []), warnings
         if (
@@ -1171,7 +1171,9 @@ async def probe_operand(
             # GNU 9.7 stats an operand before it opens one: a stat that
             # fails is what it names, and a directory it may not read is
             # worded apart, the entry being there.
-            failed = exc if refused is None else refused
+            reason = (
+                fs_strerror(exc) or str(exc) if refused is None else refused
+            )
             verb = (
                 "cannot open directory"
                 if refused is None and isinstance(exc, PermissionError)
@@ -1179,8 +1181,7 @@ async def probe_operand(
             )
             warnings.append(
                 LsWarning(
-                    f"ls: {verb} '{path.raw_path}': "
-                    f"{fs_strerror(failed) or failed}",
+                    f"ls: {verb} '{path.raw_path}': {reason}",
                     command_line_arg,
                 )
             )

@@ -12,25 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.rs.errors import StreamRefusal as StreamRefusal
     from mirage.rs.stream import open_stream as open_stream
     from mirage.rs.stream import run_stream as run_stream
 
-_EXPORTS = {
-    "StreamRefusal": "mirage.rs.errors",
-    "open_stream": "mirage.rs.stream",
-    "run_stream": "mirage.rs.stream",
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.rs.errors": ("StreamRefusal",),
+    "mirage.rs.stream": ("open_stream", "run_stream"),
 }
-__all__ = list(_EXPORTS)
+__all__ = ["StreamRefusal", "open_stream", "run_stream"]
 
-
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    value = getattr(import_module(_EXPORTS[name]), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

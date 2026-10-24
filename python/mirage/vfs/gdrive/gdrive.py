@@ -47,7 +47,24 @@ from mirage.types import (
 )
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
-from mirage.vfs.gdrive.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  Mirrors Google Drive folder hierarchy. May contain:
+    <name>.gdoc.json    Google Docs    (cat returns gdoc.json - see /gdocs layout)
+    <name>.gsheet.json  Google Sheets  (cat returns gsheet.json - see /gsheets layout)
+    <name>.gslide.json  Google Slides  (cat returns gslide.json - see /gslides layout)
+    <other-files>       PDFs, images, etc. - cat returns raw bytes
+
+  No owned/ vs shared/ split here: gdrive shows the user's full Drive view,
+  including files shared with the user that have been added to My Drive.
+  Shared drives visible to the user are included as top-level directories.
+
+  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
+  Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
+
+  To act on Drive items by id (create, update, export, permissions),
+  use the gws CLI if installed: gws drive --help"""
 
 
 class GoogleDriveVFS(BaseVFS):
@@ -58,7 +75,8 @@ class GoogleDriveVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
+    whole_word_search: bool = True
     supports_snapshot: bool = True
     read_revalidatable: bool = True
 
@@ -192,6 +210,17 @@ class GoogleDriveVFS(BaseVFS):
         parent: FileStat | None = None,
     ) -> None:
         await _truncate(self.accessor, path, length, no_create, entry, parent)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

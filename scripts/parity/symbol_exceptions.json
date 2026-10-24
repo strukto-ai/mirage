@@ -1,9 +1,14 @@
 {
-  "baseline": 3146,
+  "baseline": 3142,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
     "_FileStore": "Python RAM and device stores share a structural mapping contract because device listings return lists rather than dict views; TypeScript uses its native Map surface."
+   }
+  },
+  "utils/loader": {
+   "python_only": {
+    "lazy_exports": "The PEP 562 __getattr__ every Python package barrel binds; TypeScript barrels re-export statically and load nothing lazily."
    }
   },
   "utils/ids": {

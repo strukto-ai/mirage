@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function listMembers(
   accessor: SlackAccessor,
@@ -33,6 +32,6 @@ export async function listMembers(
     query !== undefined && query !== ''
       ? await searchUsers(accessor, query)
       : await listUsers(accessor)
-  const out: ByteSource = ENC.encode(JSON.stringify(users))
+  const out: ByteSource = compactJsonBytes(users)
   return [out, new IOResult()]
 }

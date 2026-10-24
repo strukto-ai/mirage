@@ -105,14 +105,9 @@ class PagesVFS(BaseVFS):
         known = self.accessor.known_sizes
         return [_row(name, child, known) for name, child in node.items()]
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
-        # reads_ranges stays False, so a byte window is cut from the whole
-        # page for us and offset and size can be ignored here.
+    # reads_ranges stays False, so a byte window is cut from the whole page
+    # for us and read takes no offset or size.
+    async def read(self, path: PathSpec) -> bytes:
         node = _node(self.accessor.pages, path.vfs_path)
         if isinstance(node, dict):
             raise IsADirectoryError(path.virtual)
@@ -164,7 +159,7 @@ class WikiVFS(PagesVFS):
         super().__init__(
             name="wiki",
             accessor=self.wiki,
-            prompt="A team wiki rendered as markdown files.",
+            vfs_md="A team wiki rendered as markdown files.",
             commands=[wiki_titles],
             supports_snapshot=True,
         )
@@ -223,7 +218,7 @@ class FeedVFS(PagesVFS):
         super().__init__(
             name="feed",
             accessor=WikiAccessor(FEED, known_sizes=False),
-            prompt="A status feed rendered as markdown.",
+            vfs_md="A status feed rendered as markdown.",
             supports_snapshot=True,
         )
 

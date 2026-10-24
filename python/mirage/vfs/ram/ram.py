@@ -37,7 +37,6 @@ from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.errors import VFSConfigError
-from mirage.vfs.ram.prompt import PROMPT
 from mirage.vfs.ram.store import RAMStore
 
 
@@ -47,7 +46,6 @@ class RAMVFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     index_ttl: float = 0
-    prompt: str = PROMPT
 
     reads_ranges: bool = True
     local: bool = True

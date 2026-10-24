@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.core.mongodb.read import read as _read
 from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.search import (
@@ -28,10 +27,24 @@ from mirage.core.mongodb.stream import last_lines as _last_lines
 from mirage.core.mongodb.stream import line_count as _line_count
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
-from mirage.vfs.mongodb.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  <database>/
+    database.json                  collection and view names
+    collections/<collection>/
+      schema.json                  sampled field types, validator, indexes
+      documents.jsonl              streamed BSON Extended JSON documents
+    views/<view>/
+      schema.json
+      documents.jsonl
+  Read database.json first to discover entities. Use schema.json before
+  reading large document streams; head, tail, wc, grep, rg, and jq understand
+  documents.jsonl; grep and rg fetch only the documents that may match.
+  Unknown stat sizes display as -; wc -c measures bytes and wc -l counts
+  documents on demand. These counts may scan the collection."""
 
 
 class MongoDBVFS(BaseVFS):
@@ -41,7 +54,7 @@ class MongoDBVFS(BaseVFS):
     # A live store: every readdir must hit the backend, so the index is
     # not reused across commands. Mirrors the TypeScript VFS.
     index_ttl: float = 0
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: MongoDBConfig) -> None:
         super().__init__()
@@ -52,13 +65,8 @@ class MongoDBVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         return await _readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path)
-        data = await _read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> ByteSource:
+        return _read_stream(self.accessor, path)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

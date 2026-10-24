@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
 import { redactTrelloConfig } from '../../core/trello/config.ts'
-import { TrelloVFS } from './trello.ts'
+import { TrelloVFS, VFS_MD } from './trello.ts'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -41,8 +41,7 @@ describe('TrelloVFS', () => {
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ apiKey: 'k', apiToken: 't' })
-    expect(typeof r.prompt).toBe('string')
-    expect(typeof r.writePrompt).toBe('string')
+    expect(typeof r.vfsMd).toBe('string')
   })
 
   it('getState() redacts apiKey/apiToken', async () => {
@@ -150,5 +149,11 @@ describe('redactTrelloConfig', () => {
       boardIds: ['b1'],
       baseUrl: 'https://x',
     })
+  })
+})
+
+describe('trello VFS_MD', () => {
+  it('points at the CLI', () => {
+    expect(VFS_MD).toContain('trello --help')
   })
 })

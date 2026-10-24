@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.history import fetch_recent_messages
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -34,7 +33,5 @@ async def read(
         fl.as_str("channel") or "",
         fl.as_int("limit", 20),
     )
-    out = json.dumps(
-        messages, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(messages)
     return out, IOResult()

@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.deliver import deliver
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
@@ -46,7 +45,5 @@ async def send(
         "to": message["To"],
         "subject": message["Subject"],
     }
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult(stderr=warning.encode() if warning else None)

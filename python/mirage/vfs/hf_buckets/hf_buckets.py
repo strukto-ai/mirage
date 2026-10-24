@@ -30,7 +30,6 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
-from mirage.vfs.hf_buckets.prompt import PROMPT
 
 
 class HfBucketsVFS(BaseVFS):
@@ -41,7 +40,6 @@ class HfBucketsVFS(BaseVFS):
     # object size for LFS files); readdir backfills any lister-omitted
     # size with one stat.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
     supports_snapshot: bool = True
     # stat stamps the paths-info xet hash and a read stamps its download's
     # strong ETag, which is that same hash, so a `fresh` probe compares

@@ -50,7 +50,7 @@ class NotesVFS extends BaseVFS<NotesAccessor> {
     super({
       name: 'notes',
       accessor: new NotesAccessor(pages),
-      prompt: 'Read-only notes rendered as UTF-8 text files.',
+      vfsMd: 'Read-only notes rendered as UTF-8 text files.',
       sizesAlwaysKnown: true,
     })
   }

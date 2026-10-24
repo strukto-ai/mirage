@@ -32,8 +32,73 @@ from mirage.utils.generated.google_vocabulary import SLIDES_WORDS
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gslides.config import GSlidesConfig
-from mirage.vfs.gslides.prompt import PROMPT, WRITE_PROMPT
 from mirage.vfs.gslides.slide_entry import make_filename
+
+VFS_MD = """\
+{prefix}
+  owned/
+    <date>_<title>__<presentation-id>.gslide.json
+  shared/
+    <date>_<title>__<presentation-id>.gslide.json
+
+  Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+    <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
+    <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+    <presentation-id>  Google Slides presentation ID
+
+  Buckets:
+    owned/   presentations you created
+    shared/  presentations shared with you by others
+             - does NOT include presentations you own and shared with others;
+               those are still in owned/.
+
+  gslide.json structure (matches the Google Slides API presentations.get response):
+    {
+      "presentationId": "...",
+      "title": "...",
+      "pageSize": { "width": {...}, "height": {...} },
+      "slides": [
+        {                                      # one element per slide
+          "objectId": "...",
+          "pageElements": [
+            {
+              "objectId": "...",
+              "shape": {
+                "shapeType": "TEXT_BOX",
+                "text": {
+                  "textElements": [
+                    { "textRun": { "content": "the actual text\\n",
+                                   "style": {...} } }
+                  ]
+                }
+              }
+            },
+            { "image": {...} },
+            { "table": {...} }
+          ]
+        }
+      ],
+      "masters": [...],
+      "layouts": [...]
+    }
+
+  Useful jq paths:
+    .title
+    .slides | length                                                    # slide count
+    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
+    .slides[0].objectId
+
+  Delete, on a `write` path:
+    rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive
+    rm -f <path>                             # ignore if missing
+    Only operates on .gslide.json files; owned/ and shared/ themselves
+    cannot be removed.
+
+  Rename to a new title, on a `write` path:
+    mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
+       {prefix}/owned/<date>_<new>__<id>.gslide.json
+    Keep the folder, the date and the id, and spell the title the way
+    the listing does (spaces->_); any other name is refused."""
 
 
 class GSlidesVFS(BaseVFS):
@@ -46,8 +111,8 @@ class GSlidesVFS(BaseVFS):
     index_ttl: float = 86_400
     # Reads stamp listing metadata; a fresh stat checks Drive by file ID.
     read_revalidatable: bool = True
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
+    whole_word_search: bool = True
 
     # Every file here is a rendering; there are no stored bytes to read.
     renderers: Mapping[str, str] = MappingProxyType(
@@ -78,6 +143,17 @@ class GSlidesVFS(BaseVFS):
         """
         data = await _read(self.accessor, path)
         return slice_window(data, offset, size)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

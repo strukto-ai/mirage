@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.workspace.mount.namespace.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
@@ -30,10 +31,8 @@ __all__ = [
     "RedisNamespaceStore",
 ]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.mount.namespace.redis": ("RedisNamespaceStore",),
+}
 
-def __getattr__(name: str) -> "type[RedisNamespaceStore]":
-    if name == "RedisNamespaceStore":
-        from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
-
-        return RedisNamespaceStore
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

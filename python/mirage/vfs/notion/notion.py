@@ -17,23 +17,47 @@ from typing import Any
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.read import first_lines as _first_lines
-from mirage.core.notion.read import read as _read
 from mirage.core.notion.read import read_stream as _read_stream
 from mirage.core.notion.readdir import readdir as _readdir
 from mirage.core.notion.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.notion.prompt import PROMPT, WRITE_PROMPT
+
+VFS_MD = """\
+{prefix}
+  pages/
+    <page-title>__<page-id>/
+      page.json
+      <child-page-title>__<child-id>/
+        page.json
+  databases/
+    <database-title>__<database-id>/
+      database.json
+      <data-source-title>__<data-source-id>/
+        data_source.json
+        rows.jsonl
+  Hierarchical page tree plus shared databases. cat page.json shows
+  metadata, the page body rendered as markdown, and raw blocks (nested
+  blocks under "children"). A database is a container plus one or more
+  data sources: database.json holds the container's identity and its
+  data_sources stubs, data_source.json holds the typed property schema,
+  and rows.jsonl holds the rows, one JSON line each: the row page's
+  page.json without the body, plus "path", that page.json's path below
+  the data source dir. Row dirs are not listed; open one by its path.
+
+  Titles are sanitized; don't construct paths: ls the parent dir, or
+  take a row's "path" from rows.jsonl.
+  ntn takes ids as positional operands, not flags: ntn pages get
+  <page-id>, ntn datasources query <data-source-id>, ntn datasources
+  resolve <database-id>."""
 
 
 class NotionVFS(BaseVFS):
     accessor: NotionAccessor
     name: str = VFSName.NOTION
     caches_reads: bool = True
-    prompt: str = PROMPT
-    write_prompt: str = WRITE_PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: NotionConfig) -> None:
         super().__init__()
@@ -50,16 +74,9 @@ class NotionVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry, parent)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, parent)
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, parent)
 
     async def first_lines(
         self, path: PathSpec, n: int, parent: FileStat | None = None

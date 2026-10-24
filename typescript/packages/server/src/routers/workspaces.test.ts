@@ -231,6 +231,33 @@ describe('workspaces router', () => {
     }
   })
 
+  it('GET /v1/workspaces/:id answers 404 while the workspace is deleted', async () => {
+    const app = buildApp()
+    const payload = {
+      config: { workspace_id: 'going', mounts: { '/': { vfs: 'ram', mode: 'write' } } },
+    }
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      await app.inject({ method: 'POST', url: '/v1/workspaces', payload })
+      const runner = app.registry.get('going').runner
+      const stop = runner.stop.bind(runner)
+      vi.spyOn(runner, 'stop').mockImplementationOnce(async (options) => {
+        await stop(options)
+        await gate
+      })
+      const removal = app.registry.remove('going')
+      const during = await app.inject({ method: 'GET', url: '/v1/workspaces/going' })
+      release()
+      await removal
+      expect(during.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('POST /v1/workspaces installs the config clis section', async () => {
     // The route used to enumerate Workspace options by hand and omit
     // `clis`, so a yaml clis block parsed, validated, and installed

@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gslides.config import GSlidesConfig
 from mirage.vfs.gslides.slide_entry import SlideEntry
 
@@ -22,10 +23,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GSlidesConfig", "SlideEntry", "GSlidesVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gslides.gslides": ("GSlidesVFS",),
+}
 
-def __getattr__(name: str) -> "type[GSlidesVFS]":
-    if name == "GSlidesVFS":
-        from mirage.vfs.gslides.gslides import GSlidesVFS
-
-        return GSlidesVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

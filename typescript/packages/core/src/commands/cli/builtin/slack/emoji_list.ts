@@ -17,8 +17,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function emojiList(
   accessor: SlackAccessor,
@@ -27,6 +26,6 @@ export async function emojiList(
   _ctx: Context,
 ): Promise<CommandFnResult> {
   const emoji = await listEmoji(accessor)
-  const out: ByteSource = ENC.encode(JSON.stringify(emoji))
+  const out: ByteSource = compactJsonBytes(emoji)
   return [out, new IOResult()]
 }

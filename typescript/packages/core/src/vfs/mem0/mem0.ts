@@ -5,14 +5,15 @@ import { Mem0Accessor } from '../../accessor/mem0.ts'
 import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir } from '../../core/mem0/readdir.ts'
-import { read, readStream } from '../../core/mem0/read.ts'
+import { readStream } from '../../core/mem0/read.ts'
 import { stat } from '../../core/mem0/stat.ts'
 import { searchMany } from '../../core/mem0/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  <memory-id>.json`
 
 export interface Mem0VFSState {
   type: string
@@ -31,7 +32,7 @@ export class Mem0VFS extends BaseVFS {
   // serves those same bytes, so sizes are exact by construction.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = false
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly accessor: Mem0Accessor
 
   private readonly config: Mem0Config
@@ -48,15 +49,9 @@ export class Mem0VFS extends BaseVFS {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return readStream(this.accessor, path, handed?.entry)
-    const data = await read(this.accessor, path, handed?.entry)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return readStream(this.accessor, path, handed?.entry)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

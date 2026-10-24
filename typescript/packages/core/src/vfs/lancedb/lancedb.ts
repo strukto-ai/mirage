@@ -16,9 +16,16 @@ import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { filesContaining } from '../../core/lancedb/search.ts'
 import { SEARCH, read, readdir, stat } from '../../core/lancedb/tree.ts'
 import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
+
+export const VFS_MD = `This mount is a LanceDB table exposed as a filesystem.
+
+Directories are the configured group-by columns; descending narrows a filter.
+Each matching row is a <id>.md card plus a <id>.<ext> blob file. For semantic
+search use the search command, which returns ranked rows as canonical file
+paths with a score, e.g. search "red running shoes" /mount then cat one of the
+returned <path>.md files. Use ls/cd/cat/tree/find/wc as usual; grep/rg stay
+lexical. Quote queries that contain spaces.`
 
 /**
  * LanceDB's functions over its accessor, which a host package builds
@@ -29,14 +36,8 @@ export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
     return readdir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return read(this.accessor, path)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

@@ -99,7 +99,7 @@ class TimeRange:
             first += timedelta(days=1)
         return out
 
-    def prompt(self) -> str:
+    def vfs_md(self) -> str:
         start = (
             datetime.fromtimestamp(self.start, timezone.utc).isoformat()
             if self.start is not None

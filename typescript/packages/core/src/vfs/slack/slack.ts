@@ -27,12 +27,45 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `{prefix}
+  channels/
+    <channel-name>__<channel-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl                # messages for that date
+        files/                    # attachments shared that day (may be empty)
+          <name>__<F-id>.<ext>    # cat to download bytes
+  dms/
+    <user-name>__<dm-id>/
+      <yyyy-mm-dd>/
+        chat.jsonl
+        files/
+          <name>__<F-id>.<ext>
+  users/
+    <username>__<user-id>.json    # user profile
+  Naming: channel/DM/user directory names are \`<display-name>__<id>\`.
+  The display name keeps the original spelling from Slack; only \`/\` is
+  replaced with \`∕\` (U+2215) so paths don't break. Quote names
+  containing spaces in shell commands. Always ls the parent dir first
+  to discover exact entry names (they include IDs).
+  Without time bounds, bare channel listings show the latest 90 days
+  ending at the newest message. Date globs can discover earlier days.
+  With start_time/end_time, listings cover that scope; messages and their
+  attachments outside it are absent, including through direct paths.
+  Users and channel metadata remain available as context.
+  On a time-scoped mount grep and rg see only the in-scope files.
+  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
+  .user is a user ID (U…), not a username; resolve it through
+  users/<username>__<user-id>.json and filter messages by the ID.
+  Unless walk_limit is -1, grep -rw and rg -w read only the channel
+  and DM days Slack search names; attachments under files/ are always read.`
+
 /**
  * Slack's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
 export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly readsRanges: boolean = true
+  override readonly wholeWordSearch: boolean = true
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],
@@ -90,6 +123,15 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return slackStat(this.accessor, path, handed?.entry, handed?.parent)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

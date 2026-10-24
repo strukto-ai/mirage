@@ -52,7 +52,6 @@ from mirage.types import (
 )
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
-from mirage.vfs.disk.prompt import PROMPT
 from mirage.vfs.errors import VFSConfigError
 
 
@@ -62,7 +61,6 @@ class DiskVFS(BaseVFS):
     sizes_always_known: bool = True
     accessor: DiskAccessor
     index_ttl: float = 60
-    prompt: str = PROMPT
     # Each folder's listing is stored at the folder's own version (inode
     # and change times, mirage.core.disk.listing_version), so a fresh
     # mount re-lists only the folders that changed. An instance built with
