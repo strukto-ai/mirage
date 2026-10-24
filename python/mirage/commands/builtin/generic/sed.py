@@ -1,3 +1,4 @@
+import json
 import posixpath
 import re
 from collections.abc import (
@@ -9,133 +10,27 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass
-from functools import partial
 
-from mirage.commands.builtin.constants import (
-    SED_MISSING_SCRIPT,
-    SED_NO_INPUT_EXIT,
-    SED_NO_INPUT_FILES,
-)
-from mirage.commands.builtin.generic_bind.dispatch import caller_stream
-from mirage.commands.builtin.sed_exec import (
-    SED_LINE_LENGTH,
-    SedFileContent,
-    SedFileSource,
-    SedFileText,
-    SedInput,
-    SedMachine,
-    SedRunOptions,
-    read_failed,
-    unreadable_file,
-)
-from mirage.commands.builtin.sed_script import (
-    SED_STDERR,
-    SED_STDOUT,
-    SedError,
-    SedProgram,
-    SedScriptPiece,
-    compile_script,
-)
+from mirage.commands.builtin.constants import SED_MISSING_SCRIPT
 from mirage.commands.builtin.utils.links import dispatch_of
-from mirage.commands.builtin.utils.operands import (
-    materialized_read,
-    normalized_read,
-)
-from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
+from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.stream import is_stdin
+from mirage.commands.builtin.utils.stream_host import StreamHost
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import read_fail_exit_code
-from mirage.context.session_context import Caller, current_caller
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eacces, fs_strerror
+from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
-from mirage.errors.render import fs_error_line
-from mirage.errors.types import FsCondition, StaleWriteError
-from mirage.io.cooperative import chunks
-from mirage.io.spool import ByteSpool
-from mirage.io.stream import close_quietly, ensure_stream, prime_stream
+from mirage.errors.types import FsCondition
+from mirage.io.stream import drain
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.io.writer import ByteWriter
-from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import (
-    byte_view,
-    decode_text,
-    encode_text,
-    from_byte_view,
-    utf8_locale,
-)
-from mirage.types import PathSpec, PolymorphicReadFn
-from mirage.utils.path import resolve_path
+from mirage.rs.stream import open_stream, serve_requests
+from mirage.shell.bytes import byte_view, encode_text, utf8_locale
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
-WriteBytes = Callable[..., Awaitable[None]]
-
-
-@dataclass
-class _ScriptFiles:
-    """How sed reaches the files its script names.
-
-    ``r``, ``R``, ``w``, ``W`` and ``s///w`` go through the workspace
-    dispatcher when there is one, so a name on another mount works as it
-    does for awk's redirections, and through this mount's own read and
-    write otherwise.
-    """
-
-    read_stream: PolymorphicReadFn
-    write_bytes: WriteBytes | None
-    dispatch: DispatchFn | None
-    cwd: str
-    caller: Caller
-
-    def spec(self, name: str) -> PathSpec:
-        resolved = resolve_path(name, self.cwd)
-        if self.dispatch is not None:
-            return PathSpec.from_str_path(name, cwd=self.cwd)
-        slash = resolved.rfind("/")
-        return PathSpec(
-            virtual=resolved,
-            directory=resolved[: slash + 1] if slash >= 0 else "/",
-            resolved=True,
-            vfs_path=resolved.strip("/"),
-        )
-
-    async def read(self, name: str) -> bytes:
-        return await materialize(self.stream(name))
-
-    async def stream(self, name: str) -> AsyncIterator[bytes]:
-        path = self.spec(name)
-        source = (
-            normalized_read(self.read_stream)(path)
-            if self.dispatch is None
-            else caller_stream(self.dispatch, self.caller, path)
-        )
-        async with aclosing(chunks(source)) as data:
-            async for part in data:
-                yield part
-
-    async def write(
-        self,
-        name: str,
-        data: ByteSource,
-        *,
-        atomic: bool = False,
-        append: bool = False,
-    ) -> None:
-        path = self.spec(name)
-        if self.dispatch is not None:
-            if append:
-                await self.dispatch("append", path, data=data)
-            else:
-                await self.dispatch("write", path, data=data, atomic=atomic)
-            return
-        if self.write_bytes is None:
-            raise eacces(name)
-        async with ByteSpool() as spool:
-            if append:
-                await spool.fill(normalized_read(self.read_stream)(path))
-            await spool.fill(data)
-            await self.write_bytes(path, spool.stream())
+SED_LINE_LENGTH = 70
 
 
 def _line_length(raw: str | None) -> int:
@@ -159,406 +54,45 @@ def _line_length(raw: str | None) -> int:
     return 0 if width >> 31 else width
 
 
-def _open_failure(name: str, exc: BaseException) -> str:
-    strerror = fs_strerror(exc) or posix_phrase(FsCondition.EACCES)
-    return f"sed: couldn't open file {name}: {strerror}\n"
-
-
-def _edit_failure(name: str, exc: BaseException) -> str:
-    strerror = fs_strerror(exc) or str(exc)
-    return f"sed: couldn't edit {name}: {strerror}\n"
-
-
-async def _open_write_files(
-    names: Sequence[str], access: _ScriptFiles
-) -> str | None:
-    """Truncate the ``w`` files as GNU opens them when it compiles.
-
-    In order; the first that cannot be opened ends the run with GNU's
-    ``couldn't open file`` line, exit 4.
+def _served_here(path: PathSpec) -> bool:
+    """Every operand reads through the mount sed runs on, which resolved
+    it.
 
     Args:
-        names (Sequence[str]): the files, in the order they were opened.
-        access (_ScriptFiles): how sed reaches the files its script names.
+        path (PathSpec): the operand.
     """
-    for name in names:
-        if name in (SED_STDOUT, SED_STDERR):
-            continue
-        try:
-            await access.write(name, b"")
-        except FS_ERRORS as exc:
-            return _open_failure(name, exc)
-    return None
-
-
-async def _read_script_files(
-    names: Sequence[str],
-    access: _ScriptFiles,
-    utf8: bool = False,
-    streamed: bool = False,
-) -> dict[str, SedFileContent]:
-    """Read the files ``r`` or ``R`` names.
-
-    A file that cannot be opened reads as empty, as POSIX asks; any other
-    failure, a directory's included, is a read error GNU reports and exits
-    4 on when it gets there, whether the file streams or is read here.
-
-    Args:
-        names (Sequence[str]): the file names.
-        access (_ScriptFiles): how sed reaches the files its script names.
-        utf8 (bool): read them as text, under a UTF-8 locale.
-    """
-    files: dict[str, SedFileContent] = {}
-    for name in names:
-        if streamed:
-            files[name] = SedFileSource(partial(access.stream, name))
-            continue
-        try:
-            files[name] = SedFileText(byte_view(await access.read(name), utf8))
-        except Exception as exc:
-            if not read_failed(exc):
-                raise
-            files[name] = unreadable_file(name, exc)
-    return files
-
-
-class _ScriptWrites:
-    """Drain sed's named outputs, one bounded writer per file for the run.
-
-    A writer stays open until the run ends: finishing one at each switch
-    between files would make every switch an append, which a store
-    without native appends rewrites whole.
-
-    GNU opens each spelling of a file (``w out``, ``w ./out``) as its own
-    buffered stream from offset 0, and the first opened is flushed last:
-    its bytes win, and a later spelling's show only past its end. The
-    first spelling writes here; the others keep only the bytes past what
-    it has written so far, for that tail.
-    """
-
-    def __init__(
-        self, machine: SedMachine, access: _ScriptFiles, defer: bool
-    ) -> None:
-        self.machine = machine
-        self.defer = defer
-        self.access = access
-        self.writers: dict[str, ByteWriter] = {}
-        self.failed: set[str] = set()
-        self.edited: set[str] = set()
-        self.errors = ""
-        self.first: dict[str, str] = {}
-        self.later: dict[str, ByteSpool] = {}
-        self.deferred: dict[str, ByteSpool] = {}
-        self.sent: dict[str, int] = {}
-        for name in machine.wfiles:
-            if self.first.setdefault(access.spec(name).virtual, name) != name:
-                self.later[name] = ByteSpool()
-
-    async def flush(self, final: bool = False) -> None:
-        for name, out in self.machine.wfiles.items():
-            if not out.chunks:
-                continue
-            data = from_byte_view("".join(out.chunks), self.machine.opts.utf8)
-            out.chunks.clear()
-            path = self.access.spec(name).virtual
-            if name in self.failed or path in self.edited:
-                continue
-            if name in self.later:
-                await self.later[name].append(data)
-            elif self.defer:
-                if name not in self.deferred:
-                    self.deferred[name] = ByteSpool()
-                await self.deferred[name].append(data)
-            else:
-                await self._send(name, data)
-        if final:
-            deferred, self.deferred = self.deferred, {}
-            for name, spool in deferred.items():
-                async with spool:
-                    if self.access.spec(name).virtual not in self.edited:
-                        async for data in spool.stream():
-                            await self._send(name, data)
-
-    async def _send(self, name: str, data: bytes) -> None:
-        writer = self.writers.get(name)
-        if writer is None:
-            writer = self.writers[name] = ByteWriter(
-                partial(self.access.write, name, append=True)
-            )
-        try:
-            await writer.write(data)
-            self.sent[name] = self.sent.get(name, 0) + len(data)
-        except FS_ERRORS as exc:
-            self._failed(name, exc)
-            del self.writers[name]
-            await writer.abort()
-
-    def _failed(self, name: str, exc: BaseException) -> None:
-        self.failed.add(name)
-        self.errors += _open_failure(name, exc)
-
-    async def finish(self) -> None:
-        for name, spool in self.later.items():
-            path = self.access.spec(name).virtual
-            first = self.first[path]
-            if first not in self.failed and path not in self.edited:
-                async for data in spool.stream(self.sent.get(first, 0)):
-                    await self._send(first, data)
-        writers, self.writers = self.writers, {}
-        for name, writer in writers.items():
-            try:
-                await writer.finish()
-            except FS_ERRORS as exc:
-                self._failed(name, exc)
-
-    async def abort(self) -> None:
-        writers, self.writers = self.writers, {}
-        try:
-            for writer in writers.values():
-                await writer.abort()
-        finally:
-            for spool in (*self.later.values(), *self.deferred.values()):
-                await spool.close()
-            self.later.clear()
-            self.deferred.clear()
+    return True
 
 
 def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
     return None, IOResult(exit_code=exit_code, stderr=encode_text(stderr))
 
 
-async def sed(
-    paths: list[PathSpec],
-    script: str | Sequence[SedScriptPiece],
-    *,
-    read_stream: PolymorphicReadFn,
-    write_bytes: WriteBytes | None,
-    stdin: ByteSource | None = None,
-    in_place: bool = False,
-    suppress: bool = False,
-    extended: bool = False,
-    separate: bool = False,
-    line_length: int = SED_LINE_LENGTH,
-    dispatch: DispatchFn | None = None,
-    cwd: str = "/",
-    utf8: bool = False,
-) -> tuple[ByteSource | None, IOResult]:
-    """Compile a script and run it over the operands, as GNU sed 4.9.
-
-    Args:
-        paths (list[PathSpec]): the resolved operands.
-        script (str | Sequence[SedScriptPiece]): one expression, or the
-            -e and -f pieces in order.
-        read_stream (PolymorphicReadFn): bound input reader.
-        write_bytes (WriteBytes | None): bound writer, None when the
-            backend is read-only.
-        stdin (ByteSource | None): the input when there are no operands.
-        in_place (bool): -i.
-        suppress (bool): -n.
-        extended (bool): -E.
-        separate (bool): -s.
-        line_length (int): -l.
-        dispatch (DispatchFn | None): the workspace dispatcher, for the
-            files the script names.
-        cwd (str): the directory those names resolve against.
-        utf8 (bool): a UTF-8 locale: the script and the input are
-            characters rather than bytes.
-    """
-    read = normalized_read(read_stream)
-    pieces = (
-        [SedScriptPiece("expr", script)] if isinstance(script, str) else script
-    )
-    access = _ScriptFiles(
-        read_stream if in_place else stdin_stream(read_stream, stdin),
-        write_bytes,
-        dispatch,
-        cwd,
-        current_caller(),
-    )
-    try:
-        program = compile_script(pieces, extended, utf8)
-    except SedError as exc:
-        refused = await _open_write_files(exc.wfiles, access)
-        if refused is not None:
-            return _failed(refused, 4)
-        return _failed(f"{exc}\n", exc.exit_code)
-    refused = await _open_write_files(program.wfiles, access)
-    if refused is not None:
-        return _failed(refused, 4)
-    machine = SedMachine(
-        program,
-        SedRunOptions(
-            suppress=suppress,
-            separate=in_place or separate,
-            line_length=line_length,
-            files=await _read_script_files(
-                program.rfiles, access, utf8, not in_place
-            ),
-            reader_files=await _read_script_files(
-                program.reader_files, access, utf8, not (in_place or separate)
-            ),
-            utf8=utf8,
-        ),
-    )
-    writes = _ScriptWrites(
-        machine,
-        access,
-        in_place or bool(program.rfiles or program.reader_files),
-    )
-    if in_place:
-        try:
-            return await _run_in_place(
-                paths,
-                program,
-                machine,
-                access,
-                read,
-                write_bytes,
-                writes,
-            )
-        finally:
-            await writes.abort()
-
-    stdin_source = ensure_stream(stdin or b"")
-    inputs = [
-        SedInput("-", source=stdin_source)
-        if is_stdin(p)
-        else SedInput(p.raw_path, source=read(p))
-        for p in paths
-    ] or [SedInput("-", source=stdin_source)]
-    io = IOResult()
-
-    async def output() -> AsyncIterator[bytes]:
-        try:
-            async with aclosing(
-                machine.process(inputs, True, writes.flush)
-            ) as chunks:
-                async for chunk in chunks:
-                    yield from_byte_view(chunk, utf8)
-        finally:
-            try:
-                await writes.flush(final=True)
-                await writes.finish()
-            finally:
-                await writes.abort()
-            write_err = writes.errors
-            stderr = machine.stderr() + write_err
-            io.exit_code = machine.exit_code() if not write_err else 4
-            io.stderr = encode_text(stderr) if stderr else None
-
-    return output(), io
-
-
-class _EditAborted(Exception):
-    pass
-
-
-async def _edit_output(
-    machine: SedMachine,
-    path: PathSpec,
-    source: ByteSource,
-    utf8: bool,
-    writes: _ScriptWrites,
+async def _sed_stream(
+    config: Mapping[str, JsonValue], host: StreamHost, io: IOResult
 ) -> AsyncIterator[bytes]:
-    async with aclosing(
-        machine.process(
-            [SedInput(path.raw_path, source=source)], False, writes.flush
-        )
-    ) as output:
-        async for chunk in output:
-            yield from_byte_view(chunk, utf8)
-    if machine.panic_code is not None:
-        raise _EditAborted()
-
-
-async def _run_in_place(
-    paths: list[PathSpec],
-    program: SedProgram,
-    machine: SedMachine,
-    access: _ScriptFiles,
-    read_stream: Callable[..., AsyncIterator[bytes]],
-    write_bytes: WriteBytes | None,
-    writes: _ScriptWrites,
-) -> tuple[ByteSource | None, IOResult]:
-    """GNU -i: each file is its own run.
-
-    Line numbers, ``$``, the hold space and ranges restart, and the whole
-    output of that run replaces the file: ``p`` doubles lines in place,
-    ``q`` truncates, ``a``/``i``/``c`` land their text. The ``w`` files,
-    ``R`` readers and /dev/stdout span the files. A ``q`` stops before the
-    next file; a panic leaves the file it hit untouched.
+    """Run the script, yielding its output as it settles; output closed
+    early still lets what the script wrote to its files land. The engine
+    opens on the first pull, so output closed before one holds none.
 
     Args:
-        paths (list[PathSpec]): the files to edit.
-        program (SedProgram): the compiled script.
-        machine (SedMachine): the compiled script's machine.
-        access (_ScriptFiles): how sed reaches the files its script names.
-        read_stream (Callable): bound streaming reader.
-        write_bytes (WriteBytes | None): bound writer.
-        writes (_ScriptWrites): the script output writers.
+        config (Mapping[str, JsonValue]): the sed engine's configuration.
+        host (StreamHost): serves the inputs and files it reaches.
+        io (IOResult): receives the exit status and stderr.
     """
-    utf8 = machine.opts.utf8
-    if not paths:
-        return _failed(f"{SED_NO_INPUT_FILES}\n", SED_NO_INPUT_EXIT)
-    if write_bytes is None:
-        raise NotImplementedError(
-            "sed: in-place edit (-i) is not supported on this backend"
-        )
-    edited: list[PathSpec] = []
-    err = ""
-    code = 0
-    for p in paths:
-        if machine.stopped():
-            break
-        try:
-            data = await prime_stream(read_stream(p))
-        except FS_ERRORS as exc:
-            err += fs_error_line("sed", p, exc)
-            code = max(code, read_fail_exit_code("sed", exc))
-            if isinstance(exc, IsADirectoryError):
-                break
-            continue
-        try:
-            if edited:
-                # An `r` file edited by an earlier file of this command reads
-                # with its new content.
-                machine.set_files(
-                    await _read_script_files(program.rfiles, access, utf8)
-                )
-            try:
-                writes.edited.add(p.virtual)
-                await access.write(
-                    p.virtual,
-                    _edit_output(machine, p, data, utf8, writes),
-                    atomic=True,
-                )
-            except _EditAborted:
-                break
-            except StaleWriteError as exc:
-                err += _edit_failure(p.raw_path, exc)
-                code = 4
-                break
-        finally:
-            await close_quietly(data)
-        edited.append(p)
-    await writes.flush(final=True)
-    await writes.finish()
-    write_err = writes.errors
-    stderr = err + machine.stderr() + write_err
-    if machine.panic_code is not None:
-        exit_code = machine.panic_code
-    elif write_err or code == 4:
-        exit_code = 4
-    else:
-        exit_code = code or machine.exit_code()
-    stdout = "".join(machine.stdout.chunks)
-    return from_byte_view(stdout, utf8) if stdout else None, IOResult(
-        exit_code=exit_code,
-        stderr=encode_text(stderr) if stderr else None,
-    )
-
-
-__all__ = ["sed"]
+    engine = open_stream("sed", config)
+    try:
+        async with aclosing(serve_requests(engine, host)) as output:
+            async for chunk in output:
+                yield chunk
+    except GeneratorExit:
+        if engine.cancel():
+            await drain(serve_requests(engine, host))
+        raise
+    finally:
+        io.exit_code = engine.status()
+        io.stderr = await host.errors.output()
+        await host.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -605,12 +139,14 @@ def sed_writes(flags: Mapping[str, FlagValue], texts: Sequence[str]) -> bool:
     scripts = fl.as_list("e") or list(texts[:1])
     if not scripts:
         return False
-    pieces = [SedScriptPiece("expr", s) for s in scripts]
-    extended = fl.as_bool("E") or fl.as_bool("r")
-    try:
-        return bool(compile_script(pieces, extended).wfiles)
-    except SedError as exc:
-        return bool(exc.wfiles)
+    engine = open_stream(
+        "sed",
+        {
+            "pieces": [{"text": byte_view(script)} for script in scripts],
+            "extended": fl.as_bool("E") or fl.as_bool("r"),
+        },
+    )
+    return bool(json.loads(engine.metadata())["writes"])
 
 
 def _script_origins(
@@ -697,15 +233,17 @@ async def sed_generic(
     ctx: Context,
     resolve_glob: Callable[..., Awaitable[list[PathSpec]]],
     read_stream: PolymorphicReadFn,
-    write_bytes: WriteBytes | None,
+    writable: bool,
 ) -> tuple[ByteSource | None, IOResult]:
-    """Run sed over the given operands; mirrors sedGeneric.
+    """Run sed over the given operands, as GNU sed 4.9; mirrors
+    sedGeneric.
 
     The script comes from -e expressions and -f script files, compiled
     in option order, when any were given, otherwise from the first
-    positional operand. The default stream-to-stdout path is read-only
-    and works on every backend; only in-place editing needs a write op
-    (#382).
+    positional operand. mirage-rs compiles and runs it; every operand and
+    every file the script names is a request the host serves. The default
+    stream-to-stdout path is read-only and works on every backend; only
+    in-place editing needs a write op (#382).
 
     Args:
         paths (list[PathSpec]): The path operands, unresolved.
@@ -714,40 +252,39 @@ async def sed_generic(
         resolve_glob (Callable[..., Awaitable[list[PathSpec]]]):
             Expands globs against the backend.
         read_stream (PolymorphicReadFn): Bound input reader.
-        write_bytes (WriteBytes | None): Bound writer, None when the
-            backend is read-only.
+        writable (bool): Whether the backend can write, as -i needs.
     """
-    read_bytes = materialized_read(read_stream)
+    read = normalized_read(read_stream)
     parsed = parse_flags(ctx.flags)
     origins = _script_origins(ctx.argv, len(parsed.scripts))
-    pieces: list[SedScriptPiece] = []
+    pieces: list[JsonValue] = []
     for index, part in enumerate(parsed.scripts):
         shown = origins[index] if origins is not None else None
         if isinstance(part, str):
-            pieces.append(
-                SedScriptPiece("expr", part)
-                if shown is None
-                else SedScriptPiece("file", part, shown)
-            )
+            piece: dict[str, JsonValue] = {"text": byte_view(part)}
+            if shown is not None:
+                piece["file"] = byte_view(shown)
+            pieces.append(piece)
             continue
         name = shown if shown is not None else part.raw_path
         try:
-            data = await read_bytes(part)
+            data = await materialize(read(part))
         except FS_ERRORS as exc:
-            return _failed(_open_failure(name, exc), 4)
-        pieces.append(SedScriptPiece("file", decode_text(data), name))
+            strerror = fs_strerror(exc) or posix_phrase(FsCondition.EACCES)
+            return _failed(f"sed: couldn't open file {name}: {strerror}\n", 4)
+        pieces.append(
+            {"text": data.decode("latin-1"), "file": byte_view(name)}
+        )
     flag_script = bool(parsed.scripts)
     if not flag_script and texts:
-        pieces.append(SedScriptPiece("expr", texts[0]))
+        pieces.append({"text": byte_view(texts[0])})
     if not pieces:
         return _failed(f"{SED_MISSING_SCRIPT}\n", 1)
-    if parsed.in_place and write_bytes is None:
+    if parsed.in_place and not writable:
         # A backend with no write op refuses the edit itself, not a file:
         # the line names no operand, so sed's step wording is not it.
-        return None, IOResult(
-            exit_code=1,
-            stderr=b"sed: -i not supported on this backend: "
-            b"Permission denied\n",
+        return _failed(
+            "sed: -i not supported on this backend: Permission denied\n", 1
         )
     operands = list(paths)
     if flag_script:
@@ -755,21 +292,36 @@ async def sed_generic(
         operands = _positional_as_paths(list(texts), ctx.cwd) + operands
     if operands:
         operands = await resolve_glob(operands)
-    cwd = (
-        ctx.cwd.virtual if isinstance(ctx.cwd, PathSpec) else (ctx.cwd or "/")
-    )
-    return await sed(
+    # -i edits `-` as a file; otherwise an operand naming stdin is `-`
+    # to F and to sed's messages.
+    names = [
+        "-" if not parsed.in_place and is_stdin(p) else p.raw_path
+        for p in operands
+    ]
+    config: dict[str, JsonValue] = {
+        "pieces": pieces,
+        "extended": parsed.extended,
+        "utf8": utf8_locale(ctx.env),
+        "quiet": parsed.suppress,
+        "separate": parsed.separate,
+        "in_place": parsed.in_place,
+        "line_length": parsed.line_length,
+        "inputs": [byte_view(name) for name in names],
+        "paths": [byte_view(p.virtual) for p in operands],
+        "cwd": byte_view(ctx.cwd.virtual),
+    }
+    host = StreamHost(
         operands,
-        pieces,
-        read_stream=read_stream,
-        write_bytes=write_bytes,
-        stdin=ctx.stdin,
-        in_place=parsed.in_place,
-        suppress=parsed.suppress,
-        extended=parsed.extended,
-        separate=parsed.separate,
-        line_length=parsed.line_length,
-        dispatch=dispatch_of(ctx),
-        cwd=cwd,
-        utf8=utf8_locale(ctx.env),
+        read,
+        ctx.stdin,
+        dispatch_of(ctx),
+        ctx.cwd,
+        None,
+        _served_here,
+        dash=not parsed.in_place,
     )
+    io = IOResult()
+    return _sed_stream(config, host, io), io
+
+
+__all__ = ["sed_generic", "sed_writes"]

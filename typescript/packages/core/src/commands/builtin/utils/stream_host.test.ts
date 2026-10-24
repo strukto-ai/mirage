@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
+import { Files } from '../../../workspace/files.ts'
 import { StreamHost } from './stream_host.ts'
 
 const ENC = new TextEncoder()
@@ -53,7 +54,7 @@ describe('StreamHost', () => {
     expect(first).toEqual({ reply: {}, data: ENC.encode('one\n') })
     expect((await h.serve({ op: 'read', fd: 1 }, new Uint8Array())).reply).toEqual({ end: true })
     const missing = await h.serve({ op: 'read', fd: 2, path: '/b.txt' }, new Uint8Array())
-    expect(missing.reply).toEqual({ error: 'No such file or directory' })
+    expect(missing.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
   })
 
   it('shares one stdin cursor between readers', async () => {
@@ -69,6 +70,69 @@ describe('StreamHost', () => {
     const served = await h.serve({ op: 'emit', fd: 3 }, new Uint8Array())
     expect(await materialize(served.output ?? null)).toEqual(ENC.encode('held'))
     expect((await h.serve({ op: 'emit', fd: 3 }, new Uint8Array())).output).toBeNull()
+  })
+
+  it('lands a replacement whole once flushed', async () => {
+    const files = new Map<string, Uint8Array>([['/out', ENC.encode('old')]])
+    const dispatch = async (
+      op: string,
+      p: PathSpec,
+      args: readonly unknown[] = [],
+    ): Promise<[unknown, IOResult]> => {
+      if (p.virtual === '/ro') throw Object.assign(new Error('/ro'), { code: 'EACCES' })
+      const body = await materialize((args[0] ?? new Uint8Array()) as ByteSource)
+      const kept = op === 'append' ? (files.get(p.virtual) ?? new Uint8Array()) : new Uint8Array()
+      files.set(p.virtual, new Uint8Array([...kept, ...body]))
+      return [null, new IOResult()]
+    }
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    } as unknown as Context
+    const h = new StreamHost(
+      [],
+      () => parts(),
+      ctx,
+      () => true,
+    )
+    await h.serve({ op: 'write', path: '/out', atomic: true }, ENC.encode('new '))
+    await h.serve({ op: 'spool', fd: 4 }, ENC.encode('tail'))
+    await h.serve({ op: 'write', path: '/out', append: true, spool: 4 }, new Uint8Array())
+    expect(files.get('/out')).toEqual(ENC.encode('old'))
+    expect((await h.serve({ op: 'flush', path: '/out' }, new Uint8Array())).reply).toEqual({})
+    expect(files.get('/out')).toEqual(ENC.encode('new tail'))
+    const refused = await h.serve({ op: 'write', path: '/ro', atomic: true }, new Uint8Array())
+    expect(refused.reply).toEqual({ error: 'Permission denied', errno: 'EACCES' })
+    expect((await h.serve({ op: 'flush' }, new Uint8Array())).reply).toEqual({})
+    await h.close()
+  })
+
+  it('reads a file a script names, never stdin', async () => {
+    const h = host({}, parts('p\n'))
+    const read = await h.serve({ op: 'read', fd: 1, path: '-', file: true }, new Uint8Array())
+    expect(read.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
+  })
+
+  it('lets a stalled read lose to the abort', async () => {
+    const controller = new AbortController()
+    const stalled = (): AsyncIterable<Uint8Array> => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+      }),
+    })
+    const ctx = {
+      stdin: null,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      signal: controller.signal,
+    } as unknown as Context
+    const h = new StreamHost([spec('/a.txt')], stalled, ctx, () => true)
+    const pending = h.serve({ op: 'read', fd: 1, path: '/a.txt', operand: 1 }, new Uint8Array())
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await h.close()
   })
 
   it('refuses what needs a workspace outside one', async () => {

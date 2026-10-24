@@ -5,12 +5,11 @@ use super::compile::{
     RSTART, SUBSEP, Var,
 };
 use super::format::sprintf;
-use super::io::{
-    Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, Request, STDERR_NAME, STDOUT_NAMES,
-};
+use super::io::{Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, STDERR_NAME, STDOUT_NAMES};
 use super::parser::{Cmp, GetlineKind, RedirKind};
 use super::text::{Regexes, split, split_assignment, substitute, substr};
 use super::value::{MAX_LEN, Value, compare, format_num, strnum, to_int};
+use crate::request::{Opening, Request, WriteMode};
 
 const MAX_CALL_DEPTH: usize = 100;
 
@@ -1033,7 +1032,10 @@ impl Machine {
             self.read_operand = true;
             self.start_file(operand.clone());
             let fd = self.io.fd();
-            self.io.main = Some(Reader::new(fd, Some((operand, Some(self.arg_index)))));
+            self.io.main = Some(Reader::new(
+                fd,
+                Some((operand, Opening::Operand(self.arg_index))),
+            ));
             return Ok(true);
         }
         if self.read_operand {
@@ -1042,7 +1044,7 @@ impl Machine {
         self.read_operand = true;
         self.start_file(b"-".to_vec());
         let fd = self.io.fd();
-        self.io.main = Some(Reader::new(fd, Some((b"-".to_vec(), None))));
+        self.io.main = Some(Reader::new(fd, Some((b"-".to_vec(), Opening::Name))));
         Ok(true)
     }
 
@@ -1139,7 +1141,7 @@ impl Machine {
                 let rs = special(&self.globals, RS).into_owned();
                 if !self.io.files_in.contains(&name) {
                     let fd = self.io.fd();
-                    let reader = Reader::new(fd, Some((name.clone(), None)));
+                    let reader = Reader::new(fd, Some((name.clone(), Opening::Name)));
                     self.io.files_in.insert(name.clone(), reader);
                 }
                 let reader = self.io.files_in.get_mut(&name).expect("just opened");
@@ -1179,7 +1181,7 @@ impl Machine {
                     self.io
                         .pipes_in
                         .insert(command.clone(), (Reader::new(fd, None), 0.0));
-                    self.io.push(Request::Run {
+                    self.io.run(Request::Run {
                         command,
                         stdin: None,
                         stdout: Some(fd),
@@ -1273,7 +1275,7 @@ impl Machine {
                     if kind == RedirKind::File {
                         self.io.push(Request::Write {
                             path: name.clone(),
-                            append: false,
+                            mode: WriteMode::Truncate,
                             data: Vec::new(),
                         });
                         return self.wait(1);
@@ -1318,7 +1320,7 @@ impl Machine {
             });
         }
         self.io.send_files();
-        self.io.push(Request::Run {
+        self.io.run(Request::Run {
             command,
             stdin: Some(pipe.fd),
             stdout: None,
@@ -1411,7 +1413,7 @@ impl Machine {
         if self.stage == 0 {
             let command = self.top_text();
             self.io.before_command();
-            self.io.push(Request::Run {
+            self.io.run(Request::Run {
                 command,
                 stdin: None,
                 stdout: None,

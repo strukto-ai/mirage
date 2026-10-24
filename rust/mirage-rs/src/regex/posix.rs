@@ -205,6 +205,16 @@ impl Posix {
     /// search starts one unit on.
     pub(crate) fn all(&mut self, hay: &[u8]) -> Vec<Spans> {
         let mut out = Vec::new();
+        self.each(hay, |found| {
+            out.push(found);
+            true
+        });
+        out
+    }
+
+    /// The matches `all` finds, each handed to `visit` as it is found,
+    /// until `visit` answers false.
+    pub(crate) fn each(&mut self, hay: &[u8], mut visit: impl FnMut(Spans) -> bool) {
         let mut at = 0;
         let mut previous = None;
         while at <= hay.len() {
@@ -223,7 +233,9 @@ impl Posix {
                     None => break,
                 }
             }
-            out.push(found);
+            if !visit(found) {
+                break;
+            }
             previous = Some(stop);
             at = if stop > start {
                 stop
@@ -234,7 +246,6 @@ impl Posix {
                 }
             };
         }
-        out
     }
 
     /// How many times the pattern matches `hay` as git counts under

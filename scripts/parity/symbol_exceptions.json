@@ -1,5 +1,5 @@
 {
-  "baseline": 3096,
+  "baseline": 3094,
  "modules": {
   "vfs/ram/store": {
    "python_only": {

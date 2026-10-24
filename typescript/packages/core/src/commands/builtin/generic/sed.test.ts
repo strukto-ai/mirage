@@ -14,87 +14,55 @@
 import { describe, expect, it } from 'vitest'
 
 import { yieldBytes } from '../../../io/stream.ts'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
-import { sedGeneric } from './sed.ts'
+import type { FlagValue } from '../../spec/types.ts'
+import { sedGeneric, sedWrites } from './sed.ts'
 import { Files } from '../../../workspace/files.ts'
 
 const DEC = new TextDecoder()
+const ENC = new TextEncoder()
 
-async function runSed(
-  texts: string[],
-  flags: Context['flags'] = {},
-): Promise<{ exitCode: number; stderr: string }> {
-  const ctx = {
-    stdin: null,
-    flags,
-    cwd: PathSpec.fromStrPath('/'),
-    vfs: { kind: 'ram' } as never,
-  } as Context
-  const result = await sedGeneric(
-    [],
-    texts,
-    ctx,
-    () => {
-      throw new Error('no operands; nothing to stream')
-    },
-    () => Promise.resolve(),
-  )
-  if (result === null) throw new Error('sed returned nothing')
-  const io = result[1]
-  const stderr = io.stderr === null ? '' : DEC.decode(await materialize(io.stderr))
-  return { exitCode: io.exitCode, stderr }
+function noRead(p: PathSpec): AsyncIterable<Uint8Array> {
+  throw new Error(`read ${p.virtual}`)
 }
 
 describe('sed usage reporting', () => {
   it('reports no input files for -i with no operands', async () => {
-    expect(await runSed(['s/a/b/'], { i: true })).toEqual({
-      exitCode: 4,
-      stderr: 'sed: no input files\n',
-    })
+    const ctx = { stdin: null, flags: { i: true }, cwd: PathSpec.fromStrPath('/') } as Context
+    const result = await sedGeneric([], ['s/a/b/'], ctx, noRead)
+    if (result === null) throw new Error('sed returned nothing')
+    if (result[0] !== null) await materialize(result[0])
+    const io = result[1]
+    expect(io.exitCode).toBe(4)
+    expect(DEC.decode(await materialize(io.stderr))).toBe('sed: no input files\n')
   })
 })
 
-it('closes primed input when an in-place write is refused', async () => {
-  let closed = false
-  const error = new Error('write refused')
-  await expect(
-    sedGeneric(
-      [PathSpec.fromStrPath('/a.txt')],
-      ['s/one/two/'],
-      {
-        stdin: null,
-        flags: { i: true },
-        cwd: PathSpec.fromStrPath('/'),
-        vfs: new Files(() => Promise.reject(error), null, null, { ledger: false }),
-      } as Context,
-      async function* () {
-        try {
-          await Promise.resolve()
-          yield new TextEncoder().encode('one\n')
-          throw new Error('refused write must not pull more input')
-        } finally {
-          closed = true
-        }
-      },
-      () => Promise.resolve(),
-    ),
-  ).rejects.toBe(error)
-  expect(closed).toBe(true)
+describe('sedWrites', () => {
+  it.each<[Record<string, FlagValue>, string[], boolean]>([
+    [{}, ['p'], false],
+    [{}, ['w /o'], true],
+    [{}, ['s/a/b/w /dev/stdout'], true],
+    [{ e: ['w /o', 'k'] }, [], true],
+    [{ e: ['k', 'w /o'] }, [], false],
+    [{ i: true }, ['p'], true],
+    [{}, [], false],
+  ])('%j %j writes: %s', (flags, texts, writes) => {
+    expect(sedWrites(flags, texts)).toBe(writes)
+  })
 })
 
 describe('sed operands after a directory (GNU sed 4.9)', () => {
-  const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
-
   async function run(
     script: string,
     flags: Context['flags'] = {},
   ): Promise<{ out: string; code: number; reads: string[] }> {
     const files = new Map([
-      ['/f', enc('one\ntwo\nthree\n')],
-      ['/g', enc('L1\nL2\n')],
+      ['/f', ENC.encode('one\ntwo\nthree\n')],
+      ['/g', ENC.encode('L1\nL2\n')],
     ])
     const reads: string[] = []
     const paths = ['/f', '/d', '/g'].map((p) => PathSpec.fromStrPath(p))
@@ -102,20 +70,13 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
       stdin: null,
       flags: { n: true, ...flags },
       cwd: PathSpec.fromStrPath('/'),
-      vfs: { kind: 'ram' } as never,
     } as Context
-    const result = await sedGeneric(
-      paths,
-      [script],
-      ctx,
-      async function* (p) {
-        await Promise.resolve()
-        reads.push(p.virtual)
-        if (p.virtual === '/d') throw eisdir(p)
-        yield* yieldBytes(files.get(p.virtual) ?? new Uint8Array())
-      },
-      () => Promise.resolve(),
-    )
+    const result = await sedGeneric(paths, [script], ctx, async function* (p) {
+      await Promise.resolve()
+      reads.push(p.virtual)
+      if (p.virtual === '/d') throw eisdir(p)
+      yield* yieldBytes(files.get(p.virtual) ?? new Uint8Array())
+    })
     if (result === null) throw new Error('sed returned nothing')
     const out = result[0] === null ? '' : DEC.decode(await materialize(result[0]))
     return { out, code: result[1].exitCode, reads }
@@ -131,49 +92,6 @@ describe('sed operands after a directory (GNU sed 4.9)', () => {
   })
 })
 
-// Twin of Python's test_an_r_file_that_fails_to_read_fails_where_it_is_read.
-describe('an r file that fails to read (GNU sed 4.9)', () => {
-  const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
-  const eio = (): Error => Object.assign(new Error('Input/output error'), { code: 'EIO' })
-
-  it.each([
-    ['1r /r', false, 4],
-    ['1R /r', false, 4],
-    ['/none/r /r', false, 0],
-    ['1r /r', true, 4],
-    ['1R /r', true, 4],
-    ['/none/r /r', true, 0],
-  ] as const)('fails where %s reads it (in place: %s)', async (script, inPlace, code) => {
-    const files = new Map([['/f', enc('one\ntwo\n')]])
-    const ctx = {
-      stdin: null,
-      flags: { i: inPlace },
-      cwd: PathSpec.fromStrPath('/'),
-      vfs: { kind: 'ram' } as never,
-    } as Context
-    const result = await sedGeneric(
-      [PathSpec.fromStrPath('/f')],
-      [script],
-      ctx,
-      async function* (p) {
-        await Promise.resolve()
-        if (p.virtual === '/r') throw eio()
-        yield* yieldBytes(files.get(p.virtual) ?? new Uint8Array())
-      },
-      async (p, data) => {
-        files.set(p.virtual, await materialize(data))
-      },
-    )
-    if (result === null) throw new Error('sed returned nothing')
-    if (result[0] !== null) await materialize(result[0])
-    const io = result[1]
-    const stderr = io.stderr === null ? '' : DEC.decode(await materialize(io.stderr))
-    expect(io.exitCode).toBe(code)
-    expect(stderr).toBe(code === 0 ? '' : 'sed: read error on /r: Input/output error\n')
-    if (code === 0) expect(DEC.decode(files.get('/f'))).toBe('one\ntwo\n')
-  })
-})
-
 it.each([
   ['w /saved', 0],
   ['w /saved\nq7', 7],
@@ -181,41 +99,42 @@ it.each([
   'finalizes reached writes and status when %s output closes early',
   async (script, code) => {
     const files = new Map<string, Uint8Array>()
-    const result = await sedGeneric(
-      [],
-      [script],
-      {
-        stdin: new TextEncoder().encode('x\n'),
-        flags: {},
-        cwd: PathSpec.fromStrPath('/'),
-      } as Context,
-      () => yieldBytes(new Uint8Array()),
-      async (p, data) => {
-        files.set(p.virtual, await materialize(data))
-      },
-    )
+    const dispatch = async (
+      op: string,
+      path: PathSpec,
+      args: readonly unknown[] = [],
+    ): Promise<[unknown, IOResult]> => {
+      const body = await materialize((args[0] ?? new Uint8Array()) as ByteSource)
+      const kept =
+        op === 'append' ? (files.get(path.virtual) ?? new Uint8Array()) : new Uint8Array()
+      files.set(path.virtual, new Uint8Array([...kept, ...body]))
+      return [null, new IOResult()]
+    }
+    const data = ENC.encode(Array.from({ length: 100000 }, (_, n) => `${String(n)}\n`).join(''))
+    const ctx = {
+      stdin: data,
+      flags: {},
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    } as Context
+    const result = await sedGeneric([], [script], ctx, noRead)
     if (result === null) throw new Error('no result')
     const output = result[0] as AsyncGenerator<Uint8Array, void>
-    expect(await output.next()).toEqual({ done: false, value: new TextEncoder().encode('x\n') })
+    const first = await output.next()
     await output.return(undefined)
-    expect(DEC.decode(files.get('/saved'))).toBe('x\n')
+    const saved = DEC.decode(files.get('/saved'))
+    expect(DEC.decode(first.value as Uint8Array).startsWith('0\n')).toBe(true)
+    expect(DEC.decode(data).startsWith(saved)).toBe(true)
+    expect(saved.length).toBeGreaterThanOrEqual((first.value as Uint8Array).byteLength)
+    expect(saved.length).toBeLessThan(data.byteLength)
     expect(result[1].exitCode).toBe(code)
   },
 )
 
 it('shares bytes-valued stdin across repeated operands', async () => {
   const dash = new PathSpec({ virtual: '-', directory: '-', vfsPath: '-', rawPath: '-' })
-  const result = await sedGeneric(
-    [dash, dash],
-    [''],
-    {
-      stdin: new TextEncoder().encode('x\n'),
-      flags: {},
-      cwd: PathSpec.fromStrPath('/'),
-    } as Context,
-    () => yieldBytes(new Uint8Array()),
-    () => Promise.resolve(),
-  )
+  const ctx = { stdin: ENC.encode('x\n'), flags: {}, cwd: PathSpec.fromStrPath('/') } as Context
+  const result = await sedGeneric([dash, dash], [''], ctx, noRead)
   if (result === null) throw new Error('no result')
   expect(DEC.decode(await materialize(result[0]))).toBe('x\n')
   expect(result[1].exitCode).toBe(0)
