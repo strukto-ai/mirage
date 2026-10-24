@@ -89,3 +89,21 @@ async def test_rename_does_not_resurrect_trashed_revisions(store: FakeStore):
     assert len(store.ids("/trash/a.txt")) == 1
     rows = await readdir(accessor, _spec(""))
     assert [row.name for row in rows] == ["b.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("src", "dst"),
+    [("src", "$dst"), ("\U0001f600", "dst"), ("d\u00e9j\u00e0", "\U0001f600")],
+)
+async def test_rename_directory_keeps_every_child_name(
+    store: FakeStore, src: str, dst: str
+):
+    # A $ name is a literal, not a field path, and the cut counts code
+    # points the way $substrCP does, so no child name is lost or clipped.
+    for name in (f"{src}/", f"{src}/file.txt", f"{src}/sub/g.txt"):
+        store.upload(name, b"")
+    await rename(make_accessor(), _spec(src), _spec(dst))
+    assert sorted(store.names()) == sorted(
+        [f"{dst}/", f"{dst}/file.txt", f"{dst}/sub/g.txt"]
+    )

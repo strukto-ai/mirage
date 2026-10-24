@@ -65,8 +65,8 @@ def _evaluate(expr: Any, doc: dict[str, Any]) -> Any:
     """The value of the aggregation expressions ``retag`` sends.
 
     Args:
-        expr (Any): ``$concat``, ``$substrCP``, ``$strLenCP``, a field
-            path or a literal.
+        expr (Any): ``$concat``, ``$substrCP``, ``$strLenCP``,
+            ``$literal``, a field path or a number.
         doc (dict[str, Any]): the document it reads.
     """
     if isinstance(expr, str):
@@ -74,6 +74,8 @@ def _evaluate(expr: Any, doc: dict[str, Any]) -> Any:
     if isinstance(expr, int):
         return expr
     (op, args), *_ = expr.items()
+    if op == "$literal":
+        return args
     if op == "$concat":
         return "".join(_evaluate(arg, doc) for arg in args)
     if op == "$strLenCP":

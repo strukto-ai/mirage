@@ -265,7 +265,7 @@ async def _move_prefix(
             return False
         await trash(conn, prefix_query(dst_pfx))
         await prune(conn, prefix_query(trashed(dst_pfx)))
-    moved = await retag(conn, prefix_query(src_pfx), dst_pfx, len(src_pfx))
+    moved = await retag(conn, prefix_query(src_pfx), dst_pfx, src_pfx)
     return moved > 0
 
 

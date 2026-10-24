@@ -244,7 +244,7 @@ async function movePrefix(conn: GridFSAccessor, srcPfx: string, dstPfx: string):
     await trash(conn, prefixQuery(dstPfx))
     await prune(conn, prefixQuery(trashed(dstPfx)))
   }
-  const moved = await retag(conn, prefixQuery(srcPfx), dstPfx, srcPfx.length)
+  const moved = await retag(conn, prefixQuery(srcPfx), dstPfx, srcPfx)
   return moved > 0
 }
 

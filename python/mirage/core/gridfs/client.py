@@ -132,28 +132,38 @@ async def retag(
     accessor: GridFSAccessor,
     query: dict[str, Any],
     prefix: str,
-    strip: int = 0,
+    strip: str = "",
 ) -> int:
     """Rename every revision matching a query, in one server-side update.
 
-    Each filename loses its first ``strip`` characters and gains
-    ``prefix``. The revisions keep their ``_id`` and chunks, so a read
-    pinned to one still finds it under the new name.
+    Each filename loses its leading ``strip`` and gains ``prefix``. Both are
+    sent as literals and the server measures ``strip`` itself, so a ``$`` in
+    a name is never read as a field path and the cut counts code points,
+    as ``$substrCP`` does. The revisions keep their ``_id`` and chunks, so a
+    read pinned to one still finds it under the new name.
 
     Args:
         accessor (GridFSAccessor): GridFS accessor.
-        query (dict[str, Any]): fs.files filter selecting the revisions.
+        query (dict[str, Any]): fs.files filter selecting the revisions;
+            every filename it selects starts with ``strip``.
         prefix (str): what the new filename starts with.
-        strip (int): how many leading characters the old filename loses.
+        strip (str): the leading part each old filename loses.
 
     Returns:
         int: how many revisions the query selected.
     """
     rest: Any = "$filename"
     if strip:
-        rest = {"$substrCP": ["$filename", strip, {"$strLenCP": "$filename"}]}
+        rest = {
+            "$substrCP": [
+                "$filename",
+                {"$strLenCP": {"$literal": strip}},
+                {"$strLenCP": "$filename"},
+            ]
+        }
     result = await files_coll(accessor).update_many(
-        query, [{"$set": {"filename": {"$concat": [prefix, rest]}}}]
+        query,
+        [{"$set": {"filename": {"$concat": [{"$literal": prefix}, rest]}}}],
     )
     return result.matched_count
 

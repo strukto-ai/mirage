@@ -158,21 +158,29 @@ export async function* iterLatest(
 
 /**
  * Rename every revision matching a query, in one server-side update: each
- * filename loses its first `strip` characters and gains `prefix`. The
- * revisions keep their `_id` and chunks, so a read pinned to one still finds
- * it under the new name. Returns how many revisions the query selected.
+ * filename loses its leading `strip` and gains `prefix`. Both are sent as
+ * literals and the server measures `strip` itself, so a `$` in a name is
+ * never read as a field path and the cut counts code points, as `$substrCP`
+ * does, not UTF-16 units. Every filename the query selects starts with
+ * `strip`. The revisions keep their `_id` and chunks, so a read pinned to
+ * one still finds it under the new name. Returns how many revisions the
+ * query selected.
  */
 export async function retag(
   accessor: GridFSAccessor,
   query: Record<string, unknown>,
   prefix: string,
-  strip = 0,
+  strip = '',
 ): Promise<number> {
   const files = await filesColl(accessor)
   const rest =
-    strip === 0 ? '$filename' : { $substrCP: ['$filename', strip, { $strLenCP: '$filename' }] }
+    strip === ''
+      ? '$filename'
+      : {
+          $substrCP: ['$filename', { $strLenCP: { $literal: strip } }, { $strLenCP: '$filename' }],
+        }
   const result = await files.updateMany(query, [
-    { $set: { filename: { $concat: [prefix, rest] } } },
+    { $set: { filename: { $concat: [{ $literal: prefix }, rest] } } },
   ])
   return result.matchedCount
 }

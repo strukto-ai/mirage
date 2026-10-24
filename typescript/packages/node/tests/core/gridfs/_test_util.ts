@@ -71,6 +71,7 @@ function evaluate(expr: unknown, doc: FakeDoc): unknown {
   }
   if (typeof expr === 'number') return expr
   const [[op, args]] = Object.entries(expr as Record<string, unknown>) as [[string, unknown]]
+  if (op === '$literal') return args
   if (op === '$concat') return (args as unknown[]).map((arg) => evaluate(arg, doc)).join('')
   if (op === '$strLenCP') return Array.from(evaluate(args, doc) as string).length
   if (op === '$substrCP') {

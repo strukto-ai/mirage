@@ -101,4 +101,19 @@ describe('gridfs rename', () => {
     expect(store.ids('/trash/a.txt')).toHaveLength(1)
     expect((await readdir(accessor, spec(''))).map((row) => row.name)).toEqual(['b.txt'])
   })
+
+  // A $ name is a literal, not a field path, and the cut counts code points
+  // the way $substrCP does, not UTF-16 units, so no child name is lost or
+  // clipped.
+  it.each([
+    ['src', '$dst'],
+    ['\u{1F600}', 'dst'],
+    ['d\u00e9j\u00e0', '\u{1F600}'],
+  ])('keeps every child name moving %s to %s', async (src, dst) => {
+    for (const name of [`${src}/`, `${src}/file.txt`, `${src}/sub/g.txt`]) store.upload(name, EMPTY)
+    await rename(makeAccessor(store), spec(src), spec(dst))
+    expect([...store.names()].sort()).toEqual(
+      [`${dst}/`, `${dst}/file.txt`, `${dst}/sub/g.txt`].sort(),
+    )
+  })
 })
