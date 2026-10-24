@@ -25,7 +25,6 @@ const LONG_MIN = -(2n ** 63n)
 const LONG_MAX = 2n ** 63n - 1n
 export const ULONG_MAX = 2n ** 64n - 1n
 export const INT_MAX = 2n ** 31n - 1n
-export const UINT_MAX = 2n ** 32n - 1n
 // What GNU 9.7 appends after a refused number that scanned, measured under
 // LC_ALL=C: ERANGE for a value outside the option's range and
 // EOVERFLOW for one the program words as too large for its type.

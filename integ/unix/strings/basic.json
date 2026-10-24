@@ -138,6 +138,43 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "strings_counts_a_tab_as_printable",
+      "seq": 16100008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\tcd\\0ab\\vcd\\0ab\\fcd\\0ab\\rcd\\0x' | strings -n 3 | od -An -c; printf 'abcd\\351fgh\\0' | strings",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a   b  \\t   c   d  \\n\nabcd\n",
+        "stderr": ""
+      },
+      "flags": [
+        "n"
+      ]
     }
   ]
 }

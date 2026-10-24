@@ -30,7 +30,6 @@ LONG_MIN = -(2**63)
 LONG_MAX = 2**63 - 1
 ULONG_MAX = 2**64 - 1
 INT_MAX = 2**31 - 1
-UINT_MAX = 2**32 - 1
 # What GNU 9.7 appends after a refused number that scanned, measured under
 # LC_ALL=C: ERANGE for a value outside the option's range and
 # EOVERFLOW for one the program words as too large for its type.
@@ -136,7 +135,6 @@ __all__ = [
     "EOVERFLOW_REASON",
     "ERANGE_REASON",
     "INT_MAX",
-    "UINT_MAX",
     "ULONG_MAX",
     "bounded_decimal",
     "c_int",

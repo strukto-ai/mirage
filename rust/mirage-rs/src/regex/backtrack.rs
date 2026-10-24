@@ -743,13 +743,7 @@ impl Program {
             None => (at, false),
         };
         if !resume {
-            let width = end.saturating_sub(at) + 1;
-            scratch.remember = !self.backrefs
-                && self.insts.len().saturating_mul(width).saturating_mul(2) <= VISITED_LIMIT;
-            let used = scratch.seen_used.min(scratch.seen.len());
-            scratch.seen[..used].fill(0);
-            scratch.seen_used = 0;
-            scratch.seen_from = at;
+            self.fresh(end, at, scratch);
         }
         loop {
             match self.run(hay, begin, end, pos, longest, scratch, budget, resume) {
@@ -766,5 +760,33 @@ impl Program {
             };
             pos += len;
         }
+    }
+
+    /// Where the longest match that starts at `start` ends, the subject
+    /// being `hay` whole.
+    pub(crate) fn longest_from(
+        &self,
+        hay: &[u8],
+        start: usize,
+        scratch: &mut Scratch,
+    ) -> Option<usize> {
+        self.fresh(hay.len(), start, scratch);
+        let mut budget = u64::MAX;
+        match self.run(hay, 0, hay.len(), start, true, scratch, &mut budget, false) {
+            Step::Done(found) => found,
+            Step::Paused => None,
+        }
+    }
+
+    /// Forget the states an earlier search failed from, for one starting
+    /// at `at` in a record ending at `end`.
+    fn fresh(&self, end: usize, at: usize, scratch: &mut Scratch) {
+        let width = end.saturating_sub(at) + 1;
+        scratch.remember = !self.backrefs
+            && self.insts.len().saturating_mul(width).saturating_mul(2) <= VISITED_LIMIT;
+        let used = scratch.seen_used.min(scratch.seen.len());
+        scratch.seen[..used].fill(0);
+        scratch.seen_used = 0;
+        scratch.seen_from = at;
     }
 }

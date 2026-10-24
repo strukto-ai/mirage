@@ -204,6 +204,43 @@
         "stdout": "",
         "stderr": "look: bad usage\nTry 'look --help' for more information.\n"
       }
+    },
+    {
+      "id": "look_prints_lines_as_bytes_folding_ascii_alone",
+      "seq": 16160002,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/qlookend && printf 'ab\\napple' > /data/qlookend/f && look a /data/qlookend/f | od -An -c; rm -r /data/qlookend; mkdir -p /data/qlookf && printf '\\303\\251cole\\n' > /data/qlookf/f && look -f \"$(printf '\\303\\211')\" /data/qlookf/f; echo rc=$?; printf 'ECOLE\\necole\\n' > /data/qlookf/f && look -f e /data/qlookf/f; rm -r /data/qlookf; mkdir -p /data/qlookb && printf 'a\\377\\nab\\n' > /data/qlookb/f && look a /data/qlookb/f | od -An -c; rm -r /data/qlookb",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a   b  \\n   a   p   p   l   e\nrc=1\nECOLE\necole\n   a 377  \\n   a   b  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "f"
+      ]
     }
   ]
 }

@@ -21,8 +21,68 @@
       "seq": 910047,
       "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'a1b22c333' | tac --regex --separator='[0-9]+'",
-      "expect": { "exit": 0, "stdout": "c333b22a1", "stderr": "" },
+      "expect": { "exit": 0, "stdout": "33c32b2a1", "stderr": "" },
       "flags": ["regex", "separator"]
+    },
+    {
+      "id": "tac_r_reads_emacs_syntax_searching_back_from_the_end",
+      "seq": 910048,
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "command": "printf 'xa+y' | tac -r -s 'a+'; echo; printf 'xa+aay' | tac -r -s 'a\\+'; echo; printf 'a|b|c' | tac -r -s 'a|b'; echo; printf 'a|b|c' | tac -r -s 'a\\|b'; echo; printf 'xa{2}y' | tac -r -s 'a\\{2\\}'; echo; printf 'ab:]c' | tac -r -s '[[:upper:]]'; echo; printf 'xaayaa' | tac -r -s '\\(a\\)\\1'; echo; printf 'xbx' | tac -r -s '[c-a]'; echo; printf 'abb' | tac -r -s 'b$'; echo; printf 'xaaaay' | tac -r -s 'a*'; echo; printf 'xaby' | tac -r -s 'a\\|ab'; echo; printf 'xababcy' | tac -r -s '\\(ab\\)*c'; echo; printf 'x1x22x' | tac -b -r -s '[0-9]+'; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "+yxa\naayxa+\n|ca|b\n|c|ba\nyxa{2}\ncab:]\nyaaxaa\nxbx\nbab\nyaaaxa\nyxab\nyxababc\n2x21xx\n",
+        "stderr": ""
+      },
+      "flags": ["regex", "separator", "before"]
+    },
+    {
+      "id": "tac_r_matches_bytes_and_skips_a_newline_with_dot",
+      "seq": 910049,
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "command": "printf 'a\\nb' | tac -r -s '.' | od -An -c; printf 'a\\nb' | tac -r -s '[^a]' | od -An -c; printf 'ab\\ncd\\n' | tac -r -s '^c' | od -An -c; printf 'ab\\ncd\\n' | tac -r -s '$' | od -An -c; printf 'a\\303\\251b\\303\\251c' | tac -r -s \"$(printf '[\\303\\251]')\" | od -An -c; printf 'a\\377b\\377c' | tac -r -s \"$(printf '\\377')\" | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "  \\n   b   a\n   b   a  \\n\n   d  \\n   a   b  \\n   c\n  \\n  \\n   c   d   a   b\n   c 251   b 303 251   a 303\n   c   b 377   a 377\n",
+        "stderr": ""
+      },
+      "flags": ["regex", "separator"]
+    },
+    {
+      "id": "tac_r_refuses_a_bad_separator_before_reading",
+      "seq": 910050,
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "command": "for s in '' '[' '[a' '\\(' '\\)' '\\2' '\\'; do printf abc | tac -r -s \"$s\"; echo rc=$?; done; tac -r -s '[' /data/missing.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "tac: separator cannot be empty\ntac: Invalid regular expression\ntac: Unmatched [, [^, [:, [., or [=\ntac: Unmatched ( or \\(\ntac: Unmatched ) or \\)\ntac: Invalid back reference\ntac: Trailing backslash\ntac: Invalid regular expression\n"
+      },
+      "flags": ["regex", "separator"]
+    },
+    {
+      "id": "tac_s_splits_overlapping_separators_from_the_end",
+      "seq": 910051,
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "command": "printf 'xaaay' | tac -s aa; echo; printf 'aaaaa' | tac -b -s aa; echo; printf 'abcab' | tac -s abcd; echo; printf 'a\\200b\\200' | tac -s \"$(printf '\\200')\" | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "yxaaa\naaaaa\nabcab\n   b 200   a 200\n",
+        "stderr": ""
+      },
+      "flags": ["separator", "before"]
+    },
+    {
+      "id": "tac_reads_its_input_a_block_at_a_time",
+      "seq": 910052,
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "command": "seq 1 30000 | tac -s 00 | head -c 40; echo; seq 1 30000 | tac -b -r -s '[05]0*' | tail -c 40; echo; seq 1 30000 | tac | wc -c; seq -s, 1 40000 | tac -s ,30000, | head -c 20; echo; seq -s, 1 40000 | tac -s ,30000, | tail -c 20; echo; seq -s, 1 40000 | tac -r -s ',3000\\(0\\),' | head -c 20; echo; seq -s, 1 40000 | tac -r -s ',3000\\(0\\),' | wc -c; seq 1 30000 | tac -s 90 | md5sum",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n00\n29901\n29902\n29903\n29904\n29905\n29906\n\n8\n19\n20\n11\n12\n13\n14\n15\n6\n7\n8\n9\n11\n2\n3\n4\n\n168894\n30001,30002,30003,30\n7,29998,29999,30000,\n30001,30002,30003,30\n228894\nba85db36ba7fb3f3be6ff9706bb43574  -\n",
+        "stderr": ""
+      },
+      "flags": ["separator", "before", "regex"]
     }
   ]
 }
