@@ -39,10 +39,8 @@ describe('NotionVFS (browser)', () => {
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ authProvider })
-    expect(typeof r.prompt).toBe('string')
-    expect(r.prompt.length).toBeGreaterThan(0)
-    expect(typeof r.writePrompt).toBe('string')
-    expect(r.writePrompt.length).toBeGreaterThan(0)
+    expect(typeof r.vfsMd).toBe('string')
+    expect(r.vfsMd.length).toBeGreaterThan(0)
   })
 
   it('serves only the generic set', () => {

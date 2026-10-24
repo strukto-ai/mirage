@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import inspect
 
 import pytest
 
@@ -37,6 +38,7 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.vfs.registry import REGISTRY, resolve_class
 from mirage.workspace.mount.read_policy import check_read_capability
 from tests.fixtures.driver_ops import ops
 from tests.fixtures.vfs_io import served
@@ -286,10 +288,9 @@ def test_declaration_flags_default_off():
     assert vfs.read_revalidatable is False
 
 
-def test_prompts_set():
-    vfs = make_vfs(prompt="wiki files", write_prompt="writable")
-    assert vfs.prompt == "wiki files"
-    assert vfs.write_prompt == "writable"
+def test_vfs_md_set():
+    vfs = make_vfs(vfs_md="wiki files")
+    assert vfs.vfs_md == "wiki files"
 
 
 @pytest.mark.asyncio
@@ -487,3 +488,38 @@ async def test_custom_driver_serves_cli_namespace_and_runtime():
         assert not row.is_dir
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_whole_word_search_says_what_files_containing_answers():
+    path = PathSpec(virtual="/m", directory="/m", vfs_path="")
+    for name in sorted(REGISTRY):
+        cls = resolve_class(REGISTRY[name].vfs_path)
+        if cls.files_containing is BaseVFS.files_containing:
+            assert not cls.whole_word_search, name
+            continue
+        checks = "not whole_word" in inspect.getsource(cls.files_containing)
+        assert checks == cls.whole_word_search, name
+        if cls.whole_word_search:
+            vfs = cls.__new__(cls)
+            BaseVFS.__init__(vfs)
+            answer = await vfs.files_containing(
+                path, "word", whole_word=False, ignore_case=False
+            )
+            assert answer is None, name
+
+
+def test_search_off_without_a_walk_limit_is_not_answered():
+    for name in sorted(REGISTRY):
+        cls = resolve_class(REGISTRY[name].vfs_path)
+        if cls.files_containing is BaseVFS.files_containing:
+            continue
+        guards = "walk_limit < 0" in inspect.getsource(cls.files_containing)
+        assert guards == (cls.supports is not BaseVFS.supports), name
+        if guards:
+            vfs = cls.__new__(cls)
+            BaseVFS.__init__(vfs)
+            vfs.walk_limit = -1
+            assert not vfs.supports("files_containing"), name
+            vfs.walk_limit = 1000
+            assert vfs.supports("files_containing"), name

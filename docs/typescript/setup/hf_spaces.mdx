@@ -80,6 +80,43 @@ mirage does not assume which one the Hub resolves. With a
 `keyPrefix`, the stored version is that commit joined with the prefix, so mounts
 of different subtrees sharing an index never share a version.
 
+## VFS.md
+
+What `ws.vfsMd()` answers with HF Spaces mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md hf_spaces start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `hf_spaces`, read |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md hf_spaces end */}
+
 ## Integration
 
 What Hugging Face Spaces answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.

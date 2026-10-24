@@ -20,4 +20,3 @@ export {
   type EmailConfigInput,
   type EmailConfigRedacted,
 } from '../../core/email/config.ts'
-export { PROMPT as EMAIL_PROMPT, WRITE_PROMPT as EMAIL_WRITE_PROMPT } from './prompt.ts'

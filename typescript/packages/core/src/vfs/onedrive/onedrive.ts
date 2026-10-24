@@ -6,7 +6,6 @@ import {
   type OneDriveConfigRedacted,
 } from '../../accessor/onedrive.ts'
 import { VFSName } from '../../types.ts'
-import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { buildDeltaHook } from '../../core/onedrive/events.ts'
 import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
@@ -48,7 +47,7 @@ export class OneDriveVFS extends BaseVFS {
   // read taking it before the bytes, so the gate compares like with like.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
-  override readonly prompt: string = PROMPT
+  override readonly wholeWordSearch: boolean = true
   override readonly accessor: OneDriveAccessor
   private readonly config: OneDriveConfig
 
@@ -127,6 +126,15 @@ export class OneDriveVFS extends BaseVFS {
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return truncate(this.accessor, path, length, noCreate)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

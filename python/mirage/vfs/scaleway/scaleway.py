@@ -15,12 +15,10 @@
 from mirage.types import VFSName
 from mirage.vfs.s3_alias import S3AliasVFS
 from mirage.vfs.scaleway.config import ScalewayConfig
-from mirage.vfs.scaleway.prompt import PROMPT
 
 
 class ScalewayVFS(S3AliasVFS):
     name: str = VFSName.SCALEWAY
-    prompt: str = PROMPT
 
     def __init__(self, config: ScalewayConfig) -> None:
         super().__init__(config)

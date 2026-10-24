@@ -45,3 +45,40 @@ A folder changed in the last 2 seconds gets no version and is re-listed until it
 A snapshot carries the mount's files, and loading it restores them.
 
 For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).
+
+## VFS.md
+
+What `ws.vfsMd()` answers with Disk mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md disk start */}
+```markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `disk`, write |
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Almost all Unix commands. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+```
+{/* generated: vfs-md disk end */}

@@ -57,9 +57,9 @@ afterEach(() => {
 })
 
 describe('DiskVFS — identity', () => {
-  it('exposes kind, prompt, root', () => {
+  it('exposes kind, vfsMd, root', () => {
     expect(res.name).toBe(VFSName.DISK)
-    expect(typeof res.prompt).toBe('string')
+    expect(typeof res.vfsMd).toBe('string')
     expect(res.root).toBe(root)
   })
 

@@ -21,6 +21,13 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `{prefix}
+  services/
+    <service-name>/
+      operations.json
+      traces/
+        <trace-id>.json`
+
 /**
  * Jaeger's functions over its accessor, which a host package builds
  * over its own transport.

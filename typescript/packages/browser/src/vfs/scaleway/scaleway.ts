@@ -20,13 +20,10 @@ import {
   type ScalewayConfig,
   type ScalewayConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type ScalewayVFSState = S3AliasVFSState<ScalewayConfigRedacted>
 
 export class ScalewayVFS extends S3AliasVFS<ScalewayConfig, ScalewayConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: ScalewayConfig) {
     super(VFSName.SCALEWAY, config, scalewayToS3Config(config), redactScalewayConfig)
   }

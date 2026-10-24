@@ -138,14 +138,14 @@ async def test_unmount_and_closed_sessions_release_paths():
     await a.vfs_md("/guide.md")
     await b.vfs_md("/guide.md")
     await ws.close_session("a")
-    assert b"Virtual filesystem" in await ws.vfs.read(
+    assert b"Virtual Filesystem" in await ws.vfs.read(
         "/guide.md", session_id="b"
     )
     await ws.close_session("b")
     await ws.skill_md("/guide.md")
     await ws.unmount("/guide.md")
     await ws.vfs_md("/guide.md")
-    assert b"Virtual filesystem" in await ws.vfs.read("/guide.md")
+    assert b"Virtual Filesystem" in await ws.vfs.read("/guide.md")
     await ws.close()
 
 
@@ -157,7 +157,7 @@ async def test_subtree_modes_omit_unrestricted_backend_guidance():
     )
     markdown = await ws.vfs_md()
     assert "In-memory" not in markdown
-    assert "`/data/public`: read-only" in markdown
+    assert "| `/data/public` | `ram`, read |" in markdown
     await ws.close()
 
 
@@ -170,7 +170,7 @@ async def test_copy_excludes_live_documents():
     assert not await clone.vfs.exists("/VFS.md")
     assert not await clone.vfs.exists("/SKILL.md")
     await clone.vfs_md("/VFS.md")
-    assert b"Virtual filesystem" in await clone.vfs.read("/VFS.md")
+    assert b"Virtual Filesystem" in await clone.vfs.read("/VFS.md")
     await clone.close()
     await ws.close()
 
@@ -197,7 +197,7 @@ async def test_an_in_place_load_drops_bindings_for_the_restored_file():
     await apply_state_dict(ws, state)
     assert await ws.vfs.read("/data/VFS.md") == b"restored\n"
     await ws.vfs_md("/VFS.md")
-    assert b"Virtual filesystem" in await ws.vfs.read("/VFS.md")
+    assert b"Virtual Filesystem" in await ws.vfs.read("/VFS.md")
     await source.close()
     await ws.close()
 

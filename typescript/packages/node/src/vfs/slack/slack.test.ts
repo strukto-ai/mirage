@@ -45,8 +45,7 @@ describe('SlackVFS (node)', () => {
     expect(r.cachesReads).toBe(true)
     expect(r.indexTtl).toBe(600)
     expect(r.config).toEqual({ token: 'xoxb-test' })
-    expect(typeof r.prompt).toBe('string')
-    expect(typeof r.writePrompt).toBe('string')
+    expect(typeof r.vfsMd).toBe('string')
   })
 
   it('serves no commands of its own', () => {

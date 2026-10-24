@@ -25,7 +25,10 @@ from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
-from mirage.vfs.mem0.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  <memory-id>.json"""
 
 
 class Mem0VFS(BaseVFS):
@@ -35,7 +38,7 @@ class Mem0VFS(BaseVFS):
     # readdir and stat store the rendered JSON's byte length and read
     # serves those same bytes, so sizes are exact by construction.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
     supports_snapshot: bool = False
 
     def __init__(self, config: Mem0Config) -> None:

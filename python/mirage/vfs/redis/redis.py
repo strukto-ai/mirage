@@ -47,7 +47,6 @@ from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import WALK_LIMIT
 from mirage.vfs.errors import VFSConfigError
-from mirage.vfs.redis.prompt import PROMPT
 from mirage.vfs.redis.store import RedisStore, escape_glob
 from mirage.vfs.secrets import REDACTED_SECRET
 
@@ -58,7 +57,6 @@ class RedisVFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     index_ttl: float = 0
-    prompt: str = PROMPT
 
     reads_ranges: bool = True
     local: bool = True

@@ -20,13 +20,10 @@ import {
   type MinIOConfig,
   type MinIOConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type MinIOVFSState = S3AliasVFSState<MinIOConfigRedacted>
 
 export class MinIOVFS extends S3AliasVFS<MinIOConfig, MinIOConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: MinIOConfig) {
     super(VFSName.MINIO, config, minioToS3Config(config), redactMinIOConfig)
   }

@@ -164,7 +164,7 @@ class WikiVFS(PagesVFS):
         super().__init__(
             name="wiki",
             accessor=self.wiki,
-            prompt="A team wiki rendered as markdown files.",
+            vfs_md="A team wiki rendered as markdown files.",
             commands=[wiki_titles],
             supports_snapshot=True,
         )
@@ -223,7 +223,7 @@ class FeedVFS(PagesVFS):
         super().__init__(
             name="feed",
             accessor=WikiAccessor(FEED, known_sizes=False),
-            prompt="A status feed rendered as markdown.",
+            vfs_md="A status feed rendered as markdown.",
             supports_snapshot=True,
         )
 

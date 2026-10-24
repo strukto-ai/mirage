@@ -35,7 +35,6 @@ known-first-party = ["mirage", "tests"]
 max-line-length = 88
 
 [lint.per-file-ignores]
-"python/mirage/vfs/*/prompt.py" = ["E501"]
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]

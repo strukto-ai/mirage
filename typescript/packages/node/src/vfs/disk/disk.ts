@@ -22,7 +22,6 @@ import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mir
 import type { CapacityResult } from '@struktoai/mirage-core/types'
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { DiskAccessor } from '../../accessor/disk.ts'
-import { PROMPT } from './prompt.ts'
 import type { DirListing, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
@@ -84,7 +83,6 @@ export class DiskVFS extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
-  override readonly prompt = PROMPT
   // Each folder's listing is stored at the folder's own version (inode and
   // change times, core/disk/listing_version.ts), so a fresh mount re-lists
   // only the folders that changed. An instance built with folderVersions

@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "documents_skill_every_cli_verb",
+      "id": "documents_skill_names_only_allowed_cli_verbs",
       "seq": 960014,
       "targets": [
         "git-ram",
@@ -9,8 +9,8 @@
       ],
       "command": "grep -c '^## `git status`' /SKILL.md; grep -c '^## `git add`' /SKILL.md",
       "expect": {
-        "exit": 0,
-        "stdout": "1\n1\n",
+        "exit": 1,
+        "stdout": "1\n0\n",
         "stderr": ""
       },
       "session": "docs-cli",

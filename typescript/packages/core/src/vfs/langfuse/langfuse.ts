@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
 
 import { HttpLangfuseTransport } from '../../core/langfuse/client.ts'
-
-import { PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactLangfuseConfig, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
@@ -28,6 +26,21 @@ import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  traces/
+    <trace-id>.json
+  sessions/
+    <session-id>/
+      <trace-id>.json
+  prompts/
+    <prompt-name>/
+      <version>.json
+  datasets/
+    <dataset-name>/
+      items.jsonl
+      runs/
+        <run-name>.jsonl`
 
 export interface LangfuseVFSState {
   type: string
@@ -41,7 +54,7 @@ export class LangfuseVFS extends BaseVFS {
 
   override readonly name: string = VFSName.LANGFUSE
   override readonly cachesReads: boolean = true
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   readonly config: LangfuseConfig
   override readonly accessor: LangfuseAccessor
 

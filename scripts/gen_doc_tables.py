@@ -14,10 +14,12 @@
 
 import argparse
 import ast
+import asyncio
 import difflib
 import inspect
 import re
 import sys
+import typing
 from collections.abc import Callable
 from enum import Enum
 from functools import partial
@@ -27,8 +29,12 @@ from typing import NamedTuple
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from mirage.vfs.registry import REGISTRY, resolve_class
+from mirage.types import JsonValue, MountMode
+from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
 from mirage.vfs.secrets import secret_field_names
+from mirage.workspace import Workspace
+from mirage.workspace.documentation.constants import INTRO
+from mirage.workspace.documentation.render import fenced
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs" / "python"
@@ -47,6 +53,38 @@ TOKEN = re.compile(
     r"(?: omit=[\w,]+)? (?P<edge>start|end) \*/\}"
 )
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
+# The path a docs page mounts its VFS at: a mount goes wherever its
+# workspace puts it.
+PLACEHOLDER = "/<path>"
+# A config each VFS builds from where a placeholder per required field is
+# not one it accepts. Nothing is reached: building a VFS opens no
+# connection.
+SAMPLES: dict[str, dict[str, JsonValue]] = {
+    "box": {"access_token": "token"},
+    "databricks_volume": {
+        "host": "https://example.cloud.databricks.com",
+        "token": "token",
+        "catalog": "main",
+        "schema": "default",
+        "volume": "files",
+    },
+    "disk": {"root": "/"},
+    "gcal": {"access_token": "token"},
+    "gdocs": {"access_token": "token"},
+    "gdrive": {"access_token": "token"},
+    "github": {"token": "token", "owner": "owner", "repo": "repo"},
+    "gmail": {"access_token": "token"},
+    "gsheets": {"access_token": "token"},
+    "gslides": {"access_token": "token"},
+    "hf_buckets": {"bucket": "owner/bucket"},
+    "mem0": {"api_key": "key", "user_id": "user"},
+    "r2": {"bucket": "bucket", "account_id": "account"},
+    "supabase": {
+        "bucket": "bucket",
+        "region": "us-east-1",
+        "project_ref": "ref",
+    },
+}
 
 
 class Rendered(NamedTuple):
@@ -382,6 +420,77 @@ def exports_table(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
     return exports_rows(adapter_exports(name), omit)
 
 
+def placeholder(annotation: type | None) -> JsonValue:
+    """A value of one required field's type that its model accepts.
+
+    Args:
+        annotation (type | None): The field's annotation.
+    """
+    if annotation in (int, float):
+        return 1
+    if annotation is bool:
+        return False
+    if typing.get_origin(annotation) in (list, tuple):
+        return ["value"]
+    return "value"
+
+
+def sample_config(
+    name: str, model: type[BaseModel] | None
+) -> dict[str, JsonValue]:
+    """A config ``name`` builds from: a placeholder for each required field,
+    or the sample it needs.
+
+    Args:
+        name (str): The registry name.
+        model (type[BaseModel] | None): Its config model, if it has one.
+    """
+    if name in SAMPLES:
+        return SAMPLES[name]
+    if model is None:
+        return {}
+    return {
+        field: placeholder(info.annotation)
+        for field, info in model.model_fields.items()
+        if info.is_required()
+    }
+
+
+def hidden(session_id: str | None) -> bool:
+    return False
+
+
+async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
+    vfs = build_vfs(name, dict(config))
+    ws = Workspace({PLACEHOLDER: (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    # The scratch root every workspace adds is no part of this VFS, and
+    # the agent's opening paragraph is no part of a docs page.
+    ws.mount("/").visible = hidden
+    try:
+        return (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
+    finally:
+        await ws.close()
+
+
+def vfs_md(
+    name: str,
+    model: type[BaseModel] | None,
+    omit: frozenset[str] = frozenset(),
+) -> Rendered:
+    """Render the VFS.md a workspace with ``name`` mounted writable at
+    ``PLACEHOLDER`` answers, as one Markdown code block.
+
+    Args:
+        name (str): The registry name.
+        model (type[BaseModel] | None): Its config model, if it has one.
+        omit (frozenset[str]): Nothing can be left out of a document.
+    """
+    markdown = asyncio.run(_vfs_md(name, sample_config(name, model)))
+    return Rendered(
+        fenced(markdown.rstrip("\n"), "markdown"), [], sorted(omit)
+    )
+
+
 def renderers() -> dict[str, dict[str, Renderer]]:
     """Each marker kind's keys, mapped to the function rendering one."""
     models = config_models()
@@ -391,6 +500,10 @@ def renderers() -> dict[str, dict[str, Renderer]]:
             for name, model in models.items()
         },
         "exports": {name: partial(exports_table, name) for name in adapters()},
+        "vfs-md": {
+            name: partial(vfs_md, name, models.get(name))
+            for name in sorted(REGISTRY)
+        },
     }
 
 

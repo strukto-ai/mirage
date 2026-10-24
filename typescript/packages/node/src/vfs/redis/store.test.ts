@@ -127,15 +127,14 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.getModified('/x')).toBeNull()
   })
 
-  it('clear wipes everything including root dir set', async () => {
+  it('clear wipes everything but the root', async () => {
     await store.setFile('/a', new Uint8Array([1]))
     await store.setModified('/a', 'ts')
     await store.addDir('/foo')
     await store.clear()
     expect(await store.listFiles()).toEqual([])
     expect(await store.getModified('/a')).toBeNull()
-    // after clear, dir set is deleted, so / is no longer seeded
-    expect((await store.listDirs()).size).toBe(0)
+    expect([...(await store.listDirs())]).toEqual(['/'])
   })
 
   it('statMany answers what the single getters do', async () => {
@@ -172,5 +171,13 @@ describe.skipIf(skip)('RedisStore', () => {
     await c.set(`${prefix}tmp:/big:abc`, 'partial')
     await store.clear()
     expect(await c.exists(`${prefix}tmp:/big:abc`)).toBe(0)
+  })
+})
+
+describe('RedisStore root', () => {
+  it('is a directory without a server', async () => {
+    const store = new RedisStore({ url: 'redis://127.0.0.1:1/0' })
+    expect(await store.hasDir('/')).toBe(true)
+    await store.close()
   })
 })

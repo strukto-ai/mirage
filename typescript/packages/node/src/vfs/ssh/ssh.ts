@@ -17,7 +17,6 @@ import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { SSHAccessor } from '../../accessor/ssh.ts'
 import { type SSHConfig, type SSHConfigRedacted, redactSshConfig } from './config.ts'
-import { PROMPT } from './prompt.ts'
 import type {
   CapacityResult,
   PathSpec,
@@ -63,7 +62,6 @@ export class SSHVFS extends BaseVFS {
   // file; reads are the same raw bytes.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 60
-  override readonly prompt = PROMPT
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor
 

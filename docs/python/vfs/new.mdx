@@ -42,7 +42,7 @@ class JiraVFS(BaseVFS):
         super().__init__(
             name="jira",
             accessor=JiraAccessor(config),
-            prompt="Issues rendered as .json files.",
+            vfs_md="Issues rendered as .json files.",
         )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]: ...
@@ -419,7 +419,7 @@ python/mirage/
     __init__.py              # COMMANDS
     <bespoke commands>.py    # push-downs and verbs
   vfs/<name>/
-    __init__.py config.py prompt.py
+    __init__.py config.py
     <name>.py                # the VFS class and its functions
 ```
 
@@ -642,7 +642,8 @@ An older spelling changes in these places:
 | Before | Now |
 | --- | --- |
 | `GenericVFS(name=..., accessor=..., io=...)` | a `BaseVFS` subclass that defines the functions; a driver built from options needs a name |
-| `PROMPT`, `WRITE_PROMPT`, `SUPPORTS_SNAPSHOT`, `SIZES_ALWAYS_KNOWN`, `READ_REVALIDATABLE` | `prompt`, `write_prompt`, `supports_snapshot`, `sizes_always_known`, `read_revalidatable` |
+| `SUPPORTS_SNAPSHOT`, `SIZES_ALWAYS_KNOWN`, `READ_REVALIDATABLE` | `supports_snapshot`, `sizes_always_known`, `read_revalidatable` |
+| `PROMPT`, `WRITE_PROMPT`, `prompt`, `write_prompt` | one `vfs_md`, this VFS's part of VFS.md; usage of a CLI belongs in its help |
 | `self.register(fn)` and `self.register_op(op)` in `__init__`, `ops_list()` | nothing: the mount builds the commands and the dispatcher when it places the driver |
 | `resolve_glob(paths, prefix)` | the `glob` the mount derives from `readdir`; the mount stamps each spec's `vfs_path` before calling it |
 | `vfs.read_bytes(path)` | `vfs.read(path)` outside a workspace, `ws.dispatch(...)` inside one |

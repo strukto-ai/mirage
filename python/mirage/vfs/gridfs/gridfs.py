@@ -35,7 +35,6 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gridfs.config import GridFSConfig
-from mirage.vfs.gridfs.prompt import PROMPT
 
 
 class GridFSVFS(BaseVFS):
@@ -44,7 +43,6 @@ class GridFSVFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     caches_reads: bool = True
-    prompt: str = PROMPT
     supports_snapshot: bool = True
     # stat and read both stamp str(file_id), so the gate compares like
     # with like.

@@ -693,7 +693,9 @@ async def test_generated_documents_refresh_even_on_an_open_handle():
     await ws.vfs_md("/VFS.md")
     core = MountCore(ws.vfs, session=session)
     skill = await core.open("/SKILL.md")
-    assert b"name: mirage" in await core.read("/SKILL.md", 100000, 0, skill)
+    assert b"name: workspace-commands" in await core.read(
+        "/SKILL.md", 100000, 0, skill
+    )
     await core.release(skill)
     handle = await core.open("/VFS.md")
     assert b"/secret" in await core.read("/VFS.md", 100000, 0, handle)

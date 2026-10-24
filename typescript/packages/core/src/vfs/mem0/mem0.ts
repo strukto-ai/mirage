@@ -5,7 +5,6 @@ import { Mem0Accessor } from '../../accessor/mem0.ts'
 import { redactMem0Config, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
 
 import { type DirListing, VFSName } from '../../types.ts'
-import { PROMPT } from './prompt.ts'
 import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir } from '../../core/mem0/readdir.ts'
@@ -13,6 +12,9 @@ import { read, readStream } from '../../core/mem0/read.ts'
 import { stat } from '../../core/mem0/stat.ts'
 import { searchMany } from '../../core/mem0/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
+
+export const VFS_MD = `{prefix}
+  <memory-id>.json`
 
 export interface Mem0VFSState {
   type: string
@@ -31,7 +33,7 @@ export class Mem0VFS extends BaseVFS {
   // serves those same bytes, so sizes are exact by construction.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = false
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   override readonly accessor: Mem0Accessor
 
   private readonly config: Mem0Config

@@ -28,6 +28,21 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+export const VFS_MD = `{prefix}
+  <database>/
+    database.json                  collection and view names
+    collections/<collection>/
+      schema.json                  sampled field types, validator, indexes
+      documents.jsonl              streamed BSON Extended JSON documents
+    views/<view>/
+      schema.json
+      documents.jsonl
+  Read database.json first to discover entities. Use schema.json before
+  reading large document streams; head, tail, wc, grep, rg, and jq understand
+  documents.jsonl; grep and rg fetch only the documents that may match.
+  Unknown stat sizes display as -; wc -c measures bytes and wc -l counts
+  documents on demand. These counts may scan the collection.`
+
 /**
  * MongoDB's functions over its accessor, which the node and browser
  * packages build over their own transport.

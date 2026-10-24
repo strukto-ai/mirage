@@ -6,7 +6,6 @@ import {
   type SharePointConfigRedacted,
 } from '../../accessor/sharepoint.ts'
 import { VFSName } from '../../types.ts'
-import { PROMPT } from './prompt.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { buildDeltaHook } from '../../core/sharepoint/events.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
@@ -29,6 +28,15 @@ import { truncate } from '../../core/sharepoint/truncate.ts'
 import { filesContaining } from '../../core/sharepoint/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
+export const VFS_MD = `{prefix}
+  SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
+  Unscoped mounts use: /{site_name}/{library_name}/{path_to_file}
+  Unscoped level 0 (ls /): lists all accessible SharePoint sites.
+  Unscoped level 1 (ls /site/): lists document libraries (drives) in that site.
+  Unscoped level 2+ (ls /site/lib/...): lists files and folders in the drive.
+  IMPORTANT: This is a remote mount. Prefer targeted reads (grep, head) over full scans. Avoid cat on large files without piping to head/tail.
+  File versions are retained, snapshots pin and read prior versions.`
+
 export interface SharePointVFSState {
   type: string
   config: SharePointConfigRedacted
@@ -46,7 +54,8 @@ export class SharePointVFS extends BaseVFS {
   // read taking it before the bytes, so the gate compares like with like.
   override readonly readRevalidatable: boolean = true
   override readonly indexTtl: number = 86_400
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
+  override readonly wholeWordSearch: boolean = true
   override readonly accessor: SharePointAccessor
   private readonly config: SharePointConfig
 
@@ -125,6 +134,15 @@ export class SharePointVFS extends BaseVFS {
 
   override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     return truncate(this.accessor, path, length, noCreate)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

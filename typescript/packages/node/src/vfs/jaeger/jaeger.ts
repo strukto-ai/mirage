@@ -17,7 +17,7 @@ import { JaegerAccessor } from '@struktoai/mirage-core/accessor/jaeger'
 
 import { HttpJaegerTransport } from '@struktoai/mirage-core/core/jaeger/client'
 
-import { PROMPT } from '@struktoai/mirage-core/vfs/jaeger/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactJaegerConfig, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
@@ -35,7 +35,7 @@ export class JaegerVFS extends JaegerVFSBase {
   // from the search payload the listing already fetched, and operations.json
   // is sized by one call per service directory the caller opens.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly prompt: string = PROMPT
+  override vfsMd: string = VFS_MD
   readonly config: JaegerConfig
   override readonly accessor: JaegerAccessor
 

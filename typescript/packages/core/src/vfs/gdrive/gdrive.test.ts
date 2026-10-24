@@ -24,7 +24,7 @@ import {
   checkDrift,
 } from '../../workspace/snapshot/drift.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { GoogleDriveVFS } from './gdrive.ts'
+import { GoogleDriveVFS, VFS_MD } from './gdrive.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -205,5 +205,20 @@ describe('GoogleDriveVFS snapshot capture on a written path', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('VFS_MD', () => {
+  it('cross-references the per-service shapes and notes scope', () => {
+    const rendered = VFS_MD.replace(/\{prefix\}/g, '/gdrive')
+    expect(rendered).toContain('.gdoc.json')
+    expect(rendered).toContain('.gsheet.json')
+    expect(rendered).toContain('.gslide.json')
+    expect(rendered).toContain('/gdocs layout')
+    expect(rendered).toContain('/gsheets layout')
+    expect(rendered).toContain('/gslides layout')
+    expect(rendered).toContain('remote mount')
+    expect(rendered).toContain('modifiedTime range')
+    expect(rendered).toContain('No owned/ vs shared/')
   })
 })

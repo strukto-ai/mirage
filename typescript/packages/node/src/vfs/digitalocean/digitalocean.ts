@@ -20,13 +20,10 @@ import {
   type DigitalOceanConfig,
   type DigitalOceanConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type DigitalOceanVFSState = S3AliasVFSState<DigitalOceanConfigRedacted>
 
 export class DigitalOceanVFS extends S3AliasVFS<DigitalOceanConfig, DigitalOceanConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: DigitalOceanConfig) {
     super(VFSName.DIGITALOCEAN, config, digitalOceanToS3Config(config), redactDigitalOceanConfig)
   }

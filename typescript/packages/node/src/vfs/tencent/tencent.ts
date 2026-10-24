@@ -20,13 +20,10 @@ import {
   type TencentConfig,
   type TencentConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type TencentVFSState = S3AliasVFSState<TencentConfigRedacted>
 
 export class TencentVFS extends S3AliasVFS<TencentConfig, TencentConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: TencentConfig) {
     super(VFSName.TENCENT, config, tencentToS3Config(config), redactTencentConfig)
   }

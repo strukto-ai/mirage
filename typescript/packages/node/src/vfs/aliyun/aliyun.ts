@@ -20,13 +20,10 @@ import {
   type AliyunConfig,
   type AliyunConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type AliyunVFSState = S3AliasVFSState<AliyunConfigRedacted>
 
 export class AliyunVFS extends S3AliasVFS<AliyunConfig, AliyunConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: AliyunConfig) {
     super(VFSName.ALIYUN, config, aliyunToS3Config(config), redactAliyunConfig)
   }

@@ -77,7 +77,7 @@ export class TimeRange {
     return days
   }
 
-  prompt(): string {
+  vfsMd(): string {
     const start = this.start === null ? 'unbounded' : new Date(this.start * 1000).toISOString()
     const end = this.end === null ? 'unbounded' : new Date(this.end * 1000).toISOString()
     return `\n  Time scope: start_time=${start} (inclusive), end_time=${end} (exclusive). Explicit paths and globs cannot escape this scope.`

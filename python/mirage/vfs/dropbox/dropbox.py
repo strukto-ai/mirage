@@ -42,7 +42,6 @@ from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
-from mirage.vfs.dropbox.prompt import PROMPT
 
 
 class DropboxVFS(BaseVFS):
@@ -58,7 +57,7 @@ class DropboxVFS(BaseVFS):
     # get_metadata carry it, and a download, ranged or not, names it in
     # Dropbox-API-Result at no extra request.
     read_revalidatable: bool = True
-    prompt: str = PROMPT
+    whole_word_search: bool = True
 
     reads_ranges: bool = True
 
@@ -138,6 +137,17 @@ class DropboxVFS(BaseVFS):
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         await _dir_copy(self.accessor, src, dst)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

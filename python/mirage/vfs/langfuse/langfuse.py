@@ -22,14 +22,29 @@ from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.langfuse.config import LangfuseConfig
-from mirage.vfs.langfuse.prompt import PROMPT
+
+VFS_MD = """\
+{prefix}
+  traces/
+    <trace-id>.json
+  sessions/
+    <session-id>/
+      <trace-id>.json
+  prompts/
+    <prompt-name>/
+      <version>.json
+  datasets/
+    <dataset-name>/
+      items.jsonl
+      runs/
+        <run-name>.jsonl"""
 
 
 class LangfuseVFS(BaseVFS):
     accessor: LangfuseAccessor
     name: str = VFSName.LANGFUSE
     caches_reads: bool = True
-    prompt: str = PROMPT
+    vfs_md: str = VFS_MD
 
     def __init__(self, config: LangfuseConfig) -> None:
         super().__init__()

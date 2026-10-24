@@ -17,7 +17,7 @@ import { SlackAccessor } from '@struktoai/mirage-core/accessor/slack'
 
 import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_browser'
 
-import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/slack/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/slack/slack'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
@@ -36,8 +36,7 @@ export class SlackVFS extends SlackVFSBase {
   // (users.list is payload-identical to users.info, verified live), and
   // file blobs carry Slack's upload byte count.
   override readonly sizesAlwaysKnown: boolean = true
-  override readonly prompt: string
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string
   readonly config: SlackConfig
   override readonly accessor: SlackAccessor
 
@@ -54,7 +53,7 @@ export class SlackVFS extends SlackVFSBase {
       }),
       config,
     )
-    this.prompt = PROMPT + this.accessor.timeRange.prompt()
+    this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()
   }
 
   override getState(): Promise<SlackVFSState> {

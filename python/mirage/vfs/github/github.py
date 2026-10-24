@@ -35,7 +35,6 @@ from mirage.types import (
 )
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.github.prompt import PROMPT
 
 
 def _pin_of(ref: str | None) -> str | None:
@@ -77,7 +76,7 @@ class GitHubVFS(BaseVFS):
     # provider a full re-walk every 10 minutes. Mirrors the TypeScript
     # VFS.
     index_ttl: float = 86_400
-    prompt: str = PROMPT
+    whole_word_search: bool = True
 
     def __init__(
         self,
@@ -180,6 +179,17 @@ class GitHubVFS(BaseVFS):
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
+
+    def supports(self, name: str) -> bool:
+        """Whether this VFS answers ``name``; with no walk limit it reads
+        every file rather than ask the service's search.
+
+        Args:
+            name (str): the function name.
+        """
+        if name == "files_containing" and self.walk_limit < 0:
+            return False
+        return super().supports(name)
 
     async def files_containing(
         self,

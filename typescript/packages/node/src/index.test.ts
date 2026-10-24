@@ -33,10 +33,6 @@ describe('@struktoai/mirage-node barrel exports', () => {
     expect(typeof nodePkg.DiskVFS).toBe('function')
   })
 
-  it('exports DISK_PROMPT string', () => {
-    expect(typeof nodePkg.DISK_PROMPT).toBe('string')
-  })
-
   it('exports patchNodeFs function', () => {
     expect(typeof nodePkg.patchNodeFs).toBe('function')
   })
@@ -45,6 +41,5 @@ describe('@struktoai/mirage-node barrel exports', () => {
     expect(typeof nodePkg.RedisVFS).toBe('function')
     expect(typeof nodePkg.RedisFileCacheStore).toBe('function')
     expect(typeof nodePkg.RedisIndexCacheStore).toBe('function')
-    expect(typeof nodePkg.REDIS_PROMPT).toBe('string')
   })
 })

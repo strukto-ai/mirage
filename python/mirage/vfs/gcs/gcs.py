@@ -14,13 +14,11 @@
 
 from mirage.types import VFSName
 from mirage.vfs.gcs.config import GCSConfig
-from mirage.vfs.gcs.prompt import PROMPT
 from mirage.vfs.s3_alias import S3AliasVFS
 
 
 class GCSVFS(S3AliasVFS):
     name: str = VFSName.GCS
-    prompt: str = PROMPT
 
     def __init__(self, config: GCSConfig) -> None:
         super().__init__(config)

@@ -24,7 +24,7 @@ import type {
   PostgresConfigRedacted,
   PostgresConfigResolved,
 } from '@struktoai/mirage-core/vfs/postgres/config'
-import { PROMPT } from '@struktoai/mirage-core/vfs/postgres/prompt'
+import { VFS_MD } from '@struktoai/mirage-core/vfs/postgres/postgres'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { PostgresStore } from './store.ts'
@@ -45,7 +45,7 @@ export class PostgresVFS extends PostgresVFSBase {
   override readonly name: string = VFSName.POSTGRES
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
-  override readonly prompt: string
+  override vfsMd: string
   readonly config: PostgresConfigResolved
   readonly store: PostgresStore
   override readonly accessor: PostgresAccessor
@@ -59,7 +59,7 @@ export class PostgresVFS extends PostgresVFSBase {
     this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.store = new PostgresStore(this.config)
     this.accessor = new PostgresAccessor(this.store, this.config)
-    this.prompt = PROMPT.replace('{prefix}', prefix ?? '')
+    this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
   override getState(): PostgresVFSState {

@@ -50,7 +50,49 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
 
-## Filesystem Layout
+## VFS.md
+
+What `ws.vfs_md()` answers with Mem0 mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+
+{/* generated: vfs-md mem0 start */}
+````markdown
+---
+name: workspace-filesystem
+description: The virtual filesystem layout of this workspace.
+---
+
+# Virtual Filesystem
+
+| Path | Description |
+| --- | --- |
+| `/<path>` | `mem0`, read |
+
+## `/<path>` layout
+
+```text
+/<path>
+  <memory-id>.json
+```
+
+## Supported Unix Commands for VFS
+
+Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+| Path | Supported |
+| --- | --- |
+| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+
+## Limitations of Unix Commands for VFS
+
+Where a path differs from a local filesystem:
+
+| Path | Limitations |
+| --- | --- |
+| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+````
+{/* generated: vfs-md mem0 end */}
 
 The tree is flat: the mount root lists one `<memory_id>.json` file per memory in
 the configured scope.

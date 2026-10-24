@@ -20,7 +20,6 @@ from typing import cast
 from mirage.vfs.redis.constants import TRUNCATE_SCRIPT
 
 try:
-    import redis as sync_redis
     from redis.asyncio import Redis
 except ImportError as _err:
     raise ImportError(
@@ -59,9 +58,6 @@ class RedisStore:
         self._explicit_client = client
         self._prefix = key_prefix
         self._clients: dict[int, Redis] = {}
-        sr = sync_redis.Redis.from_url(url)
-        sr.sadd(self._dk(), "/")
-        sr.close()
 
     @property
     def _client(self) -> Redis:
@@ -191,6 +187,8 @@ class RedisStore:
         )
 
     async def has_dir(self, path: str) -> bool:
+        if path == "/":
+            return True
         return bool(
             await cast(
                 "Awaitable[int]", self._client.sismember(self._dk(), path)
@@ -207,7 +205,9 @@ class RedisStore:
         members = await cast(
             "Awaitable[set[bytes]]", self._client.smembers(self._dk())
         )
-        return {m.decode() if isinstance(m, bytes) else m for m in members}
+        return {"/"} | {
+            m.decode() if isinstance(m, bytes) else m for m in members
+        }
 
     async def get_modified(self, path: str) -> str | None:
         val = await self._client.get(self._mk(path))

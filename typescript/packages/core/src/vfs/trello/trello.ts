@@ -17,8 +17,6 @@ import type { Handed } from '../types.ts'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 
 import { HttpTrelloTransport } from '../../core/trello/client.ts'
-
-import { PROMPT, WRITE_PROMPT } from './prompt.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 
 import {
@@ -34,6 +32,30 @@ import { stat as trelloStat } from '../../core/trello/stat.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
+export const VFS_MD = `{prefix}
+  workspaces/
+    <workspace-name>__<workspace-id>/
+      workspace.json
+      boards/
+        <board-name>__<board-id>/
+          board.json
+          members/
+            <full-name>__<member-id>.json
+          labels/
+            <label-name>__<label-id>.json
+          lists/
+            <list-name>__<list-id>/
+              list.json
+              cards/
+                <card-name>__<card-id>/
+                  card.json
+                  comments.jsonl
+  Always ls directories first to discover exact names.
+
+  To act on boards and cards (list boards, members, lists, labels,
+  cards and comments; create, update, move, assign, label and comment
+  on cards), use the trello CLI if installed: trello --help`
+
 export interface TrelloVFSState {
   type: string
   config: TrelloConfigRedacted
@@ -48,8 +70,8 @@ export class TrelloVFS extends BaseVFS {
 
   override readonly name: string = VFSName.TRELLO
   override readonly cachesReads: boolean = true
-  override readonly prompt: string = PROMPT
-  override readonly writePrompt: string = WRITE_PROMPT
+  override vfsMd: string = VFS_MD
+  override readonly wholeWordSearch: boolean = true
   readonly config: TrelloConfig
   override readonly accessor: TrelloAccessor
   // Trello's search answers for cards; comments and the board's other files
@@ -78,6 +100,15 @@ export class TrelloVFS extends BaseVFS {
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
     accessorOpts.walkLimit = this.walkLimit
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
+  }
+
+  /**
+   * Whether this VFS answers `name`; with no walk limit it reads every
+   * file rather than ask the service's search.
+   */
+  override supports(name: string): boolean {
+    if (name === 'files_containing' && this.walkLimit < 0) return false
+    return super.supports(name)
   }
 
   override filesContaining(

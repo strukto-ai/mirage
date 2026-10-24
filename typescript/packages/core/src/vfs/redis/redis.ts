@@ -21,7 +21,6 @@ import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { WALK_LIMIT } from '../constants.ts'
 import { VFSConfigError } from '../errors.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
-import { PROMPT } from './prompt.ts'
 import type { RedisStoreLike } from './store.ts'
 import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
@@ -70,7 +69,6 @@ export class RedisVFS extends BaseVFS {
   // byte store: stat() sizes every file from metadata
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
-  override readonly prompt: string = PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
   override readonly walkLimit: number

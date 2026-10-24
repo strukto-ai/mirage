@@ -20,13 +20,10 @@ import {
   type SupabaseConfig,
   type SupabaseConfigRedacted,
 } from './config.ts'
-import { PROMPT } from './prompt.ts'
 
 export type SupabaseVFSState = S3AliasVFSState<SupabaseConfigRedacted>
 
 export class SupabaseVFS extends S3AliasVFS<SupabaseConfig, SupabaseConfigRedacted> {
-  override readonly prompt: string = PROMPT
-
   constructor(config: SupabaseConfig) {
     super(VFSName.SUPABASE, config, supabaseToS3Config(config), redactSupabaseConfig)
   }

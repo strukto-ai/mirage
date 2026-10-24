@@ -32,7 +32,6 @@ from mirage.io.types import ByteSource, materialize
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
-from mirage.vfs.databricks_volume.prompt import PROMPT
 
 
 class DatabricksVolumeVFS(BaseVFS):
@@ -43,7 +42,6 @@ class DatabricksVolumeVFS(BaseVFS):
     # Content-Length, both the exact byte count the download returns;
     # readdir backfills any lister-omitted size with one HEAD.
     sizes_always_known: bool = True
-    prompt: str = PROMPT
 
     reads_ranges: bool = True
 
