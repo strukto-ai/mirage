@@ -365,6 +365,9 @@ class _LinkUnderRoot:
     def link_stats_below(self, directory: str) -> list[tuple[str, FileStat]]:
         return [("/a/lnk", FileStat(name="lnk", type=FileType.SYMLINK))]
 
+    def mounts(self, crossing: bool) -> None:
+        return None
+
 
 async def _refused_readdir(op: str, path: PathSpec, *args, **kwargs):
     """A dispatch whose mount refuses every listing."""

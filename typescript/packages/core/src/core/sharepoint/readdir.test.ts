@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { readdir, tree } from './readdir.ts'
 
 afterEach(() => {
@@ -34,9 +34,12 @@ describe('SharePoint namespace listings', () => {
       }),
     )
     const accessor = new SharePointAccessor({ accessToken: 'token' })
-    const sites = await readdir(accessor, PathSpec.fromStrPath('/sp', ''))
+    const sites = (await readdir(accessor, PathSpec.fromStrPath('/sp', ''))) as FileStat[]
     expect(sites.map((row) => [row.name, row.type])).toEqual([['Team', 'directory']])
-    const libraries = await readdir(accessor, PathSpec.fromStrPath('/sp/Team', 'Team'))
+    const libraries = (await readdir(
+      accessor,
+      PathSpec.fromStrPath('/sp/Team', 'Team'),
+    )) as FileStat[]
     expect(libraries.map((row) => [row.name, row.type])).toEqual([['Documents', 'directory']])
   })
 })

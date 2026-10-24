@@ -115,9 +115,14 @@ export async function getDirectoryMetadata(
   await request(accessor, 'HEAD', 'directories', path, { read: 'none' })
 }
 
+/**
+ * A directory's entries, a page at a time; no page past the one that
+ * brings `limit` entries. Mirrors Python's `list_directory_contents`.
+ */
 export async function listDirectoryContents(
   accessor: DatabricksVolumeAccessor,
   path: string,
+  limit?: number,
 ): Promise<DirectoryEntry[]> {
   const entries: DirectoryEntry[] = []
   let token: string | null | undefined
@@ -136,6 +141,7 @@ export async function listDirectoryContents(
       })),
     )
     token = page.next_page_token
+    if (limit !== undefined && entries.length >= limit) break
   } while (token !== undefined && token !== null && token !== '')
   return entries
 }

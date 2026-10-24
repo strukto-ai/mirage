@@ -30,7 +30,7 @@ import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { write as s3Write } from '../../core/s3/write.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 import { exdev } from '../../errors/fs.ts'
@@ -57,12 +57,12 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
     return this.accessor.config.presignedUrlProvider !== undefined
   }
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return s3Tree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return s3Tree(this.accessor, path, handed?.limit)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return s3Readdir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return s3Readdir(this.accessor, path, handed?.limit)
   }
 
   override read(

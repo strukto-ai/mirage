@@ -91,8 +91,9 @@ class FakeDrive:
         self.searches: list[list[str]] = []
         self.incomplete = False
         # The folder ids and shared drive of every listing of several
-        # folders at once.
+        # folders at once, and the limit each was handed.
         self.child_queries: list[tuple[list[str], str | None]] = []
+        self.child_limits: list[int | None] = []
 
     def add(
         self,
@@ -162,14 +163,19 @@ class FakeDrive:
         return out
 
     async def list_children(
-        self, folder_ids: list[str], drive_id: str | None
+        self,
+        folder_ids: list[str],
+        drive_id: str | None,
+        limit: int | None = None,
     ) -> list[dict]:
         self.child_queries.append((list(folder_ids), drive_id))
-        return [
+        self.child_limits.append(limit)
+        out = [
             self.public(item["id"])
             for item in self.items.values()
             if set(item["parents"]) & set(folder_ids)
         ]
+        return out if limit is None else out[:limit]
 
     async def list_all_files(
         self,

@@ -53,7 +53,7 @@ const NOTE = new FileStat({ name: 'note.txt', type: FileType.FILE })
 
 // What the mount hands a read at `path`, found by listing as it would.
 async function listed(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat | null> {
-  return (await handedAt(readdir, accessor, path)).entry ?? null
+  return (await handedAt((a, p) => readdir(a, p), accessor, path)).entry ?? null
 }
 
 describe('dropbox read', () => {

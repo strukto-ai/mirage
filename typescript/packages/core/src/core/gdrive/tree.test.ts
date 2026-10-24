@@ -160,3 +160,21 @@ describe('gdrive tree failures', () => {
     expect(await tree(accessor, scope())).toBeNull()
   })
 })
+
+// Twin of test_a_level_is_paged_no_further_than_a_walks_limit.
+it('pages a level no further than a walk limit', async () => {
+  const sub = fake.folder('sub')
+  for (let i = 0; i < 5; i++) fake.add(`f${String(i)}.txt`, sub, undefined, ENC.encode('x'))
+  expect(await tree(accessor, scope(), null, 3)).toBeNull()
+  expect(fake.childLimits).toEqual([3])
+})
+
+// Twin of test_a_level_asks_no_query_past_a_walks_limit.
+it('asks no query of a level past a walk limit', async () => {
+  for (let i = 0; i < PARENTS_PER_QUERY + 1; i++) {
+    const folder = fake.folder(`d${String(i).padStart(2, '0')}`)
+    fake.add('f.txt', folder, undefined, ENC.encode('x'))
+  }
+  expect(await tree(accessor, scope(), null, PARENTS_PER_QUERY + 10)).toBeNull()
+  expect(fake.childLimits).toEqual([10])
+})

@@ -24,9 +24,9 @@ import { WalkLimitError, UsageError } from '../../errors.ts'
 // The conditions under which a guard's path reaches no directory to walk.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
 
-export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
+export type ReadTree = (path: PathSpec, limit?: number) => Promise<Map<string, FileStat> | null>
 
-export type WalkCall<R> = (path: PathSpec, nofollow?: boolean) => Promise<R>
+export type WalkCall<R> = (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<R>
 
 /**
  * Let the mount that owns `path` refuse a command about to read every file
@@ -125,13 +125,28 @@ export class WalkBudget {
     return false
   }
 
-  /** `readdir` of `directory`, cut to what the walk may still list. */
-  async listing(
-    readdir: (path: PathSpec) => Promise<string[]>,
-    directory: PathSpec,
-  ): Promise<string[]> {
+  /**
+   * The `limit` a listing of `directory` hands its backend: one entry past
+   * what the walk may still keep there, so a backend that stops at it still
+   * leaves the walk the entry that records its stop; null when nothing caps
+   * the walk.
+   */
+  listingLimit(directory: string): number | null {
+    const limit = this.limitAt(directory)
+    if (limit < 0) return null
+    const used = this.spent.get(this.folderOf(directory)) ?? 0
+    return Math.max(limit - used, 0) + 1
+  }
+
+  /**
+   * `readdir` of `directory`, cut to what the walk may still list; the
+   * backend is handed the `limit` past which it may stop.
+   */
+  async listing(readdir: WalkCall<string[]>, directory: PathSpec): Promise<string[]> {
     if (!this.opens(directory.virtual)) return []
-    return (await readdir(directory)).filter(() => this.spend(directory.virtual))
+    const limit = this.listingLimit(directory.virtual)
+    const names = await (limit === null ? readdir(directory) : readdir(directory, false, limit))
+    return names.filter(() => this.spend(directory.virtual))
   }
 }
 
@@ -188,7 +203,8 @@ function answerable(path: PathSpec): boolean {
  * (ENOTDIR), so a directory a walk reached through one is opened by
  * `readdir`, which follows it as opendir(3) does and meets whatever refuses
  * the directory it leads to. Both take the path first and pass the rest
- * through. Mirrors Python's `tree_walk`.
+ * through; a listing's `limit` reaches `readTree` too, which may then answer
+ * null for a subtree past it. Mirrors Python's `tree_walk`.
  */
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
@@ -206,14 +222,14 @@ export function treeWalk<D, S>(
     }
     return null
   }
-  const treeReaddir: WalkCall<D> = async (path, nofollow) => {
+  const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
       asked.add(virtual)
       let found: Map<string, FileStat> | null
       try {
-        found = await readTree(path)
+        found = await readTree(path, limit)
       } catch (err) {
         if ((err as Partial<WalkDeclinedError>).declined !== true && !isEnotdir(err)) throw err
         found = null
@@ -232,7 +248,7 @@ export function treeWalk<D, S>(
         return listing.map((name) => base + name) as D
       }
     }
-    return readdir(path, nofollow)
+    return readdir(path, nofollow, limit)
   }
   const treeStat: WalkCall<S> = async (path, nofollow) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'

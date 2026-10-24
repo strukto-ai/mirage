@@ -52,7 +52,7 @@ describe('box readdir', () => {
       }
       throw new Error(`unexpected folderId=${folderId}`)
     })
-    const rows = await readdir(makeAccessor(), ROOT)
+    const rows = (await readdir(makeAccessor(), ROOT)) as FileStat[]
     expect(rows.map((row) => [row.name, row.type, row.size, row.extra.box_id])).toEqual([
       ['docs', FileType.DIRECTORY, null, '111'],
       ['notes.txt', FileType.FILE, 12, '222'],
@@ -66,7 +66,7 @@ describe('box readdir', () => {
       }
       throw new Error(`unexpected folderId=${folderId}`)
     })
-    const rows = await readdir(makeAccessor(), DOCS, DOCS_ROW)
+    const rows = (await readdir(makeAccessor(), DOCS, DOCS_ROW)) as FileStat[]
     expect(rows.map((row) => row.name)).toEqual(['note.md'])
   })
 
@@ -94,7 +94,7 @@ describe('box readdir', () => {
         modified_at: '2026-04-01T00:00:00Z',
       },
     ])
-    const rows = await readdir(makeAccessor(), ROOT)
+    const rows = (await readdir(makeAccessor(), ROOT)) as FileStat[]
     expect(rows.map((row) => [row.name, row.size])).toEqual([['empty.txt', 0]])
   })
 
@@ -123,7 +123,7 @@ describe('box readdir', () => {
     vi.mocked(api.listFolderItems).mockResolvedValue([
       { type: 'file', id: '200', name: 'a.txt', size: 1, sha1 } as unknown as api.BoxItem,
     ])
-    const [row] = await readdir(makeAccessor(), ROOT)
+    const [row] = (await readdir(makeAccessor(), ROOT)) as FileStat[]
     expect(row?.extra.sha1).toBe(kept)
     expect(row?.fingerprint).toBe(kept ?? null)
   })
@@ -132,7 +132,7 @@ describe('box readdir', () => {
     vi.mocked(api.listFolderItems).mockResolvedValue([
       { type: 'file' as const, id: '200', name: 'a.txt', size: 1, etag: '3' },
     ])
-    const [row] = await readdir(makeAccessor(), ROOT)
+    const [row] = (await readdir(makeAccessor(), ROOT)) as FileStat[]
     expect(row?.extra.etag).toBe('3')
   })
 })

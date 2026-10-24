@@ -60,7 +60,7 @@ async def stat(accessor: OneDriveAccessor, path: PathSpec) -> FileStat:
 
 
 async def tree(
-    accessor: OneDriveAccessor, path: PathSpec
+    accessor: OneDriveAccessor, path: PathSpec, limit: int | None = None
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as a listing's stat renders it.
 
@@ -71,19 +71,22 @@ async def tree(
     ``cTag`` out, so its folders' listings go out batched instead
     (``batch_tree``), as they do for a feed that does not answer and for
     a drive that will not say which kind it is. Which kind the drive is,
-    Graph's ``driveType``, is asked once per mount.
+    Graph's ``driveType``, is asked once per mount. A walk's ``limit``
+    goes to the batched listings, which stop past it, since the feed
+    cannot be cut.
 
     Args:
         accessor (OneDriveAccessor): backend accessor.
         path (PathSpec): the directory.
+        limit (int | None): the most entries a walk can still keep.
     """
     config = accessor.config
     loc = drive_loc(config, path.vfs_path)
-    if await _drive_type(accessor) == "personal":
+    if limit is None and await _drive_type(accessor) == "personal":
         found = await delta_tree(accessor, loc)
         if found is not None:
             return found
-    return await batch_tree(accessor, loc, virtual_key(path))
+    return await batch_tree(accessor, loc, virtual_key(path), limit)
 
 
 async def _drive_type(accessor: OneDriveAccessor) -> str:

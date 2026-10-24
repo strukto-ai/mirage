@@ -111,25 +111,34 @@ export interface BoxSearchItem {
   path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
 }
 
+/**
+ * List every item in a Box folder, following offset pagination: `pageSize`
+ * items per request, and no request past the one that brings `limit` items
+ * other than web links (bookmarks no listing names). Mirrors Python's
+ * `list_folder_items`.
+ */
 export async function listFolderItems(
   tm: BoxTokenManager,
   folderId: string,
-  opts: { limit?: number } = {},
+  opts: { pageSize?: number; limit?: number } = {},
 ): Promise<BoxItem[]> {
-  const limit = opts.limit ?? 1000
+  const pageSize = opts.pageSize ?? 1000
   const out: BoxItem[] = []
   let offset = 0
+  let named = 0
   for (;;) {
     const data = (await boxGet(tm, `${tm.apiBase}/folders/${folderId}/items`, {
       fields: LIST_FIELDS,
-      limit,
+      limit: pageSize,
       offset,
     })) as ListItemsResponse
     out.push(...data.entries)
     offset += data.entries.length
+    named += data.entries.filter((item) => item.type !== 'web_link').length
     if (offset >= data.total_count || data.entries.length === 0) {
       break
     }
+    if (opts.limit !== undefined && named >= opts.limit) break
   }
   return out
 }

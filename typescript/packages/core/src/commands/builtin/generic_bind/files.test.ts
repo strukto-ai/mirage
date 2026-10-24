@@ -37,6 +37,7 @@ import { runWithRevisions } from '../../../observe/context.ts'
 import { BatchedRAM, readers } from '../../../test-utils.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -257,4 +258,33 @@ it('warms the operands after a glob read', async () => {
   const warmed = names.slice(1).map((name) => `/r${name}`)
   expect(vfs.reads).toEqual(['/r/f00'])
   expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8)])
+})
+
+// A RAM mount noting each folder its tree read is asked for. Twin of
+// Python's TreeRAM.
+class TreeRAM extends RAMVFS {
+  readonly trees: string[] = []
+
+  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    this.trees.push(path.virtual)
+    return super.readTree(path)
+  }
+}
+
+it('reads no tree a mount sits under on a walk across mounts', async () => {
+  const vfs = new TreeRAM()
+  for (const dir of ['/d', '/d/sub', '/e']) vfs.store.dirs.add(dir)
+  vfs.store.files.set('/d/x', new Uint8Array())
+  vfs.store.files.set('/e/y', new Uint8Array())
+  const nested = new RAMVFS()
+  nested.store.files.set('/z', new Uint8Array())
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/r': vfs, '/r/d/sub': nested },
+    { shellParserFactory: () => Promise.resolve(parser) },
+  )
+  open.push(ws)
+  const out = await ws.shell('ls -R /r')
+  expect(DEC.decode(out.stdout)).toBe('/r:\nd\ne\n\n/r/d:\nsub\nx\n\n/r/d/sub:\nz\n\n/r/e:\ny\n')
+  expect(vfs.trees).toEqual(['/r/e'])
 })

@@ -13,9 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import functools
 import re
 
-from mirage.commands.builtin.utils.tree import WalkBudget
+from mirage.commands.builtin.generic_bind.files import (
+    dispatched_call,
+    dispatched_read_tree,
+)
+from mirage.commands.builtin.utils.tree import WalkBudget, WalkCall, tree_walk
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
@@ -74,6 +79,7 @@ def encode_value(value: bytes, encoding: str | None) -> bytes:
 
 async def _walk(
     dispatch: DispatchFn,
+    walk: tuple[WalkCall, WalkCall],
     links: NamespaceLinks,
     path: PathSpec,
     shown: str,
@@ -88,7 +94,9 @@ async def _walk(
     and for an operand itself unless ``-P``.
 
     Args:
-        dispatch (DispatchFn): op dispatcher.
+        dispatch (DispatchFn): op dispatcher, which follows a link.
+        walk (tuple[WalkCall, WalkCall]): the walk's readdir and lstat,
+            answered from a mount's ``read_tree`` where one answers.
         links (NamespaceLinks): the session's link table, which names
             the directory a listing comes from.
         path (PathSpec): the entry to report and maybe descend into.
@@ -97,9 +105,10 @@ async def _walk(
         deref (bool): whether this entry, if a link, is descended.
         budget (WalkBudget): the entries the operand's walk may still list.
     """
+    readdir, lstat = walk
     entries = [(path, shown)]
     try:
-        stat, _ = await dispatch("stat", path, nofollow=True)
+        stat = await lstat(path)
         if stat.type == FileType.SYMLINK and deref:
             stat, _ = await dispatch("stat", path)
     except (FileNotFoundError, NotADirectoryError):
@@ -109,7 +118,10 @@ async def _walk(
     here = links.follow(path.virtual)
     if not budget.opens(here):
         return entries
-    children, _ = await dispatch("readdir", path)
+    limit = budget.listing_limit(here)
+    children = await (
+        readdir(path) if limit is None else readdir(path, limit=limit)
+    )
     for child in children:
         if not budget.spend(here):
             break
@@ -117,6 +129,7 @@ async def _walk(
         entries.extend(
             await _walk(
                 dispatch,
+                walk,
                 links,
                 PathSpec.from_str_path(child.rstrip("/")),
                 f"{shown.rstrip('/')}/{name}",
@@ -185,6 +198,13 @@ async def handle_getfattr(
     warned = False
     links = namespace.session_links(session)
     mounts = links.mounts(True)
+    walk = tree_walk(
+        dispatched_read_tree(
+            dispatch, links.mounts(False), links.follow_parent, True
+        ),
+        functools.partial(dispatched_call, dispatch, "readdir"),
+        functools.partial(dispatched_call, dispatch, "stat", nofollow=True),
+    )
     for target in targets:
         typed = target.raw_path or target.virtual
         entries = [(target, typed)]
@@ -192,6 +212,7 @@ async def handle_getfattr(
         if fl.as_bool("recursive"):
             entries = await _walk(
                 dispatch,
+                walk,
                 links,
                 target,
                 typed,

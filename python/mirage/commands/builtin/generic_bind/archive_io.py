@@ -5,8 +5,16 @@ from typing import cast
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
 from mirage.commands.builtin.generic.find import parse_find_args
-from mirage.commands.builtin.generic_bind.files import CommandFiles
-from mirage.commands.builtin.utils.tree import before_full_walk
+from mirage.commands.builtin.generic_bind.files import (
+    CommandFiles,
+    dispatched_call,
+)
+from mirage.commands.builtin.utils.tree import (
+    ReadTree,
+    WalkCall,
+    before_full_walk,
+    tree_walk,
+)
 from mirage.core.generic.find import walk_find
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, ReaddirFn, StatFn
@@ -97,7 +105,12 @@ def walk_of(
             asks the mount's ``before_full_walk``.
         command (str): tar or zip.
     """
-    return partial(_walk_with, files.readdir, files.stat, dispatch, command)
+    readdir, stat = tree_walk(
+        files.read_tree if files.answers("read_tree") else None,
+        files.readdir,
+        files.stat,
+    )
+    return partial(_walk_with, readdir, stat, dispatch, command)
 
 
 def is_dir_of(files: CommandFiles) -> DirProbe:
@@ -121,7 +134,7 @@ async def _relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
 
 
 async def _own_listing(
-    dispatch: DispatchFn, owed: ChildMounts | None, path: PathSpec
+    readdir: WalkCall, owed: ChildMounts | None, path: PathSpec
 ) -> list[str]:
     """One directory as its own backend lists it, through the dispatcher.
 
@@ -132,12 +145,12 @@ async def _own_listing(
     mount the scan must not cross, so they are left to the scan.
 
     Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
+        readdir (WalkCall): the relay's listing.
         owed (ChildMounts | None): the names the namespace owes a
             directory; None lists everything the dispatcher does.
         path (PathSpec): the directory to list.
     """
-    entries, _ = await dispatch("readdir", path)
+    entries = await readdir(path)
     if owed is None:
         return list(entries)
     names = set(owed(path.virtual))
@@ -149,7 +162,10 @@ async def _own_listing(
 
 
 def relay_walk_of(
-    dispatch: DispatchFn, owed: ChildMounts | None, command: str
+    dispatch: DispatchFn,
+    owed: ChildMounts | None,
+    command: str,
+    read_tree: ReadTree | None = None,
 ) -> WalkFn:
     """The subtree listing tar and zip walk with when a line spans mounts.
 
@@ -162,11 +178,18 @@ def relay_walk_of(
         owed (ChildMounts | None): the names the namespace owes a
             directory, which the scan merges itself.
         command (str): tar or zip.
+        read_tree (ReadTree | None): the walk's subtree read
+            (``dispatched_read_tree``); None lists every directory.
     """
+    readdir, stat = tree_walk(
+        read_tree,
+        partial(dispatched_call, dispatch, "readdir"),
+        partial(_relayed_stat, dispatch),
+    )
     return partial(
         _walk_with,
-        partial(_own_listing, dispatch, owed),
-        partial(_relayed_stat, dispatch),
+        partial(_own_listing, readdir, owed),
+        stat,
         dispatch,
         command,
     )
@@ -181,5 +204,5 @@ def relay_is_dir_of(dispatch: DispatchFn) -> DirProbe:
     return partial(
         _is_dir_with,
         partial(_relayed_stat, dispatch),
-        partial(_own_listing, dispatch, None),
+        partial(dispatched_call, dispatch, "readdir"),
     )

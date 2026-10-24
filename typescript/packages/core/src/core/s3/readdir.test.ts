@@ -22,7 +22,7 @@ vi.mock('./client.ts', async () => {
 
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import * as clientMod from './client.ts'
 import { readdir } from './readdir.ts'
 import { stripSlash } from '../../utils/slash.ts'
@@ -91,7 +91,7 @@ function spec(virtual: string): PathSpec {
 async function run(keys: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
   mockBucket(keys)
   const config = { bucket: 'b', keyPrefix } as S3Config
-  const rows = await readdir(new S3Accessor(config), spec(virtual))
+  const rows = (await readdir(new S3Accessor(config), spec(virtual))) as FileStat[]
   return rows.map((row) => `${virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 

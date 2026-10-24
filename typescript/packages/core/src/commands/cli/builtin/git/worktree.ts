@@ -13,12 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
-import { mountView } from '../../../builtin/utils/links.ts'
+import { dispatchedReadTree } from '../../../builtin/generic_bind/files.ts'
+import { linkLocation, linkView, mountView } from '../../../builtin/utils/links.ts'
+import { type ReadTree, treeWalk, type WalkCall } from '../../../builtin/utils/tree.ts'
+import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { GIT_DIR } from './constants.ts'
 import { WorkTreeLimitError } from './errors.ts'
 import { under } from './pathspec.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { lstat, readNames, readOptional } from './io.ts'
+import { readNames, readOptional } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import type { RepoLocation, WorkTree } from './types.ts'
@@ -65,6 +68,9 @@ class Scanner {
   private readonly directories: Set<string>
   private readonly mounts: MountView | undefined
   private readonly counted = new Map<string, number>()
+  private readonly readTree: ReadTree
+  private readonly treeReaddir: WalkCall<string[]>
+  private readonly treeLstat: WalkCall<FileStat>
 
   constructor(
     private readonly vfs: Files,
@@ -76,6 +82,18 @@ class Scanner {
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
+    const links = linkView(vfs)
+    this.readTree = dispatchedReadTree(
+      vfs.dispatch,
+      mountView(vfs),
+      links === undefined ? null : (virtual) => linkLocation(links, virtual),
+      true,
+    )
+    ;[this.treeReaddir, this.treeLstat] = treeWalk<string[], FileStat>(
+      (path) => this.subtree(path),
+      (path) => vfs.readdir(path),
+      (path) => vfs.stat(path, undefined, { nofollow: true }),
+    )
   }
 
   /**
@@ -111,10 +129,52 @@ class Scanner {
   }
 
   /**
+   * A directory's whole subtree in one read, given up once it holds more
+   * entries than files the walk may still count on its mount.
+   */
+  private subtree(path: PathSpec): Promise<Map<string, FileStat> | null> {
+    if (this.mounts?.walkLimit === undefined) return this.readTree(path)
+    const limit = this.mounts.walkLimit(path.virtual)
+    if (limit < 0) return this.readTree(path)
+    const spent = this.counted.get(this.mounts.rootOf(path.virtual)) ?? 0
+    return this.readTree(path, Math.max(limit - spent, 0) + 1)
+  }
+
+  /**
+   * Whether the walk reads a directory's whole subtree, which a mount's
+   * `readTree` may then answer in one call: any below the work tree's root,
+   * whose own subtree holds the git directory the walk skips, at or under a
+   * root.
+   */
+  private whole(relative: string): boolean {
+    return (
+      relative !== '' &&
+      (this.roots === null || this.roots.some((root) => relative === root || under(relative, root)))
+    )
+  }
+
+  /** A directory's entries, empty when it does not exist. */
+  private async names(relative: string): Promise<string[]> {
+    const path = this.absolute(relative)
+    if (!this.whole(relative)) return readNames(this.vfs, path)
+    try {
+      return await this.treeReaddir(path)
+    } catch (err) {
+      if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return []
+      throw err
+    }
+  }
+
+  /**
    * What the walk sees at one path, without following a link.
    */
   private async entryStat(relative: string): Promise<FileStat | null> {
-    return lstat(this.vfs, this.absolute(relative))
+    try {
+      return await this.treeLstat(this.absolute(relative))
+    } catch (err) {
+      if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
+      throw err
+    }
   }
 
   /**
@@ -122,7 +182,8 @@ class Scanner {
    *
    * git lists a directory only when something inside it would be reported, so a
    * directory holding nothing but ignored files, or nothing at all, is not
-   * mentioned. Stops at the first find.
+   * mentioned. Stops at the first find, so it lists one directory at a time
+   * rather than reading a subtree whole.
    */
   private async holdsAFile(
     relative: string,
@@ -206,7 +267,7 @@ class Scanner {
    */
   async walk(relative: string, ignored: boolean, ignores: IgnoreStack): Promise<void> {
     const rules = await this.descend(relative, ignores)
-    const entries = (await readNames(this.vfs, this.absolute(relative))).sort(compareCodePoints)
+    const entries = (await this.names(relative)).sort(compareCodePoints)
     for (const entry of entries) {
       const name = entryName(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue

@@ -21,7 +21,7 @@ from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.constants import CONTENT_HASH
 from mirage.core.dropbox.fingerprint import token_of
 from mirage.errors.fs import listing_error
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 
 
@@ -82,19 +82,27 @@ async def _is_dir(accessor: DropboxAccessor, key: str) -> bool:
 
 
 async def readdir(
-    accessor: DropboxAccessor, path_spec: PathSpec
-) -> list[FileStat]:
-    """A folder's children, each as ``stat`` answers it.
+    accessor: DropboxAccessor,
+    path_spec: PathSpec,
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """A folder's children, each as ``stat`` answers it; past a walk's
+    ``limit`` Dropbox is paged no further, and the listing is partial.
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
         path_spec (PathSpec): the folder.
+        limit (int | None): the most entries a walk can still keep.
     """
     path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
     key = path.strip("/")
     dropbox_path = dropbox_path_from_key(accessor.root_path, key)
     try:
-        files = await list_folder(accessor.token_manager, dropbox_path)
+        files = await (
+            list_folder(accessor.token_manager, dropbox_path)
+            if limit is None
+            else list_folder(accessor.token_manager, dropbox_path, limit=limit)
+        )
     except DropboxApiError as exc:
         # list_folder 409s on a missing path and on a file operand alike
         # (path/not_found, path/not_folder), and the subtag cannot tell
@@ -112,4 +120,6 @@ async def readdir(
         raise
     rows = [stat_from_entry(f) for f in files]
     rows.sort(key=lambda row: row.name)
+    if limit is not None and len(files) >= limit:
+        return DirListing(rows, partial=True)
     return rows

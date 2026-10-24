@@ -12,18 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
 import logging
 import re
 from datetime import datetime, timezone
 from functools import partial
 
+from mirage.commands.builtin.generic_bind.files import (
+    dispatched_call,
+    dispatched_read_tree,
+)
 from mirage.commands.builtin.utils.identity import (
     Identity,
     group_name,
     owner_name,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
-from mirage.commands.builtin.utils.tree import before_full_walk
+from mirage.commands.builtin.utils.tree import before_full_walk, tree_walk
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -35,6 +40,7 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
 from mirage.view.types import MountView, NamespaceLinks
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
@@ -400,7 +406,7 @@ async def before_recursive_change(
 
 
 async def walk_stats(
-    links: NamespaceLinks,
+    links: NamespaceReader,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
@@ -408,7 +414,9 @@ async def walk_stats(
     """A subtree as ``(path, stat, unread)`` triples, in fts's pre-order.
 
     Each entry's stat is captured during the walk because chmod's
-    symbolic clauses (``u+x``) build on the entry's own current mode.
+    symbolic clauses (``u+x``) build on the entry's own current mode,
+    read off the mount's ``read_tree`` where one answers for the
+    subtree (``tree_walk``).
     Symlinks are skipped by name: the dispatcher's readdir reports them (they
     are namespace structure), GNU chmod -R changes neither a traversed
     link nor its referent, and the skip must come before the stat
@@ -419,12 +427,17 @@ async def walk_stats(
     change, and whose subtree is not walked.
 
     Args:
-        links (NamespaceLinks): the session's link table
+        links (NamespaceReader): the session's link table
             (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
     """
+    readdir, stat_of = tree_walk(
+        dispatched_read_tree(dispatch, links.mounts(False), None, True),
+        functools.partial(dispatched_call, dispatch, "readdir"),
+        functools.partial(dispatched_call, dispatch, "stat"),
+    )
     entries: list[WalkEntry] = []
     # An explicit stack, so a deep tree costs no recursion: a directory's
     # children go on in reverse and come off in listing order.
@@ -435,7 +448,7 @@ async def walk_stats(
             entries.append((path, stat, None))
             continue
         try:
-            children, _ = await dispatch("readdir", path)
+            children = await readdir(path)
         except PermissionError as exc:
             entries.append((path, stat, exc))
             continue
@@ -448,14 +461,13 @@ async def walk_stats(
             if links.is_link(child_virtual):
                 continue
             child = PathSpec.from_str_path(child_virtual)
-            child_stat, _ = await dispatch("stat", child)
-            found.append((child, child_stat))
+            found.append((child, await stat_of(child)))
         stack.extend(reversed(found))
     return entries
 
 
 async def walk_owned(
-    links: NamespaceLinks,
+    links: NamespaceReader,
     dispatch: DispatchFn,
     root: PathSpec,
     root_stat: FileStat,
@@ -469,7 +481,7 @@ async def walk_owned(
     whose listing was refused, which the walk does not descend.
 
     Args:
-        links (NamespaceLinks): the session's link table
+        links (NamespaceReader): the session's link table
             (``Namespace.session_links``).
         dispatch (DispatchFn): op dispatcher.
         root (PathSpec): subtree root.

@@ -66,7 +66,7 @@ from mirage.view.types import ChildMounts, LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
 
-Readdir = Callable[[PathSpec], Awaitable[list[str]]]
+Readdir = Callable[..., Awaitable[list[str]]]
 Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 LS_OK = 0
@@ -1129,8 +1129,11 @@ async def probe_operand(
         link_row = _link_row(path, links)
         if link_row is not None:
             return Operand(path, link_row, []), warnings
+    limit = None if budget is None else budget.listing_limit(path.virtual)
     try:
-        names = await readdir(path)
+        names = await (
+            readdir(path) if limit is None else readdir(path, limit=limit)
+        )
     except (OSError, ValueError) as exc:
         if isinstance(exc, DotWalkError):
             # The operand did not resolve, so neither the path it

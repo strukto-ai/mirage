@@ -22,7 +22,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const readdir = (p: PathSpec): Promise<string[]> => files.readdir(p)
+  const readdir = files.readdir
   const stat = (p: PathSpec): Promise<FileStat> => files.stat(p)
   return treeGeneric(
     resolved,

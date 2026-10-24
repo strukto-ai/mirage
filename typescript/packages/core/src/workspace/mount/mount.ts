@@ -191,9 +191,10 @@ function dstArg(value: unknown): PathSpec {
   return value
 }
 
-/** What rides beside the path: the handed stats. */
+/** What rides beside the path: the handed stats, and a walk's `limit`. */
 function handedOf(kw: OpKwargs): Handed | undefined {
-  return kw.handed as Handed | undefined
+  const handed = kw.handed as Handed | undefined
+  return typeof kw.limit === 'number' ? { ...handed, limit: kw.limit } : handed
 }
 
 /**
@@ -205,6 +206,8 @@ function handedOf(kw: OpKwargs): Handed | undefined {
  */
 function taken(name: string, kwargs: OpKwargs): void {
   const keywords: Readonly<Record<string, readonly string[]>> = {
+    readdir: ['limit'],
+    read_tree: ['limit'],
     read: ['offset', 'size'],
     write: ['atomic'],
     mkdir: ['parents'],

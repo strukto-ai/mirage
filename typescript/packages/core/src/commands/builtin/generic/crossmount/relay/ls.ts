@@ -19,7 +19,11 @@ import type { FileStat, PathSpec } from '../../../../../types.ts'
 import { gnuBasename } from '../../../../../utils/path.ts'
 import type { Context } from '../../../../config.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
-import { dispatchedCall } from '../../../generic_bind/files.ts'
+import { dispatchedCall, dispatchedReadTree } from '../../../generic_bind/files.ts'
+import { specOf } from '../../../../spec/builtins.ts'
+import { FlagView } from '../../../../spec/flag_view.ts'
+import { linkLocation, linkView, mountView } from '../../../utils/links.ts'
+import { treeWalk } from '../../../utils/tree.ts'
 import { lsGeneric } from '../../ls.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { crossOpts, flatten, readdirOp } from '../utils.ts'
@@ -69,8 +73,22 @@ export async function runLs(
     ...(sessionView !== undefined ? { session: sessionView } : {}),
   }
   // The dispatcher's listing names the links among the entries. Mirrors
-  // Python's relayed_readdir.
-  const stat = relayedStat(dispatch)
-  const result = await lsGeneric(flatten(scopes), ctx, readdirOp(dispatch), stat, null)
+  // Python's relayed_readdir. Only -R walks; a plain listing reads one
+  // directory.
+  const recursive = new FlagView(flagKwargs, specOf('ls')).asBool('recursive')
+  const links = linkView(vfs)
+  const [readdir, stat] = treeWalk<string[], FileStat>(
+    recursive && vfs !== undefined
+      ? dispatchedReadTree(
+          dispatch,
+          mountView(vfs),
+          links === undefined ? null : (virtual) => linkLocation(links, virtual),
+          true,
+        )
+      : undefined,
+    readdirOp(dispatch),
+    relayedStat(dispatch),
+  )
+  const result = await lsGeneric(flatten(scopes), ctx, readdir, stat, null)
   return result ?? [null, new IOResult()]
 }

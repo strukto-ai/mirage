@@ -231,21 +231,32 @@ def _taken(
 ) -> dict[str, Any]:
     """The keywords of ``kwargs`` that ``fn`` takes.
 
-    The mount hands every function its ``index``; a function that does
-    not name it never sees it. Every other keyword is the caller's, and
-    one the function does not take is the TypeError a direct call would
-    raise, never silently dropped.
+    The mount hands every function its ``index``, and a walk hands a
+    listing its ``limit``; a function that does not name either never
+    sees it, and one that takes any keyword is handed ``limit`` only by
+    name, so a plug-in passing its keywords on to another listing is not
+    handed a hint that one refuses. Every other keyword is the caller's,
+    and one the function does not take is the TypeError a direct call
+    would raise, never silently dropped.
 
     Args:
         name (str): the function the caller named, which the error names.
         fn (Callable[..., Any]): the function about to run.
         kwargs (dict[str, Any]): the call's keywords.
     """
-    target = fn.func if isinstance(fn, functools.partial) else fn
-    names = _parameters(getattr(target, "__func__", target))
+    bound = fn.func if isinstance(fn, functools.partial) else fn
+    target = getattr(bound, "__func__", bound)
+    names = _parameters(target)
+    listing = name in ("readdir", "read_tree")
     if names is None:
-        return kwargs
-    unknown = sorted(set(kwargs) - names - {"index"})
+        named = "limit" in inspect.signature(target).parameters
+        return {
+            k: v
+            for k, v in kwargs.items()
+            if not listing or k != "limit" or named
+        }
+    exempt = {"index", "limit"} if listing else {"index"}
+    unknown = sorted(set(kwargs) - names - exempt)
     if unknown:
         raise TypeError(
             f"{name}() got an unexpected keyword argument {unknown[0]!r}"

@@ -71,9 +71,11 @@ async def test_nested_mount_failure_keeps_the_line(name, caplog):
 
     ws = Workspace({"/bad": RAMVFS(), "/good": RAMVFS()}, mode="exec")
     # find and du hand each mount's part to that mount's own command;
-    # ls -R lists the nested mount through the dispatcher.
+    # ls -R lists the nested mount through the dispatcher, which a failing
+    # backend fails whole, its subtree read as well as its listing.
     if name == "ls -R":
         override(ws.mount("/bad").vfs, "readdir", failing_readdir)
+        override(ws.mount("/bad").vfs, "read_tree", failing_readdir)
     else:
         ws.mount("/bad").register_commands(
             [failing_command(name, error, lazy=False)]

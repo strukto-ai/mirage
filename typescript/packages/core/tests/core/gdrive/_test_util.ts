@@ -86,8 +86,9 @@ export class FakeDrive implements DriveApi {
   searches: string[][] = []
   incomplete = false
   // The folder ids and shared drive of every listing of several folders at
-  // once.
+  // once, and the limit each was handed.
   childQueries: [string[], string | null][] = []
+  childLimits: (number | undefined)[] = []
   private counter = 0
 
   add(
@@ -158,13 +159,18 @@ export class FakeDrive implements DriveApi {
     return Promise.resolve(out)
   }
 
-  listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]> {
+  listChildren(
+    folderIds: readonly string[],
+    driveId: string | null,
+    limit?: number,
+  ): Promise<DriveFile[]> {
     this.childQueries.push([[...folderIds], driveId])
+    this.childLimits.push(limit)
     const out: DriveFile[] = []
     for (const item of this.items.values()) {
       if (item.parents.some((p) => folderIds.includes(p))) out.push(this.public(item.id))
     }
-    return Promise.resolve(out)
+    return Promise.resolve(limit === undefined ? out : out.slice(0, limit))
   }
 
   listAllFiles(

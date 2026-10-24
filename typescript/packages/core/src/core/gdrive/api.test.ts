@@ -50,9 +50,9 @@ const DELEGATIONS: { [K in keyof DriveApi]: Delegation & { args: Parameters<Driv
     sent: [{ folderId: 'f1', driveId: 'd1', limit: 1 }],
   },
   listChildren: {
-    args: [['a', 'b'], 'd2'],
+    args: [['a', 'b'], 'd2', 3],
     wire: drive.listChildren,
-    sent: [['a', 'b'], 'd2'],
+    sent: [['a', 'b'], 'd2', undefined, 3],
   },
   listSharedDrives: { args: [], wire: drive.listSharedDrives, sent: [] },
   listAllFiles: {

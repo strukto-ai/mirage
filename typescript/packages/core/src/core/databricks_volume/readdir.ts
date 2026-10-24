@@ -14,7 +14,7 @@
 
 import { toIsoZ } from '../../utils/dates.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { getMetadata, getDirectoryMetadata, listDirectoryContents } from './client.ts'
@@ -42,7 +42,9 @@ async function head(
 }
 
 /**
- * A folder's rows, as the Files API lists them. Mirrors Python's `readdir`.
+ * A folder's rows, as the Files API lists them; past a walk's `limit` the
+ * API is paged no further, and the listing is partial. Mirrors Python's
+ * `readdir`.
  *
  * Throws:
  *   FileNotFoundError: nothing is at the path.
@@ -51,12 +53,13 @@ async function head(
 export async function readdir(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-): Promise<FileStat[]> {
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   const listPath = path.pattern !== null ? path.dir : path
   const remotePath = backendPath(accessor.config, listPath)
   let entries: DirectoryEntry[]
   try {
-    entries = await listDirectoryContents(accessor, remotePath)
+    entries = await listDirectoryContents(accessor, remotePath, limit)
   } catch (exc) {
     // The Files API answers 404 for a missing path and for a path under a
     // file alike, so the errno comes from walking the ancestors: one
@@ -91,5 +94,7 @@ export async function readdir(
       }),
     )
   }
+  if (limit !== undefined && entries.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
   return rows
 }

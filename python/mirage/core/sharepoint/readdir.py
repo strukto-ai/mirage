@@ -25,7 +25,7 @@ from mirage.core.sharepoint.resolve import (
     list_sites,
     resolve,
 )
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 
 
 def _folders(names: list[str]) -> list[FileStat]:
@@ -40,8 +40,8 @@ def _folders(names: list[str]) -> list[FileStat]:
 
 
 async def readdir(
-    accessor: SharePointAccessor, path: PathSpec
-) -> list[FileStat]:
+    accessor: SharePointAccessor, path: PathSpec, limit: int | None = None
+) -> list[FileStat] | DirListing:
     target = directory_path(path)
     resolved = await resolve(accessor, target)
     if resolved.level == "root":
@@ -54,11 +54,12 @@ async def readdir(
         accessor,
         drive_loc(accessor.config, resolved, target.vfs_path),
         virtual_key(path),
+        limit,
     )
 
 
 async def tree(
-    accessor: SharePointAccessor, path: PathSpec
+    accessor: SharePointAccessor, path: PathSpec, limit: int | None = None
 ) -> dict[str, FileStat] | None:
     """Every item under a folder of a document library, each as its
     folder's listing renders it, from the folders' listings batched
@@ -71,6 +72,7 @@ async def tree(
     Args:
         accessor (SharePointAccessor): backend accessor.
         path (PathSpec): the directory.
+        limit (int | None): the most entries a walk can still keep.
     """
     resolved = await resolve(accessor, path)
     if resolved.level in ("root", "site") or resolved.drive_id is None:
@@ -79,4 +81,5 @@ async def tree(
         accessor,
         drive_loc(accessor.config, resolved, path.vfs_path),
         virtual_key(path),
+        limit,
     )

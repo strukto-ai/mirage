@@ -501,6 +501,26 @@ describe('batchTree', () => {
     expect(rec.bodies).toEqual([asked('top/a', 'top/b'), asked('top/a/c')])
   })
 
+  // Twin of test_batch_tree_pages_a_listing_no_further_than_a_walks_limit.
+  it('pages a listing no further than a walk limit', async () => {
+    const rest = `${children('top/a')}?page=2`
+    const more = `${children('top/a')}?page=3`
+    const file = (i: number) =>
+      row(`x${String(i)}`, `x${String(i)}.txt`, 'A', { size: 1, file: {} })
+    const rec = stubFetch([
+      {
+        method: 'GET',
+        url: children('top'),
+        body: { value: [row('A', 'a', 'T', { folder: { childCount: 4 } })] },
+      },
+      { method: 'POST', url: BATCH, body: batched({ value: [], '@odata.nextLink': rest }) },
+      { method: 'GET', url: rest, body: { value: [0, 1, 2].map(file), '@odata.nextLink': more } },
+      { method: 'GET', url: more, body: { value: [file(3)] } },
+    ])
+    expect(await batchTree(config, loc('top'), SPEC, 3)).toBeNull()
+    expect(rec.pending()).toBe(1)
+  })
+
   it('splits a wide level', async () => {
     const names = Array.from({ length: 25 }, (_, i) => `d${String(i).padStart(2, '0')}`)
     const rec = stubFetch([

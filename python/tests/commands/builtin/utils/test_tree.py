@@ -302,15 +302,15 @@ def test_a_walk_budget_names_the_operand_as_typed(raw, shown):
 
 @pytest.mark.asyncio
 async def test_a_walk_budget_listing_cuts_one_and_skips_the_next():
-    asked: list[str] = []
+    asked: list[tuple[str, int | None]] = []
 
-    async def readdir(path: PathSpec) -> list[str]:
-        asked.append(path.virtual)
+    async def readdir(path: PathSpec, limit: int | None = None) -> list[str]:
+        asked.append((path.virtual, limit))
         return [f"{path.virtual}/{i}" for i in range(3)]
 
     budget = WalkBudget(PathSpec.from_str_path("/m"), _limits({"/m/": 2}))
     listed = await budget.listing(readdir, PathSpec.from_str_path("/m"))
     assert listed == ["/m/0", "/m/1"]
     assert await budget.listing(readdir, PathSpec.from_str_path("/m/0")) == []
-    assert asked == ["/m"]
+    assert asked == [("/m", 3)]
     assert budget.stopped == [f"/m: {STOP.format(2)}"]
