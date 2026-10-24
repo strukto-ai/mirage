@@ -47,6 +47,23 @@ function stoppedStatus(job: Job): number {
   return signal === null ? KILLED_EXIT_CODE : 128 + signal
 }
 
+/** Write the kill marker and the ending chunk. Mirrors Python's `_mark_killed`. */
+async function markKilled(console: JobConsole): Promise<void> {
+  await console.emit(Channel.STDERR, encodeText('Killed'))
+  await console.finish(KILLED_OUTCOME)
+}
+
+/**
+ * Stop a running job and settle it as killed by `signal`: its status is
+ * 128 plus it. Mirrors Python's `_stop`.
+ */
+async function stop(job: Job, signal = 9): Promise<void> {
+  job.process?.terminate(signal)
+  job.status = JobStatus.KILLED
+  job.exitCode = 128 + signal
+  await markKilled(job.console)
+}
+
 async function settle(run: JobRunner, job: Job): Promise<number> {
   let result: JobResult
   try {
@@ -66,8 +83,7 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
       const code = stoppedStatus(job)
       job.status = JobStatus.KILLED
       job.exitCode = code
-      await job.console.emit(Channel.STDERR, encodeText('Killed'))
-      await job.console.finish(KILLED_OUTCOME)
+      await markKilled(job.console)
       return code
     }
     // Recorded as the job's output and exit status rather than
@@ -235,7 +251,7 @@ export class JobTable {
     }
     init.abort.signal.addEventListener('abort', onAbort, { once: true })
     if (init.abort.signal.aborted) process.terminate()
-    job.task = process.join().then(() => {
+    void process.join().then(() => {
       init.abort.signal.removeEventListener('abort', onAbort)
     })
     return job
@@ -299,13 +315,8 @@ export class JobTable {
    */
   async kill(jobId: number, sessionId = '', signal = 9): Promise<boolean> {
     const job = this.get(jobId, sessionId)
-    if (job?.status !== JobStatus.RUNNING) return false
-    if (job.process !== null) job.process.terminate(signal)
-    else job.abort?.abort()
-    job.status = JobStatus.KILLED
-    job.exitCode = 128 + signal
-    await job.console.emit(Channel.STDERR, encodeText('Killed'))
-    await job.console.finish(KILLED_OUTCOME)
+    if (job?.status !== JobStatus.RUNNING || job.process === null) return false
+    await stop(job, signal)
     return true
   }
 
@@ -349,19 +360,8 @@ export class JobTable {
    * leak tasks. */
   async killAll(): Promise<Job[]> {
     const running = this.allRunningJobs()
-    for (const job of running) {
-      await this.kill(job.id, job.sessionId)
-    }
-    for (const job of this.disowned) {
-      if (job.status === JobStatus.RUNNING) {
-        if (job.process !== null) job.process.terminate()
-        else job.abort?.abort()
-        job.status = JobStatus.KILLED
-        job.exitCode = KILLED_EXIT_CODE
-        await job.console.emit(Channel.STDERR, encodeText('Killed'))
-        await job.console.finish(KILLED_OUTCOME)
-      }
-    }
+    for (const job of [...running, ...this.disowned])
+      if (job.status === JobStatus.RUNNING && job.process !== null) await stop(job)
     this.disowned = []
     return running
   }
@@ -405,20 +405,18 @@ export class JobTable {
     if (job === null) {
       throw new Error(`unknown job: ${jobId.toString()}`)
     }
-    if (job.task === null) return job
+    if (job.process === null) return job
     await job.console.waitFinished()
-    if (job.process !== null) {
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const late = new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          resolve(null)
-        }, STOP_WAIT_SECONDS * 1000)
-      })
-      try {
-        await Promise.race([job.process.join(), late])
-      } finally {
-        clearTimeout(timer)
-      }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(null)
+      }, STOP_WAIT_SECONDS * 1000)
+    })
+    try {
+      await Promise.race([job.process.join(), late])
+    } finally {
+      clearTimeout(timer)
     }
     return job
   }

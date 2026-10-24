@@ -159,7 +159,6 @@ def test_finished_jobs_survive(tmp_path):
     finished = Job(
         id=1,
         command="echo done",
-        task=None,
         cwd="/",
         status=JobStatus.COMPLETED,
         exit_code=0,
