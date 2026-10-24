@@ -22,7 +22,7 @@ from mirage.core.sharepoint.unlink import unlink as _unlink
 from mirage.core.sharepoint.write import write as _write
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
@@ -65,8 +65,10 @@ class SharePointVFS(BaseVFS):
         self.walk_limit = config.walk_limit
         self.accessor = SharePointAccessor(self.config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit)
 
     async def read(
         self,
@@ -84,8 +86,10 @@ class SharePointVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+    async def read_tree(
+        self, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, limit)
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False

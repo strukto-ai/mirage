@@ -108,7 +108,7 @@ export class GoogleDriveVFS extends BaseVFS {
   override readonly readsRanges: boolean = true
 
   override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
-    return gdriveReaddir(this.accessor, path, handed?.entry)
+    return gdriveReaddir(this.accessor, path, handed?.entry, handed?.limit)
   }
 
   override read(
@@ -141,7 +141,7 @@ export class GoogleDriveVFS extends BaseVFS {
   }
 
   override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
-    return gdriveTree(this.accessor, path, handed?.entry)
+    return gdriveTree(this.accessor, path, handed?.entry, handed?.limit)
   }
 
   override write(

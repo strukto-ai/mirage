@@ -27,7 +27,7 @@ import { stat as dbxStat } from '../../core/databricks_volume/stat.ts'
 import { readStream as dbxStream } from '../../core/databricks_volume/stream.ts'
 import { unlink as dbxUnlink } from '../../core/databricks_volume/unlink.ts'
 import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { BaseVFS } from '../base.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -45,8 +45,8 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return `${this.name}:${cfg.host}:${volume}${rstripSlash(cfg.rootPath)}`
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return dbxReaddir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return dbxReaddir(this.accessor, path, handed?.limit)
   }
 
   override read(

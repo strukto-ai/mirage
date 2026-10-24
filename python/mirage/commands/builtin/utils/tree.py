@@ -157,13 +157,28 @@ class WalkBudget:
         self._stop(folder, limit)
         return False
 
+    def listing_limit(self, directory: str) -> int | None:
+        """The ``limit`` a listing of ``directory`` hands its backend: one
+        entry past what the walk may still keep there, so a backend that
+        stops at it still leaves the walk the entry that records its
+        stop; None when nothing caps the walk.
+
+        Args:
+            directory (str): virtual path of the directory.
+        """
+        limit = self._limit(directory)
+        if limit < 0:
+            return None
+        used = self.spent.get(self._folder(directory), 0)
+        return max(limit - used, 0) + 1
+
     async def listing(
         self,
-        readdir: Callable[[PathSpec], Awaitable[list[str]]],
+        readdir: Callable[..., Awaitable[list[str]]],
         directory: PathSpec,
     ) -> list[str]:
         """``readdir`` of ``directory``, cut to what the walk may still
-        list.
+        list; the backend is handed the ``limit`` past which it may stop.
 
         Args:
             readdir (Callable): the walk's readdir.
@@ -171,11 +186,13 @@ class WalkBudget:
         """
         if not self.opens(directory.virtual):
             return []
-        return [
-            name
-            for name in await readdir(directory)
-            if self.spend(directory.virtual)
-        ]
+        limit = self.listing_limit(directory.virtual)
+        names = await (
+            readdir(directory)
+            if limit is None
+            else readdir(directory, limit=limit)
+        )
+        return [name for name in names if self.spend(directory.virtual)]
 
 
 def _listings(found: dict[str, FileStat]) -> dict[str, list[str]]:
@@ -230,7 +247,8 @@ def tree_walk(
     directory a walk reached through one is opened by ``readdir``, which
     follows it as opendir(3) does and meets whatever refuses the
     directory it leads to. Both take the path first and pass everything
-    else through.
+    else through; a listing's ``limit`` reaches ``read_tree`` too, which
+    may then answer None for a subtree past it.
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
@@ -257,8 +275,13 @@ def tree_walk(
         hit = covering(virtual) if _answerable(path) else None
         if hit is None and virtual not in asked and not path.pattern:
             asked.add(virtual)
+            limit = kwargs.get("limit")
             try:
-                found = await read_tree(path)
+                found = await (
+                    read_tree(path)
+                    if limit is None
+                    else read_tree(path, limit=limit)
+                )
             except (WalkDeclinedError, NotADirectoryError):
                 found = None
             if found is not None:

@@ -23,7 +23,7 @@ import {
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
@@ -645,16 +645,21 @@ export async function deltaTree(
  * Graph refuses a batch, or when a
  * listing below the folder fails (a folder gone, or one the account may not
  * open), so the walk lists what is there and reports, or skips, each folder on
- * its own. Mirrors Python's `batch_tree`.
+ * its own; null too once it holds more than `limit` items, before the next
+ * level is asked. Mirrors Python's `batch_tree`.
  */
 export async function batchTree(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
   path: PathSpec,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const found = new Map<string, FileStat>()
-  let level = filed(found, '', loc, await readdirItems(config, loc, path))
+  const top = await readdirItems(config, loc, path, limit)
+  if (top instanceof DirListing) return null
+  let level = filed(found, '', loc, top)
   while (level.length > 0) {
+    if (limit !== undefined && found.size > limit) return null
     const below: [string, DriveLoc][] = []
     for (let start = 0; start < level.length; start += BATCH_LIMIT) {
       const chunk = level.slice(start, start + BATCH_LIMIT)
@@ -685,6 +690,7 @@ export async function batchTree(
     }
     level = below
   }
+  if (limit !== undefined && found.size > limit) return null
   return found
 }
 
@@ -815,15 +821,20 @@ async function isDir(config: MsGraphConfigResolved, loc: DriveLoc, path: string)
   return item !== null && 'folder' in item
 }
 
-/** A folder's children, each as `stat` answers it. Mirrors Python's `readdir_items`. */
+/**
+ * A folder's children, each as `stat` answers it; past a walk's `limit` Graph
+ * is paged no further, and the listing is partial. Mirrors Python's
+ * `readdir_items`.
+ */
 export async function readdirItems(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
   path: PathSpec,
-): Promise<FileStat[]> {
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   let children: Record<string, unknown>[]
   try {
-    children = await graphList(config, loc.item('/children'))
+    children = await graphList(config, loc.item('/children'), undefined, limit)
   } catch (error) {
     if (!(error instanceof GraphError) || error.status !== 404) throw error
     // Graph 404s a children listing for a missing item and for one under a
@@ -836,7 +847,12 @@ export async function readdirItems(
       (p) => isDir(config, loc, p),
     )
   }
-  return children.map((child) => entryStat(child)).sort((a, b) => compareCodePoints(a.name, b.name))
+  const rows = children
+    .map((child) => entryStat(child))
+    .sort((a, b) => compareCodePoints(a.name, b.name))
+  if (limit !== undefined && children.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
+  return rows
 }
 
 /** One drive item's stat, from Graph. Mirrors Python's `stat_item`. */

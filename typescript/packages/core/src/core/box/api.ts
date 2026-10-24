@@ -111,18 +111,23 @@ export interface BoxSearchItem {
   path_collection?: { total_count: number; entries: BoxPathCollectionEntry[] }
 }
 
+/**
+ * List every item in a Box folder, following offset pagination: `pageSize`
+ * items per request, and no request past the one that brings `limit` items.
+ * Mirrors Python's `list_folder_items`.
+ */
 export async function listFolderItems(
   tm: BoxTokenManager,
   folderId: string,
-  opts: { limit?: number } = {},
+  opts: { pageSize?: number; limit?: number } = {},
 ): Promise<BoxItem[]> {
-  const limit = opts.limit ?? 1000
+  const pageSize = opts.pageSize ?? 1000
   const out: BoxItem[] = []
   let offset = 0
   for (;;) {
     const data = (await boxGet(tm, `${tm.apiBase}/folders/${folderId}/items`, {
       fields: LIST_FIELDS,
-      limit,
+      limit: pageSize,
       offset,
     })) as ListItemsResponse
     out.push(...data.entries)
@@ -130,6 +135,7 @@ export async function listFolderItems(
     if (offset >= data.total_count || data.entries.length === 0) {
       break
     }
+    if (opts.limit !== undefined && out.length >= opts.limit) break
   }
   return out
 }

@@ -19,7 +19,7 @@ import pytest
 
 from mirage.core.object_store.driver import TreeEntry
 from mirage.core.object_store.readdir import make_readdir, make_tree
-from mirage.types import FileType
+from mirage.types import DirListing, FileType
 from tests.core.object_store.conftest import FakeStore, make_driver, spec
 
 
@@ -99,3 +99,30 @@ def test_tree_declines_a_row_without_a_size(accessor):
         make_driver(FakeStore({"dir/a.txt": b"x"})), list_subtree=list_subtree
     )
     assert asyncio.run(make_tree(driver)(accessor, spec("/dir"))) is None
+
+
+def test_readdir_stops_at_a_walks_limit_and_marks_the_listing_partial(
+    accessor,
+):
+    store = FakeStore({f"f{i}.txt": b"x" for i in range(5)})
+    pulled: list[str] = []
+    driver = make_driver(store)
+
+    async def counted(conn, pfx):
+        async for child in driver.list_children(conn, pfx):
+            pulled.append(child.key)
+            yield child
+
+    readdir = make_readdir(replace(driver, list_children=counted))
+    out = asyncio.run(readdir(accessor, spec("/"), 2))
+    assert isinstance(out, DirListing) and out.partial
+    assert [row.name for row in out.entries] == ["f0.txt", "f1.txt"]
+    assert pulled == ["f0.txt", "f1.txt"]
+    assert len(asyncio.run(readdir(accessor, spec("/"), 6))) == 5
+
+
+def test_tree_answers_none_past_a_walks_limit(accessor):
+    store = FakeStore({f"dir/f{i}.txt": b"x" for i in range(5)})
+    tree = make_tree(make_driver(store))
+    assert asyncio.run(tree(accessor, spec("/dir"), 3)) is None
+    assert len(asyncio.run(tree(accessor, spec("/dir"), 5))) == 6

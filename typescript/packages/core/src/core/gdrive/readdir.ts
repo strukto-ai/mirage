@@ -139,12 +139,14 @@ export async function liveRow(
 /**
  * A folder's children, each as `stat` answers it. The mount root lists the
  * scoped folder, or My Drive and the Shared Drives the account sees; any
- * other folder is listed by the id its parent's listing named.
+ * other folder is listed by the id its parent's listing named. Past a walk's
+ * `limit` Drive is paged no further, and the listing is partial.
  */
 export async function readdir(
   accessor: GDriveAccessor,
   path: PathSpec,
   entry?: FileStat | null,
+  limit?: number,
 ): Promise<FileStat[] | DirListing> {
   const target = path.pattern !== null ? path.dir : path
   const atRoot = stripSlash(target.vfsPath) === ''
@@ -165,9 +167,13 @@ export async function readdir(
     driveId = typeof entryDriveId === 'string' ? entryDriveId : null
   }
   const drive = accessor.drive
-  const files = await drive.listFiles({ folderId, driveId })
+  const files = await drive.listFiles({
+    folderId,
+    driveId,
+    ...(limit === undefined ? {} : { limit }),
+  })
   const rows = files.map((f) => statFromItem(f))
-  let complete = true
+  let complete = limit === undefined || files.length < limit
   if (atRoot && folderId === 'root') {
     // Shared Drive enumeration is best-effort: if the account can't list
     // them (missing scope, API error, network), still return My Drive
@@ -209,8 +215,8 @@ export async function readdir(
   // Codepoint compare, not localeCompare: python sorts by codepoint and the
   // two runners must list identically.
   rows.sort((a, b) => compareCodePoints(a.name, b.name))
-  // A root whose Shared Drives could not be listed is short: kept as rows,
-  // it would pin a My-Drive-only root as the whole listing until it
-  // expired, hiding Shared Drives after the cause clears.
+  // A root whose Shared Drives could not be listed is short, as is a folder
+  // cut at a walk's limit: kept as rows, either would pin a short listing as
+  // the whole folder until it expired.
   return complete ? rows : new DirListing({ entries: rows, partial: true })
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -20,7 +20,7 @@ import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buck
 import { readdir as listStats } from './readdir.ts'
 
 async function readdir(accessor: HfBucketsAccessor, path: PathSpec): Promise<string[]> {
-  const rows = await listStats(accessor, path)
+  const rows = (await listStats(accessor, path)) as FileStat[]
   return rows.map((row) => `${path.virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 
@@ -126,7 +126,7 @@ describe('hf readdir', () => {
       )
     }
     await installFakeOperator(accessor, fake)
-    const rows = await listStats(accessor, PathSpec.fromStrPath('/'))
+    const rows = (await listStats(accessor, PathSpec.fromStrPath('/'))) as FileStat[]
     expect(rows.find((row) => row.name === 'config.json')?.size).toBe(2)
   })
 

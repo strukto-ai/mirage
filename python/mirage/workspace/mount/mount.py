@@ -230,10 +230,11 @@ def _taken(
 ) -> dict[str, Any]:
     """The keywords of ``kwargs`` that ``fn`` takes.
 
-    The mount hands every function its ``index``; a function that does
-    not name it never sees it. Every other keyword is the caller's, and
-    one the function does not take is the TypeError a direct call would
-    raise, never silently dropped.
+    The mount hands every function its ``index``, and a walk hands a
+    listing its ``limit``; a function that does not name either never
+    sees it. Every other keyword is the caller's, and one the function
+    does not take is the TypeError a direct call would raise, never
+    silently dropped.
 
     Args:
         name (str): the function the caller named, which the error names.
@@ -244,7 +245,10 @@ def _taken(
     names = _parameters(getattr(target, "__func__", target))
     if names is None:
         return kwargs
-    unknown = sorted(set(kwargs) - names - {"index"})
+    exempt = (
+        {"index", "limit"} if name in ("readdir", "read_tree") else {"index"}
+    )
+    unknown = sorted(set(kwargs) - names - exempt)
     if unknown:
         raise TypeError(
             f"{name}() got an unexpected keyword argument {unknown[0]!r}"

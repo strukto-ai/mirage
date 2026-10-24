@@ -24,7 +24,7 @@ from mirage.core.object_store.driver import (
     TreeFn,
 )
 from mirage.errors.fs import listing_error
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import raw_path_of
@@ -51,10 +51,13 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def readdir(accessor: A, path_spec: PathSpec) -> list[FileStat]:
+    async def readdir(
+        accessor: A, path_spec: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
         # When called from resolve_glob with a pattern (e.g. *.txt),
         # use path.directory for the listing. Direct callers (ls, ops)
-        # pass pattern=None so path.virtual is used.
+        # pass pattern=None so path.virtual is used. The store lists in
+        # key order, so a walk's limit stops it at the first names.
         path = raw_path_of(path_spec.dir if path_spec.pattern else path_spec)
         kpfx = driver.key_prefix_of(accessor)
         pfx = kp.apply_dir(kpfx, path)
@@ -63,6 +66,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         sizes: dict[str, int | None] = {}
         times: dict[str, str] = {}
         saw_key = False
+        cut = False
         async with driver.connect(accessor) as conn:
             async for child in driver.list_children(conn, pfx):
                 saw_key = True
@@ -78,6 +82,9 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                     names.append(key)
                     sizes[key] = child.size
                     times[key] = child.modified
+                if limit is not None and len(names) >= limit:
+                    cut = True
+                    break
             if not saw_key and path.strip("/"):
                 # An empty directory is a zero-byte marker object keyed at
                 # the prefix itself, so a prefix holding no key at all --
@@ -120,28 +127,38 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                         content=content_type_for_path(name),
                     )
                 )
-        return rows
+        return DirListing(rows, partial=True) if cut else rows
 
     return readdir
 
 
 async def read_tree(
-    driver: ObjectStoreDriver[A, C], accessor: A, path: PathSpec
-) -> list[TreeEntry]:
+    driver: ObjectStoreDriver[A, C],
+    accessor: A,
+    path: PathSpec,
+    limit: int | None = None,
+) -> list[TreeEntry] | None:
     """Every key at and under a path, in one recursive listing.
 
     The rows are the key at the path itself and every key under it, as
-    ``list_subtree`` gives them, markers included.
+    ``list_subtree`` gives them, markers included; None once the listing
+    passes ``limit`` keys, before it pages further.
 
     Args:
         driver (ObjectStoreDriver): backend primitives.
         accessor (Accessor): backend connection configuration.
         path (PathSpec): operand root.
+        limit (int | None): the most keys a walk can still use.
     """
     kpfx = driver.key_prefix_of(accessor)
     stem = kp.apply(kpfx, path.mount_path).rstrip("/")
+    rows: list[TreeEntry] = []
     async with driver.connect(accessor) as conn:
-        return [entry async for entry in driver.list_subtree(conn, stem)]
+        async for entry in driver.list_subtree(conn, stem):
+            rows.append(entry)
+            if limit is not None and len(rows) > limit:
+                return None
+    return rows
 
 
 def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
@@ -151,7 +168,9 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
-    async def tree(accessor: A, path: PathSpec) -> dict[str, FileStat] | None:
+    async def tree(
+        accessor: A, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
         """Every key under ``path`` as the walk's readdir and stat see it,
         and the directory itself under ``""``.
 
@@ -161,13 +180,17 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
         itself names no entry. None, so the walk's readdir and stat
         answer instead, when nothing is under the prefix, when a row has
         no size, when a key has an empty segment, and when one name is
-        both a file and a prefix, which a readdir lists as a directory.
+        both a file and a prefix, which a readdir lists as a directory;
+        and None for a subtree of more than ``limit`` keys.
 
         Args:
             accessor (Accessor): backend accessor.
             path (PathSpec): the directory.
+            limit (int | None): the most entries a walk can still keep.
         """
-        rows = await read_tree(driver, accessor, path)
+        rows = await read_tree(driver, accessor, path, limit)
+        if rows is None:
+            return None
         kpfx = driver.key_prefix_of(accessor)
         prefix = kp.apply_dir(kpfx, path.mount_path)
         if not any(row.key.startswith(prefix) for row in rows):

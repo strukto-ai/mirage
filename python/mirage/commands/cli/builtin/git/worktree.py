@@ -13,7 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from mirage.commands.builtin.utils.links import mount_view
+from functools import partial
+from typing import cast
+
+from mirage.commands.builtin.generic_bind.files import dispatched_read_tree
+from mirage.commands.builtin.utils.links import (
+    link_location,
+    link_view,
+    mount_view,
+)
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
 from mirage.commands.cli.builtin.git.errors import WorkTreeLimitError
 from mirage.commands.cli.builtin.git.ignore import (
@@ -22,12 +31,12 @@ from mirage.commands.cli.builtin.git.ignore import (
     load_ignores,
 )
 from mirage.commands.cli.builtin.git.io import (
-    lstat,
     read_names,
     read_optional,
 )
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
+from mirage.errors.constants import MISS_ERRORS
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.remnants import entry_name
 from mirage.workspace.files import Files
@@ -91,6 +100,17 @@ class Scanner:
         self._roots = roots
         self._mounts = mount_view(vfs, crossing=True)
         self._counted: dict[str, int] = {}
+        links = link_view(vfs)
+        self._tree_readdir, self._tree_lstat = tree_walk(
+            dispatched_read_tree(
+                vfs.dispatch,
+                mount_view(vfs),
+                None if links is None else partial(link_location, links),
+                True,
+            ),
+            vfs.readdir,
+            partial(vfs.stat, nofollow=True),
+        )
         self.found = WorkTree()
 
     def _absolute(self, relative: str) -> PathSpec:
@@ -134,13 +154,49 @@ class Scanner:
             raise WorkTreeLimitError(limit)
         self._counted[root] = self._counted.get(root, 0) + 1
 
+    def _whole(self, relative: str) -> bool:
+        """Whether the walk reads a directory's whole subtree, which a
+        mount's ``read_tree`` may then answer in one call: any below the
+        work tree's root, whose own subtree holds the git directory the
+        walk skips, at or under a root.
+
+        Args:
+            relative (str): repository-relative path of the directory.
+        """
+        return bool(relative) and (
+            self._roots is None
+            or any(
+                relative == root or under(relative, root)
+                for root in self._roots
+            )
+        )
+
+    async def _names(self, relative: str) -> list[str]:
+        """A directory's entries, empty when it does not exist.
+
+        Args:
+            relative (str): repository-relative path, empty at the root.
+        """
+        path = self._absolute(relative)
+        if not self._whole(relative):
+            return await read_names(self._vfs, path)
+        try:
+            return cast(list[str], await self._tree_readdir(path))
+        except MISS_ERRORS:
+            return []
+
     async def _entry_stat(self, relative: str) -> FileStat | None:
         """What the walk sees at one path, without following a link.
 
         Args:
             relative (str): repository-relative path of the entry.
         """
-        return await lstat(self._vfs, self._absolute(relative))
+        try:
+            return cast(
+                FileStat, await self._tree_lstat(self._absolute(relative))
+            )
+        except MISS_ERRORS:
+            return None
 
     async def _holds_a_file(
         self,
@@ -159,7 +215,7 @@ class Scanner:
             ignores (IgnoreStack): the rules governing it.
         """
         rules = await self._descend(relative, ignores)
-        for entry in await read_names(self._vfs, self._absolute(relative)):
+        for entry in await self._names(relative):
             name = entry_name(entry)
             if not name:
                 continue
@@ -251,9 +307,7 @@ class Scanner:
             ignores (IgnoreStack): the rules governing its parent.
         """
         rules = await self._descend(relative, ignores)
-        for entry in sorted(
-            await read_names(self._vfs, self._absolute(relative))
-        ):
+        for entry in sorted(await self._names(relative)):
             name = entry_name(entry)
             if not name or (not relative and name == GIT_DIR):
                 continue

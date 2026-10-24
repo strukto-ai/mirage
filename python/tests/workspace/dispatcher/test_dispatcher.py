@@ -55,6 +55,7 @@ from mirage.policy import (
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
+    DirListing,
     FileStat,
     FileType,
     HiddenPaths,
@@ -3296,6 +3297,52 @@ async def test_a_listed_count_stops_one_file_past_the_limit():
         with pytest.raises(ValueError, match="more than 2 files"):
             await ws.dispatch("before_full_walk", _path("/ram/d"))
     assert len(vfs.listed) == 4
+
+
+class CutRAM(RAMVFS):
+    """A RAM mount whose listing stops at a walk's ``limit``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[int | None] = []
+        self._store.dirs.add("/d")
+        for name in ("a", "b", "sec"):
+            self._store.files[f"/d/{name}"] = b""
+
+    async def readdir(self, path, limit=None):
+        self.asked.append(limit)
+        rows = list(await super().readdir(path))
+        if limit is None or len(rows) < limit:
+            return rows
+        return DirListing(rows[:limit], partial=True)
+
+
+@pytest.mark.asyncio
+async def test_a_cut_listing_is_not_kept_as_the_whole_directory():
+    vfs = CutRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        cut, _ = await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+        whole, _ = await ws.dispatch("readdir", _path("/ram/d"))
+    assert vfs.asked == [2, None]
+    assert (len(cut), len(whole)) == (2, 3)
+
+
+@pytest.mark.asyncio
+async def test_a_hide_below_a_listing_drops_the_walks_limit():
+    # The hide filters the listing after the backend answers, so a cut
+    # one could leave nothing visible and still read as complete.
+    vfs = CutRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        sess = ws.create_session(
+            "veiled", profile={"paths": {"hide": ["/ram/d/sec"]}}
+        )
+        token = set_current_session(sess)
+        try:
+            listed, _ = await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+        finally:
+            reset_current_session(token)
+    assert vfs.asked == [None]
+    assert listed == ["/ram/d/a", "/ram/d/b"]
 
 
 @pytest.mark.asyncio

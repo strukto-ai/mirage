@@ -24,7 +24,7 @@ import { hasAborted, makeAbortError } from '../../../utils/abort.ts'
 import { makeResolveGlob, type ResolveGlobFn } from '../../../utils/glob_walk.ts'
 import { moveReveals } from '../../../utils/hidden.ts'
 import { CycleError } from '../../../utils/path.ts'
-import type { SessionAccess } from '../../../view/types.ts'
+import type { MountView, SessionAccess } from '../../../view/types.ts'
 import type { Context } from '../../config.ts'
 import { guardInput } from '../utils/limit.ts'
 import {
@@ -33,10 +33,12 @@ import {
   linkLocation,
   linksOf,
   mountRoot,
+  mountView,
   mountsOf,
   owedNames,
 } from '../utils/links.ts'
 import { isImplicitDir } from '../utils/paths.ts'
+import type { ReadTree } from '../utils/tree.ts'
 import { callerStream } from './dispatch.ts'
 
 /**
@@ -59,7 +61,7 @@ export interface CommandFiles {
   /** The entry at `path` itself, as lstat answers. */
   readonly stat: (path: PathSpec) => Promise<FileStat>
   readonly exists: (path: PathSpec) => Promise<boolean>
-  readonly readdir: (path: PathSpec, nofollow?: boolean) => Promise<string[]>
+  readonly readdir: (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
   /**
    * `read(path, offset?, size?)`: the stored bytes or a window of them,
    * opened at the first pull; `materialize` collects them.
@@ -105,7 +107,7 @@ export interface CommandFiles {
     interval: number,
   ) => Promise<AsyncIterable<Uint8Array> | null>
   /** Every entry under `path`, keyed below it; null when the directory is to be walked. */
-  readonly readTree: (path: PathSpec) => Promise<Map<string, FileStat> | null>
+  readonly readTree: ReadTree
   /** The files under `path` that may contain `text`; null when the search cannot answer for every file. */
   readonly filesContaining: (
     path: PathSpec,
@@ -152,7 +154,8 @@ export function withReading(ctx: Context, reading: Reading): Context {
 }
 
 // The writes a run across mounts makes at the dispatcher, whichever mount
-// serves the path; it takes no other function's shortcut.
+// serves the path; of the other functions it takes only `readTree`'s
+// shortcut, where no mount sits below the subtree.
 const CROSSING_CALLS: ReadonlySet<string> = new Set([
   'write',
   'pwrite',
@@ -237,6 +240,53 @@ export async function dispatchedCall(
 ): Promise<unknown> {
   const [result] = await dispatch(name, path, args, kwargs)
   return result
+}
+
+/**
+ * The `readTree` a walk through the dispatcher takes, asked only where the
+ * mount a subtree lands on answers one; elsewhere null, and the walk lists
+ * instead.
+ *
+ * The serving mount's answer is no guide: a walk through the dispatcher also
+ * reaches the mounts below it and those a link above the subtree leads to, so
+ * a subtree on one that answers no read_tree (a disk mount under the root RAM)
+ * is walked rather than refused with ENOTSUP. A walk across mounts
+ * (`crossing`) asks only where no mount sits below the subtree either: the
+ * serving backend's answer holds keys a mount there shadows, and lacks the
+ * mount's own. A subtree read stops at a link at the final name (ENOTDIR), so
+ * a walk that follows links lists them directory by directory instead.
+ * `mounts` is the boundary view a walk that does not cross them sees
+ * (`mountView(files)`), undefined to take no shortcut; `landing` where a path lands, every link above its
+ * final name followed (`linkLocation`, `NamespaceLinks.followParent`), null
+ * for a walk whose paths name their own place. Mirrors Python's
+ * `dispatched_read_tree`.
+ */
+export function dispatchedReadTree(
+  dispatch: DispatchFn,
+  mounts: MountView | undefined,
+  landing: ((virtual: string) => string) | null,
+  crossing: boolean,
+): ReadTree {
+  return async (path, limit) => {
+    let at: string
+    try {
+      at = landing === null ? path.virtual : landing(path.virtual)
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err
+      console.debug(`following the links above ${path.virtual} failed: ${String(err)}`)
+      return null
+    }
+    if (
+      mounts === undefined ||
+      !mounts.answers(at, 'read_tree') ||
+      (crossing && mounts.descendants(at).length > 0)
+    )
+      return null
+    return (await dispatchedCall(dispatch, 'read_tree', path, [], {
+      nofollow: true,
+      ...(limit === undefined ? {} : { limit }),
+    })) as Map<string, FileStat> | null
+  }
 }
 
 /** A command's streamed read of the stored bytes, or a window of them, at the
@@ -462,16 +512,20 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     refusedAfterAbort(signal, fn)
 
   let rawStat: (path: PathSpec) => Promise<FileStat>
-  let rawReaddir: (path: PathSpec, nofollow?: boolean) => Promise<string[]>
+  let rawReaddir: (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
   let rawStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   if (crossing) {
     rawStat = async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat
-    rawReaddir = async (path) => (await dispatch('readdir', path))[0] as string[]
+    rawReaddir = async (path, _nofollow, limit) =>
+      (await dispatch('readdir', path, [], limit === undefined ? {} : { limit }))[0] as string[]
     rawStream = (path) => callerStream(dispatch, currentCaller(), path, ahead)
   } else {
     rawStat = (path) => dispatchedStat(dispatch, path)
-    rawReaddir = async (path, nofollow) =>
-      (await call('readdir', path, [], nofollow === true ? { nofollow } : {})) as string[]
+    rawReaddir = async (path, nofollow, limit) =>
+      (await call('readdir', path, [], {
+        ...(nofollow === true ? { nofollow } : {}),
+        ...(limit === undefined ? {} : { limit }),
+      })) as string[]
     const stream = reading?.stream ?? null
     rawStream =
       stream === null
@@ -495,20 +549,9 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     crossing ? false : (await call('read', path, [], { filetype: null, warm: true })) === true
   const stat = guard(rawStat)
   const readdir = guard(rawReaddir)
-  const links = crossing ? undefined : linksOf(ctx)
+  const table = linksOf(ctx)
+  const links = crossing ? undefined : table
   const access = crossing ? undefined : ctx.session?.access()
-  // Where a call that keeps its final name lands: every link above it
-  // followed, as the dispatcher follows them. A loop is left to the call.
-  const landing = (virtual: string): string => {
-    if (links === undefined) return virtual
-    try {
-      return linkLocation(links, virtual)
-    } catch (err) {
-      if (!(err instanceof CycleError)) throw err
-      console.debug(`following the links above ${virtual} failed: ${String(err)}`)
-      return virtual
-    }
-  }
   return {
     stat,
     exists: guard((path: PathSpec) => dispatchedExists(dispatch, path)),
@@ -569,17 +612,13 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       async (path: PathSpec, n: number, interval: number) =>
         (await call('follow', path, [n, interval])) as AsyncIterable<Uint8Array> | null,
     ),
-    // A subtree read stops at a link at the final name (ENOTDIR): it cannot
-    // pass through one, so a walk that follows links lists them directory by
-    // directory instead. `answers` speaks for the serving mount, but a walk
-    // through the dispatcher also reaches the mounts below it and those a
-    // link above the subtree leads to, so a subtree on one that answers no
-    // read_tree (a disk mount under the root RAM) is left to be walked
-    // rather than refused with ENOTSUP.
-    readTree: guard(async (path: PathSpec) =>
-      !crossing && mounts !== undefined && !mounts.answers(landing(path.virtual), 'read_tree')
-        ? null
-        : ((await call('read_tree', path, [], { nofollow: true })) as Map<string, FileStat> | null),
+    readTree: guard(
+      dispatchedReadTree(
+        dispatch,
+        mountView(vfs),
+        table === undefined ? null : (virtual) => linkLocation(table, virtual),
+        crossing,
+      ),
     ),
     filesContaining: async (path, text, opts) =>
       (await call('files_containing', path, [text], {
@@ -600,6 +639,8 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       noted,
     ),
     answers: (name: string) =>
-      crossing ? CROSSING_CALLS.has(name) : (mounts?.answers(anchor, name) ?? false),
+      crossing
+        ? CROSSING_CALLS.has(name) || name === 'read_tree'
+        : (mounts?.answers(anchor, name) ?? false),
   }
 }

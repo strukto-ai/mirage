@@ -120,7 +120,10 @@ async def list_level(
 
 
 async def tree(
-    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None = None
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    entry: FileStat | None = None,
+    limit: int | None = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as its folder's listing renders it,
     read a level at a time (``list_level``): a query per level and corpus
@@ -133,18 +136,23 @@ async def tree(
     (Shared Drives it could not list), or when a level below it fails, so
     the walk lists what is there and reports, or skips, each folder on
     its own.
+    None too once it holds more than ``limit`` items, before the next
+    level is asked.
 
     Args:
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): the directory.
         entry (FileStat | None): what is at the directory.
+        limit (int | None): the most entries a walk can still keep.
     """
-    listed = await readdir(accessor, path, entry)
+    listed = await readdir(accessor, path, entry, limit)
     if isinstance(listed, DirListing):
         return None
     found: dict[str, FileStat] = {}
     level = _placed(found, "", listed, None)
     while level:
+        if limit is not None and len(found) > limit:
+            return None
         try:
             children = await list_level(accessor, list(level.values()))
         except (OSError, aiohttp.ClientError) as exc:
@@ -160,6 +168,8 @@ async def tree(
             )
             below.update(_placed(found, rel, rows, drive_id))
         level = below
+    if limit is not None and len(found) > limit:
+        return None
     return found
 
 

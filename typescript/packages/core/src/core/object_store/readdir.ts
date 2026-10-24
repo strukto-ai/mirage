@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import type { TreeEntry } from './driver.ts'
 import type { Accessor } from '../../accessor/base.ts'
@@ -43,10 +43,11 @@ async function probeDir<A extends Accessor, C>(
 
 /** Build a prefix listing over one driver. Mirrors Python's `make_readdir`. */
 export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): ReaddirFn<A> {
-  return async function readdir(accessor, path) {
+  return async function readdir(accessor, path, limit) {
     // When called from resolveGlob with a pattern (e.g. *.txt), use
     // path.directory for the listing. Direct callers (ls, ops) pass
-    // pattern=null so path.virtual is used.
+    // pattern=null so path.virtual is used. The store lists in key order, so
+    // a walk's limit stops it at the first names.
     const rawPath = rawPathOf(path.pattern !== null ? path.dir : path)
     const kpfx = driver.keyPrefixOf(accessor)
     const pfx = kp.applyDir(kpfx, rawPath)
@@ -55,6 +56,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     const sizes = new Map<string, number | null>()
     const times = new Map<string, string>()
     let sawKey = false
+    let cut = false
     const { conn, close } = await driver.connect(accessor)
     try {
       for await (const child of driver.listChildren(conn, pfx)) {
@@ -69,6 +71,10 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
           names.push(key)
           sizes.set(key, child.size ?? null)
           times.set(key, child.modified ?? '')
+        }
+        if (limit !== undefined && names.length >= limit) {
+          cut = true
+          break
         }
       }
       if (!sawKey && rstripSlash(rawPath) !== '') {
@@ -95,7 +101,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
           `${String(unique.length)} entries (limit ${String(driver.scopeError)})`,
       )
     }
-    return unique.map((key) => {
+    const rows = unique.map((key) => {
       const name = key.slice(key.lastIndexOf('/') + 1)
       // Store "folders" are synthetic prefixes with no object of their own,
       // so there is no mtime or size to record. A name that is a key and a
@@ -110,24 +116,30 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         content: contentTypeForPath(name),
       })
     })
+    return cut ? new DirListing({ entries: rows, partial: true }) : rows
   }
 }
 
 /**
  * Every key at and under a path, in one recursive listing: the key at the path
  * itself and every key under it, as `listSubtree` gives them, markers
- * included. Mirrors Python's `read_tree`.
+ * included; null once the listing passes `limit` keys, before it pages
+ * further. Mirrors Python's `read_tree`.
  */
 export async function readTree<A extends Accessor, C>(
   driver: ObjectStoreDriver<A, C>,
   accessor: A,
   path: PathSpec,
-): Promise<TreeEntry[]> {
+  limit?: number,
+): Promise<TreeEntry[] | null> {
   const stem = rstripSlash(kp.apply(driver.keyPrefixOf(accessor), path.mountPath))
   const { conn, close } = await driver.connect(accessor)
   const entries: TreeEntry[] = []
   try {
-    for await (const entry of driver.listSubtree(conn, stem)) entries.push(entry)
+    for await (const entry of driver.listSubtree(conn, stem)) {
+      entries.push(entry)
+      if (limit !== undefined && entries.length > limit) return null
+    }
   } finally {
     await close()
   }
@@ -141,12 +153,13 @@ export async function readTree<A extends Accessor, C>(
  * marker for `path` itself names no entry. Null, so the walk's readdir and
  * stat answer instead, when nothing is under the prefix, when a row has no
  * size, when a key has an empty segment, and when one name is both a file and
- * a prefix, which a readdir lists as a directory. Mirrors Python's
- * `make_tree`.
+ * a prefix, which a readdir lists as a directory; and null for a subtree of
+ * more than `limit` keys. Mirrors Python's `make_tree`.
  */
 export function makeTree<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): TreeFn<A> {
-  return async (accessor, path) => {
-    const rows = await readTree(driver, accessor, path)
+  return async (accessor, path, limit) => {
+    const rows = await readTree(driver, accessor, path, limit)
+    if (rows === null) return null
     const prefix = kp.applyDir(driver.keyPrefixOf(accessor), path.mountPath)
     if (!rows.some((row) => row.key.startsWith(prefix))) return null
     const found = new Map<string, FileStat>()

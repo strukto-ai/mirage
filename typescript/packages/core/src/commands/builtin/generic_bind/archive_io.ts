@@ -21,7 +21,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, WalkFn } from '../generic/archive/walk.ts'
 import type { CommandFiles } from './files.ts'
-import { beforeFullWalk } from '../utils/tree.ts'
+import { beforeFullWalk, treeWalk, type ReadTree, type WalkCall } from '../utils/tree.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],
@@ -58,7 +58,12 @@ export function walkOf(
   dispatch: DispatchFn | undefined,
   command: string,
 ): WalkFn {
-  return walkWith((spec) => files.readdir(spec), files.stat, dispatch, command)
+  const [readdir, stat] = treeWalk(
+    files.answers('read_tree') ? files.readTree : undefined,
+    files.readdir,
+    files.stat,
+  )
+  return walkWith((spec) => readdir(spec), stat, dispatch, command)
 }
 
 /**
@@ -100,10 +105,9 @@ export function isDirOf(files: CommandFiles): DirProbe {
  * they are left to the scan.
  */
 function ownListing(
-  dispatch: DispatchFn,
+  readdir: WalkCall<string[]>,
   owed: ChildMounts | undefined,
 ): (p: PathSpec) => Promise<string[]> {
-  const readdir = readdirOp(dispatch)
   return async (p) => {
     const entries = await readdir(p)
     if (owed === undefined) return entries
@@ -120,14 +124,17 @@ function ownListing(
  *
  * Every directory is listed on the mount that owns it, so operands from
  * several mounts go into one archive, and find's walk classifies what it
- * lists exactly as it does on one backend.
+ * lists exactly as it does on one backend. `readTree` is the walk's subtree
+ * read (`dispatchedReadTree`); undefined lists every directory.
  */
 export function relayWalkOf(
   dispatch: DispatchFn,
   owed: ChildMounts | undefined,
   command: string,
+  readTree?: ReadTree,
 ): WalkFn {
-  return walkWith(ownListing(dispatch, owed), statOp(dispatch), dispatch, command)
+  const [readdir, stat] = treeWalk(readTree, readdirOp(dispatch), statOp(dispatch))
+  return walkWith(ownListing(readdir, owed), stat, dispatch, command)
 }
 
 // The directory probe tar's `-C` check uses when a line spans mounts.

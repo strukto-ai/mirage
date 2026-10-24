@@ -107,18 +107,21 @@ export async function listLevel(
  * Of two items with one name in a folder, the one its listing keeps, the last,
  * stands. Null when that listing is short (Shared Drives it could not list),
  * or when a level below it fails, so the walk lists what is there and reports,
- * or skips, each folder on its own. Mirrors Python's `tree`.
+ * or skips, each folder on its own; null too once it holds more than `limit`
+ * items, before the next level is asked. Mirrors Python's `tree`.
  */
 export async function tree(
   accessor: GDriveAccessor,
   path: PathSpec,
   entry?: FileStat | null,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
-  const listed = await readdir(accessor, path, entry)
+  const listed = await readdir(accessor, path, entry, limit)
   if (listed instanceof DirListing) return null
   const found = new Map<string, FileStat>()
   let level = placed(found, '', listed, null)
   while (level.size > 0) {
+    if (limit !== undefined && found.size > limit) return null
     let children: Map<string, DriveFile[]>
     try {
       children = await listLevel(accessor, [...level.values()])
@@ -138,6 +141,7 @@ export async function tree(
     }
     level = below
   }
+  if (limit !== undefined && found.size > limit) return null
   return found
 }
 

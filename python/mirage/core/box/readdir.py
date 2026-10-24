@@ -20,7 +20,7 @@ from mirage.core.box.constants import SHA1
 from mirage.core.box.fingerprint import token_of
 from mirage.core.box.resolve import root_id
 from mirage.errors.fs import enoent, enotdir
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 
 
@@ -74,17 +74,20 @@ async def readdir(
     accessor: BoxAccessor,
     path_spec: PathSpec,
     entry: FileStat | None = None,
-) -> list[FileStat]:
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
     """A folder's children, each as ``stat`` answers it.
 
     The mount root lists its root folder; any other folder is listed by
     the id its parent's listing named. Web links are bookmarks with no
-    content endpoint and no size, so they are left out.
+    content endpoint and no size, so they are left out. Past a walk's
+    ``limit`` Box is paged no further, and the listing is partial.
 
     Args:
         accessor (BoxAccessor): Box accessor.
         path_spec (PathSpec): the folder.
         entry (FileStat | None): what is at the folder.
+        limit (int | None): the most entries a walk can still keep.
     """
     target = path_spec.dir if path_spec.pattern else path_spec
     if not target.vfs_path.strip("/"):
@@ -97,7 +100,13 @@ async def readdir(
         folder_id = entry.extra["box_id"]
     items = await absent_on_404(
         path_spec.virtual,
-        lambda: list_folder_items(accessor.token_manager, folder_id),
+        lambda: (
+            list_folder_items(accessor.token_manager, folder_id)
+            if limit is None
+            else list_folder_items(
+                accessor.token_manager, folder_id, limit=limit
+            )
+        ),
     )
     rows = [
         stat_from_item(item)
@@ -105,4 +114,6 @@ async def readdir(
         if item.get("type") != "web_link"
     ]
     rows.sort(key=lambda row: row.name)
+    if limit is not None and len(items) >= limit:
+        return DirListing(rows, partial=True)
     return rows

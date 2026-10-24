@@ -276,6 +276,13 @@ class BaseVFS:
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         """List the children of a directory, each as its stat answers it.
 
+        A readdir that also takes ``limit: int | None`` is handed, on a
+        walk, the most entries the walk can still use; it may stop once it
+        holds that many and answer them as ``DirListing(rows,
+        partial=True)``. A glob hands the word it matches as
+        ``path.pattern``; a backend that filters by it answers
+        ``partial=True`` too.
+
         Args:
             path (PathSpec): the directory.
         """
@@ -441,7 +448,9 @@ class BaseVFS:
         the stat ``stat`` gives for it.
         The walk lists each directory from it in name order. Return None
         to have the command walk ``readdir`` the usual way; raise what
-        ``readdir`` of ``path`` raises otherwise.
+        ``readdir`` of ``path`` raises otherwise. A read_tree that also
+        takes ``limit: int | None`` is handed the most entries the walk
+        can still use, and may return None once the tree holds more.
 
         Args:
             path (PathSpec): the directory.

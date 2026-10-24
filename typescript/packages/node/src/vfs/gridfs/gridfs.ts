@@ -18,7 +18,7 @@ import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { redactConfig, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir as gridfsReaddir } from '../../core/gridfs/readdir.ts'
@@ -78,12 +78,12 @@ export class GridFSVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return gridfsTree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return gridfsTree(this.accessor, path, handed?.limit)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return gridfsReaddir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return gridfsReaddir(this.accessor, path, handed?.limit)
   }
 
   override read(

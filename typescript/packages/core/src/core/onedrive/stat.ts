@@ -57,14 +57,15 @@ export async function stat(accessor: OneDriveAccessor, path: PathSpec): Promise<
 export async function tree(
   accessor: OneDriveAccessor,
   path: PathSpec,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const config = accessor.config
   const loc = driveLoc(config, path.vfsPath)
-  if ((await driveType(accessor)) === 'personal') {
+  if (limit === undefined && (await driveType(accessor)) === 'personal') {
     const found = await deltaTree(config, loc)
     if (found !== null) return found
   }
-  return batchTree(config, loc, path)
+  return batchTree(config, loc, path, limit)
 }
 
 /**

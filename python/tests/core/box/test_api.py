@@ -80,7 +80,7 @@ async def test_list_folder_items_follows_offset_pagination(tm):
         new_callable=AsyncMock,
         side_effect=pages,
     ) as mock_get:
-        items = await list_folder_items(tm, "0", limit=2)
+        items = await list_folder_items(tm, "0", page_size=2)
     assert [it["id"] for it in items] == ["1", "2", "3"]
     assert mock_get.await_count == 2
     _, second = mock_get.await_args_list[1]

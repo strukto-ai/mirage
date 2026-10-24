@@ -16,11 +16,12 @@ import { IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayWalkOf } from '../../../generic_bind/archive_io.ts'
+import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
-import { owedNames } from '../../../utils/links.ts'
+import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
 
 /**
  * Run a zip whose archive and operands span mounts.
@@ -37,6 +38,16 @@ export async function runZip(
   // The symlinks and mount boundaries the scan merges into each walk.
   vfs?: Files,
 ): Promise<CrossResult> {
+  const links = linkView(vfs)
+  const tree =
+    vfs === undefined
+      ? undefined
+      : dispatchedReadTree(
+          dispatch,
+          mountView(vfs),
+          links === undefined ? null : (virtual) => linkLocation(links, virtual),
+          true,
+        )
   const result = await zipGeneric(
     flatten(scopes),
     { ...crossOpts(flagKwargs), ...(vfs !== undefined ? { vfs } : {}) },
@@ -46,7 +57,7 @@ export async function runZip(
         await dispatch('write', p, [data])
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'zip'),
+      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'zip', tree),
     },
   )
   return result ?? [null, new IOResult()]

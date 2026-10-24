@@ -21,7 +21,9 @@ from mirage.commands.builtin.generic.crossmount.utils import (
 )
 from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
 from mirage.commands.builtin.generic_bind.archive_io import relay_walk_of
+from mirage.commands.builtin.generic_bind.files import dispatched_read_tree
 from mirage.commands.builtin.utils.links import (
+    link_location,
     link_view,
     mount_view,
     owed_names,
@@ -55,19 +57,33 @@ async def run_zip(
     """
     parsed = parse_flags(flag_kwargs)
     prim = transfer_primitives(dispatch)
+    links = link_view(vfs)
+    tree = (
+        None
+        if vfs is None
+        else dispatched_read_tree(
+            dispatch,
+            mount_view(vfs),
+            None if links is None else functools.partial(link_location, links),
+            crossing=True,
+        )
+    )
     return await zip_cmd(
         flat_scopes(scopes),
         read_bytes=prim["read_bytes"],
         write_bytes=prim["write"],
         stat=prim["stat"],
         walk=relay_walk_of(
-            dispatch, functools.partial(owed_names, vfs), "zip"
+            dispatch,
+            functools.partial(owed_names, vfs),
+            "zip",
+            tree,
         ),
         r=parsed.recursive,
         j=parsed.junk_paths,
         q=parsed.quiet,
         y=parsed.store_links,
         x=list(parsed.exclude) or None,
-        links=link_view(vfs),
+        links=links,
         mounts=mount_view(vfs),
     )

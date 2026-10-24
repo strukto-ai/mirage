@@ -116,8 +116,18 @@ async def get_directory_metadata(
 
 
 async def list_directory_contents(
-    accessor: DatabricksVolumeAccessor, remote_path: str
+    accessor: DatabricksVolumeAccessor,
+    remote_path: str,
+    limit: int | None = None,
 ) -> list[DirectoryEntry]:
+    """A directory's entries, a page at a time; no page past the one that
+    brings ``limit`` entries.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): Databricks accessor.
+        remote_path (str): the directory in the volume.
+        limit (int | None): stop once this many entries are in hand.
+    """
     entries: list[DirectoryEntry] = []
     page_token: str | None = None
     while True:
@@ -140,7 +150,9 @@ async def list_directory_contents(
             )
             for entry in page.contents
         )
-        if not page.next_page_token:
+        if not page.next_page_token or (
+            limit is not None and len(entries) >= limit
+        ):
             return entries
         page_token = page.next_page_token
 

@@ -36,6 +36,7 @@ from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
@@ -262,3 +263,30 @@ async def test_a_glob_read_warms_the_operands_after_it():
     warmed = [f"/r{name}" for name in names[1:]]
     assert vfs.reads == ["/r/f00"]
     assert vfs.batches == [warmed[:8], warmed[8:]]
+
+
+class TreeRAM(RAMVFS):
+    """A RAM mount noting each folder its tree read is asked for."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.trees: list[str] = []
+
+    async def read_tree(self, path):
+        self.trees.append(path.virtual)
+        return await super().read_tree(path)
+
+
+@pytest.mark.asyncio
+async def test_a_walk_across_mounts_reads_no_tree_a_mount_sits_under():
+    vfs = TreeRAM()
+    vfs._store.dirs.update({"/d", "/d/sub", "/e"})
+    vfs._store.files.update({"/d/x": b"", "/e/y": b""})
+    nested = RAMVFS()
+    nested._store.files["/z"] = b""
+    with Workspace({"/r/": vfs, "/r/d/sub/": nested}) as ws:
+        out = await ws.shell("ls -R /r")
+        assert await out.stdout_str() == (
+            "/r:\nd\ne\n\n/r/d:\nsub\nx\n\n/r/d/sub:\nz\n\n/r/e:\ny\n"
+        )
+    assert vfs.trees == ["/r/e"]

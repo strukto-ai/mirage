@@ -8,7 +8,7 @@ import {
 import { VFSName } from '../../types.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { buildDeltaHook } from '../../core/sharepoint/events.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir, tree } from '../../core/sharepoint/readdir.ts'
 import { read } from '../../core/sharepoint/read.ts'
@@ -70,8 +70,8 @@ export class SharePointVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return readdir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return readdir(this.accessor, path, handed?.limit)
   }
 
   override read(
@@ -92,8 +92,8 @@ export class SharePointVFS extends BaseVFS {
     return exists(this.accessor, path)
   }
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return tree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return tree(this.accessor, path, handed?.limit)
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {

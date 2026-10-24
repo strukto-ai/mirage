@@ -112,14 +112,17 @@ EVENTS_PAGE = 500
 async def list_folder_items(
     tm: BoxTokenManager,
     folder_id: str,
-    limit: int = 1000,
+    page_size: int = 1000,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """List every item in a Box folder, following offset pagination.
 
     Args:
         tm (BoxTokenManager): token manager.
         folder_id (str): Box folder id ("0" is All Files, the account root).
-        limit (int): page size for each request.
+        page_size (int): items per request.
+        limit (int | None): stop once this many items are in hand and do
+            not request another page.
     """
     out: list[dict[str, Any]] = []
     offset = 0
@@ -129,7 +132,7 @@ async def list_folder_items(
             f"{tm.api_base}/folders/{folder_id}/items",
             params={
                 "fields": LIST_FIELDS,
-                "limit": limit,
+                "limit": page_size,
                 "offset": offset,
             },
         )
@@ -137,6 +140,8 @@ async def list_folder_items(
         out.extend(entries)
         offset += len(entries)
         if offset >= data.get("total_count", 0) or not entries:
+            break
+        if limit is not None and len(out) >= limit:
             break
     return out
 

@@ -41,7 +41,7 @@ _LAST = "`-- "
 _VERTICAL = "|   "
 _INDENT = "    "
 
-Readdir = Callable[[PathSpec], Awaitable[list[str]]]
+Readdir = Callable[..., Awaitable[list[str]]]
 Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 UNOPENABLE_MARK = "  [error opening dir]"
@@ -156,8 +156,13 @@ async def _walk_tree(
     # readdir raises and a merge below it never runs: `tree` reported the
     # one path whose children it could name for certain as unopenable.
     child_mounts = _child_mounts(mounts, path.virtual)
+    limit = None if budget is None else budget.listing_limit(path.virtual)
     try:
-        entries = sorted(await readdir(path))
+        entries = sorted(
+            await (
+                readdir(path) if limit is None else readdir(path, limit=limit)
+            )
+        )
     except WALK_ERRORS as exc:
         # An absence only. A directory the backend refused (EACCES,
         # ENOTSUP) is there and holds data, so it stays a warning and an

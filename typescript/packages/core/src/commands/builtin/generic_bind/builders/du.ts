@@ -226,9 +226,10 @@ async function duWalk(
   }
   tally.directories.push(path.virtual)
   if (!scan.opens(path.virtual)) return 0
+  const limit = scan.listingLimit(path.virtual)
   let children: string[]
   try {
-    children = await walk.readdir(path)
+    children = await (limit === null ? walk.readdir(path) : walk.readdir(path, false, limit))
   } catch (err) {
     accountForWalkError(err, path, tally)
     return 0
@@ -302,9 +303,11 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const listing =
     bound === undefined
       ? files.readdir
-      : async (path: PathSpec): Promise<string[]> => {
+      : async (path: PathSpec, nofollow?: boolean, limit?: number): Promise<string[]> => {
           const owner = bound.rootOf(path.virtual)
-          return (await files.readdir(path)).filter((e) => bound.rootOf(rstripSlash(e)) === owner)
+          return (await files.readdir(path, nofollow, limit)).filter(
+            (e) => bound.rootOf(rstripSlash(e)) === owner,
+          )
         }
   const links = linksOf(ctx)
   const follow =

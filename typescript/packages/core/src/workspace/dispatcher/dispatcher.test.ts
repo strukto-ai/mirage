@@ -39,7 +39,15 @@ import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { ident } from '../../utils/stat_view.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { FileStat, FileType, Limit, MountMode, OnExceed, PathSpec } from '../../types.ts'
+import {
+  DirListing,
+  FileStat,
+  FileType,
+  Limit,
+  MountMode,
+  OnExceed,
+  PathSpec,
+} from '../../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -3095,6 +3103,28 @@ Object.defineProperty(ListedRAM.prototype, 'readTree', {
   value: (BaseVFS.prototype as unknown as Record<string, unknown>).readTree,
 })
 
+// A RAM mount whose listing stops at a walk's limit. Twin of Python's CutRAM.
+class CutRAM extends RAMVFS {
+  readonly asked: (number | undefined)[] = []
+
+  constructor() {
+    super()
+    this.store.dirs.add('/d')
+    for (const name of ['a', 'b', 'sec']) this.store.files.set(`/d/${name}`, new Uint8Array())
+  }
+}
+// RAMVFS narrows readdir to a plain array, so the cut listing goes on the
+// prototype.
+Object.defineProperty(CutRAM.prototype, 'readdir', {
+  value: async function (this: CutRAM, path: PathSpec, handed?: Handed) {
+    const limit = handed?.limit
+    this.asked.push(limit)
+    const rows = await RAMVFS.prototype.readdir.call(this, path)
+    if (limit === undefined || rows.length < limit) return rows
+    return new DirListing({ entries: rows.slice(0, limit), partial: true })
+  },
+})
+
 // The limited mount handing each file's matching lines over itself. Twin of
 // Python's LinedRAM.
 class LinedRAM extends LimitedRAM {
@@ -3682,6 +3712,36 @@ describe('a hide filters a one-call read', () => {
     try {
       await expect(ws.dispatch('before_full_walk', '/ram/d')).rejects.toThrow('more than 2 files')
       expect(vfs.listed).toHaveLength(4)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_cut_listing_is_not_kept_as_the_whole_directory.
+  it('does not keep a cut listing as the whole directory', async () => {
+    const vfs = new CutRAM()
+    const ws = new Workspace({ '/ram': vfs })
+    try {
+      const cut = (await ws.dispatch('readdir', '/ram/d', [], { limit: 2 })) as string[]
+      const whole = (await ws.dispatch('readdir', '/ram/d')) as string[]
+      expect(vfs.asked).toEqual([2, undefined])
+      expect([cut.length, whole.length]).toEqual([2, 3])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_hide_below_a_listing_drops_the_walks_limit.
+  it('drops the walk limit from a listing a hide filters', async () => {
+    const vfs = new CutRAM()
+    const ws = new Workspace({ '/ram': vfs })
+    try {
+      const sess = ws.createSession('veiled', { profile: { paths: { hide: ['/ram/d/sec'] } } })
+      const listed = await runWithSession(sess, () =>
+        ws.dispatch('readdir', '/ram/d', [], { limit: 2 }),
+      )
+      expect(vfs.asked).toEqual([undefined])
+      expect(listed).toEqual(['/ram/d/a', '/ram/d/b'])
     } finally {
       await ws.close()
     }

@@ -70,7 +70,7 @@ import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { streamConfig } from './sort.ts'
 
-type Readdir = (p: PathSpec) => Promise<string[]>
+type Readdir = (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
 export const LS_OK = 0
@@ -545,7 +545,8 @@ async function listDir(
   let entries: string[]
   let structureOnly = false
   try {
-    entries = await readdir(dir)
+    const limit = ctx.budget?.listingLimit(dir.virtual) ?? null
+    entries = await (limit === null ? readdir(dir) : readdir(dir, false, limit))
     const budget = ctx.budget
     if (budget !== undefined) entries = entries.filter(() => budget.spend(dir.virtual))
   } catch (err) {

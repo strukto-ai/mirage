@@ -29,7 +29,7 @@ from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.core.databricks_volume.unlink import unlink as _unlink
 from mirage.core.databricks_volume.write import write as _write
 from mirage.io.types import ByteSource, materialize
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
@@ -54,8 +54,10 @@ class DatabricksVolumeVFS(BaseVFS):
         self.walk_limit = config.walk_limit
         self.accessor = DatabricksVolumeAccessor(self.config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit)
 
     async def read(
         self,

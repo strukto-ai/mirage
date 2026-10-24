@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { listingError } from '../../errors/fs.ts'
 import { DropboxApiError } from './client.ts'
 import { getMetadata, listFolder, type DropboxEntry } from './api.ts'
@@ -77,13 +77,25 @@ async function isDir(accessor: DropboxAccessor, key: string): Promise<boolean> {
   return entry !== null && entry['.tag'] === 'folder'
 }
 
-/** A folder's children, each as `stat` answers it. Mirrors Python's `readdir`. */
-export async function readdir(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat[]> {
+/**
+ * A folder's children, each as `stat` answers it; past a walk's `limit`
+ * Dropbox is paged no further, and the listing is partial. Mirrors Python's
+ * `readdir`.
+ */
+export async function readdir(
+  accessor: DropboxAccessor,
+  path: PathSpec,
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   const key = (path.pattern !== null ? path.dir : path).vfsPath
   const dropboxPath = dropboxPathFromKey(accessor.rootPath, stripSlash(key))
   let files: DropboxEntry[]
   try {
-    files = await listFolder(accessor.tokenManager, dropboxPath)
+    files = await listFolder(
+      accessor.tokenManager,
+      dropboxPath,
+      limit === undefined ? {} : { limit },
+    )
   } catch (err) {
     // list_folder 409s on a missing path and on a file operand alike
     // (path/not_found, path/not_folder), and the subtag cannot tell ENOENT
@@ -103,5 +115,7 @@ export async function readdir(accessor: DropboxAccessor, path: PathSpec): Promis
   }
   const rows = files.map(statFromEntry)
   rows.sort((a, b) => compareCodePoints(a.name, b.name))
+  if (limit !== undefined && files.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
   return rows
 }

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -68,13 +68,15 @@ export function statFromItem(item: BoxItem): FileStat {
  * A folder's children, each as `stat` answers it. The mount root lists its
  * root folder; any other folder is listed by the id its parent's listing
  * named. Web links are bookmarks with no content endpoint and no size, so
- * they are left out. Mirrors Python's `readdir`.
+ * they are left out. Past a walk's `limit` Box is paged no further, and the
+ * listing is partial. Mirrors Python's `readdir`.
  */
 export async function readdir(
   accessor: BoxAccessor,
   path: PathSpec,
   entry?: FileStat | null,
-): Promise<FileStat[]> {
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   const target = path.pattern !== null ? path.dir : path
   let folderId: string
   if (stripSlash(target.vfsPath) === '') folderId = accessor.rootFolderId
@@ -82,9 +84,11 @@ export async function readdir(
   else if (entry.type !== FileType.DIRECTORY) throw enotdir(path.virtual)
   else folderId = entry.extra.box_id as string
   const items = await absentOn404(path.virtual, () =>
-    listFolderItems(accessor.tokenManager, folderId),
+    listFolderItems(accessor.tokenManager, folderId, limit === undefined ? {} : { limit }),
   )
   const rows = items.filter((item) => item.type !== 'web_link').map(statFromItem)
   rows.sort((a, b) => compareCodePoints(a.name, b.name))
+  if (limit !== undefined && items.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
   return rows
 }

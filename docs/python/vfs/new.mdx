@@ -109,6 +109,12 @@ Return a `DirListing` when one fetch proves more: `seeds` for the descendant
 listings it also names, `partial=True` for a filtered or truncated view, and
 `window=True` for a capped one that proves nothing absent.
 
+On a walk, a `readdir` that takes `limit` is handed how many entries the walk
+can still use; it may stop paging there and return what it holds with
+`partial=True`. A glob hands the word it matches as `path.pattern`
+(`*.json`); a `readdir` that lists only what matches returns `partial=True`
+too.
+
 A function that needs what a listing already holds declares it by parameter
 name: `entry` (the row at the path) and `parent` (the row of its folder), and
 for `rename`, `copy` and `dir_copy` also `dst_entry` and `dst_parent`. Each is
@@ -127,6 +133,8 @@ Every other function is optional, and each stands alone:
 | `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
 | `copy_from` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
+| `read_many` | Optional: read several small files in one request. |
+| `delta_hook` | Optional: read the service's change feed ([Notifications](/home/notifications/support)). |
 | `search`, `search_many` | Optional resource search. |
 | `files_containing`, `lines_containing`, `before_full_walk` | Optional: let grep and rg skip what your search rules out, and refuse a walk of every file. |
 
@@ -135,6 +143,16 @@ path there. Raise EXDEV when the store cannot make the copy (another kind of
 store, other credentials, a refusal), and `cp` reads the file and writes it
 instead. S3 and the S3-compatible stores copy between two buckets that one
 set of credentials reaches.
+
+`read_many(paths, limit)` reads several whole files in one request. When a
+command reads its operands in turn (`cat a b c`), the next few go to it as one
+batch and land in the read cache. Return the bytes keyed by each path's
+`virtual`; leave out a file larger than `limit` bytes or one the request could
+not read, and its own `read` answers it.
+
+`delta_hook()` returns the hook a poll loop or webhook receiver calls to read
+the service's changes since a checkpoint. Leave it out when the service has no
+change feed.
 
 `pwrite` receives `(path, data, offset)` and keeps every byte outside the
 window, as pwrite(2) does. A VFS with `write` and no `append` or `pwrite` gets
@@ -557,7 +575,7 @@ class MyVFS(BaseVFS):
 
 The mount builds the commands and the dispatcher from the class when the driver is placed; a driver never registers anything onto itself.
 
-Set `caches_reads=True` only for stable, read-mostly content. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
+Set `caches_reads=True` only for stable, read-mostly content. `index_ttl` is how long the mount keeps a listing or a stat, 600 seconds unless your VFS sets it; a mount's read `ttl` caps it. Implement `get_state()` with credentials redacted (`self.config_state(self.config)`) and close any network clients in `close()`.
 
 ### Point lookups under `fresh`
 

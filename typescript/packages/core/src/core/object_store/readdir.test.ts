@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { FileType } from '../../types.ts'
+import { DirListing, type FileStat, FileType } from '../../types.ts'
 import {
   codeOf,
   FakeAccessor,
@@ -29,7 +29,7 @@ describe('object_store readdir', () => {
   it('lists files and collapsed dirs', async () => {
     const store = new FakeStore({ 'a.txt': 'hi', 'dir/f.txt': 'x', 'dir/sub/g': 'y' })
     const readdir = makeReaddir(makeDriver(store))
-    const rows = await readdir(accessor, spec('/'))
+    const rows = (await readdir(accessor, spec('/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.type, row.size])).toEqual([
       ['a.txt', FileType.FILE, 2],
       ['dir', FileType.DIRECTORY, null],
@@ -38,7 +38,7 @@ describe('object_store readdir', () => {
 
   it('lists a name that is a key and a prefix as a directory', async () => {
     const store = new FakeStore({ csv: 'file', 'csv/inner.txt': 'x' })
-    const rows = await makeReaddir(makeDriver(store))(accessor, spec('/'))
+    const rows = (await makeReaddir(makeDriver(store))(accessor, spec('/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.type])).toEqual([['csv', FileType.DIRECTORY]])
   })
 
@@ -101,4 +101,35 @@ describe('object_store makeTree', () => {
     }
     await expect(makeTree(driver)(accessor, spec('/dir'))).resolves.toBeNull()
   })
+
+  // Twin of test_tree_answers_none_past_a_walks_limit.
+  it('answers null past a walk limit', async () => {
+    const store = new FakeStore(
+      Object.fromEntries([0, 1, 2, 3, 4].map((i) => [`dir/f${String(i)}.txt`, 'x'])),
+    )
+    const tree = makeTree(makeDriver(store))
+    await expect(tree(accessor, spec('/dir'), 3)).resolves.toBeNull()
+    expect((await tree(accessor, spec('/dir'), 5))?.size).toBe(6)
+  })
+})
+
+// Twin of test_readdir_stops_at_a_walks_limit_and_marks_the_listing_partial.
+it('stops a listing at a walk limit and marks it partial', async () => {
+  const store = new FakeStore(
+    Object.fromEntries([0, 1, 2, 3, 4].map((i) => [`f${String(i)}.txt`, 'x'])),
+  )
+  const pulled: string[] = []
+  const driver = makeDriver(store)
+  async function* counted(conn: FakeStore, pfx: string) {
+    for await (const child of driver.listChildren(conn, pfx)) {
+      pulled.push(child.key)
+      yield child
+    }
+  }
+  const readdir = makeReaddir({ ...driver, listChildren: counted })
+  const out = await readdir(accessor, spec('/'), 2)
+  expect(out instanceof DirListing && out.partial).toBe(true)
+  expect((out as DirListing).entries.map((row) => row.name)).toEqual(['f0.txt', 'f1.txt'])
+  expect(pulled).toEqual(['f0.txt', 'f1.txt'])
+  expect((await readdir(accessor, spec('/'), 6)) as FileStat[]).toHaveLength(5)
 })

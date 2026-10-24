@@ -244,8 +244,13 @@ async def _du_walk(
     tally.directories.append(path.virtual)
     if not scan.opens(path.virtual):
         return 0
+    limit = scan.listing_limit(path.virtual)
     try:
-        children = await walk.readdir(path)
+        children = await (
+            walk.readdir(path)
+            if limit is None
+            else walk.readdir(path, limit=limit)
+        )
     except Exception as exc:
         _account_for_walk_error(exc, path, tally)
         return 0
@@ -353,8 +358,8 @@ async def du(
     # of the mounts below it, which the walk must neither list nor stat.
     bound = mount_view(ctx.vfs) if fl.as_bool("one_file_system") else None
 
-    async def listing(path: PathSpec) -> list[str]:
-        entries = await files.readdir(path)
+    async def listing(path: PathSpec, limit: int | None = None) -> list[str]:
+        entries = await files.readdir(path, limit=limit)
         if bound is None:
             return entries
         owner = bound.root_of(path.virtual)

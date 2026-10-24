@@ -1962,10 +1962,16 @@ export class Dispatcher {
     const counted = (virtual: string): boolean =>
       pathVisible(call.vis, virtual) &&
       !covered.some((p) => `${rstripSlash(virtual)}/`.startsWith(p))
+    const limit = vfs.walkLimit
     if (vfs.supports('read_tree')) {
       let found: Map<string, FileStat> | null
       try {
-        found = (await mount.call('read_tree', root)) as Map<string, FileStat> | null
+        found = (await mount.call(
+          'read_tree',
+          root,
+          [],
+          limit < 0 ? {} : { limit: limit + 1 },
+        )) as Map<string, FileStat> | null
       } catch (err) {
         if (!isFsError(err)) throw err
         console.debug(`walk count of ${root} lists instead: ${String(err)}`)
@@ -1980,25 +1986,35 @@ export class Dispatcher {
         return files
       }
     }
-    const limit = vfs.walkLimit
     if (limit < 0) return null
     let count = 0
-    const pending = [root]
-    for (
-      let directory = pending.pop();
-      directory !== undefined && count <= limit;
-      directory = pending.pop()
-    ) {
+    const pending: [string, boolean][] = [[root, false]]
+    const seen = new Map<string, Set<string>>()
+    for (let next = pending.pop(); next !== undefined && count <= limit; next = pending.pop()) {
+      const [directory, whole] = next
+      const asked = whole ? null : limit - count + 1
       let entries: string[]
       try {
-        entries = (await mount.call('readdir', directory)) as string[]
+        entries = (await mount.call(
+          'readdir',
+          directory,
+          [],
+          asked === null ? {} : { limit: asked },
+        )) as string[]
       } catch (err) {
         if (directory === root || !isFsError(err)) throw err
         console.debug(`walk count skips ${directory}: ${String(err)}`)
         continue
       }
+      // Maybe cut: listed in full once what is below it is counted, if the
+      // count is still short then.
+      if (asked !== null && entries.length >= asked) pending.push([directory, true])
+      const known = seen.get(directory) ?? new Set<string>()
+      seen.set(directory, known)
       for (const entry of entries) {
         const child = rstripSlash(entry)
+        if (known.has(child)) continue
+        known.add(child)
         if (!counted(child)) continue
         let row: FileStat
         try {
@@ -2008,7 +2024,7 @@ export class Dispatcher {
           console.debug(`walk count skips ${child}: ${String(err)}`)
           continue
         }
-        if (row.type === FileType.DIRECTORY) pending.push(child)
+        if (row.type === FileType.DIRECTORY) pending.push([child, false])
         else if (row.type === FileType.FILE) {
           count += 1
           if (count > limit) break
@@ -2104,6 +2120,10 @@ export class Dispatcher {
       ...(call.fresh ? { index: new ListingCheckStore({ hints: mount.index }) } : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
     }
+    // A listing cut at a walk's limit is filtered after the backend answers,
+    // so under a hide it could come back short of the limit and read as the
+    // whole folder: the walk then lists in full.
+    if (DIRECTORY_OPEN_OPS.has(name) && hiddenUnder(call.vis, p.virtual)) delete fullKwargs.limit
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
     const fullArgs = (call.args ?? []).map(keyed)

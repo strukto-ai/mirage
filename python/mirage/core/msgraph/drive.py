@@ -53,7 +53,7 @@ from mirage.observe.context import (
     revision_for,
     start_op,
 )
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for
@@ -694,6 +694,7 @@ async def batch_tree(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
+    limit: int | None = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as its folder's listing renders it,
     from the folders' listings sent ``BATCH_LIMIT`` to a request through
@@ -708,17 +709,24 @@ async def batch_tree(
     are read as a listing reads them. None
     when Graph refuses a batch, or when a listing below the folder fails
     (a folder gone, or one the account may not open), so the walk lists
-    what is there and reports, or skips, each folder on its own.
+    what is there and reports, or skips, each folder on its own; None too
+    once it holds more than ``limit`` items, before the next level is
+    asked.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
+        limit (int | None): the most entries a walk can still keep.
     """
     found: dict[str, FileStat] = {}
-    rows = await readdir_items(accessor, loc, virtual_key)
+    rows = await readdir_items(accessor, loc, virtual_key, limit)
+    if isinstance(rows, DirListing):
+        return None
     level = _filed(found, "", loc, rows)
     while level:
+        if limit is not None and len(found) > limit:
+            return None
         below: list[tuple[str, DriveLoc]] = []
         for start in range(0, len(level), BATCH_LIMIT):
             chunk = level[start : start + BATCH_LIMIT]
@@ -744,6 +752,8 @@ async def batch_tree(
                 rows = sorted(map(entry_stat, items), key=lambda r: r.name)
                 below.extend(_filed(found, rel, folder, rows))
         level = below
+    if limit is not None and len(found) > limit:
+        return None
     return found
 
 
@@ -906,16 +916,23 @@ async def readdir_items(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
-) -> list[FileStat]:
-    """A folder's children, each as ``stat`` answers it.
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """A folder's children, each as ``stat`` answers it; past a walk's
+    ``limit`` Graph is paged no further, and the listing is partial.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
+        limit (int | None): the most entries a walk can still keep.
     """
     try:
-        children = await graph_list(accessor, loc.item("/children"))
+        children = await (
+            graph_list(accessor, loc.item("/children"))
+            if limit is None
+            else graph_list(accessor, loc.item("/children"), limit=limit)
+        )
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -931,6 +948,8 @@ async def readdir_items(
         ) from exc
     rows = [entry_stat(child) for child in children]
     rows.sort(key=lambda row: row.name)
+    if limit is not None and len(children) >= limit:
+        return DirListing(rows, partial=True)
     return rows
 
 

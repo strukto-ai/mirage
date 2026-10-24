@@ -26,7 +26,7 @@ from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.types import StaleWriteError
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 
 A = TypeVar("A", bound=Accessor)
@@ -36,13 +36,16 @@ A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
 
 class ReaddirFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path_spec: PathSpec
-    ) -> Awaitable[list[FileStat]]: ...
+        self,
+        accessor: A_contra,
+        path_spec: PathSpec,
+        limit: int | None = None,
+    ) -> Awaitable[list[FileStat] | DirListing]: ...
 
 
 class TreeFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path: PathSpec
+        self, accessor: A_contra, path: PathSpec, limit: int | None = None
     ) -> Awaitable[dict[str, FileStat] | None]: ...
 
 
