@@ -15,11 +15,14 @@
 import datetime as dt
 import math
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, TypeVar
 
 from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
+from pymongo.asynchronous.collection import AsyncCollection
 
 from mirage.core.mongodb.types import PRIMARY_KEY, BsonTypeTag
+
+_T = TypeVar("_T")
 
 
 def _bump(counts: dict[str, dict[str, int]], path: str, tag: str) -> None:
@@ -27,7 +30,7 @@ def _bump(counts: dict[str, dict[str, int]], path: str, tag: str) -> None:
     counts[path][tag] = counts[path].get(tag, 0) + 1
 
 
-def _scalar_tag(v) -> str:
+def _scalar_tag(v: _T) -> str:
     if isinstance(v, bool):
         return BsonTypeTag.BOOL
     if isinstance(v, Int64):
@@ -77,7 +80,7 @@ def _array_tag(items: Iterable[Any]) -> str:
     return BsonTypeTag.ARRAY
 
 
-def _walk(value, prefix: str, counts: dict[str, dict[str, int]]) -> None:
+def _walk(value: _T, prefix: str, counts: dict[str, dict[str, int]]) -> None:
     if isinstance(value, dict):
         if prefix:
             _bump(counts, prefix, BsonTypeTag.OBJECT)
@@ -92,7 +95,7 @@ def _walk(value, prefix: str, counts: dict[str, dict[str, int]]) -> None:
 
 
 async def sample_field_types(
-    col, sample_size: int = 100
+    col: AsyncCollection[dict[str, Any]], sample_size: int = 100
 ) -> list[dict[str, Any]]:
     counts: dict[str, dict[str, int]] = {}
     total = 0

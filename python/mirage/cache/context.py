@@ -16,9 +16,10 @@ import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Literal, Protocol, TypeVar
+from typing import Literal, TypeVar
 
 from mirage.cache.types import (
+    CacheInvalidator,
     KnownVersions,
     LiveVersion,
     OwnRead,
@@ -34,27 +35,12 @@ from mirage.context.session_context import (
 from mirage.errors.fs import enotsup, stale_write
 from mirage.errors.types import StaleWriteError
 from mirage.observe.context import mark_lost
-from mirage.types import FileStat, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.key_prefix import key_path
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-
-class CacheInvalidator(Protocol):
-    """What this module needs from a cache manager.
-
-    ``mirage.cache.manager.CacheManager`` satisfies this structurally;
-    this module never imports it, keeping the dependency one-way:
-    backends -> cache.context <- mount (pushes a manager).
-    """
-
-    async def cached_size(self, path: PathSpec) -> int | None: ...
-
-    async def is_cached(self, path: PathSpec) -> bool: ...
-
-    def probed_stat(self, path: PathSpec) -> FileStat | None: ...
 
 
 def active_cache_manager() -> CacheInvalidator | None:

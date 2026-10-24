@@ -32,7 +32,7 @@ class _PopMissing(Enum):
     TOKEN = 0
 
 
-class DevFiles(dict[str, bytes], PipeFiles):
+class DevFiles(PipeFiles):
     """Real backing store plus a synthetic /null, /zero overlay.
 
     The synthetic device names read as empty/zeros and swallow writes until
@@ -205,21 +205,33 @@ class DevFiles(dict[str, bytes], PipeFiles):
     def __len__(self) -> int:
         return len(self.keys())
 
-    def get(self, key, default=None):
+    @overload
+    def get(self, key: str, default: None = None) -> bytes | None: ...
+
+    @overload
+    def get(self, key: str, default: bytes) -> bytes: ...
+
+    @overload
+    def get(self, key: str, default: _T) -> bytes | _T: ...
+
+    def get(self, key: str, default: _T | None = None) -> bytes | _T | None:
         return self[key] if key in self else default
 
-    def items(self):
+    def items(self) -> list[tuple[str, bytes]]:
         return [(key, self._listed_bytes(key)) for key in self.keys()]
 
-    def values(self):
+    def values(self) -> list[bytes]:
         return [self._listed_bytes(key) for key in self.keys()]
 
-    def keys(self):
+    def keys(self) -> list[str]:
         return [
             *self._synthetic_names(),
             *self.state.files.keys(),
             *self._visible_inputs(),
         ]
+
+    def clear(self) -> None:
+        """Leave the device overlay and its backing state intact."""
 
 
 class _DevDirs(set[str]):
@@ -232,12 +244,12 @@ class _DevDirs(set[str]):
     def __len__(self) -> int:
         return len(self._files.state.dirs) + int("/fd" in self)
 
-    def __contains__(self, key) -> bool:
+    def __contains__(self, key: _T) -> bool:
         if key == "/fd":
             return bool(self._files._visible_inputs())
         return key in self._files.state.dirs
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[str]:
         return iter(
             [*self._files.state.dirs, *(["/fd"] if "/fd" in self else [])]
         )
@@ -247,8 +259,8 @@ class _DevDirs(set[str]):
             raise eacces(f"/dev{key}")
         self._files.state.dirs.add(key)
 
-    def discard(self, key) -> None:
-        if key == "/fd" or key.startswith("/fd/"):
+    def discard(self, key: _T) -> None:
+        if isinstance(key, str) and (key == "/fd" or key.startswith("/fd/")):
             raise eacces(f"/dev{key}")
         self._files.state.dirs.discard(key)
 

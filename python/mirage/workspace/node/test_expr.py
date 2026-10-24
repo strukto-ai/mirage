@@ -14,10 +14,11 @@
 
 import logging
 from functools import partial
-from typing import Any
 
-from mirage.shell.bytes import decode_text
+from mirage.shell.call_stack import CallStack
+from mirage.shell.helpers import get_text
 from mirage.shell.types import NodeType as NT
+from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
 from mirage.view.types import SessionView
@@ -36,6 +37,7 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.fields import split_fields
 from mirage.workspace.expand.node import expand_chunks
 from mirage.workspace.expand.pattern import expand_pattern
+from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.expand.variable import ifs_value
 from mirage.workspace.node.test_tokens import (
     CondParser,
@@ -52,10 +54,10 @@ _COND_OP_TOKENS = frozenset({"=", "==", "!=", "=~", "<", ">", "&&", "||"})
 
 
 async def expand_test_expr(
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None = None,
 ) -> list[str | PathSpec]:
     """Expand a test_command ``[ ... ]`` into flat argv, tokens in
@@ -67,10 +69,10 @@ async def expand_test_expr(
     expansions word-split like bash (an empty one drops out of argv).
 
     Args:
-        node: tree-sitter test_command node.
+        node (TSNodeLike): tree-sitter test_command node.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     session = context.session
     result: list[str | PathSpec] = []
@@ -94,10 +96,10 @@ async def expand_test_expr(
 
 
 async def expand_double_bracket(
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None = None,
 ) -> CondNode:
     """Build a structured condition tree from a ``[[ ... ]]`` node.
@@ -108,10 +110,10 @@ async def expand_double_bracket(
     tree-sitter's tree.
 
     Args:
-        node: tree-sitter test_command node opened with ``[[``.
+        node (TSNodeLike): tree-sitter test_command node opened with ``[[``.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     exprs = [c for c in node.named_children]
     if not exprs:
@@ -127,8 +129,8 @@ async def expand_double_bracket(
 async def _cond_node(
     tree: CondTree,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None,
 ) -> CondNode:
     """Expand one parsed ``[[ ]]`` tree into a CondNode.
@@ -136,8 +138,8 @@ async def _cond_node(
     Args:
         tree (CondTree): from ``CondParser``.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     kind = tree[0]
     if kind in ("and", "or"):
@@ -178,8 +180,8 @@ async def _cond_node(
 async def _token_text(
     token: ExprToken,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None,
 ) -> str:
     text = await expand_node(token.operand, context, execute_fn, cs, view=view)
@@ -187,19 +189,19 @@ async def _token_text(
 
 
 async def _build_cond(
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None = None,
 ) -> CondNode:
     """Recursively translate one expression node into a CondNode.
 
     Args:
-        node: tree-sitter expression node.
+        node (TSNodeLike): tree-sitter expression node.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     ntype = node.type
     if ntype == NT.PARENTHESIZED_EXPRESSION:
@@ -216,26 +218,26 @@ async def _build_cond(
 
 
 async def _build_unary(
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None = None,
 ) -> CondNode:
     """Translate a unary/negation expression node.
 
     Args:
-        node: tree-sitter unary_expression or negation_expression.
+        node (TSNodeLike): tree-sitter unary_expression or negation_expression.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     negated = any(c.type == "!" for c in node.children)
     op = None
     operand_node = None
     for child in node.children:
         if child.type == NT.TEST_OPERATOR:
-            op = decode_text(child.text)
+            op = get_text(child)
         elif child.is_named:
             operand_node = child
     if op is None and operand_node is not None and negated:
@@ -261,29 +263,29 @@ async def _build_unary(
 
 
 async def _build_binary(
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None = None,
 ) -> CondNode:
     """Translate a binary expression node (logical or comparison).
 
     Args:
-        node: tree-sitter binary_expression.
+        node (TSNodeLike): tree-sitter binary_expression.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     op = None
-    operands: list[Any] = []
+    operands: list[TSNodeLike] = []
     for child in node.children:
         if not child.is_named:
             if child.type in _COND_OP_TOKENS:
                 op = child.type
             continue
         if child.type == NT.TEST_OPERATOR and op is None and operands:
-            op = decode_text(child.text)
+            op = get_text(child)
             continue
         operands.append(child)
     if op in ("&&", "||") and len(operands) == 2:
@@ -318,10 +320,10 @@ async def _build_binary(
 async def _comparison(
     op: str,
     left_text: str,
-    right_node,
+    right_node: TSNodeLike,
     context: EvaluationContext,
-    execute_fn,
-    cs,
+    execute_fn: ExecuteFn,
+    cs: CallStack | None,
     view: SessionView | None,
 ) -> CondNode:
     """A binary test, its right operand expanded as ``op`` reads it.
@@ -329,13 +331,13 @@ async def _comparison(
     Args:
         op (str): the operator.
         left_text (str): the expanded left operand.
-        right_node: the right operand's tree-sitter node.
+        right_node (TSNodeLike): the right operand's tree-sitter node.
         context (EvaluationContext): the evaluation expanding it.
-        execute_fn: workspace execute for command substitutions.
-        cs: call stack for positional parameters.
+        execute_fn (ExecuteFn): workspace execute for command substitutions.
+        cs (CallStack | None): call stack for positional parameters.
     """
     if op == "=~" and right_node.type == NT.REGEX:
-        raw = decode_text(right_node.text)
+        raw = get_text(right_node)
         # After =~ tree-sitter lexes even a quoted operand as one regex
         # token; quoted means bash matches it literally.
         if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":

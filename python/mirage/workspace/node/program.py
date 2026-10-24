@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from mirage.io import IOResult
@@ -20,12 +20,14 @@ from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text, same_line
+from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
@@ -78,19 +80,21 @@ class StatementRecorder(Recorder):
 
 
 async def execute_program(
-    recurse,
-    node,
+    recurse: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
-    dispatch=None,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
+    dispatch: DispatchFn | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
     inline: bool = False,
     execute_fn: Callable[..., Any] | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute program node (root / semicolon-separated).
 
     ``dispatch`` is the dispatcher, threaded so an active ``exec`` redirect
@@ -149,20 +153,22 @@ async def execute_program(
 
 
 async def _run_program(
-    recurse,
-    node,
+    recurse: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
-    dispatch=None,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
+    dispatch: DispatchFn | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
     sink: JobConsole | None = None,
     own: StreamOwner | None = None,
     inline: bool = False,
     execute_fn: Callable[..., Any] | None = None,
-) -> tuple[Any, IOResult, ExecutionNode]:
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     children = node.children
     all_stdout: list[Any] = []
@@ -485,13 +491,15 @@ async def _exit_shell(
     return merged_io
 
 
-def _next_line(node: Any, children: list[Any], i: int) -> int:
+def _next_line(
+    node: TSNodeLike, children: Sequence[TSNodeLike], i: int
+) -> int:
     """The first statement after ``children[i]`` on a later line
     (``same_line``), where a discarded line resumes.
 
     Args:
-        node (Any): the program.
-        children (list[Any]): its children.
+        node (TSNodeLike): the program.
+        children (Sequence[TSNodeLike]): its children.
         i (int): the statement that discarded its line.
     """
     j = i + 1

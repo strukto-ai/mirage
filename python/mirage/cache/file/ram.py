@@ -16,9 +16,9 @@ import asyncio
 from collections import OrderedDict
 
 from mirage.cache.file.entry import CacheEntry, Holds
+from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import parse_limit
-from mirage.cache.invalidation import Invalidation
 from mirage.cache.lock import KeyLockMixin
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -92,10 +92,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
     ) -> None:
         # Stamped before waiting on the lock: bytes read before an
         # invalidation are stale even when the lock was granted after it.
-        stamp = self._invalidation.enter(key)
-        try:
+        with with_fill_guard(self._invalidation, [key]) as is_live:
             async with self._lock_for(key):
-                if self._invalidation.stale(key, stamp):
+                if not is_live(key):
                     return
                 self._drop_entry(key)
                 entry = CacheEntry(
@@ -107,8 +106,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                 self._entries[key] = entry
                 self._store.files[key] = data
                 self._cache_size += entry.size
-        finally:
-            self._invalidation.leave(key)
         await self._evict()
 
     async def remove(
@@ -167,10 +164,9 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             await self._set_version(key, fingerprint)
 
     async def _set_version(self, key: str, fingerprint: str) -> None:
-        stamp = self._invalidation.enter(key)
-        try:
+        with with_fill_guard(self._invalidation, [key]) as is_live:
             async with self._lock_for(key):
-                if self._invalidation.stale(key, stamp):
+                if not is_live(key):
                     return
                 entry = self._entries.get(key)
                 if (
@@ -183,8 +179,6 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
                     return
                 self._drop_entry(key)
                 self._put_version(key, fingerprint)
-        finally:
-            self._invalidation.leave(key)
         await self._evict()
 
     def _put_version(self, key: str, fingerprint: str) -> None:

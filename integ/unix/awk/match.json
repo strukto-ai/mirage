@@ -407,6 +407,108 @@
         "stdout": "rc=2\nrc=2\nrc=2\nrc=2\n1\nrc=0\nrc=2\n",
         "stderr": "awk: syntax error at ',': expected ')'\nawk: syntax error at ',': expected ')'\nawk: too many arguments in call to substr: 4 (maximum 3)\nawk: syntax error at ';': expected '('\nawk: too many arguments in call to sprintf: 256 (maximum 255)\n"
       }
+    },
+    {
+      "id": "awk_match_takes_leftmost_longest",
+      "seq": 16100202,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo xabcd | awk '{print match($0, /ab|abcd/), RSTART, RLENGTH}'; echo abcd | awk '{n = sub(/a|ab/, \"[&]\"); print n, $0}'; echo xyz | awk '{print match($0, /(x|xy)(z|yz)/), RLENGTH}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2 2 4\n1 [ab]cd\n1 3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_separators_take_leftmost_longest",
+      "seq": 16100203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo 'one,,two' | awk -F ',|,,' '{print NF; print $2}'; printf 'aXXbXc' | awk 'BEGIN{RS=\"X|XX\"} {print NR\": \"$0}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\ntwo\n1: a\n2: b\n3: c\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "awk_match_anchors_at_string_edges",
+      "seq": 16100204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk 'BEGIN { print match(\"a\\nb\", /a$./), match(\"a\\nb\", /.^b/), match(\"a\\nb\", /^b/), match(\"a\\nb\", /a$/) }'; awk 'BEGIN { s = \"x\\ny\"; print (s ~ /x$/), (s ~ /^y/), (s ~ /y$/), (s ~ /^x/), gsub(/^|$/, \"|\", s), s }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0 0 0 0\n0 0 1 1 2 |x\ny|\n",
+        "stderr": ""
+      }
     }
   ]
 }

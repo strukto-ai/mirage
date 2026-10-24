@@ -43,7 +43,7 @@ async def fetch_default_branch(
     data = await github_get(
         account, "/repos/{owner}/{repo}", owner=owner, repo=repo
     )
-    return data["default_branch"]
+    return cast(str, data["default_branch"])
 
 
 async def ensure_default_branch(

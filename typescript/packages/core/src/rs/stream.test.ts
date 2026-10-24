@@ -19,7 +19,7 @@ import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
 import { Glob } from './glob.ts'
 import { PosixRegex } from './regex.ts'
-import { compiledModule, openStream } from './stream.ts'
+import { compiledModule, openStream, serveRequests } from './stream.ts'
 import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
@@ -202,5 +202,28 @@ describe('adoptModule', () => {
     await expect(worker.openStream('base64', DECODE)).rejects.toBeInstanceOf(
       WebAssembly.CompileError,
     )
+  })
+})
+
+describe('serveRequests', () => {
+  it('moves stderr out of the stream after each drain', async () => {
+    const program = 'BEGIN { for (i = 0; i < 100000; i++) print "line" > "/dev/stderr" }'
+    const stream = await openStream('awk', { program })
+    const sizes: number[] = []
+    const host = {
+      errors: {
+        append: (data: Uint8Array): Promise<void> => {
+          sizes.push(data.byteLength)
+          return Promise.resolve()
+        },
+      },
+      serve: (): never => {
+        throw new Error('unexpected request')
+      },
+    }
+    for await (const _ of serveRequests(stream, host)) void _
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(500000)
+    expect(Math.max(...sizes)).toBeLessThan(70000)
+    stream.close()
   })
 })

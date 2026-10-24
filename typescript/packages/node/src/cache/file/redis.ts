@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
 import { DEFAULT_KEY_PREFIX } from '@struktoai/mirage-core/cache/file/constants'
-import { Invalidation } from '@struktoai/mirage-core/cache/invalidation'
+import { Invalidation, withFillGuard } from '@struktoai/mirage-core/cache/file/invalidation'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
 import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
 import { globEscape, parseLimit, tokenOrNull } from '@struktoai/mirage-core/cache/file/utils'
@@ -78,7 +78,6 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
   private readonly entryPattern: string
   private readonly entryBases: readonly string[]
   private maxDrainBytesValue: number | null = null
-  // Local invalidation also discards fills paused in cooperative hashing.
   private readonly invalidation = new Invalidation()
 
   constructor(options: RedisFileCacheOptions = {}) {
@@ -162,11 +161,10 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     data: Uint8Array,
     options: { fingerprint?: string | null; ttl?: number | null } = {},
   ): Promise<void> {
-    const stamp = this.invalidation.enter(key)
-    try {
+    await withFillGuard(this.invalidation, [key], async (isLive) => {
       const fp = tokenOrNull(options.fingerprint)
       const c = await this.cacheClient()
-      if (this.invalidation.stale(key, stamp)) return
+      if (!isLive(key)) return
       const dk = this.dataKey(key)
       const mk = this.metaKey(key)
       const pipe = c.multi()
@@ -182,9 +180,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
         if (fp !== null) pipe.expire(mk, options.ttl)
       }
       await pipe.exec()
-    } finally {
-      this.invalidation.leave(key)
-    }
+    })
   }
 
   async remove(
@@ -218,16 +214,14 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     const keys = Object.keys(fingerprints)
     for (let start = 0; start < keys.length; start += KEY_BATCH) {
       const batch = keys.slice(start, start + KEY_BATCH)
-      const stamps = batch.map((key) => [key, this.invalidation.enter(key)] as const)
-      try {
+      await withFillGuard(this.invalidation, batch, async (isLive) => {
         const c = await this.cacheClient()
         // Judged at each send: a retry after a script load runs later.
-        const live = (): typeof stamps =>
-          stamps.filter(([key, stamp]) => !this.invalidation.stale(key, stamp))
+        const live = (): string[] => batch.filter(isLive)
         if (live().length > 0) {
           const send = async (): Promise<void> => {
             const pipe = c.multi()
-            for (const [key] of live()) {
+            for (const key of live()) {
               const fingerprint = fingerprints[key]
               if (fingerprint === undefined) continue
               pipe.evalSha(VERSION_SHA, {
@@ -246,9 +240,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
             await send()
           }
         }
-      } finally {
-        for (const key of batch) this.invalidation.leave(key)
-      }
+      })
     }
   }
 

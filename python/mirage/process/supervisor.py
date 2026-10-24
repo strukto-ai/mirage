@@ -6,7 +6,7 @@ from threading import RLock
 
 from mirage.execution.context import new_execution_id
 from mirage.process.config import ProcessPermissions, ProcessScope
-from mirage.process.handle import ProcessHandle
+from mirage.process.handle import ExecutionBind, ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
 from mirage.process.view import ProcessView
 from mirage.types import PathSpec
@@ -22,10 +22,15 @@ class ProcessSupervisor:
     Args:
         ids (IdSource | None): where a process's execution id is drawn
             when its caller names none; None means the system source.
+        bind (ExecutionBind | None): runs each process under its host's
+            execution context; None runs its body as supplied.
     """
 
-    def __init__(self, ids: IdSource | None = None) -> None:
+    def __init__(
+        self, ids: IdSource | None = None, bind: ExecutionBind | None = None
+    ) -> None:
         self._ids = ids
+        self._bind = bind
         self._next_pid = 1
         self._live: dict[int, tuple[int, ProcessHandle]] = {}
         self._generations: dict[str, int] = {}
@@ -102,6 +107,7 @@ class ProcessSupervisor:
                 run,
                 self._retire,
                 lambda signal: self.terminate_children(pid, signal),
+                self._bind,
             )
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             return handle

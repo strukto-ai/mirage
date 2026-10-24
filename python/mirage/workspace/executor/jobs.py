@@ -15,7 +15,7 @@
 import asyncio
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Any
@@ -238,13 +238,15 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
 
 
 async def handle_background(
-    execute_node,
+    execute_node: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
     left: TSNodeLike,
     right: TSNodeLike | None,
     context: EvaluationContext,
     job_table: JobTable,
     stdin: ByteSource | None = None,
-    call_stack=None,
+    call_stack: CallStack | None = None,
     handed: HandOff | None = None,
     decisions: Decisions | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
@@ -482,7 +484,9 @@ async def handle_background(
 
 
 async def run_statement(
-    execute_node: Callable[..., Any],
+    execute_node: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
     node: TSNodeLike,
     context: EvaluationContext,
     stdin: ByteSource | None,

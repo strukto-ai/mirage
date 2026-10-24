@@ -16,7 +16,6 @@ import { CacheManager } from './manager.ts'
 import { RAMFileCacheStore } from './file/ram.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  type CacheInvalidator,
   activeCacheManager,
   captureRead,
   publishRead,
@@ -26,6 +25,7 @@ import {
   writeCondition,
   writesConditioned,
 } from './context.ts'
+import type { CacheInvalidator } from './types.ts'
 import { MountMode, PathSpec, WritePolicy } from '../types.ts'
 import { RAMIndexCacheStore } from './index/ram.ts'
 import { runInCommandScope } from './index/scope.ts'

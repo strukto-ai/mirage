@@ -16,7 +16,7 @@ import importlib
 import importlib.util
 import sys
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 # The module name a class loaded from a script file runs under. A snapshot
 # records a VFS's class as ``module.Class``, and this name is the one
@@ -77,7 +77,7 @@ def load_backend_class(spec: str) -> type[Any]:
     Returns:
         type: The loaded class.
     """
-    return load_attr(spec)
+    return cast(type[Any], load_attr(spec))
 
 
 def lazy_exports(

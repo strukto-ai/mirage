@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { awkGeneric, servedHere } from '../../generic/awk.ts'
+import { awkGeneric, isAssignment, servedHere } from '../../generic/awk.ts'
 import type { Context, CommandFn } from '../../../config.ts'
-import { splitAssignment } from '../../../../core/awk/index.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles } from '../files.ts'
@@ -34,7 +33,7 @@ async function resolveOperands(
   const out: PathSpec[] = []
   let run: PathSpec[] = []
   for (const path of paths) {
-    if (splitAssignment(path.rawPath) === null && servedHere(ctx, path)) {
+    if (!isAssignment(path.rawPath) && servedHere(ctx, path)) {
       run.push(path)
       continue
     }

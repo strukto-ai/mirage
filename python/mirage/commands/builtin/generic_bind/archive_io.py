@@ -1,5 +1,6 @@
 import logging
 from functools import partial
+from typing import cast
 
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
@@ -116,7 +117,7 @@ async def _relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
         path (PathSpec): the path to stat.
     """
     found, _ = await dispatch("stat", path)
-    return found
+    return cast(FileStat, found)
 
 
 async def _own_listing(

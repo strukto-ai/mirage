@@ -29,12 +29,9 @@ const DEC = new TextDecoder()
 async function programPrintf(args: string[]): Promise<[string | null, string, number]> {
   const session = new SessionState({ sessionId: 's1' })
   const [out, io, node] = await runAsProgram(session, () => handlePrintf(args, session))
+  const text = out === null ? null : DEC.decode(await materialize(out))
   expect(io.exitCode).toBe(node.exitCode)
-  return [
-    out instanceof Uint8Array ? DEC.decode(out) : null,
-    DEC.decode(await materialize(io.stderr)),
-    node.exitCode,
-  ]
+  return [text, DEC.decode(await materialize(io.stderr)), node.exitCode]
 }
 
 function excess(word: string): string {
@@ -68,7 +65,7 @@ describe('printf run as a program', () => {
 
   it('stays silent as the builtin', async () => {
     const [out, io] = await handlePrintf(['x\n', 'a'], new SessionState({ sessionId: 's1' }))
-    expect([DEC.decode(out as Uint8Array), io.stderr, io.exitCode]).toEqual(['x\n', null, 0])
+    expect([DEC.decode(await materialize(out)), io.stderr, io.exitCode]).toEqual(['x\n', null, 0])
   })
 })
 
@@ -128,3 +125,18 @@ it.each(['', 'env '])(
     }
   },
 )
+
+describe('printf in a pipeline', () => {
+  it('keeps its status when its reader stops early', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    const io = await ws.shell(`printf '%d' bad | head -c 1; echo " \${PIPESTATUS[*]}"`)
+    expect([io.stdoutText, io.stderrText]).toEqual([
+      '0 1 0\n',
+      'bash: printf: bad: invalid number\n',
+    ])
+    await ws.close()
+  })
+})

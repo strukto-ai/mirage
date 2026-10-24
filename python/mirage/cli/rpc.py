@@ -60,6 +60,7 @@ def rpc_cmd(
         fail("pass a config or --workspace, not both", exit_code=2)
     else:
         path = None
-    from mirage.server.rpc.relay import relay_stdio
+    # Load the protocol server only for this CLI verb.
+    from mirage.server.rpc.relay import relay_stdio  # noqa: PLC0415
 
     relay_workspace(path, workspace_id, session_id, "rpc", relay_stdio)

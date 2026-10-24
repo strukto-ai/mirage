@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.render.json import compact_json_bytes
@@ -104,7 +104,7 @@ async def get_user_profile(
         dict: user info.
     """
     data = await slack_get(accessor, "users.info", params={"user": user_id})
-    return data.get("user", {})
+    return cast(dict[str, Any], data.get("user", {}))
 
 
 async def search_users(

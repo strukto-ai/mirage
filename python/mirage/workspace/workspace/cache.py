@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
@@ -20,7 +20,10 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.utils.clock import Clock
 
-RedisFileCacheStore: Any
+if TYPE_CHECKING:
+    from mirage.cache.file.redis import RedisFileCacheStore as RedisStore
+
+RedisFileCacheStore: "type[RedisStore] | None"
 try:
     from mirage.cache.file.redis import (
         RedisFileCacheStore as _RedisFileCacheStore,

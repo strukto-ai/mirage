@@ -17,7 +17,7 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { type Clock, SystemClock } from '../../utils/clock.ts'
-import { Invalidation } from '../invalidation.ts'
+import { Invalidation, withFillGuard } from './invalidation.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry, Holds } from './entry.ts'
 import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
@@ -126,10 +126,9 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   ): Promise<void> {
     // Stamped before waiting on the lock: bytes read before an
     // invalidation are stale even when the lock was granted after it.
-    const stamp = this.invalidation.enter(key)
-    try {
+    await withFillGuard(this.invalidation, [key], async (isLive) => {
       await this.lock.withLock(key, async () => {
-        if (this.invalidation.stale(key, stamp)) return
+        if (!isLive(key)) return
         this.dropEntry(key)
         const entry = new CacheEntry({
           size: data.byteLength,
@@ -142,9 +141,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
         this.size += entry.size
         return Promise.resolve()
       })
-    } finally {
-      this.invalidation.leave(key)
-    }
+    })
     await this.evict()
   }
 
@@ -184,10 +181,9 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
   }
 
   private async setVersion(key: string, fingerprint: string): Promise<void> {
-    const stamp = this.invalidation.enter(key)
-    try {
+    await withFillGuard(this.invalidation, [key], async (isLive) => {
       await this.lock.withLock(key, () => {
-        if (this.invalidation.stale(key, stamp)) return Promise.resolve()
+        if (!isLive(key)) return Promise.resolve()
         const entry = this.entries.get(key)
         if (entry !== undefined && entry.hasBytes && !entry.isExpired(this.seconds())) {
           if (entry.fingerprint === fingerprint) {
@@ -208,9 +204,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
         this.putVersion(key, fingerprint)
         return Promise.resolve()
       })
-    } finally {
-      this.invalidation.leave(key)
-    }
+    })
     await this.evict()
   }
 

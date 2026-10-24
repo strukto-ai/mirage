@@ -26,7 +26,7 @@ import { MountCommandUnsupported, type MountRegistry } from '../../mount/registr
 import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
-import type { RouteDecision } from '../../../runtime/routing/index.ts'
+import type { RouteDecision } from '../../../runtime/types.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import type { ExecuteFn } from '../../expand/types.ts'

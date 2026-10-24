@@ -1,10 +1,15 @@
 import asyncio
+from contextlib import aclosing
 
 import pytest
 
+from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import open_stream
-from mirage.workspace.executor.builtins.printf.format import run_printf
+from mirage.workspace.executor.builtins.printf.format import (
+    printf_output,
+    run_printf,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -44,13 +49,11 @@ async def test_octal_byte_grammars(escape, format_hex, argument_hex):
         bytes.fromhex(format_hex),
         b"",
         0,
-        False,
     )
     assert await run_printf("%b", [escape]) == (
         bytes.fromhex(argument_hex),
         b"",
         0,
-        False,
     )
 
 
@@ -61,7 +64,6 @@ async def test_unicode_escapes_preserve_raw_bytes(escape, expected):
             bytes.fromhex(expected),
             b"",
             0,
-            False,
         )
 
 
@@ -71,7 +73,7 @@ async def test_signed_special_values_and_hex_carry(program):
         "%+.1f|%+.1a|%.0a|%.1a|%.0f",
         ["nan", "-nan", "0x1.ffp0", "0x1.ffp0", "-0"],
         program,
-    ) == (b"+nan|-nan|0x2p+0|0x2.0p+0|-0", b"", 0, False)
+    ) == (b"+nan|-nan|0x2p+0|0x2.0p+0|-0", b"", 0)
 
 
 async def test_argument_stop_retains_diagnostics_and_resets_status():
@@ -79,7 +81,6 @@ async def test_argument_stop_retains_diagnostics_and_resets_status():
         b"0x",
         b"bash: printf: bad: invalid number\n",
         0,
-        True,
     )
 
 
@@ -88,22 +89,21 @@ async def test_format_stop_retains_failure():
         b"0",
         b"bash: printf: bad: invalid number\n",
         1,
-        True,
     )
 
 
 async def test_long_arguments_cross_host_chunks_without_losing_bytes():
     raw = "a" * 4095 + "𐂀" + "\udcff" + "b" * 17000
-    out, err, status, stopped = await run_printf("%s", [raw])
+    out, err, status = await run_printf("%s", [raw])
     assert out == raw.encode("utf-8", "surrogateescape")
-    assert (err, status, stopped) == (b"", 0, False)
+    assert (err, status) == (b"", 0)
 
 
 async def test_large_width_and_precision_are_cancellable():
     for fmt in ["%2147483647s", "%.2147483647f", "%.2147483647d"]:
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(run_printf(fmt, ["1"]), timeout=0.03)
-    assert await run_printf("%s", ["after"]) == (b"after", b"", 0, False)
+    assert await run_printf("%s", ["after"]) == (b"after", b"", 0)
 
 
 async def test_cancels_a_preloaded_numeric_scan(monkeypatch):
@@ -129,3 +129,11 @@ async def test_cancels_a_preloaded_numeric_scan(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await pending
     assert stream.busy()
+
+
+async def test_a_wide_field_comes_out_in_bounded_steps():
+    io = IOResult()
+    async with aclosing(printf_output("%2147483647s", ["x"], io)) as parts:
+        first = await anext(parts)
+    assert first == b" " * len(first)
+    assert 0 < len(first) <= 16 * 1024

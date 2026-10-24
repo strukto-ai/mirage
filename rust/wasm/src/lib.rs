@@ -13,6 +13,8 @@ struct Slot {
     stream: Box<dyn Stream>,
     out: Vec<u8>,
     error: Vec<u8>,
+    /// A reply being handed over a window at a time.
+    staged: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -87,6 +89,7 @@ pub extern "C" fn mirage_rs_open(kind_len: usize, config_len: usize) -> u32 {
                     stream,
                     out: Vec::new(),
                     error: Vec::new(),
+                    staged: Vec::new(),
                 };
                 state.slots.insert(handle, slot);
                 if state.input.is_empty() {
@@ -199,6 +202,57 @@ pub extern "C" fn mirage_rs_take_stderr(handle: u32) -> i32 {
     call(handle, 0, |stream, _, out| {
         stream.take_stderr(out);
         Ok(())
+    })
+}
+
+/// Put the request the stream waits on at `mirage_rs_output`, its JSON
+/// header then the bytes it carries; returns the header's length, or -1
+/// when it waits on none.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_request(handle: u32) -> i32 {
+    with_slot(handle, -1, |slot| {
+        slot.out.clear();
+        let mut data = Vec::new();
+        match slot.stream.request(&mut data) {
+            Some(header) => {
+                slot.out.extend_from_slice(&header);
+                slot.out.append(&mut data);
+                i32::try_from(header.len()).unwrap_or(-1)
+            }
+            None => -1,
+        }
+    })
+}
+
+/// Append the first `len` bytes of the input window to the reply being
+/// handed over.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_stage(handle: u32, len: usize) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        let Some(slot) = state.slots.get_mut(&handle) else {
+            return 1;
+        };
+        slot.staged
+            .extend_from_slice(&state.input[..len.min(state.input.len())]);
+        0
+    })
+}
+
+/// Answer the request taken last with the staged reply: `reply_len` bytes
+/// of JSON, then the bytes it carries.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_respond(handle: u32, reply_len: usize) -> i32 {
+    with_slot(handle, 1, |slot| {
+        slot.out.clear();
+        let staged = std::mem::take(&mut slot.staged);
+        let (reply, data) = staged.split_at(reply_len.min(staged.len()));
+        match slot.stream.respond(reply, data, &mut slot.out) {
+            Ok(()) => 0,
+            Err(err) => {
+                slot.error = err.message.into_bytes();
+                1
+            }
+        }
     })
 }
 

@@ -19,14 +19,16 @@ import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { spliceWindow } from '../../utils/ranges.ts'
 
-import { activePipe } from '../dev/device.ts'
+import { activeDevice, activePipe } from '../dev/device.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
 
 /**
  * Write bytes at an offset of one key. A live pipe has no offset: its bytes
  * go into the pipe, in the order they are written, which is how an open
  * descriptor delivers to a FIFO (`exec >"$1"` and a link to a substitution
- * write through here). Mirrors Python's pwrite.
+ * write through here). A device that discards writes (`/dev/null`) keeps
+ * nothing, so windows written into it pad nothing up to their offset. Mirrors
+ * Python's pwrite.
  */
 export async function pwrite(
   accessor: RAMAccessor,
@@ -45,8 +47,10 @@ export async function pwrite(
   }
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
-  const existing = accessor.store.files.get(p) ?? new Uint8Array()
-  accessor.store.files.set(p, spliceWindow(existing, offset, data))
+  if (activeDevice(accessor, p) === null) {
+    const existing = accessor.store.files.get(p) ?? new Uint8Array()
+    accessor.store.files.set(p, spliceWindow(existing, offset, data))
+  }
   accessor.store.modified.set(p, nowIso())
   record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)
 }

@@ -44,7 +44,10 @@ def ssh_proxy_cmd(
         + (f"/v1/workspaces/{quote(workspace_id, safe='')}/ssh")
     )
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    from mirage.server.ssh.relay import TunnelRefused, relay_ssh
+    from mirage.server.ssh.relay import (  # noqa: PLC0415 - cold start
+        TunnelRefused,
+        relay_ssh,
+    )
 
     try:
         asyncio.run(relay_ssh(url, headers))
@@ -81,6 +84,7 @@ def codex_exec_cmd(
         + base.removeprefix("http")
         + (f"/v1/workspaces/{quote(workspace_id, safe='')}/codex-exec")
     )
-    from mirage.server.ssh.relay import relay_codex
+    # Keep websocket support out of unrelated CLI commands.
+    from mirage.server.ssh.relay import relay_codex  # noqa: PLC0415
 
     asyncio.run(relay_codex(host.strip("[]"), int(port), url, token))

@@ -65,7 +65,7 @@ BodyRun = Callable[
 
 
 async def execute_body(
-    execute_node: Callable[..., Any],
+    execute_node: BodyRun,
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None,
@@ -139,7 +139,12 @@ async def execute_body(
 
 
 class LoopSignal(Exception):
-    def __init__(self, stdout=None, io=None, levels: int = 1):
+    def __init__(
+        self,
+        stdout: ByteSource | None = None,
+        io: IOResult | None = None,
+        levels: int = 1,
+    ) -> None:
         self.stdout = stdout
         self.io = io if io is not None else IOResult()
         self.levels = levels

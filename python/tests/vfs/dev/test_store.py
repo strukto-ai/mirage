@@ -91,6 +91,23 @@ def test_non_device_names_store_for_real():
     assert "/custom" not in files
 
 
+def test_clear_keeps_the_device_overlay_and_backing_files():
+    files = DevFiles()
+    files["/custom"] = b"bytes"
+    files.clear()
+    assert files.items() == [
+        ("/null", b""),
+        ("/zero", b""),
+        ("/custom", b"bytes"),
+    ]
+
+
+def test_directory_discard_accepts_non_string_keys():
+    store = DevStore()
+    store.dirs.discard(42)
+    assert list(store.dirs) == ["/"]
+
+
 def test_pop_mirrors_delete_semantics():
     files = DevFiles()
     assert files.pop("/null") == b""

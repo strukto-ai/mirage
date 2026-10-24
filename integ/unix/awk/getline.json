@@ -2738,6 +2738,40 @@
         "stdout": "",
         "stderr": "awk: cannot open \"/data/b.txt/../review-dot-out\" for output (Not a directory)\n"
       }
+    },
+    {
+      "id": "awk_output_pipe_empty_keeps_input",
+      "seq": 13470322,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'one\\n' | awk 'BEGIN { printf \"\" | \"cat\"; close(\"cat\") } { print \"record\", $0 }'; printf 'one\\n' | awk 'BEGIN { printf \"\" | \"cat\" } { print \"record\", $0 }'",
+      "expect": {
+        "exit": 0,
+        "stdout": "record one\nrecord one\n",
+        "stderr": ""
+      }
     }
   ]
 }
