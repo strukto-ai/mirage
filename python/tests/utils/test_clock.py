@@ -19,10 +19,28 @@ from pathlib import Path
 
 import pytest
 
-import mirage.cache as cache_pkg
+import mirage
 from mirage.utils.clock import Clock, ManualClock, SystemClock
 
-CACHE_DIR = Path(cache_pkg.__file__).parent
+MIRAGE_DIR = Path(mirage.__file__).parent
+
+# Every module that reads time and waits through the workspace Clock. A
+# package is scanned whole.
+SEAMED = (
+    "cache",
+    "observe",
+    "accessor/base.py",
+    "accessor/box.py",
+    "accessor/dropbox.py",
+    "accessor/google_api.py",
+    "core/api/oauth.py",
+    "core/box/client.py",
+    "core/dropbox/client.py",
+    "core/google/client.py",
+    "workspace/files.py",
+    "workspace/mount/mount.py",
+    "workspace/mount/registry.py",
+)
 
 SYSTEM_CLOCK_READS = frozenset(
     {
@@ -39,12 +57,21 @@ SYSTEM_CLOCK_READS = frozenset(
         "asyncio.get_running_loop().time",
         "asyncio.get_event_loop().time",
         "mirage.utils.dates.now_iso",
-        "mirage.utils.dates.utc_date_folder",
+    }
+)
+
+SYSTEM_WAITS = frozenset(
+    {
+        "asyncio.sleep",
+        "asyncio.timeout",
+        "asyncio.wait_for",
+        "time.sleep",
+        "mirage.utils.abort.cancellable_sleep",
     }
 )
 
 KEPT_ON_SYSTEM_CLOCK = {
-    ("index/listing_memo.py", "time.monotonic"): (
+    ("cache/index/listing_memo.py", "time.monotonic"): (
         "the trust window and row-write times are counted per key prefix "
         "across every store sharing it, and those stores may hold "
         "different clocks, so they stay on the process monotonic clock; "
@@ -198,7 +225,7 @@ def _dotted(node: ast.expr, bound: dict[str, str]) -> str | None:
 
 
 def clock_reads(source: str, package: str) -> set[str]:
-    """Every system-clock read ``source`` imports or references.
+    """Every system-clock read or wait ``source`` imports or references.
 
     Args:
         source (str): a module's Python source.
@@ -213,17 +240,29 @@ def clock_reads(source: str, package: str) -> set[str]:
         if isinstance(node, (ast.Name, ast.Attribute))
         and (name := _dotted(node, bound))
     }
-    return named & SYSTEM_CLOCK_READS
+    return named & (SYSTEM_CLOCK_READS | SYSTEM_WAITS)
 
 
-def _cache_clock_reads() -> set[tuple[str, str]]:
+def _seamed_modules() -> list[Path]:
+    return sorted(
+        module
+        for seamed in SEAMED
+        for module in (
+            (MIRAGE_DIR / seamed).rglob("*.py")
+            if (MIRAGE_DIR / seamed).is_dir()
+            else [MIRAGE_DIR / seamed]
+        )
+    )
+
+
+def _seamed_clock_reads() -> set[tuple[str, str]]:
     return {
-        (path.relative_to(CACHE_DIR).as_posix(), name)
-        for path in CACHE_DIR.rglob("*.py")
+        (path.relative_to(MIRAGE_DIR).as_posix(), name)
+        for path in _seamed_modules()
         for name in clock_reads(
             path.read_text(),
             ".".join(
-                (cache_pkg.__name__, *path.relative_to(CACHE_DIR).parent.parts)
+                (mirage.__name__, *path.relative_to(MIRAGE_DIR).parent.parts)
             ),
         )
     }
@@ -265,9 +304,27 @@ def _cache_clock_reads() -> set[tuple[str, str]]:
             {"mirage.utils.dates.now_iso"},
         ),
         (
-            "from mirage.utils.dates import utc_date_folder as folder\n"
-            "folder()",
-            {"mirage.utils.dates.utc_date_folder"},
+            "from mirage.utils.dates import now_iso as stamp\nstamp()",
+            {"mirage.utils.dates.now_iso"},
+        ),
+        ("import asyncio\nawait asyncio.sleep(1)", {"asyncio.sleep"}),
+        (
+            "from asyncio import sleep as wait\nawait wait(1)",
+            {"asyncio.sleep"},
+        ),
+        ("import time\ntime.sleep(1)", {"time.sleep"}),
+        (
+            "import asyncio\nawait asyncio.wait_for(job, 5)",
+            {"asyncio.wait_for"},
+        ),
+        (
+            "import asyncio\nasync with asyncio.timeout(5):\n    pass",
+            {"asyncio.timeout"},
+        ),
+        (
+            "from ...utils.abort import cancellable_sleep\n"
+            "await cancellable_sleep(1, cancel)",
+            {"mirage.utils.abort.cancellable_sleep"},
         ),
         (
             "from ...utils.dates import now_iso\nnow_iso()",
@@ -291,7 +348,10 @@ def test_the_detector_catches_a_planted_clock_read(source, expected):
         "from datetime import datetime, timezone\n"
         "datetime.fromtimestamp(self.clock.now(), timezone.utc)",
         "from datetime import datetime, timedelta, timezone",
-        "import time\ntime.sleep(1)",
+        "await self.clock.sleep(1)",
+        "await tm.clock.sleep(delay)",
+        "from mirage.utils.dates import utc_date_folder\n"
+        "utc_date_folder(self.clock.now())",
         "import asyncio\nasyncio.get_running_loop().create_task(job)",
         "from mirage.utils.dates import iso_to_epoch\niso_to_epoch(text)",
     ],
@@ -300,9 +360,13 @@ def test_the_detector_leaves_what_reads_the_injected_clock(allowed):
     assert clock_reads(allowed, "mirage.cache.file") == set()
 
 
-def test_no_cache_module_reads_the_system_clock_past_the_seam():
-    assert _cache_clock_reads() - set(KEPT_ON_SYSTEM_CLOCK) == set()
+def test_no_seamed_module_reads_or_waits_on_the_system_clock():
+    assert _seamed_clock_reads() - set(KEPT_ON_SYSTEM_CLOCK) == set()
 
 
 def test_every_kept_system_clock_read_is_still_made():
-    assert set(KEPT_ON_SYSTEM_CLOCK) - _cache_clock_reads() == set()
+    assert set(KEPT_ON_SYSTEM_CLOCK) - _seamed_clock_reads() == set()
+
+
+def test_every_seamed_path_exists():
+    assert [s for s in SEAMED if not (MIRAGE_DIR / s).exists()] == []

@@ -14,11 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../io/types.ts'
-import { utcDateFolder } from '../utils/dates.ts'
+import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import { Observer } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
+
+const NEW_YEAR = 1_609_459_200
 
 function logEntry(o: Observer, entry: LogEntry): Promise<void> {
   return (o as unknown as { log: (e: LogEntry) => Promise<void> }).log(entry)
@@ -44,7 +46,7 @@ function decode(b: Uint8Array | undefined): string {
 describe('Observer', () => {
   it('logOp writes one JSONL line under the UTC-date folder', async () => {
     const store = new RAMObserverStore()
-    const o = new Observer(store)
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
     const rec = new OpRecord({
       op: 'read',
       path: '/data/f.csv',
@@ -54,9 +56,10 @@ describe('Observer', () => {
       durationMs: 5,
     })
     await o.logOp(rec, 'sess-1')
-    const parsed = JSON.parse(
-      decode(store.files.get(`/${utcDateFolder()}/sess-1.jsonl`)).trim(),
-    ) as Record<string, unknown>
+    const parsed = JSON.parse(decode(store.files.get('/2021-01-01/sess-1.jsonl')).trim()) as Record<
+      string,
+      unknown
+    >
     expect(parsed.type).toBe('op')
     expect(parsed.session).toBe('sess-1')
     expect(parsed.op).toBe('read')
@@ -64,12 +67,14 @@ describe('Observer', () => {
 
   it('logExecution writes a command JSONL line', async () => {
     const store = new RAMObserverStore()
-    const o = new Observer(store)
+    const o = new Observer(store, new ManualClock(NEW_YEAR + 1.5))
     const io = new IOResult({ stdout: new TextEncoder().encode('file.csv\n') })
     await o.logExecution('ls /data', io, [], 'sess-1')
-    const parsed = JSON.parse(
-      decode(store.files.get(`/${utcDateFolder()}/sess-1.jsonl`)).trim(),
-    ) as Record<string, unknown>
+    const parsed = JSON.parse(decode(store.files.get('/2021-01-01/sess-1.jsonl')).trim()) as Record<
+      string,
+      unknown
+    >
+    expect(parsed.timestamp).toBe(1_609_459_201_500)
     expect(parsed.type).toBe('command')
     expect(parsed.session).toBe('sess-1')
     expect(parsed.command).toBe('ls /data')
@@ -79,7 +84,7 @@ describe('Observer', () => {
 
   it('appends successive entries', async () => {
     const store = new RAMObserverStore()
-    const o = new Observer(store)
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
     for (let i = 0; i < 3; i++) {
       const rec = new OpRecord({
         op: 'read',
@@ -91,9 +96,7 @@ describe('Observer', () => {
       })
       await o.logOp(rec, 's')
     }
-    const lines = decode(store.files.get(`/${utcDateFolder()}/s.jsonl`))
-      .trim()
-      .split('\n')
+    const lines = decode(store.files.get('/2021-01-01/s.jsonl')).trim().split('\n')
     expect(lines).toHaveLength(3)
   })
 

@@ -20,12 +20,14 @@ from mirage.observe import OpRecord
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
-from mirage.utils.dates import utc_date_folder
+from mirage.utils.clock import ManualClock
+
+NEW_YEAR = 1_609_459_200.0
 
 
 def test_log_op_writes_jsonl():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     rec = OpRecord(
         op="read",
         path="/data/f.csv",
@@ -35,7 +37,7 @@ def test_log_op_writes_jsonl():
         duration_ms=5,
     )
     asyncio.run(obs.log_op(rec, session="sess-1"))
-    data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
+    data = store.files["/2021-01-01/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
     assert parsed["type"] == "op"
     assert parsed["session"] == "sess-1"
@@ -44,11 +46,12 @@ def test_log_op_writes_jsonl():
 
 def test_log_execution_writes_jsonl():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR + 1.5))
     io = IOResult(stdout=b"file.csv\n")
     asyncio.run(obs.log_execution("ls /data", io, [], session="sess-1"))
-    data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
+    data = store.files["/2021-01-01/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
+    assert parsed["timestamp"] == 1_609_459_201_500
     assert parsed["type"] == "command"
     assert parsed["session"] == "sess-1"
     assert parsed["command"] == "ls /data"
@@ -58,7 +61,7 @@ def test_log_execution_writes_jsonl():
 
 def test_multiple_entries_appended():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     for i in range(3):
         rec = OpRecord(
             op="read",
@@ -69,7 +72,7 @@ def test_multiple_entries_appended():
             duration_ms=1,
         )
         asyncio.run(obs.log_op(rec, session="s"))
-    data = store.files[f"/{utc_date_folder()}/s.jsonl"]
+    data = store.files["/2021-01-01/s.jsonl"]
     lines = data.decode().strip().split("\n")
     assert len(lines) == 3
 
