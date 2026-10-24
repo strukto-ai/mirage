@@ -322,9 +322,9 @@ export async function* serveRequests(
     while (stream.busy()) {
       await budget.run()
       const output = stream.drain()
+      await host.errors.append(stream.takeStderr())
       if (output.byteLength > 0) yield output
     }
-    await host.errors.append(stream.takeStderr())
     const taken = stream.request()
     if (taken === null) break
     await budget.run()

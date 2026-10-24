@@ -579,3 +579,64 @@ fn a_long_run_yields_between_steps() {
     assert!(calls > 10, "{calls}");
     assert_eq!(out, b"499999500000\n");
 }
+
+#[test]
+fn long_chains_run_and_deep_nesting_is_refused() {
+    let sum = format!("BEGIN {{ print 1{} }}", "+1".repeat(5000));
+    assert_eq!(run(&sum, ""), "5001\n");
+    let concat = format!(
+        "BEGIN {{ x = \"a\"{}; print length(x) }}",
+        " \"b\"".repeat(3000)
+    );
+    assert_eq!(run(&concat, ""), "3001\n");
+    let shallow = format!("BEGIN {{ print {}1{} }}", "(".repeat(150), ")".repeat(150));
+    assert_eq!(run(&shallow, ""), "1\n");
+    let deep = format!("BEGIN {{ print {}1{} }}", "(".repeat(300), ")".repeat(300));
+    let refused = run_with(&deep, &[], "", &[]);
+    assert_eq!(
+        (refused.err.as_str(), refused.status),
+        ("awk: syntax error at '(': nested too deeply\n", 2)
+    );
+    for deep in [
+        format!("BEGIN {{ print {}1 }}", "- ".repeat(3000)),
+        format!("BEGIN {{ x = {}1 }}", "y = ".repeat(3000)),
+        format!("BEGIN {{ print 2{} }}", "^1".repeat(3000)),
+        format!(
+            "BEGIN {{ {} print 1 {} }}",
+            "{".repeat(3000),
+            "}".repeat(3000)
+        ),
+    ] {
+        let refused = run_with(&deep, &[], "", &[]);
+        assert!(
+            refused.err.ends_with("nested too deeply\n"),
+            "{}",
+            &deep[..20]
+        );
+    }
+}
+
+#[test]
+fn anchors_hold_at_the_string_edges() {
+    assert_eq!(
+        run(
+            "BEGIN { print match(\"a\\nb\", /a$./), match(\"a\\nb\", /.^b/), match(\"a\\nb\", /^b/) }",
+            ""
+        ),
+        "0 0 0\n"
+    );
+}
+
+#[test]
+fn a_replacement_past_the_string_limit_is_refused() {
+    let grown = run_with(
+        "BEGIN { s = sprintf(\"%65536s\", \"\"); gsub(/ /, s, s) }",
+        &[],
+        "",
+        &[],
+    );
+    assert_eq!(
+        (grown.err.as_str(), grown.status),
+        ("awk: out of memory\n", 2)
+    );
+}

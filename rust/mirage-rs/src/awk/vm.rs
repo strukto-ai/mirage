@@ -18,7 +18,7 @@ const MAX_CALL_DEPTH: usize = 100;
 /// this rather than refusing.
 const MAX_FIELDS: usize = 1 << 22;
 
-fn no_memory() -> Vec<u8> {
+pub(super) fn no_memory() -> Vec<u8> {
     b"awk: out of memory".to_vec()
 }
 
@@ -283,7 +283,12 @@ impl Machine {
             return;
         }
         let mut steps = 0;
-        while !self.done && self.io.idle() && steps < budget && self.io.out.len() < LIMIT {
+        while !self.done
+            && self.io.idle()
+            && steps < budget
+            && self.io.out.len() < LIMIT
+            && self.io.err.len() < LIMIT
+        {
             steps += 1;
             if let Err(message) = self.step() {
                 self.salvage(message);
@@ -518,6 +523,11 @@ impl Machine {
                     let fmt = self.convfmt();
                     let sep = special(&self.globals, SUBSEP);
                     let texts: Vec<Cow<[u8]>> = parts.iter().map(|v| v.text(&fmt)).collect();
+                    let len = texts.iter().map(|text| text.len()).sum::<usize>()
+                        + sep.len().saturating_mul(count - 1);
+                    if len > MAX_LEN {
+                        return Err(no_memory());
+                    }
                     texts.join(sep.as_ref())
                 };
                 self.stack.push(Value::Str(key));
@@ -898,7 +908,8 @@ impl Machine {
         let template = self.pop_text();
         let pattern = self.pop_text();
         let regex = self.regexes.get(&pattern)?;
-        let (count, result) = substitute(regex, &template, subject, global);
+        let (count, result) =
+            substitute(regex, &template, subject, global).ok_or_else(no_memory)?;
         self.stack.push(Value::Num(count as f64));
         Ok((count > 0).then_some(result))
     }
@@ -1214,13 +1225,16 @@ impl Machine {
             let ofs = special(&self.globals, OFS);
             let mut body = Vec::new();
             for (at, arg) in args.iter().enumerate() {
-                if at > 0 {
-                    body.extend_from_slice(&ofs);
+                let text = match arg {
+                    Value::Num(n) => Cow::Owned(format_num(*n, &ofmt)),
+                    other => other.text(&fmt),
+                };
+                let sep: &[u8] = if at > 0 { &ofs } else { &[] };
+                if body.len() + sep.len() + text.len() > MAX_LEN {
+                    return Err(no_memory());
                 }
-                match arg {
-                    Value::Num(n) => body.extend_from_slice(&format_num(*n, &ofmt)),
-                    other => body.extend_from_slice(&other.text(&fmt)),
-                }
+                body.extend_from_slice(sep);
+                body.extend_from_slice(&text);
             }
             body
         };

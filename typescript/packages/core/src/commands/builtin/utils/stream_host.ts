@@ -234,7 +234,11 @@ export class StreamHost {
     if (shell === undefined) return { reply: { fatal: 'running a command requires a workspace' } }
     const failure = await this.flushOutput()
     if (failure !== null) return { reply: { fatal: failure } }
-    const spool = typeof request.stdin === 'number' ? this.spools.get(request.stdin) : undefined
+    // A pipe nothing was printed to has no spool, and is still its command's whole input.
+    const spool =
+      typeof request.stdin === 'number'
+        ? (this.spools.get(request.stdin) ?? new ByteSpool())
+        : undefined
     if (typeof request.stdin === 'number') this.spools.delete(request.stdin)
     const source: ByteSource = spool === undefined ? this.stdinView() : spool.stream()
     const command = textView(typeof request.command === 'string' ? request.command : '')

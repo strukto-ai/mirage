@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 
+use super::value::MAX_LEN;
+
 /// Read one string escape whose backslash ends at `pos`, appending what it
 /// spells; returns where the escape ends. An escape awk does not know
 /// keeps its backslash.
@@ -276,57 +278,65 @@ pub(super) fn substr(subject: &[u8], start: f64, length: Option<f64>) -> &[u8] {
     }
 }
 
+/// Append `piece`, or None when the string would pass the longest one
+/// awk keeps.
+fn grow(out: &mut Vec<u8>, piece: &[u8]) -> Option<()> {
+    (out.len() + piece.len() <= MAX_LEN).then(|| out.extend_from_slice(piece))
+}
+
 /// A sub/gsub replacement with `&` the match: `\&` is a literal
 /// ampersand and `\\&` a backslash and the match; any other backslash is
 /// itself, as in gawk, mawk and onetrueawk.
-fn expand(template: &[u8], matched: &[u8], out: &mut Vec<u8>) {
+fn expand(template: &[u8], matched: &[u8], out: &mut Vec<u8>) -> Option<()> {
     let mut at = 0;
     while at < template.len() {
-        match template[at] {
-            b'\\' if template.get(at + 1) == Some(&b'&') => {
-                out.push(b'&');
-                at += 2;
-            }
-            b'\\' if template[at + 1..].starts_with(b"\\&") => {
-                out.push(b'\\');
-                out.extend_from_slice(matched);
-                at += 3;
-            }
-            b'&' => {
-                out.extend_from_slice(matched);
-                at += 1;
-            }
-            c => {
-                out.push(c);
-                at += 1;
-            }
+        let Some(found) = memchr::memchr2(b'\\', b'&', &template[at..]) else {
+            return grow(out, &template[at..]);
+        };
+        grow(out, &template[at..at + found])?;
+        at += found;
+        if template[at] == b'&' {
+            grow(out, matched)?;
+            at += 1;
+        } else if template.get(at + 1) == Some(&b'&') {
+            grow(out, b"&")?;
+            at += 2;
+        } else if template[at + 1..].starts_with(b"\\&") {
+            grow(out, b"\\")?;
+            grow(out, matched)?;
+            at += 3;
+        } else {
+            grow(out, b"\\")?;
+            at += 1;
         }
     }
+    Some(())
 }
 
-/// sub, or gsub when `global`: the count of replacements and the result.
-/// An empty match touching the previous match is no match, so
+/// sub, or gsub when `global`: the count of replacements and the result,
+/// or None when the result would pass the longest string awk keeps. An
+/// empty match touching the previous match is no match, so
 /// `gsub(/l*/, "-")` turns "hello" into "-h-e-o-".
 pub(super) fn substitute(
     regex: &mut Posix,
     template: &[u8],
     subject: &[u8],
     global: bool,
-) -> (usize, Vec<u8>) {
+) -> Option<(usize, Vec<u8>)> {
     let mut out = Vec::with_capacity(subject.len());
     let (mut count, mut pos, mut last_end) = (0, 0, None);
     while pos <= subject.len() {
         let Some((from, to)) = regex.find(subject, pos) else {
             break;
         };
-        out.extend_from_slice(&subject[pos..from]);
+        grow(&mut out, &subject[pos..from])?;
         if !(from == to && last_end == Some(from)) {
-            expand(template, &subject[from..to], &mut out);
+            expand(template, &subject[from..to], &mut out)?;
             count += 1;
         }
         if from == to {
             if let Some(&c) = subject.get(from) {
-                out.push(c);
+                grow(&mut out, &[c])?;
             }
             pos = from + 1;
         } else {
@@ -337,6 +347,6 @@ pub(super) fn substitute(
             break;
         }
     }
-    out.extend_from_slice(subject.get(pos..).unwrap_or_default());
-    (count, out)
+    grow(&mut out, subject.get(pos..).unwrap_or_default())?;
+    Some((count, out))
 }

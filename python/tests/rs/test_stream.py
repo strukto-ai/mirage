@@ -8,7 +8,7 @@ import pytest
 from mirage.concurrency.worker import Worker
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.glob import Glob
-from mirage.rs.stream import open_stream, run_stream
+from mirage.rs.stream import Served, open_stream, run_stream, serve_requests
 from mirage.workspace import Workspace
 
 DECODE = {"mode": "decode", "ignore_garbage": False}
@@ -155,3 +155,32 @@ async def test_native_refusal_keeps_message_and_partial_output_through_worker():
         assert await worker.call(len, b"healthy") == 7
     finally:
         await worker.close()
+
+
+class _Errors:
+    def __init__(self) -> None:
+        self.sizes: list[int] = []
+
+    async def append(self, data: bytes) -> None:
+        self.sizes.append(len(data))
+
+
+class _NoRequests:
+    def __init__(self) -> None:
+        self.errors = _Errors()
+
+    async def serve(self, request: object, data: bytes) -> Served:
+        raise AssertionError(f"unexpected request {request!r}")
+
+
+@pytest.mark.asyncio
+async def test_stderr_leaves_the_stream_after_each_drain() -> None:
+    program = (
+        'BEGIN { for (i = 0; i < 100000; i++) print "line" > "/dev/stderr" }'
+    )
+    stream = open_stream("awk", {"program": program})
+    host = _NoRequests()
+    async for _ in serve_requests(stream, host):  # type: ignore[arg-type]
+        pass
+    assert sum(host.errors.sizes) == 500000
+    assert max(host.errors.sizes) < 70000

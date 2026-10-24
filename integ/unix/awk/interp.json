@@ -1767,6 +1767,40 @@
         "stdout": "2 5 \n2 1 \n2 X b c\n2 2 b c\n2 xa bb\n2 2 xx \n",
         "stderr": ""
       }
+    },
+    {
+      "id": "awk_interp_long_chains",
+      "seq": 991252,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk \"BEGIN { print 1$(printf '+1%.0s' $(seq 5000)) }\"; awk \"BEGIN { x = \\\"a\\\"$(printf ' \"b\"%.0s' $(seq 3000)); print length(x) }\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "5001\n3001\n",
+        "stderr": ""
+      }
     }
   ]
 }

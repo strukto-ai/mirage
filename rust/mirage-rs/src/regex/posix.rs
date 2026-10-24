@@ -57,7 +57,9 @@ impl Posix {
             utf8: options.utf8,
             multiline: options.multiline,
             unicode_words,
-            consumed_newlines: options.dialect != Dialect::Grep && !options.multiline,
+            // awk's anchors hold at the subject's edges alone.
+            consumed_newlines: !matches!(options.dialect, Dialect::Grep | Dialect::Awk)
+                && !options.multiline,
             dot_skips_nul: options.dialect == Dialect::Posix,
         };
         // Placing groups, regexec holds every `$` of a pattern that has

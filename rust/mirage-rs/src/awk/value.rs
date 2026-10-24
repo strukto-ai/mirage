@@ -211,15 +211,19 @@ impl Default for FloatSpec<'_> {
 
 impl FloatSpec<'_> {
     pub(super) fn render(&self, value: f64, out: &mut Vec<u8>) {
+        pad(self.rendered(value), self.flags, self.width, out);
+    }
+
+    /// The conversion before its field width.
+    pub(super) fn rendered(&self, value: f64) -> Rendered {
         // A NaN prints unsigned, as Python's and C's printf agree.
         let value = if value.is_nan() { f64::NAN } else { value };
-        let precision = self.precision.map(|p| p as u64);
-        pad(
-            render_float(value, self.conv, self.flags, precision),
+        render_float(
+            value,
+            self.conv,
             self.flags,
-            self.width,
-            out,
-        );
+            self.precision.map(|p| p as u64),
+        )
     }
 }
 

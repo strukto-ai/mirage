@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
 use super::text::{Regexes, take_record};
+use super::value::MAX_LEN;
+use super::vm::no_memory;
 
 /// How much output, or what one file or pipe holds, waits before it goes
 /// to the host.
@@ -303,6 +305,8 @@ impl Reader {
         Ok(match (&self.failed, self.ended) {
             (_, true) => Next::End,
             (Some(detail), _) => Next::Failed(detail.clone()),
+            // A record past the longest string awk keeps ends the run.
+            _ if self.buf.len() - self.start > MAX_LEN => return Err(no_memory()),
             _ => Next::Pending,
         })
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::parser::{Cmp, Expr, GetlineKind, Program, RedirKind, RuleKind, Stmt};
+use super::parser::{Cmp, Expr, GetlineKind, Infix, Program, RedirKind, RuleKind, Stmt};
 
 /// A scalar: a global, a function's parameter, or a counter the record
 /// keeps.
@@ -520,63 +520,19 @@ impl<'a> Compiler<'a> {
                 }
                 _ => self.fatal(b"awk: assignment to a non-lvalue"),
             },
-            Expr::Binary(op, left, right) => {
-                self.expr(left);
-                self.expr(right);
-                self.emit(Op::Arith(*op));
-            }
             Expr::Unary(op, operand) => {
                 self.expr(operand);
                 self.emit(if *op == b'-' { Op::Neg } else { Op::ToNum });
             }
-            Expr::Concat(left, right) => {
-                self.expr(left);
-                self.expr(right);
-                self.emit(Op::Concat);
-            }
-            Expr::Compare(cmp, left, right) => {
-                self.expr(left);
-                self.expr(right);
-                self.emit(Op::Compare(*cmp));
-            }
-            Expr::Match(negated, left, right) => {
-                self.expr(left);
-                self.regex_source(right);
-                self.emit(Op::Match(*negated));
-            }
-            Expr::Logical(and, left, right) => {
-                self.expr(left);
-                if *and {
-                    let short = self.emit(Op::JumpIfFalse(0));
-                    self.expr(right);
-                    self.emit(Op::Truth);
-                    let end = self.emit(Op::Jump(0));
-                    self.patch(short);
-                    self.emit(Op::Num(0.0));
-                    self.patch(end);
-                } else {
-                    self.emit(Op::Not);
-                    let short = self.emit(Op::JumpIfFalse(0));
-                    self.expr(right);
-                    self.emit(Op::Truth);
-                    let end = self.emit(Op::Jump(0));
-                    self.patch(short);
-                    self.emit(Op::Num(1.0));
-                    self.patch(end);
+            Expr::Chain(first, steps) => {
+                self.expr(first);
+                for step in steps {
+                    self.step(step);
                 }
             }
             Expr::Not(operand) => {
                 self.expr(operand);
                 self.emit(Op::Not);
-            }
-            Expr::Cond(cond, then, other) => {
-                self.expr(cond);
-                let skip = self.emit(Op::JumpIfFalse(0));
-                self.expr(then);
-                let end = self.emit(Op::Jump(0));
-                self.patch(skip);
-                self.expr(other);
-                self.patch(end);
             }
             Expr::IncDec(pre, delta, target) => match target.as_ref() {
                 Expr::Var(name) => {
@@ -612,6 +568,53 @@ impl<'a> Compiler<'a> {
                     self.patch(skip);
                     self.emit(Op::Pop);
                 }
+            }
+        }
+    }
+
+    /// One step of a chain, its left operand on the stack.
+    fn step(&mut self, step: &'a Infix) {
+        match step {
+            Infix::Arith(op, right) => {
+                self.expr(right);
+                self.emit(Op::Arith(*op));
+            }
+            Infix::Concat(right) => {
+                self.expr(right);
+                self.emit(Op::Concat);
+            }
+            Infix::Compare(cmp, right) => {
+                self.expr(right);
+                self.emit(Op::Compare(*cmp));
+            }
+            Infix::Match(negated, right) => {
+                self.regex_source(right);
+                self.emit(Op::Match(*negated));
+            }
+            Infix::Logical(and, right) => {
+                if !*and {
+                    self.emit(Op::Not);
+                }
+                let short = self.emit(Op::JumpIfFalse(0));
+                self.expr(right);
+                self.emit(Op::Truth);
+                let end = self.emit(Op::Jump(0));
+                self.patch(short);
+                self.emit(Op::Num(if *and { 0.0 } else { 1.0 }));
+                self.patch(end);
+            }
+            Infix::Cond(then, other) => {
+                let skip = self.emit(Op::JumpIfFalse(0));
+                self.expr(then);
+                let end = self.emit(Op::Jump(0));
+                self.patch(skip);
+                self.expr(other);
+                self.patch(end);
+            }
+            Infix::In(name) => {
+                let arr = self.arr(name);
+                self.emit(Op::Key(1));
+                self.emit(Op::In(arr));
             }
         }
     }

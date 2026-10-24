@@ -250,8 +250,10 @@ class StreamHost:
         if failure := await self.flush_output():
             return Served({"fatal": failure})
         stdin_fd = request.get("stdin")
+        # A pipe nothing was printed to has no spool, and is still its
+        # command's whole input.
         spool = (
-            self.spools.pop(stdin_fd, None)
+            self.spools.pop(stdin_fd, ByteSpool())
             if isinstance(stdin_fd, int)
             else None
         )

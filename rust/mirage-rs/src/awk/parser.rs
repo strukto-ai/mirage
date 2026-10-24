@@ -28,23 +28,33 @@ pub(super) enum Expr {
     Index(Vec<u8>, Vec<Expr>),
     /// The operator of `op=`, None for a plain `=`.
     Assign(Box<Expr>, Option<u8>, Box<Expr>),
-    Binary(u8, Box<Expr>, Box<Expr>),
     /// Unary `-` or `+`.
     Unary(u8, Box<Expr>),
-    Concat(Box<Expr>, Box<Expr>),
-    Compare(Cmp, Box<Expr>, Box<Expr>),
-    /// `~`, or `!~` when negated.
-    Match(bool, Box<Expr>, Box<Expr>),
-    /// `&&`, or `||` when false.
-    Logical(bool, Box<Expr>, Box<Expr>),
+    /// Binary operators read left to right, each step applied to what the
+    /// chain has so far: flat, so a long chain nests nothing.
+    Chain(Box<Expr>, Vec<Infix>),
     Not(Box<Expr>),
-    Cond(Box<Expr>, Box<Expr>, Box<Expr>),
     /// `++`/`--`: before the operand or after it, and by how much.
     IncDec(bool, f64, Box<Expr>),
     Call(Vec<u8>, Vec<Expr>),
     Builtin(&'static [u8], Vec<Expr>),
     In(Vec<Expr>, Vec<u8>),
     Getline(GetlineKind, Option<Box<Expr>>, Option<Box<Expr>>),
+}
+
+/// One step of an operator chain, with its right operand.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Infix {
+    Arith(u8, Expr),
+    Concat(Expr),
+    Compare(Cmp, Expr),
+    /// `~`, or `!~` when negated.
+    Match(bool, Expr),
+    /// `&&`, or `||` when false.
+    Logical(bool, Expr),
+    /// `? then : other`.
+    Cond(Expr, Expr),
+    In(Vec<u8>),
 }
 
 impl Expr {
@@ -128,6 +138,11 @@ const P_MUL: u8 = 10;
 const P_UNARY: u8 = 11;
 const P_POW: u8 = 12;
 
+/// The deepest the parser recurses (parentheses, unary operators, nested
+/// statements): every walk of the tree recurses, and a wasm build has a
+/// 1 MiB stack. mawk 1.3.4 refuses past about 200 levels too.
+const NEST_LIMIT: usize = 200;
+
 /// The builtins whose arguments mawk 1.3.4's grammar counts as it reads
 /// them: a surplus or missing one is refused where the call goes wrong.
 const GRAMMAR_BUILTINS: [&[u8]; 5] = [b"gsub", b"length", b"match", b"split", b"sub"];
@@ -140,6 +155,7 @@ struct Parser {
     functions: Vec<Function>,
     loop_depth: usize,
     in_function: bool,
+    depth: usize,
 }
 
 impl Parser {
@@ -341,7 +357,22 @@ impl Parser {
         body
     }
 
+    /// Recurse one level into `parse`, refused past `NEST_LIMIT`.
+    fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Parsed<T>) -> Parsed<T> {
+        if self.depth >= NEST_LIMIT {
+            return Err(self.error(b"nested too deeply"));
+        }
+        self.depth += 1;
+        let parsed = parse(self);
+        self.depth -= 1;
+        parsed
+    }
+
     fn statement(&mut self) -> Parsed<Stmt> {
+        self.nested(Self::statement_body)
+    }
+
+    fn statement_body(&mut self) -> Parsed<Stmt> {
         if self.at_op(&[b"{"]) {
             return Ok(Stmt::Block(self.block()?));
         }
@@ -523,7 +554,7 @@ impl Parser {
     /// not to hold the whole list.
     fn print_args(&mut self) -> Parsed<Vec<Expr>> {
         if self.at_op(&[b"("]) {
-            let save = self.pos;
+            let (save, depth) = (self.pos, self.depth);
             self.pos += 1;
             if let Ok(grouped) = self.expr_list(b")") {
                 if grouped.len() > 1 && self.at_op(&[b")"]) {
@@ -534,6 +565,7 @@ impl Parser {
                 }
             }
             self.pos = save;
+            self.depth = depth;
         }
         let mut items = vec![self.expr(P_ASSIGN, true)?];
         while self.at_op(&[b","]) {
@@ -547,8 +579,10 @@ impl Parser {
     /// An expression by precedence climbing; under `no_gt` a `>`, `>>` or
     /// `|` ends it, as in a print statement.
     fn expr(&mut self, min_bp: u8, no_gt: bool) -> Parsed<Expr> {
-        let left = self.unary(no_gt)?;
-        self.infix(left, min_bp, no_gt)
+        self.nested(|parser| {
+            let left = parser.unary(no_gt)?;
+            parser.infix(left, min_bp, no_gt)
+        })
     }
 
     fn unary(&mut self, no_gt: bool) -> Parsed<Expr> {
@@ -567,20 +601,26 @@ impl Parser {
         let mut node = self.postfix(node);
         // `cmd | getline` takes the primary alone as its command (mawk
         // 1.3.4); in a print statement `|` is the output pipe instead.
+        let base = self.depth;
         while !no_gt
             && self.at_op(&[b"|"])
             && self.peek(1).kind == Kind::Keyword
             && self.peek(1).text == b"getline"
         {
+            if self.depth >= NEST_LIMIT {
+                return Err(self.error(b"nested too deeply"));
+            }
+            self.depth += 1;
             self.pos += 1;
             node = self.getline(Some(node))?;
         }
+        self.depth = base;
         Ok(node)
     }
 
     fn pre_increment(&mut self, operand: impl FnOnce(&mut Self) -> Parsed<Expr>) -> Parsed<Expr> {
         let op = self.next_token().text;
-        let target = operand(self)?;
+        let target = self.nested(operand)?;
         if !target.is_lvalue() {
             return Err(self.error(&[op.as_slice(), b" needs an lvalue"].concat()));
         }
@@ -617,7 +657,7 @@ impl Parser {
             }
             Kind::Ere => {
                 self.pos += 1;
-                compile_ere(&tok.text)?;
+                valid_ere(&tok.text)?;
                 Ok(Expr::Regex(tok.text))
             }
             Kind::Op if tok.text == b"$" => {
@@ -708,6 +748,10 @@ impl Parser {
     /// `$` binds tighter than every binary operator, so `$NF-1` is
     /// `($NF)-1` and only a parenthesised index can be compound.
     fn field_index(&mut self, no_gt: bool) -> Parsed<Expr> {
+        self.nested(|parser| parser.field_index_body(no_gt))
+    }
+
+    fn field_index_body(&mut self, no_gt: bool) -> Parsed<Expr> {
         if self.at_op(&[b"("]) {
             return self.grouping();
         }
@@ -793,75 +837,75 @@ impl Parser {
         }
     }
 
-    fn infix(&mut self, mut left: Expr, min_bp: u8, no_gt: bool) -> Parsed<Expr> {
+    // Kept out of line: inlined into the recursive descent, its large
+    // frame would sit on the stack at every level of nesting.
+    #[inline(never)]
+    fn infix(&mut self, first: Expr, min_bp: u8, no_gt: bool) -> Parsed<Expr> {
+        let mut steps = Vec::new();
         loop {
             let tok = self.peek(0);
             if tok.kind == Kind::Keyword && tok.text == b"in" {
                 if P_IN < min_bp {
-                    return Ok(left);
+                    break;
                 }
                 self.pos += 1;
                 let name = self.next_token();
                 if name.kind != Kind::Name {
                     return Err(self.error(b"expected array name after 'in'"));
                 }
-                left = Expr::In(vec![left], name.text);
+                steps.push(Infix::In(name.text));
                 continue;
             }
             if tok.kind != Kind::Op {
                 if self.starts_concat() && P_CONCAT >= min_bp {
-                    let right = self.expr(P_CONCAT + 1, no_gt)?;
-                    left = Expr::Concat(Box::new(left), Box::new(right));
+                    steps.push(Infix::Concat(self.expr(P_CONCAT + 1, no_gt)?));
                     continue;
                 }
-                return Ok(left);
+                break;
             }
             let op = tok.text.clone();
             match op.as_slice() {
                 b"=" | b"+=" | b"-=" | b"*=" | b"/=" | b"%=" | b"^=" => {
-                    if P_ASSIGN < min_bp || !left.is_lvalue() {
-                        return Ok(left);
+                    if P_ASSIGN < min_bp || !steps.is_empty() || !first.is_lvalue() {
+                        break;
                     }
                     self.pos += 1;
                     self.skip_newlines();
                     let value = self.expr(P_ASSIGN, no_gt)?;
                     let op = (op.len() == 2).then_some(op[0]);
-                    return Ok(Expr::Assign(Box::new(left), op, Box::new(value)));
+                    return Ok(Expr::Assign(Box::new(first), op, Box::new(value)));
                 }
                 b"?" => {
                     if P_TERNARY < min_bp {
-                        return Ok(left);
+                        break;
                     }
                     self.pos += 1;
                     self.skip_newlines();
                     let then = self.expr(P_ASSIGN, no_gt)?;
                     self.eat_op(b":")?;
                     self.skip_newlines();
-                    let other = self.expr(P_TERNARY, no_gt)?;
-                    left = Expr::Cond(Box::new(left), Box::new(then), Box::new(other));
+                    steps.push(Infix::Cond(then, self.expr(P_TERNARY, no_gt)?));
                 }
                 b"||" | b"&&" => {
                     let and = op == b"&&";
                     let bp = if and { P_AND } else { P_OR };
                     if bp < min_bp {
-                        return Ok(left);
+                        break;
                     }
                     self.pos += 1;
                     self.skip_newlines();
-                    let right = self.expr(bp + 1, no_gt)?;
-                    left = Expr::Logical(and, Box::new(left), Box::new(right));
+                    steps.push(Infix::Logical(and, self.expr(bp + 1, no_gt)?));
                 }
                 b"~" | b"!~" => {
                     if P_MATCH < min_bp {
-                        return Ok(left);
+                        break;
                     }
                     self.pos += 1;
-                    let right = self.expr(P_MATCH + 1, no_gt)?;
-                    left = Expr::Match(op == b"!~", Box::new(left), Box::new(right));
+                    steps.push(Infix::Match(op == b"!~", self.expr(P_MATCH + 1, no_gt)?));
                 }
                 b"<" | b"<=" | b">" | b">=" | b"==" | b"!=" => {
                     if (no_gt && op == b">") || P_COMPARE < min_bp {
-                        return Ok(left);
+                        break;
                     }
                     self.pos += 1;
                     let cmp = match op.as_slice() {
@@ -872,8 +916,7 @@ impl Parser {
                         b"==" => Cmp::Eq,
                         _ => Cmp::Ne,
                     };
-                    let right = self.expr(P_COMPARE + 1, no_gt)?;
-                    left = Expr::Compare(cmp, Box::new(left), Box::new(right));
+                    steps.push(Infix::Compare(cmp, self.expr(P_COMPARE + 1, no_gt)?));
                 }
                 b"+" | b"-" | b"*" | b"/" | b"%" | b"^" => {
                     let bp = match op[0] {
@@ -882,25 +925,35 @@ impl Parser {
                         _ => P_MUL,
                     };
                     if bp < min_bp {
-                        return Ok(left);
+                        break;
                     }
                     self.pos += 1;
                     // `^` is right-associative.
                     let next = if bp == P_POW { bp } else { bp + 1 };
-                    let right = self.expr(next, no_gt)?;
-                    left = Expr::Binary(op[0], Box::new(left), Box::new(right));
+                    steps.push(Infix::Arith(op[0], self.expr(next, no_gt)?));
                 }
                 b"(" | b"$" | b"++" | b"--" | b"!" => {
                     if P_CONCAT < min_bp {
-                        return Ok(left);
+                        break;
                     }
-                    let right = self.expr(P_CONCAT + 1, no_gt)?;
-                    left = Expr::Concat(Box::new(left), Box::new(right));
+                    steps.push(Infix::Concat(self.expr(P_CONCAT + 1, no_gt)?));
                 }
-                _ => return Ok(left),
+                _ => break,
             }
         }
+        Ok(if steps.is_empty() {
+            first
+        } else {
+            Expr::Chain(Box::new(first), steps)
+        })
     }
+}
+
+/// Refuse an expression awk cannot compile. Out of line, so the compiled
+/// expression never takes room in the recursive descent's frames.
+#[inline(never)]
+fn valid_ere(pattern: &[u8]) -> Parsed<()> {
+    compile_ere(pattern).map(drop)
 }
 
 /// Parse a program; a refusal is the message awk prints.
@@ -911,6 +964,7 @@ pub(super) fn parse(src: &[u8]) -> Parsed<Program> {
         functions: Vec::new(),
         loop_depth: 0,
         in_function: false,
+        depth: 0,
     }
     .program()
 }

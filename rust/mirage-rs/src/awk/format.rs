@@ -1,6 +1,7 @@
 use crate::printf::number::Rendered;
 
 use super::value::{FloatSpec, MAX_LEN, Value, decimal, pad, render_int, to_int};
+use super::vm::no_memory;
 
 fn digits(fmt: &[u8], from: usize) -> usize {
     fmt[from..]
@@ -93,9 +94,9 @@ pub(super) fn sprintf(fmt: &[u8], args: &[Value], convfmt: &[u8]) -> Result<Vec<
         let width = decimal(&width);
         let precision = (!precision.is_empty()).then(|| decimal(&precision[1..]));
         if width > MAX_LEN || (conv != b's' && precision.is_some_and(|p| p > MAX_LEN)) {
-            return Err(b"awk: out of memory".to_vec());
+            return Err(no_memory());
         }
-        match conv {
+        let rendered = match conv {
             b'c' | b's' => {
                 let mut body = if conv == b'c' {
                     match arg {
@@ -112,38 +113,34 @@ pub(super) fn sprintf(fmt: &[u8], args: &[Value], convfmt: &[u8]) -> Result<Vec<
                 if let (b's', Some(precision)) = (conv, precision) {
                     body.truncate(precision);
                 }
-                let rendered = Rendered {
+                Rendered {
                     prefix: Vec::new(),
                     body,
                     zero_tail: 0,
                     suffix: Vec::new(),
                     allow_zero: false,
-                };
-                pad(rendered, &flags, width, &mut out);
+                }
             }
             b'd' | b'i' | b'o' | b'u' | b'x' | b'X' => {
-                pad(
-                    render_int(arg.num(), conv, &flags, precision),
-                    &flags,
-                    width,
-                    &mut out,
-                );
+                render_int(arg.num(), conv, &flags, precision)
             }
-            _ => {
-                let conv = match conv {
+            _ => FloatSpec {
+                flags: &flags,
+                width,
+                precision,
+                conv: match conv {
                     b'a' => b'g',
                     b'A' => b'G',
                     other => other,
-                };
-                FloatSpec {
-                    flags: &flags,
-                    width,
-                    precision,
-                    conv,
-                }
-                .render(arg.num(), &mut out);
+                },
             }
+            .rendered(arg.num()),
+        };
+        let len = usize::try_from(rendered.byte_len()).unwrap_or(usize::MAX);
+        if out.len().saturating_add(len.max(width)) > MAX_LEN {
+            return Err(no_memory());
         }
+        pad(rendered, &flags, width, &mut out);
     }
     Ok(out)
 }

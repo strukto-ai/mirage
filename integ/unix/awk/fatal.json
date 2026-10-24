@@ -271,6 +271,40 @@
         "stdout": "before\n",
         "stderr": "awk: out of memory\n"
       }
+    },
+    {
+      "id": "awk_fatal_nested_too_deeply",
+      "seq": 991308,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "awk \"BEGIN { print $(printf '(%.0s' $(seq 300))1$(printf ')%.0s' $(seq 300)) }\"",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "awk: syntax error at '(': nested too deeply\n"
+      }
     }
   ]
 }

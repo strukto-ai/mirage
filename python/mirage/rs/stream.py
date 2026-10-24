@@ -196,9 +196,10 @@ async def serve_requests(
     while True:
         while stream.busy():
             await budget.run()
-            if output := stream.drain():
+            output = stream.drain()
+            await host.errors.append(stream.take_stderr())
+            if output:
                 yield output
-        await host.errors.append(stream.take_stderr())
         taken = stream.request()
         if taken is None:
             break
